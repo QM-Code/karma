@@ -1,0 +1,17 @@
+<rml>
+  <head>
+    <link href="examples/assets/rmlui/overlay.rcss" type="text/rcss" rel="stylesheet"/>
+  </head>
+  <body>
+    <div class="panel" data-model="demo">
+      <div class="title">Karma RmlUi Overlay</div>
+      <div class="mono">Fonts: Google Sans, Audiowide</div>
+      <div>Overlay is running.</div>
+      <div class="media">
+        <img class="badge" src="examples/assets/rmlui/karma_badge.png"/>
+        <svg class="badge" src="examples/assets/rmlui/karma_icon.svg"></svg>
+      </div>
+      <button data-event-click="reset_tank">Reset Tank</button>
+    </div>
+  </body>
+</rml>

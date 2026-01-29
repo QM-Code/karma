@@ -24,5 +24,9 @@
 #include "karma/physics/physics_world.hpp"
 #include "karma/renderer/device.h"
 #include "karma/scene/scene.h"
+#if KARMA_WITH_IMGUI
 #include "karma/ui/imgui_overlay.h"
+#endif
+#if KARMA_WITH_RMLUI
 #include "karma/ui/rmlui_overlay.h"
+#endif

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(karma LANGUAGES CXX C)
 
-set(BUILD_TESTING OFF CACHE BOOL "Disable CTest targets for Karma deps" FORCE)
+set(BUILD_TESTING ON CACHE BOOL "Disable CTest targets for Karma deps" FORCE)
 
 option(KARMA_WINDOW_BACKEND_GLFW "Use GLFW window backend" ON)
 option(KARMA_WINDOW_BACKEND_SDL "Use SDL window backend" OFF)
@@ -17,6 +17,11 @@ option(KARMA_WITH_RMLUI "Enable RmlUi overlay backend" OFF)
 option(KARMA_WITH_RMLUI_SVG "Enable RmlUi SVG plugin (requires lunasvg)" ON)
 option(KARMA_FETCH_DEPS "Fetch third-party dependencies if missing" ON)
 set(KARMA_DILIGENT_TAG "v2.5.5" CACHE STRING "DiligentCore git tag/branch to fetch")
+
+if (BUILD_TESTING)
+  set(KARMA_WITH_IMGUI ON CACHE BOOL "Enable ImGui overlay backend" FORCE)
+  set(KARMA_WITH_RMLUI ON CACHE BOOL "Enable RmlUi overlay backend" FORCE)
+endif()
 
 if (KARMA_WINDOW_BACKEND_GLFW AND KARMA_WINDOW_BACKEND_SDL)
   message(FATAL_ERROR "Choose only one window backend: GLFW or SDL.")
@@ -68,6 +73,20 @@ if (KARMA_WITH_IMGUI)
   endif()
 endif()
 
+if (BUILD_TESTING AND NOT KARMA_WITH_IMGUI)
+  find_package(imgui CONFIG QUIET)
+  if (TARGET imgui::imgui)
+    list(APPEND KARMA_EXTRA_LINK_LIBS imgui::imgui)
+  elseif (KARMA_FETCH_DEPS)
+    FetchContent_Declare(
+      imgui
+      GIT_REPOSITORY https://github.com/ocornut/imgui.git
+      GIT_TAG v1.92.5
+    )
+    FetchContent_MakeAvailable(imgui)
+  endif()
+endif()
+
 if (KARMA_WITH_RMLUI)
   find_package(RmlUi CONFIG QUIET)
   if (TARGET RmlUi::Core)
@@ -102,6 +121,13 @@ if (KARMA_WITH_RMLUI)
     endif()
   else()
     message(FATAL_ERROR "KARMA_WITH_RMLUI=ON but RmlUi not found. Provide RmlUi or enable KARMA_FETCH_DEPS.")
+  endif()
+endif()
+
+if (BUILD_TESTING AND NOT KARMA_WITH_RMLUI)
+  find_package(RmlUi CONFIG QUIET)
+  if (TARGET RmlUi::Core)
+    list(APPEND KARMA_EXTRA_LINK_LIBS RmlUi::Core)
   endif()
 endif()
 if (TARGET glm::glm)
@@ -336,12 +362,8 @@ if (KARMA_RENDER_BACKEND_DILIGENT)
     src/renderer/backends/diligent/backend_render.cpp
     src/renderer/backends/diligent/backend_textures.cpp
     src/renderer/backends/diligent/stb_image.cpp
+    src/renderer/backends/diligent/backend_imgui.cpp
   )
-  if (KARMA_WITH_IMGUI)
-    list(APPEND KARMA_SOURCES
-      src/renderer/backends/diligent/backend_imgui.cpp
-    )
-  endif()
 endif()
 
 if (KARMA_WINDOW_BACKEND_SDL)
@@ -449,7 +471,6 @@ target_link_libraries(karma
     ${KARMA_AUDIO_LINK_LIBS}
     ${KARMA_NETWORK_LINK_LIBS}
     ${KARMA_EXTRA_LINK_LIBS}
-    RmlUi::Core
 )
 
 add_executable(karma_example

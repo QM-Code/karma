@@ -2,6 +2,8 @@
 
 #include "backend_internal.h"
 
+#if KARMA_WITH_IMGUI
+
 #include <imgui.h>
 
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
@@ -554,3 +556,21 @@ void DiligentBackend::renderImGuiDrawData(ImDrawData* draw_data) {
 }
 
 }  // namespace karma::renderer_backend
+
+#else
+
+namespace karma::renderer_backend {
+
+void DiligentBackend::setOverlayCallback(std::function<void()>) {}
+
+void DiligentBackend::handleOverlayEvent(const platform::Event&) {}
+
+void DiligentBackend::renderOverlay() {}
+
+void DiligentBackend::initImGui() {}
+
+void DiligentBackend::renderImGuiDrawData(ImDrawData*) {}
+
+}  // namespace karma::renderer_backend
+
+#endif

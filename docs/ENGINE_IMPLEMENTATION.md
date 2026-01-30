@@ -1,7 +1,7 @@
 # Karma Engine — Implementation Notes
 
 ## Overview
-Karma is a C++20 client/server 3D game engine with a layered architecture and a Diligent backend by default. It exposes a small public API for app control and an overlay abstraction, while keeping rendering, physics, audio, and networking pluggable via backend factories.
+Karma is a C++20 client/server 3D game engine with a layered architecture and a Diligent backend by default. It exposes a small public API for app control and keeps rendering, physics, audio, and networking pluggable via backend factories.
 
 ## Core Architecture
 - **EngineApp** (`src/app/engine_app.cpp`) manages lifecycle, the main loop, and system updates.
@@ -20,33 +20,16 @@ Karma is a C++20 client/server 3D game engine with a layered architecture and a 
 - Shadow settings are controlled via engine config (bias, map size, pcf radius).
 - Cascaded shadow maps (CSM) are integrated in the renderer.
 
-## UI / Overlay Integration
-- Core interface: `include/karma/ui/overlay.h`.
-- **ImGui backend**: `src/ui/imgui_overlay.cpp` (optional build).
-- **RmlUi backend**: `src/ui/rmlui_overlay.cpp` (optional build).
-- The engine always interacts with `Overlay` only; UI specifics are isolated in backends.
-
-### RmlUi Backend
-- Uses RmlUi RenderInterface (not compatibility mode).
-- Supports:
-  - Geometry compilation, rendering, scissor
-  - Texture load (via stb_image)
-  - SVG plugin (optional)
-  - Clip masks (stencil-based)
-  - File interface for `link` and `template`
-  - Hot reload of RML files
-- Uses orthographic projection matching ImGui conventions.
-
-### ImGui Backend
-- Standard ImGui integration in a Diligent pipeline.
-- Uses engine input events for mouse/keyboard.
+## UI / Draw Data Integration
+- Core types: `include/karma/app/ui_draw_data.h` + `include/karma/app/ui_context.h`.
+- Engine owns a `UIContext` and calls a user-provided `UiLayer` each frame.
+- The renderer consumes `UIDrawData` and composites it over the 3D frame.
+- UI systems (RmlUi, ImGui, etc.) are expected to live outside the engine and
+  translate their draw lists into `UIDrawData`.
 
 ## Optional Dependencies
-These are disabled by default and enabled by CMake options:
-- `KARMA_WITH_IMGUI`
-- `KARMA_WITH_RMLUI`
-
-If enabled, the build expects the user to provide the corresponding libraries, unless `KARMA_FETCH_DEPS=ON`.
+Optional dependencies are controlled via CMake (window/audio/physics/network backends). When `KARMA_FETCH_DEPS=ON`,
+missing dependencies are fetched automatically. The ImGui demo is optional via `KARMA_BUILD_IMGUI_DEMO`.
 
 ## Build System Highlights
 - Uses `FetchContent` for dependencies when `KARMA_FETCH_DEPS=ON`.
@@ -63,4 +46,3 @@ If enabled, the build expects the user to provide the corresponding libraries, u
 ## Notes
 - Many paths in examples are absolute (for local data). Users should replace with relative or project-specific paths.
 - Clip masks require a stencil-capable depth buffer (D24S8).
-

@@ -62,10 +62,10 @@ void DiligentBackend::recreateShadowMap() {
   device_->CreateTexture(shadow_desc, nullptr, &shadow_map_tex_);
   if (shadow_map_tex_) {
     if (auto* dsv = shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL)) {
-      shadow_map_dsv_.Attach(dsv);
+      shadow_map_dsv_ = dsv;
     }
     if (auto* srv = shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)) {
-      shadow_map_srv_.Attach(srv);
+      shadow_map_srv_ = srv;
     }
   } else {
     spdlog::error("Karma: Failed to create shadow map texture ({}x{}).",
@@ -603,6 +603,8 @@ VSOutput main(VSInput input)
       }
     }
   }
+
+  ensureLineResources();
 }
 
 }  // namespace karma::renderer_backend

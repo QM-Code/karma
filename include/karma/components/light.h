@@ -13,7 +13,7 @@ struct LightComponent : ecs::ComponentTag {
   };
 
   Type type = Type::Point;
-  Vec3 color{1.0f, 1.0f, 1.0f};
+  math::Color color{1.0f, 1.0f, 1.0f, 1.0f};
   float intensity = 1.0f;
   float range = 10.0f;
   float inner_cone_degrees = 15.0f;

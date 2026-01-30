@@ -96,6 +96,13 @@ void GraphicsDevice::renderLayer(LayerId layer, RenderTargetId target) {
   }
 }
 
+void GraphicsDevice::drawLine(const math::Vec3& start, const math::Vec3& end,
+                              const math::Color& color, bool depth_test, float thickness) {
+  if (backend_) {
+    backend_->drawLine(start, end, color, depth_test, thickness);
+  }
+}
+
 unsigned int GraphicsDevice::getRenderTargetTextureId(RenderTargetId target) const {
   return backend_ ? backend_->getRenderTargetTextureId(target) : 0u;
 }
@@ -142,21 +149,29 @@ void GraphicsDevice::setShadowSettings(float bias, int map_size, int pcf_radius)
   }
 }
 
-void GraphicsDevice::setOverlayCallback(std::function<void()> callback) {
+TextureId GraphicsDevice::createTextureRGBA8(int width, int height, const void* pixels) {
+  renderer::TextureDesc desc{};
+  desc.width = width;
+  desc.height = height;
+  desc.format = renderer::TextureFormat::RGBA8;
+  desc.srgb = false;
+  desc.generate_mips = false;
+  const TextureId id = createTexture(desc);
+  if (pixels && id != kInvalidTexture) {
+    updateTextureRGBA8(id, width, height, pixels);
+  }
+  return id;
+}
+
+void GraphicsDevice::updateTextureRGBA8(TextureId texture, int width, int height, const void* pixels) {
   if (backend_) {
-    backend_->setOverlayCallback(std::move(callback));
+    backend_->updateTextureRGBA8(texture, width, height, pixels);
   }
 }
 
-void GraphicsDevice::handleOverlayEvent(const platform::Event& event) {
+void GraphicsDevice::renderUi(const karma::app::UIDrawData& draw_data) {
   if (backend_) {
-    backend_->handleOverlayEvent(event);
-  }
-}
-
-void GraphicsDevice::renderOverlay() {
-  if (backend_) {
-    backend_->renderOverlay();
+    backend_->renderUi(draw_data);
   }
 }
 

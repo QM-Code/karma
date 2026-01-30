@@ -12,16 +12,10 @@ option(KARMA_AUDIO_BACKEND_SDL "Use SDL audio backend" OFF)
 option(KARMA_NETWORK_BACKEND_ENET "Use ENet network backend" ON)
 option(KARMA_PHYSICS_BACKEND_JOLT "Use Jolt physics backend" ON)
 option(KARMA_PHYSICS_BACKEND_BULLET "Use Bullet physics backend" OFF)
-option(KARMA_WITH_IMGUI "Enable ImGui overlay backend" OFF)
-option(KARMA_WITH_RMLUI "Enable RmlUi overlay backend" OFF)
-option(KARMA_WITH_RMLUI_SVG "Enable RmlUi SVG plugin (requires lunasvg)" ON)
 option(KARMA_FETCH_DEPS "Fetch third-party dependencies if missing" ON)
+option(KARMA_BUILD_IMGUI_DEMO "Build ImGui UI demo" ON)
+option(KARMA_BUILD_RMLUI_DEMO "Build RmlUi UI demo" ON)
 set(KARMA_DILIGENT_TAG "v2.5.5" CACHE STRING "DiligentCore git tag/branch to fetch")
-
-if (BUILD_TESTING)
-  set(KARMA_WITH_IMGUI ON CACHE BOOL "Enable ImGui overlay backend" FORCE)
-  set(KARMA_WITH_RMLUI ON CACHE BOOL "Enable RmlUi overlay backend" FORCE)
-endif()
 
 if (KARMA_WINDOW_BACKEND_GLFW AND KARMA_WINDOW_BACKEND_SDL)
   message(FATAL_ERROR "Choose only one window backend: GLFW or SDL.")
@@ -50,10 +44,10 @@ if (NOT TARGET glm::glm AND KARMA_FETCH_DEPS)
   FetchContent_MakeAvailable(glm)
 endif()
 
-if (KARMA_WITH_IMGUI)
+if (KARMA_BUILD_IMGUI_DEMO)
   find_package(imgui CONFIG QUIET)
   if (TARGET imgui::imgui)
-    list(APPEND KARMA_EXTRA_LINK_LIBS imgui::imgui)
+    set(KARMA_IMGUI_TARGET imgui::imgui)
   elseif (KARMA_FETCH_DEPS)
     FetchContent_Declare(
       imgui
@@ -68,48 +62,22 @@ if (KARMA_WITH_IMGUI)
       ${imgui_SOURCE_DIR}/imgui_tables.cpp
       ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     )
+    set(KARMA_IMGUI_TARGET "")
   else()
-    message(FATAL_ERROR "KARMA_WITH_IMGUI=ON but ImGui not found. Provide imgui or enable KARMA_FETCH_DEPS.")
+    message(FATAL_ERROR "KARMA_BUILD_IMGUI_DEMO=ON but ImGui not found. Provide imgui or enable KARMA_FETCH_DEPS.")
   endif()
 endif()
 
-if (BUILD_TESTING AND NOT KARMA_WITH_IMGUI)
-  find_package(imgui CONFIG QUIET)
-  if (TARGET imgui::imgui)
-    list(APPEND KARMA_EXTRA_LINK_LIBS imgui::imgui)
-  elseif (KARMA_FETCH_DEPS)
-    FetchContent_Declare(
-      imgui
-      GIT_REPOSITORY https://github.com/ocornut/imgui.git
-      GIT_TAG v1.92.5
-    )
-    FetchContent_MakeAvailable(imgui)
-  endif()
-endif()
-
-if (KARMA_WITH_RMLUI)
+if (KARMA_BUILD_RMLUI_DEMO)
   find_package(RmlUi CONFIG QUIET)
   if (TARGET RmlUi::Core)
-    list(APPEND KARMA_EXTRA_LINK_LIBS RmlUi::Core)
+    set(KARMA_RMLUI_TARGET RmlUi::Core)
   elseif (KARMA_FETCH_DEPS)
+    set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_VIEWER OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    if (KARMA_WITH_RMLUI_SVG)
-      set(RMLUI_SVG_PLUGIN ON CACHE BOOL "" FORCE)
-      FetchContent_Declare(
-        lunasvg
-        GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
-        GIT_TAG v2.4.1
-      )
-      FetchContent_MakeAvailable(lunasvg)
-      if (TARGET lunasvg::lunasvg)
-        list(APPEND KARMA_EXTRA_LINK_LIBS lunasvg::lunasvg)
-      elseif (TARGET lunasvg)
-        list(APPEND KARMA_EXTRA_LINK_LIBS lunasvg)
-      endif()
-    endif()
     FetchContent_Declare(
       rmlui
       GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
@@ -117,19 +85,17 @@ if (KARMA_WITH_RMLUI)
     )
     FetchContent_MakeAvailable(rmlui)
     if (TARGET RmlUi::Core)
-      list(APPEND KARMA_EXTRA_LINK_LIBS RmlUi::Core)
+      set(KARMA_RMLUI_TARGET RmlUi::Core)
+    elseif (TARGET rmlui_core)
+      set(KARMA_RMLUI_TARGET rmlui_core)
+    else()
+      set(KARMA_RMLUI_TARGET "")
     endif()
   else()
-    message(FATAL_ERROR "KARMA_WITH_RMLUI=ON but RmlUi not found. Provide RmlUi or enable KARMA_FETCH_DEPS.")
+    message(FATAL_ERROR "KARMA_BUILD_RMLUI_DEMO=ON but RmlUi not found. Provide RmlUi or enable KARMA_FETCH_DEPS.")
   endif()
 endif()
 
-if (BUILD_TESTING AND NOT KARMA_WITH_RMLUI)
-  find_package(RmlUi CONFIG QUIET)
-  if (TARGET RmlUi::Core)
-    list(APPEND KARMA_EXTRA_LINK_LIBS RmlUi::Core)
-  endif()
-endif()
 if (TARGET glm::glm)
   list(APPEND KARMA_EXTRA_LINK_LIBS glm::glm)
 endif()
@@ -321,6 +287,7 @@ endif()
 
 set(KARMA_SOURCES
   src/app/engine_app.cpp
+  src/app/ui_context.cpp
   src/components/transform.cpp
   src/audio/audio.cpp
   src/audio/backend_factory.cpp
@@ -341,19 +308,6 @@ set(KARMA_SOURCES
   src/geometry/mesh_loader.cpp
 )
 
-if (KARMA_WITH_IMGUI)
-  list(APPEND KARMA_SOURCES
-    ${IMGUI_SOURCES}
-    src/ui/imgui_overlay.cpp
-  )
-endif()
-
-if (KARMA_WITH_RMLUI)
-  list(APPEND KARMA_SOURCES
-    src/ui/rmlui_overlay.cpp
-  )
-endif()
-
 if (KARMA_RENDER_BACKEND_DILIGENT)
   list(APPEND KARMA_SOURCES
     src/renderer/backends/diligent/backend_common.cpp
@@ -361,8 +315,8 @@ if (KARMA_RENDER_BACKEND_DILIGENT)
     src/renderer/backends/diligent/backend_mesh.cpp
     src/renderer/backends/diligent/backend_render.cpp
     src/renderer/backends/diligent/backend_textures.cpp
+    src/renderer/backends/diligent/backend_ui.cpp
     src/renderer/backends/diligent/stb_image.cpp
-    src/renderer/backends/diligent/backend_imgui.cpp
   )
 endif()
 
@@ -417,7 +371,6 @@ add_library(karma STATIC ${KARMA_SOURCES})
 target_include_directories(karma
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${imgui_SOURCE_DIR}
     ${KARMA_EXTRA_INCLUDE_DIRS}
 )
 
@@ -452,16 +405,6 @@ endif()
 if (KARMA_NETWORK_BACKEND_ENET)
   target_compile_definitions(karma PUBLIC KARMA_NETWORK_BACKEND_ENET)
 endif()
-if (KARMA_WITH_IMGUI)
-  target_compile_definitions(karma PUBLIC KARMA_WITH_IMGUI=1)
-else()
-  target_compile_definitions(karma PUBLIC KARMA_WITH_IMGUI=0)
-endif()
-if (KARMA_WITH_RMLUI)
-  target_compile_definitions(karma PUBLIC KARMA_WITH_RMLUI=1)
-else()
-  target_compile_definitions(karma PUBLIC KARMA_WITH_RMLUI=0)
-endif()
 
 target_link_libraries(karma
   PUBLIC
@@ -479,18 +422,22 @@ add_executable(karma_example
 
 target_link_libraries(karma_example PRIVATE karma)
 
-if (KARMA_WITH_IMGUI)
-  add_executable(karma_imgui_demo
-    examples/imgui_overlay_demo.cpp
+if (KARMA_BUILD_IMGUI_DEMO)
+  add_executable(karma_imgui_ui_demo
+    examples/imgui_ui_demo.cpp
+    ${IMGUI_SOURCES}
   )
-  target_link_libraries(karma_imgui_demo PRIVATE karma)
+  target_link_libraries(karma_imgui_ui_demo PRIVATE karma ${KARMA_IMGUI_TARGET})
+  if (imgui_SOURCE_DIR)
+    target_include_directories(karma_imgui_ui_demo PRIVATE ${imgui_SOURCE_DIR})
+  endif()
 endif()
 
-if (KARMA_WITH_RMLUI)
-  add_executable(karma_rmlui_demo
-    examples/rmlui_overlay_demo.cpp
+if (KARMA_BUILD_RMLUI_DEMO)
+  add_executable(karma_rmlui_ui_demo
+    examples/rmlui_ui_demo.cpp
   )
-  target_link_libraries(karma_rmlui_demo PRIVATE karma)
+  target_link_libraries(karma_rmlui_ui_demo PRIVATE karma ${KARMA_RMLUI_TARGET})
 endif()
 
 add_executable(karma_network_demo

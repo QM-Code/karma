@@ -45,8 +45,8 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
 
   if (has_listener) {
     const auto& transform = world.get<components::TransformComponent>(listener_entity);
-    const components::Vec3 pos = transform.position();
-    const components::Quat rot = transform.rotation();
+    const math::Vec3 pos = transform.position();
+    const math::Quat rot = transform.rotation();
     audio_.setListenerPosition({pos.x, pos.y, pos.z});
     audio_.setListenerRotation({rot.w, rot.x, rot.y, rot.z});
     warned_no_listener_ = false;
@@ -67,7 +67,7 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
     try {
       const int max_instances = source.max_instances > 0 ? source.max_instances : 1;
       auto& clip = getClip(source.clip_key, max_instances);
-      const components::Vec3 pos = transform.position();
+      const math::Vec3 pos = transform.position();
       clip.setSpatialDefaults(source.spatialized, source.min_distance, source.max_distance);
       if (source.spatialized) {
         clip.playSpatial({pos.x, pos.y, pos.z},

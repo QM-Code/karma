@@ -1,13 +1,10 @@
 #pragma once
 
 #include "karma/renderer/types.h"
-#include "karma/platform/events.h"
+#include "karma/app/ui_draw_data.h"
 
 #include <filesystem>
-#include <functional>
-#include <glm/glm.hpp>
-#include <glm/gtc/quaternion.hpp>
-#include <glm/mat4x4.hpp>
+#include "karma/math/types.h"
 #include <memory>
 #include <string>
 #include <string_view>
@@ -43,6 +40,8 @@ class Backend {
 
   virtual void submit(const renderer::DrawItem& item) = 0;
   virtual void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) = 0;
+  virtual void drawLine(const math::Vec3& start, const math::Vec3& end,
+                        const math::Color& color, bool depth_test, float thickness) = 0;
 
   virtual unsigned int getRenderTargetTextureId(renderer::RenderTargetId target) const = 0;
 
@@ -54,9 +53,8 @@ class Backend {
   virtual void setGenerateMips(bool enabled) = 0;
   virtual void setShadowSettings(float bias, int map_size, int pcf_radius) = 0;
 
-  virtual void setOverlayCallback(std::function<void()> callback) = 0;
-  virtual void handleOverlayEvent(const platform::Event& event) = 0;
-  virtual void renderOverlay() = 0;
+  virtual void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) = 0;
+  virtual void renderUi(const karma::app::UIDrawData& draw_data) = 0;
 };
 
 std::unique_ptr<Backend> CreateGraphicsBackend(karma::platform::Window& window);

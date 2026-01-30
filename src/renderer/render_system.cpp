@@ -18,18 +18,18 @@
 namespace karma::renderer {
 
 namespace {
-glm::vec3 toGlm(const components::Vec3& v) {
+glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
 }
 
-glm::quat toGlm(const components::Quat& q) {
+glm::quat toGlm(const math::Quat& q) {
   return {q.w, q.x, q.y, q.z};
 }
 
 renderer::DirectionalLightData toDirectionalLight(const components::LightComponent& light,
                                                   const components::TransformComponent& transform) {
   renderer::DirectionalLightData out{};
-  out.color = toGlm(light.color);
+  out.color = light.color;
   out.intensity = light.intensity;
   const glm::quat rot = toGlm(transform.rotation());
   const glm::mat3 basis = glm::mat3_cast(rot);
@@ -202,7 +202,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
   if (!has_light) {
     light.direction = glm::vec3(0.3f, 1.0f, 0.2f);
-    light.color = glm::vec3(1.0f, 1.0f, 1.0f);
+    light.color = math::Color{1.0f, 1.0f, 1.0f, 1.0f};
     light.intensity = 1.0f;
   }
   device_.setDirectionalLight(light);

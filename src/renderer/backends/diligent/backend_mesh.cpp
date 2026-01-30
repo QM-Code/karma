@@ -352,7 +352,10 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
   const renderer::MaterialId id = nextMaterialId_++;
   MaterialRecord record{};
   record.desc = material;
-  record.base_color_factor = material.base_color;
+  record.base_color_factor = glm::vec4(material.base_color.r,
+                                       material.base_color.g,
+                                       material.base_color.b,
+                                       material.base_color.a);
   record.emissive_factor = glm::vec3(0.0f);
   record.metallic_factor = 1.0f;
   record.roughness_factor = 1.0f;
@@ -407,7 +410,10 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material, const render
     return;
   }
   it->second.desc = desc;
-  it->second.base_color_factor = desc.base_color;
+  it->second.base_color_factor = glm::vec4(desc.base_color.r,
+                                           desc.base_color.g,
+                                           desc.base_color.b,
+                                           desc.base_color.a);
 }
 
 void DiligentBackend::destroyMaterial(renderer::MaterialId material) {
@@ -457,7 +463,7 @@ renderer::TextureId DiligentBackend::createTexture(const renderer::TextureDesc& 
       auto* raw_view = record.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
       if (raw_view) {
         Diligent::RefCntAutoPtr<Diligent::ITextureView> view;
-        view.Attach(raw_view);
+        view = raw_view;
         record.srv = view;
         if (desc.generate_mips && context_) {
           context_->GenerateMips(record.srv);
@@ -473,6 +479,79 @@ renderer::TextureId DiligentBackend::createTexture(const renderer::TextureDesc& 
 
 void DiligentBackend::destroyTexture(renderer::TextureId texture) {
   textures_.erase(texture);
+}
+
+void DiligentBackend::updateTextureRGBA8(renderer::TextureId texture,
+                                         int w,
+                                         int h,
+                                         const void* pixels) {
+  if (!device_ || !context_ || texture == renderer::kInvalidTexture || !pixels || w <= 0 || h <= 0) {
+    return;
+  }
+  auto it = textures_.find(texture);
+  if (it == textures_.end()) {
+    return;
+  }
+
+  auto& record = it->second;
+  const bool size_changed = record.desc.width != w || record.desc.height != h;
+  const bool format_changed = record.desc.format != renderer::TextureFormat::RGBA8;
+  if (!record.texture || size_changed || format_changed) {
+    record.desc.width = w;
+    record.desc.height = h;
+    record.desc.format = renderer::TextureFormat::RGBA8;
+    record.desc.srgb = false;
+    record.desc.generate_mips = false;
+
+    Diligent::TextureDesc tex_desc{};
+    tex_desc.Name = "Karma UI Texture";
+    tex_desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+    tex_desc.Width = static_cast<Diligent::Uint32>(w);
+    tex_desc.Height = static_cast<Diligent::Uint32>(h);
+    tex_desc.MipLevels = 1;
+    tex_desc.Format = Diligent::TEX_FORMAT_RGBA8_UNORM;
+    tex_desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+    tex_desc.Usage = Diligent::USAGE_DEFAULT;
+
+    record.texture.Release();
+    record.srv.Release();
+    Diligent::TextureSubResData subres{};
+    subres.pData = pixels;
+    subres.Stride = static_cast<Diligent::Uint32>(w * 4);
+    Diligent::TextureData init_data{};
+    init_data.pSubResources = &subres;
+    init_data.NumSubresources = 1;
+    device_->CreateTexture(tex_desc, &init_data, &record.texture);
+    if (record.texture) {
+      auto* raw_view = record.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+      if (raw_view) {
+        Diligent::RefCntAutoPtr<Diligent::ITextureView> view;
+        view = raw_view;
+        record.srv = view;
+      }
+    }
+    return;
+  }
+
+  if (!record.texture) {
+    return;
+  }
+
+  Diligent::TextureSubResData subres{};
+  subres.pData = pixels;
+  subres.Stride = static_cast<Diligent::Uint32>(w * 4);
+
+  Diligent::Box box{};
+  box.MinX = 0;
+  box.MaxX = static_cast<Diligent::Uint32>(w);
+  box.MinY = 0;
+  box.MaxY = static_cast<Diligent::Uint32>(h);
+  box.MinZ = 0;
+  box.MaxZ = 1;
+
+  context_->UpdateTexture(record.texture, 0, 0, box, subres,
+                          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 }
 
 renderer::RenderTargetId DiligentBackend::createRenderTarget(const renderer::RenderTargetDesc& desc) {

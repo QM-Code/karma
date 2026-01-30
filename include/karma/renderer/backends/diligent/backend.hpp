@@ -4,9 +4,9 @@
 
 #include <Common/interface/RefCntAutoPtr.hpp>
 #include <filesystem>
-#include <functional>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -29,7 +29,6 @@ class ISampler;
 
 struct aiScene;
 struct aiString;
-struct ImDrawData;
 
 namespace karma::renderer_backend {
 
@@ -59,6 +58,8 @@ class DiligentBackend final : public Backend {
 
   void submit(const renderer::DrawItem& item) override;
   void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) override;
+  void drawLine(const math::Vec3& start, const math::Vec3& end,
+                const math::Color& color, bool depth_test, float thickness) override;
 
   unsigned int getRenderTargetTextureId(renderer::RenderTargetId target) const override;
 
@@ -69,9 +70,8 @@ class DiligentBackend final : public Backend {
   void setAnisotropy(bool enabled, int level) override;
   void setGenerateMips(bool enabled) override;
   void setShadowSettings(float bias, int map_size, int pcf_radius) override;
-  void setOverlayCallback(std::function<void()> callback) override;
-  void handleOverlayEvent(const platform::Event& event) override;
-  void renderOverlay() override;
+  void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) override;
+  void renderUi(const karma::app::UIDrawData& draw_data) override;
 
   Diligent::IRenderDevice* getDevice() const { return device_; }
   Diligent::IDeviceContext* getContext() const { return context_; }
@@ -130,11 +130,16 @@ class DiligentBackend final : public Backend {
     bool shadow_visible = true;
   };
 
+  struct LineVertex {
+    float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  };
+
   void initializeDevice();
   void clearFrame(const float* color, bool clear_depth);
   void recreateShadowMap();
-  void initImGui();
-  void renderImGuiDrawData(ImDrawData* draw_data);
+  void ensureUiResources();
+  void ensureLineResources();
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
                                                                    int width,
                                                                    int height,
@@ -175,14 +180,18 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITexture> shadow_map_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_dsv_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> imgui_pipeline_state_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> imgui_srb_;
-  Diligent::RefCntAutoPtr<Diligent::IBuffer> imgui_vb_;
-  Diligent::RefCntAutoPtr<Diligent::IBuffer> imgui_ib_;
-  Diligent::RefCntAutoPtr<Diligent::IBuffer> imgui_cb_;
-  Diligent::RefCntAutoPtr<Diligent::ISampler> imgui_sampler_;
-  Diligent::RefCntAutoPtr<Diligent::ITexture> imgui_font_tex_;
-  Diligent::RefCntAutoPtr<Diligent::ITextureView> imgui_font_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_vb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_ib_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_cb_;
+  Diligent::RefCntAutoPtr<Diligent::ISampler> ui_sampler_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> line_srb_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> line_srb_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> line_vb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> line_cb_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_base_color_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_normal_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_metallic_roughness_tex_;
@@ -208,6 +217,8 @@ class DiligentBackend final : public Backend {
   std::unordered_map<std::string, renderer::TextureId> texture_cache_;
   std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;
   std::unordered_map<renderer::InstanceId, InstanceRecord> instances_;
+  std::vector<LineVertex> line_vertices_depth_;
+  std::vector<LineVertex> line_vertices_no_depth_;
 
   renderer::CameraData camera_{};
   bool camera_active_ = true;
@@ -222,11 +233,10 @@ class DiligentBackend final : public Backend {
   float shadow_bias_ = 0.002f;
   int shadow_pcf_radius_ = 0;
   bool shadow_debug_ = false;
-  bool imgui_initialized_ = false;
-  float imgui_last_dt_ = 1.0f / 60.0f;
-  size_t imgui_vb_size_ = 0;
-  size_t imgui_ib_size_ = 0;
-  std::function<void()> overlay_callback_;
+  size_t ui_vb_size_ = 0;
+  size_t ui_ib_size_ = 0;
+  size_t line_vb_size_ = 0;
+  bool warned_line_thickness_ = false;
   int current_width_ = 0;
   int current_height_ = 0;
   bool warned_no_draws_ = false;

@@ -8,20 +8,20 @@ namespace karma::components {
 class RigidbodyComponent : public ecs::ComponentTag {
  public:
   float mass = 1.0f;
-  Vec3 velocity{};
-  Vec3 angular_velocity{};
+  math::Vec3 velocity{};
+  math::Vec3 angular_velocity{};
   bool is_kinematic = false;
   bool use_gravity = true;
 
-  void setPosition(const Vec3& position) {
+  void setPosition(const math::Vec3& position) {
     position_ = position;
     teleport_position_ = position;
     teleport_ = true;
   }
 
-  Vec3 getPosition() const { return position_; }
+  math::Vec3 getPosition() const { return position_; }
 
-  bool consumeTeleport(Vec3& out_position) {
+  bool consumeTeleport(math::Vec3& out_position) {
     if (!teleport_) {
       return false;
     }
@@ -30,12 +30,12 @@ class RigidbodyComponent : public ecs::ComponentTag {
     return true;
   }
 
-  void syncPosition(const Vec3& position) { position_ = position; }
+  void syncPosition(const math::Vec3& position) { position_ = position; }
 
  private:
   bool teleport_ = false;
-  Vec3 teleport_position_{};
-  Vec3 position_{};
+  math::Vec3 teleport_position_{};
+  math::Vec3 position_{};
 };
 
 }  // namespace karma::components

@@ -38,21 +38,22 @@ void EngineApp::initSubsystems() {
 }
 
 void EngineApp::shutdownSubsystems() {
-  if (overlay_) {
-    overlay_->onShutdown();
-    overlay_.reset();
+  if (ui_) {
+    ui_->onShutdown();
+    ui_.reset();
   }
+  ui_context_ = {};
   render_system_.reset();
   graphics_.reset();
   window_.reset();
   running_ = false;
 }
 
-void EngineApp::setOverlay(std::unique_ptr<ui::Overlay> overlay) {
-  if (overlay_) {
-    overlay_->onShutdown();
+void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
+  if (ui_) {
+    ui_->onShutdown();
   }
-  overlay_ = std::move(overlay);
+  ui_ = std::move(ui);
 }
 
 void EngineApp::start(GameInterface& game, const EngineConfig& config) {
@@ -74,7 +75,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   running_ = true;
   accumulator_ = 0.0f;
   last_time_ = std::chrono::steady_clock::now();
-  game_->bindContext(world_, scene_, input_, physics_);
+  game_->bindContext(world_, scene_, input_, physics_, graphics_.get());
   game_->onStart();
 }
 
@@ -97,9 +98,9 @@ void EngineApp::tick() {
 
   if (window_) {
     window_->pollEvents();
-    if (overlay_) {
+    if (ui_) {
       for (const auto& event : window_->events()) {
-        overlay_->onEvent(event);
+        ui_->onEvent(event);
       }
     }
     input_.update(window_->events());
@@ -107,6 +108,15 @@ void EngineApp::tick() {
     if (window_->shouldClose()) {
       requestStop();
     }
+  }
+
+  if (!running_) {
+    if (game_) {
+      game_->onShutdown();
+    }
+    shutdownSubsystems();
+    game_ = nullptr;
+    return;
   }
 
   while (accumulator_ >= fixed_dt_) {
@@ -126,18 +136,25 @@ void EngineApp::tick() {
     if (window_) {
       window_->getFramebufferSize(fb_width, fb_height);
     }
+    if (ui_) {
+      ui_context_.frame_.dt = frame_dt;
+      ui_context_.frame_.viewport_w = fb_width;
+      ui_context_.frame_.viewport_h = fb_height;
+      ui_context_.frame_.dpi_scale = window_ ? window_->getContentScale() : 1.0f;
+      ui_context_.draw_data_.clear();
+      ui_context_.input_ = &input_;
+      ui_context_.device_ = graphics_.get();
+      ui_->onFrame(ui_context_);
+    }
     renderer::FrameInfo frame{};
     frame.width = fb_width;
     frame.height = fb_height;
     frame.delta_time = frame_dt;
     graphics_->beginFrame(frame);
-    if (overlay_) {
-      overlay_->onFrameBegin(frame.width, frame.height, frame.delta_time);
-    }
     render_system_->update(world_, scene_, frame_dt);
     graphics_->renderLayer(0);
-    if (overlay_) {
-      overlay_->onRender(*graphics_);
+    if (ui_) {
+      graphics_->renderUi(ui_context_.draw_data_);
     }
     graphics_->endFrame();
     if (window_) {
@@ -148,7 +165,9 @@ void EngineApp::tick() {
   }
 
   if (!running_) {
-    game_->onShutdown();
+    if (game_) {
+      game_->onShutdown();
+    }
     shutdownSubsystems();
     game_ = nullptr;
   }

@@ -1,0 +1,12 @@
+<rml>
+  <head></head>
+  <body>
+    <div style="width: 320px; padding: 12px; background: #1b2433; border-width: 1px; border-color: #32435f;">
+      <div id="title" style="font-family: Roboto; font-weight: 900; font-size: 20px; margin-bottom: 8px;">RmlUi Demo</div>
+      <div style="font-family: Roboto; font-weight: 900;">Draw data bridge example</div>
+      <div style="height: 14px; margin-top: 8px; background: #2b3a52;">
+        <div style="height: 14px; width: 60%; background: #f59e0b;"></div>
+      </div>
+    </div>
+  </body>
+</rml>

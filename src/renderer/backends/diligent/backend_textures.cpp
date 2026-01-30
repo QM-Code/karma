@@ -84,7 +84,7 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
     return {};
   }
   Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
-  srv.Attach(raw_view);
+  srv = raw_view;
   if (should_gen_mips && context_) {
     context_->GenerateMips(srv);
   }

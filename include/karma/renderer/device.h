@@ -1,9 +1,6 @@
 #pragma once
 
 #include "karma/renderer/backend.hpp"
-#include "karma/platform/events.h"
-
-#include <functional>
 
 namespace karma::renderer {
 
@@ -33,6 +30,8 @@ class GraphicsDevice {
 
   void submit(const DrawItem& item);
   void renderLayer(LayerId layer, RenderTargetId target = kDefaultRenderTarget);
+  void drawLine(const math::Vec3& start, const math::Vec3& end, const math::Color& color,
+                bool depth_test = true, float thickness = 1.0f);
 
   unsigned int getRenderTargetTextureId(RenderTargetId target) const;
 
@@ -43,9 +42,9 @@ class GraphicsDevice {
   void setAnisotropy(bool enabled, int level);
   void setGenerateMips(bool enabled);
   void setShadowSettings(float bias, int map_size, int pcf_radius);
-  void setOverlayCallback(std::function<void()> callback);
-  void handleOverlayEvent(const platform::Event& event);
-  void renderOverlay();
+  TextureId createTextureRGBA8(int width, int height, const void* pixels);
+  void updateTextureRGBA8(TextureId texture, int width, int height, const void* pixels);
+  void renderUi(const karma::app::UIDrawData& draw_data);
   renderer_backend::Backend* backend() { return backend_.get(); }
   const renderer_backend::Backend* backend() const { return backend_.get(); }
 

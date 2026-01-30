@@ -15,11 +15,57 @@
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
 #include <limits>
 
 namespace karma::renderer_backend {
 
 namespace {
+struct alignas(16) LineConstants {
+  float view_proj[16];
+};
+
+static constexpr const char* kLineVS = R"(
+cbuffer Constants
+{
+    row_major float4x4 g_ViewProj;
+};
+
+struct VSInput
+{
+    float4 pos : ATTRIB0;
+    float4 col : ATTRIB1;
+};
+
+struct PSInput
+{
+    float4 pos : SV_POSITION;
+    float4 col : COLOR0;
+};
+
+PSInput main(VSInput input)
+{
+    PSInput output;
+    output.pos = mul(input.pos, g_ViewProj);
+    output.col = input.col;
+    return output;
+}
+)";
+
+static constexpr const char* kLinePS = R"(
+struct PSInput
+{
+    float4 pos : SV_POSITION;
+    float4 col : COLOR0;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    return input.col;
+}
+)";
+
 glm::mat4 buildLightView(const renderer::DirectionalLightData& light) {
   glm::vec3 dir = light.direction;
   if (glm::length(dir) < 1e-4f) {
@@ -65,12 +111,17 @@ void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
       (frame.width != current_width_ || frame.height != current_height_)) {
     resize(frame.width, frame.height);
   }
-  imgui_last_dt_ = frame.delta_time > 0.0f ? frame.delta_time : (1.0f / 60.0f);
 }
 
 void DiligentBackend::endFrame() {
   if (swap_chain_) {
     swap_chain_->Present();
+  }
+  if (!line_vertices_depth_.empty()) {
+    line_vertices_depth_.clear();
+  }
+  if (!line_vertices_no_depth_.empty()) {
+    line_vertices_no_depth_.clear();
   }
 }
 
@@ -104,6 +155,158 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   record.transform = item.transform;
   record.visible = item.visible;
   record.shadow_visible = item.shadow_visible;
+}
+
+void DiligentBackend::drawLine(const math::Vec3& start, const math::Vec3& end,
+                               const math::Color& color, bool depth_test, float thickness) {
+  if (!warned_line_thickness_ && thickness != 1.0f) {
+    spdlog::warn("Karma: Line thickness {} requested; only 1.0 is supported right now.", thickness);
+    warned_line_thickness_ = true;
+  }
+  LineVertex a{};
+  a.position[0] = start.x;
+  a.position[1] = start.y;
+  a.position[2] = start.z;
+  a.position[3] = 1.0f;
+  a.color[0] = color.r;
+  a.color[1] = color.g;
+  a.color[2] = color.b;
+  a.color[3] = color.a;
+
+  LineVertex b{};
+  b.position[0] = end.x;
+  b.position[1] = end.y;
+  b.position[2] = end.z;
+  b.position[3] = 1.0f;
+  b.color[0] = color.r;
+  b.color[1] = color.g;
+  b.color[2] = color.b;
+  b.color[3] = color.a;
+
+  auto& bucket = depth_test ? line_vertices_depth_ : line_vertices_no_depth_;
+  bucket.push_back(a);
+  bucket.push_back(b);
+}
+
+void DiligentBackend::ensureLineResources() {
+  if (line_pipeline_state_depth_ && line_pipeline_state_no_depth_) {
+    return;
+  }
+  if (!device_) {
+    return;
+  }
+
+  Diligent::ShaderCreateInfo shader_ci{};
+  shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
+  shader_ci.CompileFlags = Diligent::SHADER_COMPILE_FLAGS{};
+
+  Diligent::RefCntAutoPtr<Diligent::IShader> vs;
+  shader_ci.Desc.Name = "Karma Line VS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
+  shader_ci.EntryPoint = "main";
+  shader_ci.Source = kLineVS;
+  device_->CreateShader(shader_ci, &vs);
+
+  Diligent::RefCntAutoPtr<Diligent::IShader> ps;
+  shader_ci.Desc.Name = "Karma Line PS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+  shader_ci.EntryPoint = "main";
+  shader_ci.Source = kLinePS;
+  device_->CreateShader(shader_ci, &ps);
+
+  if (!vs || !ps) {
+    spdlog::error("Karma: Failed to create line shaders.");
+    return;
+  }
+
+  Diligent::LayoutElement layout[] = {
+      Diligent::LayoutElement{0, 0, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(offsetof(LineVertex, position)),
+                              static_cast<Diligent::Uint32>(sizeof(LineVertex))},
+      Diligent::LayoutElement{1, 0, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(offsetof(LineVertex, color)),
+                              static_cast<Diligent::Uint32>(sizeof(LineVertex))}
+  };
+
+  Diligent::ShaderResourceVariableDesc vars[] = {
+      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+  };
+
+  auto create_pipeline = [&](const char* name, bool depth_test,
+                             Diligent::RefCntAutoPtr<Diligent::IPipelineState>& out_pso,
+                             Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb) {
+    Diligent::GraphicsPipelineStateCreateInfo pso{};
+    pso.PSODesc.Name = name;
+    pso.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
+    pso.pVS = vs;
+    pso.pPS = ps;
+
+    auto& graphics = pso.GraphicsPipeline;
+    graphics.NumRenderTargets = 1;
+    graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
+                                        : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
+                                     : Diligent::TEX_FORMAT_D32_FLOAT;
+    graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_LINE_LIST;
+    graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
+    if (depth_test) {
+      graphics.RasterizerDesc.DepthBias = -1;
+    }
+    graphics.DepthStencilDesc.DepthEnable = depth_test;
+    graphics.DepthStencilDesc.DepthWriteEnable = false;
+    graphics.BlendDesc.RenderTargets[0].RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
+
+    graphics.InputLayout.LayoutElements = layout;
+    graphics.InputLayout.NumElements =
+        static_cast<Diligent::Uint32>(sizeof(layout) / sizeof(layout[0]));
+
+    pso.PSODesc.ResourceLayout.Variables = vars;
+    pso.PSODesc.ResourceLayout.NumVariables =
+        static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
+
+    device_->CreateGraphicsPipelineState(pso, &out_pso);
+    if (!out_pso) {
+      spdlog::error("Karma: Failed to create {} pipeline state.", name);
+      return false;
+    }
+    if (auto* var =
+            out_pso->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
+      var->Set(line_cb_);
+    }
+    out_pso->CreateShaderResourceBinding(&out_srb, true);
+    return true;
+  };
+
+  Diligent::BufferDesc cb_desc{};
+  cb_desc.Name = "Karma Line Constants";
+  cb_desc.Usage = Diligent::USAGE_DYNAMIC;
+  cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
+  cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+  cb_desc.Size = sizeof(LineConstants);
+  device_->CreateBuffer(cb_desc, nullptr, &line_cb_);
+
+  if (!line_cb_) {
+    spdlog::error("Karma: Failed to create line constants buffer.");
+    return;
+  }
+
+  create_pipeline("Karma Line Pipeline (Depth)", true, line_pipeline_state_depth_, line_srb_depth_);
+  create_pipeline("Karma Line Pipeline (NoDepth)", false, line_pipeline_state_no_depth_, line_srb_no_depth_);
+
+  if (!line_vb_) {
+    line_vb_size_ = 1024;
+    Diligent::BufferDesc vb_desc{};
+    vb_desc.Name = "Karma Line VB";
+    vb_desc.Usage = Diligent::USAGE_DYNAMIC;
+    vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
+    vb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+    vb_desc.Size = static_cast<Diligent::Uint32>(line_vb_size_ * sizeof(LineVertex));
+    device_->CreateBuffer(vb_desc, nullptr, &line_vb_);
+    if (!line_vb_) {
+      spdlog::error("Karma: Failed to create line vertex buffer.");
+      line_vb_size_ = 0;
+    }
+  }
 }
 
 void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTargetId /*target*/) {
@@ -427,9 +630,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     constants.light_dir[1] = light_dir.y;
     constants.light_dir[2] = light_dir.z;
     constants.light_dir[3] = 0.0f;
-    constants.light_color[0] = directional_light_.color.x * directional_light_.intensity;
-    constants.light_color[1] = directional_light_.color.y * directional_light_.intensity;
-    constants.light_color[2] = directional_light_.color.z * directional_light_.intensity;
+    constants.light_color[0] = directional_light_.color.r * directional_light_.intensity;
+    constants.light_color[1] = directional_light_.color.g * directional_light_.intensity;
+    constants.light_color[2] = directional_light_.color.b * directional_light_.intensity;
     constants.light_color[3] = 1.0f;
     constants.camera_pos[0] = camera_.position.x;
     constants.camera_pos[1] = camera_.position.y;
@@ -526,6 +729,67 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       draw_with_material(instance.material, 0, mesh.index_count);
     }
   }
+
+  auto draw_lines = [&](const std::vector<LineVertex>& lines,
+                        Diligent::RefCntAutoPtr<Diligent::IPipelineState>& pso,
+                        Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb) {
+    if (lines.empty()) {
+      return;
+    }
+    if (pso && line_cb_ && line_vb_) {
+      if (lines.size() > line_vb_size_) {
+        spdlog::warn("Karma: Line draw skipped ({} vertices > capacity {}).",
+                     lines.size(), line_vb_size_);
+      } else {
+        auto* rtv = swap_chain_->GetCurrentBackBufferRTV();
+        auto* dsv = swap_chain_->GetDepthBufferDSV();
+        context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+        Diligent::Viewport viewport{};
+        viewport.TopLeftX = 0.0f;
+        viewport.TopLeftY = 0.0f;
+        viewport.Width = static_cast<float>(current_width_);
+        viewport.Height = static_cast<float>(current_height_);
+        viewport.MinDepth = 0.0f;
+        viewport.MaxDepth = 1.0f;
+        context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(current_width_),
+                               static_cast<Diligent::Uint32>(current_height_));
+
+        {
+          Diligent::MapHelper<LineVertex> vb_map(context_, line_vb_, Diligent::MAP_WRITE,
+                                                 Diligent::MAP_FLAG_DISCARD);
+          std::memcpy(vb_map, lines.data(), lines.size() * sizeof(LineVertex));
+        }
+
+        const glm::mat4 view_proj = depth_fix * projection * view;
+        LineConstants constants{};
+        copyMat4(constants.view_proj, view_proj);
+        {
+          Diligent::MapHelper<LineConstants> cb_map(context_, line_cb_, Diligent::MAP_WRITE,
+                                                    Diligent::MAP_FLAG_DISCARD);
+          *cb_map = constants;
+        }
+
+        context_->SetPipelineState(pso);
+        if (srb) {
+          context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        }
+        Diligent::IBuffer* vbs[] = {line_vb_};
+        Diligent::Uint64 offsets[] = {0};
+        context_->SetVertexBuffers(0, 1, vbs, offsets,
+                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                   Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+
+        Diligent::DrawAttribs draw{};
+        draw.NumVertices = static_cast<Diligent::Uint32>(lines.size());
+        draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        context_->Draw(draw);
+      }
+    }
+  };
+
+  draw_lines(line_vertices_depth_, line_pipeline_state_depth_, line_srb_depth_);
+  draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
 
   if (!warned_no_draws_) {
     spdlog::info("Karma: Diligent drew {} instance(s) this frame (instances={}).", draw_count,

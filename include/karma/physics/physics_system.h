@@ -22,8 +22,8 @@ class PhysicsSystem : public systems::ISystem {
 
  private:
   struct TeleportRequest {
-    components::Vec3 position{};
-    components::Quat rotation{};
+    math::Vec3 position{};
+    math::Quat rotation{};
   };
 
   static uint64_t entityKey(ecs::Entity entity) {

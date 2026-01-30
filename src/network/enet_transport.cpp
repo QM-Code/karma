@@ -70,6 +70,20 @@ std::optional<std::string> peerIpString(const ENetAddress& addr) {
   return std::nullopt;
 }
 
+void drainHostEvents(ENetHost* host, int max_events) {
+  if (!host || max_events <= 0) {
+    return;
+  }
+  ENetEvent event;
+  int drained = 0;
+  while (drained < max_events && enet_host_service(host, &event, 0) > 0) {
+    if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+      enet_packet_destroy(event.packet);
+    }
+    drained += 1;
+  }
+}
+
 class EnetClientTransport final : public IClientTransport {
  public:
   EnetClientTransport() = default;
@@ -122,10 +136,32 @@ class EnetClientTransport final : public IClientTransport {
   }
 
   void disconnect() override {
-    if (peer_) {
-      enet_peer_disconnect(peer_, 0);
-      peer_ = nullptr;
+    if (!peer_) {
+      return;
     }
+    enet_peer_disconnect(peer_, 0);
+    if (host_) {
+      enet_host_flush(host_);
+      ENetEvent event;
+      bool disconnected = false;
+      for (int i = 0; i < 32; ++i) {
+        if (enet_host_service(host_, &event, 0) <= 0) {
+          break;
+        }
+        if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+          enet_packet_destroy(event.packet);
+        }
+        if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
+          disconnected = true;
+          break;
+        }
+      }
+      if (!disconnected) {
+        enet_peer_reset(peer_);
+      }
+      drainHostEvents(host_, 32);
+    }
+    peer_ = nullptr;
   }
 
   bool isConnected() const override {
@@ -231,6 +267,14 @@ class EnetServerTransport final : public IServerTransport {
 
   ~EnetServerTransport() override {
     if (host_) {
+      for (size_t i = 0; i < host_->peerCount; ++i) {
+        ENetPeer* peer = &host_->peers[i];
+        if (peer->state != ENET_PEER_STATE_DISCONNECTED) {
+          enet_peer_disconnect(peer, 0);
+        }
+      }
+      enet_host_flush(host_);
+      drainHostEvents(host_, 128);
       enet_host_destroy(host_);
       host_ = nullptr;
     }

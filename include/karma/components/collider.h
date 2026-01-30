@@ -14,8 +14,8 @@ struct ColliderComponent : ecs::ComponentTag {
   };
 
   Shape shape = Shape::Box;
-  Vec3 center{};
-  Vec3 half_extents{0.5f, 0.5f, 0.5f};
+  math::Vec3 center{};
+  math::Vec3 half_extents{0.5f, 0.5f, 0.5f};
   float radius = 0.5f;
   float height = 1.0f;
   bool is_trigger = false;

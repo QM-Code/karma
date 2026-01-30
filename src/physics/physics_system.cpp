@@ -7,15 +7,15 @@ namespace karma::physics {
 
 namespace {
 
-components::Vec3 toVec3(const glm::vec3& v) {
+math::Vec3 toVec3(const glm::vec3& v) {
   return {v.x, v.y, v.z};
 }
 
-glm::vec3 toGlm(const components::Vec3& v) {
+glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
 }
 
-glm::quat toGlm(const components::Quat& q) {
+glm::quat toGlm(const math::Quat& q) {
   return {q.w, q.x, q.y, q.z};
 }
 
@@ -76,7 +76,7 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
     transform.setHasPhysics(true);
     transform.setPhysicsWriteWarning(!body.is_kinematic);
 
-    components::Vec3 teleport_position{};
+    math::Vec3 teleport_position{};
     if (body.consumeTeleport(teleport_position)) {
       teleports_[key] = TeleportRequest{teleport_position, transform.rotation()};
       body.velocity = {0.0f, 0.0f, 0.0f};
@@ -212,8 +212,8 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
   auto& transform = world.get<components::TransformComponent>(player_entity_);
   auto& input = world.get<components::PlayerControllerComponent>(player_entity_);
 
-  const components::Vec3 desired = input.desiredVelocity();
-  const components::Vec3 impulse = input.addVelocity();
+  const math::Vec3 desired = input.desiredVelocity();
+  const math::Vec3 impulse = input.addVelocity();
   glm::vec3 velocity = toGlm(desired) + toGlm(impulse);
   controller.setVelocity(velocity);
   input.clearImpulse();

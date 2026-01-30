@@ -11,7 +11,7 @@
 #include "karma/audio/audio.h"
 #include "karma/audio/audio_system.h"
 #include "karma/platform/window.h"
-#include "karma/ui/overlay.h"
+#include "karma/app/ui_context.h"
 #include "karma/physics/physics_world.hpp"
 #include "karma/physics/physics_system.h"
 #include "karma/renderer/device.h"
@@ -54,7 +54,7 @@ class EngineApp {
   void tick();
   bool isRunning() const { return running_; }
   void requestStop();
-  void setOverlay(std::unique_ptr<ui::Overlay> overlay);
+  void setUi(std::unique_ptr<UiLayer> ui);
 
  private:
   void initSubsystems();
@@ -72,7 +72,8 @@ class EngineApp {
   scene::Scene scene_;
   systems::SystemGraph systems_;
   EngineConfig config_{};
-  std::unique_ptr<ui::Overlay> overlay_;
+  std::unique_ptr<UiLayer> ui_;
+  UIContext ui_context_{};
 
   bool running_ = false;
   float fixed_dt_ = 1.0f / 60.0f;

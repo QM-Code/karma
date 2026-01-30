@@ -14,22 +14,21 @@ Common toggles:
 
 ```bash
 cmake -B build \
-  -DKARMA_WITH_IMGUI=ON \
-  -DKARMA_WITH_RMLUI=ON \
   -DKARMA_FETCH_DEPS=OFF
 ```
 
-### UI Backends
-By default, UI backends are **disabled**. Enable one or both:
-- `KARMA_WITH_IMGUI=ON`
-- `KARMA_WITH_RMLUI=ON`
-
-If `KARMA_FETCH_DEPS=OFF`, you must provide the libraries:
+Optional demo:
 
 ```bash
 cmake -B build \
-  -DKARMA_WITH_RMLUI=ON \
-  -DRmlUi_DIR=/path/to/RmlUi/cmake
+  -DKARMA_BUILD_IMGUI_DEMO=ON
+```
+
+RmlUi demo:
+
+```bash
+cmake -B build \
+  -DKARMA_BUILD_RMLUI_DEMO=ON
 ```
 
 ## Basic App Structure
@@ -41,14 +40,18 @@ public:
   void onFixedUpdate(float dt) override { /* fixed timestep */ }
 };
 
+class MyUi : public karma::app::UiLayer {
+ public:
+  void onFrame(karma::app::UIContext& ctx) override { /* fill ctx.drawData() */ }
+};
+
 int main() {
   karma::app::EngineApp engine;
   MyGame game;
 
-  // Optional UI overlay
-  auto overlay = std::make_unique<karma::ui::RmlUiOverlay>();
-  overlay->setDocumentFile("ui/main.rml");
-  engine.setOverlay(std::move(overlay));
+  // Optional UI layer
+  auto ui = std::make_unique<MyUi>();
+  engine.setUi(std::move(ui));
 
   karma::app::EngineConfig config;
   config.window.title = "My Game";
@@ -61,30 +64,15 @@ int main() {
 }
 ```
 
-## Overlays
-Karma uses a simple overlay interface. You can:
-- Use built-in ImGui/RmlUi backends (if enabled).
-- Provide your own overlay by inheriting `karma::ui::Overlay`.
+## UI draw data
+Karma's UI integration is backend-agnostic. You provide a `UiLayer` implementation
+that owns its UI system and submits draw data into `UIContext` each frame:
 
-### RmlUi Overlay
-```cpp
-auto overlay = std::make_unique<karma::ui::RmlUiOverlay>();
-overlay->setDocumentFile("examples/assets/rmlui/overlay.rml");
-engine.setOverlay(std::move(overlay));
-```
+- `onEvent(...)` for input
+- `onFrame(...)` for timing + draw list submission
+- `UIContext::createTextureRGBA8(...)` for UI textures
 
-Hot reload:
-```cpp
-overlay->setHotReloadEnabled(true);
-overlay->setHotReloadInterval(0.5);
-```
-
-### ImGui Overlay
-```cpp
-auto overlay = std::make_unique<karma::ui::ImGuiOverlay>();
-overlay->setDrawCallback([](){ ImGui::ShowDemoWindow(); });
-engine.setOverlay(std::move(overlay));
-```
+The engine renders your UI draw lists on top of the 3D frame.
 
 ## Rendering Features
 - Directional light with shadows (PCF supported)
@@ -101,10 +89,5 @@ BZ3_DATA_DIR="$PWD/data" ./build/karma_example
 
 ## Demos
 - `karma_example` (default scene)
-- `karma_imgui_demo` (requires `KARMA_WITH_IMGUI`)
-- `karma_rmlui_demo` (requires `KARMA_WITH_RMLUI`)
-
-## Notes
-- UI assets (RML/RCSS/images) are resolved relative to the current working directory unless `setAssetRoot()` is set.
-- RmlUi clip masks require a stencil-capable swapchain (enabled by default in this repo).
-
+- `karma_imgui_ui_demo` (ImGui draw data bridge)
+- `karma_rmlui_ui_demo` (RmlUi draw data bridge)

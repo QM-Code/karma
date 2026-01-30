@@ -8,9 +8,6 @@
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
-#if KARMA_WITH_IMGUI
-#include <imgui.h>
-#endif
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <fstream>
@@ -249,11 +246,6 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
 }
 
 DiligentBackend::~DiligentBackend() {
-#if KARMA_WITH_IMGUI
-  if (imgui_initialized_) {
-    ImGui::DestroyContext();
-  }
-#endif
 }
 
 }  // namespace karma::renderer_backend

@@ -1,5 +1,6 @@
 #include "karma/renderer/backends/diligent/backend.hpp"
 
+#include <Common/interface/BasicMath.hpp>
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/PipelineState.h>
@@ -20,13 +21,15 @@ namespace karma::renderer_backend {
 
 namespace {
 struct alignas(16) UiConstants {
-  float proj[16];
+  Diligent::float4x4 transform;
+  Diligent::float4 translate;
 };
 
 static constexpr const char* kUiVS = R"(
 cbuffer Constants
 {
-    row_major float4x4 g_Proj;
+    row_major float4x4 g_Transform;
+    float4 g_Translate;
 };
 
 struct VSInput
@@ -46,16 +49,31 @@ struct PSInput
 PSInput main(VSInput input)
 {
     PSInput output;
-    output.pos = mul(float4(input.pos.xy, 0.0f, 1.0f), g_Proj);
+    float2 pos = input.pos.xy + g_Translate.xy;
+    output.pos = mul(float4(pos, 0.0f, 1.0f), g_Transform);
     output.uv = input.uv;
     output.col = input.col;
     return output;
 }
 )";
 
-static constexpr const char* kUiPS = R"(
+static constexpr const char* kUiColorPS = R"(
+struct PSInput
+{
+    float4 pos : SV_POSITION;
+    float2 uv  : TEXCOORD0;
+    float4 col : COLOR0;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    return input.col;
+}
+)";
+
+static constexpr const char* kUiTexturePS = R"(
 Texture2D g_Texture;
-SamplerState g_Sampler;
+SamplerState g_Texture_sampler;
 
 struct PSInput
 {
@@ -66,13 +84,14 @@ struct PSInput
 
 float4 main(PSInput input) : SV_TARGET
 {
-    return input.col * g_Texture.Sample(g_Sampler, input.uv);
+    return input.col * g_Texture.Sample(g_Texture_sampler, input.uv);
 }
 )";
 }  // namespace
 
 void DiligentBackend::ensureUiResources() {
-  if (ui_pipeline_state_) {
+  static bool logged_once = false;
+  if (ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ && ui_pso_texture_scissor_) {
     return;
   }
   if (!device_) {
@@ -90,45 +109,24 @@ void DiligentBackend::ensureUiResources() {
   shader_ci.Source = kUiVS;
   device_->CreateShader(shader_ci, &vs);
 
-  Diligent::RefCntAutoPtr<Diligent::IShader> ps;
-  shader_ci.Desc.Name = "Karma UI PS";
+  Diligent::RefCntAutoPtr<Diligent::IShader> ps_color;
+  shader_ci.Desc.Name = "Karma UI Color PS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
   shader_ci.EntryPoint = "main";
-  shader_ci.Source = kUiPS;
-  device_->CreateShader(shader_ci, &ps);
+  shader_ci.Source = kUiColorPS;
+  device_->CreateShader(shader_ci, &ps_color);
 
-  if (!vs || !ps) {
+  Diligent::RefCntAutoPtr<Diligent::IShader> ps_texture;
+  shader_ci.Desc.Name = "Karma UI Texture PS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+  shader_ci.EntryPoint = "main";
+  shader_ci.Source = kUiTexturePS;
+  device_->CreateShader(shader_ci, &ps_texture);
+
+  if (!vs || !ps_color || !ps_texture) {
     spdlog::error("Karma: Failed to create UI shaders.");
     return;
   }
-
-  Diligent::GraphicsPipelineStateCreateInfo pso{};
-  pso.PSODesc.Name = "Karma UI Pipeline";
-  pso.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
-  pso.pVS = vs;
-  pso.pPS = ps;
-
-  auto& graphics = pso.GraphicsPipeline;
-  graphics.NumRenderTargets = 1;
-  graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                      : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
-  graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
-                                   : Diligent::TEX_FORMAT_D32_FLOAT;
-  graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-  graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
-  graphics.RasterizerDesc.ScissorEnable = true;
-  graphics.DepthStencilDesc.DepthEnable = false;
-  graphics.DepthStencilDesc.DepthWriteEnable = false;
-
-  auto& blend = graphics.BlendDesc.RenderTargets[0];
-  blend.BlendEnable = true;
-  blend.SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
-  blend.DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
-  blend.BlendOp = Diligent::BLEND_OPERATION_ADD;
-  blend.SrcBlendAlpha = Diligent::BLEND_FACTOR_SRC_ALPHA;
-  blend.DestBlendAlpha = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
-  blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
-  blend.RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
 
   Diligent::LayoutElement layout[] = {
       Diligent::LayoutElement{0, 0, 2, Diligent::VT_FLOAT32, false,
@@ -141,53 +139,108 @@ void DiligentBackend::ensureUiResources() {
                               static_cast<Diligent::Uint32>(offsetof(karma::app::UIVertex, rgba)),
                               static_cast<Diligent::Uint32>(sizeof(karma::app::UIVertex))}
   };
-  graphics.InputLayout.LayoutElements = layout;
-  graphics.InputLayout.NumElements = static_cast<Diligent::Uint32>(std::size(layout));
 
-  Diligent::ShaderResourceVariableDesc vars[] = {
-      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_Texture", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-      {Diligent::SHADER_TYPE_PIXEL, "g_Sampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+  if (!ui_cb_) {
+    Diligent::BufferDesc cb_desc{};
+    cb_desc.Name = "Karma UI Constants";
+    cb_desc.Usage = Diligent::USAGE_DYNAMIC;
+    cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
+    cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+    cb_desc.Size = sizeof(UiConstants);
+    device_->CreateBuffer(cb_desc, nullptr, &ui_cb_);
+  }
+
+  static const Diligent::ShaderResourceVariableDesc kUiTextureVars[] = {
+      {Diligent::SHADER_TYPE_PIXEL, "g_Texture",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC}
   };
-  pso.PSODesc.ResourceLayout.Variables = vars;
-  pso.PSODesc.ResourceLayout.NumVariables =
-      static_cast<Diligent::Uint32>(std::size(vars));
+  static const Diligent::SamplerDesc kUiTextureSamplerDesc{
+      Diligent::FILTER_TYPE_LINEAR, Diligent::FILTER_TYPE_LINEAR, Diligent::FILTER_TYPE_LINEAR,
+      Diligent::TEXTURE_ADDRESS_CLAMP, Diligent::TEXTURE_ADDRESS_CLAMP, Diligent::TEXTURE_ADDRESS_CLAMP
+  };
+  static const Diligent::ImmutableSamplerDesc kUiTextureSamplers[] = {
+      {Diligent::SHADER_TYPE_PIXEL, "g_Texture_sampler", kUiTextureSamplerDesc}
+  };
 
-  Diligent::SamplerDesc sampler{};
-  sampler.MinFilter = Diligent::FILTER_TYPE_LINEAR;
-  sampler.MagFilter = Diligent::FILTER_TYPE_LINEAR;
-  sampler.MipFilter = Diligent::FILTER_TYPE_LINEAR;
-  sampler.AddressU = Diligent::TEXTURE_ADDRESS_CLAMP;
-  sampler.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
-  sampler.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
-  device_->CreateSampler(sampler, &ui_sampler_);
-
-  device_->CreateGraphicsPipelineState(pso, &ui_pipeline_state_);
-  if (!ui_pipeline_state_) {
-    spdlog::error("Karma: Failed to create UI pipeline state.");
-    return;
-  }
-
-  Diligent::BufferDesc cb_desc{};
-  cb_desc.Name = "Karma UI Constants";
-  cb_desc.Usage = Diligent::USAGE_DYNAMIC;
-  cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
-  cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-  cb_desc.Size = sizeof(UiConstants);
-  device_->CreateBuffer(cb_desc, nullptr, &ui_cb_);
-
-  if (auto* var = ui_pipeline_state_->GetStaticVariableByName(
-          Diligent::SHADER_TYPE_VERTEX, "Constants")) {
-    var->Set(ui_cb_);
-  }
-  if (ui_sampler_) {
-    if (auto* var = ui_pipeline_state_->GetStaticVariableByName(
-            Diligent::SHADER_TYPE_PIXEL, "g_Sampler")) {
-      var->Set(ui_sampler_);
+  auto create_pipeline = [&](Diligent::IShader* ps,
+                             bool scissor,
+                             bool textured,
+                             const char* name,
+                             Diligent::RefCntAutoPtr<Diligent::IPipelineState>& out_pso,
+                             Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb) {
+    if (out_pso) {
+      return;
     }
-  }
+    Diligent::GraphicsPipelineStateCreateInfo pso{};
+    pso.PSODesc.Name = name;
+    pso.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
+    pso.pVS = vs;
+    pso.pPS = ps;
 
-  ui_pipeline_state_->CreateShaderResourceBinding(&ui_srb_, true);
+    auto& graphics = pso.GraphicsPipeline;
+    graphics.NumRenderTargets = 1;
+    graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
+                                        : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
+                                     : Diligent::TEX_FORMAT_D32_FLOAT;
+    graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
+    graphics.RasterizerDesc.ScissorEnable = scissor;
+    graphics.DepthStencilDesc.DepthEnable = false;
+    graphics.DepthStencilDesc.DepthWriteEnable = false;
+
+    auto& blend = graphics.BlendDesc.RenderTargets[0];
+    blend.BlendEnable = true;
+    blend.SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
+    blend.DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+    blend.BlendOp = Diligent::BLEND_OPERATION_ADD;
+    blend.SrcBlendAlpha = Diligent::BLEND_FACTOR_SRC_ALPHA;
+    blend.DestBlendAlpha = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+    blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
+    blend.RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
+
+    graphics.InputLayout.LayoutElements = layout;
+    graphics.InputLayout.NumElements = static_cast<Diligent::Uint32>(std::size(layout));
+
+    if (textured) {
+      pso.PSODesc.ResourceLayout.Variables = kUiTextureVars;
+      pso.PSODesc.ResourceLayout.NumVariables =
+          static_cast<Diligent::Uint32>(std::size(kUiTextureVars));
+      pso.PSODesc.ResourceLayout.ImmutableSamplers = kUiTextureSamplers;
+      pso.PSODesc.ResourceLayout.NumImmutableSamplers =
+          static_cast<Diligent::Uint32>(std::size(kUiTextureSamplers));
+    }
+
+    device_->CreateGraphicsPipelineState(pso, &out_pso);
+    if (!out_pso) {
+      spdlog::error("Karma: Failed to create UI pipeline state.");
+      return;
+    }
+
+    if (ui_cb_) {
+      if (auto* var = out_pso->GetStaticVariableByName(
+              Diligent::SHADER_TYPE_VERTEX, "Constants")) {
+        var->Set(ui_cb_);
+      }
+    }
+
+    out_pso->CreateShaderResourceBinding(&out_srb, true);
+  };
+
+  create_pipeline(ps_color, false, false, "Karma UI Color PSO",
+                  ui_pso_color_, ui_srb_color_);
+  create_pipeline(ps_color, true, false, "Karma UI Color PSO Scissor",
+                  ui_pso_color_scissor_, ui_srb_color_scissor_);
+  create_pipeline(ps_texture, false, true, "Karma UI Texture PSO",
+                  ui_pso_texture_, ui_srb_texture_);
+  create_pipeline(ps_texture, true, true, "Karma UI Texture PSO Scissor",
+                  ui_pso_texture_scissor_, ui_srb_texture_scissor_);
+
+  if (!logged_once &&
+      ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ && ui_pso_texture_scissor_) {
+    spdlog::info("Karma UI: pipeline created.");
+    logged_once = true;
+  }
 }
 
 void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
@@ -202,7 +255,7 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
   }
 
   ensureUiResources();
-  if (!ui_pipeline_state_ || !ui_srb_ || !ui_cb_) {
+  if (!ui_cb_) {
     return;
   }
 
@@ -258,13 +311,13 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
   {
     Diligent::MapHelper<UiConstants> cb_map(context_, ui_cb_, Diligent::MAP_WRITE,
                                             Diligent::MAP_FLAG_DISCARD);
-    std::memcpy(cb_map->proj, proj.data(), sizeof(proj));
+    cb_map->transform = Diligent::float4x4::MakeMatrix(proj.data());
+    cb_map->translate = Diligent::float4{0.0f, 0.0f, 0.0f, 0.0f};
   }
 
   Diligent::ITextureView* rtv = swap_chain_->GetCurrentBackBufferRTV();
   Diligent::ITextureView* dsv = swap_chain_->GetDepthBufferDSV();
   context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-  context_->SetPipelineState(ui_pipeline_state_);
 
   Diligent::Viewport vp{};
   vp.TopLeftX = 0.0f;
@@ -285,6 +338,22 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
 
   Diligent::ITextureView* current_texture = nullptr;
   for (const auto& cmd : draw_data.commands) {
+    const bool use_texture = cmd.texture != 0;
+    auto* pipeline = use_texture
+        ? (cmd.scissor_enabled ? ui_pso_texture_scissor_.RawPtr()
+                               : ui_pso_texture_.RawPtr())
+        : (cmd.scissor_enabled ? ui_pso_color_scissor_.RawPtr()
+                               : ui_pso_color_.RawPtr());
+    auto* srb = use_texture
+        ? (cmd.scissor_enabled ? ui_srb_texture_scissor_.RawPtr()
+                               : ui_srb_texture_.RawPtr())
+        : (cmd.scissor_enabled ? ui_srb_color_scissor_.RawPtr()
+                               : ui_srb_color_.RawPtr());
+    if (!pipeline || !srb) {
+      continue;
+    }
+    context_->SetPipelineState(pipeline);
+
     const bool scissor = cmd.scissor_enabled;
     Diligent::Rect rect{};
     if (scissor) {
@@ -303,21 +372,21 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
     context_->SetScissorRects(1, &rect, static_cast<Diligent::Uint32>(current_width_),
                               static_cast<Diligent::Uint32>(current_height_));
 
-    Diligent::ITextureView* desired = default_base_color_;
-    if (cmd.texture != 0) {
+    if (use_texture) {
+      Diligent::ITextureView* desired = default_base_color_;
       auto it = textures_.find(cmd.texture);
       if (it != textures_.end() && it->second.srv) {
         desired = it->second.srv;
       }
-    }
-    if (desired && desired != current_texture) {
-      current_texture = desired;
-      if (auto* var = ui_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture")) {
-        var->Set(current_texture);
+      if (desired && desired != current_texture) {
+        current_texture = desired;
+        if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture")) {
+          var->Set(current_texture);
+        }
       }
     }
 
-    context_->CommitShaderResources(ui_srb_, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     Diligent::DrawIndexedAttribs draw{};
     draw.IndexType = Diligent::VT_UINT32;

@@ -73,11 +73,17 @@ if (KARMA_BUILD_RMLUI_DEMO)
   if (TARGET RmlUi::Core)
     set(KARMA_RMLUI_TARGET RmlUi::Core)
   elseif (KARMA_FETCH_DEPS)
-    set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(RMLUI_SVG_PLUGIN ON CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_VIEWER OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      lunasvg
+      GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
+      GIT_TAG v2.4.0
+    )
+    FetchContent_MakeAvailable(lunasvg)
     FetchContent_Declare(
       rmlui
       GIT_REPOSITORY https://github.com/mikke89/RmlUi.git

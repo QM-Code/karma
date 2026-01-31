@@ -30,11 +30,13 @@ struct UIDrawData {
   std::vector<UIVertex> vertices;
   std::vector<uint32_t> indices;
   std::vector<UIDrawCmd> commands;
+  bool premultiplied_alpha = false;
 
   void clear() {
     vertices.clear();
     indices.clear();
     commands.clear();
+    premultiplied_alpha = false;
   }
 };
 

@@ -180,8 +180,14 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITexture> shadow_map_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_dsv_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pipeline_state_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_scissor_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_scissor_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_scissor_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_scissor_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_ib_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_cb_;

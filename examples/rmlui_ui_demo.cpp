@@ -8,6 +8,9 @@
 #include <RmlUi/Core.h>
 #include <spdlog/spdlog.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 namespace karma::demo {
 
 namespace {
@@ -99,11 +102,51 @@ uint32_t packColor(const ColorT& c) {
          (static_cast<uint32_t>(c.alpha) << 24);
 }
 
-const char* kDemoRml =
+std::filesystem::path resolveAssetPath(std::string_view relative) {
+  std::filesystem::path candidate(relative);
+  if (candidate.is_absolute() && std::filesystem::exists(candidate)) {
+    return candidate;
+  }
+  std::filesystem::path cwd = std::filesystem::current_path();
+  for (int depth = 0; depth < 6; ++depth) {
+    const std::filesystem::path direct = cwd / candidate;
+    if (std::filesystem::exists(direct)) {
+      return direct;
+    }
+    const std::filesystem::path examples = cwd / "examples" / "assets" / candidate.filename();
+    if (std::filesystem::exists(examples)) {
+      return examples;
+    }
+    if (!cwd.has_parent_path()) {
+      break;
+    }
+    cwd = cwd.parent_path();
+  }
+  return candidate;
+}
+
+void replaceAll(std::string& haystack, std::string_view needle, std::string_view value) {
+  if (needle.empty()) {
+    return;
+  }
+  size_t pos = 0;
+  while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+    haystack.replace(pos, needle.size(), value);
+    pos += value.size();
+  }
+}
+
+const char* kDemoRmlTemplate =
     "<rml><body>"
-    "<div style=\"width:320px;padding:12px;background:#1b2433;border-width:1px;border-color:#32435f;\">"
+    "<div style=\"width:360px;padding:12px;background:#1b2433;border-width:1px;border-color:#32435f;\">"
     "<div style=\"font-family:Roboto;font-weight:900;font-size:20px;\">Karma RmlUi</div>"
     "<div style=\"font-family:Roboto;font-weight:900;margin-top:6px;\">Hello from the minimal demo</div>"
+    "<div style=\"margin-top:10px;\">"
+    "<img src=\"{PNG}\" width=\"128\" height=\"128\"/>"
+    "</div>"
+    "<div style=\"margin-top:10px;\">"
+    "<svg src=\"{SVG}\" width=\"128\" height=\"128\"></svg>"
+    "</div>"
     "</div>"
     "</body></rml>";
 }  // namespace
@@ -118,6 +161,9 @@ class RmlUiLayer final : public app::UiLayer,
     Rml::SetRenderInterface(this);
     Rml::SetFileInterface(this);
     Rml::Initialise();
+#ifndef RMLUI_SVG_PLUGIN
+    spdlog::warn("RmlUi: SVG plugin is not enabled; <svg> elements will not render.");
+#endif
   }
 
   ~RmlUiLayer() override {
@@ -168,6 +214,9 @@ class RmlUiLayer final : public app::UiLayer,
 
   void onFrame(app::UIContext& ctx) override {
     ctx_ = &ctx;
+    app::UIDrawData& out = ctx.drawData();
+    out.clear();
+    out.premultiplied_alpha = false;
     const auto frame = ctx.frame();
     width_ = frame.viewport_w;
     height_ = frame.viewport_h;
@@ -185,6 +234,10 @@ class RmlUiLayer final : public app::UiLayer,
   }
 
   void onShutdown() override {
+    if (shutdown_) {
+      return;
+    }
+    shutdown_ = true;
     if (context_) {
       Rml::RemoveContext(context_->GetName());
       context_ = nullptr;
@@ -298,7 +351,40 @@ class RmlUiLayer final : public app::UiLayer,
 
   Rml::TextureHandle LoadTexture(Rml::Vector2i& texture_dimensions,
                                  const Rml::String& source) override {
-    (void)source;
+    if (!ctx_) {
+      texture_dimensions = Rml::Vector2i(0, 0);
+      return 0;
+    }
+    std::filesystem::path path(source.c_str());
+    if (!path.is_absolute()) {
+      path = resolveAssetPath(source.c_str());
+    }
+    if (path.extension() == ".svg") {
+      spdlog::warn("RmlUi: SVG not supported by demo loader ({})", path.string());
+      texture_dimensions = Rml::Vector2i(0, 0);
+      return 0;
+    }
+
+    int w = 0;
+    int h = 0;
+    int comp = 0;
+    unsigned char* pixels = stbi_load(path.string().c_str(), &w, &h, &comp, 4);
+    if (!pixels || w <= 0 || h <= 0) {
+      if (pixels) {
+        stbi_image_free(pixels);
+      }
+      texture_dimensions = Rml::Vector2i(0, 0);
+      return 0;
+    }
+
+    const auto handle = next_texture_handle_++;
+    app::UITextureHandle tex = ctx_->createTextureRGBA8(w, h, pixels);
+    stbi_image_free(pixels);
+    if (tex != 0) {
+      textures_[handle] = tex;
+      texture_dimensions = Rml::Vector2i(w, h);
+      return handle;
+    }
     texture_dimensions = Rml::Vector2i(0, 0);
     return 0;
   }
@@ -337,6 +423,10 @@ class RmlUiLayer final : public app::UiLayer,
       textures_[handle] = tex;
       return handle;
     }
+    spdlog::warn("RmlUi: failed to create texture {}x{} bytes={}",
+                 source_dimensions.x,
+                 source_dimensions.y,
+                 source.size());
     return 0;
   }
 
@@ -367,8 +457,18 @@ class RmlUiLayer final : public app::UiLayer,
   }
 
   Rml::FileHandle Open(const Rml::String& path) override {
-    std::filesystem::path resolved(path);
+    std::string normalized = path;
+    const std::string file_prefix = "file://";
+    if (normalized.rfind(file_prefix, 0) == 0) {
+      normalized = normalized.substr(file_prefix.size());
+    }
+    std::filesystem::path resolved(normalized);
     if (!resolved.is_absolute()) {
+      if (normalized.rfind("home/", 0) == 0) {
+        resolved = std::filesystem::path("/") / resolved;
+      } else {
+        resolved = resolveAssetPath(normalized);
+      }
       const std::filesystem::path cwd = std::filesystem::current_path() / resolved;
       if (std::filesystem::exists(cwd)) {
         resolved = cwd;
@@ -435,10 +535,25 @@ class RmlUiLayer final : public app::UiLayer,
       return;
     }
     const auto weight = static_cast<Rml::Style::FontWeight>(900);
-    Rml::LoadFontFace("examples/assets/Roboto-Black.ttf", false, weight);
-    Rml::LoadFontFace("examples/assets/Roboto-Black.ttf", true, weight);
+    const auto font_path = resolveAssetPath("examples/assets/Roboto-Black.ttf");
+    if (!std::filesystem::exists(font_path)) {
+      spdlog::warn("RmlUi: font not found at {}", font_path.string());
+    } else {
+      if (!Rml::LoadFontFace(font_path.string(), false, weight)) {
+        spdlog::warn("RmlUi: failed to load font {}", font_path.string());
+      }
+      if (!Rml::LoadFontFace(font_path.string(), true, weight)) {
+        spdlog::warn("RmlUi: failed to load italic font {}", font_path.string());
+      }
+    }
 
-    document_ = context_->LoadDocumentFromMemory(kDemoRml, "[rmlui-minimal]");
+    const auto png_path = resolveAssetPath("examples/assets/demo_image.png");
+    const auto svg_path = resolveAssetPath("examples/assets/demo_icon.svg");
+    std::string rml = kDemoRmlTemplate;
+    replaceAll(rml, "{PNG}", png_path.string());
+    replaceAll(rml, "{SVG}", svg_path.string());
+
+    document_ = context_->LoadDocumentFromMemory(rml, "[rmlui-minimal]");
     if (!document_) {
       spdlog::warn("RmlUi: failed to load demo RML");
       return;
@@ -468,6 +583,7 @@ class RmlUiLayer final : public app::UiLayer,
   Rml::TextureHandle next_texture_handle_ = 1;
   std::unordered_map<Rml::CompiledGeometryHandle, Geometry> geometries_;
   std::unordered_map<Rml::TextureHandle, app::UITextureHandle> textures_;
+  bool shutdown_ = false;
   bool scissor_enabled_ = false;
   Rml::Rectanglei scissor_{};
   bool has_transform_ = false;

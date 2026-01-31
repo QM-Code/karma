@@ -1,11 +1,15 @@
 #include <cmath>
 #include <cstdint>
-
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 #include "karma/karma.h"
 #include "karma/components/environment.h"
 
 #include <imgui.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 namespace karma::demo {
 
@@ -122,6 +126,29 @@ ImTextureID toImTextureId(karma::app::UITextureHandle handle) {
 karma::app::UITextureHandle fromImTextureId(ImTextureID id) {
   return static_cast<karma::app::UITextureHandle>(id);
 }
+
+std::filesystem::path resolveAssetPath(std::string_view relative) {
+  std::filesystem::path candidate(relative);
+  if (candidate.is_absolute() && std::filesystem::exists(candidate)) {
+    return candidate;
+  }
+  std::filesystem::path cwd = std::filesystem::current_path();
+  for (int depth = 0; depth < 6; ++depth) {
+    const std::filesystem::path direct = cwd / candidate;
+    if (std::filesystem::exists(direct)) {
+      return direct;
+    }
+    const std::filesystem::path examples = cwd / "examples" / "assets" / candidate.filename();
+    if (std::filesystem::exists(examples)) {
+      return examples;
+    }
+    if (!cwd.has_parent_path()) {
+      break;
+    }
+    cwd = cwd.parent_path();
+  }
+  return candidate;
+}
 }  // namespace
 
 class ImGuiUiLayer final : public karma::app::UiLayer {
@@ -193,6 +220,32 @@ class ImGuiUiLayer final : public karma::app::UiLayer {
       io.Fonts->SetTexID(toImTextureId(font_texture_));
     }
 
+    if (!png_texture_) {
+      const auto png_path = resolveAssetPath("examples/assets/demo_image.png");
+      int w = 0;
+      int h = 0;
+      int comp = 0;
+      unsigned char* pixels = stbi_load(png_path.string().c_str(), &w, &h, &comp, 4);
+      if (pixels && w > 0 && h > 0) {
+        png_texture_ = ctx.createTextureRGBA8(w, h, pixels);
+        png_w_ = w;
+        png_h_ = h;
+      }
+      if (pixels) {
+        stbi_image_free(pixels);
+      }
+    }
+
+    if (!svg_loaded_) {
+      const auto svg_path = resolveAssetPath("examples/assets/demo_icon.svg");
+      std::ifstream in(svg_path, std::ios::in | std::ios::binary);
+      if (in) {
+        svg_text_.assign(std::istreambuf_iterator<char>(in),
+                         std::istreambuf_iterator<char>());
+      }
+      svg_loaded_ = true;
+    }
+
     ImGui::NewFrame();
     ImGui::Begin("Karma ImGui UI");
     ImGui::Text("ImGui draw data -> Karma UI bridge");
@@ -200,6 +253,13 @@ class ImGuiUiLayer final : public karma::app::UiLayer {
     ImGui::Text("FPS: %.1f", io.Framerate);
     ImGui::SliderFloat("Value", &slider_value_, 0.0f, 1.0f);
     ImGui::ColorEdit3("Tint", tint_);
+    if (png_texture_ != 0) {
+      ImGui::Text("PNG:");
+      ImGui::Image(toImTextureId(png_texture_),
+                   ImVec2(static_cast<float>(png_w_), static_cast<float>(png_h_)));
+    }
+    ImGui::Separator();
+    ImGui::Text("SVG loaded: %zu bytes", svg_text_.size());
     ImGui::End();
     ImGui::Render();
 
@@ -271,6 +331,12 @@ class ImGuiUiLayer final : public karma::app::UiLayer {
       }
       font_texture_ = 0;
     }
+    if (png_texture_ != 0) {
+      if (pending_ctx_) {
+        pending_ctx_->destroyTexture(png_texture_);
+      }
+      png_texture_ = 0;
+    }
     ImGui::DestroyContext();
   }
 
@@ -278,6 +344,11 @@ class ImGuiUiLayer final : public karma::app::UiLayer {
   float slider_value_ = 0.25f;
   float tint_[3] = {0.2f, 0.7f, 0.9f};
   karma::app::UITextureHandle font_texture_ = 0;
+  karma::app::UITextureHandle png_texture_ = 0;
+  int png_w_ = 0;
+  int png_h_ = 0;
+  std::string svg_text_;
+  bool svg_loaded_ = false;
   karma::app::UIContext* pending_ctx_ = nullptr;
 };
 

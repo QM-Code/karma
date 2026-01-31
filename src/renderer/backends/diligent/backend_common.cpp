@@ -69,7 +69,7 @@ LoadedImage loadImageFromMemory(const unsigned char* data, size_t size) {
   int w = 0;
   int h = 0;
   int comp = 0;
-  stbi_set_flip_vertically_on_load(1);
+  stbi_set_flip_vertically_on_load(0);
   stbi_uc* decoded = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
   if (!decoded) {
     return image;
@@ -87,6 +87,23 @@ LoadedImage loadImageFromFile(const std::filesystem::path& path) {
     return {};
   }
   return loadImageFromMemory(bytes.data(), bytes.size());
+}
+
+LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path) {
+  LoadedImageHDR image{};
+  int w = 0;
+  int h = 0;
+  int comp = 0;
+  stbi_set_flip_vertically_on_load(1);
+  float* decoded = stbi_loadf(path.string().c_str(), &w, &h, &comp, 4);
+  if (!decoded) {
+    return image;
+  }
+  image.width = w;
+  image.height = h;
+  image.pixels.assign(decoded, decoded + (w * h * 4));
+  stbi_image_free(decoded);
+  return image;
 }
 
 #if !defined(BZ3_WINDOW_BACKEND_SDL)

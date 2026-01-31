@@ -8,7 +8,6 @@
 #include "karma/components/environment.h"
 
 #include <imgui.h>
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 namespace karma::demo {
@@ -393,7 +392,7 @@ class DemoGame : public app::GameInterface {
 
     auto environment = world->createEntity();
     world->add(environment, components::EnvironmentComponent{
-        .environment_map = "/home/quinn/Documents/bz3/data/client/ludwikowice_farmland_4k.hdr",
+        .environment_map = "/home/quinn/Documents/karma/examples/assets/demo_env.png",
         .intensity = 0.6f});
   }
 

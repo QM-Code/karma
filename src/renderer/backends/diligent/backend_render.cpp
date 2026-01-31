@@ -9,6 +9,7 @@
 #include <Graphics/GraphicsEngine/interface/ShaderResourceBinding.h>
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
 #include <Graphics/GraphicsEngine/interface/Sampler.h>
+#include <Graphics/GraphicsEngine/interface/Texture.h>
 #include <Graphics/GraphicsEngine/interface/GraphicsTypes.h>
 #include <Graphics/GraphicsTools/interface/MapHelper.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -25,6 +26,74 @@ namespace {
 struct alignas(16) LineConstants {
   float view_proj[16];
 };
+
+struct alignas(16) EnvConstants {
+  float view_proj[16];
+};
+
+static constexpr const char* kEnvCubeVS = R"(
+cbuffer Constants
+{
+    row_major float4x4 g_ViewProj;
+};
+
+struct VSInput
+{
+    float3 pos : ATTRIB0;
+};
+
+struct PSInput
+{
+    float4 pos : SV_POSITION;
+    float3 local_pos : TEXCOORD0;
+};
+
+PSInput main(VSInput input)
+{
+    PSInput output;
+    output.local_pos = input.pos;
+    output.pos = mul(float4(input.pos, 1.0f), g_ViewProj);
+    return output;
+}
+)";
+
+static constexpr const char* kEquirectToCubePS = R"(
+Texture2D g_Equirect;
+SamplerState g_Sampler;
+
+struct PSInput
+{
+    float4 pos : SV_POSITION;
+    float3 local_pos : TEXCOORD0;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    float3 dir = normalize(input.local_pos);
+    const float PI = 3.14159265;
+    float2 uv;
+    uv.x = 1.0 - (atan2(dir.z, dir.x) / (2.0 * PI) + 0.5);
+    uv.y = 1.0 - (asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5);
+    return g_Equirect.Sample(g_Sampler, uv);
+}
+)";
+
+static constexpr const char* kSkyboxPS = R"(
+TextureCube g_Skybox;
+SamplerState g_Sampler;
+
+struct PSInput
+{
+    float4 pos : SV_POSITION;
+    float3 local_pos : TEXCOORD0;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    float3 dir = normalize(input.local_pos);
+    return g_Skybox.Sample(g_Sampler, dir);
+}
+)";
 
 static constexpr const char* kLineVS = R"(
 cbuffer Constants
@@ -65,6 +134,50 @@ float4 main(PSInput input) : SV_TARGET
     return input.col;
 }
 )";
+
+static const float kEnvCubeVertices[] = {
+    -1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+    -1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+
+    -1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f, -1.0f,
+
+    -1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f, -1.0f
+};
 
 glm::mat4 buildLightView(const renderer::DirectionalLightData& light) {
   glm::vec3 dir = light.direction;
@@ -309,6 +422,383 @@ void DiligentBackend::ensureLineResources() {
   }
 }
 
+void DiligentBackend::ensureEnvironmentResources() {
+  if (!device_ || !context_) {
+    return;
+  }
+  if (!env_dirty_ && env_cubemap_srv_ && skybox_pso_) {
+    return;
+  }
+
+  if (!env_cb_) {
+    Diligent::BufferDesc cb_desc{};
+    cb_desc.Name = "Karma Env Constants";
+    cb_desc.Usage = Diligent::USAGE_DYNAMIC;
+    cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
+    cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+    cb_desc.Size = sizeof(EnvConstants);
+    device_->CreateBuffer(cb_desc, nullptr, &env_cb_);
+  }
+
+  if (!env_cube_vb_) {
+    Diligent::BufferDesc vb_desc{};
+    vb_desc.Name = "Karma Env Cube VB";
+    vb_desc.Usage = Diligent::USAGE_IMMUTABLE;
+    vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
+    vb_desc.Size = static_cast<Diligent::Uint32>(sizeof(kEnvCubeVertices));
+    Diligent::BufferData vb_data{};
+    vb_data.pData = kEnvCubeVertices;
+    vb_data.DataSize = vb_desc.Size;
+    device_->CreateBuffer(vb_desc, &vb_data, &env_cube_vb_);
+  }
+
+  if (!env_equirect_pso_ || !skybox_pso_) {
+    Diligent::ShaderCreateInfo shader_ci{};
+    shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
+
+    Diligent::RefCntAutoPtr<Diligent::IShader> vs;
+    shader_ci.Desc.Name = "Karma Env VS";
+    shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
+    shader_ci.EntryPoint = "main";
+    shader_ci.Source = kEnvCubeVS;
+    device_->CreateShader(shader_ci, &vs);
+
+    Diligent::RefCntAutoPtr<Diligent::IShader> ps_equirect;
+    shader_ci.Desc.Name = "Karma Env Equirect PS";
+    shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+    shader_ci.EntryPoint = "main";
+    shader_ci.Source = kEquirectToCubePS;
+    device_->CreateShader(shader_ci, &ps_equirect);
+
+    Diligent::RefCntAutoPtr<Diligent::IShader> ps_skybox;
+    shader_ci.Desc.Name = "Karma Skybox PS";
+    shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+    shader_ci.EntryPoint = "main";
+    shader_ci.Source = kSkyboxPS;
+    device_->CreateShader(shader_ci, &ps_skybox);
+
+    if (!vs || !ps_equirect || !ps_skybox) {
+      spdlog::warn("Karma: Failed to create environment shaders.");
+      return;
+    }
+
+    Diligent::LayoutElement layout[] = {
+        Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false}
+    };
+
+    auto create_env_pso = [&](const char* name,
+                              Diligent::IShader* ps,
+                              const char* tex_name,
+                              Diligent::RefCntAutoPtr<Diligent::IPipelineState>& out_pso,
+                              Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb,
+                              Diligent::TEXTURE_FORMAT rtv_format,
+                              bool depth_test) {
+      if (out_pso) {
+        return;
+      }
+      Diligent::GraphicsPipelineStateCreateInfo pso{};
+      pso.PSODesc.Name = name;
+      pso.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
+      pso.pVS = vs;
+      pso.pPS = ps;
+
+      auto& graphics = pso.GraphicsPipeline;
+      graphics.NumRenderTargets = 1;
+      graphics.RTVFormats[0] = rtv_format;
+      graphics.DSVFormat = depth_test && swap_chain_
+                               ? swap_chain_->GetDesc().DepthBufferFormat
+                               : Diligent::TEX_FORMAT_UNKNOWN;
+      graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+      graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
+      graphics.DepthStencilDesc.DepthEnable = depth_test;
+      graphics.DepthStencilDesc.DepthWriteEnable = false;
+      if (depth_test) {
+        graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
+      }
+      graphics.BlendDesc.RenderTargets[0].RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
+      graphics.InputLayout.LayoutElements = layout;
+      graphics.InputLayout.NumElements = static_cast<Diligent::Uint32>(std::size(layout));
+
+      Diligent::ShaderResourceVariableDesc vars[] = {
+          {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+          {Diligent::SHADER_TYPE_PIXEL, tex_name, Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC}
+      };
+      pso.PSODesc.ResourceLayout.Variables = vars;
+      pso.PSODesc.ResourceLayout.NumVariables =
+          static_cast<Diligent::Uint32>(std::size(vars));
+
+      Diligent::SamplerDesc sampler{};
+      sampler.MinFilter = Diligent::FILTER_TYPE_LINEAR;
+      sampler.MagFilter = Diligent::FILTER_TYPE_LINEAR;
+      sampler.MipFilter = Diligent::FILTER_TYPE_LINEAR;
+      sampler.AddressU = Diligent::TEXTURE_ADDRESS_CLAMP;
+      sampler.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
+      sampler.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
+      Diligent::ImmutableSamplerDesc samplers[] = {
+          {Diligent::SHADER_TYPE_PIXEL, "g_Sampler", sampler}
+      };
+      pso.PSODesc.ResourceLayout.ImmutableSamplers = samplers;
+      pso.PSODesc.ResourceLayout.NumImmutableSamplers =
+          static_cast<Diligent::Uint32>(std::size(samplers));
+
+      device_->CreateGraphicsPipelineState(pso, &out_pso);
+      if (!out_pso) {
+        return;
+      }
+      if (env_cb_) {
+        if (auto* var = out_pso->GetStaticVariableByName(
+                Diligent::SHADER_TYPE_VERTEX, "Constants")) {
+          var->Set(env_cb_);
+        }
+      }
+      out_pso->CreateShaderResourceBinding(&out_srb, true);
+    };
+
+    create_env_pso("Karma Env Equirect PSO", ps_equirect, "g_Equirect",
+                   env_equirect_pso_, env_equirect_srb_, Diligent::TEX_FORMAT_RGBA16_FLOAT,
+                   false);
+    create_env_pso("Karma Skybox PSO", ps_skybox, "g_Skybox",
+                   skybox_pso_, skybox_srb_, swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
+                                                       : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB,
+                   true);
+  }
+
+  if (environment_map_.empty()) {
+    if (!env_cubemap_tex_) {
+      Diligent::TextureDesc desc{};
+      desc.Name = "Karma Env Default Cube";
+    desc.Type = Diligent::RESOURCE_DIM_TEX_CUBE;
+    desc.Width = 1;
+    desc.Height = 1;
+    desc.ArraySize = 6;
+    desc.MipLevels = 1;
+      desc.Format = Diligent::TEX_FORMAT_RGBA8_UNORM;
+      desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+      unsigned char pixel[4] = {0, 0, 0, 255};
+      Diligent::TextureSubResData subres{};
+      subres.pData = pixel;
+      subres.Stride = 4;
+      Diligent::TextureData init{};
+      init.pSubResources = &subres;
+      init.NumSubresources = 1;
+      device_->CreateTexture(desc, &init, &env_cubemap_tex_);
+      if (env_cubemap_tex_) {
+        env_cubemap_srv_ = env_cubemap_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+      }
+    }
+    env_cubemap_srv_ = env_cubemap_srv_ ? env_cubemap_srv_ : default_env_;
+    env_irradiance_srv_ = env_cubemap_srv_;
+    env_prefilter_srv_ = env_cubemap_srv_;
+    env_brdf_lut_srv_ = default_base_color_;
+    env_dirty_ = false;
+    return;
+  }
+
+  LoadedImageHDR hdr = loadImageFromFileHDR(environment_map_);
+  if (hdr.pixels.empty()) {
+    spdlog::warn("Karma: Failed to load HDR env map '{}'", environment_map_.string());
+    env_cubemap_srv_ = default_env_;
+    env_irradiance_srv_ = default_env_;
+    env_prefilter_srv_ = default_env_;
+    env_brdf_lut_srv_ = default_base_color_;
+    env_dirty_ = false;
+    return;
+  }
+
+  {
+    Diligent::TextureDesc desc{};
+    desc.Name = "Karma Env Equirect";
+    desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+    desc.Width = static_cast<Diligent::Uint32>(hdr.width);
+    desc.Height = static_cast<Diligent::Uint32>(hdr.height);
+    desc.MipLevels = 1;
+    desc.Format = Diligent::TEX_FORMAT_RGBA32_FLOAT;
+    desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+    Diligent::TextureSubResData subres{};
+    subres.pData = hdr.pixels.data();
+    subres.Stride = static_cast<Diligent::Uint32>(hdr.width * 4 * sizeof(float));
+    Diligent::TextureData init{};
+    init.pSubResources = &subres;
+    init.NumSubresources = 1;
+    device_->CreateTexture(desc, &init, &env_equirect_tex_);
+    if (env_equirect_tex_) {
+      env_equirect_srv_ = env_equirect_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+    }
+  }
+
+  const int cube_size = 512;
+  if (!env_cubemap_tex_) {
+    Diligent::TextureDesc desc{};
+    desc.Name = "Karma Env Cubemap";
+    desc.Type = Diligent::RESOURCE_DIM_TEX_CUBE;
+    desc.Width = cube_size;
+    desc.Height = cube_size;
+    desc.ArraySize = 6;
+    desc.MipLevels = 0;
+    desc.Format = Diligent::TEX_FORMAT_RGBA16_FLOAT;
+    desc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
+    desc.MiscFlags = Diligent::MISC_TEXTURE_FLAG_GENERATE_MIPS;
+    device_->CreateTexture(desc, nullptr, &env_cubemap_tex_);
+    if (env_cubemap_tex_) {
+      env_cubemap_srv_ = env_cubemap_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+    }
+  }
+
+  bool restore_main_targets = false;
+  if (env_cubemap_tex_ && env_equirect_srv_ && env_equirect_pso_) {
+    const glm::mat4 capture_proj = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
+    const glm::mat4 capture_views[] = {
+        glm::lookAt(glm::vec3(0.0f), glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)),
+        glm::lookAt(glm::vec3(0.0f), glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)),
+        glm::lookAt(glm::vec3(0.0f), glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)),
+        glm::lookAt(glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+        glm::lookAt(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f)),
+        glm::lookAt(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f))
+    };
+
+    Diligent::IBuffer* vbs[] = {env_cube_vb_};
+    Diligent::Uint64 offsets[] = {0};
+    context_->SetVertexBuffers(0, 1, vbs, offsets,
+                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                               Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+
+    for (int face = 0; face < 6; ++face) {
+      Diligent::TextureViewDesc rtv_desc{};
+      rtv_desc.ViewType = Diligent::TEXTURE_VIEW_RENDER_TARGET;
+      rtv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
+      rtv_desc.Format = Diligent::TEX_FORMAT_RGBA16_FLOAT;
+      rtv_desc.MostDetailedMip = 0;
+      rtv_desc.NumMipLevels = 1;
+      rtv_desc.FirstArraySlice = face;
+      rtv_desc.NumArraySlices = 1;
+      Diligent::RefCntAutoPtr<Diligent::ITextureView> rtv;
+      env_cubemap_tex_->CreateView(rtv_desc, &rtv);
+      if (!rtv) {
+        continue;
+      }
+      context_->SetRenderTargets(1, &rtv, nullptr,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      restore_main_targets = true;
+      Diligent::Viewport vp{};
+      vp.TopLeftX = 0.0f;
+      vp.TopLeftY = 0.0f;
+      vp.Width = static_cast<float>(cube_size);
+      vp.Height = static_cast<float>(cube_size);
+      vp.MinDepth = 0.0f;
+      vp.MaxDepth = 1.0f;
+      context_->SetViewports(1, &vp, cube_size, cube_size);
+
+      EnvConstants constants{};
+      const glm::mat4 view_proj = capture_proj * capture_views[face];
+      copyMat4(constants.view_proj, view_proj);
+      {
+        Diligent::MapHelper<EnvConstants> cb_map(context_, env_cb_, Diligent::MAP_WRITE,
+                                                 Diligent::MAP_FLAG_DISCARD);
+        *cb_map = constants;
+      }
+
+      context_->SetPipelineState(env_equirect_pso_);
+      if (env_equirect_srb_) {
+        if (auto* var = env_equirect_srb_->GetVariableByName(
+                Diligent::SHADER_TYPE_PIXEL, "g_Equirect")) {
+          var->Set(env_equirect_srv_);
+        }
+        context_->CommitShaderResources(env_equirect_srb_,
+                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      }
+
+      Diligent::DrawAttribs draw{};
+      draw.NumVertices = static_cast<Diligent::Uint32>(sizeof(kEnvCubeVertices) / (sizeof(float) * 3));
+      draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+      context_->Draw(draw);
+    }
+
+    if (env_cubemap_srv_) {
+      context_->GenerateMips(env_cubemap_srv_);
+    }
+  }
+
+  if (restore_main_targets && context_ && swap_chain_) {
+    auto* rtv = swap_chain_->GetCurrentBackBufferRTV();
+    auto* dsv = swap_chain_->GetDepthBufferDSV();
+    context_->SetRenderTargets(1, &rtv, dsv,
+                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    Diligent::Viewport vp{};
+    vp.TopLeftX = 0.0f;
+    vp.TopLeftY = 0.0f;
+    vp.Width = static_cast<float>(current_width_);
+    vp.Height = static_cast<float>(current_height_);
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    context_->SetViewports(1, &vp,
+                           static_cast<Diligent::Uint32>(current_width_),
+                           static_cast<Diligent::Uint32>(current_height_));
+  }
+
+  env_irradiance_srv_ = env_cubemap_srv_;
+  env_prefilter_srv_ = env_cubemap_srv_;
+
+  if (!env_brdf_lut_tex_) {
+    const int lut_size = 256;
+    std::vector<float> lut(static_cast<size_t>(lut_size * lut_size * 2), 0.5f);
+    Diligent::TextureDesc desc{};
+    desc.Name = "Karma BRDF LUT";
+    desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+    desc.Width = lut_size;
+    desc.Height = lut_size;
+    desc.MipLevels = 1;
+    desc.Format = Diligent::TEX_FORMAT_RG32_FLOAT;
+    desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+    Diligent::TextureSubResData subres{};
+    subres.pData = lut.data();
+    subres.Stride = static_cast<Diligent::Uint32>(lut_size * 2 * sizeof(float));
+    Diligent::TextureData init{};
+    init.pSubResources = &subres;
+    init.NumSubresources = 1;
+    device_->CreateTexture(desc, &init, &env_brdf_lut_tex_);
+    if (env_brdf_lut_tex_) {
+      env_brdf_lut_srv_ = env_brdf_lut_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+    }
+  }
+
+  env_dirty_ = false;
+}
+
+void DiligentBackend::renderSkybox(const glm::mat4& projection, const glm::mat4& view) {
+  if (!context_ || !skybox_pso_ || !skybox_srb_ || !env_cubemap_srv_ || !env_cb_) {
+    return;
+  }
+  glm::mat4 view_no_translation = view;
+  view_no_translation[3][0] = 0.0f;
+  view_no_translation[3][1] = 0.0f;
+  view_no_translation[3][2] = 0.0f;
+
+  EnvConstants constants{};
+  copyMat4(constants.view_proj, projection * view_no_translation);
+  {
+    Diligent::MapHelper<EnvConstants> cb_map(context_, env_cb_, Diligent::MAP_WRITE,
+                                             Diligent::MAP_FLAG_DISCARD);
+    *cb_map = constants;
+  }
+
+  context_->SetPipelineState(skybox_pso_);
+  if (auto* var = skybox_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Skybox")) {
+    var->Set(env_cubemap_srv_);
+  }
+  context_->CommitShaderResources(skybox_srb_, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+  Diligent::IBuffer* vbs[] = {env_cube_vb_};
+  Diligent::Uint64 offsets[] = {0};
+  context_->SetVertexBuffers(0, 1, vbs, offsets,
+                             Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                             Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+
+  Diligent::DrawAttribs draw{};
+  draw.NumVertices = static_cast<Diligent::Uint32>(sizeof(kEnvCubeVertices) / (sizeof(float) * 3));
+  draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+  context_->Draw(draw);
+}
+
 void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTargetId /*target*/) {
   if (!context_ || !swap_chain_) {
     return;
@@ -354,6 +844,17 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   const glm::vec3 forward = cam_basis * glm::vec3(0.0f, 0.0f, -1.0f);
   const glm::vec3 up = cam_basis * glm::vec3(0.0f, 1.0f, 0.0f);
   const glm::mat4 view = glm::lookAt(camera_.position, camera_.position + forward, up);
+
+  ensureEnvironmentResources();
+  float env_max_mip = 0.0f;
+  if (env_prefilter_tex_) {
+    const auto& desc = env_prefilter_tex_->GetDesc();
+    if (desc.MipLevels > 0) {
+      env_max_mip = static_cast<float>(desc.MipLevels - 1);
+    }
+  }
+
+  renderSkybox(projection, view);
 
   const glm::mat4 light_view = buildLightView(directional_light_);
   glm::vec3 light_min{std::numeric_limits<float>::max()};
@@ -683,7 +1184,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       constants.pbr_params[2] = mat ? mat->occlusion_strength : 1.0f;
       constants.pbr_params[3] = mat ? mat->normal_scale : 1.0f;
       constants.env_params[0] = environment_intensity_;
-      constants.env_params[1] = 0.0f;
+      constants.env_params[1] = env_max_mip;
       constants.env_params[2] = 0.0f;
       constants.env_params[3] = 0.0f;
 
@@ -822,23 +1323,30 @@ void DiligentBackend::setDirectionalLight(const renderer::DirectionalLightData& 
 void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float intensity) {
   environment_intensity_ = intensity;
   environment_map_ = path;
+  env_dirty_ = true;
   if (!device_) {
     return;
   }
 
   if (path.empty()) {
-    env_srv_ = default_env_;
+    env_cubemap_srv_ = default_env_;
+    env_irradiance_srv_ = default_env_;
+    env_prefilter_srv_ = default_env_;
+    env_brdf_lut_srv_ = default_base_color_;
+    env_dirty_ = false;
   } else {
-    env_srv_ = loadTextureFromFile(path, true, "environment");
-    if (!env_srv_) {
-      spdlog::warn("Karma: Failed to load environment map '{}'", path.string());
-      env_srv_ = default_env_;
-    }
+    ensureEnvironmentResources();
   }
 
   if (pipeline_state_) {
-    if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EnvTex")) {
-      var->Set(env_srv_);
+    if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+      var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+    }
+    if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+      var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+    }
+    if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+      var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
     }
   }
 }

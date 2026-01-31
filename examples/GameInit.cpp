@@ -53,7 +53,8 @@ GameInitResult BuildDemoScene() {
   // Example skybox entity (optional)
   auto sky = result.world.createEntity();
   result.world.add(sky, components::SkyboxComponent{
-      .skybox_key = "sunset_sky"});
+      .environment_map = "/home/quinn/Documents/karma/examples/assets/demo_env.png",
+      .intensity = 0.6f});
 
   // Scene nodes (hierarchy)
   auto player_node = result.scene.createNode(result.player);

@@ -2,7 +2,7 @@
 
 
 #include "karma/karma.h"
-#include "karma/components/environment.h"
+#include "karma/components/skybox.h"
 
 namespace karma::demo {
 
@@ -60,9 +60,9 @@ class DemoGame : public app::GameInterface {
         .intensity = 1.0f,
         .shadow_extent = 60.0f});
 
-    auto environment = world->createEntity();
-    world->add(environment, components::EnvironmentComponent{
-        .environment_map = "/home/quinn/Documents/bz3/data/client/ludwikowice_farmland_4k.hdr",
+    auto skybox = world->createEntity();
+    world->add(skybox, components::SkyboxComponent{
+        .environment_map = "/home/quinn/Documents/karma/examples/assets/golden_gate_hills_4k.hdr",
         .intensity = 0.6f});
   }
 

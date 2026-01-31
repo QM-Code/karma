@@ -22,6 +22,12 @@ struct LoadedImage {
   std::vector<unsigned char> pixels;
 };
 
+struct LoadedImageHDR {
+  int width = 0;
+  int height = 0;
+  std::vector<float> pixels;
+};
+
 struct SubmeshInfo {
   Diligent::Uint32 index_offset = 0;
   Diligent::Uint32 index_count = 0;
@@ -47,6 +53,7 @@ bool isValidSize(int width, int height);
 std::vector<unsigned char> readFileBytes(const std::filesystem::path& path);
 LoadedImage loadImageFromMemory(const unsigned char* data, size_t size);
 LoadedImage loadImageFromFile(const std::filesystem::path& path);
+LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path);
 
 #if !defined(BZ3_WINDOW_BACKEND_SDL)
 Diligent::NativeWindow toNativeWindow(GLFWwindow* window);

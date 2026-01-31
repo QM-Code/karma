@@ -204,7 +204,9 @@ Texture2D g_NormalTex;
 Texture2D g_MetallicRoughnessTex;
 Texture2D g_OcclusionTex;
 Texture2D g_EmissiveTex;
-Texture2D g_EnvTex;
+TextureCube g_IrradianceTex;
+TextureCube g_PrefilterTex;
+Texture2D g_BRDFLUT;
 Texture2D<float> g_ShadowMap;
 SamplerState g_SamplerColor;
 SamplerState g_SamplerData;
@@ -310,16 +312,15 @@ float4 main(PSInput input) : SV_TARGET
     lit *= occlusion;
     if (g_EnvParams.x > 0.0)
     {
-        float3 env_dir = normalize(n);
-        float2 env_uv = float2(atan2(env_dir.z, env_dir.x) / (2.0 * PI) + 0.5,
-                               asin(clamp(env_dir.y, -1.0, 1.0)) / PI + 0.5);
-        float3 env_diffuse = g_EnvTex.Sample(g_SamplerColor, env_uv).rgb * g_EnvParams.x;
+        float3 env_diffuse = g_IrradianceTex.Sample(g_SamplerColor, n).rgb * g_EnvParams.x;
         float3 r = reflect(-v, n);
-        float2 env_uv_spec = float2(atan2(r.z, r.x) / (2.0 * PI) + 0.5,
-                                    asin(clamp(r.y, -1.0, 1.0)) / PI + 0.5);
-        float3 env_spec = g_EnvTex.Sample(g_SamplerColor, env_uv_spec).rgb * g_EnvParams.x;
+        float mip = saturate(roughness) * g_EnvParams.y;
+        float3 prefiltered = g_PrefilterTex.SampleLevel(g_SamplerColor, r, mip).rgb;
+        float ndotv = max(dot(n, v), 0.0);
+        float2 brdf = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, roughness)).rg;
+        float3 env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
         lit += env_diffuse * base_color * occlusion;
-        lit += env_spec * spec_color * (1.0 - roughness);
+        lit += env_spec * g_EnvParams.x;
     }
     lit += emissive;
     return float4(lit, g_BaseColorFactor.a * base_tex.a);
@@ -426,7 +427,9 @@ VSOutput main(VSInput input)
   Diligent::ShaderResourceVariableDesc vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_EnvTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
@@ -519,11 +522,19 @@ VSOutput main(VSInput input)
 
   if (pipeline_state_) {
     if (env_srv_) {
-      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EnvTex")) {
+      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+        var->Set(env_srv_);
+      }
+      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
         var->Set(env_srv_);
       }
     } else {
       spdlog::warn("Karma: Default environment texture failed to create.");
+    }
+    if (default_base_color_) {
+      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+        var->Set(default_base_color_);
+      }
     }
     if (shadow_map_srv_) {
       if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {

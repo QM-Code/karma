@@ -8,7 +8,6 @@
 #include <RmlUi/Core.h>
 #include <spdlog/spdlog.h>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 namespace karma::demo {

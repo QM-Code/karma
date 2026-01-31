@@ -163,6 +163,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> loadTextureFromFile(const std::filesystem::path& path,
                                                                       bool srgb,
                                                                       const char* label);
+  void ensureEnvironmentResources();
+  void renderSkybox(const glm::mat4& projection, const glm::mat4& view);
 
   karma::platform::Window* window_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IRenderDevice> device_;
@@ -211,6 +213,30 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_emissive_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_env_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> env_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> env_equirect_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> env_equirect_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> env_cubemap_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> env_cubemap_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> env_irradiance_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> env_irradiance_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> env_prefilter_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> env_prefilter_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> env_brdf_lut_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> env_brdf_lut_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> env_equirect_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> env_equirect_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> env_irradiance_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> env_irradiance_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> env_prefilter_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> env_prefilter_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> env_brdf_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> env_brdf_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> skybox_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> skybox_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cube_vb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cube_ib_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cb_;
+  bool env_dirty_ = false;
 
   renderer::MeshId nextMeshId_ = 1;
   renderer::MaterialId nextMaterialId_ = 1;

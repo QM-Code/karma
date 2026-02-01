@@ -14,7 +14,6 @@
 #include <Graphics/GraphicsTools/interface/MapHelper.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
@@ -490,7 +489,6 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   }
 
   if (meshes_.find(item.mesh) == meshes_.end()) {
-    spdlog::warn("Karma: Diligent submit missing mesh id={}", item.mesh);
     return;
   }
 
@@ -506,7 +504,6 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
 void DiligentBackend::drawLine(const math::Vec3& start, const math::Vec3& end,
                                const math::Color& color, bool depth_test, float thickness) {
   if (!warned_line_thickness_ && thickness != 1.0f) {
-    spdlog::warn("Karma: Line thickness {} requested; only 1.0 is supported right now.", thickness);
     warned_line_thickness_ = true;
   }
   LineVertex a{};
@@ -551,17 +548,16 @@ void DiligentBackend::ensureLineResources() {
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kLineVS;
-  device_->CreateShader(shader_ci, &vs);
+  vs = device_with_cache_.CreateShader(shader_ci);
 
   Diligent::RefCntAutoPtr<Diligent::IShader> ps;
   shader_ci.Desc.Name = "Karma Line PS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kLinePS;
-  device_->CreateShader(shader_ci, &ps);
+  ps = device_with_cache_.CreateShader(shader_ci);
 
   if (!vs || !ps) {
-    spdlog::error("Karma: Failed to create line shaders.");
     return;
   }
 
@@ -610,9 +606,8 @@ void DiligentBackend::ensureLineResources() {
     pso.PSODesc.ResourceLayout.NumVariables =
         static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
 
-    device_->CreateGraphicsPipelineState(pso, &out_pso);
+    out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
     if (!out_pso) {
-      spdlog::error("Karma: Failed to create {} pipeline state.", name);
       return false;
     }
     if (auto* var =
@@ -632,7 +627,6 @@ void DiligentBackend::ensureLineResources() {
   device_->CreateBuffer(cb_desc, nullptr, &line_cb_);
 
   if (!line_cb_) {
-    spdlog::error("Karma: Failed to create line constants buffer.");
     return;
   }
 
@@ -649,7 +643,6 @@ void DiligentBackend::ensureLineResources() {
     vb_desc.Size = static_cast<Diligent::Uint32>(line_vb_size_ * sizeof(LineVertex));
     device_->CreateBuffer(vb_desc, nullptr, &line_vb_);
     if (!line_vb_) {
-      spdlog::error("Karma: Failed to create line vertex buffer.");
       line_vb_size_ = 0;
     }
   }
@@ -672,7 +665,6 @@ void DiligentBackend::ensureEnvironmentResources() {
     cb_desc.Size = sizeof(EnvConstants);
     device_->CreateBuffer(cb_desc, nullptr, &env_cb_);
     if (!env_cb_) {
-      spdlog::warn("Karma: Failed to create env constant buffer.");
     }
   }
 
@@ -687,7 +679,6 @@ void DiligentBackend::ensureEnvironmentResources() {
     vb_data.DataSize = vb_desc.Size;
     device_->CreateBuffer(vb_desc, &vb_data, &env_cube_vb_);
     if (!env_cube_vb_) {
-      spdlog::warn("Karma: Failed to create env cube vertex buffer.");
     }
   }
 
@@ -701,53 +692,52 @@ void DiligentBackend::ensureEnvironmentResources() {
     shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
     shader_ci.EntryPoint = "main";
     shader_ci.Source = kEnvCubeVS;
-    device_->CreateShader(shader_ci, &vs);
+    vs = device_with_cache_.CreateShader(shader_ci);
 
     Diligent::RefCntAutoPtr<Diligent::IShader> ps_equirect;
     shader_ci.Desc.Name = "Karma Env Equirect PS";
     shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
     shader_ci.EntryPoint = "main";
     shader_ci.Source = kEquirectToCubePS;
-    device_->CreateShader(shader_ci, &ps_equirect);
+    ps_equirect = device_with_cache_.CreateShader(shader_ci);
 
     Diligent::RefCntAutoPtr<Diligent::IShader> ps_skybox;
     shader_ci.Desc.Name = "Karma Skybox PS";
     shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
     shader_ci.EntryPoint = "main";
     shader_ci.Source = kSkyboxPS;
-    device_->CreateShader(shader_ci, &ps_skybox);
+    ps_skybox = device_with_cache_.CreateShader(shader_ci);
 
     Diligent::RefCntAutoPtr<Diligent::IShader> ps_irradiance;
     shader_ci.Desc.Name = "Karma Env Irradiance PS";
     shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
     shader_ci.EntryPoint = "main";
     shader_ci.Source = kIrradiancePS;
-    device_->CreateShader(shader_ci, &ps_irradiance);
+    ps_irradiance = device_with_cache_.CreateShader(shader_ci);
 
     Diligent::RefCntAutoPtr<Diligent::IShader> ps_prefilter;
     shader_ci.Desc.Name = "Karma Env Prefilter PS";
     shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
     shader_ci.EntryPoint = "main";
     shader_ci.Source = kPrefilterPS;
-    device_->CreateShader(shader_ci, &ps_prefilter);
+    ps_prefilter = device_with_cache_.CreateShader(shader_ci);
 
     Diligent::RefCntAutoPtr<Diligent::IShader> vs_brdf;
     shader_ci.Desc.Name = "Karma BRDF LUT VS";
     shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
     shader_ci.EntryPoint = "main";
     shader_ci.Source = kBrdfLutVS;
-    device_->CreateShader(shader_ci, &vs_brdf);
+    vs_brdf = device_with_cache_.CreateShader(shader_ci);
 
     Diligent::RefCntAutoPtr<Diligent::IShader> ps_brdf;
     shader_ci.Desc.Name = "Karma BRDF LUT PS";
     shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
     shader_ci.EntryPoint = "main";
     shader_ci.Source = kBrdfLutPS;
-    device_->CreateShader(shader_ci, &ps_brdf);
+    ps_brdf = device_with_cache_.CreateShader(shader_ci);
 
     if (!vs || !ps_equirect || !ps_skybox || !ps_irradiance || !ps_prefilter || !vs_brdf ||
         !ps_brdf) {
-      spdlog::warn("Karma: Failed to create environment shaders.");
       return;
     }
 
@@ -811,7 +801,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       pso.PSODesc.ResourceLayout.NumImmutableSamplers =
           static_cast<Diligent::Uint32>(std::size(samplers));
 
-      device_->CreateGraphicsPipelineState(pso, &out_pso);
+      out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
       if (!out_pso) {
         return;
       }
@@ -861,7 +851,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       graphics.InputLayout.LayoutElements = nullptr;
       graphics.InputLayout.NumElements = 0;
 
-      device_->CreateGraphicsPipelineState(pso, &brdf_lut_pso_);
+      brdf_lut_pso_ = device_with_cache_.CreateGraphicsPipelineState(pso);
     }
   }
 
@@ -886,9 +876,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       device_->CreateTexture(desc, &init, &env_cubemap_tex_);
       if (env_cubemap_tex_) {
         env_cubemap_srv_ = env_cubemap_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-        spdlog::info("Karma: Created default env cubemap {}x{}.", desc.Width, desc.Height);
       } else {
-        spdlog::warn("Karma: Failed to create default env cubemap.");
       }
     }
     env_cubemap_srv_ = env_cubemap_srv_ ? env_cubemap_srv_ : default_env_;
@@ -901,7 +889,6 @@ void DiligentBackend::ensureEnvironmentResources() {
 
   LoadedImageHDR hdr = loadImageFromFileHDR(environment_map_);
   if (hdr.pixels.empty()) {
-    spdlog::warn("Karma: Failed to load HDR env map '{}'", environment_map_.string());
     env_cubemap_srv_ = default_env_;
     env_irradiance_srv_ = default_env_;
     env_prefilter_srv_ = default_env_;
@@ -909,10 +896,6 @@ void DiligentBackend::ensureEnvironmentResources() {
     env_dirty_ = false;
     return;
   }
-  spdlog::info("Karma: Loaded HDR env map '{}' ({}x{}).",
-               environment_map_.string(),
-               hdr.width,
-               hdr.height);
 
   {
     Diligent::TextureDesc desc{};
@@ -932,9 +915,7 @@ void DiligentBackend::ensureEnvironmentResources() {
     device_->CreateTexture(desc, &init, &env_equirect_tex_);
     if (env_equirect_tex_) {
       env_equirect_srv_ = env_equirect_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      spdlog::info("Karma: Created env equirect texture {}x{}.", desc.Width, desc.Height);
     } else {
-      spdlog::warn("Karma: Failed to create env equirect texture.");
     }
   }
 
@@ -955,9 +936,7 @@ void DiligentBackend::ensureEnvironmentResources() {
     device_->CreateTexture(desc, nullptr, &env_cubemap_tex_);
     if (env_cubemap_tex_) {
       env_cubemap_srv_ = env_cubemap_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      spdlog::info("Karma: Created env cubemap {}x{}.", desc.Width, desc.Height);
     } else {
-      spdlog::warn("Karma: Failed to create env cubemap.");
     }
   }
 
@@ -976,9 +955,7 @@ void DiligentBackend::ensureEnvironmentResources() {
     if (env_irradiance_tex_) {
       env_irradiance_srv_ =
           env_irradiance_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      spdlog::info("Karma: Created env irradiance cubemap {}x{}.", desc.Width, desc.Height);
     } else {
-      spdlog::warn("Karma: Failed to create env irradiance cubemap.");
     }
   }
 
@@ -997,9 +974,7 @@ void DiligentBackend::ensureEnvironmentResources() {
     if (env_prefilter_tex_) {
       env_prefilter_srv_ =
           env_prefilter_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      spdlog::info("Karma: Created env prefilter cubemap {}x{}.", desc.Width, desc.Height);
     } else {
-      spdlog::warn("Karma: Failed to create env prefilter cubemap.");
     }
   }
 
@@ -1233,9 +1208,7 @@ void DiligentBackend::ensureEnvironmentResources() {
     device_->CreateTexture(desc, nullptr, &env_brdf_lut_tex_);
     if (env_brdf_lut_tex_) {
       env_brdf_lut_srv_ = env_brdf_lut_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      spdlog::info("Karma: Created env BRDF LUT {}x{}.", desc.Width, desc.Height);
     } else {
-      spdlog::warn("Karma: Failed to create env BRDF LUT.");
     }
   }
 
@@ -1331,7 +1304,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
 
   if (!pipeline_state_ || !shader_resources_ || !constants_) {
     if (!warned_no_draws_) {
-      spdlog::warn("Karma: Diligent backend missing pipeline/resources; skipping draw.");
       warned_no_draws_ = true;
     }
     return;
@@ -1372,30 +1344,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   }
 
   if (env_debug_mode_ > 0 && !warned_env_debug_) {
-    spdlog::warn("Karma: ENV DEBUG mode={} (1=irradiance,2=prefilter,3=brdf,4=params,5=irradiance_up,6=prefilter_up,7=base_color,8=uv,9=normal).",
-                 env_debug_mode_);
     warned_env_debug_ = true;
-    if (env_irradiance_srv_) {
-      const auto& desc = env_irradiance_srv_->GetTexture()->GetDesc();
-      spdlog::info("Karma: Env irradiance desc {}x{} mips={} fmt={}.",
-                   desc.Width, desc.Height, desc.MipLevels, static_cast<int>(desc.Format));
-    } else {
-      spdlog::warn("Karma: Env irradiance SRV is null.");
-    }
-    if (env_prefilter_srv_) {
-      const auto& desc = env_prefilter_srv_->GetTexture()->GetDesc();
-      spdlog::info("Karma: Env prefilter desc {}x{} mips={} fmt={}.",
-                   desc.Width, desc.Height, desc.MipLevels, static_cast<int>(desc.Format));
-    } else {
-      spdlog::warn("Karma: Env prefilter SRV is null.");
-    }
-    if (env_cubemap_srv_) {
-      const auto& desc = env_cubemap_srv_->GetTexture()->GetDesc();
-      spdlog::info("Karma: Env cubemap desc {}x{} mips={} fmt={}.",
-                   desc.Width, desc.Height, desc.MipLevels, static_cast<int>(desc.Format));
-    } else {
-      spdlog::warn("Karma: Env cubemap SRV is null.");
-    }
   }
 
   renderSkybox(projection, view);
@@ -1593,18 +1542,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
 
   static bool logged_frame = false;
   if (!logged_frame) {
-    spdlog::info("Karma: Diligent render layer {} viewport={}x{} aspect={}",
-                 layer,
-                 current_width_,
-                 current_height_,
-                 aspect);
-    spdlog::info("Karma: Camera pos=({}, {}, {}) fov={} near={} far={}",
-                 camera_.position.x,
-                 camera_.position.y,
-                 camera_.position.z,
-                 camera_.fov_y_degrees,
-                 camera_.near_clip,
-                 camera_.far_clip);
     logged_frame = true;
   }
 
@@ -1644,13 +1581,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     const bool shadow_ready = shadow_pipeline_state_ && shadow_map_srv_ && shadow_map_dsv_ &&
                               shadow_sampler_;
     constants.shadow_params[0] = shadow_ready ? 1.0f : 0.0f;
-    if (!shadow_ready) {
-      spdlog::warn("Karma: Shadow not ready (pipeline={} dsv={} srv={} sampler={})",
-                   shadow_pipeline_state_ ? 1 : 0,
-                   shadow_map_dsv_ ? 1 : 0,
-                   shadow_map_srv_ ? 1 : 0,
-                   shadow_sampler_ ? 1 : 0);
-    }
     float fixed_bias = shadow_bias_;
     if (shadow_map_size_ >= 2048) {
       fixed_bias = 0.0025f;
@@ -1731,10 +1661,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       constants.env_params[1] = env_max_mip;
       constants.env_params[2] = static_cast<float>(env_debug_mode_);
       constants.env_params[3] = 0.0f;
-      if (env_debug_mode_ > 0 && !warned_env_debug_) {
-        spdlog::info("Karma: Env params intensity={} max_mip={}.",
-                     constants.env_params[0], constants.env_params[1]);
-      }
 
       {
         Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
@@ -1752,22 +1678,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         auto* irr = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex");
         auto* pre = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex");
         auto* brdf = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT");
-        if (env_debug_mode_ > 0 && !warned_env_debug_) {
-          auto* base = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex");
-          spdlog::info("Karma: SRB debug base_color var={} material={} default={}.",
-                       base ? "ok" : "null",
-                       mat ? "material" : "default",
-                       mat ? "no" : "yes");
-        }
-        if (!irr || !pre || !brdf) {
-          if (!warned_env_bind_missing_) {
-            spdlog::warn("Karma: Missing env vars on SRB irr={} pre={} brdf={}.",
-                         irr ? "ok" : "null",
-                         pre ? "ok" : "null",
-                         brdf ? "ok" : "null");
-            warned_env_bind_missing_ = true;
-          }
-        }
         if (irr) {
           irr->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
         }
@@ -1815,8 +1725,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
     if (pso && line_cb_ && line_vb_) {
       if (lines.size() > line_vb_size_) {
-        spdlog::warn("Karma: Line draw skipped ({} vertices > capacity {}).",
-                     lines.size(), line_vb_size_);
       } else {
         auto* rtv = swap_chain_->GetCurrentBackBufferRTV();
         auto* dsv = swap_chain_->GetDepthBufferDSV();
@@ -1869,13 +1777,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
 
   if (!warned_no_draws_) {
-    spdlog::info("Karma: Diligent drew {} instance(s) this frame (instances={}).", draw_count,
-                 instances_.size());
-    spdlog::info("Karma: Diligent skipped: hidden={} missing_vb={} missing_mesh={} layer={}",
-                 skipped_hidden,
-                 skipped_missing_vb,
-                 skipped_missing_mesh,
-                 skipped_layer);
     warned_no_draws_ = true;
   }
 }
@@ -1902,11 +1803,6 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
   environment_map_ = path;
   draw_skybox_ = draw_skybox;
   env_dirty_ = true;
-  spdlog::info("Karma: setEnvironmentMap path='{}' intensity={} draw_skybox={} debug_mode={}",
-               environment_map_.string(),
-               environment_intensity_,
-               draw_skybox_ ? 1 : 0,
-               env_debug_mode_);
   if (!device_) {
     return;
   }
@@ -1923,20 +1819,16 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
 
   auto bind_env_to_srb = [&](Diligent::IShaderResourceBinding* srb, const char* label) {
     if (!srb) {
-      spdlog::warn("Karma: Env SRV bind skipped for {} (null srb).", label);
       return;
     }
     auto* irr = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex");
     auto* pre = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex");
     auto* brdf = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT");
     if (!irr) {
-      spdlog::warn("Karma: {} missing g_IrradianceTex.", label);
     }
     if (!pre) {
-      spdlog::warn("Karma: {} missing g_PrefilterTex.", label);
     }
     if (!brdf) {
-      spdlog::warn("Karma: {} missing g_BRDFLUT.", label);
     }
     if (irr) {
       irr->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
@@ -1947,14 +1839,6 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
     if (brdf) {
       brdf->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
     }
-    spdlog::info("Karma: Env SRVs bound for {} irr={} pre={} brdf={} irr_ptr={} pre_ptr={} brdf_ptr={}",
-                 label,
-                 env_irradiance_srv_ ? "ok" : "null",
-                 env_prefilter_srv_ ? "ok" : "null",
-                 env_brdf_lut_srv_ ? "ok" : "null",
-                 static_cast<const void*>(env_irradiance_srv_.RawPtr()),
-                 static_cast<const void*>(env_prefilter_srv_.RawPtr()),
-                 static_cast<const void*>(env_brdf_lut_srv_.RawPtr()));
   };
 
   bind_env_to_srb(shader_resources_, "shader_resources");

@@ -6,7 +6,6 @@
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
-#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <filesystem>
 
@@ -44,8 +43,6 @@ renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
   record.data = mesh;
   computeBounds(mesh, record.bounds_center, record.bounds_radius);
   record.base_color = glm::vec4(1.0f);
-  spdlog::warn("Karma: Diligent createMesh id={} verts={} indices={}", id, mesh.vertices.size(),
-               mesh.indices.size());
 
   if (device_ && !mesh.vertices.empty()) {
     const auto interleaved = buildInterleavedVertices(mesh);
@@ -87,10 +84,6 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
   const renderer::MeshId id = nextMeshId_++;
 
   Assimp::Importer importer;
-  spdlog::warn("Karma: Diligent createMeshFromFile id={} path='{}' exists={}",
-               id,
-               path.string(),
-               !path.empty() && std::filesystem::exists(path));
   const aiScene* scene = importer.ReadFile(path.string(),
                                            aiProcess_Triangulate |
                                            aiProcess_GenNormals |
@@ -98,9 +91,6 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
                                            aiProcess_JoinIdenticalVertices |
                                            aiProcess_PreTransformVertices);
   if (!scene || !scene->mRootNode) {
-    spdlog::error("Karma: Failed to load model at path {} ({})",
-                  path.string(),
-                  importer.GetErrorString());
     meshes_[id] = MeshRecord{};
     return id;
   }
@@ -109,12 +99,7 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
   std::vector<SubmeshInfo> submesh_infos;
   const auto combined = combineMeshes(*scene, base_color, submesh_infos);
   if (combined.vertices.empty()) {
-    spdlog::warn("Karma: Model '{}' has no vertices", path.string());
   } else {
-    spdlog::warn("Karma: Model '{}' vertices={}, indices={}",
-                 path.string(),
-                 combined.vertices.size(),
-                 combined.indices.size());
     if (!combined.uvs.empty()) {
       glm::vec2 uv_min = combined.uvs.front();
       glm::vec2 uv_max = combined.uvs.front();
@@ -124,14 +109,7 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
         uv_max.x = std::max(uv_max.x, uv.x);
         uv_max.y = std::max(uv_max.y, uv.y);
       }
-      spdlog::warn("Karma: Model '{}' UV range min=({}, {}) max=({}, {})",
-                   path.string(),
-                   uv_min.x,
-                   uv_min.y,
-                   uv_max.x,
-                   uv_max.y);
     } else {
-      spdlog::warn("Karma: Model '{}' has no UVs", path.string());
     }
   }
 
@@ -217,14 +195,12 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
 
     auto log_texture = [&](aiTextureType type, const char* label, const aiString& tex_path,
                            aiTextureMapping mapping, unsigned int uv_index, float blend) {
-      spdlog::warn("Karma: Material {} texture {} path='{}' mapping={} uv={} blend={}",
-                   mat_index, label, tex_path.C_Str(),
-                   static_cast<int>(mapping), uv_index, blend);
-      if (uv_index != 0) {
-        spdlog::warn("Karma: Material {} texture {} uses UV channel {} (only UV0 supported)",
-                     mat_index, label, uv_index);
-      }
       (void)type;
+      (void)label;
+      (void)tex_path;
+      (void)mapping;
+      (void)uv_index;
+      (void)blend;
     };
 
     aiString tex_path;
@@ -340,15 +316,12 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
     }
     record.submeshes.push_back(submesh);
   }
-  spdlog::warn("Karma: Mesh '{}' submeshes={} materials={}",
-               path.string(), record.submeshes.size(), material_ids.size());
 
   meshes_[id] = std::move(record);
   return id;
 }
 
 void DiligentBackend::destroyMesh(renderer::MeshId mesh) {
-  spdlog::warn("Karma: Diligent destroyMesh id={}", mesh);
   meshes_.erase(mesh);
 }
 
@@ -381,10 +354,6 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
     pipeline_state_->CreateShaderResourceBinding(&record.srb, true);
     if (record.srb) {
       if (!env_irradiance_srv_ || !env_prefilter_srv_ || !env_brdf_lut_srv_) {
-        spdlog::warn("Karma: Material SRB env defaults irr={} pre={} brdf={}",
-                     env_irradiance_srv_ ? "ok" : "null",
-                     env_prefilter_srv_ ? "ok" : "null",
-                     env_brdf_lut_srv_ ? "ok" : "null");
       }
       if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
         var->Set(sampler_color_);
@@ -488,7 +457,6 @@ renderer::TextureId DiligentBackend::createTexture(const renderer::TextureDesc& 
           context_->GenerateMips(record.srv);
         }
       } else {
-        spdlog::warn("Karma: Failed to create SRV for runtime texture");
       }
     }
   }

@@ -55,6 +55,8 @@ class Scene {
 
   const Node& get(NodeId id) const { return nodes_[id]; }
 
+  const std::vector<Node>& nodes() const { return nodes_; }
+
  private:
   void detachFromParent(NodeId id) {
     const NodeId parent = nodes_[id].parent;

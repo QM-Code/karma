@@ -3,7 +3,7 @@
 #include <glm/gtc/matrix_access.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <spdlog/spdlog.h>
+#include <cmath>
 #include <algorithm>
 #include <filesystem>
 #include <assimp/Importer.hpp>
@@ -12,8 +12,10 @@
 #include <limits>
 
 #include "karma/components/camera.h"
+#include "karma/components/collider.h"
 #include "karma/components/environment.h"
 #include "karma/components/light.h"
+#include "karma/components/mesh.h"
 
 namespace karma::renderer {
 
@@ -26,23 +28,129 @@ glm::quat toGlm(const math::Quat& q) {
   return {q.w, q.x, q.y, q.z};
 }
 
+glm::vec3 transformPoint(const components::TransformComponent& transform,
+                          const math::Vec3& local) {
+  const glm::vec3 pos = toGlm(transform.getPosition());
+  const glm::quat rot = toGlm(transform.getRotation());
+  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 scaled{local.x * scale.x, local.y * scale.y, local.z * scale.z};
+  return pos + glm::mat3_cast(rot) * scaled;
+}
+
+void drawCircle(GraphicsDevice& device,
+                const glm::vec3& center,
+                const glm::vec3& axis_x,
+                const glm::vec3& axis_y,
+                float radius,
+                const math::Color& color,
+                int segments = 24) {
+  constexpr float kPi = 3.14159265358979323846f;
+  const float step = static_cast<float>(2.0f * kPi) / static_cast<float>(segments);
+  glm::vec3 prev = center + radius * axis_x;
+  for (int i = 1; i <= segments; ++i) {
+    const float angle = step * static_cast<float>(i);
+    const glm::vec3 next = center + radius * (std::cos(angle) * axis_x + std::sin(angle) * axis_y);
+    device.drawLine({prev.x, prev.y, prev.z}, {next.x, next.y, next.z}, color, true, 1.0f);
+    prev = next;
+  }
+}
+
+void drawBoxWire(GraphicsDevice& device,
+                 const components::TransformComponent& transform,
+                 const math::Vec3& center,
+                 const math::Vec3& half_extents,
+                 const math::Color& color) {
+  const math::Vec3 c = center;
+  const math::Vec3 h = half_extents;
+  const math::Vec3 corners[8] = {
+      {c.x - h.x, c.y - h.y, c.z - h.z},
+      {c.x + h.x, c.y - h.y, c.z - h.z},
+      {c.x + h.x, c.y + h.y, c.z - h.z},
+      {c.x - h.x, c.y + h.y, c.z - h.z},
+      {c.x - h.x, c.y - h.y, c.z + h.z},
+      {c.x + h.x, c.y - h.y, c.z + h.z},
+      {c.x + h.x, c.y + h.y, c.z + h.z},
+      {c.x - h.x, c.y + h.y, c.z + h.z},
+  };
+
+  const int edges[12][2] = {
+      {0, 1}, {1, 2}, {2, 3}, {3, 0},
+      {4, 5}, {5, 6}, {6, 7}, {7, 4},
+      {0, 4}, {1, 5}, {2, 6}, {3, 7},
+  };
+
+  glm::vec3 world_corners[8];
+  for (int i = 0; i < 8; ++i) {
+    world_corners[i] = transformPoint(transform, corners[i]);
+  }
+
+  for (const auto& edge : edges) {
+    const glm::vec3 a = world_corners[edge[0]];
+    const glm::vec3 b = world_corners[edge[1]];
+    device.drawLine({a.x, a.y, a.z}, {b.x, b.y, b.z}, color, true, 1.0f);
+  }
+}
+
+void drawSphereWire(GraphicsDevice& device,
+                    const components::TransformComponent& transform,
+                    const math::Vec3& center,
+                    float radius,
+                    const math::Color& color) {
+  const glm::vec3 world_center = transformPoint(transform, center);
+  const glm::vec3 scale = toGlm(transform.getScale());
+  const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
+  const float r = radius * max_scale;
+  drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, r, color);
+  drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, r, color);
+  drawCircle(device, world_center, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, r, color);
+}
+
+void drawCapsuleWire(GraphicsDevice& device,
+                     const components::TransformComponent& transform,
+                     const math::Vec3& center,
+                     float radius,
+                     float height,
+                     const math::Color& color) {
+  const glm::vec3 scale = toGlm(transform.getScale());
+  const float r = radius * std::max(scale.x, scale.z);
+  const float half_height = (height * 0.5f) * scale.y;
+  const glm::quat rot = toGlm(transform.getRotation());
+  const glm::mat3 basis = glm::mat3_cast(rot);
+  const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
+  const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
+  const glm::vec3 forward = basis * glm::vec3(0.0f, 0.0f, 1.0f);
+  const glm::vec3 world_center = transformPoint(transform, center);
+  const glm::vec3 top = world_center + up * half_height;
+  const glm::vec3 bottom = world_center - up * half_height;
+
+  drawCircle(device, top, right, forward, r, color);
+  drawCircle(device, bottom, right, forward, r, color);
+
+  const glm::vec3 offsets[4] = {right * r, -right * r, forward * r, -forward * r};
+  for (const auto& offset : offsets) {
+    const glm::vec3 a = top + offset;
+    const glm::vec3 b = bottom + offset;
+    device.drawLine({a.x, a.y, a.z}, {b.x, b.y, b.z}, color, true, 1.0f);
+  }
+}
+
 renderer::DirectionalLightData toDirectionalLight(const components::LightComponent& light,
                                                   const components::TransformComponent& transform) {
   renderer::DirectionalLightData out{};
   out.color = light.color;
   out.intensity = light.intensity;
-  const glm::quat rot = toGlm(transform.rotation());
+  const glm::quat rot = toGlm(transform.getRotation());
   const glm::mat3 basis = glm::mat3_cast(rot);
   out.direction = basis * glm::vec3(0.0f, 0.0f, -1.0f);
-  out.position = toGlm(transform.position());
+  out.position = toGlm(transform.getPosition());
   out.shadow_extent = light.shadow_extent;
   return out;
 }
 
 glm::mat4 toTransform(const components::TransformComponent& transform) {
-  const glm::vec3 pos = toGlm(transform.position());
-  const glm::quat rot = toGlm(transform.rotation());
-  const glm::vec3 scale = toGlm(transform.scale());
+  const glm::vec3 pos = toGlm(transform.getPosition());
+  const glm::quat rot = toGlm(transform.getRotation());
+  const glm::vec3 scale = toGlm(transform.getScale());
   glm::mat4 matrix(1.0f);
   matrix = glm::translate(matrix, pos);
   matrix *= glm::mat4_cast(rot);
@@ -94,7 +202,6 @@ bool computeMeshBounds(const std::string& path, glm::vec3& out_center, float& ou
                                            aiProcess_JoinIdenticalVertices |
                                            aiProcess_PreTransformVertices);
   if (!scene || !scene->mRootNode) {
-    spdlog::warn("Karma: Failed to compute bounds for '{}': {}", path, importer.GetErrorString());
     return false;
   }
 
@@ -132,7 +239,6 @@ bool computeMeshBounds(const std::string& path, glm::vec3& out_center, float& ou
 void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/) {
   static bool logged_start = false;
   if (!logged_start) {
-    spdlog::warn("Karma: RenderSystem update running.");
     logged_start = true;
   }
   bool has_camera = false;
@@ -146,8 +252,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
     CameraData cam{};
-    cam.position = toGlm(transform.position());
-    cam.rotation = toGlm(transform.rotation());
+    cam.position = toGlm(transform.getPosition());
+    cam.rotation = toGlm(transform.getRotation());
     cam.perspective = true;
     cam.fov_y_degrees = camera.fov_y_degrees;
     cam.aspect = 16.0f / 9.0f;
@@ -168,7 +274,6 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
 
   if (!has_camera) {
     if (!warned_no_camera_) {
-      spdlog::warn("Karma: No primary camera found; rendering a blank frame.");
       warned_no_camera_ = true;
     }
     device_.setCameraActive(false);
@@ -183,7 +288,6 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   if (!warned_missing_light_transform) {
     for (const ecs::Entity entity : world.view<components::LightComponent>()) {
       if (!world.has<components::TransformComponent>(entity)) {
-        spdlog::warn("Karma: LightComponent entity={} missing TransformComponent.", entityKey(entity));
         warned_missing_light_transform = true;
         break;
       }
@@ -248,11 +352,6 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     auto it = records_.find(key);
     if (it == records_.end()) {
       const bool exists = !mesh.mesh_key.empty() && std::filesystem::exists(mesh.mesh_key);
-      spdlog::warn("Karma: RenderSystem create record entity={} mesh='{}' exists={} material='{}'",
-                   key,
-                   mesh.mesh_key,
-                   exists,
-                   mesh.material_key);
       RenderRecord record;
       record.mesh_key = mesh.mesh_key;
       record.material_key = mesh.material_key;
@@ -268,13 +367,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       record.bounds_center = bounds_it->second.center;
       record.bounds_radius = bounds_it->second.radius;
       it = records_.emplace(key, std::move(record)).first;
-      spdlog::warn("Karma: RenderSystem created mesh id={} for entity={}", it->second.mesh, key);
     } else if (it->second.mesh_key != mesh.mesh_key) {
       const bool exists = !mesh.mesh_key.empty() && std::filesystem::exists(mesh.mesh_key);
-      spdlog::warn("Karma: RenderSystem mesh changed entity={} mesh='{}' exists={}",
-                   key,
-                   mesh.mesh_key,
-                   exists);
       it->second.mesh_key = mesh.mesh_key;
       it->second.mesh = device_.createMeshFromFile(mesh.mesh_key);
       auto bounds_it = bounds_cache_.find(mesh.mesh_key);
@@ -286,14 +380,13 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       it->second.bounds_valid = bounds_it->second.valid;
       it->second.bounds_center = bounds_it->second.center;
       it->second.bounds_radius = bounds_it->second.radius;
-      spdlog::warn("Karma: RenderSystem updated mesh id={} for entity={}", it->second.mesh, key);
     }
 
     const glm::mat4 world_matrix = toTransform(transform);
     bool in_frustum = true;
     if (it->second.bounds_valid) {
       const glm::vec3 world_center = glm::vec3(world_matrix * glm::vec4(it->second.bounds_center, 1.0f));
-      const glm::vec3 scale = toGlm(transform.scale());
+      const glm::vec3 scale = toGlm(transform.getScale());
       const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
       const float world_radius = it->second.bounds_radius * max_scale;
       if (!sphereInFrustum(frustum, world_center, world_radius)) {
@@ -310,6 +403,63 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     item.visible = visible && in_frustum;
     item.shadow_visible = visible;
     device_.submit(item);
+  }
+
+  const math::Color debug_color{0.1f, 1.0f, 0.1f, 1.0f};
+  for (const ecs::Entity entity :
+       world.view<components::TransformComponent, components::BoxColliderComponent>()) {
+    const auto& collider = world.get<components::BoxColliderComponent>(entity);
+    if (!collider.debug_draw) {
+      continue;
+    }
+    const auto& transform = world.get<components::TransformComponent>(entity);
+    drawBoxWire(device_, transform, collider.center, collider.half_extents, debug_color);
+  }
+
+  for (const ecs::Entity entity :
+       world.view<components::TransformComponent, components::SphereColliderComponent>()) {
+    const auto& collider = world.get<components::SphereColliderComponent>(entity);
+    if (!collider.debug_draw) {
+      continue;
+    }
+    const auto& transform = world.get<components::TransformComponent>(entity);
+    drawSphereWire(device_, transform, collider.center, collider.radius, debug_color);
+  }
+
+  for (const ecs::Entity entity :
+       world.view<components::TransformComponent, components::CapsuleColliderComponent>()) {
+    const auto& collider = world.get<components::CapsuleColliderComponent>(entity);
+    if (!collider.debug_draw) {
+      continue;
+    }
+    const auto& transform = world.get<components::TransformComponent>(entity);
+    drawCapsuleWire(device_, transform, collider.center, collider.radius, collider.height, debug_color);
+  }
+
+  for (const ecs::Entity entity :
+       world.view<components::TransformComponent, components::MeshColliderComponent, components::MeshComponent>()) {
+    const auto& collider = world.get<components::MeshColliderComponent>(entity);
+    if (!collider.debug_draw) {
+      continue;
+    }
+    const auto& transform = world.get<components::TransformComponent>(entity);
+    const auto& mesh = world.get<components::MeshComponent>(entity);
+    if (mesh.mesh_key.empty()) {
+      continue;
+    }
+    auto bounds_it = bounds_cache_.find(mesh.mesh_key);
+    if (bounds_it == bounds_cache_.end()) {
+      MeshBounds bounds{};
+      bounds.valid = computeMeshBounds(mesh.mesh_key, bounds.center, bounds.radius);
+      bounds_it = bounds_cache_.emplace(mesh.mesh_key, bounds).first;
+    }
+    if (!bounds_it->second.valid) {
+      continue;
+    }
+    drawSphereWire(device_, transform, {bounds_it->second.center.x,
+                                        bounds_it->second.center.y,
+                                        bounds_it->second.center.z},
+                   bounds_it->second.radius, debug_color);
   }
 }
 

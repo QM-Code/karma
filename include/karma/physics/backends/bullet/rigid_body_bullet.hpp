@@ -30,6 +30,9 @@ public:
     void setRotation(const glm::quat& rotation) override;
     void setVelocity(const glm::vec3& velocity) override;
     void setAngularVelocity(const glm::vec3& angularVelocity) override;
+    void setKinematic(bool kinematic) override;
+    void setUseGravity(bool useGravity) override;
+    void setTrigger(bool trigger) override;
     bool isGrounded(const glm::vec3& dimensions) const override;
     void destroy() override;
     std::uintptr_t nativeHandle() const override;

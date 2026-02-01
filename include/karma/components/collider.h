@@ -6,19 +6,26 @@
 namespace karma::components {
 
 struct ColliderComponent : ecs::ComponentTag {
-  enum class Shape {
-    Box,
-    Sphere,
-    Capsule,
-    Mesh
-  };
+  bool is_trigger = false;
+  bool debug_draw = false;
+};
 
-  Shape shape = Shape::Box;
+struct BoxColliderComponent : ColliderComponent {
   math::Vec3 center{};
   math::Vec3 half_extents{0.5f, 0.5f, 0.5f};
+};
+
+struct SphereColliderComponent : ColliderComponent {
+  math::Vec3 center{};
+  float radius = 0.5f;
+};
+
+struct CapsuleColliderComponent : ColliderComponent {
+  math::Vec3 center{};
   float radius = 0.5f;
   float height = 1.0f;
-  bool is_trigger = false;
 };
+
+struct MeshColliderComponent : ColliderComponent {};
 
 }  // namespace karma::components

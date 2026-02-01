@@ -1,6 +1,5 @@
 #include "karma/renderer/device.h"
 
-#include <spdlog/spdlog.h>
 
 namespace karma::renderer {
 

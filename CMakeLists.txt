@@ -13,6 +13,7 @@ option(KARMA_NETWORK_BACKEND_ENET "Use ENet network backend" ON)
 option(KARMA_PHYSICS_BACKEND_JOLT "Use Jolt physics backend" ON)
 option(KARMA_PHYSICS_BACKEND_BULLET "Use Bullet physics backend" OFF)
 option(KARMA_FETCH_DEPS "Fetch third-party dependencies if missing" ON)
+option(KARMA_BUILD_DEBUG_UI "Build engine debug UI overlay" ON)
 option(KARMA_BUILD_IMGUI_DEMO "Build ImGui UI demo" ON)
 option(KARMA_BUILD_RMLUI_DEMO "Build RmlUi UI demo" ON)
 set(KARMA_DILIGENT_TAG "v2.5.5" CACHE STRING "DiligentCore git tag/branch to fetch")
@@ -44,7 +45,7 @@ if (NOT TARGET glm::glm AND KARMA_FETCH_DEPS)
   FetchContent_MakeAvailable(glm)
 endif()
 
-if (KARMA_BUILD_IMGUI_DEMO)
+if (KARMA_BUILD_IMGUI_DEMO OR KARMA_BUILD_DEBUG_UI)
   find_package(imgui CONFIG QUIET)
   if (TARGET imgui::imgui)
     set(KARMA_IMGUI_TARGET imgui::imgui)
@@ -64,7 +65,7 @@ if (KARMA_BUILD_IMGUI_DEMO)
     )
     set(KARMA_IMGUI_TARGET "")
   else()
-    message(FATAL_ERROR "KARMA_BUILD_IMGUI_DEMO=ON but ImGui not found. Provide imgui or enable KARMA_FETCH_DEPS.")
+    message(FATAL_ERROR "ImGui is required but not found. Provide imgui or enable KARMA_FETCH_DEPS.")
   endif()
 endif()
 
@@ -184,11 +185,26 @@ if (KARMA_RENDER_BACKEND_DILIGENT)
       list(APPEND KARMA_RENDER_LINK_LIBS Diligent-BuildSettings)
     endif()
     list(APPEND KARMA_RENDER_LINK_LIBS ${KARMA_DILIGENT_TARGET})
+    if (TARGET Diligent-GraphicsTools)
+      list(APPEND KARMA_RENDER_LINK_LIBS Diligent-GraphicsTools)
+    endif()
+    if (TARGET Diligent-Common)
+      list(APPEND KARMA_RENDER_LINK_LIBS Diligent-Common)
+    endif()
+    if (TARGET Diligent-TargetPlatform)
+      list(APPEND KARMA_RENDER_LINK_LIBS Diligent-TargetPlatform)
+    endif()
   else()
     message(FATAL_ERROR "Karma: Diligent backend enabled but Diligent Vulkan target not found.")
   endif()
   if (diligentcore_SOURCE_DIR)
     list(APPEND KARMA_EXTRA_INCLUDE_DIRS ${diligentcore_SOURCE_DIR})
+  endif()
+
+  if (TARGET xxhash)
+    set(KARMA_XXHASH_ARCHIVE "${CMAKE_BINARY_DIR}/_deps/diligentcore-build/ThirdParty/xxHash/cmake_unofficial/libxxhash.a")
+    set(KARMA_XXHASH_OBJECT "${CMAKE_BINARY_DIR}/_deps/diligentcore-build/ThirdParty/xxHash/cmake_unofficial/CMakeFiles/xxhash.dir/__/xxhash.c.o")
+    set(KARMA_XXHASH_SOURCE "${CMAKE_BINARY_DIR}/_deps/DiligentCore/ThirdParty/xxHash/xxhash.c")
   endif()
 endif()
 
@@ -314,6 +330,18 @@ set(KARMA_SOURCES
   src/geometry/mesh_loader.cpp
 )
 
+if (KARMA_BUILD_DEBUG_UI)
+  list(APPEND KARMA_SOURCES
+    src/debug/debug_overlay.cpp
+  )
+endif()
+
+if (KARMA_BUILD_DEBUG_UI AND DEFINED IMGUI_SOURCES)
+  list(APPEND KARMA_SOURCES
+    ${IMGUI_SOURCES}
+  )
+endif()
+
 if (KARMA_RENDER_BACKEND_DILIGENT)
   list(APPEND KARMA_SOURCES
     src/renderer/backends/diligent/backend_common.cpp
@@ -411,6 +439,9 @@ endif()
 if (KARMA_NETWORK_BACKEND_ENET)
   target_compile_definitions(karma PUBLIC KARMA_NETWORK_BACKEND_ENET)
 endif()
+if (KARMA_BUILD_DEBUG_UI)
+  target_compile_definitions(karma PUBLIC KARMA_DEBUG_UI)
+endif()
 
 target_link_libraries(karma
   PUBLIC
@@ -422,11 +453,34 @@ target_link_libraries(karma
     ${KARMA_EXTRA_LINK_LIBS}
 )
 
+if (KARMA_BUILD_DEBUG_UI)
+  if (KARMA_IMGUI_TARGET)
+    target_link_libraries(karma PRIVATE ${KARMA_IMGUI_TARGET})
+  endif()
+  if (imgui_SOURCE_DIR)
+    target_include_directories(karma PRIVATE ${imgui_SOURCE_DIR})
+  endif()
+endif()
+
 add_executable(karma_example
   examples/main.cpp
 )
 
 target_link_libraries(karma_example PRIVATE karma)
+
+if (KARMA_XXHASH_ARCHIVE AND CMAKE_AR AND CMAKE_C_COMPILER)
+  set(KARMA_XXHASH_STAMP "${CMAKE_BINARY_DIR}/karma_xxhash.stamp")
+  add_custom_command(
+    OUTPUT ${KARMA_XXHASH_STAMP}
+    COMMAND ${CMAKE_C_COMPILER} -c ${KARMA_XXHASH_SOURCE} -o ${KARMA_XXHASH_OBJECT}
+    COMMAND ${CMAKE_AR} qc ${KARMA_XXHASH_ARCHIVE} ${KARMA_XXHASH_OBJECT}
+    COMMAND ${CMAKE_RANLIB} ${KARMA_XXHASH_ARCHIVE}
+    COMMAND ${CMAKE_COMMAND} -E touch ${KARMA_XXHASH_STAMP}
+    COMMENT "Rebuilding xxhash static archive"
+    VERBATIM)
+  add_custom_target(karma_fix_xxhash DEPENDS ${KARMA_XXHASH_STAMP})
+  add_dependencies(karma_example karma_fix_xxhash)
+endif()
 
 if (KARMA_BUILD_IMGUI_DEMO)
   add_executable(karma_imgui_ui_demo
@@ -437,6 +491,9 @@ if (KARMA_BUILD_IMGUI_DEMO)
   if (imgui_SOURCE_DIR)
     target_include_directories(karma_imgui_ui_demo PRIVATE ${imgui_SOURCE_DIR})
   endif()
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_imgui_ui_demo karma_fix_xxhash)
+  endif()
 endif()
 
 if (KARMA_BUILD_RMLUI_DEMO)
@@ -444,6 +501,9 @@ if (KARMA_BUILD_RMLUI_DEMO)
     examples/rmlui_ui_demo.cpp
   )
   target_link_libraries(karma_rmlui_ui_demo PRIVATE karma ${KARMA_RMLUI_TARGET})
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
+  endif()
 endif()
 
 add_executable(karma_network_demo
@@ -451,3 +511,6 @@ add_executable(karma_network_demo
 )
 
 target_link_libraries(karma_network_demo PRIVATE karma)
+if (TARGET karma_fix_xxhash)
+  add_dependencies(karma_network_demo karma_fix_xxhash)
+endif()

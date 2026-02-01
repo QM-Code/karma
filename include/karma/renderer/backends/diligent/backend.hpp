@@ -3,7 +3,9 @@
 #include "karma/renderer/backend.hpp"
 
 #include <Common/interface/RefCntAutoPtr.hpp>
+#include <Graphics/GraphicsTools/interface/RenderStateCache.hpp>
 #include <filesystem>
+#include <cstdint>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -171,6 +173,12 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IRenderDevice> device_;
   Diligent::RefCntAutoPtr<Diligent::IDeviceContext> context_;
   Diligent::RefCntAutoPtr<Diligent::ISwapChain> swap_chain_;
+  Diligent::RenderDeviceWithCache<false> device_with_cache_;
+  std::filesystem::path render_state_cache_path_;
+  bool shader_cache_enabled_ = true;
+  bool shader_cache_log_ = false;
+  std::uint32_t shader_cache_version_ = 1;
+  bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> shadow_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shader_resources_;

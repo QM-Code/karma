@@ -87,6 +87,41 @@ void PhysicsRigidBodyBullet::setAngularVelocity(const glm::vec3& angularVelocity
     body_->activate(true);
 }
 
+void PhysicsRigidBodyBullet::setKinematic(bool kinematic) {
+    if (!body_) return;
+    int flags = body_->getCollisionFlags();
+    if (kinematic) {
+        flags |= btCollisionObject::CF_KINEMATIC_OBJECT;
+        body_->setActivationState(DISABLE_DEACTIVATION);
+    } else {
+        flags &= ~btCollisionObject::CF_KINEMATIC_OBJECT;
+        body_->setActivationState(ACTIVE_TAG);
+    }
+    body_->setCollisionFlags(flags);
+}
+
+void PhysicsRigidBodyBullet::setUseGravity(bool useGravity) {
+    if (!body_ || !world_ || !world_->world()) return;
+    if (useGravity) {
+        body_->setGravity(world_->world()->getGravity());
+    } else {
+        body_->setGravity(btVector3(0.0f, 0.0f, 0.0f));
+    }
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::setTrigger(bool trigger) {
+    if (!body_) return;
+    int flags = body_->getCollisionFlags();
+    if (trigger) {
+        flags |= btCollisionObject::CF_NO_CONTACT_RESPONSE;
+    } else {
+        flags &= ~btCollisionObject::CF_NO_CONTACT_RESPONSE;
+    }
+    body_->setCollisionFlags(flags);
+    body_->activate(true);
+}
+
 bool PhysicsRigidBodyBullet::isGrounded(const glm::vec3& dimensions) const {
     if (!world_ || !body_ || !world_->world()) return false;
 

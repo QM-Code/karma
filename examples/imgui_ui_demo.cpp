@@ -363,7 +363,7 @@ class DemoGame : public app::GameInterface {
     auto world_entity = world->createEntity();
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/world.glb"});
-    world->add(world_entity, components::ColliderComponent{.shape = components::ColliderComponent::Shape::Mesh});
+    world->add(world_entity, components::MeshColliderComponent{});
 
     auto camera = world->createEntity();
     components::TransformComponent camera_xform{};
@@ -430,7 +430,7 @@ class DemoGame : public app::GameInterface {
     if (input->actionDown("cam_right")) right_input += 1.0f;
     if (input->actionDown("cam_left")) right_input -= 1.0f;
 
-    math::Vec3 cam_pos = camera_xform.position();
+    math::Vec3 cam_pos = camera_xform.getPosition();
     cam_pos.x += (forward.x * forward_input + right.x * right_input) * move_speed * dt;
     cam_pos.y += (forward.y * forward_input) * move_speed * dt;
     cam_pos.z += (forward.z * forward_input + right.z * right_input) * move_speed * dt;

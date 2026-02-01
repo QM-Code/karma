@@ -10,7 +10,6 @@
 #include <Graphics/GraphicsEngine/interface/SwapChain.h>
 #include <Graphics/GraphicsEngine/interface/Texture.h>
 #include <Graphics/GraphicsTools/interface/MapHelper.hpp>
-#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <array>
@@ -107,24 +106,23 @@ void DiligentBackend::ensureUiResources() {
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kUiVS;
-  device_->CreateShader(shader_ci, &vs);
+  vs = device_with_cache_.CreateShader(shader_ci);
 
   Diligent::RefCntAutoPtr<Diligent::IShader> ps_color;
   shader_ci.Desc.Name = "Karma UI Color PS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kUiColorPS;
-  device_->CreateShader(shader_ci, &ps_color);
+  ps_color = device_with_cache_.CreateShader(shader_ci);
 
   Diligent::RefCntAutoPtr<Diligent::IShader> ps_texture;
   shader_ci.Desc.Name = "Karma UI Texture PS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kUiTexturePS;
-  device_->CreateShader(shader_ci, &ps_texture);
+  ps_texture = device_with_cache_.CreateShader(shader_ci);
 
   if (!vs || !ps_color || !ps_texture) {
-    spdlog::error("Karma: Failed to create UI shaders.");
     return;
   }
 
@@ -211,9 +209,8 @@ void DiligentBackend::ensureUiResources() {
           static_cast<Diligent::Uint32>(std::size(kUiTextureSamplers));
     }
 
-    device_->CreateGraphicsPipelineState(pso, &out_pso);
+    out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
     if (!out_pso) {
-      spdlog::error("Karma: Failed to create UI pipeline state.");
       return;
     }
 
@@ -238,7 +235,6 @@ void DiligentBackend::ensureUiResources() {
 
   if (!logged_once &&
       ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ && ui_pso_texture_scissor_) {
-    spdlog::info("Karma UI: pipeline created.");
     logged_once = true;
   }
 }

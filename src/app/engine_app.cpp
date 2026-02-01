@@ -1,9 +1,27 @@
 #include "karma/app/engine_app.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <string>
+
 #include <spdlog/spdlog.h>
 
+#include "karma/debug/debug_overlay.h"
+
 namespace karma::app {
+namespace {
+uint64_t entityKey(ecs::Entity entity) {
+  return (static_cast<uint64_t>(entity.index) << 32) |
+         static_cast<uint64_t>(entity.generation);
+}
+
+ecs::Entity entityFromKey(uint64_t key) {
+  ecs::Entity entity{};
+  entity.index = static_cast<uint32_t>(key >> 32);
+  entity.generation = static_cast<uint32_t>(key & 0xFFFFFFFFu);
+  return entity;
+}
+}  // namespace
 
 EngineApp::EngineApp() = default;
 
@@ -53,17 +71,37 @@ void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
   if (ui_) {
     ui_->onShutdown();
   }
+#if defined(KARMA_DEBUG_UI)
+  if (debug_ui_enabled_) {
+    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_, &scene_, &systems_);
+    return;
+  }
+#endif
   ui_ = std::move(ui);
+}
+
+void EngineApp::setCursorVisible(bool visible) {
+  if (window_) {
+    window_->setCursorVisible(visible);
+  }
+  config_.cursor_visible = visible;
 }
 
 void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   if (running_) {
     return;
   }
-  spdlog::set_level(spdlog::level::info);
+  spdlog::set_level(spdlog::level::trace);
   config_ = config;
   fixed_dt_ = config_.fixed_dt;
+  const char* debug_env = std::getenv("KARMA_ENGINE_EDITOR_DEBUG");
+  debug_ui_enabled_ = debug_env && std::string(debug_env) != "0";
   initSubsystems();
+#if defined(KARMA_DEBUG_UI)
+  if (debug_ui_enabled_) {
+    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_, &scene_, &systems_);
+  }
+#endif
   if (graphics_) {
     graphics_->setGenerateMips(config_.generate_mipmaps);
     graphics_->setEnvironmentMap(config_.environment_map,
@@ -83,6 +121,25 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
 
 void EngineApp::requestStop() {
   running_ = false;
+}
+
+void EngineApp::syncSceneEntities() {
+  for (const ecs::Entity entity : world_.entities()) {
+    const uint64_t key = entityKey(entity);
+    if (entity_nodes_.find(key) == entity_nodes_.end()) {
+      const scene::NodeId node = scene_.createNode(entity);
+      entity_nodes_[key] = node;
+    }
+  }
+  for (auto it = entity_nodes_.begin(); it != entity_nodes_.end();) {
+    const ecs::Entity entity = entityFromKey(it->first);
+    if (!world_.isAlive(entity)) {
+      scene_.destroyNode(it->second);
+      it = entity_nodes_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 void EngineApp::tick() {
@@ -133,6 +190,7 @@ void EngineApp::tick() {
     audio_system_->update(world_, frame_dt);
   }
   if (graphics_ && render_system_) {
+    syncSceneEntities();
     int fb_width = 0;
     int fb_height = 0;
     if (window_) {

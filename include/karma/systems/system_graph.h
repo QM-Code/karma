@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <queue>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -15,6 +16,12 @@ using SystemId = uint32_t;
 
 class SystemGraph {
  public:
+  struct SystemInfo {
+    SystemId id = 0;
+    std::string name;
+    std::vector<SystemId> depends_on;
+  };
+
   SystemId addSystem(std::unique_ptr<ISystem> system) {
     const SystemId id = next_id_++;
     nodes_[id] = Node{.id = id, .system = std::move(system), .depends_on = {}};
@@ -33,6 +40,21 @@ class SystemGraph {
         nodes_[id].system->update(world, dt);
       }
     }
+  }
+
+  std::vector<SystemInfo> systems() const {
+    std::vector<SystemInfo> out;
+    out.reserve(nodes_.size());
+    for (const auto& [id, node] : nodes_) {
+      SystemInfo info{};
+      info.id = id;
+      if (node.system) {
+        info.name = std::string(node.system->name());
+      }
+      info.depends_on = node.depends_on;
+      out.push_back(std::move(info));
+    }
+    return out;
   }
 
  private:

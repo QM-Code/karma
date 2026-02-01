@@ -58,6 +58,24 @@ void RigidBody::setAngularVelocity(const glm::vec3& angularVelocity) {
     }
 }
 
+void RigidBody::setKinematic(bool kinematic) {
+    if (backend_) {
+        backend_->setKinematic(kinematic);
+    }
+}
+
+void RigidBody::setUseGravity(bool useGravity) {
+    if (backend_) {
+        backend_->setUseGravity(useGravity);
+    }
+}
+
+void RigidBody::setTrigger(bool trigger) {
+    if (backend_) {
+        backend_->setTrigger(trigger);
+    }
+}
+
 bool RigidBody::isGrounded(const glm::vec3& dimensions) const {
     return backend_ ? backend_->isGrounded(dimensions) : false;
 }

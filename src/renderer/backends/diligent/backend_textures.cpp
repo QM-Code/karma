@@ -3,7 +3,6 @@
 #include "backend_internal.h"
 
 #include <assimp/scene.h>
-#include <spdlog/spdlog.h>
 #include <cstring>
 
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
@@ -80,7 +79,6 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
   out_texture = texture;
   auto* raw_view = texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
   if (!raw_view) {
-    spdlog::warn("Karma: Failed to get texture SRV for {}", name ? name : "texture");
     return {};
   }
   Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
@@ -125,7 +123,6 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   }
   auto cache_it = texture_cache_.find(key);
   if (cache_it != texture_cache_.end()) {
-    spdlog::warn("Karma: Texture cache hit {} '{}' key='{}'", label, raw_key, key);
     auto tex_it = textures_.find(cache_it->second);
     if (tex_it != textures_.end()) {
       return tex_it->second.srv;
@@ -156,11 +153,8 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   }
 
   if (image.pixels.empty()) {
-    spdlog::warn("Karma: Missing {} texture '{}'", label, raw_key);
     return {};
   }
-  spdlog::warn("Karma: Loaded {} texture '{}' ({}x{}) srgb={} embedded={} key='{}'",
-               label, raw_key, image.width, image.height, srgb, is_embedded, key);
 
   const renderer::TextureId id = nextTextureId_++;
   TextureRecord record{};
@@ -195,7 +189,6 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
 
   LoadedImage image = loadImageFromFile(path);
   if (image.pixels.empty()) {
-    spdlog::warn("Karma: Missing {} texture '{}'", label, key);
     return {};
   }
 

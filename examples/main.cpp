@@ -17,16 +17,18 @@ class DemoGame : public app::GameInterface {
     input->bindKey("tank_reset", platform::Key::R, input::Trigger::Down);
 
     auto world_entity = world->createEntity();
+    world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/world.glb"});
-    world->add(world_entity, components::ColliderComponent{.shape = components::ColliderComponent::Shape::Mesh});
+    world->add(world_entity, components::MeshColliderComponent{});
 
     auto tank = world->createEntity();
+    world->setName(tank, "Tank");
     world->add(tank, components::TransformComponent{});
     world->add(tank, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/tank_final.glb"});
-    world->add(tank, components::ColliderComponent{
-        .shape = components::ColliderComponent::Shape::Box,
-        .half_extents = {1.0f, 1.0f, 2.0f}});
+    world->add(tank, components::BoxColliderComponent{
+        .center = {0.0f, 1.0f, 0.0f},
+        .half_extents = {1.0f, 1.0f, 1.0f}});
     world->add(tank, components::RigidbodyComponent{});
     components::AudioSourceComponent tank_audio{};
     tank_audio.clip_key = "/home/quinn/Documents/bz3/data/client/audio/fire.wav";
@@ -36,6 +38,7 @@ class DemoGame : public app::GameInterface {
     tank_entity_ = tank;
 
     auto camera = world->createEntity();
+    world->setName(camera, "Camera");
     components::TransformComponent camera_xform{};
     camera_xform.setPosition({0.0f, 12.0f, 12.0f});
     const float pitch = -0.65f;
@@ -50,6 +53,7 @@ class DemoGame : public app::GameInterface {
     camera_entity_ = camera;
 
     auto light = world->createEntity();
+    world->setName(light, "Sun Light");
     components::TransformComponent light_xform{};
     light_xform.setPosition({0.0f, 50.0f, 0.0f});
     light_xform.setRotation(math::fromYawPitch(0.5f, -0.9f));
@@ -61,6 +65,7 @@ class DemoGame : public app::GameInterface {
         .shadow_extent = 60.0f});
 
     auto skybox = world->createEntity();
+    world->setName(skybox, "Environment");
     world->add(skybox, components::EnvironmentComponent{
         .environment_map = "/home/quinn/Documents/karma/examples/assets/golden_gate_hills_4k.hdr",
         .intensity = 0.4f,
@@ -72,10 +77,9 @@ class DemoGame : public app::GameInterface {
     const bool reset_down = input->actionDown("tank_reset");
     if (reset_down && !reset_down_prev_ && world->isAlive(tank_entity_)) {
       auto& tank_xform = world->get<components::TransformComponent>(tank_entity_);
-      math::Vec3 pos = tank_xform.position();
+      math::Vec3 pos = tank_xform.getPosition();
       pos.y = 10.0f;
-      auto& tank_body = world->get<components::RigidbodyComponent>(tank_entity_);
-      tank_body.setPosition(pos);
+      tank_xform.setPosition(pos);
       auto& tank_audio = world->get<components::AudioSourceComponent>(tank_entity_);
       tank_audio.play();
     }
@@ -113,7 +117,7 @@ class DemoGame : public app::GameInterface {
     if (input->actionDown("cam_right")) right_input += 1.0f;
     if (input->actionDown("cam_left")) right_input -= 1.0f;
 
-    math::Vec3 cam_pos = camera_xform.position();
+    math::Vec3 cam_pos = camera_xform.getPosition();
     cam_pos.x += (forward.x * forward_input + right.x * right_input) * move_speed * dt;
     cam_pos.y += (forward.y * forward_input) * move_speed * dt;
     cam_pos.z += (forward.z * forward_input + right.z * right_input) * move_speed * dt;
@@ -153,7 +157,7 @@ int main() {
   karma::app::EngineConfig config;
   config.window.title = "Karma Example";
   config.window.samples = 1;
-  config.cursor_visible = false;
+  config.cursor_visible = true;
   config.enable_anisotropy = true;
   config.anisotropy_level = 16;
   config.generate_mipmaps = true;

@@ -18,6 +18,7 @@
 #include "karma/renderer/render_system.h"
 #include "karma/scene/scene.h"
 #include "karma/systems/system_graph.h"
+#include <unordered_map>
 
 namespace karma::platform {
 class Window;
@@ -56,10 +57,12 @@ class EngineApp {
   bool isRunning() const { return running_; }
   void requestStop();
   void setUi(std::unique_ptr<UiLayer> ui);
+  void setCursorVisible(bool visible);
 
  private:
-  void initSubsystems();
-  void shutdownSubsystems();
+ void initSubsystems();
+ void shutdownSubsystems();
+ void syncSceneEntities();
 
   GameInterface* game_ = nullptr;
   std::unique_ptr<platform::Window> window_;
@@ -75,6 +78,8 @@ class EngineApp {
   EngineConfig config_{};
   std::unique_ptr<UiLayer> ui_;
   UIContext ui_context_{};
+  bool debug_ui_enabled_ = false;
+  std::unordered_map<uint64_t, scene::NodeId> entity_nodes_;
 
   bool running_ = false;
   float fixed_dt_ = 1.0f / 60.0f;

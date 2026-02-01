@@ -22,6 +22,9 @@ public:
     virtual void setRotation(const glm::quat& rotation) = 0;
     virtual void setVelocity(const glm::vec3& velocity) = 0;
     virtual void setAngularVelocity(const glm::vec3& angularVelocity) = 0;
+    virtual void setKinematic(bool kinematic) = 0;
+    virtual void setUseGravity(bool useGravity) = 0;
+    virtual void setTrigger(bool trigger) = 0;
     virtual bool isGrounded(const glm::vec3& dimensions) const = 0;
     virtual void destroy() = 0;
     virtual std::uintptr_t nativeHandle() const = 0;

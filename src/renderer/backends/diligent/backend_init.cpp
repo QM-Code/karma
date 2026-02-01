@@ -4,9 +4,9 @@
 
 #include "backend_internal.h"
 
-#include <spdlog/spdlog.h>
 
 #include <Primitives/interface/BasicTypes.h>
+#include <Primitives/interface/DebugOutput.h>
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/GraphicsTypes.h>
@@ -31,19 +31,21 @@
 
 namespace karma::renderer_backend {
 
+namespace {
+void DILIGENT_CALL_TYPE IgnoreDiligentMessage(Diligent::DEBUG_MESSAGE_SEVERITY,
+                                              const char*,
+                                              const char*,
+                                              const char*,
+                                              int) {}
+}  // namespace
+
 void DiligentBackend::recreateShadowMap() {
   if (!device_) {
     return;
   }
   const auto& adapter = device_->GetAdapterInfo();
   const int max_dim = static_cast<int>(adapter.Texture.MaxTexture2DDimension);
-  spdlog::info("Karma: Shadow map requested size={} max_supported={}.",
-               shadow_map_size_,
-               max_dim);
   if (max_dim > 0 && shadow_map_size_ > max_dim) {
-    spdlog::warn("Karma: Shadow map size {} exceeds device max {}; clamping.",
-                 shadow_map_size_,
-                 max_dim);
     shadow_map_size_ = max_dim;
   }
   shadow_map_tex_.Release();
@@ -57,7 +59,6 @@ void DiligentBackend::recreateShadowMap() {
   shadow_desc.Height = static_cast<Diligent::Uint32>(shadow_map_size_);
   shadow_desc.MipLevels = 1;
   shadow_desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
-  spdlog::info("Karma: Shadow map format=D32_FLOAT.");
   shadow_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
   device_->CreateTexture(shadow_desc, nullptr, &shadow_map_tex_);
   if (shadow_map_tex_) {
@@ -68,14 +69,8 @@ void DiligentBackend::recreateShadowMap() {
       shadow_map_srv_ = srv;
     }
   } else {
-    spdlog::error("Karma: Failed to create shadow map texture ({}x{}).",
-                  shadow_map_size_,
-                  shadow_map_size_);
   }
   if (!shadow_map_srv_ || !shadow_map_dsv_) {
-    spdlog::error("Karma: Shadow map views not created (srv={} dsv={}).",
-                  shadow_map_srv_ ? 1 : 0,
-                  shadow_map_dsv_ ? 1 : 0);
   }
   if (pipeline_state_ && shadow_map_srv_) {
     if (auto* var =
@@ -89,6 +84,7 @@ void DiligentBackend::initializeDevice() {
 #if defined(ENGINE_FORCE_VULKAN)
   (void)window_;
 #endif
+  Diligent::SetDebugMessageCallback(IgnoreDiligentMessage);
   Diligent::RefCntAutoPtr<Diligent::IEngineFactoryVk> factory;
   Diligent::EngineVkCreateInfo engine_ci{};
 
@@ -99,9 +95,10 @@ void DiligentBackend::initializeDevice() {
 #endif
 
   if (!factory) {
-    spdlog::error("Karma: Failed to create Diligent Vulkan factory.");
     return;
   }
+
+  factory->SetMessageCallback(IgnoreDiligentMessage);
 
   if (window_) {
 #if !defined(BZ3_WINDOW_BACKEND_SDL)
@@ -125,11 +122,31 @@ void DiligentBackend::initializeDevice() {
   }
 
   if (!device_ || !context_) {
-    spdlog::error("Karma: Failed to initialize Diligent device/context.");
   }
 
   if (!device_) {
     return;
+  }
+
+  device_with_cache_ = Diligent::RenderDeviceWithCache<false>{device_};
+  if (shader_cache_enabled_) {
+    Diligent::RenderStateCacheCreateInfo cache_ci{};
+    device_with_cache_.CreateRenderStateCache(cache_ci);
+    if (!device_with_cache_.GetCache()) {
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(render_state_cache_path_.parent_path(), ec);
+    const bool cache_exists = std::filesystem::exists(render_state_cache_path_);
+    if (shader_cache_log_) {
+    }
+    device_with_cache_.LoadCacheFromFile(render_state_cache_path_.string().c_str(),
+                                         true,
+                                         shader_cache_version_);
+    if (shader_cache_log_) {
+      const bool exists_after = std::filesystem::exists(render_state_cache_path_);
+      (void)exists_after;
+    }
+  } else if (shader_cache_log_) {
   }
 
   Diligent::ShaderCreateInfo shader_ci{};
@@ -410,9 +427,8 @@ VSOutput main(VSInput input)
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kVertexShader;
-  device_->CreateShader(shader_ci, &vs);
+  vs = device_with_cache_.CreateShader(shader_ci);
   if (!vs) {
-    spdlog::error("Karma: Failed to create Diligent vertex shader.");
   }
 
   Diligent::RefCntAutoPtr<Diligent::IShader> ps;
@@ -420,9 +436,8 @@ VSOutput main(VSInput input)
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kPixelShader;
-  device_->CreateShader(shader_ci, &ps);
+  ps = device_with_cache_.CreateShader(shader_ci);
   if (!ps) {
-    spdlog::error("Karma: Failed to create Diligent pixel shader.");
   }
 
   Diligent::RefCntAutoPtr<Diligent::IShader> shadow_vs;
@@ -430,9 +445,8 @@ VSOutput main(VSInput input)
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kShadowVertexShader;
-  device_->CreateShader(shader_ci, &shadow_vs);
+  shadow_vs = device_with_cache_.CreateShader(shader_ci);
   if (!shadow_vs) {
-    spdlog::error("Karma: Failed to create Diligent shadow vertex shader.");
   }
 
 
@@ -514,10 +528,9 @@ VSOutput main(VSInput input)
 
   recreateShadowMap();
 
-  device_->CreateGraphicsPipelineState(pso_ci, &pipeline_state_);
+  pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
 
   if (!pipeline_state_) {
-    spdlog::error("Karma: Failed to create Diligent pipeline state.");
     return;
   }
 
@@ -542,7 +555,6 @@ VSOutput main(VSInput input)
       bound = true;
     }
     if (!bound) {
-      spdlog::error("Karma: Failed to bind Diligent constant buffer.");
     }
   }
 
@@ -571,7 +583,6 @@ VSOutput main(VSInput input)
         }
       }
     } else {
-      spdlog::warn("Karma: Default environment texture failed to create.");
     }
     if (default_base_color_) {
       if (default_material_srb_) {
@@ -619,7 +630,7 @@ VSOutput main(VSInput input)
     shadow_pso.PSODesc.ResourceLayout.NumVariables =
         static_cast<Diligent::Uint32>(sizeof(shadow_vars) / sizeof(shadow_vars[0]));
 
-    device_->CreateGraphicsPipelineState(shadow_pso, &shadow_pipeline_state_);
+    shadow_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(shadow_pso);
     if (shadow_pipeline_state_) {
       if (auto* variable =
               shadow_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
@@ -627,7 +638,6 @@ VSOutput main(VSInput input)
       }
       shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
     } else {
-      spdlog::error("Karma: Failed to create Diligent shadow pipeline state.");
     }
   }
 
@@ -660,6 +670,15 @@ VSOutput main(VSInput input)
   }
 
   ensureLineResources();
+
+  if (shader_cache_enabled_ && shader_cache_flush_ && device_with_cache_.GetCache()) {
+    device_with_cache_.SaveCache(render_state_cache_path_.string().c_str());
+    if (shader_cache_log_) {
+      std::error_code ec;
+      const auto size = std::filesystem::file_size(render_state_cache_path_, ec);
+      (void)size;
+    }
+  }
 }
 
 }  // namespace karma::renderer_backend

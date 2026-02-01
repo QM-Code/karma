@@ -11,7 +11,7 @@ PlayerController::~PlayerController() {
 }
 
 glm::vec3 PlayerController::getPosition() const {
-    return backend_ ? backend_->getPosition() : glm::vec3(0.0f);
+    return backend_ ? (backend_->getPosition() - center_) : glm::vec3(0.0f);
 }
 
 glm::quat PlayerController::getRotation() const {
@@ -36,6 +36,10 @@ void PlayerController::setHalfExtents(const glm::vec3& extents) {
     }
 }
 
+void PlayerController::setCenter(const glm::vec3& center) {
+    center_ = center;
+}
+
 void PlayerController::update(float dt) {
     if (backend_) {
         backend_->update(dt);
@@ -44,7 +48,7 @@ void PlayerController::update(float dt) {
 
 void PlayerController::setPosition(const glm::vec3& position) {
     if (backend_) {
-        backend_->setPosition(position);
+        backend_->setPosition(position + center_);
     }
 }
 

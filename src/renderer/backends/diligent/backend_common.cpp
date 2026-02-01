@@ -8,7 +8,6 @@
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
-#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <fstream>
 #include <cstring>
@@ -51,6 +50,23 @@
 #endif
 
 namespace karma::renderer_backend {
+
+namespace {
+std::filesystem::path defaultShaderCachePath(std::uint32_t version) {
+  const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
+  const char* home = std::getenv("HOME");
+  std::filesystem::path base;
+  if (xdg_cache && xdg_cache[0] != '\0') {
+    base = xdg_cache;
+  } else if (home && home[0] != '\0') {
+    base = std::filesystem::path(home) / ".cache";
+  } else {
+    base = "cache";
+  }
+  const std::string filename = "karma_shader_cache_v" + std::to_string(version) + ".diligentcache";
+  return base / "karma" / filename;
+}
+}  // namespace
 
 bool isValidSize(int width, int height) {
   return width > 0 && height > 0;
@@ -254,6 +270,29 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   if (const char* env = std::getenv("KARMA_ENV_DEBUG")) {
     env_debug_mode_ = std::atoi(env);
   }
+  if (const char* env = std::getenv("KARMA_SHADER_CACHE")) {
+    shader_cache_enabled_ = std::string(env) != "0";
+  }
+  if (const char* env = std::getenv("KARMA_SHADER_CACHE_LOG")) {
+    shader_cache_log_ = std::string(env) != "0";
+  }
+  if (const char* env = std::getenv("KARMA_SHADER_CACHE_FLUSH")) {
+    shader_cache_flush_ = std::string(env) != "0";
+  }
+  if (const char* env = std::getenv("KARMA_SHADER_CACHE_VERSION")) {
+    const int version = std::atoi(env);
+    if (version > 0) {
+      shader_cache_version_ = static_cast<std::uint32_t>(version);
+    }
+  }
+  if (const char* env = std::getenv("KARMA_SHADER_CACHE_PATH")) {
+    if (env[0] != '\0') {
+      render_state_cache_path_ = env;
+    }
+  }
+  if (render_state_cache_path_.empty()) {
+    render_state_cache_path_ = defaultShaderCachePath(shader_cache_version_);
+  }
   int fb_width = 800;
   int fb_height = 600;
   window_->getFramebufferSize(fb_width, fb_height);
@@ -266,6 +305,9 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
 }
 
 DiligentBackend::~DiligentBackend() {
+  if (shader_cache_enabled_ && !render_state_cache_path_.empty() && device_with_cache_.GetCache()) {
+    device_with_cache_.SaveCache(render_state_cache_path_.string().c_str());
+  }
 }
 
 }  // namespace karma::renderer_backend

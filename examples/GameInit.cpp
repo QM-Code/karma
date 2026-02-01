@@ -34,8 +34,8 @@ GameInitResult BuildDemoScene() {
       .texture_key = "player_albedo.png",
       .visible = true});
   result.world.add(result.player, components::RigidbodyComponent{});
-  result.world.add(result.player, components::ColliderComponent{
-      .shape = components::ColliderComponent::Shape::Capsule,
+  result.world.add(result.player, components::CapsuleColliderComponent{
+      .center = {},
       .radius = 0.4f,
       .height = 1.6f});
   result.world.add(result.player, components::VisibilityComponent{

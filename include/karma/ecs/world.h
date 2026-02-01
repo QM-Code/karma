@@ -13,6 +13,7 @@
 
 #include "karma/components/rigidbody.h"
 #include "karma/components/transform.h"
+#include "karma/components/tag.h"
 
 namespace karma::ecs {
 
@@ -24,26 +25,23 @@ class World {
 
   bool isAlive(Entity entity) const { return registry_.isAlive(entity); }
 
+  const std::vector<Entity>& entities() const { return registry_.entities(); }
+
+  void setName(Entity entity, std::string name) {
+    if (has<components::TagComponent>(entity)) {
+      auto& tag = get<components::TagComponent>(entity);
+      tag.name = std::move(name);
+    } else {
+      add(entity, components::TagComponent{.name = std::move(name)});
+    }
+  }
+
   template <typename T>
   void add(Entity entity, T component) {
     if constexpr (HasValidate<T>::value) {
       T::Validate(*this, entity);
     }
-    if constexpr (std::is_same_v<T, components::TransformComponent>) {
-      if (has<components::RigidbodyComponent>(entity)) {
-        const auto& body = get<components::RigidbodyComponent>(entity);
-        component.setHasPhysics(true);
-        component.setPhysicsWriteWarning(!body.is_kinematic);
-      }
-    }
     getStorage<T>().data.add(entity, std::move(component));
-    if constexpr (std::is_same_v<T, components::RigidbodyComponent>) {
-      if (has<components::TransformComponent>(entity)) {
-        auto& transform = get<components::TransformComponent>(entity);
-        transform.setHasPhysics(true);
-        transform.setPhysicsWriteWarning(!component.is_kinematic);
-      }
-    }
   }
 
   template <typename T>
@@ -64,13 +62,6 @@ class World {
   template <typename T>
   void remove(Entity entity) {
     getStorage<T>().data.remove(entity);
-    if constexpr (std::is_same_v<T, components::RigidbodyComponent>) {
-      if (has<components::TransformComponent>(entity)) {
-        auto& transform = get<components::TransformComponent>(entity);
-        transform.setHasPhysics(false);
-        transform.setPhysicsWriteWarning(true);
-      }
-    }
   }
 
   template <typename T>

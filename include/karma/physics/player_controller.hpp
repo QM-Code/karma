@@ -22,7 +22,9 @@ public:
     glm::vec3 getVelocity() const;
     glm::vec3 getAngularVelocity() const;
     glm::vec3 getForwardVector() const;
+    glm::vec3 getCenter() const { return center_; }
     void setHalfExtents(const glm::vec3& extents);
+    void setCenter(const glm::vec3& center);
 
     void update(float dt);
 
@@ -37,6 +39,7 @@ public:
 
 private:
     std::unique_ptr<karma::physics_backend::PhysicsPlayerControllerBackend> backend_;
+    glm::vec3 center_{0.0f, 0.0f, 0.0f};
 };
 
 } // namespace karma::physics

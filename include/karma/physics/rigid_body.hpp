@@ -30,6 +30,9 @@ public:
     void setRotation(const glm::quat& rotation);
     void setVelocity(const glm::vec3& velocity);
     void setAngularVelocity(const glm::vec3& angularVelocity);
+    void setKinematic(bool kinematic);
+    void setUseGravity(bool useGravity);
+    void setTrigger(bool trigger);
 
     bool isGrounded(const glm::vec3& dimensions) const;
 

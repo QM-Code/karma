@@ -1,6 +1,7 @@
 #include "karma/physics/backends/jolt/rigid_body_jolt.hpp"
 #include "karma/physics/backends/jolt/physics_world_jolt.hpp"
 #include <Jolt/Physics/Body/Body.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -81,6 +82,32 @@ void PhysicsRigidBodyJolt::setAngularVelocity(const glm::vec3& angularVelocity) 
     BodyInterface& bi = world_->physicsSystem()->GetBodyInterface();
     bi.SetAngularVelocity(*body_, Vec3(angularVelocity.x, angularVelocity.y, angularVelocity.z));
     bi.ActivateBody(*body_);
+}
+
+void PhysicsRigidBodyJolt::setKinematic(bool kinematic) {
+    if (!world_ || !body_.has_value()) return;
+    BodyInterface& bi = world_->physicsSystem()->GetBodyInterface();
+    const EMotionType motion = kinematic ? EMotionType::Kinematic : EMotionType::Dynamic;
+    bi.SetMotionType(*body_, motion, EActivation::Activate);
+}
+
+void PhysicsRigidBodyJolt::setUseGravity(bool useGravity) {
+    if (!world_ || !body_.has_value()) return;
+    BodyInterface& bi = world_->physicsSystem()->GetBodyInterface();
+    bi.SetGravityFactor(*body_, useGravity ? 1.0f : 0.0f);
+    bi.ActivateBody(*body_);
+}
+
+void PhysicsRigidBodyJolt::setTrigger(bool trigger) {
+    if (!world_ || !body_.has_value()) return;
+    {
+        BodyLockWrite lock(world_->physicsSystem()->GetBodyLockInterface(), *body_);
+        if (!lock.Succeeded()) {
+            return;
+        }
+        lock.GetBody().SetIsSensor(trigger);
+    }
+    world_->physicsSystem()->GetBodyInterface().ActivateBody(*body_);
 }
 
 bool PhysicsRigidBodyJolt::isGrounded(const glm::vec3& dimensions) const {

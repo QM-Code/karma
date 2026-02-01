@@ -48,6 +48,7 @@ class RenderSystem {
   std::unordered_map<std::string, MeshBounds> bounds_cache_;
   std::string last_env_path_;
   float last_env_intensity_ = -1.0f;
+  bool last_env_draw_skybox_ = false;
   bool warned_no_camera_ = false;
 };
 

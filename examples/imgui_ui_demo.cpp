@@ -393,7 +393,8 @@ class DemoGame : public app::GameInterface {
     auto environment = world->createEntity();
     world->add(environment, components::EnvironmentComponent{
         .environment_map = "/home/quinn/Documents/karma/examples/assets/demo_env.png",
-        .intensity = 0.6f});
+        .intensity = 0.6f,
+        .draw_skybox = true});
   }
 
   void onFixedUpdate(float /*dt*/) override {}

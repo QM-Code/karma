@@ -49,10 +49,12 @@ renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
 
   if (device_ && !mesh.vertices.empty()) {
     const auto interleaved = buildInterleavedVertices(mesh);
+    constexpr Diligent::Uint32 kVertexStride = static_cast<Diligent::Uint32>(12 * sizeof(float));
     Diligent::BufferDesc vb_desc{};
     vb_desc.Name = "Karma VB";
     vb_desc.Usage = Diligent::USAGE_IMMUTABLE;
     vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
+    vb_desc.ElementByteStride = kVertexStride;
     vb_desc.Size = static_cast<Diligent::Uint32>(interleaved.size() * sizeof(float));
     Diligent::BufferData vb_data{interleaved.data(), vb_desc.Size};
     device_->CreateBuffer(vb_desc, &vb_data, &record.vertex_buffer);
@@ -140,10 +142,12 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
 
   if (device_ && !combined.vertices.empty()) {
     const auto interleaved = buildInterleavedVertices(combined);
+    constexpr Diligent::Uint32 kVertexStride = static_cast<Diligent::Uint32>(12 * sizeof(float));
     Diligent::BufferDesc vb_desc{};
     vb_desc.Name = "Karma VB";
     vb_desc.Usage = Diligent::USAGE_IMMUTABLE;
     vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
+    vb_desc.ElementByteStride = kVertexStride;
     vb_desc.Size = static_cast<Diligent::Uint32>(interleaved.size() * sizeof(float));
     Diligent::BufferData vb_data{interleaved.data(), vb_desc.Size};
     device_->CreateBuffer(vb_desc, &vb_data, &record.vertex_buffer);
@@ -376,6 +380,12 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
   if (pipeline_state_) {
     pipeline_state_->CreateShaderResourceBinding(&record.srb, true);
     if (record.srb) {
+      if (!env_irradiance_srv_ || !env_prefilter_srv_ || !env_brdf_lut_srv_) {
+        spdlog::warn("Karma: Material SRB env defaults irr={} pre={} brdf={}",
+                     env_irradiance_srv_ ? "ok" : "null",
+                     env_prefilter_srv_ ? "ok" : "null",
+                     env_brdf_lut_srv_ ? "ok" : "null");
+      }
       if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
         var->Set(sampler_color_);
       }
@@ -396,6 +406,15 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
       }
       if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
         var->Set(record.emissive_srv);
+      }
+      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+        var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+      }
+      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+        var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+      }
+      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+        var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
       }
     }
   }

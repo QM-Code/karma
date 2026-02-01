@@ -13,7 +13,6 @@
 
 #include "karma/components/camera.h"
 #include "karma/components/environment.h"
-#include "karma/components/skybox.h"
 #include "karma/components/light.h"
 
 namespace karma::renderer {
@@ -209,35 +208,28 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   device_.setDirectionalLight(light);
 
   bool env_found = false;
-  for (const ecs::Entity entity : world.view<components::SkyboxComponent>()) {
-    const auto& skybox = world.get<components::SkyboxComponent>(entity);
-    if (!skybox.enabled) {
+  for (const ecs::Entity entity : world.view<components::EnvironmentComponent>()) {
+    const auto& env = world.get<components::EnvironmentComponent>(entity);
+    if (!env.enabled) {
       continue;
     }
-    if (skybox.environment_map != last_env_path_ || skybox.intensity != last_env_intensity_) {
-      device_.setEnvironmentMap(skybox.environment_map, skybox.intensity);
-      last_env_path_ = skybox.environment_map;
-      last_env_intensity_ = skybox.intensity;
+    if (env.environment_map != last_env_path_ ||
+        env.intensity != last_env_intensity_ ||
+        env.draw_skybox != last_env_draw_skybox_) {
+      device_.setEnvironmentMap(env.environment_map, env.intensity, env.draw_skybox);
+      last_env_path_ = env.environment_map;
+      last_env_intensity_ = env.intensity;
+      last_env_draw_skybox_ = env.draw_skybox;
     }
     env_found = true;
     break;
   }
-  if (!env_found) {
-    for (const ecs::Entity entity : world.view<components::EnvironmentComponent>()) {
-      const auto& env = world.get<components::EnvironmentComponent>(entity);
-      if (env.environment_map != last_env_path_ || env.intensity != last_env_intensity_) {
-        device_.setEnvironmentMap(env.environment_map, env.intensity);
-        last_env_path_ = env.environment_map;
-        last_env_intensity_ = env.intensity;
-      }
-      env_found = true;
-      break;
-    }
-  }
-  if (!env_found && (!last_env_path_.empty() || last_env_intensity_ >= 0.0f)) {
-    device_.setEnvironmentMap({}, 0.0f);
+  if (!env_found &&
+      (!last_env_path_.empty() || last_env_intensity_ >= 0.0f || last_env_draw_skybox_)) {
+    device_.setEnvironmentMap({}, 0.0f, false);
     last_env_path_.clear();
     last_env_intensity_ = -1.0f;
+    last_env_draw_skybox_ = false;
   }
 
   const FrustumPlanes frustum = extractFrustumPlanes(projection * view);

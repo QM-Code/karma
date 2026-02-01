@@ -66,7 +66,9 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   initSubsystems();
   if (graphics_) {
     graphics_->setGenerateMips(config_.generate_mipmaps);
-    graphics_->setEnvironmentMap(config_.environment_map, config_.environment_intensity);
+    graphics_->setEnvironmentMap(config_.environment_map,
+                                 config_.environment_intensity,
+                                 config_.environment_draw_skybox);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
     graphics_->setShadowSettings(config_.shadow_bias, config_.shadow_map_size,
                                  config_.shadow_pcf_radius);

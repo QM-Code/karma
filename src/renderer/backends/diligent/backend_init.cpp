@@ -306,11 +306,12 @@ float4 main(PSInput input) : SV_TARGET
             }
         }
     }
-    float3 lit = base_color * g_LightColor.rgb * (0.2 + ndotl * 0.8 * shadow);
+    float3 lit = base_color * g_LightColor.rgb * (ndotl * shadow);
     lit += spec_color * spec * g_LightColor.rgb * shadow;
     occlusion = lerp(1.0, occlusion, g_PbrParams.z);
     lit *= occlusion;
-    if (g_EnvParams.x > 0.0)
+    const bool env_debug = g_EnvParams.z > 0.5;
+    if (g_EnvParams.x > 0.0 || env_debug)
     {
         float3 env_diffuse = g_IrradianceTex.Sample(g_SamplerColor, n).rgb * g_EnvParams.x;
         float3 r = reflect(-v, n);
@@ -321,6 +322,45 @@ float4 main(PSInput input) : SV_TARGET
         float3 env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
         lit += env_diffuse * base_color * occlusion;
         lit += env_spec * g_EnvParams.x;
+        if (env_debug)
+        {
+            if (g_EnvParams.z < 1.5)
+            {
+                return float4(env_diffuse, 1.0);
+            }
+            if (g_EnvParams.z < 2.5)
+            {
+                return float4(prefiltered, 1.0);
+            }
+            if (g_EnvParams.z < 3.5)
+            {
+                return float4(brdf.x, brdf.y, 0.0, 1.0);
+            }
+            if (g_EnvParams.z < 4.5)
+            {
+                return float4(g_EnvParams.xxx, 1.0);
+            }
+            if (g_EnvParams.z < 5.5)
+            {
+                return float4(g_IrradianceTex.Sample(g_SamplerColor, float3(0.0, 1.0, 0.0)).rgb, 1.0);
+            }
+            if (g_EnvParams.z < 6.5)
+            {
+                return float4(g_PrefilterTex.SampleLevel(g_SamplerColor, float3(0.0, 1.0, 0.0), 0.0).rgb, 1.0);
+            }
+            if (g_EnvParams.z < 7.5)
+            {
+                return float4(base_tex.rgb, 1.0);
+            }
+            if (g_EnvParams.z < 8.5)
+            {
+                return float4(input.UV, 0.0, 1.0);
+            }
+            if (g_EnvParams.z < 9.5)
+            {
+                return float4(normal_tex.xyz * 0.5 + 0.5, 1.0);
+            }
+        }
     }
     lit += emissive;
     return float4(lit, g_BaseColorFactor.a * base_tex.a);
@@ -427,9 +467,9 @@ VSOutput main(VSInput input)
   Diligent::ShaderResourceVariableDesc vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
@@ -522,18 +562,22 @@ VSOutput main(VSInput input)
 
   if (pipeline_state_) {
     if (env_srv_) {
-      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
-        var->Set(env_srv_);
-      }
-      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
-        var->Set(env_srv_);
+      if (default_material_srb_) {
+        if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+          var->Set(env_srv_);
+        }
+        if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+          var->Set(env_srv_);
+        }
       }
     } else {
       spdlog::warn("Karma: Default environment texture failed to create.");
     }
     if (default_base_color_) {
-      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-        var->Set(default_base_color_);
+      if (default_material_srb_) {
+        if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+          var->Set(default_base_color_);
+        }
       }
     }
     if (shadow_map_srv_) {

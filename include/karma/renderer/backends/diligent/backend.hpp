@@ -66,7 +66,8 @@ class DiligentBackend final : public Backend {
   void setCamera(const renderer::CameraData& camera) override;
   void setCameraActive(bool active) override;
   void setDirectionalLight(const renderer::DirectionalLightData& light) override;
-  void setEnvironmentMap(const std::filesystem::path& path, float intensity) override;
+  void setEnvironmentMap(const std::filesystem::path& path, float intensity,
+                         bool draw_skybox) override;
   void setAnisotropy(bool enabled, int level) override;
   void setGenerateMips(bool enabled) override;
   void setShadowSettings(float bias, int map_size, int pcf_radius) override;
@@ -229,8 +230,7 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> env_irradiance_srb_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> env_prefilter_pso_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> env_prefilter_srb_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> env_brdf_pso_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> env_brdf_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> brdf_lut_pso_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> skybox_pso_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> skybox_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cube_vb_;
@@ -258,6 +258,10 @@ class DiligentBackend final : public Backend {
   renderer::DirectionalLightData directional_light_{};
   std::filesystem::path environment_map_;
   float environment_intensity_ = 0.0f;
+  bool draw_skybox_ = true;
+  int env_debug_mode_ = 0;
+  bool warned_env_debug_ = false;
+  bool warned_env_bind_missing_ = false;
   bool anisotropy_enabled_ = false;
   int anisotropy_level_ = 1;
   bool generate_mips_enabled_ = false;

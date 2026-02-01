@@ -34,6 +34,7 @@ struct EngineConfig {
   bool cursor_visible = true;
   std::filesystem::path environment_map;
   float environment_intensity = 0.0f;
+  bool environment_draw_skybox = true;
   bool enable_anisotropy = false;
   int anisotropy_level = 1;
   bool generate_mipmaps = false;

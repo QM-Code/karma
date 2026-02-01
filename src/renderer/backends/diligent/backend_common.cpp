@@ -69,7 +69,7 @@ LoadedImage loadImageFromMemory(const unsigned char* data, size_t size) {
   int w = 0;
   int h = 0;
   int comp = 0;
-  stbi_set_flip_vertically_on_load(0);
+  stbi_set_flip_vertically_on_load(1);
   stbi_uc* decoded = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
   if (!decoded) {
     return image;
@@ -250,6 +250,9 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
     : window_(&window) {
   if (const char* env = std::getenv("KARMA_SHADOW_DEBUG")) {
     shadow_debug_ = std::string(env) != "0";
+  }
+  if (const char* env = std::getenv("KARMA_ENV_DEBUG")) {
+    env_debug_mode_ = std::atoi(env);
   }
   int fb_width = 800;
   int fb_height = 600;

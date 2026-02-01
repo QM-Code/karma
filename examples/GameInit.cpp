@@ -4,10 +4,10 @@
 #include "karma/components/audio_source.h"
 #include "karma/components/camera.h"
 #include "karma/components/collider.h"
+#include "karma/components/environment.h"
 #include "karma/components/layers.h"
 #include "karma/components/mesh.h"
 #include "karma/components/rigidbody.h"
-#include "karma/components/skybox.h"
 #include "karma/components/tag.h"
 #include "karma/components/transform.h"
 #include "karma/components/visibility.h"
@@ -50,11 +50,12 @@ GameInitResult BuildDemoScene() {
   result.world.add(result.camera, components::CameraComponent{
       .is_primary = true});
 
-  // Example skybox entity (optional)
+  // Example environment entity (optional)
   auto sky = result.world.createEntity();
-  result.world.add(sky, components::SkyboxComponent{
+  result.world.add(sky, components::EnvironmentComponent{
       .environment_map = "/home/quinn/Documents/karma/examples/assets/demo_env.png",
-      .intensity = 0.6f});
+      .intensity = 0.6f,
+      .draw_skybox = true});
 
   // Scene nodes (hierarchy)
   auto player_node = result.scene.createNode(result.player);

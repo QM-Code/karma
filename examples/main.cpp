@@ -21,7 +21,7 @@ class DemoGame : public app::GameInterface {
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/world.glb"});
     world->add(world_entity, components::MeshColliderComponent{});
-
+    
     auto tank = world->createEntity();
     world->setName(tank, "Tank");
     world->add(tank, components::TransformComponent{});

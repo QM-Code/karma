@@ -77,7 +77,7 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
     }
     const auto& collider = world.get<components::BoxColliderComponent>(entity);
     const math::Vec3 collider_center = collider.center;
-    const auto& transform = world.get<components::TransformComponent>(entity);
+    auto& transform = world.get<components::TransformComponent>(entity);
     const math::Vec3 raw_half_extents = collider.half_extents;
     const math::Vec3 scale = transform.getScale();
     const math::Vec3 collider_half_extents{

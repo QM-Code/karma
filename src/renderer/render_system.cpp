@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include "karma/components/camera.h"
 #include "karma/components/collider.h"
@@ -142,6 +143,48 @@ renderer::DirectionalLightData toDirectionalLight(const components::LightCompone
   return out;
 }
 
+renderer::LightData toLightData(const components::LightComponent& light,
+                                const components::TransformComponent& transform) {
+  renderer::LightData out{};
+  const glm::quat rot = toGlm(transform.getRotation());
+  const glm::mat3 basis = glm::mat3_cast(rot);
+  glm::vec3 dir = basis * glm::vec3(0.0f, 0.0f, -1.0f);
+  if (glm::length(dir) < 1e-5f) {
+    dir = glm::vec3(0.0f, -1.0f, 0.0f);
+  } else {
+    dir = glm::normalize(dir);
+  }
+  out.position = toGlm(transform.getPosition());
+  out.direction = dir;
+  out.color = light.color;
+  out.intensity = light.intensity;
+  out.range = std::max(light.range, 0.0f);
+
+  const float inner_rad = glm::radians(light.inner_cone_degrees);
+  const float outer_rad = glm::radians(light.outer_cone_degrees);
+  float inner_cos = std::cos(inner_rad);
+  float outer_cos = std::cos(outer_rad);
+  if (inner_cos < outer_cos) {
+    std::swap(inner_cos, outer_cos);
+  }
+  out.inner_cone_cos = inner_cos;
+  out.outer_cone_cos = outer_cos;
+
+  switch (light.type) {
+    case components::LightComponent::Type::Directional:
+      out.type = renderer::LightType::Directional;
+      out.range = 0.0f;
+      break;
+    case components::LightComponent::Type::Point:
+      out.type = renderer::LightType::Point;
+      break;
+    case components::LightComponent::Type::Spot:
+      out.type = renderer::LightType::Spot;
+      break;
+  }
+  return out;
+}
+
 glm::mat4 toTransform(const components::TransformComponent& transform) {
   const glm::vec3 pos = toGlm(transform.getPosition());
   const glm::quat rot = toGlm(transform.getRotation());
@@ -265,6 +308,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   device_.setCameraActive(true);
 
   renderer::DirectionalLightData light{};
+  std::vector<renderer::LightData> lights;
+  lights.reserve(16);
   bool has_light = false;
   static bool warned_missing_light_transform = false;
   if (!warned_missing_light_transform) {
@@ -279,13 +324,13 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   world.forEach<components::LightComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
     const auto& light_component = world.get<components::LightComponent>(entity);
-    if (light_component.type != components::LightComponent::Type::Directional) {
-      return true;
-    }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    light = toDirectionalLight(light_component, transform);
-    has_light = true;
-    return false;
+    lights.push_back(toLightData(light_component, transform));
+    if (!has_light && light_component.type == components::LightComponent::Type::Directional) {
+      light = toDirectionalLight(light_component, transform);
+      has_light = true;
+    }
+    return true;
   });
   if (!has_light) {
     light.direction = glm::vec3(0.3f, -1.0f, 0.2f);
@@ -293,6 +338,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     light.intensity = 1.0f;
   }
   device_.setDirectionalLight(light);
+  device_.setLights(lights);
 
   bool env_found = false;
   world.forEach<components::EnvironmentComponent>([&](const ecs::Entity entity) {

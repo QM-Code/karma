@@ -6,6 +6,7 @@
 #include <Graphics/GraphicsTools/interface/RenderStateCache.hpp>
 #include <filesystem>
 #include <cstdint>
+#include <array>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -22,6 +23,7 @@ class IRenderDevice;
 class IDeviceContext;
 class ISwapChain;
 class IBuffer;
+class IBufferView;
 class IPipelineState;
 class IShaderResourceBinding;
 class ITexture;
@@ -70,6 +72,7 @@ class DiligentBackend final : public Backend {
   void setCamera(const renderer::CameraData& camera) override;
   void setCameraActive(bool active) override;
   void setDirectionalLight(const renderer::DirectionalLightData& light) override;
+  void setLights(const std::vector<renderer::LightData>& lights) override;
   void setEnvironmentMap(const std::filesystem::path& path, float intensity,
                          bool draw_skybox) override;
   void setAnisotropy(bool enabled, int level) override;
@@ -198,9 +201,12 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_color_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_data_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> shadow_sampler_;
+  static constexpr int kShadowCascadeCount = 4;
   Diligent::RefCntAutoPtr<Diligent::ITexture> shadow_map_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_dsv_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, kShadowCascadeCount>
+      shadow_map_dsv_cascades_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_scissor_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_;
@@ -213,6 +219,17 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_ib_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_cb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> instance_vb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> forward_plus_light_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> forward_plus_tile_count_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> forward_plus_tile_index_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_light_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_count_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_index_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_count_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_index_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> forward_plus_compute_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> forward_plus_compute_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> forward_plus_compute_cb_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> ui_sampler_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_no_depth_;
@@ -275,6 +292,7 @@ class DiligentBackend final : public Backend {
   bool camera_active_ = true;
   float clear_color_[4] = {0.2f, 0.6f, 1.0f, 1.0f};
   renderer::DirectionalLightData directional_light_{};
+  std::vector<renderer::LightData> lights_;
   std::filesystem::path environment_map_;
   float environment_intensity_ = 0.0f;
   bool draw_skybox_ = true;
@@ -291,10 +309,16 @@ class DiligentBackend final : public Backend {
   float shadow_raster_slope_bias_ = 0.0f;
   float shadow_receiver_bias_scale_ = 0.75f;
   float shadow_normal_bias_scale_ = 1.0f;
+  float shadow_split_lambda_ = 0.7f;
   size_t ui_vb_size_ = 0;
   size_t ui_ib_size_ = 0;
   size_t instance_vb_capacity_ = 0;
+  size_t forward_plus_light_capacity_ = 0;
+  size_t forward_plus_tile_count_capacity_ = 0;
+  size_t forward_plus_tile_index_capacity_ = 0;
   size_t line_vb_size_ = 0;
+  int forward_plus_tile_size_ = 16;
+  int forward_plus_max_lights_per_tile_ = 128;
   bool warned_line_thickness_ = false;
   int current_width_ = 0;
   int current_height_ = 0;

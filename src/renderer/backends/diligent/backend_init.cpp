@@ -45,15 +45,21 @@ cbuffer Constants
     float4x4 g_Model;
     float4x4 g_LightViewProj;
     float4x4 g_ShadowUVProj;
+    float4x4 g_ShadowCascadeUVProj[4];
     float4 g_BaseColorFactor;
     float4 g_EmissiveFactor;
     float4 g_PbrParams;
     float4 g_EnvParams;
     float4 g_ShadowParams;
     float4 g_ShadowBiasParams;
+    float4 g_ShadowCascadeSplits;
+    float4 g_ShadowCascadeWorldTexel;
+    float4 g_ShadowCascadeParams;
     float4 g_LightDir;
     float4 g_LightColor;
     float4 g_CameraPos;
+    float4 g_CameraForward;
+    float4 g_ForwardPlusParams;
 };
 
 struct VSInput
@@ -98,23 +104,36 @@ void DiligentBackend::recreateShadowMap() {
   shadow_map_tex_.Release();
   shadow_map_srv_.Release();
   shadow_map_dsv_.Release();
+  for (auto& dsv : shadow_map_dsv_cascades_) {
+    dsv.Release();
+  }
 
   Diligent::TextureDesc shadow_desc{};
   shadow_desc.Name = "Karma Shadow Map";
-  shadow_desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+  shadow_desc.Type = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
   shadow_desc.Width = static_cast<Diligent::Uint32>(shadow_map_size_);
   shadow_desc.Height = static_cast<Diligent::Uint32>(shadow_map_size_);
+  shadow_desc.ArraySize = static_cast<Diligent::Uint32>(kShadowCascadeCount);
   shadow_desc.MipLevels = 1;
   shadow_desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
   shadow_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
   device_->CreateTexture(shadow_desc, nullptr, &shadow_map_tex_);
   if (shadow_map_tex_) {
-    if (auto* dsv = shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL)) {
-      shadow_map_dsv_ = dsv;
-    }
     if (auto* srv = shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)) {
       shadow_map_srv_ = srv;
     }
+    for (int cascade = 0; cascade < kShadowCascadeCount; ++cascade) {
+      Diligent::TextureViewDesc dsv_desc{};
+      dsv_desc.ViewType = Diligent::TEXTURE_VIEW_DEPTH_STENCIL;
+      dsv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
+      dsv_desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
+      dsv_desc.MostDetailedMip = 0;
+      dsv_desc.NumMipLevels = 1;
+      dsv_desc.FirstArraySlice = static_cast<Diligent::Uint32>(cascade);
+      dsv_desc.NumArraySlices = 1;
+      shadow_map_tex_->CreateView(dsv_desc, &shadow_map_dsv_cascades_[cascade]);
+    }
+    shadow_map_dsv_ = shadow_map_dsv_cascades_[0];
   } else {
   }
   if (!shadow_map_srv_ || !shadow_map_dsv_) {
@@ -292,15 +311,21 @@ cbuffer Constants
     float4x4 g_Model;
     float4x4 g_LightViewProj;
     float4x4 g_ShadowUVProj;
+    float4x4 g_ShadowCascadeUVProj[4];
     float4 g_BaseColorFactor;
     float4 g_EmissiveFactor;
     float4 g_PbrParams;
     float4 g_EnvParams;
     float4 g_ShadowParams;
     float4 g_ShadowBiasParams;
+    float4 g_ShadowCascadeSplits;
+    float4 g_ShadowCascadeWorldTexel;
+    float4 g_ShadowCascadeParams;
     float4 g_LightDir;
     float4 g_LightColor;
     float4 g_CameraPos;
+    float4 g_CameraForward;
+    float4 g_ForwardPlusParams;
 };
 
 struct VSInput
@@ -349,15 +374,21 @@ cbuffer Constants
     float4x4 g_Model;
     float4x4 g_LightViewProj;
     float4x4 g_ShadowUVProj;
+    float4x4 g_ShadowCascadeUVProj[4];
     float4 g_BaseColorFactor;
     float4 g_EmissiveFactor;
     float4 g_PbrParams;
     float4 g_EnvParams;
     float4 g_ShadowParams;
     float4 g_ShadowBiasParams;
+    float4 g_ShadowCascadeSplits;
+    float4 g_ShadowCascadeWorldTexel;
+    float4 g_ShadowCascadeParams;
     float4 g_LightDir;
     float4 g_LightColor;
     float4 g_CameraPos;
+    float4 g_CameraForward;
+    float4 g_ForwardPlusParams;
 };
 
 Texture2D g_BaseColorTex;
@@ -368,10 +399,22 @@ Texture2D g_EmissiveTex;
 TextureCube g_IrradianceTex;
 TextureCube g_PrefilterTex;
 Texture2D g_BRDFLUT;
-Texture2D<float> g_ShadowMap;
+Texture2DArray<float> g_ShadowMap;
 SamplerState g_SamplerColor;
 SamplerState g_SamplerData;
 SamplerComparisonState g_ShadowSampler;
+
+struct ForwardPlusLight
+{
+    float4 position_range;
+    float4 direction_type;
+    float4 color_intensity;
+    float4 spot_params;
+};
+
+StructuredBuffer<ForwardPlusLight> g_ForwardPlusLights;
+StructuredBuffer<uint> g_ForwardPlusTileLightCounts;
+StructuredBuffer<uint> g_ForwardPlusTileLightIndices;
 
 struct PSInput
 {
@@ -382,6 +425,70 @@ struct PSInput
     float3 WorldPos : TEXCOORD2;
     bool FrontFace : SV_IsFrontFace;
 };
+
+float SampleCascadeShadow(uint cascade_idx,
+                          float3 world_pos,
+                          float3 geom_n,
+                          float3 l_dir,
+                          float slope,
+                          float normal_scale,
+                          float receiver_scale)
+{
+    float shadow = 1.0;
+    float world_texel = max(g_ShadowCascadeWorldTexel[cascade_idx], 0.0);
+    float normal_offset_ws = world_texel * normal_scale * (0.4 + 1.2 * slope);
+    float light_offset_ws = world_texel * receiver_scale * (0.03 + 0.07 * slope);
+    float3 shadow_world_pos = world_pos + geom_n * normal_offset_ws + l_dir * light_offset_ws;
+    float4 shadow_uv_depth = mul(g_ShadowCascadeUVProj[cascade_idx], float4(shadow_world_pos, 1.0));
+    shadow_uv_depth.xyz /= max(shadow_uv_depth.w, 1e-7);
+    float2 shadow_uv = shadow_uv_depth.xy;
+    float shadow_depth = max(shadow_uv_depth.z, 1e-7);
+    if (shadow_uv.x >= 0.0 && shadow_uv.x <= 1.0 &&
+        shadow_uv.y >= 0.0 && shadow_uv.y <= 1.0 &&
+        shadow_depth >= 0.0 && shadow_depth <= 1.0)
+    {
+        int radius = (int)g_ShadowParams.z;
+        radius = clamp(radius, 0, 4);
+        float const_bias = max(g_ShadowParams.y, 0.0);
+        float receiver_plane_bias = abs(ddx(shadow_depth)) + abs(ddy(shadow_depth));
+        float texel_size = max(g_ShadowParams.w, 0.0);
+        float slope_texel_bias = texel_size * normal_scale * (0.45 + 0.9 * slope);
+        float receiver_bias = receiver_plane_bias * (0.5 * receiver_scale);
+        float bias = const_bias + receiver_bias + slope_texel_bias;
+        bias = min(bias, 0.01);
+        if (radius == 0)
+        {
+            shadow = g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
+                                                    float3(shadow_uv, (float)cascade_idx),
+                                                    shadow_depth - bias);
+        }
+        else
+        {
+            float2 texel = float2(g_ShadowParams.w, g_ShadowParams.w);
+            float sum = 0.0;
+            int count = 0;
+            [unroll]
+            for (int y = -4; y <= 4; ++y)
+            {
+                [unroll]
+                for (int x = -4; x <= 4; ++x)
+                {
+                    if (abs(x) <= radius && abs(y) <= radius)
+                    {
+                        float2 offset = float2((float)x, (float)y) * texel;
+                        sum += g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
+                                                              float3(shadow_uv + offset,
+                                                                     (float)cascade_idx),
+                                                              shadow_depth - bias);
+                        count += 1;
+                    }
+                }
+            }
+            shadow = (count > 0) ? (sum / count) : 1.0;
+        }
+    }
+    return shadow;
+}
 
 float4 main(PSInput input) : SV_TARGET
 {
@@ -394,8 +501,8 @@ float4 main(PSInput input) : SV_TARGET
     normal_tex.xy *= g_PbrParams.w;
     normal_tex = normalize(normal_tex);
     n = normalize(normal_tex.x * t + normal_tex.y * b + normal_tex.z * n);
-    float3 l = normalize(-g_LightDir.xyz);
-    float ndotl = max(dot(n, l), 0.0);
+    float3 l_dir = normalize(-g_LightDir.xyz);
+    float ndotl = max(dot(n, l_dir), 0.0);
     float4 base_tex = g_BaseColorTex.Sample(g_SamplerColor, input.UV);
     float3 emissive_tex = g_EmissiveTex.Sample(g_SamplerColor, input.UV).rgb;
     float occlusion = g_OcclusionTex.Sample(g_SamplerData, input.UV).r;
@@ -407,7 +514,7 @@ float4 main(PSInput input) : SV_TARGET
     float3 emissive = g_EmissiveFactor.rgb * emissive_tex;
 
     float3 v = normalize(g_CameraPos.xyz - input.WorldPos);
-    float3 h = normalize(v + l);
+    float3 h = normalize(v + l_dir);
     float ndoth = max(dot(n, h), 0.0);
     float rough = max(roughness, 0.05);
     float shininess = 2.0 / (rough * rough) - 2.0;
@@ -417,66 +524,103 @@ float4 main(PSInput input) : SV_TARGET
     float shadow = 1.0;
     if (g_ShadowParams.x > 0.5)
     {
-        float ndotl_shadow = saturate(dot(geom_n, l));
+        float view_depth = dot(input.WorldPos - g_CameraPos.xyz, g_CameraForward.xyz);
+        view_depth = max(view_depth, 0.0);
+        uint cascade_idx = 0u;
+        if (view_depth > g_ShadowCascadeSplits.x) cascade_idx = 1u;
+        if (view_depth > g_ShadowCascadeSplits.y) cascade_idx = 2u;
+        if (view_depth > g_ShadowCascadeSplits.z) cascade_idx = 3u;
+
+        float ndotl_shadow = saturate(dot(geom_n, l_dir));
         float slope = 1.0 - ndotl_shadow;
-        float world_texel = max(g_ShadowBiasParams.z, 0.0);
         float normal_scale = max(g_ShadowBiasParams.y, 0.0);
         float receiver_scale = max(g_ShadowBiasParams.x, 0.0);
-        // Offset the receiver in world space before projection. Keep the
-        // direction-light offset mild and rely primarily on normal offset.
-        float normal_offset_ws = world_texel * normal_scale * (0.4 + 1.2 * slope);
-        float light_offset_ws = world_texel * receiver_scale * (0.03 + 0.07 * slope);
-        float3 shadow_world_pos = input.WorldPos + geom_n * normal_offset_ws + l * light_offset_ws;
-        float4 shadow_uv_depth = mul(g_ShadowUVProj, float4(shadow_world_pos, 1.0));
-        shadow_uv_depth.xyz /= max(shadow_uv_depth.w, 1e-7);
-        float2 shadow_uv = shadow_uv_depth.xy;
-        float shadow_depth = max(shadow_uv_depth.z, 1e-7);
-        if (shadow_uv.x >= 0.0 && shadow_uv.x <= 1.0 &&
-            shadow_uv.y >= 0.0 && shadow_uv.y <= 1.0 &&
-            shadow_depth >= 0.0 && shadow_depth <= 1.0)
+
+        shadow = SampleCascadeShadow(cascade_idx,
+                                     input.WorldPos,
+                                     geom_n,
+                                     l_dir,
+                                     slope,
+                                     normal_scale,
+                                     receiver_scale);
+
+        if (cascade_idx < 3u)
         {
-            int radius = (int)g_ShadowParams.z;
-            radius = clamp(radius, 0, 4);
-            float const_bias = max(g_ShadowParams.y, 0.0);
-            float receiver_plane_bias = abs(ddx(shadow_depth)) + abs(ddy(shadow_depth));
-            float texel_size = max(g_ShadowParams.w, 0.0);
-            float slope_texel_bias = texel_size * normal_scale * (0.45 + 0.9 * slope);
-            float receiver_bias = receiver_plane_bias * (0.5 * receiver_scale);
-            float bias = const_bias + receiver_bias + slope_texel_bias;
-            bias = min(bias, 0.01);
-            if (radius == 0)
+            float split_depth = g_ShadowCascadeSplits[cascade_idx];
+            float transition_fraction = max(g_ShadowCascadeParams.x, 0.0);
+            float transition_range = max(split_depth * transition_fraction, 0.25);
+            float blend = saturate((view_depth - (split_depth - transition_range)) /
+                                   max(transition_range, 1e-4));
+            if (blend > 0.0)
             {
-                shadow = g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
-                                                        shadow_uv,
-                                                        shadow_depth - bias);
-            }
-            else
-            {
-                float2 texel = float2(g_ShadowParams.w, g_ShadowParams.w);
-                float sum = 0.0;
-                int count = 0;
-                [unroll]
-                for (int y = -4; y <= 4; ++y)
-                {
-                    [unroll]
-                    for (int x = -4; x <= 4; ++x)
-                    {
-                        if (abs(x) <= radius && abs(y) <= radius)
-                        {
-                            float2 offset = float2((float)x, (float)y) * texel;
-                            sum += g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
-                                                                  shadow_uv + offset,
-                                                                  shadow_depth - bias);
-                            count += 1;
-                        }
-                    }
-                }
-                shadow = (count > 0) ? (sum / count) : 1.0;
+                float shadow_next = SampleCascadeShadow(cascade_idx + 1u,
+                                                        input.WorldPos,
+                                                        geom_n,
+                                                        l_dir,
+                                                        slope,
+                                                        normal_scale,
+                                                        receiver_scale);
+                shadow = lerp(shadow, shadow_next, blend);
             }
         }
     }
     float3 lit = base_color * g_LightColor.rgb * (ndotl * shadow);
     lit += spec_color * spec * g_LightColor.rgb * shadow;
+    uint tile_size = (uint)max(g_ForwardPlusParams.x, 1.0);
+    uint tiles_x = (uint)max(g_ForwardPlusParams.y, 1.0);
+    uint tiles_y = (uint)max(g_ForwardPlusParams.z, 1.0);
+    uint max_lights_per_tile = (uint)max(g_ForwardPlusParams.w, 0.0);
+    if (max_lights_per_tile > 0u)
+    {
+        uint safe_tiles_x = max(tiles_x, 1u);
+        uint safe_tiles_y = max(tiles_y, 1u);
+        uint2 pixel = uint2(input.Pos.xy);
+        uint tile_x = min(pixel.x / tile_size, safe_tiles_x - 1u);
+        uint tile_y = min(pixel.y / tile_size, safe_tiles_y - 1u);
+        uint tile_idx = tile_y * safe_tiles_x + tile_x;
+        uint light_count = min(g_ForwardPlusTileLightCounts[tile_idx], max_lights_per_tile);
+        uint base_idx = tile_idx * max_lights_per_tile;
+        [loop]
+        for (uint i = 0u; i < light_count; ++i)
+        {
+            uint light_index = g_ForwardPlusTileLightIndices[base_idx + i];
+            ForwardPlusLight light = g_ForwardPlusLights[light_index];
+            float3 to_light = light.position_range.xyz - input.WorldPos;
+            float dist = length(to_light);
+            if (dist <= 1e-4 || dist >= light.position_range.w)
+            {
+                continue;
+            }
+            float3 l_local = to_light / dist;
+            float local_ndotl = max(dot(n, l_local), 0.0);
+            if (local_ndotl <= 0.0)
+            {
+                continue;
+            }
+            float atten = saturate(1.0 - dist / light.position_range.w);
+            atten *= atten;
+            // Spot lights: direction_type.w == 2, directional/point are handled elsewhere.
+            if (light.direction_type.w > 1.5)
+            {
+                float3 spot_dir = normalize(-light.direction_type.xyz);
+                float cone = dot(spot_dir, l_local);
+                float inner_cos = light.spot_params.x;
+                float outer_cos = light.spot_params.y;
+                float denom = max(inner_cos - outer_cos, 1e-4);
+                float spot = saturate((cone - outer_cos) / denom);
+                atten *= spot;
+            }
+            if (atten <= 0.0)
+            {
+                continue;
+            }
+            float3 h_local = normalize(v + l_local);
+            float local_spec = pow(max(dot(n, h_local), 0.0), shininess);
+            float3 light_color = light.color_intensity.rgb * light.color_intensity.w * atten;
+            lit += base_color * light_color * local_ndotl;
+            lit += spec_color * light_color * local_spec;
+        }
+    }
     occlusion = lerp(1.0, occlusion, g_PbrParams.z);
     lit *= occlusion;
     const bool env_debug = g_EnvParams.z > 0.5;
@@ -536,6 +680,162 @@ float4 main(PSInput input) : SV_TARGET
 }
 )";
 
+  static constexpr const char* kForwardPlusComputeShader = R"(
+cbuffer ForwardPlusConstants
+{
+    float4x4 g_ViewProj;
+    float4 g_ForwardPlusParams;
+    float4 g_ScreenParams;
+};
+
+struct ForwardPlusLight
+{
+    float4 position_range;
+    float4 direction_type;
+    float4 color_intensity;
+    float4 spot_params;
+};
+
+StructuredBuffer<ForwardPlusLight> g_ForwardPlusLights;
+RWStructuredBuffer<uint> g_ForwardPlusTileLightCounts;
+RWStructuredBuffer<uint> g_ForwardPlusTileLightIndices;
+
+bool projectSphereToScreenRect(float3 center_ws,
+                               float radius_ws,
+                               uint screen_width,
+                               uint screen_height,
+                               out float4 out_rect)
+{
+    if (radius_ws <= 0.0)
+    {
+        out_rect = float4(0.0, 0.0, 0.0, 0.0);
+        return false;
+    }
+
+    float min_x = 3.402823466e+38;
+    float min_y = 3.402823466e+38;
+    float max_x = -3.402823466e+38;
+    float max_y = -3.402823466e+38;
+    bool any_point = false;
+
+    for (int z = -1; z <= 1; z += 2)
+    {
+        for (int y = -1; y <= 1; y += 2)
+        {
+            for (int x = -1; x <= 1; x += 2)
+            {
+                float3 sample = center_ws + float3((float)x, (float)y, (float)z) * radius_ws;
+                float4 clip = mul(g_ViewProj, float4(sample, 1.0));
+                if (abs(clip.w) <= 1e-6)
+                {
+                    continue;
+                }
+                float2 ndc = clip.xy / clip.w;
+                float sx = (ndc.x * 0.5 + 0.5) * (float)screen_width;
+                float sy = (1.0 - (ndc.y * 0.5 + 0.5)) * (float)screen_height;
+                min_x = min(min_x, sx);
+                min_y = min(min_y, sy);
+                max_x = max(max_x, sx);
+                max_y = max(max_y, sy);
+                any_point = true;
+            }
+        }
+    }
+
+    if (!any_point)
+    {
+        out_rect = float4(0.0, 0.0, 0.0, 0.0);
+        return false;
+    }
+
+    if (max_x < 0.0 || max_y < 0.0 ||
+        min_x > (float)screen_width ||
+        min_y > (float)screen_height)
+    {
+        out_rect = float4(0.0, 0.0, 0.0, 0.0);
+        return false;
+    }
+
+    float max_screen_x = max((float)screen_width - 1.0, 0.0);
+    float max_screen_y = max((float)screen_height - 1.0, 0.0);
+    min_x = clamp(min_x, 0.0, max_screen_x);
+    max_x = clamp(max_x, 0.0, max_screen_x);
+    min_y = clamp(min_y, 0.0, max_screen_y);
+    max_y = clamp(max_y, 0.0, max_screen_y);
+    out_rect = float4(min_x, min_y, max_x, max_y);
+    return max_x >= min_x && max_y >= min_y;
+}
+
+[numthreads(1, 1, 1)]
+void main(uint3 dispatch_id : SV_DispatchThreadID)
+{
+    uint tile_size = (uint)max(g_ForwardPlusParams.x, 1.0);
+    uint tiles_x = (uint)max(g_ForwardPlusParams.y, 1.0);
+    uint tiles_y = (uint)max(g_ForwardPlusParams.z, 1.0);
+    uint max_lights_per_tile = (uint)max(g_ForwardPlusParams.w, 1.0);
+    uint screen_width = (uint)max(g_ScreenParams.x, 1.0);
+    uint screen_height = (uint)max(g_ScreenParams.y, 1.0);
+    uint light_count = (uint)max(g_ScreenParams.z, 0.0);
+
+    uint tile_x = dispatch_id.x;
+    uint tile_y = dispatch_id.y;
+    if (tile_x >= tiles_x || tile_y >= tiles_y)
+    {
+        return;
+    }
+
+    uint tile_idx = tile_y * tiles_x + tile_x;
+    uint out_base = tile_idx * max_lights_per_tile;
+    g_ForwardPlusTileLightCounts[tile_idx] = 0u;
+
+    float tile_min_x = (float)(tile_x * tile_size);
+    float tile_min_y = (float)(tile_y * tile_size);
+    float tile_max_x = tile_min_x + (float)tile_size;
+    float tile_max_y = tile_min_y + (float)tile_size;
+
+    [loop]
+    for (uint light_idx = 0u; light_idx < light_count; ++light_idx)
+    {
+        ForwardPlusLight light = g_ForwardPlusLights[light_idx];
+        if (light.direction_type.w < 0.5)
+        {
+            continue;
+        }
+        if (light.color_intensity.w <= 0.0 || light.position_range.w <= 0.0)
+        {
+            continue;
+        }
+
+        float4 rect;
+        if (!projectSphereToScreenRect(light.position_range.xyz,
+                                       light.position_range.w,
+                                       screen_width,
+                                       screen_height,
+                                       rect))
+        {
+            continue;
+        }
+
+        bool overlaps = !(rect.z < tile_min_x ||
+                          rect.w < tile_min_y ||
+                          rect.x >= tile_max_x ||
+                          rect.y >= tile_max_y);
+        if (!overlaps)
+        {
+            continue;
+        }
+
+        uint count = g_ForwardPlusTileLightCounts[tile_idx];
+        if (count >= max_lights_per_tile)
+        {
+            continue;
+        }
+        g_ForwardPlusTileLightIndices[out_base + count] = light_idx;
+        g_ForwardPlusTileLightCounts[tile_idx] = count + 1u;
+    }
+}
+)";
+
   Diligent::RefCntAutoPtr<Diligent::IShader> vs;
   shader_ci.Desc.Name = "Karma VS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
@@ -553,6 +853,13 @@ float4 main(PSInput input) : SV_TARGET
   ps = device_with_cache_.CreateShader(shader_ci);
   if (!ps) {
   }
+
+  Diligent::RefCntAutoPtr<Diligent::IShader> forward_plus_cs;
+  shader_ci.Desc.Name = "Karma Forward+ CS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_COMPUTE;
+  shader_ci.EntryPoint = "main";
+  shader_ci.Source = kForwardPlusComputeShader;
+  forward_plus_cs = device_with_cache_.CreateShader(shader_ci);
 
   Diligent::GraphicsPipelineStateCreateInfo pso_ci{};
   pso_ci.PSODesc.Name = "Karma Pipeline";
@@ -602,6 +909,9 @@ float4 main(PSInput input) : SV_TARGET
   Diligent::ShaderResourceVariableDesc vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightIndices", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
@@ -638,9 +948,9 @@ float4 main(PSInput input) : SV_TARGET
   device_->CreateSampler(sampler_data, &sampler_data_);
 
   Diligent::SamplerDesc shadow_sampler{};
-  shadow_sampler.MinFilter = Diligent::FILTER_TYPE_COMPARISON_POINT;
-  shadow_sampler.MagFilter = Diligent::FILTER_TYPE_COMPARISON_POINT;
-  shadow_sampler.MipFilter = Diligent::FILTER_TYPE_COMPARISON_POINT;
+  shadow_sampler.MinFilter = Diligent::FILTER_TYPE_COMPARISON_LINEAR;
+  shadow_sampler.MagFilter = Diligent::FILTER_TYPE_COMPARISON_LINEAR;
+  shadow_sampler.MipFilter = Diligent::FILTER_TYPE_COMPARISON_LINEAR;
   // LESS_EQUAL is more robust against precision ties in shadow compares.
   shadow_sampler.ComparisonFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
   shadow_sampler.AddressU = Diligent::TEXTURE_ADDRESS_CLAMP;
@@ -677,6 +987,45 @@ float4 main(PSInput input) : SV_TARGET
       bound = true;
     }
     if (!bound) {
+    }
+  }
+
+  if (forward_plus_cs) {
+    Diligent::ComputePipelineStateCreateInfo forward_plus_pso_ci{};
+    forward_plus_pso_ci.PSODesc.Name = "Karma Forward+ Compute Pipeline";
+    forward_plus_pso_ci.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_COMPUTE;
+    forward_plus_pso_ci.pCS = forward_plus_cs;
+
+    Diligent::ShaderResourceVariableDesc forward_plus_vars[] = {
+        {Diligent::SHADER_TYPE_COMPUTE, "ForwardPlusConstants",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+        {Diligent::SHADER_TYPE_COMPUTE, "g_ForwardPlusLights",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+        {Diligent::SHADER_TYPE_COMPUTE, "g_ForwardPlusTileLightCounts",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+        {Diligent::SHADER_TYPE_COMPUTE, "g_ForwardPlusTileLightIndices",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE}
+    };
+    forward_plus_pso_ci.PSODesc.ResourceLayout.Variables = forward_plus_vars;
+    forward_plus_pso_ci.PSODesc.ResourceLayout.NumVariables =
+        static_cast<Diligent::Uint32>(sizeof(forward_plus_vars) / sizeof(forward_plus_vars[0]));
+
+    forward_plus_compute_pso_ = device_with_cache_.CreateComputePipelineState(forward_plus_pso_ci);
+    if (forward_plus_compute_pso_) {
+      Diligent::BufferDesc fp_cb_desc{};
+      fp_cb_desc.Name = "Karma Forward+ Compute Constants";
+      fp_cb_desc.Usage = Diligent::USAGE_DYNAMIC;
+      fp_cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
+      fp_cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+      fp_cb_desc.Size = sizeof(ForwardPlusComputeConstants);
+      device_->CreateBuffer(fp_cb_desc, nullptr, &forward_plus_compute_cb_);
+      if (forward_plus_compute_cb_) {
+        if (auto* var = forward_plus_compute_pso_->GetStaticVariableByName(
+                Diligent::SHADER_TYPE_COMPUTE, "ForwardPlusConstants")) {
+          var->Set(forward_plus_compute_cb_);
+        }
+      }
+      forward_plus_compute_pso_->CreateShaderResourceBinding(&forward_plus_compute_srb_, true);
     }
   }
 

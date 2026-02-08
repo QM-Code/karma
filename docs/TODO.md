@@ -1,6 +1,11 @@
 # TODO (Ranked)
 
 Completed:
+- [x] Add Forward+ tiled GPU local-light culling and per-tile light lists.
+- [x] Implement cascaded shadow maps (4 splits) using a shadow texture array and per-cascade render pass.
+- [x] Stabilize CSM against camera motion/rotation via texel-snapped cascade centers in a stable light-space basis.
+- [x] Add CSM cascade-transition blending and comparison-linear shadow sampling to reduce split seams and flicker.
+- [x] Fix stabilized CSM light-view handedness/depth ordering regression that caused self-shadow artifacts and missing receiver shadows.
 - [x] Add runtime-configurable shadow tuning in Debug UI (map size, const/receiver/normal bias, PCF radius, raster depth/slope bias).
 - [x] Stabilize directional shadows (fixed light-space near/far depth mapping and tuned default bias values).
 - [x] Add explicit render instance retirement plus mesh/material cleanup on despawn and mesh-key changes.

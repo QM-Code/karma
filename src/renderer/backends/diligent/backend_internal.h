@@ -39,15 +39,27 @@ struct DrawConstants {
   float model[16];
   float light_view_proj[16];
   float shadow_uv_proj[16];
+  float shadow_cascade_uv_proj[4][16];
   float base_color_factor[4];
   float emissive_factor[4];
   float pbr_params[4];
   float env_params[4];
   float shadow_params[4];
   float shadow_bias_params[4];
+  float shadow_cascade_splits[4];
+  float shadow_cascade_world_texel[4];
+  float shadow_cascade_params[4];
   float light_dir[4];
   float light_color[4];
   float camera_pos[4];
+  float camera_forward[4];
+  float forward_plus_params[4];
+};
+
+struct ForwardPlusComputeConstants {
+  float view_proj[16];
+  float forward_plus_params[4];
+  float screen_params[4];
 };
 
 bool isValidSize(int width, int height);

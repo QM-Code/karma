@@ -137,6 +137,12 @@ void GraphicsDevice::setDirectionalLight(const DirectionalLightData& light) {
   }
 }
 
+void GraphicsDevice::setLights(const std::vector<LightData>& lights) {
+  if (backend_) {
+    backend_->setLights(lights);
+  }
+}
+
 void GraphicsDevice::setEnvironmentMap(const std::filesystem::path& path, float intensity,
                                        bool draw_skybox) {
   if (backend_) {

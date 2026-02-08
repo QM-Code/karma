@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace karma::platform {
 class Window;
@@ -50,6 +51,7 @@ class Backend {
   virtual void setCamera(const renderer::CameraData& camera) = 0;
   virtual void setCameraActive(bool active) = 0;
   virtual void setDirectionalLight(const renderer::DirectionalLightData& light) = 0;
+  virtual void setLights(const std::vector<renderer::LightData>& lights) = 0;
   virtual void setEnvironmentMap(const std::filesystem::path& path, float intensity,
                                  bool draw_skybox) = 0;
   virtual void setAnisotropy(bool enabled, int level) = 0;

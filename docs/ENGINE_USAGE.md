@@ -83,6 +83,7 @@ The engine renders your UI draw lists on top of the 3D frame.
 ## Rendering Features
 - Directional light with shadows (PCF supported)
 - Cascaded shadow maps (CSM)
+- Forward+ tiled local lights (GPU light culling per screen tile)
 - Optional anisotropy + mip generation
 
 ## Shadow Defaults
@@ -95,6 +96,11 @@ Recommended baseline values for the current directional-shadow pipeline:
 - `shadow_normal_bias_scale = 1.0f`
 - `shadow_raster_depth_bias = 0`
 - `shadow_raster_slope_bias = 0.0f`
+
+Current CSM setup:
+- 4 cascades (texture-array based)
+- Stabilized light-space snapping to reduce shimmer
+- Cascade transition blending near split boundaries
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.

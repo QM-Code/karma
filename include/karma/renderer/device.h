@@ -40,6 +40,7 @@ class GraphicsDevice {
   void setCamera(const CameraData& camera);
   void setCameraActive(bool active);
   void setDirectionalLight(const DirectionalLightData& light);
+  void setLights(const std::vector<LightData>& lights);
   void setEnvironmentMap(const std::filesystem::path& path, float intensity, bool draw_skybox);
   void setAnisotropy(bool enabled, int level);
   void setGenerateMips(bool enabled);

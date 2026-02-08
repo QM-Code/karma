@@ -264,9 +264,6 @@ std::vector<float> buildInterleavedVertices(const renderer::MeshData& mesh) {
 
 DiligentBackend::DiligentBackend(karma::platform::Window& window)
     : window_(&window) {
-  if (const char* env = std::getenv("KARMA_SHADOW_DEBUG")) {
-    shadow_debug_ = std::string(env) != "0";
-  }
   if (const char* env = std::getenv("KARMA_ENV_DEBUG")) {
     env_debug_mode_ = std::atoi(env);
   }

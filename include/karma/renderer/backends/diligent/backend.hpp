@@ -46,6 +46,7 @@ class DiligentBackend final : public Backend {
   renderer::MeshId createMesh(const renderer::MeshData& mesh) override;
   renderer::MeshId createMeshFromFile(const std::filesystem::path& path) override;
   void destroyMesh(renderer::MeshId mesh) override;
+  bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const override;
 
   renderer::MaterialId createMaterial(const renderer::MaterialDesc& material) override;
   void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) override;
@@ -59,6 +60,7 @@ class DiligentBackend final : public Backend {
   void destroyRenderTarget(renderer::RenderTargetId target) override;
 
   void submit(const renderer::DrawItem& item) override;
+  void retireInstance(renderer::InstanceId instance) override;
   void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) override;
   void drawLine(const math::Vec3& start, const math::Vec3& end,
                 const math::Color& color, bool depth_test, float thickness) override;
@@ -72,7 +74,13 @@ class DiligentBackend final : public Backend {
                          bool draw_skybox) override;
   void setAnisotropy(bool enabled, int level) override;
   void setGenerateMips(bool enabled) override;
-  void setShadowSettings(float bias, int map_size, int pcf_radius) override;
+  void setShadowSettings(float bias,
+                         int map_size,
+                         int pcf_radius,
+                         int raster_depth_bias,
+                         float raster_slope_bias,
+                         float receiver_bias_scale,
+                         float normal_bias_scale) override;
   void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) override;
   void renderUi(const karma::app::UIDrawData& draw_data) override;
 
@@ -96,6 +104,7 @@ class DiligentBackend final : public Backend {
       renderer::MaterialId material = renderer::kInvalidMaterial;
     };
     std::vector<Submesh> submeshes;
+    std::vector<renderer::MaterialId> owned_materials;
   };
 
   struct MaterialRecord {
@@ -141,6 +150,7 @@ class DiligentBackend final : public Backend {
   void initializeDevice();
   void clearFrame(const float* color, bool clear_depth);
   void recreateShadowMap();
+  void recreateShadowPipeline();
   void ensureUiResources();
   void ensureLineResources();
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
@@ -202,6 +212,7 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_ib_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> instance_vb_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> ui_sampler_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_no_depth_;
@@ -274,11 +285,15 @@ class DiligentBackend final : public Backend {
   int anisotropy_level_ = 1;
   bool generate_mips_enabled_ = false;
   int shadow_map_size_ = 2048;
-  float shadow_bias_ = 0.002f;
+  float shadow_bias_ = 0.0006f;
   int shadow_pcf_radius_ = 0;
-  bool shadow_debug_ = false;
+  int shadow_raster_depth_bias_ = 0;
+  float shadow_raster_slope_bias_ = 0.0f;
+  float shadow_receiver_bias_scale_ = 0.75f;
+  float shadow_normal_bias_scale_ = 1.0f;
   size_t ui_vb_size_ = 0;
   size_t ui_ib_size_ = 0;
+  size_t instance_vb_capacity_ = 0;
   size_t line_vb_size_ = 0;
   bool warned_line_thickness_ = false;
   int current_width_ = 0;

@@ -24,16 +24,17 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
   bool has_listener = false;
   bool multiple_listeners = false;
 
-  for (const ecs::Entity entity :
-       world.view<components::AudioListenerComponent, components::TransformComponent>()) {
+  world.forEach<components::AudioListenerComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
     if (!has_listener) {
       listener_entity = entity;
       has_listener = true;
     } else {
       multiple_listeners = true;
-      break;
+      return false;
     }
-  }
+    return true;
+  });
 
   if (multiple_listeners && !warned_multiple_listeners_) {
     spdlog::warn("Karma: Multiple AudioListenerComponents found; using the first.");
@@ -53,14 +54,14 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
   }
 
   bool played_without_listener = false;
-  for (const ecs::Entity entity :
-       world.view<components::AudioSourceComponent, components::TransformComponent>()) {
+  world.forEach<components::AudioSourceComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
     const uint64_t key = entityKey(entity);
     auto& source = world.get<components::AudioSourceComponent>(entity);
     const bool should_play_on_start = source.play_on_start && !played_on_start_[key];
     const bool should_play_requested = source.consumePlayRequest();
     if (!should_play_on_start && !should_play_requested) {
-      continue;
+      return;
     }
 
     const auto& transform = world.get<components::TransformComponent>(entity);
@@ -87,7 +88,7 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
     } catch (const std::exception& ex) {
       spdlog::error("Karma: Failed to play audio '{}': {}", source.clip_key, ex.what());
     }
-  }
+  });
 
   if (played_without_listener && !warned_no_listener_) {
     spdlog::warn("Karma: Audio played without an AudioListenerComponent in the scene.");

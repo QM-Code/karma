@@ -16,6 +16,7 @@ class GraphicsDevice {
   MeshId createMesh(const MeshData& mesh);
   MeshId createMeshFromFile(const std::filesystem::path& path);
   void destroyMesh(MeshId mesh);
+  bool getMeshBounds(MeshId mesh, glm::vec3& center, float& radius) const;
 
   MaterialId createMaterial(const MaterialDesc& material);
   void updateMaterial(MaterialId material, const MaterialDesc& desc);
@@ -29,6 +30,7 @@ class GraphicsDevice {
   void destroyRenderTarget(RenderTargetId target);
 
   void submit(const DrawItem& item);
+  void retireInstance(InstanceId instance);
   void renderLayer(LayerId layer, RenderTargetId target = kDefaultRenderTarget);
   void drawLine(const math::Vec3& start, const math::Vec3& end, const math::Color& color,
                 bool depth_test = true, float thickness = 1.0f);
@@ -41,7 +43,13 @@ class GraphicsDevice {
   void setEnvironmentMap(const std::filesystem::path& path, float intensity, bool draw_skybox);
   void setAnisotropy(bool enabled, int level);
   void setGenerateMips(bool enabled);
-  void setShadowSettings(float bias, int map_size, int pcf_radius);
+  void setShadowSettings(float bias,
+                         int map_size,
+                         int pcf_radius,
+                         int raster_depth_bias,
+                         float raster_slope_bias,
+                         float receiver_bias_scale,
+                         float normal_bias_scale);
   TextureId createTextureRGBA8(int width, int height, const void* pixels);
   void updateTextureRGBA8(TextureId texture, int width, int height, const void* pixels);
   void renderUi(const karma::app::UIDrawData& draw_data);

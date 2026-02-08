@@ -37,6 +37,53 @@ void DILIGENT_CALL_TYPE IgnoreDiligentMessage(Diligent::DEBUG_MESSAGE_SEVERITY,
                                               const char*,
                                               const char*,
                                               int) {}
+
+static constexpr const char* kShadowVertexShader = R"(
+cbuffer Constants
+{
+    float4x4 g_MVP;
+    float4x4 g_Model;
+    float4x4 g_LightViewProj;
+    float4x4 g_ShadowUVProj;
+    float4 g_BaseColorFactor;
+    float4 g_EmissiveFactor;
+    float4 g_PbrParams;
+    float4 g_EnvParams;
+    float4 g_ShadowParams;
+    float4 g_ShadowBiasParams;
+    float4 g_LightDir;
+    float4 g_LightColor;
+    float4 g_CameraPos;
+};
+
+struct VSInput
+{
+    float3 Pos : ATTRIB0;
+    float3 Normal : ATTRIB1;
+    float4 Tangent : ATTRIB2;
+    float2 UV : ATTRIB3;
+    float4 ModelCol0 : ATTRIB4;
+    float4 ModelCol1 : ATTRIB5;
+    float4 ModelCol2 : ATTRIB6;
+    float4 ModelCol3 : ATTRIB7;
+};
+
+struct VSOutput
+{
+    float4 Pos : SV_POSITION;
+};
+
+VSOutput main(VSInput input)
+{
+    VSOutput output;
+    float4 world_pos = input.ModelCol0 * input.Pos.x +
+                       input.ModelCol1 * input.Pos.y +
+                       input.ModelCol2 * input.Pos.z +
+                       input.ModelCol3;
+    output.Pos = mul(g_MVP, world_pos);
+    return output;
+}
+)";
 }  // namespace
 
 void DiligentBackend::recreateShadowMap() {
@@ -78,6 +125,92 @@ void DiligentBackend::recreateShadowMap() {
       var->Set(shadow_map_srv_);
     }
   }
+}
+
+void DiligentBackend::recreateShadowPipeline() {
+  shadow_pipeline_state_.Release();
+  shadow_srb_.Release();
+  if (!device_) {
+    return;
+  }
+
+  Diligent::ShaderCreateInfo shader_ci{};
+  shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
+  shader_ci.Desc.Name = "Karma Shadow VS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
+  shader_ci.EntryPoint = "main";
+  shader_ci.Source = kShadowVertexShader;
+  Diligent::RefCntAutoPtr<Diligent::IShader> shadow_vs = device_with_cache_.CreateShader(shader_ci);
+  if (!shadow_vs) {
+    return;
+  }
+
+  Diligent::GraphicsPipelineStateCreateInfo shadow_pso{};
+  shadow_pso.PSODesc.Name = "Karma Shadow Pipeline";
+  shadow_pso.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
+  shadow_pso.pVS = shadow_vs;
+  shadow_pso.pPS = nullptr;
+
+  auto& shadow_graphics = shadow_pso.GraphicsPipeline;
+  shadow_graphics.NumRenderTargets = 0;
+  shadow_graphics.DSVFormat = Diligent::TEX_FORMAT_D32_FLOAT;
+  shadow_graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  // Mixed imported assets can have inconsistent winding; disable culling in
+  // the shadow pass so casters still contribute.
+  shadow_graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
+  shadow_graphics.RasterizerDesc.FrontCounterClockwise = true;
+  shadow_graphics.RasterizerDesc.DepthBias = shadow_raster_depth_bias_;
+  shadow_graphics.RasterizerDesc.SlopeScaledDepthBias = shadow_raster_slope_bias_;
+  shadow_graphics.DepthStencilDesc.DepthEnable = true;
+  shadow_graphics.DepthStencilDesc.DepthWriteEnable = true;
+  shadow_graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
+
+  constexpr Diligent::Uint32 kInstanceStride = static_cast<Diligent::Uint32>(sizeof(float) * 16);
+  Diligent::LayoutElement layout_elems[] = {
+      Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
+                              0u,
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 4),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 8),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 12),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE}
+  };
+  shadow_graphics.InputLayout.LayoutElements = layout_elems;
+  shadow_graphics.InputLayout.NumElements =
+      static_cast<Diligent::Uint32>(sizeof(layout_elems) / sizeof(layout_elems[0]));
+
+  Diligent::ShaderResourceVariableDesc shadow_vars[] = {
+      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+  };
+  shadow_pso.PSODesc.ResourceLayout.Variables = shadow_vars;
+  shadow_pso.PSODesc.ResourceLayout.NumVariables =
+      static_cast<Diligent::Uint32>(sizeof(shadow_vars) / sizeof(shadow_vars[0]));
+
+  shadow_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(shadow_pso);
+  if (!shadow_pipeline_state_) {
+    return;
+  }
+
+  if (constants_) {
+    if (auto* variable =
+            shadow_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
+      variable->Set(constants_);
+    }
+  }
+  shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
 }
 
 void DiligentBackend::initializeDevice() {
@@ -164,6 +297,7 @@ cbuffer Constants
     float4 g_PbrParams;
     float4 g_EnvParams;
     float4 g_ShadowParams;
+    float4 g_ShadowBiasParams;
     float4 g_LightDir;
     float4 g_LightColor;
     float4 g_CameraPos;
@@ -175,6 +309,10 @@ struct VSInput
     float3 Normal : ATTRIB1;
     float4 Tangent : ATTRIB2;
     float2 UV : ATTRIB3;
+    float4 ModelCol0 : ATTRIB4;
+    float4 ModelCol1 : ATTRIB5;
+    float4 ModelCol2 : ATTRIB6;
+    float4 ModelCol3 : ATTRIB7;
 };
 
 struct VSOutput
@@ -189,10 +327,15 @@ struct VSOutput
 VSOutput main(VSInput input)
 {
     VSOutput output;
-    output.Pos = mul(g_MVP, float4(input.Pos, 1.0));
-    float3 world_pos = mul(g_Model, float4(input.Pos, 1.0)).xyz;
-    output.WorldPos = world_pos;
-    output.Normal = normalize(mul((float3x3)g_Model, input.Normal));
+    float4 world_pos = input.ModelCol0 * input.Pos.x +
+                       input.ModelCol1 * input.Pos.y +
+                       input.ModelCol2 * input.Pos.z +
+                       input.ModelCol3;
+    output.Pos = mul(g_MVP, world_pos);
+    output.WorldPos = world_pos.xyz;
+    output.Normal = normalize(input.ModelCol0.xyz * input.Normal.x +
+                              input.ModelCol1.xyz * input.Normal.y +
+                              input.ModelCol2.xyz * input.Normal.z);
     output.UV = input.UV;
     output.Tangent = input.Tangent;
     return output;
@@ -211,6 +354,7 @@ cbuffer Constants
     float4 g_PbrParams;
     float4 g_EnvParams;
     float4 g_ShadowParams;
+    float4 g_ShadowBiasParams;
     float4 g_LightDir;
     float4 g_LightColor;
     float4 g_CameraPos;
@@ -242,9 +386,10 @@ struct PSInput
 float4 main(PSInput input) : SV_TARGET
 {
     const float PI = 3.14159265;
-    float3 n = normalize(input.Normal);
+    float3 geom_n = normalize(input.Normal);
+    float3 n = geom_n;
     float3 t = normalize(input.Tangent.xyz);
-    float3 b = normalize(cross(n, t) * input.Tangent.w);
+    float3 b = normalize(cross(geom_n, t) * input.Tangent.w);
     float3 normal_tex = g_NormalTex.Sample(g_SamplerData, input.UV).xyz * 2.0 - 1.0;
     normal_tex.xy *= g_PbrParams.w;
     normal_tex = normalize(normal_tex);
@@ -272,7 +417,17 @@ float4 main(PSInput input) : SV_TARGET
     float shadow = 1.0;
     if (g_ShadowParams.x > 0.5)
     {
-        float4 shadow_uv_depth = mul(g_ShadowUVProj, float4(input.WorldPos, 1.0));
+        float ndotl_shadow = saturate(dot(geom_n, l));
+        float slope = 1.0 - ndotl_shadow;
+        float world_texel = max(g_ShadowBiasParams.z, 0.0);
+        float normal_scale = max(g_ShadowBiasParams.y, 0.0);
+        float receiver_scale = max(g_ShadowBiasParams.x, 0.0);
+        // Offset the receiver in world space before projection. Keep the
+        // direction-light offset mild and rely primarily on normal offset.
+        float normal_offset_ws = world_texel * normal_scale * (0.4 + 1.2 * slope);
+        float light_offset_ws = world_texel * receiver_scale * (0.03 + 0.07 * slope);
+        float3 shadow_world_pos = input.WorldPos + geom_n * normal_offset_ws + l * light_offset_ws;
+        float4 shadow_uv_depth = mul(g_ShadowUVProj, float4(shadow_world_pos, 1.0));
         shadow_uv_depth.xyz /= max(shadow_uv_depth.w, 1e-7);
         float2 shadow_uv = shadow_uv_depth.xy;
         float shadow_depth = max(shadow_uv_depth.z, 1e-7);
@@ -280,18 +435,15 @@ float4 main(PSInput input) : SV_TARGET
             shadow_uv.y >= 0.0 && shadow_uv.y <= 1.0 &&
             shadow_depth >= 0.0 && shadow_depth <= 1.0)
         {
-            if (g_ShadowParams.w < 0.0)
-            {
-                float size = -g_ShadowParams.w;
-                float2 texel_f = shadow_uv * size;
-                int2 texel = int2(clamp(texel_f, 0.0, size - 1.0));
-                float depth_sample = g_ShadowMap.Load(int3(texel, 0));
-                return float4(shadow_depth, depth_sample, 0.0, 1.0);
-            }
-            float slope = 1.0 - saturate(dot(n, l));
-            float bias = g_ShadowParams.y * (1.0 + slope * 2.0);
             int radius = (int)g_ShadowParams.z;
             radius = clamp(radius, 0, 4);
+            float const_bias = max(g_ShadowParams.y, 0.0);
+            float receiver_plane_bias = abs(ddx(shadow_depth)) + abs(ddy(shadow_depth));
+            float texel_size = max(g_ShadowParams.w, 0.0);
+            float slope_texel_bias = texel_size * normal_scale * (0.45 + 0.9 * slope);
+            float receiver_bias = receiver_plane_bias * (0.5 * receiver_scale);
+            float bias = const_bias + receiver_bias + slope_texel_bias;
+            bias = min(bias, 0.01);
             if (radius == 0)
             {
                 shadow = g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
@@ -384,44 +536,6 @@ float4 main(PSInput input) : SV_TARGET
 }
 )";
 
-  static constexpr const char* kShadowVertexShader = R"(
-cbuffer Constants
-{
-    float4x4 g_MVP;
-    float4x4 g_Model;
-    float4x4 g_LightViewProj;
-    float4x4 g_ShadowUVProj;
-    float4 g_BaseColorFactor;
-    float4 g_EmissiveFactor;
-    float4 g_PbrParams;
-    float4 g_EnvParams;
-    float4 g_ShadowParams;
-    float4 g_LightDir;
-    float4 g_LightColor;
-    float4 g_CameraPos;
-};
-
-struct VSInput
-{
-    float3 Pos : ATTRIB0;
-    float3 Normal : ATTRIB1;
-    float4 Tangent : ATTRIB2;
-    float2 UV : ATTRIB3;
-};
-
-struct VSOutput
-{
-    float4 Pos : SV_POSITION;
-};
-
-VSOutput main(VSInput input)
-{
-    VSOutput output;
-    output.Pos = mul(g_MVP, float4(input.Pos, 1.0));
-    return output;
-}
-)";
-
   Diligent::RefCntAutoPtr<Diligent::IShader> vs;
   shader_ci.Desc.Name = "Karma VS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
@@ -439,16 +553,6 @@ VSOutput main(VSInput input)
   ps = device_with_cache_.CreateShader(shader_ci);
   if (!ps) {
   }
-
-  Diligent::RefCntAutoPtr<Diligent::IShader> shadow_vs;
-  shader_ci.Desc.Name = "Karma Shadow VS";
-  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
-  shader_ci.EntryPoint = "main";
-  shader_ci.Source = kShadowVertexShader;
-  shadow_vs = device_with_cache_.CreateShader(shader_ci);
-  if (!shadow_vs) {
-  }
-
 
   Diligent::GraphicsPipelineStateCreateInfo pso_ci{};
   pso_ci.PSODesc.Name = "Karma Pipeline";
@@ -468,11 +572,28 @@ VSOutput main(VSInput input)
   graphics.DepthStencilDesc.DepthEnable = true;
   graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
 
+  constexpr Diligent::Uint32 kInstanceStride = static_cast<Diligent::Uint32>(sizeof(float) * 16);
   Diligent::LayoutElement layout_elems[] = {
       Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
-      Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false}
+      Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
+                              0u,
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 4),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 8),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 12),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE}
   };
   graphics.InputLayout.LayoutElements = layout_elems;
   graphics.InputLayout.NumElements =
@@ -517,10 +638,11 @@ VSOutput main(VSInput input)
   device_->CreateSampler(sampler_data, &sampler_data_);
 
   Diligent::SamplerDesc shadow_sampler{};
-  shadow_sampler.MinFilter = Diligent::FILTER_TYPE_COMPARISON_LINEAR;
-  shadow_sampler.MagFilter = Diligent::FILTER_TYPE_COMPARISON_LINEAR;
-  shadow_sampler.MipFilter = Diligent::FILTER_TYPE_COMPARISON_LINEAR;
-  shadow_sampler.ComparisonFunc = Diligent::COMPARISON_FUNC_LESS;
+  shadow_sampler.MinFilter = Diligent::FILTER_TYPE_COMPARISON_POINT;
+  shadow_sampler.MagFilter = Diligent::FILTER_TYPE_COMPARISON_POINT;
+  shadow_sampler.MipFilter = Diligent::FILTER_TYPE_COMPARISON_POINT;
+  // LESS_EQUAL is more robust against precision ties in shadow compares.
+  shadow_sampler.ComparisonFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
   shadow_sampler.AddressU = Diligent::TEXTURE_ADDRESS_CLAMP;
   shadow_sampler.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
   shadow_sampler.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
@@ -603,43 +725,7 @@ VSOutput main(VSInput input)
     }
   }
 
-  if (shadow_vs) {
-    Diligent::GraphicsPipelineStateCreateInfo shadow_pso{};
-    shadow_pso.PSODesc.Name = "Karma Shadow Pipeline";
-    shadow_pso.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
-    shadow_pso.pVS = shadow_vs;
-    shadow_pso.pPS = nullptr;
-
-    auto& shadow_graphics = shadow_pso.GraphicsPipeline;
-    shadow_graphics.NumRenderTargets = 0;
-    shadow_graphics.DSVFormat = Diligent::TEX_FORMAT_D32_FLOAT;
-    shadow_graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    shadow_graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
-    shadow_graphics.RasterizerDesc.FrontCounterClockwise = true;
-    shadow_graphics.DepthStencilDesc.DepthEnable = true;
-    shadow_graphics.DepthStencilDesc.DepthWriteEnable = true;
-    shadow_graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
-    shadow_graphics.InputLayout.LayoutElements = layout_elems;
-    shadow_graphics.InputLayout.NumElements =
-        static_cast<Diligent::Uint32>(sizeof(layout_elems) / sizeof(layout_elems[0]));
-
-    Diligent::ShaderResourceVariableDesc shadow_vars[] = {
-        {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
-    };
-    shadow_pso.PSODesc.ResourceLayout.Variables = shadow_vars;
-    shadow_pso.PSODesc.ResourceLayout.NumVariables =
-        static_cast<Diligent::Uint32>(sizeof(shadow_vars) / sizeof(shadow_vars[0]));
-
-    shadow_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(shadow_pso);
-    if (shadow_pipeline_state_) {
-      if (auto* variable =
-              shadow_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
-        variable->Set(constants_);
-      }
-      shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
-    } else {
-    }
-  }
+  recreateShadowPipeline();
 
   if (pipeline_state_) {
     pipeline_state_->CreateShaderResourceBinding(&shader_resources_, true);

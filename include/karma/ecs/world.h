@@ -1,7 +1,7 @@
 #pragma once
 
+#include <functional>
 #include <memory>
-#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -74,19 +74,40 @@ class World {
     return getStorage<T>().data;
   }
 
-  template <typename... Ts>
+  template <typename T0, typename... Ts>
   std::vector<Entity> view() const {
     std::vector<Entity> entities;
-    const auto& base = storage<std::tuple_element_t<0, std::tuple<Ts...>>>();
+    const auto& base = storage<T0>();
     for (const Entity entity : base.denseEntities()) {
       if (!isAlive(entity)) {
         continue;
       }
-      if ((has<Ts>(entity) && ...)) {
-        entities.push_back(entity);
+      if (!(has<Ts>(entity) && ...)) {
+        continue;
       }
+      entities.push_back(entity);
     }
     return entities;
+  }
+
+  template <typename T0, typename... Ts, typename Fn>
+  void forEach(Fn&& fn) const {
+    const auto& base = storage<T0>();
+    for (const Entity entity : base.denseEntities()) {
+      if (!isAlive(entity)) {
+        continue;
+      }
+      if (!(has<Ts>(entity) && ...)) {
+        continue;
+      }
+      if constexpr (std::is_same_v<std::invoke_result_t<Fn, Entity>, bool>) {
+        if (!std::invoke(fn, entity)) {
+          break;
+        }
+      } else {
+        std::invoke(fn, entity);
+      }
+    }
   }
 
  private:

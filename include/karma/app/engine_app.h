@@ -40,8 +40,12 @@ struct EngineConfig {
   int anisotropy_level = 1;
   bool generate_mipmaps = false;
   int shadow_map_size = 2048;
-  float shadow_bias = 0.002f;
+  float shadow_bias = 0.0006f;
   int shadow_pcf_radius = 0;
+  int shadow_raster_depth_bias = 0;
+  float shadow_raster_slope_bias = 0.0f;
+  float shadow_receiver_bias_scale = 0.75f;
+  float shadow_normal_bias_scale = 1.0f;
 };
 
 class EngineApp {

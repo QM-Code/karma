@@ -1,5 +1,6 @@
 #include "karma/debug/debug_overlay.h"
 
+#include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -23,6 +24,7 @@
 #include "karma/scene/scene.h"
 #include "karma/scene/node.h"
 #include "karma/systems/system_graph.h"
+#include "karma/renderer/device.h"
 
 namespace karma::debug {
 
@@ -251,8 +253,26 @@ void drawNode(const scene::Scene& scene,
 
 DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
                                      scene::Scene* scene,
-                                     systems::SystemGraph* systems)
-    : world_(world), scene_(scene), systems_(systems) {
+                                     systems::SystemGraph* systems,
+                                     renderer::GraphicsDevice* graphics,
+                                     int shadow_map_size,
+                                     float shadow_bias,
+                                     int shadow_pcf_radius,
+                                     int shadow_raster_depth_bias,
+                                     float shadow_raster_slope_bias,
+                                     float shadow_receiver_bias_scale,
+                                     float shadow_normal_bias_scale)
+    : world_(world),
+      scene_(scene),
+      systems_(systems),
+      graphics_(graphics),
+      shadow_map_size_(shadow_map_size),
+      shadow_bias_(shadow_bias),
+      shadow_pcf_radius_(shadow_pcf_radius),
+      shadow_raster_depth_bias_(shadow_raster_depth_bias),
+      shadow_raster_slope_bias_(shadow_raster_slope_bias),
+      shadow_receiver_bias_scale_(shadow_receiver_bias_scale),
+      shadow_normal_bias_scale_(shadow_normal_bias_scale) {
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
@@ -319,6 +339,33 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
 
   ImGui::NewFrame();
   ImGui::Begin("Karma Debug");
+
+  if (graphics_ && ImGui::CollapsingHeader("Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Shadows", ImGuiTreeNodeFlags_DefaultOpen)) {
+      bool shadow_changed = false;
+      shadow_changed |= editInt("Map Size", shadow_map_size_);
+      shadow_changed |= editFloat("Bias", shadow_bias_, "%.6f");
+      shadow_changed |= editInt("PCF Radius", shadow_pcf_radius_);
+      shadow_changed |= editInt("Raster Depth Bias", shadow_raster_depth_bias_);
+      shadow_changed |= editFloat("Raster Slope Bias", shadow_raster_slope_bias_, "%.3f");
+      shadow_changed |=
+          editFloat("Receiver Bias Scale", shadow_receiver_bias_scale_, "%.3f");
+      shadow_changed |= editFloat("Normal Bias Scale", shadow_normal_bias_scale_, "%.3f");
+      if (shadow_changed) {
+        shadow_map_size_ = std::max(256, shadow_map_size_);
+        shadow_pcf_radius_ = std::clamp(shadow_pcf_radius_, 0, 4);
+        shadow_receiver_bias_scale_ = std::max(0.0f, shadow_receiver_bias_scale_);
+        shadow_normal_bias_scale_ = std::max(0.0f, shadow_normal_bias_scale_);
+        graphics_->setShadowSettings(shadow_bias_,
+                                     shadow_map_size_,
+                                     shadow_pcf_radius_,
+                                     shadow_raster_depth_bias_,
+                                     shadow_raster_slope_bias_,
+                                     shadow_receiver_bias_scale_,
+                                     shadow_normal_bias_scale_);
+      }
+    }
+  }
 
   if (scene_) {
     if (ImGui::CollapsingHeader("Hierarchy", ImGuiTreeNodeFlags_DefaultOpen)) {

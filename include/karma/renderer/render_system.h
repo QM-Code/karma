@@ -32,20 +32,22 @@ class RenderSystem {
     bool bounds_valid = false;
   };
 
-  struct MeshBounds {
-    glm::vec3 center{0.0f};
-    float radius = 0.0f;
-    bool valid = false;
-  };
-
   static uint64_t entityKey(ecs::Entity entity) {
     return (static_cast<uint64_t>(entity.index) << 32) |
            static_cast<uint64_t>(entity.generation);
   }
+  static ecs::Entity entityFromKey(uint64_t key) {
+    ecs::Entity entity{};
+    entity.index = static_cast<uint32_t>(key >> 32);
+    entity.generation = static_cast<uint32_t>(key & 0xFFFFFFFFu);
+    return entity;
+  }
+
+  void releaseRecord(uint64_t key, RenderRecord& record);
+  void cleanupStaleRecords(ecs::World& world);
 
   GraphicsDevice& device_;
   std::unordered_map<uint64_t, RenderRecord> records_;
-  std::unordered_map<std::string, MeshBounds> bounds_cache_;
   std::string last_env_path_;
   float last_env_intensity_ = -1.0f;
   bool last_env_draw_skybox_ = false;

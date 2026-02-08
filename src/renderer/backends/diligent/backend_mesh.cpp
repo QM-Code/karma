@@ -303,6 +303,7 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
 
     materials_[mat_id] = mat_record;
     material_ids[mat_index] = mat_id;
+    record.owned_materials.push_back(mat_id);
   }
 
   for (const auto& sub : submesh_infos) {
@@ -322,7 +323,35 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
 }
 
 void DiligentBackend::destroyMesh(renderer::MeshId mesh) {
-  meshes_.erase(mesh);
+  auto mesh_it = meshes_.find(mesh);
+  if (mesh_it == meshes_.end()) {
+    return;
+  }
+  for (const renderer::MaterialId material : mesh_it->second.owned_materials) {
+    materials_.erase(material);
+  }
+  for (auto it = instances_.begin(); it != instances_.end();) {
+    if (it->second.mesh == mesh) {
+      it = instances_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  meshes_.erase(mesh_it);
+}
+
+bool DiligentBackend::getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const {
+  auto mesh_it = meshes_.find(mesh);
+  if (mesh_it == meshes_.end()) {
+    return false;
+  }
+  const auto& record = mesh_it->second;
+  if (record.data.vertices.empty()) {
+    return false;
+  }
+  center = record.bounds_center;
+  radius = record.bounds_radius;
+  return true;
 }
 
 renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDesc& material) {

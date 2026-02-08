@@ -41,6 +41,13 @@ void GraphicsDevice::destroyMesh(MeshId mesh) {
   }
 }
 
+bool GraphicsDevice::getMeshBounds(MeshId mesh, glm::vec3& center, float& radius) const {
+  if (!backend_) {
+    return false;
+  }
+  return backend_->getMeshBounds(mesh, center, radius);
+}
+
 MaterialId GraphicsDevice::createMaterial(const MaterialDesc& material) {
   return backend_ ? backend_->createMaterial(material) : kInvalidMaterial;
 }
@@ -86,6 +93,12 @@ void GraphicsDevice::destroyRenderTarget(RenderTargetId target) {
 void GraphicsDevice::submit(const DrawItem& item) {
   if (backend_) {
     backend_->submit(item);
+  }
+}
+
+void GraphicsDevice::retireInstance(InstanceId instance) {
+  if (backend_) {
+    backend_->retireInstance(instance);
   }
 }
 
@@ -143,9 +156,21 @@ void GraphicsDevice::setGenerateMips(bool enabled) {
   }
 }
 
-void GraphicsDevice::setShadowSettings(float bias, int map_size, int pcf_radius) {
+void GraphicsDevice::setShadowSettings(float bias,
+                                       int map_size,
+                                       int pcf_radius,
+                                       int raster_depth_bias,
+                                       float raster_slope_bias,
+                                       float receiver_bias_scale,
+                                       float normal_bias_scale) {
   if (backend_) {
-    backend_->setShadowSettings(bias, map_size, pcf_radius);
+    backend_->setShadowSettings(bias,
+                                map_size,
+                                pcf_radius,
+                                raster_depth_bias,
+                                raster_slope_bias,
+                                receiver_bias_scale,
+                                normal_bias_scale);
   }
 }
 

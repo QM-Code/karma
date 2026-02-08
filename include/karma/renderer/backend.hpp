@@ -26,6 +26,7 @@ class Backend {
   virtual renderer::MeshId createMesh(const renderer::MeshData& mesh) = 0;
   virtual renderer::MeshId createMeshFromFile(const std::filesystem::path& path) = 0;
   virtual void destroyMesh(renderer::MeshId mesh) = 0;
+  virtual bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const = 0;
 
   virtual renderer::MaterialId createMaterial(const renderer::MaterialDesc& material) = 0;
   virtual void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) = 0;
@@ -39,6 +40,7 @@ class Backend {
   virtual void destroyRenderTarget(renderer::RenderTargetId target) = 0;
 
   virtual void submit(const renderer::DrawItem& item) = 0;
+  virtual void retireInstance(renderer::InstanceId instance) = 0;
   virtual void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) = 0;
   virtual void drawLine(const math::Vec3& start, const math::Vec3& end,
                         const math::Color& color, bool depth_test, float thickness) = 0;
@@ -52,7 +54,13 @@ class Backend {
                                  bool draw_skybox) = 0;
   virtual void setAnisotropy(bool enabled, int level) = 0;
   virtual void setGenerateMips(bool enabled) = 0;
-  virtual void setShadowSettings(float bias, int map_size, int pcf_radius) = 0;
+  virtual void setShadowSettings(float bias,
+                                 int map_size,
+                                 int pcf_radius,
+                                 int raster_depth_bias,
+                                 float raster_slope_bias,
+                                 float receiver_bias_scale,
+                                 float normal_bias_scale) = 0;
 
   virtual void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) = 0;
   virtual void renderUi(const karma::app::UIDrawData& draw_data) = 0;

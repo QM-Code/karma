@@ -3,13 +3,8 @@
 #include <glm/gtc/matrix_access.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <cmath>
 #include <algorithm>
-#include <filesystem>
-#include <assimp/Importer.hpp>
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
-#include <limits>
+#include <cmath>
 
 #include "karma/components/camera.h"
 #include "karma/components/collider.h"
@@ -194,46 +189,33 @@ bool sphereInFrustum(const FrustumPlanes& frustum, const glm::vec3& center, floa
   }
   return true;
 }
+}
 
-bool computeMeshBounds(const std::string& path, glm::vec3& out_center, float& out_radius) {
-  Assimp::Importer importer;
-  const aiScene* scene = importer.ReadFile(path,
-                                           aiProcess_Triangulate |
-                                           aiProcess_JoinIdenticalVertices |
-                                           aiProcess_PreTransformVertices);
-  if (!scene || !scene->mRootNode) {
-    return false;
+void RenderSystem::releaseRecord(uint64_t key, RenderRecord& record) {
+  device_.retireInstance(static_cast<InstanceId>(key));
+  if (record.material != renderer::kInvalidMaterial) {
+    device_.destroyMaterial(record.material);
+    record.material = renderer::kInvalidMaterial;
   }
+  if (record.mesh != renderer::kInvalidMesh) {
+    device_.destroyMesh(record.mesh);
+    record.mesh = renderer::kInvalidMesh;
+  }
+}
 
-  glm::vec3 min_v{std::numeric_limits<float>::max()};
-  glm::vec3 max_v{std::numeric_limits<float>::lowest()};
-  bool any = false;
-  for (unsigned int i = 0; i < scene->mNumMeshes; ++i) {
-    const aiMesh* mesh = scene->mMeshes[i];
-    if (!mesh) {
+void RenderSystem::cleanupStaleRecords(ecs::World& world) {
+  for (auto it = records_.begin(); it != records_.end();) {
+    const ecs::Entity entity = entityFromKey(it->first);
+    const bool stale = !world.isAlive(entity) ||
+                       !world.has<components::MeshComponent>(entity) ||
+                       !world.has<components::TransformComponent>(entity);
+    if (!stale) {
+      ++it;
       continue;
     }
-    for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
-      const aiVector3D& vert = mesh->mVertices[v];
-      min_v.x = std::min(min_v.x, vert.x);
-      min_v.y = std::min(min_v.y, vert.y);
-      min_v.z = std::min(min_v.z, vert.z);
-      max_v.x = std::max(max_v.x, vert.x);
-      max_v.y = std::max(max_v.y, vert.y);
-      max_v.z = std::max(max_v.z, vert.z);
-      any = true;
-    }
+    releaseRecord(it->first, it->second);
+    it = records_.erase(it);
   }
-
-  if (!any) {
-    return false;
-  }
-
-  out_center = (min_v + max_v) * 0.5f;
-  const glm::vec3 extents = max_v - min_v;
-  out_radius = 0.5f * glm::length(extents);
-  return true;
-}
 }
 
 void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/) {
@@ -244,11 +226,11 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   bool has_camera = false;
   glm::mat4 projection(1.0f);
   glm::mat4 view(1.0f);
-  for (const ecs::Entity entity :
-       world.view<components::CameraComponent, components::TransformComponent>()) {
+  world.forEach<components::CameraComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
     const auto& camera = world.get<components::CameraComponent>(entity);
     if (!camera.is_primary) {
-      continue;
+      return true;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
     CameraData cam{};
@@ -269,8 +251,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     const glm::vec3 up = cam_basis * glm::vec3(0.0f, 1.0f, 0.0f);
     view = glm::lookAt(cam.position, cam.position + forward, up);
     has_camera = true;
-    break;
-  }
+    return false;
+  });
 
   if (!has_camera) {
     if (!warned_no_camera_) {
@@ -286,36 +268,37 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   bool has_light = false;
   static bool warned_missing_light_transform = false;
   if (!warned_missing_light_transform) {
-    for (const ecs::Entity entity : world.view<components::LightComponent>()) {
+    world.forEach<components::LightComponent>([&](const ecs::Entity entity) {
       if (!world.has<components::TransformComponent>(entity)) {
         warned_missing_light_transform = true;
-        break;
+        return false;
       }
-    }
+      return true;
+    });
   }
-  for (const ecs::Entity entity :
-       world.view<components::LightComponent, components::TransformComponent>()) {
+  world.forEach<components::LightComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
     const auto& light_component = world.get<components::LightComponent>(entity);
     if (light_component.type != components::LightComponent::Type::Directional) {
-      continue;
+      return true;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
     light = toDirectionalLight(light_component, transform);
     has_light = true;
-    break;
-  }
+    return false;
+  });
   if (!has_light) {
-    light.direction = glm::vec3(0.3f, 1.0f, 0.2f);
+    light.direction = glm::vec3(0.3f, -1.0f, 0.2f);
     light.color = math::Color{1.0f, 1.0f, 1.0f, 1.0f};
     light.intensity = 1.0f;
   }
   device_.setDirectionalLight(light);
 
   bool env_found = false;
-  for (const ecs::Entity entity : world.view<components::EnvironmentComponent>()) {
+  world.forEach<components::EnvironmentComponent>([&](const ecs::Entity entity) {
     const auto& env = world.get<components::EnvironmentComponent>(entity);
     if (!env.enabled) {
-      continue;
+      return true;
     }
     if (env.environment_map != last_env_path_ ||
         env.intensity != last_env_intensity_ ||
@@ -326,8 +309,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       last_env_draw_skybox_ = env.draw_skybox;
     }
     env_found = true;
-    break;
-  }
+    return false;
+  });
   if (!env_found &&
       (!last_env_path_.empty() || last_env_intensity_ >= 0.0f || last_env_draw_skybox_)) {
     device_.setEnvironmentMap({}, 0.0f, false);
@@ -337,9 +320,15 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
 
   const FrustumPlanes frustum = extractFrustumPlanes(projection * view);
+  auto refresh_record_bounds = [&](RenderRecord& record) {
+    record.bounds_center = glm::vec3(0.0f);
+    record.bounds_radius = 0.0f;
+    record.bounds_valid =
+        device_.getMeshBounds(record.mesh, record.bounds_center, record.bounds_radius);
+  };
 
-  for (const ecs::Entity entity :
-       world.view<components::MeshComponent, components::TransformComponent>()) {
+  world.forEach<components::MeshComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
     const auto& mesh = world.get<components::MeshComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
 
@@ -351,35 +340,31 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     const uint64_t key = entityKey(entity);
     auto it = records_.find(key);
     if (it == records_.end()) {
-      const bool exists = !mesh.mesh_key.empty() && std::filesystem::exists(mesh.mesh_key);
       RenderRecord record;
       record.mesh_key = mesh.mesh_key;
       record.material_key = mesh.material_key;
       record.mesh = device_.createMeshFromFile(mesh.mesh_key);
       record.material = kInvalidMaterial;
-      auto bounds_it = bounds_cache_.find(mesh.mesh_key);
-      if (bounds_it == bounds_cache_.end()) {
-        MeshBounds bounds{};
-        bounds.valid = computeMeshBounds(mesh.mesh_key, bounds.center, bounds.radius);
-        bounds_it = bounds_cache_.emplace(mesh.mesh_key, bounds).first;
-      }
-      record.bounds_valid = bounds_it->second.valid;
-      record.bounds_center = bounds_it->second.center;
-      record.bounds_radius = bounds_it->second.radius;
+      refresh_record_bounds(record);
       it = records_.emplace(key, std::move(record)).first;
     } else if (it->second.mesh_key != mesh.mesh_key) {
-      const bool exists = !mesh.mesh_key.empty() && std::filesystem::exists(mesh.mesh_key);
-      it->second.mesh_key = mesh.mesh_key;
-      it->second.mesh = device_.createMeshFromFile(mesh.mesh_key);
-      auto bounds_it = bounds_cache_.find(mesh.mesh_key);
-      if (bounds_it == bounds_cache_.end()) {
-        MeshBounds bounds{};
-        bounds.valid = computeMeshBounds(mesh.mesh_key, bounds.center, bounds.radius);
-        bounds_it = bounds_cache_.emplace(mesh.mesh_key, bounds).first;
+      if (it->second.material != kInvalidMaterial) {
+        device_.destroyMaterial(it->second.material);
+        it->second.material = kInvalidMaterial;
       }
-      it->second.bounds_valid = bounds_it->second.valid;
-      it->second.bounds_center = bounds_it->second.center;
-      it->second.bounds_radius = bounds_it->second.radius;
+      if (it->second.mesh != kInvalidMesh) {
+        device_.destroyMesh(it->second.mesh);
+      }
+      it->second.mesh_key = mesh.mesh_key;
+      it->second.material_key = mesh.material_key;
+      it->second.mesh = device_.createMeshFromFile(mesh.mesh_key);
+      refresh_record_bounds(it->second);
+    } else if (it->second.material_key != mesh.material_key) {
+      if (it->second.material != kInvalidMaterial) {
+        device_.destroyMaterial(it->second.material);
+        it->second.material = kInvalidMaterial;
+      }
+      it->second.material_key = mesh.material_key;
     }
 
     const glm::mat4 world_matrix = toTransform(transform);
@@ -403,64 +388,62 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     item.visible = visible && in_frustum;
     item.shadow_visible = visible;
     device_.submit(item);
-  }
+  });
+
+  cleanupStaleRecords(world);
 
   const math::Color debug_color{0.1f, 1.0f, 0.1f, 1.0f};
-  for (const ecs::Entity entity :
-       world.view<components::TransformComponent, components::BoxColliderComponent>()) {
+  world.forEach<components::TransformComponent, components::BoxColliderComponent>(
+      [&](const ecs::Entity entity) {
     const auto& collider = world.get<components::BoxColliderComponent>(entity);
     if (!collider.debug_draw) {
-      continue;
+      return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
     drawBoxWire(device_, transform, collider.center, collider.half_extents, debug_color);
-  }
+  });
 
-  for (const ecs::Entity entity :
-       world.view<components::TransformComponent, components::SphereColliderComponent>()) {
+  world.forEach<components::TransformComponent, components::SphereColliderComponent>(
+      [&](const ecs::Entity entity) {
     const auto& collider = world.get<components::SphereColliderComponent>(entity);
     if (!collider.debug_draw) {
-      continue;
+      return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
     drawSphereWire(device_, transform, collider.center, collider.radius, debug_color);
-  }
+  });
 
-  for (const ecs::Entity entity :
-       world.view<components::TransformComponent, components::CapsuleColliderComponent>()) {
+  world.forEach<components::TransformComponent, components::CapsuleColliderComponent>(
+      [&](const ecs::Entity entity) {
     const auto& collider = world.get<components::CapsuleColliderComponent>(entity);
     if (!collider.debug_draw) {
-      continue;
+      return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
     drawCapsuleWire(device_, transform, collider.center, collider.radius, collider.height, debug_color);
-  }
+  });
 
-  for (const ecs::Entity entity :
-       world.view<components::TransformComponent, components::MeshColliderComponent, components::MeshComponent>()) {
+  world.forEach<components::TransformComponent, components::MeshColliderComponent, components::MeshComponent>(
+      [&](const ecs::Entity entity) {
     const auto& collider = world.get<components::MeshColliderComponent>(entity);
     if (!collider.debug_draw) {
-      continue;
+      return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
     const auto& mesh = world.get<components::MeshComponent>(entity);
     if (mesh.mesh_key.empty()) {
-      continue;
+      return;
     }
-    auto bounds_it = bounds_cache_.find(mesh.mesh_key);
-    if (bounds_it == bounds_cache_.end()) {
-      MeshBounds bounds{};
-      bounds.valid = computeMeshBounds(mesh.mesh_key, bounds.center, bounds.radius);
-      bounds_it = bounds_cache_.emplace(mesh.mesh_key, bounds).first;
+    const uint64_t key = entityKey(entity);
+    auto record_it = records_.find(key);
+    if (record_it == records_.end() || !record_it->second.bounds_valid) {
+      return;
     }
-    if (!bounds_it->second.valid) {
-      continue;
-    }
-    drawSphereWire(device_, transform, {bounds_it->second.center.x,
-                                        bounds_it->second.center.y,
-                                        bounds_it->second.center.z},
-                   bounds_it->second.radius, debug_color);
-  }
+    drawSphereWire(device_, transform,
+                   {record_it->second.bounds_center.x, record_it->second.bounds_center.y,
+                    record_it->second.bounds_center.z},
+                   record_it->second.bounds_radius, debug_color);
+  });
 }
 
 }  // namespace karma::renderer

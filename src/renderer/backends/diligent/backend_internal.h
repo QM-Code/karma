@@ -44,6 +44,7 @@ struct DrawConstants {
   float pbr_params[4];
   float env_params[4];
   float shadow_params[4];
+  float shadow_bias_params[4];
   float light_dir[4];
   float light_color[4];
   float camera_pos[4];

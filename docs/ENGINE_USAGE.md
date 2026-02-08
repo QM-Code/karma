@@ -56,6 +56,12 @@ int main() {
   karma::app::EngineConfig config;
   config.window.title = "My Game";
   config.shadow_map_size = 2048;
+  config.shadow_bias = 0.0006f;
+  config.shadow_pcf_radius = 1;
+  config.shadow_raster_depth_bias = 0;
+  config.shadow_raster_slope_bias = 0.0f;
+  config.shadow_receiver_bias_scale = 0.75f;
+  config.shadow_normal_bias_scale = 1.0f;
 
   engine.start(game, config);
   while (engine.isRunning()) {
@@ -78,6 +84,17 @@ The engine renders your UI draw lists on top of the 3D frame.
 - Directional light with shadows (PCF supported)
 - Cascaded shadow maps (CSM)
 - Optional anisotropy + mip generation
+
+## Shadow Defaults
+Recommended baseline values for the current directional-shadow pipeline:
+
+- `shadow_map_size = 2048`
+- `shadow_pcf_radius = 1`
+- `shadow_bias = 0.0006f`
+- `shadow_receiver_bias_scale = 0.75f`
+- `shadow_normal_bias_scale = 1.0f`
+- `shadow_raster_depth_bias = 0`
+- `shadow_raster_slope_bias = 0.0f`
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.

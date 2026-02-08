@@ -149,6 +149,24 @@ This means most frame-time risk currently clusters in renderer backend behavior 
   - `material_key` is carried in mesh component/record but not wired to a real material lookup in submission path.
   - `exists` checks are present but ignored.
 
+## Shadow Baseline
+
+Current directional shadow pipeline baseline that is verified stable in-scene:
+
+- Light-space depth mapping explicitly maps near/far in `backend_render.cpp`.
+- Shader-side receiver bias combines:
+  - world-space normal/light offset pre-projection
+  - receiver-plane derivative bias
+  - slope-scaled texel bias
+- Runtime defaults:
+  - `shadow_map_size = 2048`
+  - `shadow_pcf_radius = 1`
+  - `shadow_bias = 0.0006f`
+  - `shadow_receiver_bias_scale = 0.75f`
+  - `shadow_normal_bias_scale = 1.0f`
+  - `shadow_raster_depth_bias = 0`
+  - `shadow_raster_slope_bias = 0.0f`
+
 ## What Is Already Good
 
 1. Texture cache exists and avoids redundant image decode:
@@ -174,4 +192,3 @@ This means most frame-time risk currently clusters in renderer backend behavior 
    - Disable verify flags in non-debug builds.
 5. Validate with profiling:
    - Capture CPU and GPU timing after each step to verify actual wins.
-

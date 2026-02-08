@@ -163,6 +163,11 @@ int main() {
   config.generate_mipmaps = true;
   config.shadow_map_size = 2048;
   config.shadow_pcf_radius = 1;
+  config.shadow_bias = 0.0006f;
+  config.shadow_raster_depth_bias = 0;
+  config.shadow_raster_slope_bias = 0.0f;
+  config.shadow_receiver_bias_scale = 0.75f;
+  config.shadow_normal_bias_scale = 1.0f;
 
   engine.start(game, config);
   while (engine.isRunning()) {

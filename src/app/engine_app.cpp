@@ -73,7 +73,17 @@ void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
   }
 #if defined(KARMA_DEBUG_UI)
   if (debug_ui_enabled_) {
-    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_, &scene_, &systems_);
+    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_,
+                                                     &scene_,
+                                                     &systems_,
+                                                     graphics_.get(),
+                                                     config_.shadow_map_size,
+                                                     config_.shadow_bias,
+                                                     config_.shadow_pcf_radius,
+                                                     config_.shadow_raster_depth_bias,
+                                                     config_.shadow_raster_slope_bias,
+                                                     config_.shadow_receiver_bias_scale,
+                                                     config_.shadow_normal_bias_scale);
     return;
   }
 #endif
@@ -99,7 +109,17 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   initSubsystems();
 #if defined(KARMA_DEBUG_UI)
   if (debug_ui_enabled_) {
-    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_, &scene_, &systems_);
+    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_,
+                                                     &scene_,
+                                                     &systems_,
+                                                     graphics_.get(),
+                                                     config_.shadow_map_size,
+                                                     config_.shadow_bias,
+                                                     config_.shadow_pcf_radius,
+                                                     config_.shadow_raster_depth_bias,
+                                                     config_.shadow_raster_slope_bias,
+                                                     config_.shadow_receiver_bias_scale,
+                                                     config_.shadow_normal_bias_scale);
   }
 #endif
   if (graphics_) {
@@ -108,8 +128,13 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                  config_.environment_intensity,
                                  config_.environment_draw_skybox);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
-    graphics_->setShadowSettings(config_.shadow_bias, config_.shadow_map_size,
-                                 config_.shadow_pcf_radius);
+    graphics_->setShadowSettings(config_.shadow_bias,
+                                 config_.shadow_map_size,
+                                 config_.shadow_pcf_radius,
+                                 config_.shadow_raster_depth_bias,
+                                 config_.shadow_raster_slope_bias,
+                                 config_.shadow_receiver_bias_scale,
+                                 config_.shadow_normal_bias_scale);
   }
   game_ = &game;
   running_ = true;

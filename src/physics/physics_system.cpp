@@ -70,10 +70,10 @@ void PhysicsSystem::update(ecs::World& world, float dt) {
 }
 
 void PhysicsSystem::syncRigidBodies(ecs::World& world) {
-  for (const ecs::Entity entity :
-       world.view<components::TransformComponent, components::BoxColliderComponent, components::RigidbodyComponent>()) {
+  world.forEach<components::TransformComponent, components::BoxColliderComponent, components::RigidbodyComponent>(
+      [&](const ecs::Entity entity) {
     if (!collisionEnabled(world, entity)) {
-      continue;
+      return;
     }
     const auto& collider = world.get<components::BoxColliderComponent>(entity);
     const math::Vec3 collider_center = collider.center;
@@ -148,46 +148,46 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
         it->second.setAngularVelocity(toGlm(body.angular_velocity));
       }
     }
-  }
+  });
 
-  for (const ecs::Entity entity :
-       world.view<components::TransformComponent, components::MeshColliderComponent>()) {
+  world.forEach<components::TransformComponent, components::MeshColliderComponent>(
+      [&](const ecs::Entity entity) {
     if (world.has<components::RigidbodyComponent>(entity)) {
-      continue;
+      return;
     }
     if (!collisionEnabled(world, entity)) {
-      continue;
+      return;
     }
     const uint64_t key = entityKey(entity);
     if (static_bodies_.find(key) != static_bodies_.end()) {
-      continue;
+      return;
     }
     if (!world.has<components::MeshComponent>(entity)) {
-      continue;
+      return;
     }
     const auto& mesh = world.get<components::MeshComponent>(entity);
     StaticBody body = physics_.createStaticMesh(mesh.mesh_key);
     static_bodies_.emplace(key, std::move(body));
-  }
+  });
 }
 
 void PhysicsSystem::syncDynamicBodies(ecs::World& world) {
-  for (const ecs::Entity entity :
-       world.view<components::TransformComponent, components::BoxColliderComponent, components::RigidbodyComponent>()) {
+  world.forEach<components::TransformComponent, components::BoxColliderComponent, components::RigidbodyComponent>(
+      [&](const ecs::Entity entity) {
     if (!collisionEnabled(world, entity)) {
-      continue;
+      return;
     }
     auto& body = world.get<components::RigidbodyComponent>(entity);
     if (body.is_kinematic) {
-      continue;
+      return;
     }
     const uint64_t key = entityKey(entity);
     auto it = rigid_bodies_.find(key);
     if (it == rigid_bodies_.end()) {
-      continue;
+      return;
     }
     if (!it->second.isValid()) {
-      continue;
+      return;
     }
     auto& transform = world.get<components::TransformComponent>(entity);
     const auto& collider = world.get<components::BoxColliderComponent>(entity);
@@ -198,16 +198,16 @@ void PhysicsSystem::syncDynamicBodies(ecs::World& world) {
                                       it->second.getRotation().z, it->second.getRotation().w});
     body.velocity = toVec3(it->second.getVelocity());
     body.angular_velocity = toVec3(it->second.getAngularVelocity());
-  }
+  });
 }
 
 void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
   (void)dt;
   if (!has_player_) {
-    for (const ecs::Entity entity :
-         world.view<components::PlayerControllerComponent, components::TransformComponent>()) {
+    world.forEach<components::PlayerControllerComponent, components::TransformComponent>(
+        [&](const ecs::Entity entity) {
       if (!collisionEnabled(world, entity)) {
-        continue;
+        return true;
       }
       glm::vec3 half_extents{};
       math::Vec3 center{};
@@ -225,7 +225,7 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
         half_extents = glm::vec3(collider.radius, collider.height * 0.5f, collider.radius);
         center = collider.center;
       } else {
-        continue;
+        return true;
       }
       player_half_extents_ = {half_extents.x, half_extents.y, half_extents.z};
       player_center_ = center;
@@ -236,8 +236,8 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
       auto& transform = world.get<components::TransformComponent>(entity);
       controller.setCenter(toGlm(center));
       controller.setPosition(toGlm(transform.getPosition()));
-      break;
-    }
+      return false;
+    });
   }
 
   if (!has_player_) {

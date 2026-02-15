@@ -162,6 +162,19 @@ void GraphicsDevice::setGenerateMips(bool enabled) {
   }
 }
 
+void GraphicsDevice::setForwardPlusSettings(int tile_size, int max_lights_per_tile) {
+  if (backend_) {
+    backend_->setForwardPlusSettings(tile_size, max_lights_per_tile);
+  }
+}
+
+ForwardPlusStats GraphicsDevice::getForwardPlusStats() const {
+  if (!backend_) {
+    return {};
+  }
+  return backend_->getForwardPlusStats();
+}
+
 void GraphicsDevice::setShadowSettings(float bias,
                                        int map_size,
                                        int pcf_radius,
@@ -177,6 +190,36 @@ void GraphicsDevice::setShadowSettings(float bias,
                                 raster_slope_bias,
                                 receiver_bias_scale,
                                 normal_bias_scale);
+  }
+}
+
+void GraphicsDevice::setPointShadowSettings(float constant_bias,
+                                            float slope_bias_scale,
+                                            float normal_bias_scale,
+                                            float receiver_bias_scale) {
+  if (backend_) {
+    backend_->setPointShadowSettings(constant_bias,
+                                     slope_bias_scale,
+                                     normal_bias_scale,
+                                     receiver_bias_scale);
+  }
+}
+
+void GraphicsDevice::setLocalLightingSettings(float distance_damping,
+                                              float range_falloff_exponent,
+                                              bool ao_affects_local_lights,
+                                              float directional_shadow_lift_strength) {
+  if (backend_) {
+    backend_->setLocalLightingSettings(distance_damping,
+                                       range_falloff_exponent,
+                                       ao_affects_local_lights,
+                                       directional_shadow_lift_strength);
+  }
+}
+
+void GraphicsDevice::setExposure(float exposure) {
+  if (backend_) {
+    backend_->setExposure(exposure);
   }
 }
 

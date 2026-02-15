@@ -56,6 +56,8 @@ class Backend {
                                  bool draw_skybox) = 0;
   virtual void setAnisotropy(bool enabled, int level) = 0;
   virtual void setGenerateMips(bool enabled) = 0;
+  virtual void setForwardPlusSettings(int tile_size, int max_lights_per_tile) = 0;
+  virtual renderer::ForwardPlusStats getForwardPlusStats() const = 0;
   virtual void setShadowSettings(float bias,
                                  int map_size,
                                  int pcf_radius,
@@ -63,6 +65,15 @@ class Backend {
                                  float raster_slope_bias,
                                  float receiver_bias_scale,
                                  float normal_bias_scale) = 0;
+  virtual void setPointShadowSettings(float constant_bias,
+                                      float slope_bias_scale,
+                                      float normal_bias_scale,
+                                      float receiver_bias_scale) = 0;
+  virtual void setLocalLightingSettings(float distance_damping,
+                                        float range_falloff_exponent,
+                                        bool ao_affects_local_lights,
+                                        float directional_shadow_lift_strength) = 0;
+  virtual void setExposure(float exposure) = 0;
 
   virtual void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) = 0;
   virtual void renderUi(const karma::app::UIDrawData& draw_data) = 0;

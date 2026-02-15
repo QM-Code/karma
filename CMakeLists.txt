@@ -16,10 +16,23 @@ option(KARMA_FETCH_DEPS "Fetch third-party dependencies if missing" ON)
 option(KARMA_BUILD_DEBUG_UI "Build engine debug UI overlay" ON)
 option(KARMA_BUILD_IMGUI_DEMO "Build ImGui UI demo" ON)
 option(KARMA_BUILD_RMLUI_DEMO "Build RmlUi UI demo" ON)
+option(KARMA_HEADLESS "Build without window/render backends and graphics demos" OFF)
 set(KARMA_DILIGENT_TAG "v2.5.5" CACHE STRING "DiligentCore git tag/branch to fetch")
+
+if (KARMA_HEADLESS)
+  set(KARMA_WINDOW_BACKEND_GLFW OFF CACHE BOOL "Use GLFW window backend" FORCE)
+  set(KARMA_WINDOW_BACKEND_SDL OFF CACHE BOOL "Use SDL window backend" FORCE)
+  set(KARMA_RENDER_BACKEND_DILIGENT OFF CACHE BOOL "Use Diligent renderer backend" FORCE)
+  set(KARMA_BUILD_DEBUG_UI OFF CACHE BOOL "Build engine debug UI overlay" FORCE)
+  set(KARMA_BUILD_IMGUI_DEMO OFF CACHE BOOL "Build ImGui UI demo" FORCE)
+  set(KARMA_BUILD_RMLUI_DEMO OFF CACHE BOOL "Build RmlUi UI demo" FORCE)
+endif()
 
 if (KARMA_WINDOW_BACKEND_GLFW AND KARMA_WINDOW_BACKEND_SDL)
   message(FATAL_ERROR "Choose only one window backend: GLFW or SDL.")
+endif()
+if (NOT KARMA_HEADLESS AND NOT KARMA_WINDOW_BACKEND_GLFW AND NOT KARMA_WINDOW_BACKEND_SDL)
+  message(FATAL_ERROR "Choose one window backend (GLFW or SDL), or enable KARMA_HEADLESS.")
 endif()
 if (KARMA_AUDIO_BACKEND_MINIAUDIO AND KARMA_AUDIO_BACKEND_SDL)
   message(FATAL_ERROR "Choose only one audio backend: miniaudio or SDL.")
@@ -358,7 +371,7 @@ if (KARMA_WINDOW_BACKEND_SDL)
   list(APPEND KARMA_SOURCES
     src/platform/backends/window_sdl.cpp
   )
-else()
+elseif (KARMA_WINDOW_BACKEND_GLFW)
   list(APPEND KARMA_SOURCES
     src/platform/backends/window_glfw.cpp
   )
@@ -415,6 +428,9 @@ endif()
 
 target_compile_features(karma PUBLIC cxx_std_20)
 
+if (KARMA_HEADLESS)
+  target_compile_definitions(karma PUBLIC KARMA_HEADLESS)
+endif()
 if (KARMA_RENDER_BACKEND_DILIGENT)
   target_compile_definitions(karma PUBLIC BZ3_RENDER_BACKEND_DILIGENT)
 endif()
@@ -462,47 +478,55 @@ if (KARMA_BUILD_DEBUG_UI)
   endif()
 endif()
 
-add_executable(karma_example
-  examples/main.cpp
-)
-
-target_link_libraries(karma_example PRIVATE karma)
-
-if (KARMA_XXHASH_ARCHIVE AND CMAKE_AR AND CMAKE_C_COMPILER)
-  set(KARMA_XXHASH_STAMP "${CMAKE_BINARY_DIR}/karma_xxhash.stamp")
-  add_custom_command(
-    OUTPUT ${KARMA_XXHASH_STAMP}
-    COMMAND ${CMAKE_C_COMPILER} -c ${KARMA_XXHASH_SOURCE} -o ${KARMA_XXHASH_OBJECT}
-    COMMAND ${CMAKE_AR} qc ${KARMA_XXHASH_ARCHIVE} ${KARMA_XXHASH_OBJECT}
-    COMMAND ${CMAKE_RANLIB} ${KARMA_XXHASH_ARCHIVE}
-    COMMAND ${CMAKE_COMMAND} -E touch ${KARMA_XXHASH_STAMP}
-    COMMENT "Rebuilding xxhash static archive"
-    VERBATIM)
-  add_custom_target(karma_fix_xxhash DEPENDS ${KARMA_XXHASH_STAMP})
-  add_dependencies(karma_example karma_fix_xxhash)
-endif()
-
-if (KARMA_BUILD_IMGUI_DEMO)
-  add_executable(karma_imgui_ui_demo
-    examples/imgui_ui_demo.cpp
-    ${IMGUI_SOURCES}
+if (NOT KARMA_HEADLESS)
+  add_executable(karma_example
+    examples/main.cpp
   )
-  target_link_libraries(karma_imgui_ui_demo PRIVATE karma ${KARMA_IMGUI_TARGET})
+
+  target_link_libraries(karma_example PRIVATE karma ${KARMA_IMGUI_TARGET})
   if (imgui_SOURCE_DIR)
-    target_include_directories(karma_imgui_ui_demo PRIVATE ${imgui_SOURCE_DIR})
+    target_include_directories(karma_example PRIVATE ${imgui_SOURCE_DIR})
   endif()
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_imgui_ui_demo karma_fix_xxhash)
+  if (NOT KARMA_IMGUI_TARGET AND DEFINED IMGUI_SOURCES)
+    target_sources(karma_example PRIVATE ${IMGUI_SOURCES})
   endif()
-endif()
 
-if (KARMA_BUILD_RMLUI_DEMO)
-  add_executable(karma_rmlui_ui_demo
-    examples/rmlui_ui_demo.cpp
-  )
-  target_link_libraries(karma_rmlui_ui_demo PRIVATE karma ${KARMA_RMLUI_TARGET})
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
+  if (KARMA_XXHASH_ARCHIVE AND CMAKE_AR AND CMAKE_C_COMPILER)
+    set(KARMA_XXHASH_STAMP "${CMAKE_BINARY_DIR}/karma_xxhash.stamp")
+    add_custom_command(
+      OUTPUT ${KARMA_XXHASH_STAMP}
+      COMMAND ${CMAKE_C_COMPILER} -c ${KARMA_XXHASH_SOURCE} -o ${KARMA_XXHASH_OBJECT}
+      COMMAND ${CMAKE_AR} qc ${KARMA_XXHASH_ARCHIVE} ${KARMA_XXHASH_OBJECT}
+      COMMAND ${CMAKE_RANLIB} ${KARMA_XXHASH_ARCHIVE}
+      COMMAND ${CMAKE_COMMAND} -E touch ${KARMA_XXHASH_STAMP}
+      COMMENT "Rebuilding xxhash static archive"
+      VERBATIM)
+    add_custom_target(karma_fix_xxhash DEPENDS ${KARMA_XXHASH_STAMP})
+    add_dependencies(karma_example karma_fix_xxhash)
+  endif()
+
+  if (KARMA_BUILD_IMGUI_DEMO)
+    add_executable(karma_imgui_ui_demo
+      examples/imgui_ui_demo.cpp
+      ${IMGUI_SOURCES}
+    )
+    target_link_libraries(karma_imgui_ui_demo PRIVATE karma ${KARMA_IMGUI_TARGET})
+    if (imgui_SOURCE_DIR)
+      target_include_directories(karma_imgui_ui_demo PRIVATE ${imgui_SOURCE_DIR})
+    endif()
+    if (TARGET karma_fix_xxhash)
+      add_dependencies(karma_imgui_ui_demo karma_fix_xxhash)
+    endif()
+  endif()
+
+  if (KARMA_BUILD_RMLUI_DEMO)
+    add_executable(karma_rmlui_ui_demo
+      examples/rmlui_ui_demo.cpp
+    )
+    target_link_libraries(karma_rmlui_ui_demo PRIVATE karma ${KARMA_RMLUI_TARGET})
+    if (TARGET karma_fix_xxhash)
+      add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
+    endif()
   endif()
 endif()
 

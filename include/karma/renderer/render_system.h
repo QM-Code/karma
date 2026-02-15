@@ -32,6 +32,14 @@ class RenderSystem {
     bool bounds_valid = false;
   };
 
+  struct SharedMeshResource {
+    renderer::MeshId mesh = renderer::kInvalidMesh;
+    uint32_t ref_count = 0;
+    glm::vec3 bounds_center{0.0f};
+    float bounds_radius = 0.0f;
+    bool bounds_valid = false;
+  };
+
   static uint64_t entityKey(ecs::Entity entity) {
     return (static_cast<uint64_t>(entity.index) << 32) |
            static_cast<uint64_t>(entity.generation);
@@ -45,9 +53,13 @@ class RenderSystem {
 
   void releaseRecord(uint64_t key, RenderRecord& record);
   void cleanupStaleRecords(ecs::World& world);
+  void acquireSharedMesh(const std::string& mesh_key, RenderRecord& record);
+  void releaseSharedMesh(const std::string& mesh_key);
 
   GraphicsDevice& device_;
   std::unordered_map<uint64_t, RenderRecord> records_;
+  std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
+  std::unordered_map<std::string, renderer::RenderTargetId> render_targets_by_key_;
   std::string last_env_path_;
   float last_env_intensity_ = -1.0f;
   bool last_env_draw_skybox_ = false;

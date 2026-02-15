@@ -370,9 +370,19 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
 
     if (use_texture) {
       Diligent::ITextureView* desired = default_base_color_;
-      auto it = textures_.find(cmd.texture);
-      if (it != textures_.end() && it->second.srv) {
-        desired = it->second.srv;
+      const bool is_render_target_handle = (cmd.texture & kRenderTargetTextureHandleBit) != 0u;
+      if (is_render_target_handle) {
+        const renderer::RenderTargetId target_id =
+            static_cast<renderer::RenderTargetId>(cmd.texture & ~kRenderTargetTextureHandleBit);
+        auto target_it = targets_.find(target_id);
+        if (target_it != targets_.end() && target_it->second.color_srv) {
+          desired = target_it->second.color_srv;
+        }
+      } else {
+        auto it = textures_.find(cmd.texture);
+        if (it != textures_.end() && it->second.srv) {
+          desired = it->second.srv;
+        }
       }
       if (desired && desired != current_texture) {
         current_texture = desired;

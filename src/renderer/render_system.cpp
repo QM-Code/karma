@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 #include <vector>
 
 #include "karma/components/camera.h"
@@ -159,6 +160,7 @@ renderer::LightData toLightData(const components::LightComponent& light,
   out.color = light.color;
   out.intensity = light.intensity;
   out.range = std::max(light.range, 0.0f);
+  out.casts_shadows = light.casts_shadows;
 
   const float inner_rad = glm::radians(light.inner_cone_degrees);
   const float outer_rad = glm::radians(light.outer_cone_degrees);
@@ -232,6 +234,56 @@ bool sphereInFrustum(const FrustumPlanes& frustum, const glm::vec3& center, floa
   }
   return true;
 }
+
+renderer::CameraData toCameraData(const components::CameraComponent& camera,
+                                  const components::TransformComponent& transform) {
+  renderer::CameraData out{};
+  out.position = toGlm(transform.getPosition());
+  out.rotation = toGlm(transform.getRotation());
+  out.perspective = camera.perspective;
+  out.fov_y_degrees = camera.fov_y_degrees;
+  out.aspect = 16.0f / 9.0f;
+  out.near_clip = camera.near_clip;
+  out.far_clip = camera.far_clip;
+  out.ortho_left = camera.ortho_left;
+  out.ortho_right = camera.ortho_right;
+  out.ortho_top = camera.ortho_top;
+  out.ortho_bottom = camera.ortho_bottom;
+  out.shader_override_vertex_path = camera.shader_override_vertex_path;
+  out.shader_override_fragment_path = camera.shader_override_fragment_path;
+  out.shader_user_param_count = 0u;
+  for (const auto& [key, value] : camera.shader_user_params) {
+    if (out.shader_user_param_count >= renderer::kCameraShaderUserParamCapacity) {
+      break;
+    }
+    auto& dst = out.shader_user_params[out.shader_user_param_count++];
+    dst.key_hash = renderer::cameraShaderParamKeyHash(key);
+    dst.value = value;
+  }
+  return out;
+}
+
+glm::mat4 buildProjection(const renderer::CameraData& camera) {
+  if (camera.perspective) {
+    return glm::perspective(glm::radians(camera.fov_y_degrees),
+                            camera.aspect,
+                            camera.near_clip,
+                            camera.far_clip);
+  }
+  return glm::ortho(camera.ortho_left,
+                    camera.ortho_right,
+                    camera.ortho_bottom,
+                    camera.ortho_top,
+                    camera.near_clip,
+                    camera.far_clip);
+}
+
+glm::mat4 buildView(const renderer::CameraData& camera) {
+  const glm::mat3 cam_basis = glm::mat3_cast(camera.rotation);
+  const glm::vec3 forward = cam_basis * glm::vec3(0.0f, 0.0f, -1.0f);
+  const glm::vec3 up = cam_basis * glm::vec3(0.0f, 1.0f, 0.0f);
+  return glm::lookAt(camera.position, camera.position + forward, up);
+}
 }
 
 void RenderSystem::releaseRecord(uint64_t key, RenderRecord& record) {
@@ -240,10 +292,8 @@ void RenderSystem::releaseRecord(uint64_t key, RenderRecord& record) {
     device_.destroyMaterial(record.material);
     record.material = renderer::kInvalidMaterial;
   }
-  if (record.mesh != renderer::kInvalidMesh) {
-    device_.destroyMesh(record.mesh);
-    record.mesh = renderer::kInvalidMesh;
-  }
+  releaseSharedMesh(record.mesh_key);
+  record.mesh = renderer::kInvalidMesh;
 }
 
 void RenderSystem::cleanupStaleRecords(ecs::World& world) {
@@ -261,41 +311,118 @@ void RenderSystem::cleanupStaleRecords(ecs::World& world) {
   }
 }
 
+void RenderSystem::acquireSharedMesh(const std::string& mesh_key, RenderRecord& record) {
+  record.mesh = renderer::kInvalidMesh;
+  record.bounds_center = glm::vec3(0.0f);
+  record.bounds_radius = 0.0f;
+  record.bounds_valid = false;
+  if (mesh_key.empty()) {
+    return;
+  }
+
+  auto shared_it = shared_meshes_.find(mesh_key);
+  if (shared_it == shared_meshes_.end()) {
+    SharedMeshResource shared{};
+    shared.mesh = device_.createMeshFromFile(mesh_key);
+    if (shared.mesh != renderer::kInvalidMesh) {
+      shared.bounds_valid =
+          device_.getMeshBounds(shared.mesh, shared.bounds_center, shared.bounds_radius);
+    }
+    shared.ref_count = 1;
+    shared_it = shared_meshes_.emplace(mesh_key, std::move(shared)).first;
+  } else {
+    shared_it->second.ref_count += 1;
+  }
+
+  record.mesh = shared_it->second.mesh;
+  record.bounds_center = shared_it->second.bounds_center;
+  record.bounds_radius = shared_it->second.bounds_radius;
+  record.bounds_valid = shared_it->second.bounds_valid;
+}
+
+void RenderSystem::releaseSharedMesh(const std::string& mesh_key) {
+  if (mesh_key.empty()) {
+    return;
+  }
+  auto shared_it = shared_meshes_.find(mesh_key);
+  if (shared_it == shared_meshes_.end()) {
+    return;
+  }
+  if (shared_it->second.ref_count > 0) {
+    shared_it->second.ref_count -= 1;
+  }
+  if (shared_it->second.ref_count == 0) {
+    if (shared_it->second.mesh != renderer::kInvalidMesh) {
+      device_.destroyMesh(shared_it->second.mesh);
+    }
+    shared_meshes_.erase(shared_it);
+  }
+}
+
 void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/) {
   static bool logged_start = false;
   if (!logged_start) {
     logged_start = true;
   }
   bool has_camera = false;
+  renderer::CameraData primary_camera{};
   glm::mat4 projection(1.0f);
   glm::mat4 view(1.0f);
+  struct OffscreenPass {
+    renderer::CameraData camera;
+    renderer::RenderTargetId target = renderer::kDefaultRenderTarget;
+  };
+  std::vector<OffscreenPass> offscreen_passes;
+  std::unordered_set<std::string> active_render_target_keys;
   world.forEach<components::CameraComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
     const auto& camera = world.get<components::CameraComponent>(entity);
-    if (!camera.is_primary) {
-      return true;
-    }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    CameraData cam{};
-    cam.position = toGlm(transform.getPosition());
-    cam.rotation = toGlm(transform.getRotation());
-    cam.perspective = true;
-    cam.fov_y_degrees = camera.fov_y_degrees;
-    cam.aspect = 16.0f / 9.0f;
-    cam.near_clip = camera.near_clip;
-    cam.far_clip = camera.far_clip;
-    device_.setCamera(cam);
-    projection = glm::perspective(glm::radians(cam.fov_y_degrees),
-                                  cam.aspect,
-                                  cam.near_clip,
-                                  cam.far_clip);
-    const glm::mat3 cam_basis = glm::mat3_cast(cam.rotation);
-    const glm::vec3 forward = cam_basis * glm::vec3(0.0f, 0.0f, -1.0f);
-    const glm::vec3 up = cam_basis * glm::vec3(0.0f, 1.0f, 0.0f);
-    view = glm::lookAt(cam.position, cam.position + forward, up);
-    has_camera = true;
-    return false;
+    const renderer::CameraData cam = toCameraData(camera, transform);
+
+    if (camera.render_to_texture) {
+      renderer::RenderTargetId target_id = camera.render_target;
+      if (target_id == renderer::kDefaultRenderTarget && !camera.render_target_key.empty()) {
+        active_render_target_keys.insert(camera.render_target_key);
+        auto target_it = render_targets_by_key_.find(camera.render_target_key);
+        if (target_it == render_targets_by_key_.end()) {
+          renderer::RenderTargetDesc target_desc{};
+          target_desc.width = 512;
+          target_desc.height = 512;
+          target_desc.depth = true;
+          target_desc.stencil = false;
+          target_id = device_.createRenderTarget(target_desc);
+          if (target_id != renderer::kDefaultRenderTarget) {
+            render_targets_by_key_[camera.render_target_key] = target_id;
+          }
+        } else {
+          target_id = target_it->second;
+        }
+      }
+      if (target_id != renderer::kDefaultRenderTarget) {
+        offscreen_passes.push_back(OffscreenPass{.camera = cam, .target = target_id});
+      }
+    }
+
+    if (!has_camera && camera.is_primary) {
+      primary_camera = cam;
+      projection = buildProjection(primary_camera);
+      view = buildView(primary_camera);
+      has_camera = true;
+    }
+    return true;
   });
+
+  for (auto it = render_targets_by_key_.begin(); it != render_targets_by_key_.end();) {
+    if (active_render_target_keys.find(it->first) != active_render_target_keys.end()) {
+      ++it;
+      continue;
+    }
+    if (it->second != renderer::kDefaultRenderTarget) {
+      device_.destroyRenderTarget(it->second);
+    }
+    it = render_targets_by_key_.erase(it);
+  }
 
   if (!has_camera) {
     if (!warned_no_camera_) {
@@ -305,6 +432,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     return;
   }
   warned_no_camera_ = false;
+  device_.setCamera(primary_camera);
   device_.setCameraActive(true);
 
   renderer::DirectionalLightData light{};
@@ -366,12 +494,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
 
   const FrustumPlanes frustum = extractFrustumPlanes(projection * view);
-  auto refresh_record_bounds = [&](RenderRecord& record) {
-    record.bounds_center = glm::vec3(0.0f);
-    record.bounds_radius = 0.0f;
-    record.bounds_valid =
-        device_.getMeshBounds(record.mesh, record.bounds_center, record.bounds_radius);
-  };
+  const bool apply_frustum_culling = offscreen_passes.empty();
 
   world.forEach<components::MeshComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
@@ -389,22 +512,19 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       RenderRecord record;
       record.mesh_key = mesh.mesh_key;
       record.material_key = mesh.material_key;
-      record.mesh = device_.createMeshFromFile(mesh.mesh_key);
       record.material = kInvalidMaterial;
-      refresh_record_bounds(record);
+      acquireSharedMesh(mesh.mesh_key, record);
       it = records_.emplace(key, std::move(record)).first;
     } else if (it->second.mesh_key != mesh.mesh_key) {
       if (it->second.material != kInvalidMaterial) {
         device_.destroyMaterial(it->second.material);
         it->second.material = kInvalidMaterial;
       }
-      if (it->second.mesh != kInvalidMesh) {
-        device_.destroyMesh(it->second.mesh);
-      }
+      releaseSharedMesh(it->second.mesh_key);
       it->second.mesh_key = mesh.mesh_key;
       it->second.material_key = mesh.material_key;
-      it->second.mesh = device_.createMeshFromFile(mesh.mesh_key);
-      refresh_record_bounds(it->second);
+      it->second.material = kInvalidMaterial;
+      acquireSharedMesh(mesh.mesh_key, it->second);
     } else if (it->second.material_key != mesh.material_key) {
       if (it->second.material != kInvalidMaterial) {
         device_.destroyMaterial(it->second.material);
@@ -415,7 +535,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
 
     const glm::mat4 world_matrix = toTransform(transform);
     bool in_frustum = true;
-    if (it->second.bounds_valid) {
+    if (apply_frustum_culling && it->second.bounds_valid) {
       const glm::vec3 world_center = glm::vec3(world_matrix * glm::vec4(it->second.bounds_center, 1.0f));
       const glm::vec3 scale = toGlm(transform.getScale());
       const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
@@ -490,6 +610,14 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
                     record_it->second.bounds_center.z},
                    record_it->second.bounds_radius, debug_color);
   });
+
+  for (const auto& pass : offscreen_passes) {
+    device_.setCamera(pass.camera);
+    device_.setCameraActive(true);
+    device_.renderLayer(0, pass.target);
+  }
+  device_.setCamera(primary_camera);
+  device_.setCameraActive(true);
 }
 
 }  // namespace karma::renderer

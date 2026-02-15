@@ -2,8 +2,6 @@
 
 #if defined(BZ3_RENDER_BACKEND_DILIGENT)
 #include "karma/renderer/backends/diligent/backend.hpp"
-#else
-#error "Karma render backend not set. Define BZ3_RENDER_BACKEND_DILIGENT."
 #endif
 
 namespace karma::renderer_backend {

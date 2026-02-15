@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <limits>
 #include <filesystem>
+#include <array>
+#include <string_view>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <string>
@@ -46,6 +48,22 @@ struct MaterialDesc {
   bool double_sided = false;
 };
 
+static constexpr uint32_t kCameraShaderUserParamCapacity = 32;
+
+inline uint32_t cameraShaderParamKeyHash(std::string_view key) {
+  uint32_t hash = 2166136261u;
+  for (char c : key) {
+    hash ^= static_cast<uint32_t>(static_cast<unsigned char>(c));
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+struct CameraShaderUserParam {
+  uint32_t key_hash = 0u;
+  math::Color value{};
+};
+
 struct CameraData {
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
@@ -58,6 +76,10 @@ struct CameraData {
   float ortho_right = 1.0f;
   float ortho_top = 1.0f;
   float ortho_bottom = -1.0f;
+  std::filesystem::path shader_override_vertex_path;
+  std::filesystem::path shader_override_fragment_path;
+  std::array<CameraShaderUserParam, kCameraShaderUserParamCapacity> shader_user_params{};
+  uint32_t shader_user_param_count = 0;
 };
 
 struct DirectionalLightData {
@@ -83,6 +105,17 @@ struct LightData {
   float range = 10.0f;
   float inner_cone_cos = 0.9659258f;
   float outer_cone_cos = 0.8660254f;
+  bool casts_shadows = false;
+};
+
+struct ForwardPlusStats {
+  uint32_t tile_size = 16;
+  uint32_t max_lights_per_tile = 128;
+  uint32_t tiles_x = 0;
+  uint32_t tiles_y = 0;
+  uint32_t local_light_count = 0;
+  bool active = false;
+  bool overflow_risk = false;
 };
 
 struct DrawItem {

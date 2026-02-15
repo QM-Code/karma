@@ -29,6 +29,21 @@
 namespace karma::debug {
 
 namespace {
+class ScopedImGuiContext {
+ public:
+  explicit ScopedImGuiContext(ImGuiContext* context)
+      : previous_(ImGui::GetCurrentContext()) {
+    ImGui::SetCurrentContext(context);
+  }
+
+  ~ScopedImGuiContext() {
+    ImGui::SetCurrentContext(previous_);
+  }
+
+ private:
+  ImGuiContext* previous_ = nullptr;
+};
+
 ImGuiKey toImGuiKey(platform::Key key) {
   switch (key) {
     case platform::Key::Tab: return ImGuiKey_Tab;
@@ -261,7 +276,16 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
                                      int shadow_raster_depth_bias,
                                      float shadow_raster_slope_bias,
                                      float shadow_receiver_bias_scale,
-                                     float shadow_normal_bias_scale)
+                                     float shadow_normal_bias_scale,
+                                     float point_shadow_constant_bias,
+                                     float point_shadow_slope_bias_scale,
+                                     float point_shadow_normal_bias_scale,
+                                     float point_shadow_receiver_bias_scale,
+                                     float local_light_distance_damping,
+                                     float local_light_range_falloff_exponent,
+                                     bool ao_affects_local_lights,
+                                     float local_light_directional_shadow_lift_strength,
+                                     float lighting_exposure)
     : world_(world),
       scene_(scene),
       systems_(systems),
@@ -272,15 +296,35 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
       shadow_raster_depth_bias_(shadow_raster_depth_bias),
       shadow_raster_slope_bias_(shadow_raster_slope_bias),
       shadow_receiver_bias_scale_(shadow_receiver_bias_scale),
-      shadow_normal_bias_scale_(shadow_normal_bias_scale) {
+      shadow_normal_bias_scale_(shadow_normal_bias_scale),
+      point_shadow_constant_bias_(point_shadow_constant_bias),
+      point_shadow_slope_bias_scale_(point_shadow_slope_bias_scale),
+      point_shadow_normal_bias_scale_(point_shadow_normal_bias_scale),
+      point_shadow_receiver_bias_scale_(point_shadow_receiver_bias_scale),
+      local_light_distance_damping_(local_light_distance_damping),
+      local_light_range_falloff_exponent_(local_light_range_falloff_exponent),
+      ao_affects_local_lights_(ao_affects_local_lights),
+      local_light_directional_shadow_lift_strength_(local_light_directional_shadow_lift_strength),
+      lighting_exposure_(lighting_exposure) {
   IMGUI_CHECKVERSION();
-  ImGui::CreateContext();
+  imgui_context_ = ImGui::CreateContext();
+  ScopedImGuiContext context_scope(imgui_context_);
   ImGuiIO& io = ImGui::GetIO();
   io.BackendPlatformName = "karma";
   io.BackendRendererName = "karma_ui_draw";
+  if (graphics_) {
+    const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
+    forward_plus_tile_size_ = std::max(8, static_cast<int>(stats.tile_size));
+    forward_plus_max_lights_per_tile_ =
+        std::max(8, static_cast<int>(stats.max_lights_per_tile));
+  }
 }
 
 void DebugOverlayLayer::onEvent(const platform::Event& event) {
+  if (!imgui_context_) {
+    return;
+  }
+  ScopedImGuiContext context_scope(imgui_context_);
   ImGuiIO& io = ImGui::GetIO();
   applyModifierState(io, event.mods);
   switch (event.type) {
@@ -320,6 +364,10 @@ void DebugOverlayLayer::onEvent(const platform::Event& event) {
 }
 
 void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
+  if (!imgui_context_) {
+    return;
+  }
+  ScopedImGuiContext context_scope(imgui_context_);
   pending_ctx_ = &ctx;
   ImGuiIO& io = ImGui::GetIO();
   const auto frame = ctx.frame();
@@ -363,6 +411,69 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
                                      shadow_raster_slope_bias_,
                                      shadow_receiver_bias_scale_,
                                      shadow_normal_bias_scale_);
+      }
+      bool point_shadow_changed = false;
+      point_shadow_changed |= editFloat("Point Const Bias", point_shadow_constant_bias_, "%.6f");
+      point_shadow_changed |=
+          editFloat("Point Slope Bias Scale", point_shadow_slope_bias_scale_, "%.3f");
+      point_shadow_changed |=
+          editFloat("Point Normal Bias Scale", point_shadow_normal_bias_scale_, "%.3f");
+      point_shadow_changed |=
+          editFloat("Point Receiver Bias Scale", point_shadow_receiver_bias_scale_, "%.3f");
+      if (point_shadow_changed) {
+        point_shadow_constant_bias_ = std::max(0.0f, point_shadow_constant_bias_);
+        point_shadow_slope_bias_scale_ = std::max(0.0f, point_shadow_slope_bias_scale_);
+        point_shadow_normal_bias_scale_ = std::max(0.0f, point_shadow_normal_bias_scale_);
+        point_shadow_receiver_bias_scale_ = std::max(0.0f, point_shadow_receiver_bias_scale_);
+        graphics_->setPointShadowSettings(point_shadow_constant_bias_,
+                                          point_shadow_slope_bias_scale_,
+                                          point_shadow_normal_bias_scale_,
+                                          point_shadow_receiver_bias_scale_);
+      }
+    }
+    if (ImGui::CollapsingHeader("Local Lights (Forward+)", ImGuiTreeNodeFlags_DefaultOpen)) {
+      bool fp_changed = false;
+      fp_changed |= editInt("Tile Size", forward_plus_tile_size_);
+      fp_changed |= editInt("Max Lights / Tile", forward_plus_max_lights_per_tile_);
+      if (fp_changed) {
+        forward_plus_tile_size_ = std::clamp(forward_plus_tile_size_, 8, 64);
+        forward_plus_max_lights_per_tile_ =
+            std::clamp(forward_plus_max_lights_per_tile_, 8, 512);
+        graphics_->setForwardPlusSettings(forward_plus_tile_size_,
+                                          forward_plus_max_lights_per_tile_);
+      }
+      bool local_changed = false;
+      local_changed |= editFloat("InvSq Softening", local_light_distance_damping_, "%.3f");
+      local_changed |=
+          editFloat("Range Falloff Exponent", local_light_range_falloff_exponent_, "%.3f");
+      local_changed |= editBool("AO Affects Local Lights", ao_affects_local_lights_);
+      local_changed |= editFloat("Dir Shadow Lift", local_light_directional_shadow_lift_strength_, "%.3f");
+      if (local_changed) {
+        local_light_distance_damping_ = std::max(0.0f, local_light_distance_damping_);
+        local_light_range_falloff_exponent_ =
+            std::max(0.1f, local_light_range_falloff_exponent_);
+        local_light_directional_shadow_lift_strength_ =
+            std::max(0.0f, local_light_directional_shadow_lift_strength_);
+        graphics_->setLocalLightingSettings(local_light_distance_damping_,
+                                            local_light_range_falloff_exponent_,
+                                            ao_affects_local_lights_,
+                                            local_light_directional_shadow_lift_strength_);
+      }
+      bool exposure_changed = editFloat("Exposure", lighting_exposure_, "%.3f");
+      if (exposure_changed) {
+        lighting_exposure_ = std::max(0.01f, lighting_exposure_);
+        graphics_->setExposure(lighting_exposure_);
+      }
+      const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
+      ImGui::Text("Active: %s", stats.active ? "yes" : "no");
+      ImGui::Text("Local Lights: %u", static_cast<unsigned int>(stats.local_light_count));
+      ImGui::Text("Tiles: %u x %u", static_cast<unsigned int>(stats.tiles_x),
+                  static_cast<unsigned int>(stats.tiles_y));
+      ImGui::Text("Tile Size: %u", static_cast<unsigned int>(stats.tile_size));
+      ImGui::Text("Max Lights / Tile: %u",
+                  static_cast<unsigned int>(stats.max_lights_per_tile));
+      if (stats.overflow_risk) {
+        ImGui::Text("Warning: local light density may exceed per-tile capacity.");
       }
     }
   }
@@ -655,13 +766,18 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
 }
 
 void DebugOverlayLayer::onShutdown() {
+  if (!imgui_context_) {
+    return;
+  }
+  ScopedImGuiContext context_scope(imgui_context_);
   if (font_texture_ != 0) {
     if (pending_ctx_) {
       pending_ctx_->destroyTexture(font_texture_);
     }
     font_texture_ = 0;
   }
-  ImGui::DestroyContext();
+  ImGui::DestroyContext(imgui_context_);
+  imgui_context_ = nullptr;
 }
 
 }  // namespace karma::debug

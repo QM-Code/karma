@@ -25,6 +25,34 @@ ecs::Entity entityFromKey(uint64_t key) {
 
 EngineApp::EngineApp() = default;
 
+#if defined(KARMA_DEBUG_UI)
+std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
+  if (!debug_ui_enabled_) {
+    return nullptr;
+  }
+  return std::make_unique<debug::DebugOverlayLayer>(&world_,
+                                                    &scene_,
+                                                    &systems_,
+                                                    graphics_.get(),
+                                                    config_.shadow_map_size,
+                                                    config_.shadow_bias,
+                                                    config_.shadow_pcf_radius,
+                                                    config_.shadow_raster_depth_bias,
+                                                    config_.shadow_raster_slope_bias,
+                                                    config_.shadow_receiver_bias_scale,
+                                                    config_.shadow_normal_bias_scale,
+                                                    config_.point_shadow_constant_bias,
+                                                    config_.point_shadow_slope_bias_scale,
+                                                    config_.point_shadow_normal_bias_scale,
+                                                    config_.point_shadow_receiver_bias_scale,
+                                                    config_.local_light_distance_damping,
+                                                    config_.local_light_range_falloff_exponent,
+                                                    config_.ao_affects_local_lights,
+                                                    config_.local_light_directional_shadow_lift_strength,
+                                                    config_.lighting_exposure);
+}
+#endif
+
 EngineApp::~EngineApp() {
   if (game_ && running_) {
     game_->onShutdown();
@@ -56,11 +84,18 @@ void EngineApp::initSubsystems() {
 }
 
 void EngineApp::shutdownSubsystems() {
-  if (ui_) {
-    ui_->onShutdown();
-    ui_.reset();
+  if (user_ui_) {
+    user_ui_->onShutdown();
+    user_ui_.reset();
   }
-  ui_context_ = {};
+#if defined(KARMA_DEBUG_UI)
+  if (debug_ui_) {
+    debug_ui_->onShutdown();
+    debug_ui_.reset();
+  }
+  debug_ui_context_ = {};
+#endif
+  user_ui_context_ = {};
   render_system_.reset();
   graphics_.reset();
   window_.reset();
@@ -68,26 +103,10 @@ void EngineApp::shutdownSubsystems() {
 }
 
 void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
-  if (ui_) {
-    ui_->onShutdown();
+  if (user_ui_) {
+    user_ui_->onShutdown();
   }
-#if defined(KARMA_DEBUG_UI)
-  if (debug_ui_enabled_) {
-    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_,
-                                                     &scene_,
-                                                     &systems_,
-                                                     graphics_.get(),
-                                                     config_.shadow_map_size,
-                                                     config_.shadow_bias,
-                                                     config_.shadow_pcf_radius,
-                                                     config_.shadow_raster_depth_bias,
-                                                     config_.shadow_raster_slope_bias,
-                                                     config_.shadow_receiver_bias_scale,
-                                                     config_.shadow_normal_bias_scale);
-    return;
-  }
-#endif
-  ui_ = std::move(ui);
+  user_ui_ = std::move(ui);
 }
 
 void EngineApp::setCursorVisible(bool visible) {
@@ -108,19 +127,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   debug_ui_enabled_ = debug_env && std::string(debug_env) != "0";
   initSubsystems();
 #if defined(KARMA_DEBUG_UI)
-  if (debug_ui_enabled_) {
-    ui_ = std::make_unique<debug::DebugOverlayLayer>(&world_,
-                                                     &scene_,
-                                                     &systems_,
-                                                     graphics_.get(),
-                                                     config_.shadow_map_size,
-                                                     config_.shadow_bias,
-                                                     config_.shadow_pcf_radius,
-                                                     config_.shadow_raster_depth_bias,
-                                                     config_.shadow_raster_slope_bias,
-                                                     config_.shadow_receiver_bias_scale,
-                                                     config_.shadow_normal_bias_scale);
-  }
+  debug_ui_ = createDebugOverlayUi();
 #endif
   if (graphics_) {
     graphics_->setGenerateMips(config_.generate_mipmaps);
@@ -128,6 +135,8 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                  config_.environment_intensity,
                                  config_.environment_draw_skybox);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
+    graphics_->setForwardPlusSettings(config_.forward_plus_tile_size,
+                                      config_.forward_plus_max_lights_per_tile);
     graphics_->setShadowSettings(config_.shadow_bias,
                                  config_.shadow_map_size,
                                  config_.shadow_pcf_radius,
@@ -135,6 +144,15 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                  config_.shadow_raster_slope_bias,
                                  config_.shadow_receiver_bias_scale,
                                  config_.shadow_normal_bias_scale);
+    graphics_->setPointShadowSettings(config_.point_shadow_constant_bias,
+                                      config_.point_shadow_slope_bias_scale,
+                                      config_.point_shadow_normal_bias_scale,
+                                      config_.point_shadow_receiver_bias_scale);
+    graphics_->setLocalLightingSettings(config_.local_light_distance_damping,
+                                        config_.local_light_range_falloff_exponent,
+                                        config_.ao_affects_local_lights,
+                                        config_.local_light_directional_shadow_lift_strength);
+    graphics_->setExposure(config_.lighting_exposure);
   }
   game_ = &game;
   running_ = true;
@@ -182,10 +200,15 @@ void EngineApp::tick() {
 
   if (window_) {
     window_->pollEvents();
-    if (ui_) {
-      for (const auto& event : window_->events()) {
-        ui_->onEvent(event);
+    for (const auto& event : window_->events()) {
+      if (user_ui_) {
+        user_ui_->onEvent(event);
       }
+#if defined(KARMA_DEBUG_UI)
+      if (debug_ui_) {
+        debug_ui_->onEvent(event);
+      }
+#endif
     }
     input_.update(window_->events());
     window_->clearEvents();
@@ -221,16 +244,25 @@ void EngineApp::tick() {
     if (window_) {
       window_->getFramebufferSize(fb_width, fb_height);
     }
-    if (ui_) {
-      ui_context_.frame_.dt = frame_dt;
-      ui_context_.frame_.viewport_w = fb_width;
-      ui_context_.frame_.viewport_h = fb_height;
-      ui_context_.frame_.dpi_scale = window_ ? window_->getContentScale() : 1.0f;
-      ui_context_.draw_data_.clear();
-      ui_context_.input_ = &input_;
-      ui_context_.device_ = graphics_.get();
-      ui_->onFrame(ui_context_);
+    auto prepare_ui_context = [&](UIContext& ctx) {
+      ctx.frame_.dt = frame_dt;
+      ctx.frame_.viewport_w = fb_width;
+      ctx.frame_.viewport_h = fb_height;
+      ctx.frame_.dpi_scale = window_ ? window_->getContentScale() : 1.0f;
+      ctx.draw_data_.clear();
+      ctx.input_ = &input_;
+      ctx.device_ = graphics_.get();
+    };
+    if (user_ui_) {
+      prepare_ui_context(user_ui_context_);
+      user_ui_->onFrame(user_ui_context_);
     }
+#if defined(KARMA_DEBUG_UI)
+    if (debug_ui_) {
+      prepare_ui_context(debug_ui_context_);
+      debug_ui_->onFrame(debug_ui_context_);
+    }
+#endif
     renderer::FrameInfo frame{};
     frame.width = fb_width;
     frame.height = fb_height;
@@ -238,9 +270,14 @@ void EngineApp::tick() {
     graphics_->beginFrame(frame);
     render_system_->update(world_, scene_, frame_dt);
     graphics_->renderLayer(0);
-    if (ui_) {
-      graphics_->renderUi(ui_context_.draw_data_);
+    if (user_ui_) {
+      graphics_->renderUi(user_ui_context_.draw_data_);
     }
+#if defined(KARMA_DEBUG_UI)
+    if (debug_ui_) {
+      graphics_->renderUi(debug_ui_context_.draw_data_);
+    }
+#endif
     graphics_->endFrame();
     if (window_) {
 #if !defined(BZ3_RENDER_BACKEND_DILIGENT)

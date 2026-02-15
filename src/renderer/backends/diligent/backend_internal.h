@@ -40,11 +40,15 @@ struct DrawConstants {
   float light_view_proj[16];
   float shadow_uv_proj[16];
   float shadow_cascade_uv_proj[4][16];
+  float point_shadow_uv_proj[12][16];
   float base_color_factor[4];
   float emissive_factor[4];
   float pbr_params[4];
   float env_params[4];
   float shadow_params[4];
+  float point_shadow_params[4];
+  float local_light_params[4];
+  float point_shadow_tuning[4];
   float shadow_bias_params[4];
   float shadow_cascade_splits[4];
   float shadow_cascade_world_texel[4];
@@ -54,12 +58,23 @@ struct DrawConstants {
   float camera_pos[4];
   float camera_forward[4];
   float forward_plus_params[4];
+  float local_light_position_range[64][4];
+  float local_light_direction_type[64][4];
+  float local_light_color_intensity[64][4];
+  float local_light_spot_params[64][4];
+  float local_light_meta[4];
 };
 
 struct ForwardPlusComputeConstants {
   float view_proj[16];
   float forward_plus_params[4];
   float screen_params[4];
+};
+
+struct alignas(16) CameraOverrideUserConstants {
+  uint32_t user_key_hashes[renderer::kCameraShaderUserParamCapacity][4];
+  float user_values[renderer::kCameraShaderUserParamCapacity][4];
+  float user_meta[4];
 };
 
 bool isValidSize(int width, int height);

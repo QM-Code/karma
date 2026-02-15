@@ -2,6 +2,11 @@
 
 Completed:
 - [x] Add Forward+ tiled GPU local-light culling and per-tile light lists.
+- [x] Enable point-light and spot-light rendering through the Forward+ local-light path, with runtime tile tuning/stats in Debug UI.
+- [x] Add point-light shadow maps (cubemap-style 6-face depth rendering per light) and integrate sampling in local-light shading.
+- [x] Add shadow-update caching/scheduling (directional cache invalidation thresholds + budgeted point-shadow face updates).
+- [x] Add a depth pre-pass for multi-batch forward rendering to reduce overdraw in heavy scenes.
+- [x] Harden render stability on Vulkan/NVIDIA: validate indexed draw ranges and gate depth pre-pass on known driver-crash path.
 - [x] Implement cascaded shadow maps (4 splits) using a shadow texture array and per-cascade render pass.
 - [x] Stabilize CSM against camera motion/rotation via texel-snapped cascade centers in a stable light-space basis.
 - [x] Add CSM cascade-transition blending and comparison-linear shadow sampling to reduce split seams and flicker.

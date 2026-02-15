@@ -290,6 +290,19 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   if (render_state_cache_path_.empty()) {
     render_state_cache_path_ = defaultShaderCachePath(shader_cache_version_);
   }
+  for (auto& m : cached_cascade_light_view_proj_) {
+    m = glm::mat4(1.0f);
+  }
+  for (auto& m : cached_cascade_shadow_uv_proj_) {
+    m = glm::mat4(1.0f);
+  }
+  for (auto& m : cached_point_shadow_uv_proj_) {
+    m = glm::mat4(1.0f);
+  }
+  point_shadow_slot_source_index_.fill(-1);
+  point_shadow_slot_valid_.fill(false);
+  point_shadow_face_dirty_.fill(1u);
+
   int fb_width = 800;
   int fb_height = 600;
   window_->getFramebufferSize(fb_width, fb_height);

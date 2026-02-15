@@ -44,6 +44,8 @@ class GraphicsDevice {
   void setEnvironmentMap(const std::filesystem::path& path, float intensity, bool draw_skybox);
   void setAnisotropy(bool enabled, int level);
   void setGenerateMips(bool enabled);
+  void setForwardPlusSettings(int tile_size, int max_lights_per_tile);
+  ForwardPlusStats getForwardPlusStats() const;
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,
@@ -51,6 +53,15 @@ class GraphicsDevice {
                          float raster_slope_bias,
                          float receiver_bias_scale,
                          float normal_bias_scale);
+  void setPointShadowSettings(float constant_bias,
+                              float slope_bias_scale,
+                              float normal_bias_scale,
+                              float receiver_bias_scale);
+  void setLocalLightingSettings(float distance_damping,
+                                float range_falloff_exponent,
+                                bool ao_affects_local_lights,
+                                float directional_shadow_lift_strength);
+  void setExposure(float exposure);
   TextureId createTextureRGBA8(int width, int height, const void* pixels);
   void updateTextureRGBA8(TextureId texture, int width, int height, const void* pixels);
   void renderUi(const karma::app::UIDrawData& draw_data);

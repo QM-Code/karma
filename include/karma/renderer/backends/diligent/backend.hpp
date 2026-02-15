@@ -77,6 +77,8 @@ class DiligentBackend final : public Backend {
                          bool draw_skybox) override;
   void setAnisotropy(bool enabled, int level) override;
   void setGenerateMips(bool enabled) override;
+  void setForwardPlusSettings(int tile_size, int max_lights_per_tile) override;
+  renderer::ForwardPlusStats getForwardPlusStats() const override;
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,
@@ -84,6 +86,15 @@ class DiligentBackend final : public Backend {
                          float raster_slope_bias,
                          float receiver_bias_scale,
                          float normal_bias_scale) override;
+  void setPointShadowSettings(float constant_bias,
+                              float slope_bias_scale,
+                              float normal_bias_scale,
+                              float receiver_bias_scale) override;
+  void setLocalLightingSettings(float distance_damping,
+                                float range_falloff_exponent,
+                                bool ao_affects_local_lights,
+                                float directional_shadow_lift_strength) override;
+  void setExposure(float exposure) override;
   void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) override;
   void renderUi(const karma::app::UIDrawData& draw_data) override;
 
@@ -134,6 +145,13 @@ class DiligentBackend final : public Backend {
 
   struct RenderTargetRecord {
     renderer::RenderTargetDesc desc;
+    int width = 0;
+    int height = 0;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> color_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> color_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> color_rtv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> depth_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> depth_dsv;
   };
 
   struct InstanceRecord {
@@ -153,7 +171,11 @@ class DiligentBackend final : public Backend {
   void initializeDevice();
   void clearFrame(const float* color, bool clear_depth);
   void recreateShadowMap();
+  void recreatePointShadowMap();
+  void recreateRenderTargetResources(RenderTargetRecord& record, int width, int height);
   void recreateShadowPipeline();
+  bool ensureCameraOverridePipeline(const renderer::CameraData& camera);
+  void updateCameraOverrideUserConstants(const renderer::CameraData& camera);
   void ensureUiResources();
   void ensureLineResources();
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
@@ -190,9 +212,15 @@ class DiligentBackend final : public Backend {
   std::filesystem::path render_state_cache_path_;
   bool shader_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 1;
+  std::uint32_t shader_cache_version_ = 3;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> camera_override_pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> camera_override_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> camera_override_user_constants_;
+  std::filesystem::path camera_override_vertex_path_;
+  std::filesystem::path camera_override_fragment_path_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> shadow_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shader_resources_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> default_material_srb_;
@@ -202,11 +230,19 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_data_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> shadow_sampler_;
   static constexpr int kShadowCascadeCount = 4;
+  static constexpr int kMaxPointShadowLights = 2;
+  static constexpr int kPointShadowFaceCount = 6;
+  static constexpr int kPointShadowMatrixCount =
+      kMaxPointShadowLights * kPointShadowFaceCount;
   Diligent::RefCntAutoPtr<Diligent::ITexture> shadow_map_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_dsv_;
   std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, kShadowCascadeCount>
       shadow_map_dsv_cascades_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> point_shadow_map_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> point_shadow_map_srv_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, kPointShadowMatrixCount>
+      point_shadow_map_dsv_faces_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_scissor_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_;
@@ -310,6 +346,16 @@ class DiligentBackend final : public Backend {
   float shadow_receiver_bias_scale_ = 0.75f;
   float shadow_normal_bias_scale_ = 1.0f;
   float shadow_split_lambda_ = 0.7f;
+  float point_shadow_constant_bias_ = 0.0012f;
+  float point_shadow_slope_bias_scale_ = 2.0f;
+  float point_shadow_normal_bias_scale_ = 1.5f;
+  float point_shadow_receiver_bias_scale_ = 0.35f;
+  float local_light_distance_damping_ = 0.02f;
+  float local_light_range_exponent_ = 1.1f;
+  bool ao_affects_local_lights_ = false;
+  float local_light_directional_shadow_lift_ = 0.0f;
+  float lighting_exposure_ = 1.0f;
+  int point_shadow_map_size_ = 1024;
   size_t ui_vb_size_ = 0;
   size_t ui_ib_size_ = 0;
   size_t instance_vb_capacity_ = 0;
@@ -319,10 +365,40 @@ class DiligentBackend final : public Backend {
   size_t line_vb_size_ = 0;
   int forward_plus_tile_size_ = 16;
   int forward_plus_max_lights_per_tile_ = 128;
+  renderer::ForwardPlusStats forward_plus_stats_{};
   bool warned_line_thickness_ = false;
   int current_width_ = 0;
   int current_height_ = 0;
   bool warned_no_draws_ = false;
+  static constexpr renderer::TextureId kRenderTargetTextureHandleBit = 0x80000000u;
+
+  bool directional_shadow_cache_valid_ = false;
+  std::array<glm::mat4, kShadowCascadeCount> cached_cascade_light_view_proj_{};
+  std::array<glm::mat4, kShadowCascadeCount> cached_cascade_shadow_uv_proj_{};
+  std::array<float, kShadowCascadeCount> cached_cascade_world_texel_{};
+  std::array<float, kShadowCascadeCount> cached_cascade_splits_{};
+  glm::vec3 cached_shadow_camera_position_{0.0f, 0.0f, 0.0f};
+  glm::vec3 cached_shadow_camera_forward_{0.0f, 0.0f, -1.0f};
+  glm::vec3 cached_shadow_light_direction_{0.0f, -1.0f, 0.0f};
+  float cached_shadow_camera_aspect_ = 1.0f;
+  float cached_shadow_camera_fov_y_degrees_ = 60.0f;
+  float cached_shadow_camera_near_ = 0.1f;
+  float cached_shadow_camera_far_ = 1000.0f;
+  bool cached_shadow_camera_perspective_ = true;
+  float directional_shadow_position_threshold_ = 0.12f;
+  float directional_shadow_angle_threshold_deg_ = 0.3f;
+
+  bool point_shadow_cache_initialized_ = false;
+  std::array<glm::mat4, kPointShadowMatrixCount> cached_point_shadow_uv_proj_{};
+  std::array<int32_t, kMaxPointShadowLights> point_shadow_slot_source_index_{};
+  std::array<glm::vec3, kMaxPointShadowLights> point_shadow_slot_position_{};
+  std::array<float, kMaxPointShadowLights> point_shadow_slot_range_{};
+  std::array<bool, kMaxPointShadowLights> point_shadow_slot_valid_{};
+  std::array<uint8_t, kPointShadowMatrixCount> point_shadow_face_dirty_{};
+  Diligent::Uint32 point_shadow_face_cursor_ = 0;
+  Diligent::Uint32 point_shadow_faces_per_frame_budget_ = 2;
+  float point_shadow_position_threshold_ = 0.05f;
+  float point_shadow_range_threshold_ = 0.05f;
 };
 
 }  // namespace karma::renderer_backend

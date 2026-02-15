@@ -47,6 +47,7 @@ struct alignas(16) ForwardPlusGpuLight {
   float direction_type[4];
   float color_intensity[4];
   float spot_params[4];
+  float screen_rect[4];
 };
 
 InstanceTransformData packInstanceTransform(const glm::mat4& transform) {
@@ -59,7 +60,67 @@ InstanceTransformData packInstanceTransform(const glm::mat4& transform) {
   return out;
 }
 
-ForwardPlusGpuLight packForwardPlusLight(const renderer::LightData& light) {
+bool projectSphereToScreenRect(const glm::mat4& view_proj,
+                               const glm::vec3& center_ws,
+                               float radius_ws,
+                               float screen_width,
+                               float screen_height,
+                               glm::vec4& out_rect) {
+  if (radius_ws <= 0.0f || screen_width <= 0.0f || screen_height <= 0.0f) {
+    out_rect = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+    return false;
+  }
+
+  float min_x = std::numeric_limits<float>::max();
+  float min_y = std::numeric_limits<float>::max();
+  float max_x = -std::numeric_limits<float>::max();
+  float max_y = -std::numeric_limits<float>::max();
+  bool any_point = false;
+  for (int z = -1; z <= 1; z += 2) {
+    for (int y = -1; y <= 1; y += 2) {
+      for (int x = -1; x <= 1; x += 2) {
+        const glm::vec3 sample =
+            center_ws + glm::vec3(static_cast<float>(x),
+                                  static_cast<float>(y),
+                                  static_cast<float>(z)) *
+                            radius_ws;
+        const glm::vec4 clip = view_proj * glm::vec4(sample, 1.0f);
+        if (std::abs(clip.w) <= 1e-6f) {
+          continue;
+        }
+        const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+        const float sx = (ndc.x * 0.5f + 0.5f) * screen_width;
+        const float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * screen_height;
+        min_x = std::min(min_x, sx);
+        min_y = std::min(min_y, sy);
+        max_x = std::max(max_x, sx);
+        max_y = std::max(max_y, sy);
+        any_point = true;
+      }
+    }
+  }
+
+  if (!any_point) {
+    out_rect = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+    return false;
+  }
+
+  if (max_x < 0.0f || max_y < 0.0f || min_x > screen_width || min_y > screen_height) {
+    out_rect = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+    return false;
+  }
+
+  const float max_screen_x = std::max(screen_width - 1.0f, 0.0f);
+  const float max_screen_y = std::max(screen_height - 1.0f, 0.0f);
+  out_rect.x = std::clamp(min_x, 0.0f, max_screen_x);
+  out_rect.y = std::clamp(min_y, 0.0f, max_screen_y);
+  out_rect.z = std::clamp(max_x, 0.0f, max_screen_x);
+  out_rect.w = std::clamp(max_y, 0.0f, max_screen_y);
+  return out_rect.z >= out_rect.x && out_rect.w >= out_rect.y;
+}
+
+ForwardPlusGpuLight packForwardPlusLight(const renderer::LightData& light,
+                                         const glm::vec4& screen_rect) {
   ForwardPlusGpuLight gpu{};
   gpu.position_range[0] = light.position.x;
   gpu.position_range[1] = light.position.y;
@@ -75,8 +136,12 @@ ForwardPlusGpuLight packForwardPlusLight(const renderer::LightData& light) {
   gpu.color_intensity[3] = std::max(light.intensity, 0.0f);
   gpu.spot_params[0] = light.inner_cone_cos;
   gpu.spot_params[1] = light.outer_cone_cos;
-  gpu.spot_params[2] = 0.0f;
-  gpu.spot_params[3] = 0.0f;
+  gpu.spot_params[2] = -1.0f;
+  gpu.spot_params[3] = light.casts_shadows ? 1.0f : 0.0f;
+  gpu.screen_rect[0] = screen_rect.x;
+  gpu.screen_rect[1] = screen_rect.y;
+  gpu.screen_rect[2] = screen_rect.z;
+  gpu.screen_rect[3] = screen_rect.w;
   return gpu;
 }
 
@@ -107,6 +172,7 @@ struct ShadowBatchKeyHash {
 struct ShadowBatch {
   ShadowBatchKey key{};
   std::vector<InstanceTransformData> transforms;
+  std::vector<glm::vec4> bounds_spheres;
 };
 
 struct ForwardBatchKey {
@@ -140,6 +206,57 @@ struct ForwardBatch {
   ForwardBatchKey key{};
   std::vector<InstanceTransformData> transforms;
 };
+
+float maxTransformScale(const glm::mat4& transform) {
+  const float sx = glm::length(glm::vec3(transform[0]));
+  const float sy = glm::length(glm::vec3(transform[1]));
+  const float sz = glm::length(glm::vec3(transform[2]));
+  return std::max(sx, std::max(sy, sz));
+}
+
+glm::vec4 transformBoundingSphere(const glm::mat4& world,
+                                  const glm::vec3& local_center,
+                                  float local_radius) {
+  if (local_radius <= 0.0f) {
+    return glm::vec4(0.0f, 0.0f, 0.0f, -1.0f);
+  }
+  const glm::vec3 center = glm::vec3(world * glm::vec4(local_center, 1.0f));
+  const float radius = local_radius * maxTransformScale(world);
+  return glm::vec4(center, radius);
+}
+
+bool sphereIntersectsClipVolume(const glm::mat4& clip_from_world,
+                                const glm::vec4& sphere,
+                                bool is_gl_ndc) {
+  if (sphere.w <= 0.0f) {
+    return true;
+  }
+  const glm::vec4 clip = clip_from_world * glm::vec4(sphere.x, sphere.y, sphere.z, 1.0f);
+  if (std::abs(clip.w) <= 1e-5f) {
+    return true;
+  }
+  const float sx = glm::length(glm::vec3(clip_from_world[0]));
+  const float sy = glm::length(glm::vec3(clip_from_world[1]));
+  const float sz = glm::length(glm::vec3(clip_from_world[2]));
+  const float r = sphere.w * std::max(sx, std::max(sy, sz));
+
+  if (clip.x < -clip.w - r || clip.x > clip.w + r) {
+    return false;
+  }
+  if (clip.y < -clip.w - r || clip.y > clip.w + r) {
+    return false;
+  }
+  if (is_gl_ndc) {
+    if (clip.z < -clip.w - r || clip.z > clip.w + r) {
+      return false;
+    }
+  } else {
+    if (clip.z < -r || clip.z > clip.w + r) {
+      return false;
+    }
+  }
+  return true;
+}
 
 static constexpr const char* kEnvCubeVS = R"(
 cbuffer Constants
@@ -521,6 +638,24 @@ static const float kEnvCubeVertices[] = {
     -1.0f,  1.0f, -1.0f
 };
 
+static const std::array<glm::vec3, 6> kPointShadowFaceDirs{
+    glm::vec3(1.0f, 0.0f, 0.0f),
+    glm::vec3(-1.0f, 0.0f, 0.0f),
+    glm::vec3(0.0f, 1.0f, 0.0f),
+    glm::vec3(0.0f, -1.0f, 0.0f),
+    glm::vec3(0.0f, 0.0f, 1.0f),
+    glm::vec3(0.0f, 0.0f, -1.0f),
+};
+
+static const std::array<glm::vec3, 6> kPointShadowFaceUps{
+    glm::vec3(0.0f, -1.0f, 0.0f),
+    glm::vec3(0.0f, -1.0f, 0.0f),
+    glm::vec3(0.0f, 0.0f, 1.0f),
+    glm::vec3(0.0f, 0.0f, -1.0f),
+    glm::vec3(0.0f, -1.0f, 0.0f),
+    glm::vec3(0.0f, -1.0f, 0.0f),
+};
+
 glm::mat4 buildLightView(const renderer::DirectionalLightData& light) {
   glm::vec3 dir = light.direction;
   if (glm::length(dir) < 1e-4f) {
@@ -561,6 +696,17 @@ float maxScaleComponent(const glm::mat4& m) {
   return std::max({glm::length(x), glm::length(y), glm::length(z)});
 }
 
+bool directionChangedBeyondThreshold(const glm::vec3& a, const glm::vec3& b, float max_angle_deg) {
+  if (glm::length(a) <= 1e-4f || glm::length(b) <= 1e-4f) {
+    return true;
+  }
+  const glm::vec3 an = glm::normalize(a);
+  const glm::vec3 bn = glm::normalize(b);
+  const float dot_v = std::clamp(glm::dot(an, bn), -1.0f, 1.0f);
+  const float cos_threshold = std::cos(glm::radians(std::max(max_angle_deg, 0.0f)));
+  return dot_v < cos_threshold;
+}
+
 }  // namespace
 
 void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
@@ -592,6 +738,12 @@ void DiligentBackend::resize(int width, int height) {
   if (swap_chain_) {
     swap_chain_->Resize(static_cast<Diligent::Uint32>(width),
                         static_cast<Diligent::Uint32>(height));
+  }
+  for (auto& [id, target] : targets_) {
+    (void)id;
+    if (target.desc.width <= 0 || target.desc.height <= 0) {
+      recreateRenderTargetResources(target, width, height);
+    }
   }
 }
 
@@ -1161,7 +1313,7 @@ void DiligentBackend::ensureEnvironmentResources() {
 
       Diligent::DrawAttribs draw{};
       draw.NumVertices = static_cast<Diligent::Uint32>(sizeof(kEnvCubeVertices) / (sizeof(float) * 3));
-      draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+      draw.Flags = Diligent::DRAW_FLAG_NONE;
       context_->Draw(draw);
     }
 
@@ -1234,7 +1386,7 @@ void DiligentBackend::ensureEnvironmentResources() {
 
       Diligent::DrawAttribs draw{};
       draw.NumVertices = static_cast<Diligent::Uint32>(sizeof(kEnvCubeVertices) / (sizeof(float) * 3));
-      draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+      draw.Flags = Diligent::DRAW_FLAG_NONE;
       context_->Draw(draw);
     }
   }
@@ -1308,7 +1460,7 @@ void DiligentBackend::ensureEnvironmentResources() {
 
         Diligent::DrawAttribs draw{};
         draw.NumVertices = static_cast<Diligent::Uint32>(sizeof(kEnvCubeVertices) / (sizeof(float) * 3));
-        draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        draw.Flags = Diligent::DRAW_FLAG_NONE;
         context_->Draw(draw);
       }
     }
@@ -1348,7 +1500,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       context_->SetPipelineState(brdf_lut_pso_);
       Diligent::DrawAttribs draw{};
       draw.NumVertices = 3;
-      draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+      draw.Flags = Diligent::DRAW_FLAG_NONE;
       context_->Draw(draw);
     }
   }
@@ -1404,32 +1556,85 @@ void DiligentBackend::renderSkybox(const glm::mat4& projection, const glm::mat4&
 
   Diligent::DrawAttribs draw{};
   draw.NumVertices = static_cast<Diligent::Uint32>(sizeof(kEnvCubeVertices) / (sizeof(float) * 3));
-  draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+  draw.Flags = Diligent::DRAW_FLAG_NONE;
   context_->Draw(draw);
 }
 
-void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTargetId /*target*/) {
+void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) {
   if (!context_ || !swap_chain_) {
     return;
   }
 
-  if (!camera_active_) {
-    const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-    clearFrame(black, true);
+  Diligent::ITextureView* active_rtv = swap_chain_->GetCurrentBackBufferRTV();
+  Diligent::ITextureView* active_dsv = swap_chain_->GetDepthBufferDSV();
+  int render_width = current_width_;
+  int render_height = current_height_;
+  if (target != renderer::kDefaultRenderTarget) {
+    auto target_it = targets_.find(target);
+    if (target_it == targets_.end() || !target_it->second.color_rtv) {
+      return;
+    }
+    active_rtv = target_it->second.color_rtv;
+    active_dsv = target_it->second.depth_dsv;
+    render_width = std::max(target_it->second.width, 1);
+    render_height = std::max(target_it->second.height, 1);
+  }
+  if (!active_rtv || render_width <= 0 || render_height <= 0) {
     return;
   }
 
-  clearFrame(clear_color_, true);
+  auto bind_active_target = [&]() {
+    context_->SetRenderTargets(1, &active_rtv, active_dsv,
+                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    Diligent::Viewport viewport{};
+    viewport.TopLeftX = 0.0f;
+    viewport.TopLeftY = 0.0f;
+    viewport.Width = static_cast<float>(render_width);
+    viewport.Height = static_cast<float>(render_height);
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    context_->SetViewports(1,
+                           &viewport,
+                           static_cast<Diligent::Uint32>(render_width),
+                           static_cast<Diligent::Uint32>(render_height));
+  };
 
-  if (!pipeline_state_ || !shader_resources_ || !constants_) {
+  auto clear_active_target = [&](const float* color, bool clear_depth) {
+    bind_active_target();
+    context_->ClearRenderTarget(active_rtv, color, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    if (clear_depth && active_dsv) {
+      context_->ClearDepthStencil(active_dsv,
+                                  Diligent::CLEAR_DEPTH_FLAG,
+                                  1.0f,
+                                  0,
+                                  Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    }
+  };
+
+  if (!camera_active_) {
+    const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    clear_active_target(black, true);
+    return;
+  }
+
+  clear_active_target(clear_color_, true);
+
+  if (!constants_ || !pipeline_state_ || !shader_resources_) {
     if (!warned_no_draws_) {
       warned_no_draws_ = true;
     }
     return;
   }
+  bool use_custom_shader_override = !camera_.shader_override_fragment_path.empty();
+  if (use_custom_shader_override && !ensureCameraOverridePipeline(camera_)) {
+    use_custom_shader_override = false;
+  }
+  if (use_custom_shader_override) {
+    updateCameraOverrideUserConstants(camera_);
+  }
 
-  const float aspect = (current_height_ > 0)
-                           ? static_cast<float>(current_width_) / static_cast<float>(current_height_)
+  const float aspect = (render_height > 0)
+                           ? static_cast<float>(render_width) / static_cast<float>(render_height)
                            : camera_.aspect;
   glm::mat4 projection(1.0f);
   if (camera_.perspective) {
@@ -1454,6 +1659,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   const glm::mat4 view = glm::lookAt(camera_.position, camera_.position + forward, up);
 
   ensureEnvironmentResources();
+  bind_active_target();
   float env_max_mip = 0.0f;
   if (env_prefilter_tex_) {
     const auto& desc = env_prefilter_tex_->GetDesc();
@@ -1471,17 +1677,29 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   const glm::mat4 camera_view_proj = projection * view;
   const Diligent::Uint32 forward_plus_tile_size =
       static_cast<Diligent::Uint32>(std::max(forward_plus_tile_size_, 1));
-  const Diligent::Uint32 forward_plus_tiles_x = static_cast<Diligent::Uint32>(std::max(
-      (current_width_ + static_cast<int>(forward_plus_tile_size) - 1) /
+  const Diligent::Uint32 forward_plus_tiles_x_unclamped = static_cast<Diligent::Uint32>(std::max(
+      (render_width + static_cast<int>(forward_plus_tile_size) - 1) /
           static_cast<int>(forward_plus_tile_size),
       1));
-  const Diligent::Uint32 forward_plus_tiles_y = static_cast<Diligent::Uint32>(std::max(
-      (current_height_ + static_cast<int>(forward_plus_tile_size) - 1) /
+  const Diligent::Uint32 forward_plus_tiles_y_unclamped = static_cast<Diligent::Uint32>(std::max(
+      (render_height + static_cast<int>(forward_plus_tile_size) - 1) /
           static_cast<int>(forward_plus_tile_size),
       1));
+  static constexpr Diligent::Uint32 kMaxForwardPlusTilesPerAxis = 2048;
+  const Diligent::Uint32 forward_plus_tiles_x =
+      std::min(forward_plus_tiles_x_unclamped, kMaxForwardPlusTilesPerAxis);
+  const Diligent::Uint32 forward_plus_tiles_y =
+      std::min(forward_plus_tiles_y_unclamped, kMaxForwardPlusTilesPerAxis);
   const Diligent::Uint32 forward_plus_max_lights_per_tile = static_cast<Diligent::Uint32>(
       std::max(forward_plus_max_lights_per_tile_, 1));
+  Diligent::Uint32 active_forward_plus_tile_size = forward_plus_tile_size;
+  Diligent::Uint32 active_forward_plus_tiles_x = forward_plus_tiles_x;
+  Diligent::Uint32 active_forward_plus_tiles_y = forward_plus_tiles_y;
+  Diligent::Uint32 active_forward_plus_max_lights_per_tile = forward_plus_max_lights_per_tile;
   bool forward_plus_ready = false;
+  bool forward_plus_overflow_risk =
+      forward_plus_tiles_x != forward_plus_tiles_x_unclamped ||
+      forward_plus_tiles_y != forward_plus_tiles_y_unclamped;
 
   auto is_local_light = [](const renderer::LightData& light) {
     return light.type != renderer::LightType::Directional &&
@@ -1489,11 +1707,70 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
            light.range > 0.0f;
   };
   std::vector<ForwardPlusGpuLight> forward_plus_lights_gpu;
+  std::vector<size_t> forward_plus_light_source_index;
   forward_plus_lights_gpu.reserve(lights_.size());
-  for (const auto& light : lights_) {
+  forward_plus_light_source_index.reserve(lights_.size());
+  for (size_t idx = 0; idx < lights_.size(); ++idx) {
+    const auto& light = lights_[idx];
     if (is_local_light(light)) {
-      forward_plus_lights_gpu.push_back(packForwardPlusLight(light));
+      glm::vec4 screen_rect(1.0f, 1.0f, 0.0f, 0.0f);
+      projectSphereToScreenRect(camera_view_proj,
+                                light.position,
+                                std::max(light.range, 0.0f),
+                                static_cast<float>(std::max(render_width, 1)),
+                                static_cast<float>(std::max(render_height, 1)),
+                                screen_rect);
+      forward_plus_lights_gpu.push_back(packForwardPlusLight(light, screen_rect));
+      forward_plus_light_source_index.push_back(idx);
     }
+  }
+  static constexpr size_t kMaxForwardPlusLightCount = 4096u;
+  if (forward_plus_lights_gpu.size() > kMaxForwardPlusLightCount) {
+    forward_plus_lights_gpu.resize(kMaxForwardPlusLightCount);
+    forward_plus_light_source_index.resize(kMaxForwardPlusLightCount);
+    forward_plus_overflow_risk = true;
+  }
+
+  struct PointShadowSelection {
+    size_t local_light_index = 0;
+    float distance_sq = 0.0f;
+  };
+  std::vector<PointShadowSelection> point_shadow_candidates;
+  point_shadow_candidates.reserve(forward_plus_lights_gpu.size());
+  for (size_t local_idx = 0; local_idx < forward_plus_light_source_index.size(); ++local_idx) {
+    const renderer::LightData& source_light = lights_[forward_plus_light_source_index[local_idx]];
+    if (source_light.type != renderer::LightType::Point || !source_light.casts_shadows) {
+      continue;
+    }
+    const glm::vec3 to_camera = source_light.position - camera_.position;
+    point_shadow_candidates.push_back(
+        PointShadowSelection{.local_light_index = local_idx,
+                             .distance_sq = glm::dot(to_camera, to_camera)});
+  }
+  std::sort(point_shadow_candidates.begin(),
+            point_shadow_candidates.end(),
+            [](const PointShadowSelection& a, const PointShadowSelection& b) {
+              return a.distance_sq < b.distance_sq;
+            });
+  std::array<renderer::LightData, kMaxPointShadowLights> point_shadow_lights{};
+  std::array<size_t, kMaxPointShadowLights> point_shadow_light_source_indices{};
+  std::array<size_t, kMaxPointShadowLights> point_shadow_local_light_indices{};
+  Diligent::Uint32 point_shadow_light_count = 0;
+  for (const auto& candidate : point_shadow_candidates) {
+    if (point_shadow_light_count >= static_cast<Diligent::Uint32>(kMaxPointShadowLights)) {
+      break;
+    }
+    if (candidate.local_light_index >= forward_plus_lights_gpu.size() ||
+        candidate.local_light_index >= forward_plus_light_source_index.size()) {
+      continue;
+    }
+    const renderer::LightData& source_light =
+        lights_[forward_plus_light_source_index[candidate.local_light_index]];
+    point_shadow_lights[point_shadow_light_count] = source_light;
+    point_shadow_light_source_indices[point_shadow_light_count] =
+        forward_plus_light_source_index[candidate.local_light_index];
+    point_shadow_local_light_indices[point_shadow_light_count] = candidate.local_light_index;
+    point_shadow_light_count += 1;
   }
 
   auto ensure_forward_plus_buffer = [&](Diligent::RefCntAutoPtr<Diligent::IBuffer>& buffer,
@@ -1543,12 +1820,46 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     return true;
   };
 
-  if (!forward_plus_lights_gpu.empty() &&
-      current_width_ > 0 &&
-      current_height_ > 0 &&
-      forward_plus_compute_pso_ &&
-      forward_plus_compute_srb_ &&
-      forward_plus_compute_cb_) {
+  static constexpr size_t kCpuForwardPlusDirectLightCount = 8u;
+  static constexpr size_t kCpuForwardPlusFallbackLightCount = 64u;
+  const bool forward_plus_compute_available =
+      forward_plus_compute_pso_ && forward_plus_compute_srb_ && forward_plus_compute_cb_;
+  std::array<ForwardPlusGpuLight, kCpuForwardPlusFallbackLightCount> cpu_forward_plus_lights{};
+  Diligent::Uint32 cpu_forward_plus_light_count = 0;
+  bool cpu_forward_plus_ready = false;
+  const bool use_cpu_forward_plus_fallback =
+      !forward_plus_lights_gpu.empty() &&
+      render_width > 0 &&
+      render_height > 0 &&
+      (!forward_plus_compute_available ||
+       forward_plus_lights_gpu.size() <= kCpuForwardPlusDirectLightCount);
+
+  if (use_cpu_forward_plus_fallback) {
+    active_forward_plus_tiles_x = 1;
+    active_forward_plus_tiles_y = 1;
+    active_forward_plus_tile_size = static_cast<Diligent::Uint32>(
+        std::max(std::max(render_width, render_height), 1));
+    active_forward_plus_max_lights_per_tile = static_cast<Diligent::Uint32>(
+        std::max<size_t>(forward_plus_lights_gpu.size(), 1));
+    active_forward_plus_max_lights_per_tile = std::min(
+        active_forward_plus_max_lights_per_tile,
+        static_cast<Diligent::Uint32>(kCpuForwardPlusFallbackLightCount));
+    cpu_forward_plus_light_count = static_cast<Diligent::Uint32>(std::min<size_t>(
+        forward_plus_lights_gpu.size(), kCpuForwardPlusFallbackLightCount));
+    for (Diligent::Uint32 i = 0; i < cpu_forward_plus_light_count; ++i) {
+      cpu_forward_plus_lights[i] = forward_plus_lights_gpu[i];
+    }
+    if (forward_plus_lights_gpu.size() > static_cast<size_t>(cpu_forward_plus_light_count)) {
+      forward_plus_overflow_risk = true;
+    }
+    cpu_forward_plus_ready = cpu_forward_plus_light_count > 0;
+  }
+
+  if (!use_cpu_forward_plus_fallback &&
+      !forward_plus_lights_gpu.empty() &&
+      render_width > 0 &&
+      render_height > 0 &&
+      forward_plus_compute_available) {
     const size_t forward_plus_tile_count =
         static_cast<size_t>(forward_plus_tiles_x) * static_cast<size_t>(forward_plus_tiles_y);
     const size_t forward_plus_index_count =
@@ -1594,13 +1905,13 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
 
         ForwardPlusComputeConstants fp_constants{};
         copyMat4(fp_constants.view_proj, camera_view_proj);
-        fp_constants.forward_plus_params[0] = static_cast<float>(forward_plus_tile_size);
-        fp_constants.forward_plus_params[1] = static_cast<float>(forward_plus_tiles_x);
-        fp_constants.forward_plus_params[2] = static_cast<float>(forward_plus_tiles_y);
+        fp_constants.forward_plus_params[0] = static_cast<float>(active_forward_plus_tile_size);
+        fp_constants.forward_plus_params[1] = static_cast<float>(active_forward_plus_tiles_x);
+        fp_constants.forward_plus_params[2] = static_cast<float>(active_forward_plus_tiles_y);
         fp_constants.forward_plus_params[3] =
-            static_cast<float>(forward_plus_max_lights_per_tile);
-        fp_constants.screen_params[0] = static_cast<float>(current_width_);
-        fp_constants.screen_params[1] = static_cast<float>(current_height_);
+            static_cast<float>(active_forward_plus_max_lights_per_tile);
+        fp_constants.screen_params[0] = static_cast<float>(render_width);
+        fp_constants.screen_params[1] = static_cast<float>(render_height);
         fp_constants.screen_params[2] = static_cast<float>(forward_plus_lights_gpu.size());
         fp_constants.screen_params[3] = 0.0f;
         {
@@ -1628,9 +1939,12 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         context_->SetPipelineState(forward_plus_compute_pso_);
         context_->CommitShaderResources(forward_plus_compute_srb_,
                                         Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        static constexpr Diligent::Uint32 kForwardPlusGroupSize = 8u;
         Diligent::DispatchComputeAttribs dispatch{};
-        dispatch.ThreadGroupCountX = forward_plus_tiles_x;
-        dispatch.ThreadGroupCountY = forward_plus_tiles_y;
+        dispatch.ThreadGroupCountX =
+            (forward_plus_tiles_x + kForwardPlusGroupSize - 1u) / kForwardPlusGroupSize;
+        dispatch.ThreadGroupCountY =
+            (forward_plus_tiles_y + kForwardPlusGroupSize - 1u) / kForwardPlusGroupSize;
         dispatch.ThreadGroupCountZ = 1;
         context_->DispatchCompute(dispatch);
 
@@ -1647,23 +1961,83 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
 
         forward_plus_ready = true;
       }
+    } else {
+      forward_plus_overflow_risk = true;
     }
   }
 
-  if (forward_plus_ready && pipeline_state_) {
-    if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                             "g_ForwardPlusLights")) {
-      var->Set(forward_plus_light_srv_);
-    }
-    if (auto* var =
-            pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                     "g_ForwardPlusTileLightCounts")) {
-      var->Set(forward_plus_tile_count_srv_);
-    }
-    if (auto* var =
-            pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                     "g_ForwardPlusTileLightIndices")) {
-      var->Set(forward_plus_tile_index_srv_);
+  forward_plus_overflow_risk =
+      forward_plus_overflow_risk ||
+      (forward_plus_lights_gpu.size() >
+       static_cast<size_t>(active_forward_plus_max_lights_per_tile));
+  forward_plus_stats_.tile_size = active_forward_plus_tile_size;
+  forward_plus_stats_.max_lights_per_tile = active_forward_plus_max_lights_per_tile;
+  forward_plus_stats_.tiles_x = active_forward_plus_tiles_x;
+  forward_plus_stats_.tiles_y = active_forward_plus_tiles_y;
+  forward_plus_stats_.local_light_count =
+      static_cast<uint32_t>(std::min<size_t>(forward_plus_lights_gpu.size(),
+                                             std::numeric_limits<uint32_t>::max()));
+  forward_plus_stats_.active = forward_plus_ready || cpu_forward_plus_ready;
+  forward_plus_stats_.overflow_risk = forward_plus_overflow_risk;
+
+  if (pipeline_state_) {
+    if (forward_plus_ready) {
+      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                               "g_ForwardPlusLights")) {
+        var->Set(forward_plus_light_srv_);
+      }
+      if (auto* var =
+              pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                       "g_ForwardPlusTileLightCounts")) {
+        var->Set(forward_plus_tile_count_srv_);
+      }
+      if (auto* var =
+              pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                       "g_ForwardPlusTileLightIndices")) {
+        var->Set(forward_plus_tile_index_srv_);
+      }
+    } else {
+      const bool fallback_srvs_ready =
+          ensure_forward_plus_buffer(forward_plus_light_buffer_,
+                                     forward_plus_light_srv_,
+                                     nullptr,
+                                     forward_plus_light_capacity_,
+                                     1u,
+                                     static_cast<Diligent::Uint32>(sizeof(ForwardPlusGpuLight)),
+                                     Diligent::BIND_SHADER_RESOURCE,
+                                     "Karma Forward+ Fallback Lights") &&
+          ensure_forward_plus_buffer(forward_plus_tile_count_buffer_,
+                                     forward_plus_tile_count_srv_,
+                                     nullptr,
+                                     forward_plus_tile_count_capacity_,
+                                     1u,
+                                     static_cast<Diligent::Uint32>(sizeof(uint32_t)),
+                                     Diligent::BIND_SHADER_RESOURCE,
+                                     "Karma Forward+ Fallback Tile Counts") &&
+          ensure_forward_plus_buffer(forward_plus_tile_index_buffer_,
+                                     forward_plus_tile_index_srv_,
+                                     nullptr,
+                                     forward_plus_tile_index_capacity_,
+                                     1u,
+                                     static_cast<Diligent::Uint32>(sizeof(uint32_t)),
+                                     Diligent::BIND_SHADER_RESOURCE,
+                                     "Karma Forward+ Fallback Tile Indices");
+      if (fallback_srvs_ready) {
+        if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                                 "g_ForwardPlusLights")) {
+          var->Set(forward_plus_light_srv_);
+        }
+        if (auto* var =
+                pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                         "g_ForwardPlusTileLightCounts")) {
+          var->Set(forward_plus_tile_count_srv_);
+        }
+        if (auto* var =
+                pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                         "g_ForwardPlusTileLightIndices")) {
+          var->Set(forward_plus_tile_index_srv_);
+        }
+      }
     }
   }
 
@@ -1691,6 +2065,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                       : static_cast<float>(shadow_map_size_);
   const float safe_shadow_map_extent = std::max(shadow_map_extent, 1.0f);
   const float shadow_texel_size = 1.0f / safe_shadow_map_extent;
+  const float point_shadow_map_extent =
+      point_shadow_map_tex_ ? static_cast<float>(point_shadow_map_tex_->GetDesc().Width)
+                            : static_cast<float>(point_shadow_map_size_);
+  const float safe_point_shadow_map_extent = std::max(point_shadow_map_extent, 1.0f);
+  const float point_shadow_texel_size = 1.0f / safe_point_shadow_map_extent;
   const float fixed_bias = std::max(shadow_bias_, 0.0f);
   const float shadow_texel_param = shadow_texel_size;
   const bool is_gl = device_->GetDeviceInfo().IsGLDevice();
@@ -1762,97 +2141,118 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     return corners;
   };
 
-  std::array<glm::mat4, kShadowCascadeCount> cascade_light_view_proj{};
-  std::array<glm::mat4, kShadowCascadeCount> cascade_shadow_uv_proj{};
-  std::array<float, kShadowCascadeCount> cascade_world_texel{};
-  for (int cascade = 0; cascade < kShadowCascadeCount; ++cascade) {
-    cascade_light_view_proj[cascade] = glm::mat4(1.0f);
-    cascade_shadow_uv_proj[cascade] = glm::mat4(1.0f);
-    cascade_world_texel[cascade] = 0.0f;
+  std::array<glm::mat4, kShadowCascadeCount> cascade_light_view_proj = cached_cascade_light_view_proj_;
+  std::array<glm::mat4, kShadowCascadeCount> cascade_shadow_uv_proj = cached_cascade_shadow_uv_proj_;
+  std::array<float, kShadowCascadeCount> cascade_world_texel = cached_cascade_world_texel_;
+  std::array<glm::mat4, kPointShadowMatrixCount> point_shadow_uv_proj = cached_point_shadow_uv_proj_;
+  bool point_shadow_ready = point_shadow_cache_initialized_;
+
+  bool directional_shadow_needs_update = !directional_shadow_cache_valid_;
+  if (!directional_shadow_needs_update) {
+    const float camera_delta =
+        glm::length(camera_.position - cached_shadow_camera_position_);
+    directional_shadow_needs_update =
+        camera_delta > directional_shadow_position_threshold_ ||
+        std::abs(aspect - cached_shadow_camera_aspect_) > 1e-4f ||
+        std::abs(camera_.fov_y_degrees - cached_shadow_camera_fov_y_degrees_) > 1e-3f ||
+        std::abs(camera_.near_clip - cached_shadow_camera_near_) > 1e-4f ||
+        std::abs(camera_.far_clip - cached_shadow_camera_far_) > 1e-3f ||
+        camera_.perspective != cached_shadow_camera_perspective_ ||
+        directionChangedBeyondThreshold(cam_forward,
+                                        cached_shadow_camera_forward_,
+                                        directional_shadow_angle_threshold_deg_) ||
+        directionChangedBeyondThreshold(shadow_light_dir,
+                                        cached_shadow_light_direction_,
+                                        directional_shadow_angle_threshold_deg_);
   }
 
-  for (int cascade = 0; cascade < kShadowCascadeCount; ++cascade) {
-    const float split_near = prev_split;
-    const float split_far = cascade_splits[cascade];
-    prev_split = split_far;
-    if (split_far <= split_near + 1e-4f) {
-      continue;
-    }
-
-    const auto frustum_corners = build_slice_corners(split_near, split_far);
-    glm::vec3 frustum_center{0.0f};
-    for (const glm::vec3& corner : frustum_corners) {
-      frustum_center += corner;
-    }
-    frustum_center /= static_cast<float>(frustum_corners.size());
-
-    float radius_ws = 0.0f;
-    for (const glm::vec3& corner : frustum_corners) {
-      radius_ws = std::max(radius_ws, glm::length(corner - frustum_center));
-    }
-    radius_ws = std::ceil(radius_ws * 16.0f) / 16.0f;
-    radius_ws = std::max(radius_ws + 2.0f, 1.0f);
-
-    const glm::mat4 light_view = stable_light_view;
-
-    glm::vec3 center_ls = glm::vec3(light_view * glm::vec4(frustum_center, 1.0f));
-    const float units_per_texel = (2.0f * radius_ws) / safe_shadow_map_extent;
-    if (units_per_texel > 0.0f) {
-      center_ls.x = std::floor(center_ls.x / units_per_texel + 0.5f) * units_per_texel;
-      center_ls.y = std::floor(center_ls.y / units_per_texel + 0.5f) * units_per_texel;
-    }
-
-    glm::vec3 light_min{
-        center_ls.x - radius_ws,
-        center_ls.y - radius_ws,
-        std::numeric_limits<float>::max()};
-    glm::vec3 light_max{
-        center_ls.x + radius_ws,
-        center_ls.y + radius_ws,
-        std::numeric_limits<float>::lowest()};
-    for (const glm::vec3& corner : frustum_corners) {
-      const glm::vec3 corner_ls = glm::vec3(light_view * glm::vec4(corner, 1.0f));
-      light_min.z = std::min(light_min.z, corner_ls.z);
-      light_max.z = std::max(light_max.z, corner_ls.z);
-    }
-    const float depth_span = std::max(light_max.z - light_min.z, 1.0f);
-    const float depth_padding = std::max(5.0f, depth_span * 0.2f);
-    light_min.z -= depth_padding;
-    light_max.z += depth_padding;
-    const glm::vec3 extent = light_max - light_min;
-
-    const float scale_x = (extent.x > 0.0f) ? (2.0f / extent.x) : 1.0f;
-    const float scale_y = (extent.y > 0.0f) ? (2.0f / extent.y) : 1.0f;
-    const float near_z = light_max.z;
-    const float far_z = light_min.z;
-    const float z_denom = far_z - near_z;
-    float scale_z = 1.0f;
-    float bias_z = 0.0f;
-    if (std::abs(z_denom) > 1e-6f) {
-      if (is_gl) {
-        scale_z = 2.0f / z_denom;
-        bias_z = -(far_z + near_z) / z_denom;
-      } else {
-        scale_z = 1.0f / z_denom;
-        bias_z = -near_z * scale_z;
+  if (!directional_shadow_needs_update && directional_shadow_cache_valid_) {
+    cascade_splits = cached_cascade_splits_;
+  } else {
+    float slice_prev_split = shadow_near;
+    for (int cascade = 0; cascade < kShadowCascadeCount; ++cascade) {
+      const float split_near = slice_prev_split;
+      const float split_far = cascade_splits[cascade];
+      slice_prev_split = split_far;
+      if (split_far <= split_near + 1e-4f) {
+        continue;
       }
-    } else {
-      scale_z = is_gl ? 2.0f : 1.0f;
-      bias_z = is_gl ? -1.0f : 0.0f;
+
+      const auto frustum_corners = build_slice_corners(split_near, split_far);
+      glm::vec3 frustum_center{0.0f};
+      for (const glm::vec3& corner : frustum_corners) {
+        frustum_center += corner;
+      }
+      frustum_center /= static_cast<float>(frustum_corners.size());
+
+      float radius_ws = 0.0f;
+      for (const glm::vec3& corner : frustum_corners) {
+        radius_ws = std::max(radius_ws, glm::length(corner - frustum_center));
+      }
+      radius_ws = std::ceil(radius_ws * 16.0f) / 16.0f;
+      radius_ws = std::max(radius_ws + 2.0f, 1.0f);
+
+      const glm::mat4 light_view = stable_light_view;
+
+      glm::vec3 center_ls = glm::vec3(light_view * glm::vec4(frustum_center, 1.0f));
+      const float units_per_texel = (2.0f * radius_ws) / safe_shadow_map_extent;
+      if (units_per_texel > 0.0f) {
+        center_ls.x = std::floor(center_ls.x / units_per_texel + 0.5f) * units_per_texel;
+        center_ls.y = std::floor(center_ls.y / units_per_texel + 0.5f) * units_per_texel;
+      }
+
+      glm::vec3 light_min{
+          center_ls.x - radius_ws,
+          center_ls.y - radius_ws,
+          std::numeric_limits<float>::max()};
+      glm::vec3 light_max{
+          center_ls.x + radius_ws,
+          center_ls.y + radius_ws,
+          std::numeric_limits<float>::lowest()};
+      for (const glm::vec3& corner : frustum_corners) {
+        const glm::vec3 corner_ls = glm::vec3(light_view * glm::vec4(corner, 1.0f));
+        light_min.z = std::min(light_min.z, corner_ls.z);
+        light_max.z = std::max(light_max.z, corner_ls.z);
+      }
+      const float depth_span = std::max(light_max.z - light_min.z, 1.0f);
+      const float depth_padding = std::max(5.0f, depth_span * 0.2f);
+      light_min.z -= depth_padding;
+      light_max.z += depth_padding;
+      const glm::vec3 extent = light_max - light_min;
+
+      const float scale_x = (extent.x > 0.0f) ? (2.0f / extent.x) : 1.0f;
+      const float scale_y = (extent.y > 0.0f) ? (2.0f / extent.y) : 1.0f;
+      const float near_z = light_max.z;
+      const float far_z = light_min.z;
+      const float z_denom = far_z - near_z;
+      float scale_z = 1.0f;
+      float bias_z = 0.0f;
+      if (std::abs(z_denom) > 1e-6f) {
+        if (is_gl) {
+          scale_z = 2.0f / z_denom;
+          bias_z = -(far_z + near_z) / z_denom;
+        } else {
+          scale_z = 1.0f / z_denom;
+          bias_z = -near_z * scale_z;
+        }
+      } else {
+        scale_z = is_gl ? 2.0f : 1.0f;
+        bias_z = is_gl ? -1.0f : 0.0f;
+      }
+      const float bias_x = -light_min.x * scale_x - 1.0f;
+      const float bias_y = -light_min.y * scale_y - 1.0f;
+
+      const glm::mat4 scale_mat = glm::scale(glm::mat4(1.0f), glm::vec3(scale_x, scale_y, scale_z));
+      const glm::mat4 bias_mat = glm::translate(glm::mat4(1.0f), glm::vec3(bias_x, bias_y, bias_z));
+      const glm::mat4 shadow_proj = bias_mat * scale_mat;
+      const glm::mat4 light_view_proj = shadow_proj * light_view;
+      const glm::mat4 shadow_uv_proj = uv_bias * uv_scale * light_view_proj;
+
+      cascade_light_view_proj[cascade] = light_view_proj;
+      cascade_shadow_uv_proj[cascade] = shadow_uv_proj;
+      cascade_world_texel[cascade] =
+          std::max(std::max(extent.x, extent.y), 0.0f) / safe_shadow_map_extent;
     }
-    const float bias_x = -light_min.x * scale_x - 1.0f;
-    const float bias_y = -light_min.y * scale_y - 1.0f;
-
-    const glm::mat4 scale_mat = glm::scale(glm::mat4(1.0f), glm::vec3(scale_x, scale_y, scale_z));
-    const glm::mat4 bias_mat = glm::translate(glm::mat4(1.0f), glm::vec3(bias_x, bias_y, bias_z));
-    const glm::mat4 shadow_proj = bias_mat * scale_mat;
-    const glm::mat4 light_view_proj = shadow_proj * light_view;
-    const glm::mat4 shadow_uv_proj = uv_bias * uv_scale * light_view_proj;
-
-    cascade_light_view_proj[cascade] = light_view_proj;
-    cascade_shadow_uv_proj[cascade] = shadow_uv_proj;
-    cascade_world_texel[cascade] =
-        std::max(std::max(extent.x, extent.y), 0.0f) / safe_shadow_map_extent;
   }
 
   const glm::mat4 light_view_proj = cascade_light_view_proj[0];
@@ -1882,6 +2282,21 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     return true;
   };
 
+  auto is_valid_indexed_draw = [&](const auto& mesh,
+                                   Diligent::Uint32 first_index,
+                                   Diligent::Uint32 index_count) {
+    if (!mesh.index_buffer || mesh.index_count == 0 || index_count == 0) {
+      return false;
+    }
+    const uint64_t first = static_cast<uint64_t>(first_index);
+    const uint64_t count = static_cast<uint64_t>(index_count);
+    const uint64_t total = static_cast<uint64_t>(mesh.index_count);
+    if (first >= total) {
+      return false;
+    }
+    return first + count <= total;
+  };
+
   bool has_shadow_dsv = false;
   for (const auto& dsv : shadow_map_dsv_cascades_) {
     if (dsv) {
@@ -1889,25 +2304,114 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       break;
     }
   }
-  if (shadow_pipeline_state_ && has_shadow_dsv) {
-    Diligent::Uint32 shadow_draws = 0;
-    Diligent::Viewport shadow_viewport{};
-    shadow_viewport.TopLeftX = 0.0f;
-    shadow_viewport.TopLeftY = 0.0f;
-    shadow_viewport.Width = static_cast<float>(shadow_map_size_);
-    shadow_viewport.Height = static_cast<float>(shadow_map_size_);
-    shadow_viewport.MinDepth = 0.0f;
-    shadow_viewport.MaxDepth = 1.0f;
-    context_->SetViewports(1, &shadow_viewport,
-                           static_cast<Diligent::Uint32>(shadow_map_size_),
-                           static_cast<Diligent::Uint32>(shadow_map_size_));
+  bool has_point_shadow_dsv = false;
+  for (const auto& dsv : point_shadow_map_dsv_faces_) {
+    if (dsv) {
+      has_point_shadow_dsv = true;
+      break;
+    }
+  }
+  const bool can_render_directional_shadows = shadow_pipeline_state_ && has_shadow_dsv;
+  const bool can_render_point_shadows =
+      shadow_pipeline_state_ && point_shadow_map_srv_ && has_point_shadow_dsv &&
+      point_shadow_light_count > 0;
 
-    std::vector<ShadowBatch> shadow_batches;
+  auto mark_point_shadow_slot_dirty = [&](Diligent::Uint32 slot, bool invalidate_slot) {
+    if (slot >= static_cast<Diligent::Uint32>(kMaxPointShadowLights)) {
+      return;
+    }
+    if (invalidate_slot) {
+      point_shadow_slot_valid_[slot] = false;
+    }
+    const Diligent::Uint32 face_base = slot * static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+    for (Diligent::Uint32 face = 0; face < static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+         ++face) {
+      point_shadow_face_dirty_[face_base + face] = 1u;
+    }
+  };
+
+  bool point_shadow_force_full_refresh = false;
+  for (Diligent::Uint32 slot = 0; slot < point_shadow_light_count; ++slot) {
+    if (slot >= static_cast<Diligent::Uint32>(kMaxPointShadowLights)) {
+      break;
+    }
+    const int32_t source_index = static_cast<int32_t>(point_shadow_light_source_indices[slot]);
+    const renderer::LightData& light = point_shadow_lights[slot];
+    const bool slot_identity_changed = point_shadow_slot_source_index_[slot] != source_index;
+    const bool slot_position_changed =
+        glm::length(light.position - point_shadow_slot_position_[slot]) >
+        point_shadow_position_threshold_;
+    const bool slot_range_changed =
+        std::abs(light.range - point_shadow_slot_range_[slot]) > point_shadow_range_threshold_;
+    if (!point_shadow_cache_initialized_ || slot_identity_changed) {
+      mark_point_shadow_slot_dirty(slot, true);
+      point_shadow_force_full_refresh = point_shadow_force_full_refresh || slot_identity_changed;
+    } else if (slot_position_changed || slot_range_changed) {
+      mark_point_shadow_slot_dirty(slot, false);
+    }
+    point_shadow_slot_source_index_[slot] = source_index;
+    point_shadow_slot_position_[slot] = light.position;
+    point_shadow_slot_range_[slot] = light.range;
+  }
+  for (Diligent::Uint32 slot = point_shadow_light_count;
+       slot < static_cast<Diligent::Uint32>(kMaxPointShadowLights);
+       ++slot) {
+    point_shadow_slot_source_index_[slot] = -1;
+    point_shadow_slot_valid_[slot] = false;
+  }
+  if (point_shadow_light_count == 0) {
+    point_shadow_cache_initialized_ = false;
+    point_shadow_face_dirty_.fill(1u);
+  }
+
+  std::array<uint8_t, kPointShadowMatrixCount> point_shadow_faces_to_update{};
+  Diligent::Uint32 point_shadow_face_update_count = 0;
+  if (can_render_point_shadows) {
+    if (!point_shadow_cache_initialized_ || point_shadow_force_full_refresh) {
+      for (Diligent::Uint32 slot = 0; slot < point_shadow_light_count; ++slot) {
+        const Diligent::Uint32 face_base = slot * static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+        for (Diligent::Uint32 face = 0;
+             face < static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+             ++face) {
+          const Diligent::Uint32 matrix_idx = face_base + face;
+          point_shadow_faces_to_update[matrix_idx] = 1u;
+          point_shadow_face_update_count += 1;
+        }
+      }
+    } else {
+      const Diligent::Uint32 active_face_count =
+          point_shadow_light_count * static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+      const Diligent::Uint32 update_budget = std::max(point_shadow_faces_per_frame_budget_, 1u);
+      Diligent::Uint32 visited = 0;
+      while (point_shadow_face_update_count < update_budget && visited < active_face_count) {
+        if (active_face_count == 0) {
+          break;
+        }
+        const Diligent::Uint32 matrix_idx = point_shadow_face_cursor_ % active_face_count;
+        point_shadow_face_cursor_ = (point_shadow_face_cursor_ + 1u) % active_face_count;
+        visited += 1;
+        if (point_shadow_face_dirty_[matrix_idx] == 0u) {
+          continue;
+        }
+        point_shadow_faces_to_update[matrix_idx] = 1u;
+        point_shadow_face_update_count += 1;
+      }
+    }
+  }
+
+  const bool render_directional_shadows =
+      can_render_directional_shadows && directional_shadow_needs_update;
+  const bool render_point_shadows =
+      can_render_point_shadows && point_shadow_face_update_count > 0;
+
+  std::vector<ShadowBatch> shadow_batches;
+  if (render_directional_shadows || render_point_shadows) {
     shadow_batches.reserve(instances_.size());
     std::unordered_map<ShadowBatchKey, size_t, ShadowBatchKeyHash> shadow_batch_lookup;
     shadow_batch_lookup.reserve(instances_.size());
-
-    auto append_shadow_batch = [&](const ShadowBatchKey& key, const glm::mat4& transform) {
+    auto append_shadow_batch = [&](const ShadowBatchKey& key,
+                                   const glm::mat4& transform,
+                                   const glm::vec4& bounds_sphere) {
       auto it = shadow_batch_lookup.find(key);
       if (it == shadow_batch_lookup.end()) {
         const size_t idx = shadow_batches.size();
@@ -1916,6 +2420,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         it = shadow_batch_lookup.find(key);
       }
       shadow_batches[it->second].transforms.push_back(packInstanceTransform(transform));
+      shadow_batches[it->second].bounds_spheres.push_back(bounds_sphere);
     };
 
     for (const auto& entry : instances_) {
@@ -1931,6 +2436,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       if (!mesh.vertex_buffer) {
         continue;
       }
+      const glm::vec4 world_bounds_sphere =
+          transformBoundingSphere(instance.transform, mesh.bounds_center, mesh.bounds_radius);
 
       const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
       if (!mesh.submeshes.empty()) {
@@ -1941,7 +2448,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
               .index_count = submesh.index_count,
               .indexed = indexed_mesh && submesh.index_count > 0,
           };
-          append_shadow_batch(key, instance.transform);
+          append_shadow_batch(key, instance.transform, world_bounds_sphere);
         }
       } else {
         const ShadowBatchKey key{
@@ -1950,8 +2457,97 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
             .index_count = mesh.index_count,
             .indexed = indexed_mesh,
         };
-        append_shadow_batch(key, instance.transform);
+        append_shadow_batch(key, instance.transform, world_bounds_sphere);
       }
+    }
+  }
+
+  std::vector<InstanceTransformData> filtered_shadow_transforms;
+  auto draw_shadow_batches = [&](const DrawConstants& pass_constants, auto&& sphere_visible) {
+    {
+      Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
+                                                Diligent::MAP_FLAG_DISCARD);
+      *mapped = pass_constants;
+    }
+    for (const auto& batch : shadow_batches) {
+      if (batch.transforms.empty()) {
+        continue;
+      }
+      filtered_shadow_transforms.clear();
+      filtered_shadow_transforms.reserve(batch.transforms.size());
+      const size_t bounds_count = batch.bounds_spheres.size();
+      for (size_t i = 0; i < batch.transforms.size(); ++i) {
+        if (i < bounds_count && !sphere_visible(batch.bounds_spheres[i])) {
+          continue;
+        }
+        filtered_shadow_transforms.push_back(batch.transforms[i]);
+      }
+      if (filtered_shadow_transforms.empty()) {
+        continue;
+      }
+      auto mesh_it = meshes_.find(batch.key.mesh);
+      if (mesh_it == meshes_.end()) {
+        continue;
+      }
+      const auto& mesh = mesh_it->second;
+      if (!mesh.vertex_buffer) {
+        continue;
+      }
+      if (!ensure_instance_buffer(filtered_shadow_transforms.size())) {
+        continue;
+      }
+      {
+        Diligent::MapHelper<InstanceTransformData> instance_map(context_, instance_vb_,
+                                                                Diligent::MAP_WRITE,
+                                                                Diligent::MAP_FLAG_DISCARD);
+        std::memcpy(instance_map, filtered_shadow_transforms.data(),
+                    filtered_shadow_transforms.size() * sizeof(InstanceTransformData));
+      }
+
+      Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
+      Diligent::Uint64 offsets[] = {0, 0};
+      context_->SetVertexBuffers(0,
+                                 2,
+                                 vbs,
+                                 offsets,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                 Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+
+      if (batch.key.indexed) {
+        if (!is_valid_indexed_draw(mesh, batch.key.index_offset, batch.key.index_count)) {
+          continue;
+        }
+        context_->SetIndexBuffer(mesh.index_buffer, 0, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        Diligent::DrawIndexedAttribs indexed{};
+        indexed.IndexType = Diligent::VT_UINT32;
+        indexed.NumIndices = batch.key.index_count;
+        indexed.FirstIndexLocation = batch.key.index_offset;
+        indexed.NumInstances = static_cast<Diligent::Uint32>(filtered_shadow_transforms.size());
+        indexed.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        context_->DrawIndexed(indexed);
+      } else {
+        Diligent::DrawAttribs draw_attrs{};
+        draw_attrs.NumVertices = mesh.vertex_count;
+        draw_attrs.NumInstances = static_cast<Diligent::Uint32>(filtered_shadow_transforms.size());
+        draw_attrs.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        context_->Draw(draw_attrs);
+      }
+    }
+  };
+
+  if (render_directional_shadows) {
+    Diligent::Viewport shadow_viewport{};
+    shadow_viewport.TopLeftX = 0.0f;
+    shadow_viewport.TopLeftY = 0.0f;
+    shadow_viewport.Width = static_cast<float>(shadow_map_size_);
+    shadow_viewport.Height = static_cast<float>(shadow_map_size_);
+    shadow_viewport.MinDepth = 0.0f;
+    shadow_viewport.MaxDepth = 1.0f;
+    context_->SetViewports(1, &shadow_viewport, static_cast<Diligent::Uint32>(shadow_map_size_),
+                           static_cast<Diligent::Uint32>(shadow_map_size_));
+    context_->SetPipelineState(shadow_pipeline_state_);
+    if (shadow_srb_) {
+      context_->CommitShaderResources(shadow_srb_, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     }
 
     for (int cascade = 0; cascade < kShadowCascadeCount; ++cascade) {
@@ -1969,11 +2565,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                                   1.0f,
                                   0,
                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-      context_->SetPipelineState(shadow_pipeline_state_);
-      if (shadow_srb_) {
-        context_->CommitShaderResources(shadow_srb_,
-                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-      }
 
       DrawConstants shadow_constants{};
       copyMat4(shadow_constants.mvp, cascade_light_view_proj[cascade]);
@@ -1992,6 +2583,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       shadow_constants.shadow_params[1] = fixed_bias;
       shadow_constants.shadow_params[2] = static_cast<float>(shadow_pcf_radius_);
       shadow_constants.shadow_params[3] = shadow_texel_param;
+      shadow_constants.point_shadow_params[0] = 0.0f;
+      shadow_constants.point_shadow_params[1] = point_shadow_texel_size;
+      shadow_constants.point_shadow_params[2] = static_cast<float>(point_shadow_map_size_);
+      shadow_constants.point_shadow_params[3] = 0.0f;
+      shadow_constants.local_light_params[0] = local_light_distance_damping_;
+      shadow_constants.local_light_params[1] = local_light_range_exponent_;
+      shadow_constants.local_light_params[2] = ao_affects_local_lights_ ? 1.0f : 0.0f;
+      shadow_constants.local_light_params[3] = local_light_directional_shadow_lift_;
+      shadow_constants.point_shadow_tuning[0] = point_shadow_constant_bias_;
+      shadow_constants.point_shadow_tuning[1] = point_shadow_slope_bias_scale_;
+      shadow_constants.point_shadow_tuning[2] = point_shadow_normal_bias_scale_;
+      shadow_constants.point_shadow_tuning[3] = point_shadow_receiver_bias_scale_;
       shadow_constants.shadow_bias_params[0] = shadow_receiver_bias_scale_;
       shadow_constants.shadow_bias_params[1] = shadow_normal_bias_scale_;
       shadow_constants.shadow_bias_params[2] = cascade_world_texel[cascade];
@@ -2004,65 +2607,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       shadow_constants.camera_forward[1] = cam_forward.y;
       shadow_constants.camera_forward[2] = cam_forward.z;
       shadow_constants.camera_forward[3] = 0.0f;
-      {
-        Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
-                                                  Diligent::MAP_FLAG_DISCARD);
-        *mapped = shadow_constants;
-      }
-
-      for (const auto& batch : shadow_batches) {
-        if (batch.transforms.empty()) {
-          continue;
-        }
-        auto mesh_it = meshes_.find(batch.key.mesh);
-        if (mesh_it == meshes_.end()) {
-          continue;
-        }
-        const auto& mesh = mesh_it->second;
-        if (!mesh.vertex_buffer) {
-          continue;
-        }
-        if (!ensure_instance_buffer(batch.transforms.size())) {
-          continue;
-        }
-
-        {
-          Diligent::MapHelper<InstanceTransformData> instance_map(context_, instance_vb_,
-                                                                  Diligent::MAP_WRITE,
-                                                                  Diligent::MAP_FLAG_DISCARD);
-          std::memcpy(instance_map, batch.transforms.data(),
-                      batch.transforms.size() * sizeof(InstanceTransformData));
-        }
-
-        Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
-        Diligent::Uint64 offsets[] = {0, 0};
-        context_->SetVertexBuffers(0,
-                                   2,
-                                   vbs,
-                                   offsets,
-                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-                                   Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
-
-        if (batch.key.indexed) {
-          context_->SetIndexBuffer(mesh.index_buffer,
-                                   0,
-                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-          Diligent::DrawIndexedAttribs indexed{};
-          indexed.IndexType = Diligent::VT_UINT32;
-          indexed.NumIndices = batch.key.index_count;
-          indexed.FirstIndexLocation = batch.key.index_offset;
-          indexed.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-          indexed.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
-          context_->DrawIndexed(indexed);
-        } else {
-          Diligent::DrawAttribs draw_attrs{};
-          draw_attrs.NumVertices = mesh.vertex_count;
-          draw_attrs.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-          draw_attrs.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
-          context_->Draw(draw_attrs);
-        }
-        shadow_draws += 1;
-      }
+      const glm::mat4 cascade_cull_matrix = cascade_light_view_proj[cascade];
+      draw_shadow_batches(shadow_constants,
+                          [&](const glm::vec4& sphere) {
+                            return sphereIntersectsClipVolume(cascade_cull_matrix, sphere, is_gl);
+                          });
     }
 
     if (shadow_map_tex_) {
@@ -2073,23 +2622,208 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       barrier.Flags = Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE;
       context_->TransitionResourceStates(1, &barrier);
     }
+
+    cached_cascade_light_view_proj_ = cascade_light_view_proj;
+    cached_cascade_shadow_uv_proj_ = cascade_shadow_uv_proj;
+    cached_cascade_world_texel_ = cascade_world_texel;
+    cached_cascade_splits_ = cascade_splits;
+    cached_shadow_camera_position_ = camera_.position;
+    cached_shadow_camera_forward_ = cam_forward;
+    cached_shadow_light_direction_ = shadow_light_dir;
+    cached_shadow_camera_aspect_ = aspect;
+    cached_shadow_camera_fov_y_degrees_ = camera_.fov_y_degrees;
+    cached_shadow_camera_near_ = camera_.near_clip;
+    cached_shadow_camera_far_ = camera_.far_clip;
+    cached_shadow_camera_perspective_ = camera_.perspective;
+    directional_shadow_cache_valid_ = true;
   }
 
-  auto* rtv = swap_chain_->GetCurrentBackBufferRTV();
-  auto* dsv = swap_chain_->GetDepthBufferDSV();
+  if (render_point_shadows) {
+    Diligent::Viewport shadow_viewport{};
+    shadow_viewport.TopLeftX = 0.0f;
+    shadow_viewport.TopLeftY = 0.0f;
+    shadow_viewport.Width = static_cast<float>(point_shadow_map_size_);
+    shadow_viewport.Height = static_cast<float>(point_shadow_map_size_);
+    shadow_viewport.MinDepth = 0.0f;
+    shadow_viewport.MaxDepth = 1.0f;
+    context_->SetViewports(1, &shadow_viewport,
+                           static_cast<Diligent::Uint32>(point_shadow_map_size_),
+                           static_cast<Diligent::Uint32>(point_shadow_map_size_));
+    context_->SetPipelineState(shadow_pipeline_state_);
+    if (shadow_srb_) {
+      context_->CommitShaderResources(shadow_srb_, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    }
+
+    const Diligent::Uint32 active_face_count =
+        point_shadow_light_count * static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+    for (Diligent::Uint32 matrix_idx = 0; matrix_idx < active_face_count; ++matrix_idx) {
+      if (point_shadow_faces_to_update[matrix_idx] == 0u) {
+        continue;
+      }
+      const Diligent::Uint32 point_idx =
+          matrix_idx / static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+      const int face =
+          static_cast<int>(matrix_idx % static_cast<Diligent::Uint32>(kPointShadowFaceCount));
+      if (point_idx >= point_shadow_light_count) {
+        continue;
+      }
+
+      const renderer::LightData& point_light = point_shadow_lights[point_idx];
+      const float range_ws = std::max(point_light.range, 0.1f);
+      const float near_plane = std::max(range_ws * 0.02f, 0.05f);
+      const float far_plane = std::max(range_ws, near_plane + 0.1f);
+      const glm::mat4 face_proj = glm::perspective(glm::radians(90.0f), 1.0f, near_plane, far_plane);
+      const glm::mat4 face_view =
+          glm::lookAt(point_light.position,
+                      point_light.position + kPointShadowFaceDirs[face],
+                      kPointShadowFaceUps[face]);
+      const glm::mat4 face_light_view_proj = depth_fix * face_proj * face_view;
+      point_shadow_uv_proj[matrix_idx] = uv_bias * uv_scale * face_light_view_proj;
+      cached_point_shadow_uv_proj_[matrix_idx] = point_shadow_uv_proj[matrix_idx];
+
+      Diligent::ITextureView* face_dsv =
+          point_shadow_map_dsv_faces_[matrix_idx] ? point_shadow_map_dsv_faces_[matrix_idx].RawPtr()
+                                                  : nullptr;
+      if (!face_dsv) {
+        continue;
+      }
+      context_->SetRenderTargets(0, nullptr, face_dsv,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      context_->ClearDepthStencil(face_dsv,
+                                  Diligent::CLEAR_DEPTH_FLAG,
+                                  1.0f,
+                                  0,
+                                  Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+      DrawConstants shadow_constants{};
+      copyMat4(shadow_constants.mvp, face_light_view_proj);
+      copyMat4(shadow_constants.light_view_proj, face_light_view_proj);
+      copyMat4(shadow_constants.shadow_uv_proj, point_shadow_uv_proj[matrix_idx]);
+      for (int idx = 0; idx < kShadowCascadeCount; ++idx) {
+        copyMat4(shadow_constants.shadow_cascade_uv_proj[idx], cascade_shadow_uv_proj[idx]);
+        shadow_constants.shadow_cascade_splits[idx] = cascade_splits[idx];
+        shadow_constants.shadow_cascade_world_texel[idx] = cascade_world_texel[idx];
+      }
+      shadow_constants.shadow_cascade_params[0] = 0.08f;
+      shadow_constants.shadow_cascade_params[1] = 0.0f;
+      shadow_constants.shadow_cascade_params[2] = 0.0f;
+      shadow_constants.shadow_cascade_params[3] = 0.0f;
+      shadow_constants.shadow_params[0] = 0.0f;
+      shadow_constants.shadow_params[1] = fixed_bias;
+      shadow_constants.shadow_params[2] = static_cast<float>(shadow_pcf_radius_);
+      shadow_constants.shadow_params[3] = point_shadow_texel_size;
+      shadow_constants.point_shadow_params[0] = 0.0f;
+      shadow_constants.point_shadow_params[1] = point_shadow_texel_size;
+      shadow_constants.point_shadow_params[2] = static_cast<float>(point_shadow_map_size_);
+      shadow_constants.point_shadow_params[3] = static_cast<float>(point_shadow_light_count);
+      shadow_constants.local_light_params[0] = local_light_distance_damping_;
+      shadow_constants.local_light_params[1] = local_light_range_exponent_;
+      shadow_constants.local_light_params[2] = ao_affects_local_lights_ ? 1.0f : 0.0f;
+      shadow_constants.local_light_params[3] = local_light_directional_shadow_lift_;
+      shadow_constants.point_shadow_tuning[0] = point_shadow_constant_bias_;
+      shadow_constants.point_shadow_tuning[1] = point_shadow_slope_bias_scale_;
+      shadow_constants.point_shadow_tuning[2] = point_shadow_normal_bias_scale_;
+      shadow_constants.point_shadow_tuning[3] = point_shadow_receiver_bias_scale_;
+      shadow_constants.shadow_bias_params[0] = shadow_receiver_bias_scale_;
+      shadow_constants.shadow_bias_params[1] = shadow_normal_bias_scale_;
+      shadow_constants.shadow_bias_params[2] = range_ws / safe_point_shadow_map_extent;
+      shadow_constants.shadow_bias_params[3] = 0.0f;
+      shadow_constants.forward_plus_params[0] = 0.0f;
+      shadow_constants.forward_plus_params[1] = 0.0f;
+      shadow_constants.forward_plus_params[2] = 0.0f;
+      shadow_constants.forward_plus_params[3] = 0.0f;
+      shadow_constants.camera_forward[0] = cam_forward.x;
+      shadow_constants.camera_forward[1] = cam_forward.y;
+      shadow_constants.camera_forward[2] = cam_forward.z;
+      shadow_constants.camera_forward[3] = 0.0f;
+      const glm::mat4 point_cull_matrix = face_light_view_proj;
+      draw_shadow_batches(shadow_constants,
+                          [&](const glm::vec4& sphere) {
+                            if (sphere.w > 0.0f) {
+                              const glm::vec3 delta =
+                                  glm::vec3(sphere) - point_light.position;
+                              const float max_dist = range_ws + sphere.w;
+                              if (glm::dot(delta, delta) > max_dist * max_dist) {
+                                return false;
+                              }
+                            }
+                            return sphereIntersectsClipVolume(point_cull_matrix, sphere, is_gl);
+                          });
+      point_shadow_face_dirty_[matrix_idx] = 0u;
+    }
+
+    if (point_shadow_map_tex_) {
+      Diligent::StateTransitionDesc barrier{};
+      barrier.pResource = point_shadow_map_tex_;
+      barrier.OldState = Diligent::RESOURCE_STATE_DEPTH_WRITE;
+      barrier.NewState = Diligent::RESOURCE_STATE_SHADER_RESOURCE;
+      barrier.Flags = Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE;
+      context_->TransitionResourceStates(1, &barrier);
+      point_shadow_ready = true;
+    }
+  }
+
+  bool any_point_shadow_slot_valid = false;
+  for (Diligent::Uint32 slot = 0; slot < point_shadow_light_count; ++slot) {
+    bool slot_fully_updated = true;
+    const Diligent::Uint32 face_base = slot * static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+    for (Diligent::Uint32 face = 0;
+         face < static_cast<Diligent::Uint32>(kPointShadowFaceCount);
+         ++face) {
+      if (point_shadow_face_dirty_[face_base + face] != 0u) {
+        slot_fully_updated = false;
+        break;
+      }
+    }
+    if (slot_fully_updated) {
+      point_shadow_slot_valid_[slot] = true;
+    }
+    any_point_shadow_slot_valid = any_point_shadow_slot_valid || point_shadow_slot_valid_[slot];
+    const size_t local_light_index = point_shadow_local_light_indices[slot];
+    if (local_light_index < forward_plus_lights_gpu.size()) {
+      forward_plus_lights_gpu[local_light_index].spot_params[2] =
+          point_shadow_slot_valid_[slot] ? static_cast<float>(slot) : -1.0f;
+    }
+  }
+  if (cpu_forward_plus_ready) {
+    const Diligent::Uint32 copy_count = static_cast<Diligent::Uint32>(std::min<size_t>(
+        forward_plus_lights_gpu.size(), static_cast<size_t>(cpu_forward_plus_light_count)));
+    for (Diligent::Uint32 i = 0; i < copy_count; ++i) {
+      cpu_forward_plus_lights[i] = forward_plus_lights_gpu[i];
+    }
+  }
+  if (forward_plus_ready && forward_plus_light_buffer_ && !forward_plus_lights_gpu.empty()) {
+    context_->UpdateBuffer(forward_plus_light_buffer_,
+                           0,
+                           static_cast<Diligent::Uint32>(forward_plus_lights_gpu.size() *
+                                                         sizeof(ForwardPlusGpuLight)),
+                           forward_plus_lights_gpu.data(),
+                           Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+  }
+  point_shadow_cache_initialized_ =
+      point_shadow_cache_initialized_ || any_point_shadow_slot_valid;
+  point_shadow_ready = point_shadow_ready && any_point_shadow_slot_valid;
+
+  auto* rtv = active_rtv;
+  auto* dsv = active_dsv;
   context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_VERIFY);
 
   Diligent::Viewport viewport{};
   viewport.TopLeftX = 0.0f;
   viewport.TopLeftY = 0.0f;
-  viewport.Width = static_cast<float>(current_width_);
-  viewport.Height = static_cast<float>(current_height_);
+  viewport.Width = static_cast<float>(render_width);
+  viewport.Height = static_cast<float>(render_height);
   viewport.MinDepth = 0.0f;
   viewport.MaxDepth = 1.0f;
-  context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(current_width_),
-                         static_cast<Diligent::Uint32>(current_height_));
+  context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(render_width),
+                         static_cast<Diligent::Uint32>(render_height));
 
-  context_->SetPipelineState(pipeline_state_);
+  Diligent::IPipelineState* active_forward_pipeline =
+      use_custom_shader_override ? camera_override_pipeline_state_.RawPtr() : pipeline_state_.RawPtr();
+  if (!active_forward_pipeline) {
+    return;
+  }
+  context_->SetPipelineState(active_forward_pipeline);
 
   static bool logged_frame = false;
   if (!logged_frame) {
@@ -2112,6 +2846,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     base_constants.shadow_cascade_splits[idx] = cascade_splits[idx];
     base_constants.shadow_cascade_world_texel[idx] = cascade_world_texel[idx];
   }
+  for (int idx = 0; idx < kPointShadowMatrixCount; ++idx) {
+    copyMat4(base_constants.point_shadow_uv_proj[idx], point_shadow_uv_proj[idx]);
+  }
   base_constants.shadow_cascade_params[0] = 0.08f;
   base_constants.shadow_cascade_params[1] = 0.0f;
   base_constants.shadow_cascade_params[2] = 0.0f;
@@ -2123,12 +2860,28 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       break;
     }
   }
-  const bool shadow_ready = shadow_pipeline_state_ && shadow_map_srv_ && has_shadow_cascade_dsv &&
-                            shadow_sampler_;
+  const bool shadow_ready = directional_shadow_cache_valid_ &&
+                            shadow_pipeline_state_ && shadow_map_srv_ &&
+                            has_shadow_cascade_dsv && shadow_sampler_;
   base_constants.shadow_params[0] = shadow_ready ? 1.0f : 0.0f;
   base_constants.shadow_params[1] = fixed_bias;
   base_constants.shadow_params[2] = static_cast<float>(shadow_pcf_radius_);
   base_constants.shadow_params[3] = shadow_texel_param;
+  const bool point_shadow_enabled =
+      point_shadow_ready && point_shadow_map_srv_ && has_point_shadow_dsv &&
+      point_shadow_light_count > 0;
+  base_constants.point_shadow_params[0] = point_shadow_enabled ? 1.0f : 0.0f;
+  base_constants.point_shadow_params[1] = point_shadow_texel_size;
+  base_constants.point_shadow_params[2] = static_cast<float>(point_shadow_map_size_);
+  base_constants.point_shadow_params[3] = static_cast<float>(point_shadow_light_count);
+  base_constants.local_light_params[0] = local_light_distance_damping_;
+  base_constants.local_light_params[1] = local_light_range_exponent_;
+  base_constants.local_light_params[2] = ao_affects_local_lights_ ? 1.0f : 0.0f;
+  base_constants.local_light_params[3] = local_light_directional_shadow_lift_;
+  base_constants.point_shadow_tuning[0] = point_shadow_constant_bias_;
+  base_constants.point_shadow_tuning[1] = point_shadow_slope_bias_scale_;
+  base_constants.point_shadow_tuning[2] = point_shadow_normal_bias_scale_;
+  base_constants.point_shadow_tuning[3] = point_shadow_receiver_bias_scale_;
   base_constants.shadow_bias_params[0] = shadow_receiver_bias_scale_;
   base_constants.shadow_bias_params[1] = shadow_normal_bias_scale_;
   base_constants.shadow_bias_params[2] = shadow_world_texel;
@@ -2155,11 +2908,44 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   base_constants.camera_forward[1] = cam_forward.y;
   base_constants.camera_forward[2] = cam_forward.z;
   base_constants.camera_forward[3] = 0.0f;
-  base_constants.forward_plus_params[0] = static_cast<float>(forward_plus_tile_size);
-  base_constants.forward_plus_params[1] = static_cast<float>(forward_plus_tiles_x);
-  base_constants.forward_plus_params[2] = static_cast<float>(forward_plus_tiles_y);
-  base_constants.forward_plus_params[3] =
-      forward_plus_ready ? static_cast<float>(forward_plus_max_lights_per_tile) : 0.0f;
+  if (cpu_forward_plus_ready) {
+    base_constants.forward_plus_params[0] = 1.0f;
+    base_constants.forward_plus_params[1] = 1.0f;
+    base_constants.forward_plus_params[2] = 1.0f;
+    base_constants.forward_plus_params[3] = 0.0f;
+    base_constants.local_light_meta[0] = static_cast<float>(cpu_forward_plus_light_count);
+    base_constants.local_light_meta[1] = 0.0f;
+    base_constants.local_light_meta[2] = 0.0f;
+    base_constants.local_light_meta[3] = 0.0f;
+    for (Diligent::Uint32 idx = 0; idx < cpu_forward_plus_light_count; ++idx) {
+      std::memcpy(base_constants.local_light_position_range[idx],
+                  cpu_forward_plus_lights[idx].position_range,
+                  sizeof(cpu_forward_plus_lights[idx].position_range));
+      std::memcpy(base_constants.local_light_direction_type[idx],
+                  cpu_forward_plus_lights[idx].direction_type,
+                  sizeof(cpu_forward_plus_lights[idx].direction_type));
+      std::memcpy(base_constants.local_light_color_intensity[idx],
+                  cpu_forward_plus_lights[idx].color_intensity,
+                  sizeof(cpu_forward_plus_lights[idx].color_intensity));
+      std::memcpy(base_constants.local_light_spot_params[idx],
+                  cpu_forward_plus_lights[idx].spot_params,
+                  sizeof(cpu_forward_plus_lights[idx].spot_params));
+    }
+  } else {
+    base_constants.forward_plus_params[0] = static_cast<float>(active_forward_plus_tile_size);
+    base_constants.forward_plus_params[1] = static_cast<float>(active_forward_plus_tiles_x);
+    base_constants.forward_plus_params[2] = static_cast<float>(active_forward_plus_tiles_y);
+    base_constants.forward_plus_params[3] =
+        forward_plus_ready ? static_cast<float>(active_forward_plus_max_lights_per_tile) : 0.0f;
+    base_constants.local_light_meta[0] = 0.0f;
+    base_constants.local_light_meta[1] = 0.0f;
+    base_constants.local_light_meta[2] = 0.0f;
+    base_constants.local_light_meta[3] = 0.0f;
+  }
+  base_constants.env_params[0] = environment_intensity_;
+  base_constants.env_params[1] = env_max_mip;
+  base_constants.env_params[2] = static_cast<float>(env_debug_mode_);
+  base_constants.env_params[3] = lighting_exposure_;
 
   std::vector<ForwardBatch> forward_batches;
   forward_batches.reserve(instances_.size());
@@ -2224,6 +3010,90 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
   }
 
+  const auto& adapter_info = device_->GetAdapterInfo();
+  const bool disable_depth_prepass_for_driver =
+      device_->GetDeviceInfo().IsVulkanDevice() &&
+      adapter_info.Vendor == Diligent::ADAPTER_VENDOR_NVIDIA;
+  const bool run_depth_prepass =
+      depth_prepass_pipeline_state_ && dsv && forward_batches.size() > 1 &&
+      !disable_depth_prepass_for_driver && !use_custom_shader_override;
+  if (run_depth_prepass) {
+    context_->SetRenderTargets(0, nullptr, dsv,
+                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    context_->SetPipelineState(depth_prepass_pipeline_state_);
+    {
+      Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
+                                                Diligent::MAP_FLAG_DISCARD);
+      *mapped = base_constants;
+    }
+
+    for (const auto& batch : forward_batches) {
+      if (batch.transforms.empty()) {
+        continue;
+      }
+      auto mesh_it = meshes_.find(batch.key.mesh);
+      if (mesh_it == meshes_.end()) {
+        continue;
+      }
+      const auto& mesh = mesh_it->second;
+      if (!mesh.vertex_buffer) {
+        continue;
+      }
+      if (!ensure_instance_buffer(batch.transforms.size())) {
+        continue;
+      }
+      {
+        Diligent::MapHelper<InstanceTransformData> instance_map(context_, instance_vb_,
+                                                                Diligent::MAP_WRITE,
+                                                                Diligent::MAP_FLAG_DISCARD);
+        std::memcpy(instance_map, batch.transforms.data(),
+                    batch.transforms.size() * sizeof(InstanceTransformData));
+      }
+
+      Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
+      Diligent::Uint64 offsets[] = {0, 0};
+      context_->SetVertexBuffers(0,
+                                 2,
+                                 vbs,
+                                 offsets,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                 Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+
+      if (batch.key.indexed) {
+        if (!is_valid_indexed_draw(mesh, batch.key.index_offset, batch.key.index_count)) {
+          continue;
+        }
+        context_->SetIndexBuffer(mesh.index_buffer,
+                                 0,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        Diligent::DrawIndexedAttribs indexed{};
+        indexed.IndexType = Diligent::VT_UINT32;
+        indexed.NumIndices = batch.key.index_count;
+        indexed.FirstIndexLocation = batch.key.index_offset;
+        indexed.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
+        indexed.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        context_->DrawIndexed(indexed);
+      } else {
+        Diligent::DrawAttribs draw_attrs{};
+        draw_attrs.NumVertices = mesh.vertex_count;
+        draw_attrs.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
+        draw_attrs.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        context_->Draw(draw_attrs);
+      }
+    }
+
+    context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_VERIFY);
+    context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(render_width),
+                           static_cast<Diligent::Uint32>(render_height));
+  }
+  context_->SetPipelineState(active_forward_pipeline);
+
+  {
+    Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
+                                              Diligent::MAP_FLAG_DISCARD);
+    *mapped = base_constants;
+  }
+
   for (const auto& batch : forward_batches) {
     if (batch.transforms.empty()) {
       continue;
@@ -2263,37 +3133,27 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     constants.pbr_params[1] = mat ? mat->roughness_factor : 1.0f;
     constants.pbr_params[2] = mat ? mat->occlusion_strength : 1.0f;
     constants.pbr_params[3] = mat ? mat->normal_scale : 1.0f;
-    constants.env_params[0] = environment_intensity_;
-    constants.env_params[1] = env_max_mip;
-    constants.env_params[2] = static_cast<float>(env_debug_mode_);
-    constants.env_params[3] = 0.0f;
-
     {
       Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                                 Diligent::MAP_FLAG_DISCARD);
       *mapped = constants;
     }
 
-    Diligent::IShaderResourceBinding* srb = shader_resources_;
-    if (mat && mat->srb) {
-      srb = mat->srb;
-    } else if (default_material_srb_) {
-      srb = default_material_srb_;
-    }
-    if (srb) {
-      auto* irr = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex");
-      auto* pre = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex");
-      auto* brdf = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT");
-      if (irr) {
-        irr->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+    if (use_custom_shader_override) {
+      if (camera_override_srb_) {
+        context_->CommitShaderResources(camera_override_srb_,
+                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
       }
-      if (pre) {
-        pre->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+    } else {
+      Diligent::IShaderResourceBinding* srb = shader_resources_;
+      if (mat && mat->srb) {
+        srb = mat->srb;
+      } else if (default_material_srb_) {
+        srb = default_material_srb_;
       }
-      if (brdf) {
-        brdf->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+      if (srb) {
+        context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
       }
-      context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_VERIFY);
     }
 
     if (!ensure_instance_buffer(batch.transforms.size())) {
@@ -2317,6 +3177,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                                Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
 
     if (batch.key.indexed) {
+      if (!is_valid_indexed_draw(mesh, batch.key.index_offset, batch.key.index_count)) {
+        continue;
+      }
       context_->SetIndexBuffer(mesh.index_buffer,
                                0,
                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
@@ -2346,19 +3209,19 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     if (pso && line_cb_ && line_vb_) {
       if (lines.size() > line_vb_size_) {
       } else {
-        auto* rtv = swap_chain_->GetCurrentBackBufferRTV();
-        auto* dsv = swap_chain_->GetDepthBufferDSV();
+        auto* rtv = active_rtv;
+        auto* dsv = active_dsv;
         context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
         Diligent::Viewport viewport{};
         viewport.TopLeftX = 0.0f;
         viewport.TopLeftY = 0.0f;
-        viewport.Width = static_cast<float>(current_width_);
-        viewport.Height = static_cast<float>(current_height_);
+        viewport.Width = static_cast<float>(render_width);
+        viewport.Height = static_cast<float>(render_height);
         viewport.MinDepth = 0.0f;
         viewport.MaxDepth = 1.0f;
-        context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(current_width_),
-                               static_cast<Diligent::Uint32>(current_height_));
+        context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(render_width),
+                               static_cast<Diligent::Uint32>(render_height));
 
         {
           Diligent::MapHelper<LineVertex> vb_map(context_, line_vb_, Diligent::MAP_WRITE,
@@ -2387,7 +3250,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
 
         Diligent::DrawAttribs draw{};
         draw.NumVertices = static_cast<Diligent::Uint32>(lines.size());
-        draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        draw.Flags = Diligent::DRAW_FLAG_NONE;
         context_->Draw(draw);
       }
     }
@@ -2401,8 +3264,185 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   }
 }
 
-unsigned int DiligentBackend::getRenderTargetTextureId(renderer::RenderTargetId /*target*/) const {
-  return 0u;
+bool DiligentBackend::ensureCameraOverridePipeline(const renderer::CameraData& camera) {
+  if (!device_ || !swap_chain_ || !constants_) {
+    return false;
+  }
+  if (camera.shader_override_vertex_path.empty() ||
+      camera.shader_override_fragment_path.empty()) {
+    return false;
+  }
+  if (camera_override_pipeline_state_ &&
+      camera.shader_override_vertex_path == camera_override_vertex_path_ &&
+      camera.shader_override_fragment_path == camera_override_fragment_path_) {
+    return true;
+  }
+
+  camera_override_pipeline_state_.Release();
+  camera_override_srb_.Release();
+  camera_override_vertex_path_.clear();
+  camera_override_fragment_path_.clear();
+
+  const std::vector<unsigned char> vs_bytes = readFileBytes(camera.shader_override_vertex_path);
+  const std::vector<unsigned char> ps_bytes = readFileBytes(camera.shader_override_fragment_path);
+  if (vs_bytes.empty() || ps_bytes.empty()) {
+    return false;
+  }
+  std::string vs_source(vs_bytes.begin(), vs_bytes.end());
+  std::string ps_source(ps_bytes.begin(), ps_bytes.end());
+
+  Diligent::ShaderCreateInfo shader_ci{};
+  shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
+
+  Diligent::RefCntAutoPtr<Diligent::IShader> vs;
+  shader_ci.Desc.Name = "Karma Camera Override VS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
+  shader_ci.EntryPoint = "main";
+  shader_ci.Source = vs_source.c_str();
+  vs = device_with_cache_.CreateShader(shader_ci);
+
+  Diligent::RefCntAutoPtr<Diligent::IShader> ps;
+  shader_ci.Desc.Name = "Karma Camera Override PS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+  shader_ci.EntryPoint = "main";
+  shader_ci.Source = ps_source.c_str();
+  ps = device_with_cache_.CreateShader(shader_ci);
+  if (!vs || !ps) {
+    return false;
+  }
+
+  Diligent::GraphicsPipelineStateCreateInfo pso_ci{};
+  pso_ci.PSODesc.Name = "Karma Camera Override Pipeline";
+  pso_ci.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
+  pso_ci.pVS = vs;
+  pso_ci.pPS = ps;
+
+  auto& graphics = pso_ci.GraphicsPipeline;
+  graphics.NumRenderTargets = 1;
+  graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
+                                      : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+  graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
+                                   : Diligent::TEX_FORMAT_D32_FLOAT;
+  graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_BACK;
+  graphics.RasterizerDesc.FrontCounterClockwise = true;
+  graphics.DepthStencilDesc.DepthEnable = true;
+  graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
+
+  constexpr Diligent::Uint32 kInstanceStride = static_cast<Diligent::Uint32>(sizeof(float) * 16);
+  Diligent::LayoutElement layout_elems[] = {
+      Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
+                              0u,
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 4),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 8),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 12),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE}
+  };
+  graphics.InputLayout.LayoutElements = layout_elems;
+  graphics.InputLayout.NumElements =
+      static_cast<Diligent::Uint32>(sizeof(layout_elems) / sizeof(layout_elems[0]));
+
+  Diligent::ShaderResourceVariableDesc vars[] = {
+      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "CameraOverrideUser", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+  };
+  pso_ci.PSODesc.ResourceLayout.Variables = vars;
+  pso_ci.PSODesc.ResourceLayout.NumVariables =
+      static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
+  pso_ci.PSODesc.ResourceLayout.ImmutableSamplers = nullptr;
+  pso_ci.PSODesc.ResourceLayout.NumImmutableSamplers = 0;
+
+  camera_override_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
+  if (!camera_override_pipeline_state_) {
+    return false;
+  }
+
+  bool constants_bound = false;
+  if (auto* variable =
+          camera_override_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX,
+                                                                   "Constants")) {
+    variable->Set(constants_);
+    constants_bound = true;
+  }
+  if (auto* variable =
+          camera_override_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                                   "Constants")) {
+    variable->Set(constants_);
+    constants_bound = true;
+  }
+  if (!constants_bound) {
+    camera_override_pipeline_state_.Release();
+    return false;
+  }
+  if (camera_override_user_constants_) {
+    if (auto* variable =
+            camera_override_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                                     "CameraOverrideUser")) {
+      variable->Set(camera_override_user_constants_);
+    }
+  }
+  camera_override_pipeline_state_->CreateShaderResourceBinding(&camera_override_srb_, true);
+  camera_override_vertex_path_ = camera.shader_override_vertex_path;
+  camera_override_fragment_path_ = camera.shader_override_fragment_path;
+  return true;
+}
+
+void DiligentBackend::updateCameraOverrideUserConstants(const renderer::CameraData& camera) {
+  if (!context_ || !camera_override_user_constants_) {
+    return;
+  }
+  CameraOverrideUserConstants constants{};
+  const uint32_t count =
+      std::min(camera.shader_user_param_count, renderer::kCameraShaderUserParamCapacity);
+  for (uint32_t i = 0; i < count; ++i) {
+    const auto& p = camera.shader_user_params[i];
+    constants.user_key_hashes[i][0] = p.key_hash;
+    constants.user_key_hashes[i][1] = 0u;
+    constants.user_key_hashes[i][2] = 0u;
+    constants.user_key_hashes[i][3] = 0u;
+    constants.user_values[i][0] = p.value.r;
+    constants.user_values[i][1] = p.value.g;
+    constants.user_values[i][2] = p.value.b;
+    constants.user_values[i][3] = p.value.a;
+  }
+  constants.user_meta[0] = static_cast<float>(count);
+  constants.user_meta[1] = 0.0f;
+  constants.user_meta[2] = 0.0f;
+  constants.user_meta[3] = 0.0f;
+  Diligent::MapHelper<CameraOverrideUserConstants> mapped(context_,
+                                                          camera_override_user_constants_,
+                                                          Diligent::MAP_WRITE,
+                                                          Diligent::MAP_FLAG_DISCARD);
+  *mapped = constants;
+}
+
+unsigned int DiligentBackend::getRenderTargetTextureId(renderer::RenderTargetId target) const {
+  if (target == renderer::kDefaultRenderTarget) {
+    return 0u;
+  }
+  auto it = targets_.find(target);
+  if (it == targets_.end() || !it->second.color_srv) {
+    return 0u;
+  }
+  if ((target & kRenderTargetTextureHandleBit) != 0u) {
+    return 0u;
+  }
+  return static_cast<unsigned int>(target | kRenderTargetTextureHandleBit);
 }
 
 void DiligentBackend::setCamera(const renderer::CameraData& camera) {
@@ -2468,7 +3508,7 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
     ensureEnvironmentResources();
   }
 
-  auto bind_env_to_srb = [&](Diligent::IShaderResourceBinding* srb, const char* label) {
+  auto bind_env_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
     if (!srb) {
       return;
     }
@@ -2492,10 +3532,10 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
     }
   };
 
-  bind_env_to_srb(shader_resources_, "shader_resources");
-  bind_env_to_srb(default_material_srb_, "default_material");
+  bind_env_to_srb(shader_resources_);
+  bind_env_to_srb(default_material_srb_);
   for (auto& entry : materials_) {
-    bind_env_to_srb(entry.second.srb, "material");
+    bind_env_to_srb(entry.second.srb);
   }
 }
 
@@ -2550,6 +3590,18 @@ void DiligentBackend::setGenerateMips(bool enabled) {
   generate_mips_enabled_ = enabled;
 }
 
+void DiligentBackend::setForwardPlusSettings(int tile_size, int max_lights_per_tile) {
+  forward_plus_tile_size_ = std::clamp(tile_size, 8, 64);
+  forward_plus_max_lights_per_tile_ = std::clamp(max_lights_per_tile, 8, 512);
+  forward_plus_stats_.tile_size = static_cast<uint32_t>(forward_plus_tile_size_);
+  forward_plus_stats_.max_lights_per_tile =
+      static_cast<uint32_t>(forward_plus_max_lights_per_tile_);
+}
+
+renderer::ForwardPlusStats DiligentBackend::getForwardPlusStats() const {
+  return forward_plus_stats_;
+}
+
 void DiligentBackend::setShadowSettings(float bias,
                                         int map_size,
                                         int pcf_radius,
@@ -2570,13 +3622,43 @@ void DiligentBackend::setShadowSettings(float bias,
     shadow_raster_depth_bias_ = clamped_depth_bias;
     shadow_raster_slope_bias_ = clamped_slope_bias;
     recreateShadowPipeline();
+    directional_shadow_cache_valid_ = false;
+    point_shadow_cache_initialized_ = false;
+    point_shadow_slot_valid_.fill(false);
+    point_shadow_face_dirty_.fill(1u);
   }
 
   const int clamped_size = std::max(256, map_size);
   if (clamped_size != shadow_map_size_) {
     shadow_map_size_ = clamped_size;
+    point_shadow_map_size_ = std::max(256, shadow_map_size_ / 2);
     recreateShadowMap();
+    recreatePointShadowMap();
   }
+}
+
+void DiligentBackend::setPointShadowSettings(float constant_bias,
+                                             float slope_bias_scale,
+                                             float normal_bias_scale,
+                                             float receiver_bias_scale) {
+  point_shadow_constant_bias_ = std::clamp(constant_bias, 0.0f, 0.05f);
+  point_shadow_slope_bias_scale_ = std::clamp(slope_bias_scale, 0.0f, 16.0f);
+  point_shadow_normal_bias_scale_ = std::clamp(normal_bias_scale, 0.0f, 16.0f);
+  point_shadow_receiver_bias_scale_ = std::clamp(receiver_bias_scale, 0.0f, 8.0f);
+}
+
+void DiligentBackend::setLocalLightingSettings(float distance_damping,
+                                               float range_falloff_exponent,
+                                               bool ao_affects_local_lights,
+                                               float directional_shadow_lift_strength) {
+  local_light_distance_damping_ = std::clamp(distance_damping, 0.0f, 4.0f);
+  local_light_range_exponent_ = std::clamp(range_falloff_exponent, 0.1f, 8.0f);
+  ao_affects_local_lights_ = ao_affects_local_lights;
+  local_light_directional_shadow_lift_ = std::clamp(directional_shadow_lift_strength, 0.0f, 8.0f);
+}
+
+void DiligentBackend::setExposure(float exposure) {
+  lighting_exposure_ = std::clamp(exposure, 0.01f, 32.0f);
 }
 
 void DiligentBackend::clearFrame(const float* color, bool clear_depth) {

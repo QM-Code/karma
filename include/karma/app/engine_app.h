@@ -39,6 +39,8 @@ struct EngineConfig {
   bool enable_anisotropy = false;
   int anisotropy_level = 1;
   bool generate_mipmaps = false;
+  int forward_plus_tile_size = 16;
+  int forward_plus_max_lights_per_tile = 128;
   int shadow_map_size = 2048;
   float shadow_bias = 0.0006f;
   int shadow_pcf_radius = 0;
@@ -46,6 +48,15 @@ struct EngineConfig {
   float shadow_raster_slope_bias = 0.0f;
   float shadow_receiver_bias_scale = 0.75f;
   float shadow_normal_bias_scale = 1.0f;
+  float point_shadow_constant_bias = 0.0012f;
+  float point_shadow_slope_bias_scale = 2.0f;
+  float point_shadow_normal_bias_scale = 1.5f;
+  float point_shadow_receiver_bias_scale = 0.35f;
+  float local_light_distance_damping = 0.02f;
+  float local_light_range_falloff_exponent = 1.1f;
+  bool ao_affects_local_lights = false;
+  float local_light_directional_shadow_lift_strength = 0.0f;
+  float lighting_exposure = 1.0f;
 };
 
 class EngineApp {
@@ -64,9 +75,12 @@ class EngineApp {
   void setCursorVisible(bool visible);
 
  private:
- void initSubsystems();
- void shutdownSubsystems();
- void syncSceneEntities();
+  void initSubsystems();
+  void shutdownSubsystems();
+  void syncSceneEntities();
+#if defined(KARMA_DEBUG_UI)
+  std::unique_ptr<UiLayer> createDebugOverlayUi();
+#endif
 
   GameInterface* game_ = nullptr;
   std::unique_ptr<platform::Window> window_;
@@ -80,8 +94,12 @@ class EngineApp {
   scene::Scene scene_;
   systems::SystemGraph systems_;
   EngineConfig config_{};
-  std::unique_ptr<UiLayer> ui_;
-  UIContext ui_context_{};
+  std::unique_ptr<UiLayer> user_ui_;
+#if defined(KARMA_DEBUG_UI)
+  std::unique_ptr<UiLayer> debug_ui_;
+  UIContext debug_ui_context_{};
+#endif
+  UIContext user_ui_context_{};
   bool debug_ui_enabled_ = false;
   std::unordered_map<uint64_t, scene::NodeId> entity_nodes_;
 

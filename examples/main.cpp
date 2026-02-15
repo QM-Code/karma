@@ -1,7 +1,3 @@
-#include <cmath>
-#include <algorithm>
-
-
 #include "karma/karma.h"
 #include "karma/components/environment.h"
 
@@ -155,12 +151,15 @@ class DemoGame : public app::GameInterface {
   explicit DemoGame(RadarOverlayState& radar_state) : radar_state_(&radar_state) {}
 
   void onStart() override {
-    input->bindKey("cam_forward", platform::Key::W);
-    input->bindKey("cam_backward", platform::Key::S);
-    input->bindKey("cam_left", platform::Key::A);
-    input->bindKey("cam_right", platform::Key::D);
-    input->bindMouse("cam_look", platform::MouseButton::Right);
-    input->bindKey("tank_reset", platform::Key::R, input::Trigger::Down);
+    input->bindKey("player_forward", platform::Key::W);
+    input->bindKey("player_forward", platform::Key::Up);
+    input->bindKey("player_backward", platform::Key::S);
+    input->bindKey("player_backward", platform::Key::Down);
+    input->bindKey("player_turn_left", platform::Key::A);
+    input->bindKey("player_turn_left", platform::Key::Left);
+    input->bindKey("player_turn_right", platform::Key::D);
+    input->bindKey("player_turn_right", platform::Key::Right);
+    input->bindKey("player_reset", platform::Key::R, input::Trigger::Down);
 
     auto world_entity = world->createEntity();
     world->setName(world_entity, "World");
@@ -168,31 +167,26 @@ class DemoGame : public app::GameInterface {
     world->add(world_entity, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/world.glb"});
     world->add(world_entity, components::MeshColliderComponent{});
     
-    auto tank = world->createEntity();
-    world->setName(tank, "Tank");
-    world->add(tank, components::TransformComponent{});
-    world->add(tank, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/tank_final.glb"});
-    world->add(tank, components::BoxColliderComponent{
-        .center = {0.0f, 1.0f, 0.0f},
+    auto player = world->createEntity();
+    world->setName(player, "Player");
+    world->add(player, components::TransformComponent{});
+    world->add(player, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/tank_final.glb"});
+    world->add(player, components::BoxColliderComponent{
+        .center = {0.0f, 0.0f, 0.0f},
         .half_extents = {1.0f, 1.0f, 1.0f}});
-    world->add(tank, components::RigidbodyComponent{});
-    components::AudioSourceComponent tank_audio{};
-    tank_audio.clip_key = "/home/quinn/Documents/bz3/data/client/audio/fire.wav";
-    tank_audio.gain = 1.0f;
-    tank_audio.spatialized = false;
-    world->add(tank, std::move(tank_audio));
-    tank_entity_ = tank;
+    world->add(player, components::PlayerControllerComponent{});
+    components::AudioSourceComponent player_audio{};
+    player_audio.clip_key = "/home/quinn/Documents/bz3/data/client/audio/fire.wav";
+    player_audio.gain = 1.0f;
+    player_audio.spatialized = false;
+    world->add(player, std::move(player_audio));
+    player_entity_ = player;
 
     auto camera = world->createEntity();
     world->setName(camera, "Camera");
     components::TransformComponent camera_xform{};
-    camera_xform.setPosition({0.0f, 12.0f, 12.0f});
-    const float pitch = -0.65f;
-    camera_pitch_ = pitch;
-    target_camera_pitch_ = pitch;
-    camera_yaw_ = 3.14159f;
-    target_camera_yaw_ = 3.14159f;
-    camera_xform.setRotation(math::fromYawPitch(camera_yaw_, camera_pitch_));
+    camera_xform.setPosition(camera_follow_offset_);
+    camera_xform.setRotation(math::fromYawPitch(0.0f, camera_pitch_));
     world->add(camera, camera_xform);
     world->add(camera, components::CameraComponent{.is_primary = true});
     world->add(camera, components::AudioListenerComponent{});
@@ -299,62 +293,76 @@ class DemoGame : public app::GameInterface {
 
   void onFixedUpdate(float dt) override {
     (void)dt;
-    const bool reset_down = input->actionDown("tank_reset");
-    if (reset_down && !reset_down_prev_ && world->isAlive(tank_entity_)) {
-      auto& tank_xform = world->get<components::TransformComponent>(tank_entity_);
-      math::Vec3 pos = tank_xform.getPosition();
-      pos.y = 10.0f;
-      tank_xform.setPosition(pos);
-      auto& tank_audio = world->get<components::AudioSourceComponent>(tank_entity_);
-      tank_audio.play();
+    if (!world->isAlive(player_entity_)) {
+      return;
+    }
+
+    auto& player_input = world->get<components::PlayerControllerComponent>(player_entity_);
+
+    float forward_input = 0.0f;
+    if (input->actionDown("player_forward")) forward_input += 1.0f;
+    if (input->actionDown("player_backward")) forward_input -= 1.0f;
+
+    float turn_input = 0.0f;
+    if (input->actionDown("player_turn_left")) turn_input += 1.0f;
+    if (input->actionDown("player_turn_right")) turn_input -= 1.0f;
+
+    math::Vec3 move_forward{0.0f, 0.0f, -1.0f};
+    float vertical_velocity = 0.0f;
+    if (physics) {
+      if (auto* controller = physics->playerController()) {
+        const glm::vec3 controller_forward = controller->getForwardVector();
+        move_forward = math::normalize({controller_forward.x, 0.0f, controller_forward.z});
+        const glm::vec3 controller_velocity = controller->getVelocity();
+        vertical_velocity = controller_velocity.y;
+        controller->setAngularVelocity(glm::vec3{0.0f, turn_input * turn_speed_rad_, 0.0f});
+      }
+    }
+
+    player_input.setDesiredVelocity({
+        move_forward.x * forward_input * move_speed_,
+        vertical_velocity,
+        move_forward.z * forward_input * move_speed_});
+
+    const bool reset_down = input->actionDown("player_reset");
+    if (reset_down && !reset_down_prev_) {
+      player_input.setDesiredVelocity({});
+      if (physics) {
+        if (auto* controller = physics->playerController()) {
+          controller->setPosition(glm::vec3{0.0f, 8.0f, 0.0f});
+          controller->setVelocity(glm::vec3{0.0f, 0.0f, 0.0f});
+          controller->setAngularVelocity(glm::vec3{0.0f, 0.0f, 0.0f});
+          controller->setRotation(glm::quat{1.0f, 0.0f, 0.0f, 0.0f});
+        }
+      }
+      auto& player_xform = world->get<components::TransformComponent>(player_entity_);
+      player_xform.setPosition({0.0f, 8.0f, 0.0f});
+      player_xform.setRotation({});
+      if (world->has<components::AudioSourceComponent>(player_entity_)) {
+        auto& player_audio = world->get<components::AudioSourceComponent>(player_entity_);
+        player_audio.play();
+      }
     }
     reset_down_prev_ = reset_down;
   }
 
   void onUpdate(float dt) override {
-    if (!world->isAlive(camera_entity_)) {
-      return;
+    (void)dt;
+    if (world->isAlive(camera_entity_) && world->isAlive(player_entity_)) {
+      auto& camera_xform = world->get<components::TransformComponent>(camera_entity_);
+      const auto& player_xform = world->get<components::TransformComponent>(player_entity_);
+      const math::Vec3 player_pos = player_xform.getPosition();
+      camera_xform.setPosition({player_pos.x + camera_follow_offset_.x,
+                                player_pos.y + camera_follow_offset_.y,
+                                player_pos.z + camera_follow_offset_.z});
+      camera_xform.setRotation(math::fromYawPitch(0.0f, camera_pitch_));
     }
-    const float look_sensitivity = 0.0008f;
-    const float move_speed = 8.0f;
-    const float smoothing = 20.0f;
-    if (input->actionDown("cam_look")) {
-      target_camera_yaw_ -= input->mouseDeltaX() * look_sensitivity;
-      target_camera_pitch_ -= input->mouseDeltaY() * look_sensitivity;
-    }
-    if (target_camera_pitch_ > 1.55f) target_camera_pitch_ = 1.55f;
-    if (target_camera_pitch_ < -1.55f) target_camera_pitch_ = -1.55f;
 
-    const float alpha = 1.0f - std::exp(-smoothing * dt);
-    camera_yaw_ += (target_camera_yaw_ - camera_yaw_) * alpha;
-    camera_pitch_ += (target_camera_pitch_ - camera_pitch_) * alpha;
-
-    auto& camera_xform = world->get<components::TransformComponent>(camera_entity_);
-    const math::Quat cam_rot = math::fromYawPitch(camera_yaw_, camera_pitch_);
-    math::Vec3 forward = math::normalize(math::rotateVec(cam_rot, {0.0f, 0.0f, -1.0f}));
-    const math::Vec3 up{0.0f, 1.0f, 0.0f};
-    math::Vec3 right = math::normalize(math::cross(forward, up));
-
-    float forward_input = 0.0f;
-    float right_input = 0.0f;
-    if (input->actionDown("cam_forward")) forward_input += 1.0f;
-    if (input->actionDown("cam_backward")) forward_input -= 1.0f;
-    if (input->actionDown("cam_right")) right_input += 1.0f;
-    if (input->actionDown("cam_left")) right_input -= 1.0f;
-
-    math::Vec3 cam_pos = camera_xform.getPosition();
-    cam_pos.x += (forward.x * forward_input + right.x * right_input) * move_speed * dt;
-    cam_pos.y += (forward.y * forward_input) * move_speed * dt;
-    cam_pos.z += (forward.z * forward_input + right.z * right_input) * move_speed * dt;
-    camera_xform.setPosition(cam_pos);
-
-    camera_xform.setRotation(cam_rot);
-
-    if (world->isAlive(radar_camera_entity_) && world->isAlive(tank_entity_)) {
+    if (world->isAlive(radar_camera_entity_) && world->isAlive(player_entity_)) {
       auto& radar_xform = world->get<components::TransformComponent>(radar_camera_entity_);
-      const auto& tank_xform = world->get<components::TransformComponent>(tank_entity_);
-      const math::Vec3 tank_pos = tank_xform.getPosition();
-      radar_xform.setPosition({tank_pos.x, 60.0f, tank_pos.z});
+      const auto& player_xform = world->get<components::TransformComponent>(player_entity_);
+      const math::Vec3 player_pos = player_xform.getPosition();
+      radar_xform.setPosition({player_pos.x, 60.0f, player_pos.z});
       radar_xform.setRotation(math::fromYawPitch(0.0f, -1.5702f));
     }
 
@@ -385,13 +393,13 @@ class DemoGame : public app::GameInterface {
   RadarOverlayState* radar_state_ = nullptr;
   ecs::Entity camera_entity_{};
   ecs::Entity radar_camera_entity_{};
-  ecs::Entity tank_entity_{};
+  ecs::Entity player_entity_{};
   renderer::RenderTargetId radar_target_ = renderer::kDefaultRenderTarget;
   int radar_target_size_ = 512;
-  float camera_yaw_ = 0.0f;
-  float camera_pitch_ = 0.0f;
-  float target_camera_yaw_ = 0.0f;
-  float target_camera_pitch_ = 0.0f;
+  math::Vec3 camera_follow_offset_{0.0f, 10.0f, 18.0f};
+  float camera_pitch_ = -0.5f;
+  float move_speed_ = 8.0f;
+  float turn_speed_rad_ = 2.4f;
   bool reset_down_prev_ = false;
 };
 

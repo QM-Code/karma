@@ -707,6 +707,17 @@ bool directionChangedBeyondThreshold(const glm::vec3& a, const glm::vec3& b, flo
   return dot_v < cos_threshold;
 }
 
+bool matrixChangedBeyondEpsilon(const glm::mat4& a, const glm::mat4& b, float eps = 1e-5f) {
+  for (int col = 0; col < 4; ++col) {
+    for (int row = 0; row < 4; ++row) {
+      if (std::abs(a[col][row] - b[col][row]) > eps) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
@@ -756,7 +767,13 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
     return;
   }
 
-  auto& record = instances_[item.instance];
+  auto it = instances_.find(item.instance);
+  if (it == instances_.end()) {
+    it = instances_.emplace(item.instance, InstanceRecord{}).first;
+  }
+  auto& record = it->second;
+  const bool mesh_changed = record.mesh != item.mesh;
+  record.transform_changed = mesh_changed || matrixChangedBeyondEpsilon(record.transform, item.transform);
   record.layer = item.layer;
   record.mesh = item.mesh;
   record.material = item.material;
@@ -2353,6 +2370,45 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     point_shadow_slot_position_[slot] = light.position;
     point_shadow_slot_range_[slot] = light.range;
   }
+
+  bool moving_shadow_caster_affects_point_shadow = false;
+  if (can_render_point_shadows) {
+    for (const auto& entry : instances_) {
+      const auto& instance = entry.second;
+      if (instance.layer != layer || !instance.shadow_visible || !instance.transform_changed) {
+        continue;
+      }
+      const auto mesh_it = meshes_.find(instance.mesh);
+      if (mesh_it == meshes_.end()) {
+        continue;
+      }
+      const auto& mesh = mesh_it->second;
+      if (mesh.bounds_radius <= 0.0f) {
+        continue;
+      }
+      const glm::vec4 bounds_sphere =
+          transformBoundingSphere(instance.transform, mesh.bounds_center, mesh.bounds_radius);
+      if (bounds_sphere.w <= 0.0f) {
+        continue;
+      }
+      const glm::vec3 caster_center{bounds_sphere.x, bounds_sphere.y, bounds_sphere.z};
+      for (Diligent::Uint32 slot = 0; slot < point_shadow_light_count; ++slot) {
+        const renderer::LightData& point_light = point_shadow_lights[slot];
+        const float influence_radius = std::max(point_light.range, 0.0f) + bounds_sphere.w;
+        if (influence_radius <= 0.0f) {
+          continue;
+        }
+        const glm::vec3 to_caster = caster_center - point_light.position;
+        if (glm::dot(to_caster, to_caster) <= influence_radius * influence_radius) {
+          mark_point_shadow_slot_dirty(slot, false);
+          moving_shadow_caster_affects_point_shadow = true;
+        }
+      }
+    }
+  }
+  point_shadow_force_full_refresh =
+      point_shadow_force_full_refresh || moving_shadow_caster_affects_point_shadow;
+
   for (Diligent::Uint32 slot = point_shadow_light_count;
        slot < static_cast<Diligent::Uint32>(kMaxPointShadowLights);
        ++slot) {

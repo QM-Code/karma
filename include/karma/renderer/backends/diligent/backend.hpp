@@ -161,6 +161,7 @@ class DiligentBackend final : public Backend {
     glm::mat4 transform{1.0f};
     bool visible = true;
     bool shadow_visible = true;
+    bool transform_changed = true;
   };
 
   struct LineVertex {

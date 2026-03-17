@@ -2185,7 +2185,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                                         cached_shadow_light_direction_,
                                         directional_shadow_angle_threshold_deg_);
   }
-
   if (!directional_shadow_needs_update && directional_shadow_cache_valid_) {
     cascade_splits = cached_cascade_splits_;
   } else {
@@ -2335,6 +2334,19 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   const bool can_render_point_shadows =
       shadow_pipeline_state_ && point_shadow_map_srv_ && has_point_shadow_dsv &&
       point_shadow_light_count > 0;
+  if (!directional_shadow_needs_update && can_render_directional_shadows) {
+    for (const auto& entry : instances_) {
+      const auto& instance = entry.second;
+      if (instance.layer != layer || !instance.shadow_visible || !instance.transform_changed) {
+        continue;
+      }
+      if (meshes_.find(instance.mesh) == meshes_.end()) {
+        continue;
+      }
+      directional_shadow_needs_update = true;
+      break;
+    }
+  }
 
   auto mark_point_shadow_slot_dirty = [&](Diligent::Uint32 slot, bool invalidate_slot) {
     if (slot >= static_cast<Diligent::Uint32>(kMaxPointShadowLights)) {

@@ -26,15 +26,21 @@ class SystemGraph {
     const SystemId id = next_id_++;
     nodes_[id] = Node{.id = id, .system = std::move(system), .depends_on = {}};
     insertion_order_.push_back(id);
+    order_dirty_ = true;
     return id;
   }
 
   void addDependency(SystemId system, SystemId depends_on) {
     nodes_[system].depends_on.push_back(depends_on);
+    order_dirty_ = true;
   }
 
   void update(ecs::World& world, float dt) {
-    const auto order = buildOrder();
+    if (order_dirty_) {
+      cached_order_ = buildOrder();
+      order_dirty_ = false;
+    }
+    const auto& order = cached_order_;
     for (SystemId id : order) {
       if (nodes_[id].system) {
         nodes_[id].system->update(world, dt);
@@ -118,6 +124,8 @@ class SystemGraph {
   SystemId next_id_ = 1;
   std::unordered_map<SystemId, Node> nodes_;
   std::vector<SystemId> insertion_order_;
+  mutable std::vector<SystemId> cached_order_;
+  mutable bool order_dirty_ = true;
 };
 
 }  // namespace karma::systems

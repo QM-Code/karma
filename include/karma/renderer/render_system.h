@@ -19,7 +19,7 @@ class RenderSystem {
  public:
   explicit RenderSystem(GraphicsDevice& device) : device_(device) {}
 
-  void update(ecs::World& world, scene::Scene& scene, float dt);
+  void update(ecs::World& world, scene::Scene& scene, float dt, float interpolation_alpha);
 
  private:
   struct RenderRecord {

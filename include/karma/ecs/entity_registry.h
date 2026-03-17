@@ -15,12 +15,14 @@ class EntityRegistry {
       free_list_.pop_back();
       Entity entity{index, generations_[index]};
       alive_.push_back(entity);
+      ++version_;
       return entity;
     }
     const uint32_t index = static_cast<uint32_t>(generations_.size());
     generations_.push_back(0);
     Entity entity{index, 0};
     alive_.push_back(entity);
+    ++version_;
     return entity;
   }
 
@@ -37,6 +39,7 @@ class EntityRegistry {
         break;
       }
     }
+    ++version_;
   }
 
   bool isAlive(Entity entity) const {
@@ -45,11 +48,13 @@ class EntityRegistry {
   }
 
   const std::vector<Entity>& entities() const { return alive_; }
+  uint64_t version() const { return version_; }
 
  private:
   std::vector<uint32_t> generations_;
   std::vector<uint32_t> free_list_;
   std::vector<Entity> alive_;
+  uint64_t version_ = 0;
 };
 
 }  // namespace karma::ecs

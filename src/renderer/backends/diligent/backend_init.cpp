@@ -1253,6 +1253,14 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         }
       }
       forward_plus_compute_pso_->CreateShaderResourceBinding(&forward_plus_compute_srb_, true);
+      if (forward_plus_compute_srb_) {
+        forward_plus_compute_lights_var_ = forward_plus_compute_srb_->GetVariableByName(
+            Diligent::SHADER_TYPE_COMPUTE, "g_ForwardPlusLights");
+        forward_plus_compute_tile_counts_var_ = forward_plus_compute_srb_->GetVariableByName(
+            Diligent::SHADER_TYPE_COMPUTE, "g_ForwardPlusTileLightCounts");
+        forward_plus_compute_tile_indices_var_ = forward_plus_compute_srb_->GetVariableByName(
+            Diligent::SHADER_TYPE_COMPUTE, "g_ForwardPlusTileLightIndices");
+      }
     }
   }
 

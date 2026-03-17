@@ -18,13 +18,14 @@ class GameInterface {
   virtual void onShutdown() = 0;
 
  protected:
+  float renderInterpolationAlpha() const { return render_interpolation_alpha_; }
   ecs::World* world = nullptr;
   scene::Scene* scene = nullptr;
   input::InputSystem* input = nullptr;
   physics::World* physics = nullptr;
   renderer::GraphicsDevice* graphics = nullptr;
 
- private:
+  private:
   friend class EngineApp;
   void bindContext(ecs::World& world, scene::Scene& scene, input::InputSystem& input,
                    physics::World& physics, renderer::GraphicsDevice* graphics) {
@@ -34,6 +35,8 @@ class GameInterface {
     this->physics = &physics;
     this->graphics = graphics;
   }
+
+  float render_interpolation_alpha_ = 1.0f;
 };
 
 }  // namespace karma::app

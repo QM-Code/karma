@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -21,11 +22,21 @@ class World {
  public:
   Entity createEntity() { return registry_.create(); }
 
-  void destroyEntity(Entity entity) { registry_.destroy(entity); }
+  void destroyEntity(Entity entity) {
+    if (!registry_.isAlive(entity)) {
+      return;
+    }
+    for (auto& [id, storage] : storages_) {
+      (void)id;
+      storage->remove(entity);
+    }
+    registry_.destroy(entity);
+  }
 
   bool isAlive(Entity entity) const { return registry_.isAlive(entity); }
 
   const std::vector<Entity>& entities() const { return registry_.entities(); }
+  uint64_t entityVersion() const { return registry_.version(); }
 
   void setName(Entity entity, std::string name) {
     if (has<components::TagComponent>(entity)) {
@@ -121,11 +132,14 @@ class World {
 
   struct IStorage {
     virtual ~IStorage() = default;
+    virtual void remove(Entity entity) = 0;
   };
 
   template <typename T>
   struct Storage : IStorage {
     ComponentStorage<T> data;
+
+    void remove(Entity entity) override { data.remove(entity); }
   };
 
   template <typename T>

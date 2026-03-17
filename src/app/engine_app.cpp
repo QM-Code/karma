@@ -1,5 +1,6 @@
 #include "karma/app/engine_app.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <string>
@@ -157,6 +158,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   game_ = &game;
   running_ = true;
   accumulator_ = 0.0f;
+  last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
   last_time_ = std::chrono::steady_clock::now();
   game_->bindContext(world_, scene_, input_, physics_, graphics_.get());
   game_->onStart();
@@ -167,6 +169,11 @@ void EngineApp::requestStop() {
 }
 
 void EngineApp::syncSceneEntities() {
+  const uint64_t entity_version = world_.entityVersion();
+  if (entity_version == last_synced_entity_version_) {
+    return;
+  }
+
   for (const ecs::Entity entity : world_.entities()) {
     const uint64_t key = entityKey(entity);
     if (entity_nodes_.find(key) == entity_nodes_.end()) {
@@ -183,6 +190,7 @@ void EngineApp::syncSceneEntities() {
       ++it;
     }
   }
+  last_synced_entity_version_ = entity_version;
 }
 
 void EngineApp::tick() {
@@ -233,6 +241,11 @@ void EngineApp::tick() {
     accumulator_ -= fixed_dt_;
   }
 
+  float render_alpha = 1.0f;
+  if (fixed_dt_ > 0.0f) {
+    render_alpha = std::clamp(accumulator_ / fixed_dt_, 0.0f, 1.0f);
+  }
+  game_->render_interpolation_alpha_ = render_alpha;
   game_->onUpdate(frame_dt);
   if (audio_system_) {
     audio_system_->update(world_, frame_dt);
@@ -268,7 +281,7 @@ void EngineApp::tick() {
     frame.height = fb_height;
     frame.delta_time = frame_dt;
     graphics_->beginFrame(frame);
-    render_system_->update(world_, scene_, frame_dt);
+    render_system_->update(world_, scene_, frame_dt, render_alpha);
     graphics_->renderLayer(0);
     if (user_ui_) {
       graphics_->renderUi(user_ui_context_.draw_data_);

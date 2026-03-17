@@ -29,6 +29,7 @@ class IShaderResourceBinding;
 class ITexture;
 class ITextureView;
 class ISampler;
+class IShaderResourceVariable;
 }  // namespace Diligent
 
 struct aiScene;
@@ -252,6 +253,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_scissor_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_scissor_;
+  Diligent::IShaderResourceVariable* ui_texture_var_ = nullptr;
+  Diligent::IShaderResourceVariable* ui_texture_scissor_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_ib_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_cb_;
@@ -266,6 +269,9 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_index_uav_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> forward_plus_compute_pso_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> forward_plus_compute_srb_;
+  Diligent::IShaderResourceVariable* forward_plus_compute_lights_var_ = nullptr;
+  Diligent::IShaderResourceVariable* forward_plus_compute_tile_counts_var_ = nullptr;
+  Diligent::IShaderResourceVariable* forward_plus_compute_tile_indices_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> forward_plus_compute_cb_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> ui_sampler_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_depth_;
@@ -306,6 +312,7 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> brdf_lut_pso_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> skybox_pso_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> skybox_srb_;
+  Diligent::IShaderResourceVariable* skybox_texture_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cube_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cube_ib_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cb_;

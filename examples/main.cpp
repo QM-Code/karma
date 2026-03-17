@@ -1,3 +1,4 @@
+#include "demo_asset_paths.h"
 #include "karma/karma.h"
 #include "karma/components/environment.h"
 
@@ -164,22 +165,19 @@ class DemoGame : public app::GameInterface {
     auto world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
-    world->add(world_entity, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/world.glb"});
+    world->add(world_entity, components::MeshComponent{
+        .mesh_key = resolveExampleAssetPath("world.glb").string()});
     world->add(world_entity, components::MeshColliderComponent{});
     
     auto player = world->createEntity();
     world->setName(player, "Player");
     world->add(player, components::TransformComponent{});
-    world->add(player, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/tank_final.glb"});
+    world->add(player, components::MeshComponent{
+        .mesh_key = resolveExampleAssetPath("tank_final.glb").string()});
     world->add(player, components::BoxColliderComponent{
         .center = {0.0f, 0.0f, 0.0f},
         .half_extents = {1.0f, 1.0f, 1.0f}});
     world->add(player, components::PlayerControllerComponent{});
-    components::AudioSourceComponent player_audio{};
-    player_audio.clip_key = "/home/quinn/Documents/bz3/data/client/audio/fire.wav";
-    player_audio.gain = 1.0f;
-    player_audio.spatialized = false;
-    world->add(player, std::move(player_audio));
     player_entity_ = player;
 
     auto camera = world->createEntity();
@@ -225,10 +223,9 @@ class DemoGame : public app::GameInterface {
         .render_to_texture = true,
         .render_target = radar_target_,
         .render_target_key = "radar",
-        .shader_override_vertex_path =
-            "/home/quinn/Documents/karma/examples/assets/shaders/radar_override_vs.hlsl",
+        .shader_override_vertex_path = resolveExampleShaderPath("radar_override_vs.hlsl").string(),
         .shader_override_fragment_path =
-            "/home/quinn/Documents/karma/examples/assets/shaders/radar_override_ps.hlsl",
+            resolveExampleShaderPath("radar_override_ps.hlsl").string(),
         .shader_user_params = {
             {"height_range", {-2.0f, 20.0f, 0.0f, 0.0f}},
             {"low_color", {0.07f, 0.30f, 0.95f, 1.0f}},
@@ -286,7 +283,7 @@ class DemoGame : public app::GameInterface {
     auto skybox = world->createEntity();
     world->setName(skybox, "Environment");
     world->add(skybox, components::EnvironmentComponent{
-        .environment_map = "/home/quinn/Documents/karma/examples/assets/golden_gate_hills_4k.hdr",
+        .environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
         .intensity = 0.4f,
         .draw_skybox = true});
   }
@@ -351,7 +348,8 @@ class DemoGame : public app::GameInterface {
     if (world->isAlive(camera_entity_) && world->isAlive(player_entity_)) {
       auto& camera_xform = world->get<components::TransformComponent>(camera_entity_);
       const auto& player_xform = world->get<components::TransformComponent>(player_entity_);
-      const math::Vec3 player_pos = player_xform.getPosition();
+      const math::Vec3 player_pos =
+          player_xform.getInterpolatedPosition(renderInterpolationAlpha());
       camera_xform.setPosition({player_pos.x + camera_follow_offset_.x,
                                 player_pos.y + camera_follow_offset_.y,
                                 player_pos.z + camera_follow_offset_.z});
@@ -361,7 +359,8 @@ class DemoGame : public app::GameInterface {
     if (world->isAlive(radar_camera_entity_) && world->isAlive(player_entity_)) {
       auto& radar_xform = world->get<components::TransformComponent>(radar_camera_entity_);
       const auto& player_xform = world->get<components::TransformComponent>(player_entity_);
-      const math::Vec3 player_pos = player_xform.getPosition();
+      const math::Vec3 player_pos =
+          player_xform.getInterpolatedPosition(renderInterpolationAlpha());
       radar_xform.setPosition({player_pos.x, 60.0f, player_pos.z});
       radar_xform.setRotation(math::fromYawPitch(0.0f, -1.5702f));
     }

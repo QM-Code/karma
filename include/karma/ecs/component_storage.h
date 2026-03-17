@@ -13,8 +13,13 @@ template <typename T>
 class ComponentStorage {
  public:
   bool has(Entity entity) const {
-    return entity.index < sparse_.size() &&
-           sparse_[entity.index] != kInvalidIndex;
+    if (entity.index >= sparse_.size()) {
+      return false;
+    }
+    const size_t dense_index = sparse_[entity.index];
+    return dense_index != kInvalidIndex &&
+           dense_index < dense_.size() &&
+           dense_[dense_index] == entity;
   }
 
   T& get(Entity entity) { return components_[sparse_[entity.index]]; }

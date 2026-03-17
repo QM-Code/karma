@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 
+#include "demo_asset_paths.h"
 #include "karma/karma.h"
 #include "karma/components/environment.h"
 
@@ -362,7 +363,8 @@ class DemoGame : public app::GameInterface {
 
     auto world_entity = world->createEntity();
     world->add(world_entity, components::TransformComponent{});
-    world->add(world_entity, components::MeshComponent{.mesh_key = "/home/quinn/Documents/bz3/data/common/models/world.glb"});
+    world->add(world_entity, components::MeshComponent{
+        .mesh_key = resolveExampleAssetPath("world.glb").string()});
     world->add(world_entity, components::MeshColliderComponent{});
 
     auto camera = world->createEntity();
@@ -392,7 +394,7 @@ class DemoGame : public app::GameInterface {
 
     auto environment = world->createEntity();
     world->add(environment, components::EnvironmentComponent{
-        .environment_map = "/home/quinn/Documents/karma/examples/assets/demo_env.png",
+        .environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
         .intensity = 0.6f,
         .draw_skybox = true});
   }

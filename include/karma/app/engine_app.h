@@ -1,8 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <memory>
 
 #include "karma/app/game_interface.h"
@@ -102,6 +104,7 @@ class EngineApp {
   UIContext user_ui_context_{};
   bool debug_ui_enabled_ = false;
   std::unordered_map<uint64_t, scene::NodeId> entity_nodes_;
+  uint64_t last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
 
   bool running_ = false;
   float fixed_dt_ = 1.0f / 60.0f;

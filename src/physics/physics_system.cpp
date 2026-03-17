@@ -70,7 +70,7 @@ void PhysicsSystem::update(ecs::World& world, float dt) {
 }
 
 void PhysicsSystem::syncRigidBodies(ecs::World& world) {
-  world.forEach<components::TransformComponent, components::BoxColliderComponent, components::RigidbodyComponent>(
+  world.forEach<components::RigidbodyComponent, components::TransformComponent, components::BoxColliderComponent>(
       [&](const ecs::Entity entity) {
     if (!collisionEnabled(world, entity)) {
       return;
@@ -150,7 +150,7 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
     }
   });
 
-  world.forEach<components::TransformComponent, components::MeshColliderComponent>(
+  world.forEach<components::MeshColliderComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
     if (world.has<components::RigidbodyComponent>(entity)) {
       return;
@@ -172,7 +172,7 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
 }
 
 void PhysicsSystem::syncDynamicBodies(ecs::World& world) {
-  world.forEach<components::TransformComponent, components::BoxColliderComponent, components::RigidbodyComponent>(
+  world.forEach<components::RigidbodyComponent, components::TransformComponent, components::BoxColliderComponent>(
       [&](const ecs::Entity entity) {
     if (!collisionEnabled(world, entity)) {
       return;

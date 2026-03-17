@@ -26,9 +26,10 @@ glm::quat toGlm(const math::Quat& q) {
 }
 
 glm::vec3 transformPoint(const components::TransformComponent& transform,
-                          const math::Vec3& local) {
-  const glm::vec3 pos = toGlm(transform.getPosition());
-  const glm::quat rot = toGlm(transform.getRotation());
+                         const math::Vec3& local,
+                         float interpolation_alpha) {
+  const glm::vec3 pos = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::vec3 scale = toGlm(transform.getScale());
   const glm::vec3 scaled{local.x * scale.x, local.y * scale.y, local.z * scale.z};
   return pos + glm::mat3_cast(rot) * scaled;
@@ -56,7 +57,8 @@ void drawBoxWire(GraphicsDevice& device,
                  const components::TransformComponent& transform,
                  const math::Vec3& center,
                  const math::Vec3& half_extents,
-                 const math::Color& color) {
+                 const math::Color& color,
+                 float interpolation_alpha) {
   const math::Vec3 c = center;
   const math::Vec3 h = half_extents;
   const math::Vec3 corners[8] = {
@@ -78,7 +80,7 @@ void drawBoxWire(GraphicsDevice& device,
 
   glm::vec3 world_corners[8];
   for (int i = 0; i < 8; ++i) {
-    world_corners[i] = transformPoint(transform, corners[i]);
+    world_corners[i] = transformPoint(transform, corners[i], interpolation_alpha);
   }
 
   for (const auto& edge : edges) {
@@ -92,8 +94,9 @@ void drawSphereWire(GraphicsDevice& device,
                     const components::TransformComponent& transform,
                     const math::Vec3& center,
                     float radius,
-                    const math::Color& color) {
-  const glm::vec3 world_center = transformPoint(transform, center);
+                    const math::Color& color,
+                    float interpolation_alpha) {
+  const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
   const glm::vec3 scale = toGlm(transform.getScale());
   const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
   const float r = radius * max_scale;
@@ -107,16 +110,17 @@ void drawCapsuleWire(GraphicsDevice& device,
                      const math::Vec3& center,
                      float radius,
                      float height,
-                     const math::Color& color) {
+                     const math::Color& color,
+                     float interpolation_alpha) {
   const glm::vec3 scale = toGlm(transform.getScale());
   const float r = radius * std::max(scale.x, scale.z);
   const float half_height = (height * 0.5f) * scale.y;
-  const glm::quat rot = toGlm(transform.getRotation());
+  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
   const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
   const glm::vec3 forward = basis * glm::vec3(0.0f, 0.0f, 1.0f);
-  const glm::vec3 world_center = transformPoint(transform, center);
+  const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
   const glm::vec3 top = world_center + up * half_height;
   const glm::vec3 bottom = world_center - up * half_height;
 
@@ -132,22 +136,24 @@ void drawCapsuleWire(GraphicsDevice& device,
 }
 
 renderer::DirectionalLightData toDirectionalLight(const components::LightComponent& light,
-                                                  const components::TransformComponent& transform) {
+                                                  const components::TransformComponent& transform,
+                                                  float interpolation_alpha) {
   renderer::DirectionalLightData out{};
   out.color = light.color;
   out.intensity = light.intensity;
-  const glm::quat rot = toGlm(transform.getRotation());
+  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   out.direction = basis * glm::vec3(0.0f, 0.0f, -1.0f);
-  out.position = toGlm(transform.getPosition());
+  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.shadow_extent = light.shadow_extent;
   return out;
 }
 
 renderer::LightData toLightData(const components::LightComponent& light,
-                                const components::TransformComponent& transform) {
+                                const components::TransformComponent& transform,
+                                float interpolation_alpha) {
   renderer::LightData out{};
-  const glm::quat rot = toGlm(transform.getRotation());
+  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   glm::vec3 dir = basis * glm::vec3(0.0f, 0.0f, -1.0f);
   if (glm::length(dir) < 1e-5f) {
@@ -155,7 +161,7 @@ renderer::LightData toLightData(const components::LightComponent& light,
   } else {
     dir = glm::normalize(dir);
   }
-  out.position = toGlm(transform.getPosition());
+  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.direction = dir;
   out.color = light.color;
   out.intensity = light.intensity;
@@ -187,9 +193,9 @@ renderer::LightData toLightData(const components::LightComponent& light,
   return out;
 }
 
-glm::mat4 toTransform(const components::TransformComponent& transform) {
-  const glm::vec3 pos = toGlm(transform.getPosition());
-  const glm::quat rot = toGlm(transform.getRotation());
+glm::mat4 toTransform(const components::TransformComponent& transform, float interpolation_alpha) {
+  const glm::vec3 pos = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::vec3 scale = toGlm(transform.getScale());
   glm::mat4 matrix(1.0f);
   matrix = glm::translate(matrix, pos);
@@ -198,48 +204,12 @@ glm::mat4 toTransform(const components::TransformComponent& transform) {
   return matrix;
 }
 
-struct FrustumPlanes {
-  glm::vec4 planes[6];
-};
-
-FrustumPlanes extractFrustumPlanes(const glm::mat4& m) {
-  const glm::vec4 row0{m[0][0], m[1][0], m[2][0], m[3][0]};
-  const glm::vec4 row1{m[0][1], m[1][1], m[2][1], m[3][1]};
-  const glm::vec4 row2{m[0][2], m[1][2], m[2][2], m[3][2]};
-  const glm::vec4 row3{m[0][3], m[1][3], m[2][3], m[3][3]};
-
-  FrustumPlanes frustum{};
-  frustum.planes[0] = row3 + row0;
-  frustum.planes[1] = row3 - row0;
-  frustum.planes[2] = row3 + row1;
-  frustum.planes[3] = row3 - row1;
-  frustum.planes[4] = row3 + row2;
-  frustum.planes[5] = row3 - row2;
-
-  for (auto& plane : frustum.planes) {
-    const float length = glm::length(glm::vec3(plane));
-    if (length > 0.0f) {
-      plane /= length;
-    }
-  }
-  return frustum;
-}
-
-bool sphereInFrustum(const FrustumPlanes& frustum, const glm::vec3& center, float radius) {
-  for (const auto& plane : frustum.planes) {
-    const float distance = glm::dot(glm::vec3(plane), center) + plane.w;
-    if (distance < -radius) {
-      return false;
-    }
-  }
-  return true;
-}
-
 renderer::CameraData toCameraData(const components::CameraComponent& camera,
-                                  const components::TransformComponent& transform) {
+                                  const components::TransformComponent& transform,
+                                  float interpolation_alpha) {
   renderer::CameraData out{};
-  out.position = toGlm(transform.getPosition());
-  out.rotation = toGlm(transform.getRotation());
+  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  out.rotation = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   out.perspective = camera.perspective;
   out.fov_y_degrees = camera.fov_y_degrees;
   out.aspect = 16.0f / 9.0f;
@@ -263,27 +233,6 @@ renderer::CameraData toCameraData(const components::CameraComponent& camera,
   return out;
 }
 
-glm::mat4 buildProjection(const renderer::CameraData& camera) {
-  if (camera.perspective) {
-    return glm::perspective(glm::radians(camera.fov_y_degrees),
-                            camera.aspect,
-                            camera.near_clip,
-                            camera.far_clip);
-  }
-  return glm::ortho(camera.ortho_left,
-                    camera.ortho_right,
-                    camera.ortho_bottom,
-                    camera.ortho_top,
-                    camera.near_clip,
-                    camera.far_clip);
-}
-
-glm::mat4 buildView(const renderer::CameraData& camera) {
-  const glm::mat3 cam_basis = glm::mat3_cast(camera.rotation);
-  const glm::vec3 forward = cam_basis * glm::vec3(0.0f, 0.0f, -1.0f);
-  const glm::vec3 up = cam_basis * glm::vec3(0.0f, 1.0f, 0.0f);
-  return glm::lookAt(camera.position, camera.position + forward, up);
-}
 }
 
 void RenderSystem::releaseRecord(uint64_t key, RenderRecord& record) {
@@ -359,15 +308,14 @@ void RenderSystem::releaseSharedMesh(const std::string& mesh_key) {
   }
 }
 
-void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/) {
+void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/,
+                          float interpolation_alpha) {
   static bool logged_start = false;
   if (!logged_start) {
     logged_start = true;
   }
   bool has_camera = false;
   renderer::CameraData primary_camera{};
-  glm::mat4 projection(1.0f);
-  glm::mat4 view(1.0f);
   struct OffscreenPass {
     renderer::CameraData camera;
     renderer::RenderTargetId target = renderer::kDefaultRenderTarget;
@@ -378,7 +326,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       [&](const ecs::Entity entity) {
     const auto& camera = world.get<components::CameraComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
-    const renderer::CameraData cam = toCameraData(camera, transform);
+    const renderer::CameraData cam = toCameraData(camera, transform, interpolation_alpha);
 
     if (camera.render_to_texture) {
       renderer::RenderTargetId target_id = camera.render_target;
@@ -406,8 +354,6 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
 
     if (!has_camera && camera.is_primary) {
       primary_camera = cam;
-      projection = buildProjection(primary_camera);
-      view = buildView(primary_camera);
       has_camera = true;
     }
     return true;
@@ -453,9 +399,9 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       [&](const ecs::Entity entity) {
     const auto& light_component = world.get<components::LightComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
-    lights.push_back(toLightData(light_component, transform));
+    lights.push_back(toLightData(light_component, transform, interpolation_alpha));
     if (!has_light && light_component.type == components::LightComponent::Type::Directional) {
-      light = toDirectionalLight(light_component, transform);
+      light = toDirectionalLight(light_component, transform, interpolation_alpha);
       has_light = true;
     }
     return true;
@@ -492,9 +438,6 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     last_env_intensity_ = -1.0f;
     last_env_draw_skybox_ = false;
   }
-
-  const FrustumPlanes frustum = extractFrustumPlanes(projection * view);
-  const bool apply_frustum_culling = offscreen_passes.empty();
 
   world.forEach<components::MeshComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
@@ -533,25 +476,14 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       it->second.material_key = mesh.material_key;
     }
 
-    const glm::mat4 world_matrix = toTransform(transform);
-    bool in_frustum = true;
-    if (apply_frustum_culling && it->second.bounds_valid) {
-      const glm::vec3 world_center = glm::vec3(world_matrix * glm::vec4(it->second.bounds_center, 1.0f));
-      const glm::vec3 scale = toGlm(transform.getScale());
-      const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
-      const float world_radius = it->second.bounds_radius * max_scale;
-      if (!sphereInFrustum(frustum, world_center, world_radius)) {
-        in_frustum = false;
-      }
-    }
-
+    const glm::mat4 world_matrix = toTransform(transform, interpolation_alpha);
     DrawItem item{};
     item.instance = static_cast<InstanceId>(key);
     item.mesh = it->second.mesh;
     item.material = it->second.material;
     item.transform = world_matrix;
     item.layer = 0;
-    item.visible = visible && in_frustum;
+    item.visible = visible;
     item.shadow_visible = visible;
     device_.submit(item);
   });
@@ -566,7 +498,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    drawBoxWire(device_, transform, collider.center, collider.half_extents, debug_color);
+    drawBoxWire(device_, transform, collider.center, collider.half_extents, debug_color,
+                interpolation_alpha);
   });
 
   world.forEach<components::TransformComponent, components::SphereColliderComponent>(
@@ -576,7 +509,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    drawSphereWire(device_, transform, collider.center, collider.radius, debug_color);
+    drawSphereWire(device_, transform, collider.center, collider.radius, debug_color,
+                   interpolation_alpha);
   });
 
   world.forEach<components::TransformComponent, components::CapsuleColliderComponent>(
@@ -586,7 +520,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    drawCapsuleWire(device_, transform, collider.center, collider.radius, collider.height, debug_color);
+    drawCapsuleWire(device_, transform, collider.center, collider.radius, collider.height,
+                    debug_color, interpolation_alpha);
   });
 
   world.forEach<components::TransformComponent, components::MeshColliderComponent, components::MeshComponent>(
@@ -608,7 +543,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     drawSphereWire(device_, transform,
                    {record_it->second.bounds_center.x, record_it->second.bounds_center.y,
                     record_it->second.bounds_center.z},
-                   record_it->second.bounds_radius, debug_color);
+                   record_it->second.bounds_radius, debug_color, interpolation_alpha);
   });
 
   for (const auto& pass : offscreen_passes) {

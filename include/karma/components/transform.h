@@ -23,6 +23,8 @@ class TransformComponent : public ecs::ComponentTag {
   const math::Vec3& getPosition() const { return position_; }
   const math::Quat& getRotation() const { return rotation_; }
   const math::Vec3& getScale() const { return scale_; }
+  math::Vec3 getInterpolatedPosition(float alpha) const;
+  math::Quat getInterpolatedRotation(float alpha) const;
 
   void setPosition(const math::Vec3& position);
   void setRotation(const math::Quat& rotation);
@@ -38,6 +40,8 @@ class TransformComponent : public ecs::ComponentTag {
   math::Vec3 position_{};
   math::Quat rotation_{};
   math::Vec3 scale_{1.0f, 1.0f, 1.0f};
+  math::Vec3 previous_position_{};
+  math::Quat previous_rotation_{};
   bool position_dirty_ = false;
   bool rotation_dirty_ = false;
 };

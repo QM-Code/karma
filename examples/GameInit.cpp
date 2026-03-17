@@ -1,3 +1,4 @@
+#include "demo_asset_paths.h"
 #include "karma/ecs/world.h"
 #include "karma/scene/scene.h"
 
@@ -29,7 +30,7 @@ GameInitResult BuildDemoScene() {
   result.world.add(result.player, components::TagComponent{"player"});
   result.world.add(result.player, components::TransformComponent{});
   result.world.add(result.player, components::MeshComponent{
-      .mesh_key = "player.glb",
+      .mesh_key = resolveExampleAssetPath("tank_final.glb").string(),
       .material_key = "player.mat",
       .texture_key = "player_albedo.png",
       .visible = true});
@@ -53,7 +54,7 @@ GameInitResult BuildDemoScene() {
   // Example environment entity (optional)
   auto sky = result.world.createEntity();
   result.world.add(sky, components::EnvironmentComponent{
-      .environment_map = "/home/quinn/Documents/karma/examples/assets/demo_env.png",
+      .environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
       .intensity = 0.6f,
       .draw_skybox = true});
 

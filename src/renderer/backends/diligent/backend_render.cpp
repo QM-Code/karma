@@ -656,6 +656,12 @@ static const std::array<glm::vec3, 6> kPointShadowFaceUps{
     glm::vec3(0.0f, -1.0f, 0.0f),
 };
 
+#if defined(NDEBUG)
+constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_NONE;
+#else
+constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
+#endif
+
 glm::mat4 buildLightView(const renderer::DirectionalLightData& light) {
   glm::vec3 dir = light.direction;
   if (glm::length(dir) < 1e-4f) {
@@ -1560,8 +1566,11 @@ void DiligentBackend::renderSkybox(const glm::mat4& projection, const glm::mat4&
   }
 
   context_->SetPipelineState(skybox_pso_);
-  if (auto* var = skybox_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Skybox")) {
-    var->Set(env_cubemap_srv_);
+  if (!skybox_texture_var_ && skybox_srb_) {
+    skybox_texture_var_ = skybox_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Skybox");
+  }
+  if (skybox_texture_var_) {
+    skybox_texture_var_->Set(env_cubemap_srv_);
   }
   context_->CommitShaderResources(skybox_srb_, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
@@ -1937,20 +1946,14 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
           *mapped = fp_constants;
         }
 
-        if (auto* var =
-                forward_plus_compute_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
-                                                             "g_ForwardPlusLights")) {
-          var->Set(forward_plus_light_srv_);
+        if (forward_plus_compute_lights_var_) {
+          forward_plus_compute_lights_var_->Set(forward_plus_light_srv_);
         }
-        if (auto* var =
-                forward_plus_compute_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
-                                                             "g_ForwardPlusTileLightCounts")) {
-          var->Set(forward_plus_tile_count_uav_);
+        if (forward_plus_compute_tile_counts_var_) {
+          forward_plus_compute_tile_counts_var_->Set(forward_plus_tile_count_uav_);
         }
-        if (auto* var =
-                forward_plus_compute_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
-                                                             "g_ForwardPlusTileLightIndices")) {
-          var->Set(forward_plus_tile_index_uav_);
+        if (forward_plus_compute_tile_indices_var_) {
+          forward_plus_compute_tile_indices_var_->Set(forward_plus_tile_index_uav_);
         }
 
         context_->SetPipelineState(forward_plus_compute_pso_);
@@ -2460,10 +2463,12 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   const bool render_point_shadows =
       can_render_point_shadows && point_shadow_face_update_count > 0;
 
-  std::vector<ShadowBatch> shadow_batches;
+  thread_local std::vector<ShadowBatch> shadow_batches;
+  thread_local std::unordered_map<ShadowBatchKey, size_t, ShadowBatchKeyHash> shadow_batch_lookup;
+  shadow_batches.clear();
+  shadow_batch_lookup.clear();
   if (render_directional_shadows || render_point_shadows) {
     shadow_batches.reserve(instances_.size());
-    std::unordered_map<ShadowBatchKey, size_t, ShadowBatchKeyHash> shadow_batch_lookup;
     shadow_batch_lookup.reserve(instances_.size());
     auto append_shadow_batch = [&](const ShadowBatchKey& key,
                                    const glm::mat4& transform,
@@ -2516,10 +2521,28 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         append_shadow_batch(key, instance.transform, world_bounds_sphere);
       }
     }
+    std::sort(shadow_batches.begin(),
+              shadow_batches.end(),
+              [](const ShadowBatch& a, const ShadowBatch& b) {
+                if (a.key.mesh != b.key.mesh) {
+                  return a.key.mesh < b.key.mesh;
+                }
+                if (a.key.index_offset != b.key.index_offset) {
+                  return a.key.index_offset < b.key.index_offset;
+                }
+                if (a.key.index_count != b.key.index_count) {
+                  return a.key.index_count < b.key.index_count;
+                }
+                return static_cast<uint32_t>(a.key.indexed) < static_cast<uint32_t>(b.key.indexed);
+              });
   }
 
-  std::vector<InstanceTransformData> filtered_shadow_transforms;
+  thread_local std::vector<InstanceTransformData> filtered_shadow_transforms;
+  filtered_shadow_transforms.clear();
   auto draw_shadow_batches = [&](const DrawConstants& pass_constants, auto&& sphere_visible) {
+    Diligent::IBuffer* bound_mesh_vb = nullptr;
+    Diligent::IBuffer* bound_instance_vb = nullptr;
+    Diligent::IBuffer* bound_index_buffer = nullptr;
     {
       Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                                 Diligent::MAP_FLAG_DISCARD);
@@ -2560,32 +2583,43 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                     filtered_shadow_transforms.size() * sizeof(InstanceTransformData));
       }
 
-      Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
-      Diligent::Uint64 offsets[] = {0, 0};
-      context_->SetVertexBuffers(0,
-                                 2,
-                                 vbs,
-                                 offsets,
-                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-                                 Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+      Diligent::IBuffer* mesh_vb = mesh.vertex_buffer.RawPtr();
+      Diligent::IBuffer* instance_vb = instance_vb_.RawPtr();
+      if (mesh_vb != bound_mesh_vb || instance_vb != bound_instance_vb) {
+        Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
+        Diligent::Uint64 offsets[] = {0, 0};
+        context_->SetVertexBuffers(0,
+                                   2,
+                                   vbs,
+                                   offsets,
+                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                   Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+        bound_mesh_vb = mesh_vb;
+        bound_instance_vb = instance_vb;
+      }
 
       if (batch.key.indexed) {
         if (!is_valid_indexed_draw(mesh, batch.key.index_offset, batch.key.index_count)) {
           continue;
         }
-        context_->SetIndexBuffer(mesh.index_buffer, 0, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        Diligent::IBuffer* index_buffer = mesh.index_buffer.RawPtr();
+        if (index_buffer != bound_index_buffer) {
+          context_->SetIndexBuffer(mesh.index_buffer, 0,
+                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+          bound_index_buffer = index_buffer;
+        }
         Diligent::DrawIndexedAttribs indexed{};
         indexed.IndexType = Diligent::VT_UINT32;
         indexed.NumIndices = batch.key.index_count;
         indexed.FirstIndexLocation = batch.key.index_offset;
         indexed.NumInstances = static_cast<Diligent::Uint32>(filtered_shadow_transforms.size());
-        indexed.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        indexed.Flags = kHotPathDrawFlags;
         context_->DrawIndexed(indexed);
       } else {
         Diligent::DrawAttribs draw_attrs{};
         draw_attrs.NumVertices = mesh.vertex_count;
         draw_attrs.NumInstances = static_cast<Diligent::Uint32>(filtered_shadow_transforms.size());
-        draw_attrs.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        draw_attrs.Flags = kHotPathDrawFlags;
         context_->Draw(draw_attrs);
       }
     }
@@ -3003,9 +3037,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   base_constants.env_params[2] = static_cast<float>(env_debug_mode_);
   base_constants.env_params[3] = lighting_exposure_;
 
-  std::vector<ForwardBatch> forward_batches;
+  thread_local std::vector<ForwardBatch> forward_batches;
+  thread_local std::unordered_map<ForwardBatchKey, size_t, ForwardBatchKeyHash> forward_batch_lookup;
+  forward_batches.clear();
+  forward_batch_lookup.clear();
   forward_batches.reserve(instances_.size());
-  std::unordered_map<ForwardBatchKey, size_t, ForwardBatchKeyHash> forward_batch_lookup;
   forward_batch_lookup.reserve(instances_.size());
 
   auto append_forward_batch = [&](const ForwardBatchKey& key, const glm::mat4& transform) {
@@ -3039,6 +3075,14 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       skipped_missing_vb += 1;
       continue;
     }
+    if (mesh.bounds_radius > 0.0f) {
+      const glm::vec4 world_bounds_sphere =
+          transformBoundingSphere(instance.transform, mesh.bounds_center, mesh.bounds_radius);
+      if (!sphereIntersectsClipVolume(view_proj, world_bounds_sphere, is_gl)) {
+        skipped_hidden += 1;
+        continue;
+      }
+    }
 
     const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
     if (!mesh.submeshes.empty()) {
@@ -3065,6 +3109,23 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       append_forward_batch(key, instance.transform);
     }
   }
+  std::sort(forward_batches.begin(),
+            forward_batches.end(),
+            [](const ForwardBatch& a, const ForwardBatch& b) {
+              if (a.key.material != b.key.material) {
+                return a.key.material < b.key.material;
+              }
+              if (a.key.mesh != b.key.mesh) {
+                return a.key.mesh < b.key.mesh;
+              }
+              if (a.key.index_offset != b.key.index_offset) {
+                return a.key.index_offset < b.key.index_offset;
+              }
+              if (a.key.index_count != b.key.index_count) {
+                return a.key.index_count < b.key.index_count;
+              }
+              return static_cast<uint32_t>(a.key.indexed) < static_cast<uint32_t>(b.key.indexed);
+            });
 
   const auto& adapter_info = device_->GetAdapterInfo();
   const bool disable_depth_prepass_for_driver =
@@ -3127,13 +3188,13 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         indexed.NumIndices = batch.key.index_count;
         indexed.FirstIndexLocation = batch.key.index_offset;
         indexed.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-        indexed.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        indexed.Flags = kHotPathDrawFlags;
         context_->DrawIndexed(indexed);
       } else {
         Diligent::DrawAttribs draw_attrs{};
         draw_attrs.NumVertices = mesh.vertex_count;
         draw_attrs.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-        draw_attrs.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+        draw_attrs.Flags = kHotPathDrawFlags;
         context_->Draw(draw_attrs);
       }
     }
@@ -3143,11 +3204,22 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                            static_cast<Diligent::Uint32>(render_height));
   }
   context_->SetPipelineState(active_forward_pipeline);
+  Diligent::IShaderResourceBinding* bound_forward_srb = nullptr;
+  Diligent::IBuffer* bound_mesh_vb = nullptr;
+  Diligent::IBuffer* bound_instance_vb = nullptr;
+  Diligent::IBuffer* bound_index_buffer = nullptr;
+  renderer::MaterialId last_constants_material = renderer::kInvalidMaterial;
+  renderer::MeshId last_constants_mesh = renderer::kInvalidMesh;
 
   {
     Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                               Diligent::MAP_FLAG_DISCARD);
     *mapped = base_constants;
+  }
+  if (use_custom_shader_override && camera_override_srb_) {
+    context_->CommitShaderResources(camera_override_srb_,
+                                    Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    bound_forward_srb = camera_override_srb_;
   }
 
   for (const auto& batch : forward_batches) {
@@ -3171,44 +3243,45 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       }
     }
 
-    DrawConstants constants = base_constants;
-    glm::vec4 base_color = mat ? mat->base_color_factor : mesh.base_color;
-    if (!mat && base_color == glm::vec4(1.0f)) {
-      base_color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
-    }
-    constants.base_color_factor[0] = base_color.r;
-    constants.base_color_factor[1] = base_color.g;
-    constants.base_color_factor[2] = base_color.b;
-    constants.base_color_factor[3] = base_color.a;
-    const glm::vec3 emissive = mat ? mat->emissive_factor : glm::vec3(0.0f);
-    constants.emissive_factor[0] = emissive.x;
-    constants.emissive_factor[1] = emissive.y;
-    constants.emissive_factor[2] = emissive.z;
-    constants.emissive_factor[3] = 1.0f;
-    constants.pbr_params[0] = mat ? mat->metallic_factor : 1.0f;
-    constants.pbr_params[1] = mat ? mat->roughness_factor : 1.0f;
-    constants.pbr_params[2] = mat ? mat->occlusion_strength : 1.0f;
-    constants.pbr_params[3] = mat ? mat->normal_scale : 1.0f;
-    {
-      Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
-                                                Diligent::MAP_FLAG_DISCARD);
-      *mapped = constants;
+    if (batch.key.material != last_constants_material ||
+        (batch.key.material == renderer::kInvalidMaterial && batch.key.mesh != last_constants_mesh)) {
+      DrawConstants constants = base_constants;
+      glm::vec4 base_color = mat ? mat->base_color_factor : mesh.base_color;
+      if (!mat && base_color == glm::vec4(1.0f)) {
+        base_color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+      }
+      constants.base_color_factor[0] = base_color.r;
+      constants.base_color_factor[1] = base_color.g;
+      constants.base_color_factor[2] = base_color.b;
+      constants.base_color_factor[3] = base_color.a;
+      const glm::vec3 emissive = mat ? mat->emissive_factor : glm::vec3(0.0f);
+      constants.emissive_factor[0] = emissive.x;
+      constants.emissive_factor[1] = emissive.y;
+      constants.emissive_factor[2] = emissive.z;
+      constants.emissive_factor[3] = 1.0f;
+      constants.pbr_params[0] = mat ? mat->metallic_factor : 1.0f;
+      constants.pbr_params[1] = mat ? mat->roughness_factor : 1.0f;
+      constants.pbr_params[2] = mat ? mat->occlusion_strength : 1.0f;
+      constants.pbr_params[3] = mat ? mat->normal_scale : 1.0f;
+      {
+        Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
+                                                  Diligent::MAP_FLAG_DISCARD);
+        *mapped = constants;
+      }
+      last_constants_material = batch.key.material;
+      last_constants_mesh = batch.key.mesh;
     }
 
-    if (use_custom_shader_override) {
-      if (camera_override_srb_) {
-        context_->CommitShaderResources(camera_override_srb_,
-                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-      }
-    } else {
+    if (!use_custom_shader_override) {
       Diligent::IShaderResourceBinding* srb = shader_resources_;
       if (mat && mat->srb) {
         srb = mat->srb;
       } else if (default_material_srb_) {
         srb = default_material_srb_;
       }
-      if (srb) {
+      if (srb && srb != bound_forward_srb) {
         context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        bound_forward_srb = srb;
       }
     }
 
@@ -3223,34 +3296,44 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                   batch.transforms.size() * sizeof(InstanceTransformData));
     }
 
-    Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
-    Diligent::Uint64 offsets[] = {0, 0};
-    context_->SetVertexBuffers(0,
-                               2,
-                               vbs,
-                               offsets,
-                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-                               Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+    Diligent::IBuffer* mesh_vb = mesh.vertex_buffer.RawPtr();
+    Diligent::IBuffer* instance_vb = instance_vb_.RawPtr();
+    if (mesh_vb != bound_mesh_vb || instance_vb != bound_instance_vb) {
+      Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
+      Diligent::Uint64 offsets[] = {0, 0};
+      context_->SetVertexBuffers(0,
+                                 2,
+                                 vbs,
+                                 offsets,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                 Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+      bound_mesh_vb = mesh_vb;
+      bound_instance_vb = instance_vb;
+    }
 
     if (batch.key.indexed) {
       if (!is_valid_indexed_draw(mesh, batch.key.index_offset, batch.key.index_count)) {
         continue;
       }
-      context_->SetIndexBuffer(mesh.index_buffer,
-                               0,
-                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      Diligent::IBuffer* index_buffer = mesh.index_buffer.RawPtr();
+      if (index_buffer != bound_index_buffer) {
+        context_->SetIndexBuffer(mesh.index_buffer,
+                                 0,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        bound_index_buffer = index_buffer;
+      }
       Diligent::DrawIndexedAttribs indexed{};
       indexed.IndexType = Diligent::VT_UINT32;
       indexed.NumIndices = batch.key.index_count;
       indexed.FirstIndexLocation = batch.key.index_offset;
       indexed.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-      indexed.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+      indexed.Flags = kHotPathDrawFlags;
       context_->DrawIndexed(indexed);
     } else {
       Diligent::DrawAttribs draw_attrs{};
       draw_attrs.NumVertices = mesh.vertex_count;
       draw_attrs.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-      draw_attrs.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+      draw_attrs.Flags = kHotPathDrawFlags;
       context_->Draw(draw_attrs);
     }
     draw_count += 1;
@@ -3264,51 +3347,64 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
     if (pso && line_cb_ && line_vb_) {
       if (lines.size() > line_vb_size_) {
-      } else {
-        auto* rtv = active_rtv;
-        auto* dsv = active_dsv;
-        context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-
-        Diligent::Viewport viewport{};
-        viewport.TopLeftX = 0.0f;
-        viewport.TopLeftY = 0.0f;
-        viewport.Width = static_cast<float>(render_width);
-        viewport.Height = static_cast<float>(render_height);
-        viewport.MinDepth = 0.0f;
-        viewport.MaxDepth = 1.0f;
-        context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(render_width),
-                               static_cast<Diligent::Uint32>(render_height));
-
-        {
-          Diligent::MapHelper<LineVertex> vb_map(context_, line_vb_, Diligent::MAP_WRITE,
-                                                 Diligent::MAP_FLAG_DISCARD);
-          std::memcpy(vb_map, lines.data(), lines.size() * sizeof(LineVertex));
+        const size_t new_capacity =
+            std::max(lines.size(), line_vb_size_ > 0 ? line_vb_size_ * 2 : static_cast<size_t>(1024));
+        Diligent::BufferDesc vb_desc{};
+        vb_desc.Name = "Karma Line VB";
+        vb_desc.Usage = Diligent::USAGE_DYNAMIC;
+        vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
+        vb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+        vb_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(LineVertex));
+        device_->CreateBuffer(vb_desc, nullptr, &line_vb_);
+        if (!line_vb_) {
+          line_vb_size_ = 0;
+          return;
         }
-
-        const glm::mat4 view_proj = depth_fix * projection * view;
-        LineConstants constants{};
-        copyMat4(constants.view_proj, view_proj);
-        {
-          Diligent::MapHelper<LineConstants> cb_map(context_, line_cb_, Diligent::MAP_WRITE,
-                                                    Diligent::MAP_FLAG_DISCARD);
-          *cb_map = constants;
-        }
-
-        context_->SetPipelineState(pso);
-        if (srb) {
-          context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-        }
-        Diligent::IBuffer* vbs[] = {line_vb_};
-        Diligent::Uint64 offsets[] = {0};
-        context_->SetVertexBuffers(0, 1, vbs, offsets,
-                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-                                   Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
-
-        Diligent::DrawAttribs draw{};
-        draw.NumVertices = static_cast<Diligent::Uint32>(lines.size());
-        draw.Flags = Diligent::DRAW_FLAG_NONE;
-        context_->Draw(draw);
+        line_vb_size_ = new_capacity;
       }
+      auto* rtv = active_rtv;
+      auto* dsv = active_dsv;
+      context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+      Diligent::Viewport viewport{};
+      viewport.TopLeftX = 0.0f;
+      viewport.TopLeftY = 0.0f;
+      viewport.Width = static_cast<float>(render_width);
+      viewport.Height = static_cast<float>(render_height);
+      viewport.MinDepth = 0.0f;
+      viewport.MaxDepth = 1.0f;
+      context_->SetViewports(1, &viewport, static_cast<Diligent::Uint32>(render_width),
+                             static_cast<Diligent::Uint32>(render_height));
+
+      {
+        Diligent::MapHelper<LineVertex> vb_map(context_, line_vb_, Diligent::MAP_WRITE,
+                                               Diligent::MAP_FLAG_DISCARD);
+        std::memcpy(vb_map, lines.data(), lines.size() * sizeof(LineVertex));
+      }
+
+      const glm::mat4 view_proj = depth_fix * projection * view;
+      LineConstants constants{};
+      copyMat4(constants.view_proj, view_proj);
+      {
+        Diligent::MapHelper<LineConstants> cb_map(context_, line_cb_, Diligent::MAP_WRITE,
+                                                  Diligent::MAP_FLAG_DISCARD);
+        *cb_map = constants;
+      }
+
+      context_->SetPipelineState(pso);
+      if (srb) {
+        context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      }
+      Diligent::IBuffer* vbs[] = {line_vb_};
+      Diligent::Uint64 offsets[] = {0};
+      context_->SetVertexBuffers(0, 1, vbs, offsets,
+                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                 Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+
+      Diligent::DrawAttribs draw{};
+      draw.NumVertices = static_cast<Diligent::Uint32>(lines.size());
+      draw.Flags = Diligent::DRAW_FLAG_NONE;
+      context_->Draw(draw);
     }
   };
 

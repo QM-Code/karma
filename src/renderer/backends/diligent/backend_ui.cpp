@@ -19,6 +19,12 @@
 namespace karma::renderer_backend {
 
 namespace {
+#if defined(NDEBUG)
+constexpr auto kUiDrawFlags = Diligent::DRAW_FLAG_NONE;
+#else
+constexpr auto kUiDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
+#endif
+
 struct alignas(16) UiConstants {
   Diligent::float4x4 transform;
   Diligent::float4 translate;
@@ -232,6 +238,13 @@ void DiligentBackend::ensureUiResources() {
                   ui_pso_texture_, ui_srb_texture_);
   create_pipeline(ps_texture, true, true, "Karma UI Texture PSO Scissor",
                   ui_pso_texture_scissor_, ui_srb_texture_scissor_);
+  if (ui_srb_texture_ && !ui_texture_var_) {
+    ui_texture_var_ = ui_srb_texture_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture");
+  }
+  if (ui_srb_texture_scissor_ && !ui_texture_scissor_var_) {
+    ui_texture_scissor_var_ =
+        ui_srb_texture_scissor_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture");
+  }
 
   if (!logged_once &&
       ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ && ui_pso_texture_scissor_) {
@@ -333,6 +346,10 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
   context_->SetIndexBuffer(ui_ib_, 0, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
   Diligent::ITextureView* current_texture = nullptr;
+  Diligent::IPipelineState* current_pipeline = nullptr;
+  Diligent::IShaderResourceBinding* current_srb = nullptr;
+  Diligent::Rect current_rect{};
+  bool has_current_rect = false;
   for (const auto& cmd : draw_data.commands) {
     const bool use_texture = cmd.texture != 0;
     auto* pipeline = use_texture
@@ -348,7 +365,12 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
     if (!pipeline || !srb) {
       continue;
     }
-    context_->SetPipelineState(pipeline);
+    if (pipeline != current_pipeline) {
+      context_->SetPipelineState(pipeline);
+      current_pipeline = pipeline;
+      current_srb = nullptr;
+      has_current_rect = false;
+    }
 
     const bool scissor = cmd.scissor_enabled;
     Diligent::Rect rect{};
@@ -365,8 +387,16 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
       rect.right = current_width_;
       rect.bottom = current_height_;
     }
-    context_->SetScissorRects(1, &rect, static_cast<Diligent::Uint32>(current_width_),
-                              static_cast<Diligent::Uint32>(current_height_));
+    if (!has_current_rect ||
+        rect.left != current_rect.left ||
+        rect.top != current_rect.top ||
+        rect.right != current_rect.right ||
+        rect.bottom != current_rect.bottom) {
+      context_->SetScissorRects(1, &rect, static_cast<Diligent::Uint32>(current_width_),
+                                static_cast<Diligent::Uint32>(current_height_));
+      current_rect = rect;
+      has_current_rect = true;
+    }
 
     if (use_texture) {
       Diligent::ITextureView* desired = default_base_color_;
@@ -384,21 +414,27 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
           desired = it->second.srv;
         }
       }
-      if (desired && desired != current_texture) {
+      if (desired && (desired != current_texture || srb != current_srb)) {
         current_texture = desired;
-        if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture")) {
-          var->Set(current_texture);
+        Diligent::IShaderResourceVariable* texture_var =
+            cmd.scissor_enabled ? ui_texture_scissor_var_ : ui_texture_var_;
+        if (texture_var) {
+          texture_var->Set(current_texture);
+          current_srb = nullptr;
         }
       }
     }
 
-    context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    if (srb != current_srb) {
+      context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      current_srb = srb;
+    }
 
     Diligent::DrawIndexedAttribs draw{};
     draw.IndexType = Diligent::VT_UINT32;
     draw.NumIndices = cmd.index_count;
     draw.FirstIndexLocation = cmd.index_offset;
-    draw.Flags = Diligent::DRAW_FLAG_VERIFY_ALL;
+    draw.Flags = kUiDrawFlags;
     context_->DrawIndexed(draw);
   }
 }

@@ -132,9 +132,42 @@ Current support:
 - `SphereColliderComponent`
 - `CapsuleColliderComponent`
 
+Overlap queries:
+
+```cpp
+auto hit = karma::ecs::queries::findOverlappingCollider(
+    *world,
+    sensor_entity,
+    karma::ecs::queries::OverlapFilter{
+        .only_triggers = false,
+        .collision_layer_mask = 0xFFFFFFFFu,
+        .skip_self = true});
+
+auto hits = karma::ecs::queries::findOverlappingColliders(
+    *world,
+    sensor_entity,
+    karma::ecs::queries::OverlapFilter{
+        .only_triggers = false,
+        .collision_layer_mask = 0xFFFFFFFFu,
+        .skip_self = true});
+```
+
+Overlap query support:
+
+- `Sphere` vs `Sphere`
+- `Sphere` vs `Box`
+- `Sphere` vs `Capsule`
+- `Box` vs `Box`
+- `Box` vs `Capsule`
+- `Capsule` vs `Capsule`
+
+Assumption:
+
+- Use one logical collider component per entity. Overlap queries are designed around that model.
+
 Current limitation:
 
-- `MeshColliderComponent` is not included in point containment queries yet. Point-inside-mesh semantics are only sensible for closed volume meshes, and the current ECS query path intentionally leaves that undefined.
+- `MeshColliderComponent` is not included in point containment or overlap queries yet. Point-inside-mesh semantics are only sensible for closed volume meshes, and the current ECS query path intentionally leaves that undefined.
 
 Trigger pattern:
 

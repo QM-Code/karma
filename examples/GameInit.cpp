@@ -31,7 +31,6 @@ GameInitResult BuildDemoScene() {
   result.world.add(result.player, components::TransformComponent{});
   result.world.add(result.player, components::MeshComponent{
       .mesh_key = resolveExampleAssetPath("tank_final.glb").string(),
-      .material_key = "player.mat",
       .texture_key = "player_albedo.png",
       .visible = true});
   result.world.add(result.player, components::RigidbodyComponent{});

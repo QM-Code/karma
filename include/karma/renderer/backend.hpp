@@ -2,6 +2,7 @@
 
 #include "karma/renderer/types.h"
 #include "karma/app/ui_draw_data.h"
+#include "karma/renderer/material.h"
 
 #include <filesystem>
 #include "karma/math/types.h"
@@ -32,6 +33,9 @@ class Backend {
   virtual renderer::MaterialId createMaterial(const renderer::MaterialDesc& material) = 0;
   virtual void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) = 0;
   virtual void destroyMaterial(renderer::MaterialId material) = 0;
+  virtual renderer::MaterialSetId createMaterialSetFromMesh(renderer::MeshId mesh,
+                                                            const renderer::MaterialResourceDesc& desc) = 0;
+  virtual void destroyMaterialSet(renderer::MaterialSetId set) = 0;
   virtual void setMaterialFloat(renderer::MaterialId material, std::string_view name, float value) = 0;
 
   virtual renderer::TextureId createTexture(const renderer::TextureDesc& desc) = 0;

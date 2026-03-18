@@ -4,6 +4,7 @@
 #include "karma/input/input_system.h"
 #include "karma/physics/physics_world.hpp"
 #include "karma/renderer/device.h"
+#include "karma/renderer/material_library.h"
 #include "karma/scene/scene.h"
 
 namespace karma::app {
@@ -24,16 +25,19 @@ class GameInterface {
   input::InputSystem* input = nullptr;
   physics::World* physics = nullptr;
   renderer::GraphicsDevice* graphics = nullptr;
+  renderer::MaterialLibrary* materials = nullptr;
 
   private:
   friend class EngineApp;
   void bindContext(ecs::World& world, scene::Scene& scene, input::InputSystem& input,
-                   physics::World& physics, renderer::GraphicsDevice* graphics) {
+                   physics::World& physics, renderer::GraphicsDevice* graphics,
+                   renderer::MaterialLibrary& materials) {
     this->world = &world;
     this->scene = &scene;
     this->input = &input;
     this->physics = &physics;
     this->graphics = graphics;
+    this->materials = &materials;
   }
 
   float render_interpolation_alpha_ = 1.0f;

@@ -77,7 +77,7 @@ void EngineApp::initSubsystems() {
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
     graphics_->setVsync(config_.vsync);
-    render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_);
+    render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_, materials_);
   }
 
   systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
@@ -182,7 +182,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   running_ = true;
   accumulator_ = 0.0f;
   last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
-  game_->bindContext(world_, scene_, input_, physics_, graphics_.get());
+  game_->bindContext(world_, scene_, input_, physics_, graphics_.get(), materials_);
   game_->onStart();
   if (graphics_) {
     graphics_->setEnvironmentMap(config_.environment_map,

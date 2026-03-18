@@ -7,6 +7,7 @@
 #include <cmath>
 #include <unordered_set>
 #include <vector>
+#include <spdlog/spdlog.h>
 
 #include "karma/components/camera.h"
 #include "karma/components/collider.h"
@@ -17,6 +18,16 @@
 namespace karma::renderer {
 
 namespace {
+std::string makeMaterialVariantCacheKey(const std::string& mesh_key,
+                                        const std::string& material_key) {
+  std::string key;
+  key.reserve(mesh_key.size() + material_key.size() + 1);
+  key.append(mesh_key);
+  key.push_back('\n');
+  key.append(material_key);
+  return key;
+}
+
 glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
 }
@@ -242,6 +253,8 @@ void RenderSystem::releaseRecord(uint64_t key, RenderRecord& record) {
     device_.destroyMaterial(record.material);
     record.material = renderer::kInvalidMaterial;
   }
+  releaseSharedMaterialVariant(record.mesh_key, record.material_key);
+  record.material_set = renderer::kInvalidMaterialSet;
   releaseSharedMesh(record.mesh_key);
   record.mesh = renderer::kInvalidMesh;
 }
@@ -309,8 +322,87 @@ void RenderSystem::releaseSharedMesh(const std::string& mesh_key) {
   }
 }
 
+void RenderSystem::acquireSharedMaterialVariant(const std::string& mesh_key,
+                                                const std::string& material_key,
+                                                RenderRecord& record) {
+  record.material_set = renderer::kInvalidMaterialSet;
+  if (mesh_key.empty() || material_key.empty() || record.mesh == renderer::kInvalidMesh ||
+      material_library_ == nullptr) {
+    return;
+  }
+
+  const auto* desc = material_library_->find(material_key);
+  if (desc == nullptr) {
+    if (!warned_missing_material_keys_.contains(material_key)) {
+      spdlog::warn("Karma: material key '{}' was not registered; using source mesh materials",
+                   material_key);
+      warned_missing_material_keys_.emplace(material_key, true);
+    }
+    return;
+  }
+
+  if (!desc->source_mesh_key.empty() && desc->source_mesh_key != mesh_key) {
+    const std::string warning_key = makeMaterialVariantCacheKey(mesh_key, material_key);
+    if (!warned_material_mesh_mismatch_keys_.contains(warning_key)) {
+      spdlog::warn(
+          "Karma: material key '{}' was registered for mesh '{}' but applied to '{}'; using source mesh materials",
+          material_key, desc->source_mesh_key, mesh_key);
+      warned_material_mesh_mismatch_keys_.emplace(warning_key, true);
+    }
+    return;
+  }
+
+  const std::string cache_key = makeMaterialVariantCacheKey(mesh_key, material_key);
+  auto shared_it = shared_material_variants_.find(cache_key);
+  if (shared_it == shared_material_variants_.end()) {
+    SharedMaterialVariant shared{};
+    shared.material_set = device_.createMaterialSetFromMesh(record.mesh, *desc);
+    if (shared.material_set == renderer::kInvalidMaterialSet) {
+      return;
+    }
+    shared.ref_count = 1;
+    shared_it = shared_material_variants_.emplace(cache_key, std::move(shared)).first;
+  } else {
+    shared_it->second.ref_count += 1;
+  }
+
+  record.material_set = shared_it->second.material_set;
+}
+
+void RenderSystem::releaseSharedMaterialVariant(const std::string& mesh_key,
+                                                const std::string& material_key) {
+  if (mesh_key.empty() || material_key.empty()) {
+    return;
+  }
+
+  const std::string cache_key = makeMaterialVariantCacheKey(mesh_key, material_key);
+  auto shared_it = shared_material_variants_.find(cache_key);
+  if (shared_it == shared_material_variants_.end()) {
+    return;
+  }
+  if (shared_it->second.ref_count > 0) {
+    shared_it->second.ref_count -= 1;
+  }
+  if (shared_it->second.ref_count == 0) {
+    if (shared_it->second.material_set != renderer::kInvalidMaterialSet) {
+      device_.destroyMaterialSet(shared_it->second.material_set);
+    }
+    shared_material_variants_.erase(shared_it);
+  }
+}
+
 void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/,
                           float interpolation_alpha) {
+  if (material_library_ != nullptr &&
+      material_library_->version() != last_material_library_version_) {
+    for (auto& [key, record] : records_) {
+      (void)key;
+      releaseSharedMaterialVariant(record.mesh_key, record.material_key);
+      record.material_set = renderer::kInvalidMaterialSet;
+    }
+    last_material_library_version_ = material_library_->version();
+  }
+
   static bool logged_start = false;
   if (!logged_start) {
     logged_start = true;
@@ -458,23 +550,30 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       record.material_key = mesh.material_key;
       record.material = kInvalidMaterial;
       acquireSharedMesh(mesh.mesh_key, record);
+      acquireSharedMaterialVariant(mesh.mesh_key, mesh.material_key, record);
       it = records_.emplace(key, std::move(record)).first;
     } else if (it->second.mesh_key != mesh.mesh_key) {
       if (it->second.material != kInvalidMaterial) {
         device_.destroyMaterial(it->second.material);
         it->second.material = kInvalidMaterial;
       }
+      releaseSharedMaterialVariant(it->second.mesh_key, it->second.material_key);
+      it->second.material_set = renderer::kInvalidMaterialSet;
       releaseSharedMesh(it->second.mesh_key);
       it->second.mesh_key = mesh.mesh_key;
       it->second.material_key = mesh.material_key;
       it->second.material = kInvalidMaterial;
       acquireSharedMesh(mesh.mesh_key, it->second);
+      acquireSharedMaterialVariant(mesh.mesh_key, mesh.material_key, it->second);
     } else if (it->second.material_key != mesh.material_key) {
       if (it->second.material != kInvalidMaterial) {
         device_.destroyMaterial(it->second.material);
         it->second.material = kInvalidMaterial;
       }
+      releaseSharedMaterialVariant(it->second.mesh_key, it->second.material_key);
       it->second.material_key = mesh.material_key;
+      it->second.material_set = renderer::kInvalidMaterialSet;
+      acquireSharedMaterialVariant(mesh.mesh_key, mesh.material_key, it->second);
     }
 
     const glm::mat4 world_matrix = toTransform(transform, interpolation_alpha);
@@ -482,6 +581,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     item.instance = static_cast<InstanceId>(key);
     item.mesh = it->second.mesh;
     item.material = it->second.material;
+    item.material_set = it->second.material_set;
     item.transform = world_matrix;
     item.layer = 0;
     item.visible = visible;

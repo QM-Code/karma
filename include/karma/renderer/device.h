@@ -1,6 +1,7 @@
 #pragma once
 
 #include "karma/renderer/backend.hpp"
+#include "karma/renderer/material.h"
 
 namespace karma::renderer {
 
@@ -21,6 +22,8 @@ class GraphicsDevice {
   MaterialId createMaterial(const MaterialDesc& material);
   void updateMaterial(MaterialId material, const MaterialDesc& desc);
   void destroyMaterial(MaterialId material);
+  MaterialSetId createMaterialSetFromMesh(MeshId mesh, const MaterialResourceDesc& desc);
+  void destroyMaterialSet(MaterialSetId set);
   void setMaterialFloat(MaterialId material, std::string_view name, float value);
 
   TextureId createTexture(const TextureDesc& desc);

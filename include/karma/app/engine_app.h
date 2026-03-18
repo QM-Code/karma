@@ -17,6 +17,7 @@
 #include "karma/physics/physics_world.hpp"
 #include "karma/physics/physics_system.h"
 #include "karma/renderer/device.h"
+#include "karma/renderer/material_library.h"
 #include "karma/renderer/render_system.h"
 #include "karma/scene/scene.h"
 #include "karma/systems/system_graph.h"
@@ -95,6 +96,7 @@ class EngineApp {
   physics::World physics_;
   ecs::World world_;
   scene::Scene scene_;
+  renderer::MaterialLibrary materials_;
   systems::SystemGraph systems_;
   EngineConfig config_{};
   std::unique_ptr<UiLayer> user_ui_;

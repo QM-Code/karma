@@ -337,6 +337,16 @@ void DiligentBackend::destroyMesh(renderer::MeshId mesh) {
   if (mesh_it == meshes_.end()) {
     return;
   }
+  std::vector<renderer::MaterialSetId> owned_sets;
+  owned_sets.reserve(material_sets_.size());
+  for (const auto& [set_id, set_record] : material_sets_) {
+    if (set_record.source_mesh == mesh) {
+      owned_sets.push_back(set_id);
+    }
+  }
+  for (renderer::MaterialSetId set_id : owned_sets) {
+    destroyMaterialSet(set_id);
+  }
   for (const renderer::MaterialId material : mesh_it->second.owned_materials) {
     materials_.erase(material);
   }
@@ -431,6 +441,77 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
   return id;
 }
 
+renderer::MaterialSetId DiligentBackend::createMaterialSetFromMesh(
+    renderer::MeshId mesh,
+    const renderer::MaterialResourceDesc& desc) {
+  auto mesh_it = meshes_.find(mesh);
+  if (mesh_it == meshes_.end()) {
+    return renderer::kInvalidMaterialSet;
+  }
+
+  const auto& mesh_record = mesh_it->second;
+  const glm::vec4 tint(desc.base_color_tint.r,
+                       desc.base_color_tint.g,
+                       desc.base_color_tint.b,
+                       desc.base_color_tint.a);
+
+  auto clone_material = [&](const MaterialRecord& source) -> renderer::MaterialId {
+    const renderer::MaterialId id = nextMaterialId_++;
+    MaterialRecord clone = source;
+    clone.base_color_factor *= tint;
+    clone.desc.base_color = math::Color{clone.base_color_factor.r,
+                                        clone.base_color_factor.g,
+                                        clone.base_color_factor.b,
+                                        clone.base_color_factor.a};
+    materials_[id] = std::move(clone);
+    return id;
+  };
+
+  auto create_default_tinted_material = [&]() -> renderer::MaterialId {
+    renderer::MaterialDesc material_desc{};
+    material_desc.base_color = math::Color{mesh_record.base_color.r * tint.r,
+                                           mesh_record.base_color.g * tint.g,
+                                           mesh_record.base_color.b * tint.b,
+                                           mesh_record.base_color.a * tint.a};
+    return createMaterial(material_desc);
+  };
+
+  MaterialSetRecord set_record{};
+  set_record.source_mesh = mesh;
+
+  switch (desc.kind) {
+    case renderer::MaterialResourceDesc::Kind::MeshTint:
+      break;
+  }
+
+  if (!mesh_record.submeshes.empty()) {
+    set_record.materials.reserve(mesh_record.submeshes.size());
+    for (const auto& submesh : mesh_record.submeshes) {
+      renderer::MaterialId material_id = renderer::kInvalidMaterial;
+      if (submesh.material != renderer::kInvalidMaterial) {
+        auto material_it = materials_.find(submesh.material);
+        if (material_it != materials_.end()) {
+          material_id = clone_material(material_it->second);
+        }
+      }
+      if (material_id == renderer::kInvalidMaterial) {
+        material_id = create_default_tinted_material();
+      }
+      set_record.materials.push_back(material_id);
+    }
+  } else {
+    set_record.materials.push_back(create_default_tinted_material());
+  }
+
+  if (set_record.materials.empty()) {
+    return renderer::kInvalidMaterialSet;
+  }
+
+  const renderer::MaterialSetId set_id = nextMaterialSetId_++;
+  material_sets_[set_id] = std::move(set_record);
+  return set_id;
+}
+
 void DiligentBackend::updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) {
   auto it = materials_.find(material);
   if (it == materials_.end()) {
@@ -445,6 +526,19 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material, const render
 
 void DiligentBackend::destroyMaterial(renderer::MaterialId material) {
   materials_.erase(material);
+}
+
+void DiligentBackend::destroyMaterialSet(renderer::MaterialSetId set) {
+  auto it = material_sets_.find(set);
+  if (it == material_sets_.end()) {
+    return;
+  }
+  for (renderer::MaterialId material : it->second.materials) {
+    if (material != renderer::kInvalidMaterial) {
+      materials_.erase(material);
+    }
+  }
+  material_sets_.erase(it);
 }
 
 void DiligentBackend::setMaterialFloat(renderer::MaterialId material,

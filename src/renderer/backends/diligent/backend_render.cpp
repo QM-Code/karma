@@ -783,6 +783,7 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   record.layer = item.layer;
   record.mesh = item.mesh;
   record.material = item.material;
+  record.material_set = item.material_set;
   record.transform = item.transform;
   record.visible = item.visible;
   record.shadow_visible = item.shadow_visible;
@@ -3076,6 +3077,27 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     forward_batches[it->second].transforms.push_back(packInstanceTransform(transform));
   };
 
+  auto resolve_instance_material =
+      [&](const InstanceRecord& instance,
+          size_t submesh_index,
+          renderer::MaterialId fallback_material) -> renderer::MaterialId {
+    if (instance.material_set != renderer::kInvalidMaterialSet) {
+      auto set_it = material_sets_.find(instance.material_set);
+      if (set_it != material_sets_.end() &&
+          set_it->second.source_mesh == instance.mesh &&
+          submesh_index < set_it->second.materials.size()) {
+        const renderer::MaterialId set_material = set_it->second.materials[submesh_index];
+        if (set_material != renderer::kInvalidMaterial) {
+          return set_material;
+        }
+      }
+    }
+    if (instance.material != renderer::kInvalidMaterial) {
+      return instance.material;
+    }
+    return fallback_material;
+  };
+
   for (const auto& entry : instances_) {
     const auto& instance = entry.second;
     if (instance.layer != layer) {
@@ -3107,9 +3129,10 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
 
     const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
     if (!mesh.submeshes.empty()) {
-      for (const auto& submesh : mesh.submeshes) {
+      for (size_t submesh_index = 0; submesh_index < mesh.submeshes.size(); ++submesh_index) {
+        const auto& submesh = mesh.submeshes[submesh_index];
         const renderer::MaterialId mat_id =
-            (instance.material != renderer::kInvalidMaterial) ? instance.material : submesh.material;
+            resolve_instance_material(instance, submesh_index, submesh.material);
         const ForwardBatchKey key{
             .mesh = instance.mesh,
             .material = mat_id,
@@ -3122,7 +3145,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     } else {
       const ForwardBatchKey key{
           .mesh = instance.mesh,
-          .material = instance.material,
+          .material = resolve_instance_material(instance, 0, renderer::kInvalidMaterial),
           .index_offset = 0,
           .index_count = mesh.index_count,
           .indexed = indexed_mesh,

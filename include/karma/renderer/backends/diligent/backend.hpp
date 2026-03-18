@@ -54,6 +54,10 @@ class DiligentBackend final : public Backend {
   renderer::MaterialId createMaterial(const renderer::MaterialDesc& material) override;
   void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) override;
   void destroyMaterial(renderer::MaterialId material) override;
+  renderer::MaterialSetId createMaterialSetFromMesh(
+      renderer::MeshId mesh,
+      const renderer::MaterialResourceDesc& desc) override;
+  void destroyMaterialSet(renderer::MaterialSetId set) override;
   void setMaterialFloat(renderer::MaterialId material, std::string_view name, float value) override;
 
   renderer::TextureId createTexture(const renderer::TextureDesc& desc) override;
@@ -139,6 +143,11 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
   };
 
+  struct MaterialSetRecord {
+    renderer::MeshId source_mesh = renderer::kInvalidMesh;
+    std::vector<renderer::MaterialId> materials;
+  };
+
   struct TextureRecord {
     renderer::TextureDesc desc;
     Diligent::RefCntAutoPtr<Diligent::ITexture> texture;
@@ -160,6 +169,7 @@ class DiligentBackend final : public Backend {
     renderer::LayerId layer = 0;
     renderer::MeshId mesh = renderer::kInvalidMesh;
     renderer::MaterialId material = renderer::kInvalidMaterial;
+    renderer::MaterialSetId material_set = renderer::kInvalidMaterialSet;
     glm::mat4 transform{1.0f};
     bool visible = true;
     bool shadow_visible = true;
@@ -321,11 +331,13 @@ class DiligentBackend final : public Backend {
 
   renderer::MeshId nextMeshId_ = 1;
   renderer::MaterialId nextMaterialId_ = 1;
+  renderer::MaterialSetId nextMaterialSetId_ = 1;
   renderer::TextureId nextTextureId_ = 1;
   renderer::RenderTargetId nextTargetId_ = 1;
 
   std::unordered_map<renderer::MeshId, MeshRecord> meshes_;
   std::unordered_map<renderer::MaterialId, MaterialRecord> materials_;
+  std::unordered_map<renderer::MaterialSetId, MaterialSetRecord> material_sets_;
   std::unordered_map<renderer::TextureId, TextureRecord> textures_;
   std::unordered_map<std::string, renderer::TextureId> texture_cache_;
   std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;

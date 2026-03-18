@@ -11,13 +11,15 @@
 #include "karma/components/visibility.h"
 #include "karma/ecs/world.h"
 #include "karma/renderer/device.h"
+#include "karma/renderer/material_library.h"
 #include "karma/scene/scene.h"
 
 namespace karma::renderer {
 
 class RenderSystem {
  public:
-  explicit RenderSystem(GraphicsDevice& device) : device_(device) {}
+  RenderSystem(GraphicsDevice& device, const MaterialLibrary& material_library)
+      : device_(device), material_library_(&material_library) {}
 
   void update(ecs::World& world, scene::Scene& scene, float dt, float interpolation_alpha);
 
@@ -27,6 +29,7 @@ class RenderSystem {
     std::string material_key;
     renderer::MeshId mesh = renderer::kInvalidMesh;
     renderer::MaterialId material = renderer::kInvalidMaterial;
+    renderer::MaterialSetId material_set = renderer::kInvalidMaterialSet;
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
@@ -38,6 +41,11 @@ class RenderSystem {
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
+  };
+
+  struct SharedMaterialVariant {
+    renderer::MaterialSetId material_set = renderer::kInvalidMaterialSet;
+    uint32_t ref_count = 0;
   };
 
   static uint64_t entityKey(ecs::Entity entity) {
@@ -55,11 +63,21 @@ class RenderSystem {
   void cleanupStaleRecords(ecs::World& world);
   void acquireSharedMesh(const std::string& mesh_key, RenderRecord& record);
   void releaseSharedMesh(const std::string& mesh_key);
+  void acquireSharedMaterialVariant(const std::string& mesh_key,
+                                    const std::string& material_key,
+                                    RenderRecord& record);
+  void releaseSharedMaterialVariant(const std::string& mesh_key,
+                                    const std::string& material_key);
 
   GraphicsDevice& device_;
+  const MaterialLibrary* material_library_ = nullptr;
   std::unordered_map<uint64_t, RenderRecord> records_;
   std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
+  std::unordered_map<std::string, SharedMaterialVariant> shared_material_variants_;
   std::unordered_map<std::string, renderer::RenderTargetId> render_targets_by_key_;
+  std::unordered_map<std::string, bool> warned_missing_material_keys_;
+  std::unordered_map<std::string, bool> warned_material_mesh_mismatch_keys_;
+  uint64_t last_material_library_version_ = 0;
   std::string last_env_path_;
   float last_env_intensity_ = -1.0f;
   bool last_env_draw_skybox_ = false;

@@ -24,5 +24,6 @@
 #include "karma/network/transport_factory.h"
 #include "karma/physics/physics_world.hpp"
 #include "karma/renderer/device.h"
+#include "karma/renderer/material_library.h"
 #include "karma/scene/scene.h"
 #include "karma/app/ui_context.h"

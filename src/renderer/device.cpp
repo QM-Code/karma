@@ -64,6 +64,17 @@ void GraphicsDevice::destroyMaterial(MaterialId material) {
   }
 }
 
+MaterialSetId GraphicsDevice::createMaterialSetFromMesh(MeshId mesh,
+                                                        const MaterialResourceDesc& desc) {
+  return backend_ ? backend_->createMaterialSetFromMesh(mesh, desc) : kInvalidMaterialSet;
+}
+
+void GraphicsDevice::destroyMaterialSet(MaterialSetId set) {
+  if (backend_) {
+    backend_->destroyMaterialSet(set);
+  }
+}
+
 void GraphicsDevice::setMaterialFloat(MaterialId material, std::string_view name, float value) {
   if (backend_) {
     backend_->setMaterialFloat(material, name, value);

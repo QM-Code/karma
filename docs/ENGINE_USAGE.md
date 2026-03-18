@@ -177,6 +177,67 @@ Trigger pattern:
 
 This keeps collider components as data and keeps trigger logic outside `ecs::World`.
 
+## Runtime Materials
+`GameInterface` now exposes a runtime material library through the `materials` pointer.
+The intended workflow is:
+
+- register a material variant from game code, usually in `onStart()`
+- assign its key to `MeshComponent.material_key`
+- let the renderer clone the mesh's imported material set and apply the override
+
+Tinting a GLB while preserving its existing textures and PBR data:
+
+```cpp
+#include "karma/karma.h"
+
+class MyGame : public karma::app::GameInterface {
+ public:
+  void onStart() override {
+    const std::string tank_mesh = "assets/tank_final.glb";
+
+    materials->registerFromMeshTint(
+        "tank_blue",
+        tank_mesh,
+        karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f});
+
+    auto tank = world->createEntity();
+    world->add(tank, karma::components::TransformComponent{});
+    world->add(tank, karma::components::MeshComponent{
+        .mesh_key = tank_mesh,
+        .material_key = "tank_blue",
+        .visible = true});
+  }
+};
+```
+
+The lower-level form uses `MaterialResourceDesc` directly:
+
+```cpp
+materials->registerMaterial(
+    "tank_blue",
+    karma::renderer::MaterialResourceDesc::fromMeshTint(
+        tank_mesh,
+        karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f}));
+```
+
+Current semantics:
+
+- empty `material_key`: use the mesh's original imported materials
+- registered tint material: clone the mesh's imported material set and multiply each base color by the tint
+- unknown key: log once and fall back to the mesh's original imported materials
+- mismatched mesh/material pairing: log once and fall back to the mesh's original imported materials
+
+Current scope:
+
+- runtime registration from game code is supported now
+- descriptors are shaped so `.mat` file loading can be added later without changing `MeshComponent.material_key`
+- overrides are whole-mesh material-set variants, not per-submesh authoring APIs
+
+Current limitation:
+
+- the tint workflow assumes one logical mesh asset per `MeshComponent`
+- it preserves imported submesh materials, but does not yet expose per-submesh override selection to gameplay code
+
 ## Rendering Features
 - Directional light with shadows (PCF supported)
 - Cascaded shadow maps (CSM)

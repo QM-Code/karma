@@ -80,6 +80,7 @@ class EngineApp {
   void initSubsystems();
   void shutdownSubsystems();
   void syncSceneEntities();
+  void warmUpRenderer();
 #if defined(KARMA_DEBUG_UI)
   std::unique_ptr<UiLayer> createDebugOverlayUi();
 #endif

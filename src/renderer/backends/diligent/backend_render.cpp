@@ -735,7 +735,7 @@ void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
 
 void DiligentBackend::endFrame() {
   if (swap_chain_) {
-    swap_chain_->Present();
+    swap_chain_->Present(vsync_enabled_ ? 1u : 0u);
   }
   if (!line_vertices_depth_.empty()) {
     line_vertices_depth_.clear();
@@ -2167,12 +2167,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   std::array<glm::mat4, kPointShadowMatrixCount> point_shadow_uv_proj = cached_point_shadow_uv_proj_;
   bool point_shadow_ready = point_shadow_cache_initialized_;
 
+  float directional_shadow_position_threshold = directional_shadow_position_threshold_;
+  if (directional_shadow_cache_valid_ && cached_cascade_world_texel_[0] > 0.0f) {
+    directional_shadow_position_threshold = std::max(
+        directional_shadow_position_threshold, cached_cascade_world_texel_[0] * 1.5f);
+  }
+
   bool directional_shadow_needs_update = !directional_shadow_cache_valid_;
   if (!directional_shadow_needs_update) {
     const float camera_delta =
         glm::length(camera_.position - cached_shadow_camera_position_);
     directional_shadow_needs_update =
-        camera_delta > directional_shadow_position_threshold_ ||
+        camera_delta > directional_shadow_position_threshold ||
         std::abs(aspect - cached_shadow_camera_aspect_) > 1e-4f ||
         std::abs(camera_.fov_y_degrees - cached_shadow_camera_fov_y_degrees_) > 1e-3f ||
         std::abs(camera_.near_clip - cached_shadow_camera_near_) > 1e-4f ||
@@ -2330,9 +2336,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       break;
     }
   }
-  const bool can_render_directional_shadows = shadow_pipeline_state_ && has_shadow_dsv;
+  const bool camera_renders_shadows = camera_.render_shadows;
+  const bool can_render_directional_shadows =
+      camera_renders_shadows && shadow_pipeline_state_ && has_shadow_dsv;
   const bool can_render_point_shadows =
-      shadow_pipeline_state_ && point_shadow_map_srv_ && has_point_shadow_dsv &&
+      camera_renders_shadows && shadow_pipeline_state_ && point_shadow_map_srv_ && has_point_shadow_dsv &&
       point_shadow_light_count > 0;
   if (!directional_shadow_needs_update && can_render_directional_shadows) {
     for (const auto& entry : instances_) {
@@ -2962,7 +2970,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       break;
     }
   }
-  const bool shadow_ready = directional_shadow_cache_valid_ &&
+  const bool shadow_ready = camera_renders_shadows && directional_shadow_cache_valid_ &&
                             shadow_pipeline_state_ && shadow_map_srv_ &&
                             has_shadow_cascade_dsv && shadow_sampler_;
   base_constants.shadow_params[0] = shadow_ready ? 1.0f : 0.0f;
@@ -2970,6 +2978,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   base_constants.shadow_params[2] = static_cast<float>(shadow_pcf_radius_);
   base_constants.shadow_params[3] = shadow_texel_param;
   const bool point_shadow_enabled =
+      camera_renders_shadows &&
       point_shadow_ready && point_shadow_map_srv_ && has_point_shadow_dsv &&
       point_shadow_light_count > 0;
   base_constants.point_shadow_params[0] = point_shadow_enabled ? 1.0f : 0.0f;
@@ -3701,6 +3710,10 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
   for (auto& entry : materials_) {
     bind_env_to_srb(entry.second.srb);
   }
+}
+
+void DiligentBackend::setVsync(bool enabled) {
+  vsync_enabled_ = enabled;
 }
 
 void DiligentBackend::setAnisotropy(bool enabled, int level) {

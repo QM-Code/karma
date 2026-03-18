@@ -375,6 +375,14 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
                           static_cast<float>(frame.viewport_h));
   io.DisplayFramebufferScale = ImVec2(frame.dpi_scale, frame.dpi_scale);
   io.DeltaTime = frame.dt > 0.0f ? frame.dt : (1.0f / 60.0f);
+  const float frame_ms = io.DeltaTime * 1000.0f;
+  frame_time_history_ms_[frame_time_history_cursor_] = frame_ms;
+  frame_time_history_cursor_ = (frame_time_history_cursor_ + 1) % kFrameHistorySize;
+  frame_time_history_count_ = std::min(frame_time_history_count_ + 1, kFrameHistorySize);
+  worst_frame_ms_ = std::max(worst_frame_ms_, frame_ms);
+  if (frame_ms >= hitch_threshold_ms_) {
+    hitch_count_ += 1;
+  }
 
   if (!font_texture_) {
     unsigned char* pixels = nullptr;
@@ -387,6 +395,40 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
 
   ImGui::NewFrame();
   ImGui::Begin("Karma Debug");
+
+  if (ImGui::CollapsingHeader("Frame Pacing", ImGuiTreeNodeFlags_DefaultOpen)) {
+    std::array<float, kFrameHistorySize> plot_values{};
+    float average_ms = 0.0f;
+    float max_recent_ms = 0.0f;
+    for (size_t i = 0; i < frame_time_history_count_; ++i) {
+      const size_t src_index =
+          (frame_time_history_cursor_ + kFrameHistorySize - frame_time_history_count_ + i) %
+          kFrameHistorySize;
+      const float sample_ms = frame_time_history_ms_[src_index];
+      plot_values[i] = sample_ms;
+      average_ms += sample_ms;
+      max_recent_ms = std::max(max_recent_ms, sample_ms);
+    }
+    if (frame_time_history_count_ > 0) {
+      average_ms /= static_cast<float>(frame_time_history_count_);
+    }
+    ImGui::Text("Current: %.2f ms (%.1f FPS)", frame_ms, io.Framerate);
+    ImGui::Text("Recent Avg: %.2f ms", average_ms);
+    ImGui::Text("Recent Max: %.2f ms", max_recent_ms);
+    ImGui::Text("Worst: %.2f ms", worst_frame_ms_);
+    ImGui::Text("Hitches >= %.1f ms: %llu", hitch_threshold_ms_,
+                static_cast<unsigned long long>(hitch_count_));
+    if (frame_time_history_count_ > 0) {
+      ImGui::PlotLines("Frametime (ms)",
+                       plot_values.data(),
+                       static_cast<int>(frame_time_history_count_),
+                       0,
+                       nullptr,
+                       0.0f,
+                       std::max(40.0f, max_recent_ms * 1.1f),
+                       ImVec2(0.0f, 80.0f));
+    }
+  }
 
   if (graphics_ && ImGui::CollapsingHeader("Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
     if (ImGui::CollapsingHeader("Shadows", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -586,6 +628,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
           editFloat("Near", c.near_clip);
           editFloat("Far", c.far_clip);
           editBool("Primary", c.is_primary);
+          editBool("Render Shadows", c.render_shadows);
           editBool("Render To Texture", c.render_to_texture);
           std::string target = c.render_target_key;
           if (inputTextString("Render Target", target)) {

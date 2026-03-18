@@ -211,6 +211,7 @@ renderer::CameraData toCameraData(const components::CameraComponent& camera,
   out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.rotation = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   out.perspective = camera.perspective;
+  out.render_shadows = camera.render_shadows;
   out.fov_y_degrees = camera.fov_y_degrees;
   out.aspect = 16.0f / 9.0f;
   out.near_clip = camera.near_clip;

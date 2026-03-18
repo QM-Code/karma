@@ -42,6 +42,7 @@ class GraphicsDevice {
   void setDirectionalLight(const DirectionalLightData& light);
   void setLights(const std::vector<LightData>& lights);
   void setEnvironmentMap(const std::filesystem::path& path, float intensity, bool draw_skybox);
+  void setVsync(bool enabled);
   void setAnisotropy(bool enabled, int level);
   void setGenerateMips(bool enabled);
   void setForwardPlusSettings(int tile_size, int max_lights_per_tile);

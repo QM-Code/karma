@@ -76,6 +76,7 @@ class DiligentBackend final : public Backend {
   void setLights(const std::vector<renderer::LightData>& lights) override;
   void setEnvironmentMap(const std::filesystem::path& path, float intensity,
                          bool draw_skybox) override;
+  void setVsync(bool enabled) override;
   void setAnisotropy(bool enabled, int level) override;
   void setGenerateMips(bool enabled) override;
   void setForwardPlusSettings(int tile_size, int max_lights_per_tile) override;
@@ -340,6 +341,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path environment_map_;
   float environment_intensity_ = 0.0f;
   bool draw_skybox_ = true;
+  bool vsync_enabled_ = true;
   int env_debug_mode_ = 0;
   bool warned_env_debug_ = false;
   bool warned_env_bind_missing_ = false;

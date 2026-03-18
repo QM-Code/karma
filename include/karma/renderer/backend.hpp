@@ -54,6 +54,7 @@ class Backend {
   virtual void setLights(const std::vector<renderer::LightData>& lights) = 0;
   virtual void setEnvironmentMap(const std::filesystem::path& path, float intensity,
                                  bool draw_skybox) = 0;
+  virtual void setVsync(bool enabled) = 0;
   virtual void setAnisotropy(bool enabled, int level) = 0;
   virtual void setGenerateMips(bool enabled) = 0;
   virtual void setForwardPlusSettings(int tile_size, int max_lights_per_tile) = 0;

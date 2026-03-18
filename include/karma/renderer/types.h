@@ -68,6 +68,7 @@ struct CameraData {
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
   bool perspective = true;
+  bool render_shadows = true;
   float fov_y_degrees = 60.0f;
   float aspect = 1.0f;
   float near_clip = 0.1f;

@@ -150,6 +150,12 @@ void GraphicsDevice::setEnvironmentMap(const std::filesystem::path& path, float 
   }
 }
 
+void GraphicsDevice::setVsync(bool enabled) {
+  if (backend_) {
+    backend_->setVsync(enabled);
+  }
+}
+
 void GraphicsDevice::setAnisotropy(bool enabled, int level) {
   if (backend_) {
     backend_->setAnisotropy(enabled, level);

@@ -76,12 +76,38 @@ void EngineApp::initSubsystems() {
 
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
+    graphics_->setVsync(config_.vsync);
     render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_);
   }
 
   systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
   audio_system_ = std::make_unique<audio::AudioSystem>(audio_);
   // Register other systems here (PhysicsSystem, AudioSystem, etc.).
+}
+
+void EngineApp::warmUpRenderer() {
+  if (!graphics_ || !render_system_) {
+    return;
+  }
+
+  syncSceneEntities();
+  int fb_width = 0;
+  int fb_height = 0;
+  if (window_) {
+    window_->getFramebufferSize(fb_width, fb_height);
+  }
+  if (fb_width <= 0 || fb_height <= 0) {
+    return;
+  }
+
+  renderer::FrameInfo frame{};
+  frame.width = fb_width;
+  frame.height = fb_height;
+  frame.delta_time = 0.0f;
+  graphics_->beginFrame(frame);
+  render_system_->update(world_, scene_, 0.0f, 1.0f);
+  graphics_->renderLayer(0);
+  graphics_->endFrame();
 }
 
 void EngineApp::shutdownSubsystems() {
@@ -132,9 +158,6 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
 #endif
   if (graphics_) {
     graphics_->setGenerateMips(config_.generate_mipmaps);
-    graphics_->setEnvironmentMap(config_.environment_map,
-                                 config_.environment_intensity,
-                                 config_.environment_draw_skybox);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
     graphics_->setForwardPlusSettings(config_.forward_plus_tile_size,
                                       config_.forward_plus_max_lights_per_tile);
@@ -159,9 +182,16 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   running_ = true;
   accumulator_ = 0.0f;
   last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
-  last_time_ = std::chrono::steady_clock::now();
   game_->bindContext(world_, scene_, input_, physics_, graphics_.get());
   game_->onStart();
+  if (graphics_) {
+    graphics_->setEnvironmentMap(config_.environment_map,
+                                 config_.environment_intensity,
+                                 config_.environment_draw_skybox);
+  }
+  warmUpRenderer();
+  accumulator_ = 0.0f;
+  last_time_ = std::chrono::steady_clock::now();
 }
 
 void EngineApp::requestStop() {

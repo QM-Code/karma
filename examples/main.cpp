@@ -213,6 +213,7 @@ class DemoGame : public app::GameInterface {
     world->add(radar_camera, radar_camera_xform);
     world->add(radar_camera, components::CameraComponent{
         .perspective = false,
+        .render_shadows = false,
         .near_clip = 1.0f,
         .far_clip = 200.0f,
         .ortho_left = -35.0f,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <memory>
 
 #include "karma/app/ui_context.h"
@@ -79,6 +81,13 @@ class DebugOverlayLayer final : public app::UiLayer {
   float lighting_exposure_ = 1.0f;
   int forward_plus_tile_size_ = 16;
   int forward_plus_max_lights_per_tile_ = 128;
+  static constexpr size_t kFrameHistorySize = 180;
+  std::array<float, kFrameHistorySize> frame_time_history_ms_{};
+  size_t frame_time_history_cursor_ = 0;
+  size_t frame_time_history_count_ = 0;
+  uint64_t hitch_count_ = 0;
+  float worst_frame_ms_ = 0.0f;
+  float hitch_threshold_ms_ = 25.0f;
 };
 
 }  // namespace karma::debug

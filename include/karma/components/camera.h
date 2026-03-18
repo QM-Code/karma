@@ -11,6 +11,7 @@ namespace karma::components {
 
 struct CameraComponent : ecs::ComponentTag {
   bool perspective = true;
+  bool render_shadows = true;
   float fov_y_degrees = 60.0f;
   float near_clip = 0.1f;
   float far_clip = 1000.0f;

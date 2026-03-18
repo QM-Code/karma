@@ -99,6 +99,51 @@ that owns its UI system and submits draw data into `UIContext` each frame:
 
 The engine renders your UI draw lists on top of the 3D frame.
 
+## ECS Point Containment Queries
+Karma exposes ECS-facing point containment helpers in `karma/ecs/collider_queries.h`:
+
+```cpp
+#include "karma/ecs/collider_queries.h"
+
+using karma::ecs::queries::PointContainmentFilter;
+
+const karma::math::Vec3 point{0.0f, 1.0f, 0.0f};
+
+if (karma::ecs::queries::containsPoint(*world, trigger_entity, point)) {
+  // This point is inside at least one supported collider on trigger_entity.
+}
+
+auto hit = karma::ecs::queries::findContainingCollider(
+    *world,
+    point,
+    PointContainmentFilter{
+        .only_triggers = true,
+        .collision_layer_mask = 0xFFFFFFFFu});
+
+auto hits = karma::ecs::queries::findContainingColliders(
+    *world,
+    point,
+    PointContainmentFilter{.only_triggers = true});
+```
+
+Current support:
+
+- `BoxColliderComponent`
+- `SphereColliderComponent`
+- `CapsuleColliderComponent`
+
+Current limitation:
+
+- `MeshColliderComponent` is not included in point containment queries yet. Point-inside-mesh semantics are only sensible for closed volume meshes, and the current ECS query path intentionally leaves that undefined.
+
+Trigger pattern:
+
+- Query in fixed update using gameplay transforms, not render-interpolated transforms.
+- Store the previous frame's overlapping entity set.
+- Compare previous vs current to derive `Enter`, `Stay`, and `Exit` events in your system or gameplay code.
+
+This keeps collider components as data and keeps trigger logic outside `ecs::World`.
+
 ## Rendering Features
 - Directional light with shadows (PCF supported)
 - Cascaded shadow maps (CSM)

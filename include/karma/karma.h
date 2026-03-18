@@ -15,6 +15,7 @@
 #include "karma/components/tag.h"
 #include "karma/components/transform.h"
 #include "karma/components/visibility.h"
+#include "karma/ecs/collider_queries.h"
 #include "karma/ecs/world.h"
 #include "karma/input/input_system.h"
 #include "karma/math/quat.h"

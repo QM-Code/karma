@@ -280,15 +280,26 @@ Current behavior:
 
 - one structural ECS entity is created for each imported GLB node
 - imported lights become `LightComponent`s on those node entities
+- imported point and spot lights are created with `casts_shadows = true`
 - mesh primitives become child render entities with `MeshComponent`s already attached
 - imported primitive materials preserve the source asset's PBR textures and scalar factors
 - the full node tree is recreated in `scene::Scene`
+
+Imported light assumptions:
+
+- `KHR_lights_punctual` light intensities from GLB files are normalized during import because authored glTF values are typically much larger than Karma's runtime light scale
+- directional lights are currently scaled by `1/700`
+- point and spot lights are currently scaled by `1/50`
+- when Assimp reports the glTF default quadratic attenuation (`constant = 0`, `linear = 0`, `quadratic = 1`), Karma derives a usable local-light range from the scaled intensity instead of using a radius of `1.0`
+- that derived point/spot range is currently clamped to `[4.0, 40.0]`
+- imported light color is normalized and the scaled magnitude becomes `LightComponent::intensity`
 
 Current v1 limitations:
 
 - imported node transforms are instantiated as baked world transforms
 - scene hierarchy is preserved, but parent-driven transform propagation is not implemented yet
 - imported material alpha/double-sided metadata is preserved, but the runtime still does not specialize draw state per material
+- GLB light scaling is currently importer-defined, not configurable per asset
 - cameras, animation, and skinning are not imported yet
 
 ## Rendering Features

@@ -506,6 +506,14 @@ if (NOT KARMA_HEADLESS)
     add_dependencies(karma_example karma_fix_xxhash)
   endif()
 
+  add_executable(karma_material_override_example
+    examples/material_override_example.cpp
+  )
+  target_link_libraries(karma_material_override_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_material_override_example karma_fix_xxhash)
+  endif()
+
   if (KARMA_BUILD_IMGUI_DEMO)
     add_executable(karma_imgui_ui_demo
       examples/imgui_ui_demo.cpp

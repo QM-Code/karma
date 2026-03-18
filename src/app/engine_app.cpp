@@ -10,19 +10,6 @@
 #include "karma/debug/debug_overlay.h"
 
 namespace karma::app {
-namespace {
-uint64_t entityKey(ecs::Entity entity) {
-  return (static_cast<uint64_t>(entity.index) << 32) |
-         static_cast<uint64_t>(entity.generation);
-}
-
-ecs::Entity entityFromKey(uint64_t key) {
-  ecs::Entity entity{};
-  entity.index = static_cast<uint32_t>(key >> 32);
-  entity.generation = static_cast<uint32_t>(key & 0xFFFFFFFFu);
-  return entity;
-}
-}  // namespace
 
 EngineApp::EngineApp() = default;
 
@@ -205,20 +192,22 @@ void EngineApp::syncSceneEntities() {
   }
 
   for (const ecs::Entity entity : world_.entities()) {
-    const uint64_t key = entityKey(entity);
-    if (entity_nodes_.find(key) == entity_nodes_.end()) {
-      const scene::NodeId node = scene_.createNode(entity);
-      entity_nodes_[key] = node;
+    if (scene_.findNode(entity) == scene::Node::kInvalidId) {
+      scene_.createNode(entity);
     }
   }
-  for (auto it = entity_nodes_.begin(); it != entity_nodes_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
-    if (!world_.isAlive(entity)) {
-      scene_.destroyNode(it->second);
-      it = entity_nodes_.erase(it);
-    } else {
-      ++it;
+
+  std::vector<scene::NodeId> stale_nodes;
+  for (const auto& node : scene_.nodes()) {
+    if (!scene_.isAlive(node.id) || !node.entity.isValid()) {
+      continue;
     }
+    if (!world_.isAlive(node.entity)) {
+      stale_nodes.push_back(node.id);
+    }
+  }
+  for (const scene::NodeId id : stale_nodes) {
+    scene_.destroyNode(id);
   }
   last_synced_entity_version_ = entity_version;
 }

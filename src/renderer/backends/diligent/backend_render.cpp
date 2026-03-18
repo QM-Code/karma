@@ -2242,8 +2242,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       }
       const float depth_span = std::max(light_max.z - light_min.z, 1.0f);
       const float depth_padding = std::max(5.0f, depth_span * 0.2f);
+      // Keep additional headroom toward the light so off-screen casters can still
+      // project onto visible receivers inside the camera slice.
+      const float caster_padding_toward_light = std::max(depth_padding, radius_ws * 2.0f);
       light_min.z -= depth_padding;
-      light_max.z += depth_padding;
+      light_max.z += caster_padding_toward_light;
       const glm::vec3 extent = light_max - light_min;
 
       const float scale_x = (extent.x > 0.0f) ? (2.0f / extent.x) : 1.0f;

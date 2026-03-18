@@ -36,7 +36,223 @@ void computeBounds(const renderer::MeshData& mesh, glm::vec3& out_center, float&
   const glm::vec3 extents = max_v - min_v;
   out_radius = 0.5f * glm::length(extents);
 }
+
+renderer::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
+  renderer::MaterialDesc desc{};
+  desc.base_color = {1.0f, 1.0f, 1.0f, 1.0f};
+
+  aiColor4D base_factor(1.0f, 1.0f, 1.0f, 1.0f);
+  if (material.Get(AI_MATKEY_BASE_COLOR, base_factor) == AI_SUCCESS) {
+    desc.base_color = {base_factor.r, base_factor.g, base_factor.b, base_factor.a};
+  } else {
+    aiColor3D diffuse(1.0f, 1.0f, 1.0f);
+    if (material.Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS) {
+      desc.base_color = {diffuse.r, diffuse.g, diffuse.b, 1.0f};
+    }
+  }
+
+  float opacity = desc.base_color.a;
+  if (material.Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) {
+    desc.base_color.a = opacity;
+  }
+
+  int two_sided = 0;
+  if (material.Get(AI_MATKEY_TWOSIDED, two_sided) == AI_SUCCESS) {
+    desc.double_sided = two_sided != 0;
+  }
+
+  desc.transparent = desc.base_color.a < 0.999f;
+  return desc;
+}
 }  // namespace
+
+void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
+  if (!record.base_color_srv) {
+    record.base_color_srv = default_base_color_;
+  }
+  if (!record.normal_srv) {
+    record.normal_srv = default_normal_;
+  }
+  if (!record.metallic_roughness_srv) {
+    record.metallic_roughness_srv = default_metallic_roughness_;
+  }
+  if (!record.occlusion_srv) {
+    record.occlusion_srv = default_occlusion_;
+  }
+  if (!record.emissive_srv) {
+    record.emissive_srv = default_emissive_;
+  }
+
+  record.srb.Release();
+  if (!pipeline_state_) {
+    return;
+  }
+
+  pipeline_state_->CreateShaderResourceBinding(&record.srb, true);
+  if (!record.srb) {
+    return;
+  }
+
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
+    var->Set(sampler_color_);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
+    var->Set(sampler_data_);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
+    var->Set(record.base_color_srv);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
+    var->Set(record.normal_srv);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
+    var->Set(record.metallic_roughness_srv);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
+    var->Set(record.occlusion_srv);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
+    var->Set(record.emissive_srv);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+    var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+    var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+  }
+  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+    var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+  }
+}
+
+DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
+    const aiScene& scene,
+    const aiMaterial& material,
+    const std::filesystem::path& asset_path) {
+  MaterialRecord record{};
+  record.desc = buildImportedMaterialDesc(material);
+  record.base_color_factor = glm::vec4(record.desc.base_color.r,
+                                       record.desc.base_color.g,
+                                       record.desc.base_color.b,
+                                       record.desc.base_color.a);
+
+  aiColor3D emissive(0.0f, 0.0f, 0.0f);
+  if (material.Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == AI_SUCCESS) {
+    record.emissive_factor = glm::vec3(emissive.r, emissive.g, emissive.b);
+  }
+
+  float metallic = 1.0f;
+  if (material.Get(AI_MATKEY_METALLIC_FACTOR, metallic) == AI_SUCCESS) {
+    record.metallic_factor = metallic;
+  }
+  float roughness = 1.0f;
+  if (material.Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == AI_SUCCESS) {
+    record.roughness_factor = roughness;
+  }
+  float normal_scale = 1.0f;
+  if (material.Get(AI_MATKEY_TEXBLEND_NORMALS(0), normal_scale) == AI_SUCCESS) {
+    record.normal_scale = normal_scale;
+  }
+  float occlusion_strength = 1.0f;
+  if (material.Get(AI_MATKEY_TEXBLEND(aiTextureType_AMBIENT_OCCLUSION, 0), occlusion_strength) ==
+          AI_SUCCESS ||
+      material.Get(AI_MATKEY_TEXBLEND_LIGHTMAP(0), occlusion_strength) == AI_SUCCESS) {
+    record.occlusion_strength = occlusion_strength;
+  }
+
+  const std::filesystem::path base_dir = asset_path.parent_path();
+  const std::string model_key = asset_path.string();
+  aiString tex_path;
+  aiTextureMapping mapping = aiTextureMapping_UV;
+  unsigned int uv_index = 0;
+  float blend = 1.0f;
+  aiTextureOp op = aiTextureOp_Multiply;
+  aiTextureMapMode mapmode[2] = {aiTextureMapMode_Wrap, aiTextureMapMode_Wrap};
+
+  if (material.GetTexture(aiTextureType_BASE_COLOR, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS ||
+      material.GetTexture(aiTextureType_DIFFUSE, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
+    record.base_color_srv =
+        loadTextureFromAssimp(scene, model_key, base_dir, tex_path, true, "baseColor");
+  }
+
+  mapping = aiTextureMapping_UV;
+  uv_index = 0;
+  blend = 1.0f;
+  if (material.GetTexture(aiTextureType_NORMALS, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
+    record.normal_srv = loadTextureFromAssimp(scene, model_key, base_dir, tex_path, false, "normal");
+  }
+
+  mapping = aiTextureMapping_UV;
+  uv_index = 0;
+  blend = 1.0f;
+  if (material.GetTexture(aiTextureType_METALNESS, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS ||
+      material.GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
+    record.metallic_roughness_srv =
+        loadTextureFromAssimp(scene, model_key, base_dir, tex_path, false, "metallicRoughness");
+  }
+
+  mapping = aiTextureMapping_UV;
+  uv_index = 0;
+  blend = 1.0f;
+  if (material.GetTexture(aiTextureType_AMBIENT_OCCLUSION, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS ||
+      material.GetTexture(aiTextureType_LIGHTMAP, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
+    record.occlusion_srv =
+        loadTextureFromAssimp(scene, model_key, base_dir, tex_path, false, "occlusion");
+  }
+
+  mapping = aiTextureMapping_UV;
+  uv_index = 0;
+  blend = 1.0f;
+  if (material.GetTexture(aiTextureType_EMISSIVE, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
+    record.emissive_srv = loadTextureFromAssimp(scene, model_key, base_dir, tex_path, true, "emissive");
+  }
+
+  return record;
+}
+
+const DiligentBackend::ImportedMaterialTemplateCacheEntry* DiligentBackend::getImportedMaterialTemplates(
+    const std::filesystem::path& path) {
+  const std::string cache_key = path.string();
+  auto cache_it = imported_material_templates_.find(cache_key);
+  if (cache_it != imported_material_templates_.end()) {
+    return &cache_it->second;
+  }
+
+  ImportedMaterialTemplateCacheEntry entry{};
+  Assimp::Importer importer;
+  const aiScene* scene = importer.ReadFile(path.string(),
+                                           aiProcess_Triangulate |
+                                           aiProcess_GenNormals |
+                                           aiProcess_CalcTangentSpace |
+                                           aiProcess_JoinIdenticalVertices);
+  if (!scene) {
+    auto [it, _] = imported_material_templates_.emplace(cache_key, std::move(entry));
+    return &it->second;
+  }
+
+  entry.materials.reserve(scene->mNumMaterials);
+  for (unsigned int material_index = 0; material_index < scene->mNumMaterials; ++material_index) {
+    if (scene->mMaterials[material_index] != nullptr) {
+      entry.materials.push_back(
+          buildImportedMaterialRecord(*scene, *scene->mMaterials[material_index], path));
+    } else {
+      MaterialRecord fallback{};
+      fallback.desc = renderer::MaterialDesc{};
+      entry.materials.push_back(std::move(fallback));
+    }
+  }
+
+  auto [it, _] = imported_material_templates_.emplace(cache_key, std::move(entry));
+  return &it->second;
+}
 
 renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
   const renderer::MeshId id = nextMeshId_++;
@@ -146,8 +362,6 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
 
   std::vector<renderer::MaterialId> material_ids;
   material_ids.resize(scene->mNumMaterials, renderer::kInvalidMaterial);
-  const std::filesystem::path base_dir = path.parent_path();
-
   for (unsigned int mat_index = 0; mat_index < scene->mNumMaterials; ++mat_index) {
     const aiMaterial* material = scene->mMaterials[mat_index];
     if (!material) {
@@ -155,163 +369,10 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
     }
 
     renderer::MaterialId mat_id = nextMaterialId_++;
-    MaterialRecord mat_record{};
-    mat_record.base_color_factor = glm::vec4(1.0f);
-    mat_record.emissive_factor = glm::vec3(0.0f);
-    mat_record.metallic_factor = 1.0f;
-    mat_record.roughness_factor = 1.0f;
+    MaterialRecord mat_record = buildImportedMaterialRecord(*scene, *material, path);
+    initializeMaterialBindings(mat_record);
 
-    aiColor4D base_factor(1.0f, 1.0f, 1.0f, 1.0f);
-    if (material->Get(AI_MATKEY_BASE_COLOR, base_factor) == AI_SUCCESS) {
-      mat_record.base_color_factor = glm::vec4(base_factor.r, base_factor.g, base_factor.b, base_factor.a);
-    } else {
-      aiColor3D diffuse(1.0f, 1.0f, 1.0f);
-      if (material->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS) {
-        mat_record.base_color_factor = glm::vec4(diffuse.r, diffuse.g, diffuse.b, 1.0f);
-      }
-    }
-
-    aiColor3D emissive(0.0f, 0.0f, 0.0f);
-    if (material->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == AI_SUCCESS) {
-      mat_record.emissive_factor = glm::vec3(emissive.r, emissive.g, emissive.b);
-    }
-
-    float metallic = 1.0f;
-    if (material->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == AI_SUCCESS) {
-      mat_record.metallic_factor = metallic;
-    }
-    float roughness = 1.0f;
-    if (material->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == AI_SUCCESS) {
-      mat_record.roughness_factor = roughness;
-    }
-    float normal_scale = 1.0f;
-    if (material->Get(AI_MATKEY_TEXBLEND_NORMALS(0), normal_scale) == AI_SUCCESS) {
-      mat_record.normal_scale = normal_scale;
-    }
-    float occlusion_strength = 1.0f;
-    if (material->Get(AI_MATKEY_TEXBLEND(aiTextureType_AMBIENT_OCCLUSION, 0), occlusion_strength) == AI_SUCCESS ||
-        material->Get(AI_MATKEY_TEXBLEND_LIGHTMAP(0), occlusion_strength) == AI_SUCCESS) {
-      mat_record.occlusion_strength = occlusion_strength;
-    }
-
-    auto log_texture = [&](aiTextureType type, const char* label, const aiString& tex_path,
-                           aiTextureMapping mapping, unsigned int uv_index, float blend) {
-      (void)type;
-      (void)label;
-      (void)tex_path;
-      (void)mapping;
-      (void)uv_index;
-      (void)blend;
-    };
-
-    aiString tex_path;
-    aiTextureMapping mapping = aiTextureMapping_UV;
-    unsigned int uv_index = 0;
-    float blend = 1.0f;
-    aiTextureOp op = aiTextureOp_Multiply;
-    aiTextureMapMode mapmode[2] = {aiTextureMapMode_Wrap, aiTextureMapMode_Wrap};
-    if (material->GetTexture(aiTextureType_BASE_COLOR, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS ||
-        material->GetTexture(aiTextureType_DIFFUSE, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
-      log_texture(aiTextureType_BASE_COLOR, "baseColor", tex_path, mapping, uv_index, blend);
-      mat_record.base_color_srv = loadTextureFromAssimp(*scene, path.string(), base_dir, tex_path, true, "baseColor");
-    }
-    if (!mat_record.base_color_srv) {
-      mat_record.base_color_srv = default_base_color_;
-    }
-
-    mapping = aiTextureMapping_UV;
-    uv_index = 0;
-    blend = 1.0f;
-    if (material->GetTexture(aiTextureType_NORMALS, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
-      log_texture(aiTextureType_NORMALS, "normal", tex_path, mapping, uv_index, blend);
-      mat_record.normal_srv = loadTextureFromAssimp(*scene, path.string(), base_dir, tex_path, false, "normal");
-    }
-    if (!mat_record.normal_srv) {
-      mat_record.normal_srv = default_normal_;
-    }
-
-    mapping = aiTextureMapping_UV;
-    uv_index = 0;
-    blend = 1.0f;
-    if (material->GetTexture(aiTextureType_METALNESS, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS ||
-        material->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
-      log_texture(aiTextureType_METALNESS, "metallicRoughness", tex_path, mapping, uv_index, blend);
-      mat_record.metallic_roughness_srv =
-          loadTextureFromAssimp(*scene, path.string(), base_dir, tex_path, false, "metallicRoughness");
-    }
-    if (!mat_record.metallic_roughness_srv) {
-      mat_record.metallic_roughness_srv = default_metallic_roughness_;
-    }
-
-    mapping = aiTextureMapping_UV;
-    uv_index = 0;
-    blend = 1.0f;
-    if (material->GetTexture(aiTextureType_AMBIENT_OCCLUSION, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS ||
-        material->GetTexture(aiTextureType_LIGHTMAP, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
-      log_texture(aiTextureType_AMBIENT_OCCLUSION, "occlusion", tex_path, mapping, uv_index, blend);
-      mat_record.occlusion_srv =
-          loadTextureFromAssimp(*scene, path.string(), base_dir, tex_path, false, "occlusion");
-    }
-    if (!mat_record.occlusion_srv) {
-      mat_record.occlusion_srv = default_occlusion_;
-    }
-
-    mapping = aiTextureMapping_UV;
-    uv_index = 0;
-    blend = 1.0f;
-    if (material->GetTexture(aiTextureType_EMISSIVE, 0, &tex_path,
-                             &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
-      log_texture(aiTextureType_EMISSIVE, "emissive", tex_path, mapping, uv_index, blend);
-      mat_record.emissive_srv = loadTextureFromAssimp(*scene, path.string(), base_dir, tex_path, true, "emissive");
-    }
-    if (!mat_record.emissive_srv) {
-      mat_record.emissive_srv = default_emissive_;
-    }
-
-    if (pipeline_state_) {
-      pipeline_state_->CreateShaderResourceBinding(&mat_record.srb, true);
-      if (mat_record.srb) {
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
-          var->Set(sampler_color_);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
-          var->Set(sampler_data_);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
-          var->Set(mat_record.base_color_srv);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
-          var->Set(mat_record.normal_srv);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
-          var->Set(mat_record.metallic_roughness_srv);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
-          var->Set(mat_record.occlusion_srv);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
-          var->Set(mat_record.emissive_srv);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
-          var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
-          var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
-        }
-        if (auto* var = mat_record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-          var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
-        }
-      }
-    }
-
-    materials_[mat_id] = mat_record;
+    materials_[mat_id] = std::move(mat_record);
     material_ids[mat_index] = mat_id;
     record.owned_materials.push_back(mat_id);
   }
@@ -391,52 +452,22 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
       record.base_color_srv = tex_it->second.srv;
     }
   }
-  if (!record.base_color_srv) {
-    record.base_color_srv = default_base_color_;
-  }
-  record.normal_srv = default_normal_;
-  record.metallic_roughness_srv = default_metallic_roughness_;
-  record.occlusion_srv = default_occlusion_;
-  record.emissive_srv = default_emissive_;
+  initializeMaterialBindings(record);
 
-  if (pipeline_state_) {
-    pipeline_state_->CreateShaderResourceBinding(&record.srb, true);
-    if (record.srb) {
-      if (!env_irradiance_srv_ || !env_prefilter_srv_ || !env_brdf_lut_srv_) {
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
-        var->Set(sampler_color_);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
-        var->Set(sampler_data_);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
-        var->Set(record.base_color_srv);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
-        var->Set(record.normal_srv);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
-        var->Set(record.metallic_roughness_srv);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
-        var->Set(record.occlusion_srv);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
-        var->Set(record.emissive_srv);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
-        var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
-        var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
-      }
-      if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-        var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
-      }
-    }
+  materials_[id] = std::move(record);
+  return id;
+}
+
+renderer::MaterialId DiligentBackend::createMaterialFromAsset(const std::filesystem::path& path,
+                                                              uint32_t material_index) {
+  const auto* templates = getImportedMaterialTemplates(path);
+  if (!templates || material_index >= templates->materials.size()) {
+    return renderer::kInvalidMaterial;
   }
 
+  const renderer::MaterialId id = nextMaterialId_++;
+  MaterialRecord record = templates->materials[material_index];
+  initializeMaterialBindings(record);
   materials_[id] = std::move(record);
   return id;
 }
@@ -522,6 +553,14 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material, const render
                                            desc.base_color.g,
                                            desc.base_color.b,
                                            desc.base_color.a);
+  it->second.base_color_srv = {};
+  if (desc.base_color_texture != renderer::kInvalidTexture) {
+    auto tex_it = textures_.find(desc.base_color_texture);
+    if (tex_it != textures_.end()) {
+      it->second.base_color_srv = tex_it->second.srv;
+    }
+  }
+  initializeMaterialBindings(it->second);
 }
 
 void DiligentBackend::destroyMaterial(renderer::MaterialId material) {

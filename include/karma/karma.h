@@ -26,4 +26,5 @@
 #include "karma/renderer/device.h"
 #include "karma/renderer/material_library.h"
 #include "karma/scene/scene.h"
+#include "karma/scene/glb_scene_import.h"
 #include "karma/app/ui_context.h"

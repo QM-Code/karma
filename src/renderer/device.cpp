@@ -52,6 +52,11 @@ MaterialId GraphicsDevice::createMaterial(const MaterialDesc& material) {
   return backend_ ? backend_->createMaterial(material) : kInvalidMaterial;
 }
 
+MaterialId GraphicsDevice::createMaterialFromAsset(const std::filesystem::path& path,
+                                                   uint32_t material_index) {
+  return backend_ ? backend_->createMaterialFromAsset(path, material_index) : kInvalidMaterial;
+}
+
 void GraphicsDevice::updateMaterial(MaterialId material, const MaterialDesc& desc) {
   if (backend_) {
     backend_->updateMaterial(material, desc);

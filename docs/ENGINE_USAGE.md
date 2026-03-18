@@ -238,6 +238,59 @@ Current limitation:
 - the tint workflow assumes one logical mesh asset per `MeshComponent`
 - it preserves imported submesh materials, but does not yet expose per-submesh override selection to gameplay code
 
+## GLB Scene Import
+Karma now has a separate GLB scene-import path for authored scenes.
+This is distinct from `MeshComponent.mesh_key = "model.glb"`, which still uses the flat mesh loader.
+
+Use the convenience import directly:
+
+```cpp
+auto imported = karma::scene::importGlbScene(
+    *world,
+    *scene,
+    *graphics,
+    "assets/level.glb",
+    karma::scene::GlbSceneImportOptions{
+        .load = {
+            .import_meshes = true,
+            .import_lights = true,
+        },
+        .instantiate = {
+            .create_synthetic_root = true,
+        }});
+
+if (imported.valid()) {
+  // imported.root_entity is the top-level handle for this imported scene.
+}
+```
+
+You can also split loading and instantiation:
+
+```cpp
+const auto prefab = karma::scene::loadGlbScenePrefab("assets/level.glb");
+auto imported = karma::scene::instantiateGlbScenePrefab(
+    *world,
+    *scene,
+    *graphics,
+    prefab,
+    {.create_synthetic_root = true});
+```
+
+Current behavior:
+
+- one structural ECS entity is created for each imported GLB node
+- imported lights become `LightComponent`s on those node entities
+- mesh primitives become child render entities with `MeshComponent`s already attached
+- imported primitive materials preserve the source asset's PBR textures and scalar factors
+- the full node tree is recreated in `scene::Scene`
+
+Current v1 limitations:
+
+- imported node transforms are instantiated as baked world transforms
+- scene hierarchy is preserved, but parent-driven transform propagation is not implemented yet
+- imported material alpha/double-sided metadata is preserved, but the runtime still does not specialize draw state per material
+- cameras, animation, and skinning are not imported yet
+
 ## Rendering Features
 - Directional light with shadows (PCF supported)
 - Cascaded shadow maps (CSM)

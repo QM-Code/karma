@@ -34,6 +34,7 @@ class IShaderResourceVariable;
 
 struct aiScene;
 struct aiString;
+struct aiMaterial;
 
 namespace karma::renderer_backend {
 
@@ -52,6 +53,8 @@ class DiligentBackend final : public Backend {
   bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const override;
 
   renderer::MaterialId createMaterial(const renderer::MaterialDesc& material) override;
+  renderer::MaterialId createMaterialFromAsset(const std::filesystem::path& path,
+                                               uint32_t material_index) override;
   void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) override;
   void destroyMaterial(renderer::MaterialId material) override;
   renderer::MaterialSetId createMaterialSetFromMesh(
@@ -148,6 +151,10 @@ class DiligentBackend final : public Backend {
     std::vector<renderer::MaterialId> materials;
   };
 
+  struct ImportedMaterialTemplateCacheEntry {
+    std::vector<MaterialRecord> materials;
+  };
+
   struct TextureRecord {
     renderer::TextureDesc desc;
     Diligent::RefCntAutoPtr<Diligent::ITexture> texture;
@@ -214,6 +221,12 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> loadTextureFromFile(const std::filesystem::path& path,
                                                                       bool srgb,
                                                                       const char* label);
+  MaterialRecord buildImportedMaterialRecord(const aiScene& scene,
+                                             const aiMaterial& material,
+                                             const std::filesystem::path& asset_path);
+  void initializeMaterialBindings(MaterialRecord& record);
+  const ImportedMaterialTemplateCacheEntry* getImportedMaterialTemplates(
+      const std::filesystem::path& path);
   void ensureEnvironmentResources();
   void renderSkybox(const glm::mat4& projection, const glm::mat4& view);
 
@@ -338,6 +351,7 @@ class DiligentBackend final : public Backend {
   std::unordered_map<renderer::MeshId, MeshRecord> meshes_;
   std::unordered_map<renderer::MaterialId, MaterialRecord> materials_;
   std::unordered_map<renderer::MaterialSetId, MaterialSetRecord> material_sets_;
+  std::unordered_map<std::string, ImportedMaterialTemplateCacheEntry> imported_material_templates_;
   std::unordered_map<renderer::TextureId, TextureRecord> textures_;
   std::unordered_map<std::string, renderer::TextureId> texture_cache_;
   std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;

@@ -325,6 +325,7 @@ set(KARMA_SOURCES
   src/app/ui_context.cpp
   src/components/transform.cpp
   src/ecs/collider_queries.cpp
+  src/scene/glb_scene_import.cpp
   src/audio/audio.cpp
   src/audio/backend_factory.cpp
   src/audio/audio_system.cpp
@@ -512,6 +513,14 @@ if (NOT KARMA_HEADLESS)
   target_link_libraries(karma_material_override_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_material_override_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_glb_scene_import_example
+    examples/glb_scene_import_example.cpp
+  )
+  target_link_libraries(karma_glb_scene_import_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_glb_scene_import_example karma_fix_xxhash)
   endif()
 
   if (KARMA_BUILD_IMGUI_DEMO)

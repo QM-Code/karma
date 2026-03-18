@@ -30,6 +30,10 @@ class RenderSystem {
     renderer::MeshId mesh = renderer::kInvalidMesh;
     renderer::MaterialId material = renderer::kInvalidMaterial;
     renderer::MaterialSetId material_set = renderer::kInvalidMaterialSet;
+    renderer::MeshId direct_mesh_id = renderer::kInvalidMesh;
+    renderer::MaterialId direct_material_id = renderer::kInvalidMaterial;
+    bool owns_direct_mesh_id = false;
+    bool owns_direct_material_id = false;
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
@@ -61,6 +65,10 @@ class RenderSystem {
 
   void releaseRecord(uint64_t key, RenderRecord& record);
   void cleanupStaleRecords(ecs::World& world);
+  void releaseMeshBinding(RenderRecord& record);
+  void releaseMaterialBinding(RenderRecord& record);
+  void bindMesh(const components::MeshComponent& mesh, RenderRecord& record);
+  void bindMaterial(const components::MeshComponent& mesh, RenderRecord& record);
   void acquireSharedMesh(const std::string& mesh_key, RenderRecord& record);
   void releaseSharedMesh(const std::string& mesh_key);
   void acquireSharedMaterialVariant(const std::string& mesh_key,

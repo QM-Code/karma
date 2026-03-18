@@ -3,6 +3,7 @@
 #include <string>
 
 #include "karma/ecs/component.h"
+#include "karma/renderer/types.h"
 
 namespace karma::components {
 
@@ -10,6 +11,10 @@ struct MeshComponent : ecs::ComponentTag {
   std::string mesh_key;
   std::string material_key;
   std::string texture_key;
+  renderer::MeshId mesh_id = renderer::kInvalidMesh;
+  renderer::MaterialId material_id = renderer::kInvalidMaterial;
+  bool owns_mesh_id = false;
+  bool owns_material_id = false;
   bool visible = true;
 };
 

@@ -20,6 +20,7 @@ class GraphicsDevice {
   bool getMeshBounds(MeshId mesh, glm::vec3& center, float& radius) const;
 
   MaterialId createMaterial(const MaterialDesc& material);
+  MaterialId createMaterialFromAsset(const std::filesystem::path& path, uint32_t material_index);
   void updateMaterial(MaterialId material, const MaterialDesc& desc);
   void destroyMaterial(MaterialId material);
   MaterialSetId createMaterialSetFromMesh(MeshId mesh, const MaterialResourceDesc& desc);

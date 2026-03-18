@@ -21,7 +21,6 @@
 #include "karma/renderer/render_system.h"
 #include "karma/scene/scene.h"
 #include "karma/systems/system_graph.h"
-#include <unordered_map>
 
 namespace karma::platform {
 class Window;
@@ -106,7 +105,6 @@ class EngineApp {
 #endif
   UIContext user_ui_context_{};
   bool debug_ui_enabled_ = false;
-  std::unordered_map<uint64_t, scene::NodeId> entity_nodes_;
   uint64_t last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
 
   bool running_ = false;

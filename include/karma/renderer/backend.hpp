@@ -31,6 +31,8 @@ class Backend {
   virtual bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const = 0;
 
   virtual renderer::MaterialId createMaterial(const renderer::MaterialDesc& material) = 0;
+  virtual renderer::MaterialId createMaterialFromAsset(const std::filesystem::path& path,
+                                                       uint32_t material_index) = 0;
   virtual void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) = 0;
   virtual void destroyMaterial(renderer::MaterialId material) = 0;
   virtual renderer::MaterialSetId createMaterialSetFromMesh(renderer::MeshId mesh,

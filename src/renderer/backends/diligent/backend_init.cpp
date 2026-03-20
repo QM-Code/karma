@@ -24,6 +24,10 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
 #if !defined(BZ3_WINDOW_BACKEND_SDL)
   #include <GLFW/glfw3.h>
   #include <GLFW/glfw3native.h>
@@ -32,11 +36,60 @@
 namespace karma::renderer_backend {
 
 namespace {
+bool envFlagEnabled(const char* name) {
+  if (const char* value = std::getenv(name)) {
+    if (value[0] == '\0') {
+      return false;
+    }
+    return std::strcmp(value, "0") != 0 && std::strcmp(value, "false") != 0 &&
+           std::strcmp(value, "FALSE") != 0 && std::strcmp(value, "off") != 0 &&
+           std::strcmp(value, "OFF") != 0;
+  }
+  return false;
+}
+
 void DILIGENT_CALL_TYPE IgnoreDiligentMessage(Diligent::DEBUG_MESSAGE_SEVERITY,
                                               const char*,
                                               const char*,
                                               const char*,
                                               int) {}
+
+void DILIGENT_CALL_TYPE LogDiligentMessage(Diligent::DEBUG_MESSAGE_SEVERITY severity,
+                                           const char* message,
+                                           const char* function,
+                                           const char* file,
+                                           int line) {
+  const char* severity_name = "INFO";
+  switch (severity) {
+    case Diligent::DEBUG_MESSAGE_SEVERITY_INFO:
+      severity_name = "INFO";
+      break;
+    case Diligent::DEBUG_MESSAGE_SEVERITY_WARNING:
+      severity_name = "WARN";
+      break;
+    case Diligent::DEBUG_MESSAGE_SEVERITY_ERROR:
+      severity_name = "ERROR";
+      break;
+    case Diligent::DEBUG_MESSAGE_SEVERITY_FATAL_ERROR:
+      severity_name = "FATAL";
+      break;
+    default:
+      break;
+  }
+
+  std::fprintf(stderr, "[Diligent][%s] %s", severity_name, message ? message : "(null)");
+  if ((file && file[0] != '\0') || (function && function[0] != '\0')) {
+    std::fprintf(stderr,
+                 " (%s%s%s%s%d)",
+                 file && file[0] != '\0' ? file : "",
+                 file && file[0] != '\0' && function && function[0] != '\0' ? ":" : "",
+                 function && function[0] != '\0' ? function : "",
+                 line > 0 ? ":" : "",
+                 line > 0 ? line : 0);
+  }
+  std::fputc('\n', stderr);
+  std::fflush(stderr);
+}
 
 static constexpr const char* kShadowVertexShader = R"(
 cbuffer Constants
@@ -69,6 +122,8 @@ cbuffer Constants
     float4 g_LocalLightColorIntensity[64];
     float4 g_LocalLightSpotParams[64];
     float4 g_LocalLightMeta;
+    float4 g_MaterialParams0;
+    float4 g_MaterialParams1;
 };
 
 struct VSInput
@@ -147,14 +202,21 @@ void DiligentBackend::recreateShadowMap() {
   }
   if (!shadow_map_srv_ || !shadow_map_dsv_) {
   }
-  if (pipeline_state_ && shadow_map_srv_) {
-    if (auto* var =
-            pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {
-      var->Set(shadow_map_srv_);
-    }
-    if (auto* var =
-            pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap")) {
-      var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_);
+  if (shadow_map_srv_) {
+    for (auto* pso : {pipeline_state_.RawPtr(),
+                      transparent_pipeline_state_.RawPtr(),
+                      transparent_double_sided_pipeline_state_.RawPtr()}) {
+      if (!pso) {
+        continue;
+      }
+      if (auto* var =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {
+        var->Set(shadow_map_srv_);
+      }
+      if (auto* var =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap")) {
+        var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_);
+      }
     }
   }
   directional_shadow_cache_valid_ = false;
@@ -203,9 +265,14 @@ void DiligentBackend::recreatePointShadowMap() {
     }
   }
 
-  if (pipeline_state_) {
-    if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                              "g_PointShadowMap")) {
+  for (auto* pso : {pipeline_state_.RawPtr(),
+                    transparent_pipeline_state_.RawPtr(),
+                    transparent_double_sided_pipeline_state_.RawPtr()}) {
+    if (!pso) {
+      continue;
+    }
+    if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                 "g_PointShadowMap")) {
       var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_);
     }
   }
@@ -309,7 +376,12 @@ void DiligentBackend::initializeDevice() {
 #if defined(ENGINE_FORCE_VULKAN)
   (void)window_;
 #endif
-  Diligent::SetDebugMessageCallback(IgnoreDiligentMessage);
+  const bool enable_vk_validation = envFlagEnabled("KARMA_VK_VALIDATION");
+  const bool enable_diligent_debug =
+      enable_vk_validation || envFlagEnabled("KARMA_DILIGENT_DEBUG");
+  auto* message_callback = enable_diligent_debug ? LogDiligentMessage : IgnoreDiligentMessage;
+
+  Diligent::SetDebugMessageCallback(message_callback);
   Diligent::RefCntAutoPtr<Diligent::IEngineFactoryVk> factory;
   Diligent::EngineVkCreateInfo engine_ci{};
 
@@ -323,7 +395,14 @@ void DiligentBackend::initializeDevice() {
     return;
   }
 
-  factory->SetMessageCallback(IgnoreDiligentMessage);
+  factory->SetMessageCallback(message_callback);
+  if (enable_vk_validation) {
+    engine_ci.SetValidationLevel(Diligent::VALIDATION_LEVEL_1);
+    engine_ci.EnableValidation = true;
+    engine_ci.ValidationFlags |= Diligent::VALIDATION_FLAG_CHECK_SHADER_BUFFER_SIZE;
+    std::fprintf(stderr, "[Karma] Vulkan validation enabled via KARMA_VK_VALIDATION=1\n");
+    std::fflush(stderr);
+  }
 
   if (window_) {
 #if !defined(BZ3_WINDOW_BACKEND_SDL)
@@ -408,6 +487,8 @@ cbuffer Constants
     float4 g_LocalLightColorIntensity[64];
     float4 g_LocalLightSpotParams[64];
     float4 g_LocalLightMeta;
+    float4 g_MaterialParams0;
+    float4 g_MaterialParams1;
 };
 
 struct VSInput
@@ -480,6 +561,8 @@ cbuffer Constants
     float4 g_LocalLightColorIntensity[64];
     float4 g_LocalLightSpotParams[64];
     float4 g_LocalLightMeta;
+    float4 g_MaterialParams0;
+    float4 g_MaterialParams1;
 };
 
 Texture2D g_BaseColorTex;
@@ -736,6 +819,37 @@ void AccumulateLocalLight(ForwardPlusLight light,
     local_shadow_lift_energy += local_luminance * local_ndotl;
 }
 
+float Hash13(float3 p)
+{
+    p = frac(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return frac((p.x + p.y) * p.z);
+}
+
+float Noise3(float3 p)
+{
+    float3 i = floor(p);
+    float3 f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float n000 = Hash13(i + float3(0.0, 0.0, 0.0));
+    float n100 = Hash13(i + float3(1.0, 0.0, 0.0));
+    float n010 = Hash13(i + float3(0.0, 1.0, 0.0));
+    float n110 = Hash13(i + float3(1.0, 1.0, 0.0));
+    float n001 = Hash13(i + float3(0.0, 0.0, 1.0));
+    float n101 = Hash13(i + float3(1.0, 0.0, 1.0));
+    float n011 = Hash13(i + float3(0.0, 1.0, 1.0));
+    float n111 = Hash13(i + float3(1.0, 1.0, 1.0));
+
+    float n00 = lerp(n000, n100, f.x);
+    float n10 = lerp(n010, n110, f.x);
+    float n01 = lerp(n001, n101, f.x);
+    float n11 = lerp(n011, n111, f.x);
+    float n0 = lerp(n00, n10, f.y);
+    float n1 = lerp(n01, n11, f.y);
+    return lerp(n0, n1, f.z);
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
     const float PI = 3.14159265;
@@ -875,16 +989,18 @@ float4 main(PSInput input) : SV_TARGET
     occlusion = lerp(1.0, occlusion, g_PbrParams.z);
     float local_ao_factor = lerp(1.0, occlusion, saturate(g_LocalLightParams.z));
     float3 lit = lit_directional * occlusion + lit_local * local_ao_factor;
+    float ndotv = max(dot(n, v), 0.0);
+    float3 env_diffuse = float3(0.0, 0.0, 0.0);
+    float3 env_spec = float3(0.0, 0.0, 0.0);
     const bool env_debug = g_EnvParams.z > 0.5;
     if (g_EnvParams.x > 0.0 || env_debug)
     {
-        float3 env_diffuse = g_IrradianceTex.Sample(g_SamplerColor, n).rgb * g_EnvParams.x;
+        env_diffuse = g_IrradianceTex.Sample(g_SamplerColor, n).rgb * g_EnvParams.x;
         float3 r = reflect(-v, n);
         float mip = saturate(roughness) * g_EnvParams.y;
         float3 prefiltered = g_PrefilterTex.SampleLevel(g_SamplerColor, r, mip).rgb;
-        float ndotv = max(dot(n, v), 0.0);
         float2 brdf = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, roughness)).rg;
-        float3 env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
+        env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
         lit += env_diffuse * base_color * occlusion;
         lit += env_spec * g_EnvParams.x;
         if (env_debug)
@@ -927,10 +1043,85 @@ float4 main(PSInput input) : SV_TARGET
             }
         }
     }
-    lit += emissive;
+    float base_alpha = saturate(g_BaseColorFactor.a * base_tex.a);
+    uint shading_mode = (uint)round(g_MaterialParams0.x);
+    if (shading_mode == 1u)
+    {
+        float fresnel_power = max(g_MaterialParams0.y, 0.001);
+        float fresnel_strength = max(g_MaterialParams0.z, 0.0);
+        float refraction_strength = max(g_MaterialParams0.w, 0.0);
+        float interior_strength = max(g_MaterialParams1.x, 0.0);
+        float highlight_strength = max(g_MaterialParams1.y, 0.0);
+        float alpha_boost = g_MaterialParams1.z;
+        float swirl_strength = saturate(g_MaterialParams1.w);
+        float time = g_LocalLightMeta.w;
+
+        float rim = saturate(pow(1.0 - ndotv, fresnel_power) * fresnel_strength);
+        float3 refract_dir = refract(-v, n, 1.0 / (1.0 + refraction_strength * 0.35));
+        if (dot(refract_dir, refract_dir) <= 1.0e-5)
+        {
+            refract_dir = -v;
+        }
+        float refract_mip = saturate(roughness * 0.35 + (1.0 - ndotv) * 0.08) * g_EnvParams.y;
+        float3 env_refract =
+            g_PrefilterTex.SampleLevel(g_SamplerColor, refract_dir, refract_mip).rgb * g_EnvParams.x;
+        float body = pow(ndotv, 1.65);
+        float center_glow = body * (0.18 + interior_strength * 0.82);
+        float3 shell_tint = base_color * (0.32 + interior_strength * 0.68);
+        float light_glint =
+            pow(max(dot(reflect(-l_dir, n), v), 0.0), 42.0) * (0.18 + highlight_strength * 1.35);
+        float3 sphere_center_ws = mul(g_Model, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+        float3 sphere_offset_ws = input.WorldPos - sphere_center_ws;
+        float sphere_offset_len = max(length(sphere_offset_ws), 1.0e-5);
+        float3 sphere_dir = sphere_offset_ws / sphere_offset_len;
+        float flow_time = time * 0.28;
+        float3 shell_domain = sphere_dir * 3.6;
+        float warp_a = Noise3(shell_domain.yzx * 1.85 +
+                              float3(flow_time * 0.58, -flow_time * 0.34, flow_time * 0.29));
+        float warp_b = Noise3(shell_domain.zxy * 1.55 +
+                              float3(-flow_time * 0.31, flow_time * 0.49, flow_time * 0.37));
+        float3 island_domain =
+            shell_domain * 4.2 +
+            (float3(warp_a, warp_b, 0.5 * (warp_a + warp_b)) - 0.5) * 1.65 +
+            float3(flow_time * 0.36, -flow_time * 0.31, flow_time * 0.24);
+        float islands_base = Noise3(island_domain);
+        float islands_detail = Noise3(island_domain * 2.65 + float3(4.2, -7.1, 2.8));
+        float islands_field = islands_base * 0.72 + islands_detail * 0.28;
+        float threshold =
+            0.56 + 0.08 * Noise3(shell_domain * 1.15 + float3(-flow_time * 0.18,
+                                                               flow_time * 0.14,
+                                                               1.7));
+        float islands_mask = smoothstep(threshold - 0.09, threshold + 0.02, islands_field);
+        float islands_soft = smoothstep(threshold - 0.16, threshold + 0.10, islands_field);
+        float visibility = lerp(1.0, 0.12 + islands_mask * 0.88, swirl_strength);
+
+        lit = env_refract * (0.42 + interior_strength * 0.34) +
+              env_spec * (0.30 + rim * 0.85) +
+              shell_tint * center_glow +
+              base_color * rim * (0.20 + highlight_strength * 0.95) +
+              g_LightColor.rgb * light_glint;
+        lit += emissive * (1.0 + interior_strength * 0.28);
+        lit *= lerp(1.0, 0.52 + islands_soft * 0.48, swirl_strength);
+        base_alpha = saturate(base_alpha * 0.24 +
+                              rim * (0.34 + highlight_strength * 0.24) +
+                              center_glow * (0.10 + alpha_boost));
+        base_alpha *= visibility;
+    }
+    else
+    {
+        float transparency = saturate(1.0 - base_alpha);
+        if (transparency > 0.001)
+        {
+            float fresnel = pow(1.0 - ndotv, 4.0);
+            lit += base_color * (0.10 + 0.30 * fresnel) * transparency;
+            lit += spec_color * (0.20 + 1.25 * fresnel) * transparency;
+            base_alpha = saturate(base_alpha * 0.45 + fresnel * (0.22 + transparency * 0.38));
+        }
+        lit += emissive;
+    }
     float exposure = max(g_EnvParams.w, 0.0);
     float3 mapped = 1.0 - exp(-lit * exposure);
-    return float4(mapped, g_BaseColorFactor.a * base_tex.a);
+    return float4(mapped, base_alpha);
 }
 )";
 
@@ -1168,6 +1359,32 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
 
   pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
   depth_prepass_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(depth_prepass_ci);
+  auto create_transparent_pipeline =
+      [&](const char* name,
+          Diligent::CULL_MODE cull_mode,
+          Diligent::RefCntAutoPtr<Diligent::IPipelineState>& out_pso) {
+        Diligent::GraphicsPipelineStateCreateInfo transparent_ci = pso_ci;
+        transparent_ci.PSODesc.Name = name;
+        auto& transparent_graphics = transparent_ci.GraphicsPipeline;
+        transparent_graphics.RasterizerDesc.CullMode = cull_mode;
+        transparent_graphics.DepthStencilDesc.DepthEnable = true;
+        transparent_graphics.DepthStencilDesc.DepthWriteEnable = false;
+        auto& blend = transparent_graphics.BlendDesc.RenderTargets[0];
+        blend.BlendEnable = true;
+        blend.SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
+        blend.DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+        blend.BlendOp = Diligent::BLEND_OPERATION_ADD;
+        blend.SrcBlendAlpha = Diligent::BLEND_FACTOR_ONE;
+        blend.DestBlendAlpha = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+        blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
+        out_pso = device_with_cache_.CreateGraphicsPipelineState(transparent_ci);
+      };
+  create_transparent_pipeline("Karma Transparent Pipeline",
+                              Diligent::CULL_MODE_BACK,
+                              transparent_pipeline_state_);
+  create_transparent_pipeline("Karma Transparent Pipeline (DoubleSided)",
+                              Diligent::CULL_MODE_NONE,
+                              transparent_double_sided_pipeline_state_);
 
   if (!pipeline_state_) {
     return;
@@ -1191,16 +1408,27 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
 
   if (constants_) {
     bool bound = false;
-    if (auto* variable =
-            pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
-      variable->Set(constants_);
-      bound = true;
-    }
-    if (auto* variable =
-            pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
-      variable->Set(constants_);
-      bound = true;
-    }
+    auto bind_constants_to_pipeline = [&](Diligent::IPipelineState* pso) {
+      if (!pso) {
+        return false;
+      }
+      bool pipeline_bound = false;
+      if (auto* variable =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
+        variable->Set(constants_);
+        pipeline_bound = true;
+      }
+      if (auto* variable =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
+        variable->Set(constants_);
+        pipeline_bound = true;
+      }
+      return pipeline_bound;
+    };
+    bound = bind_constants_to_pipeline(pipeline_state_.RawPtr()) || bound;
+    bound = bind_constants_to_pipeline(transparent_pipeline_state_.RawPtr()) || bound;
+    bound =
+        bind_constants_to_pipeline(transparent_double_sided_pipeline_state_.RawPtr()) || bound;
     if (!bound) {
     }
 
@@ -1278,79 +1506,89 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                        default_env_tex_);
   env_srv_ = default_env_;
 
-  if (pipeline_state_) {
-    if (env_srv_) {
-      if (default_material_srb_) {
-        if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
-          var->Set(env_srv_);
-        }
-        if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
-          var->Set(env_srv_);
-        }
+  if (pipeline_state_ || transparent_pipeline_state_ || transparent_double_sided_pipeline_state_) {
+    auto bind_shadow_static_resources = [&](Diligent::IPipelineState* pso) {
+      if (!pso) {
+        return;
       }
-    } else {
-    }
-    if (default_base_color_) {
-      if (default_material_srb_) {
-        if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-          var->Set(default_base_color_);
+      if (shadow_map_srv_) {
+        if (auto* var =
+                pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {
+          var->Set(shadow_map_srv_);
         }
       }
-    }
-    if (shadow_map_srv_) {
-      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {
-        var->Set(shadow_map_srv_);
+      if (auto* var =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap")) {
+        var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_);
       }
-    }
-    if (auto* var =
-            pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                     "g_PointShadowMap")) {
-      var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_);
-    }
-    if (shadow_sampler_) {
-      if (auto* var = pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler")) {
-        var->Set(shadow_sampler_);
+      if (shadow_sampler_) {
+        if (auto* var =
+                pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler")) {
+          var->Set(shadow_sampler_);
+        }
       }
-    }
+    };
+    bind_shadow_static_resources(pipeline_state_.RawPtr());
+    bind_shadow_static_resources(transparent_pipeline_state_.RawPtr());
+    bind_shadow_static_resources(transparent_double_sided_pipeline_state_.RawPtr());
   }
 
   recreateShadowPipeline();
 
+  auto initialize_default_material_srb =
+      [&](Diligent::IPipelineState* pso,
+          Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb) {
+        out_srb.Release();
+        if (!pso) {
+          return;
+        }
+        pso->CreateShaderResourceBinding(&out_srb, true);
+        if (!out_srb) {
+          return;
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
+          var->Set(sampler_color_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
+          var->Set(sampler_data_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
+          var->Set(default_base_color_);
+        }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
+          var->Set(default_normal_);
+        }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                   "g_MetallicRoughnessTex")) {
+          var->Set(default_metallic_roughness_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
+          var->Set(default_occlusion_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
+          var->Set(default_emissive_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+          var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+          var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+        }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+          var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+        }
+      };
+
   if (pipeline_state_) {
     pipeline_state_->CreateShaderResourceBinding(&shader_resources_, true);
-    pipeline_state_->CreateShaderResourceBinding(&default_material_srb_, true);
-    if (default_material_srb_) {
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
-        var->Set(sampler_color_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
-        var->Set(sampler_data_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
-        var->Set(default_base_color_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
-        var->Set(default_normal_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
-        var->Set(default_metallic_roughness_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
-        var->Set(default_occlusion_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
-        var->Set(default_emissive_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
-        var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
-        var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
-      }
-      if (auto* var = default_material_srb_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-        var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
-      }
-    }
+    initialize_default_material_srb(pipeline_state_.RawPtr(), default_material_srb_);
     if (shader_resources_) {
       if (auto* var = shader_resources_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
         var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
@@ -1363,6 +1601,10 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       }
     }
   }
+  initialize_default_material_srb(transparent_pipeline_state_.RawPtr(),
+                                  transparent_default_material_srb_);
+  initialize_default_material_srb(transparent_double_sided_pipeline_state_.RawPtr(),
+                                  transparent_double_sided_default_material_srb_);
 
   ensureLineResources();
 

@@ -652,7 +652,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     item.transform = world_matrix;
     item.layer = 0;
     item.visible = visible;
-    item.shadow_visible = visible;
+    item.shadow_visible = visible && mesh.shadow_visible;
     device_.submit(item);
   });
 

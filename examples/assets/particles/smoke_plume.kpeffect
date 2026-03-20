@@ -1,0 +1,40 @@
+# Alpha-blended smoke plume for the particle example.
+layer = 0
+depth_test = true
+blend_mode = alpha
+use_soft_mask = false
+soft_particle_distance = 0.65
+texture = smoke_atlas
+
+enabled = true
+playing = true
+loop = true
+emit_burst_on_start = false
+
+atlas_columns = 4
+atlas_rows = 1
+atlas_frame_count = 4
+animate_over_lifetime = true
+random_start_frame = true
+
+max_particles = 240
+burst_count = 0
+seed = 7777
+spawn_rate = 26.0
+particle_lifetime_min = 1.8
+particle_lifetime_max = 2.8
+start_size_min = 0.55
+start_size_max = 0.85
+end_size_min = 1.45
+end_size_max = 2.10
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -0.45
+angular_velocity_max = 0.45
+spawn_box_extents = 0.12, 0.04, 0.12
+velocity_min = -0.18, 0.65, -0.18
+velocity_max = 0.18, 1.25, 0.18
+acceleration = 0.0, 0.18, 0.0
+drag = 0.12
+start_color = 0.52, 0.56, 0.60, 0.28
+end_color = 0.24, 0.26, 0.29, 0.0

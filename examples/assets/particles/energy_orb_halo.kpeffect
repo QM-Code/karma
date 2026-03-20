@@ -1,0 +1,43 @@
+# Soft outer glow around the energy orb.
+layer = 0
+depth_test = true
+blend_mode = additive
+alignment = billboard
+use_soft_mask = false
+texture = orb_halo_atlas
+
+enabled = true
+playing = true
+loop = true
+emit_burst_on_start = true
+
+atlas_columns = 6
+atlas_rows = 1
+atlas_frame_count = 6
+animate_over_lifetime = true
+random_start_frame = true
+
+max_particles = 6
+burst_count = 3
+seed = 5413
+spawn_rate = 1.4
+duration = 0.0
+particle_lifetime_min = 1.60
+particle_lifetime_max = 2.50
+start_size_min = 3.10
+start_size_max = 3.32
+end_size_min = 3.42
+end_size_max = 3.82
+size_curve_exponent = 0.78
+alpha_curve_exponent = 1.18
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -0.15
+angular_velocity_max = 0.15
+spawn_box_extents = 0.0, 0.0, 0.0
+velocity_min = -0.02, -0.015, -0.02
+velocity_max = 0.02, 0.015, 0.02
+acceleration = 0.0, 0.0, 0.0
+drag = 2.4
+start_color = 0.08, 0.34, 1.0, 0.08
+end_color = 0.02, 0.12, 0.78, 0.0

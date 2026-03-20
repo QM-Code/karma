@@ -16,6 +16,7 @@ struct MeshComponent : ecs::ComponentTag {
   bool owns_mesh_id = false;
   bool owns_material_id = false;
   bool visible = true;
+  bool shadow_visible = true;
 };
 
 }  // namespace karma::components

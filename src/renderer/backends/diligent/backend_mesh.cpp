@@ -83,46 +83,54 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
     record.emissive_srv = default_emissive_;
   }
 
-  record.srb.Release();
-  if (!pipeline_state_) {
-    return;
-  }
+  auto initialize_srb = [&](Diligent::IPipelineState* pso,
+                            Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb) {
+    srb.Release();
+    if (!pso) {
+      return;
+    }
 
-  pipeline_state_->CreateShaderResourceBinding(&record.srb, true);
-  if (!record.srb) {
-    return;
-  }
+    pso->CreateShaderResourceBinding(&srb, true);
+    if (!srb) {
+      return;
+    }
 
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
-    var->Set(sampler_color_);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
-    var->Set(sampler_data_);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
-    var->Set(record.base_color_srv);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
-    var->Set(record.normal_srv);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
-    var->Set(record.metallic_roughness_srv);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
-    var->Set(record.occlusion_srv);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
-    var->Set(record.emissive_srv);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
-    var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
-    var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
-  }
-  if (auto* var = record.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-    var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
-  }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
+      var->Set(sampler_color_);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
+      var->Set(sampler_data_);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
+      var->Set(record.base_color_srv);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
+      var->Set(record.normal_srv);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
+      var->Set(record.metallic_roughness_srv);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
+      var->Set(record.occlusion_srv);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
+      var->Set(record.emissive_srv);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+      var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+      var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+      var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+    }
+  };
+
+  initialize_srb(pipeline_state_.RawPtr(), record.srb);
+  initialize_srb(transparent_pipeline_state_.RawPtr(), record.transparent_srb);
+  initialize_srb(transparent_double_sided_pipeline_state_.RawPtr(),
+                 record.transparent_double_sided_srb);
 }
 
 DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
@@ -443,9 +451,21 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
                                        material.base_color.g,
                                        material.base_color.b,
                                        material.base_color.a);
-  record.emissive_factor = glm::vec3(0.0f);
-  record.metallic_factor = 1.0f;
-  record.roughness_factor = 1.0f;
+  record.emissive_factor = glm::vec3(material.emissive_color.r,
+                                     material.emissive_color.g,
+                                     material.emissive_color.b);
+  record.metallic_factor = material.metallic;
+  record.roughness_factor = material.roughness;
+  record.normal_scale = material.normal_scale;
+  record.occlusion_strength = material.occlusion_strength;
+  record.shading_model = material.shading_model;
+  record.shell_fresnel_power = material.shell_fresnel_power;
+  record.shell_fresnel_strength = material.shell_fresnel_strength;
+  record.shell_refraction_strength = material.shell_refraction_strength;
+  record.shell_interior_strength = material.shell_interior_strength;
+  record.shell_highlight_strength = material.shell_highlight_strength;
+  record.shell_alpha_boost = material.shell_alpha_boost;
+  record.shell_swirl_strength = material.shell_swirl_strength;
   if (material.base_color_texture != renderer::kInvalidTexture) {
     auto tex_it = textures_.find(material.base_color_texture);
     if (tex_it != textures_.end()) {
@@ -553,6 +573,21 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material, const render
                                            desc.base_color.g,
                                            desc.base_color.b,
                                            desc.base_color.a);
+  it->second.emissive_factor = glm::vec3(desc.emissive_color.r,
+                                         desc.emissive_color.g,
+                                         desc.emissive_color.b);
+  it->second.metallic_factor = desc.metallic;
+  it->second.roughness_factor = desc.roughness;
+  it->second.normal_scale = desc.normal_scale;
+  it->second.occlusion_strength = desc.occlusion_strength;
+  it->second.shading_model = desc.shading_model;
+  it->second.shell_fresnel_power = desc.shell_fresnel_power;
+  it->second.shell_fresnel_strength = desc.shell_fresnel_strength;
+  it->second.shell_refraction_strength = desc.shell_refraction_strength;
+  it->second.shell_interior_strength = desc.shell_interior_strength;
+  it->second.shell_highlight_strength = desc.shell_highlight_strength;
+  it->second.shell_alpha_boost = desc.shell_alpha_boost;
+  it->second.shell_swirl_strength = desc.shell_swirl_strength;
   it->second.base_color_srv = {};
   if (desc.base_color_texture != renderer::kInvalidTexture) {
     auto tex_it = textures_.find(desc.base_color_texture);
@@ -734,7 +769,9 @@ void DiligentBackend::recreateRenderTargetResources(RenderTargetRecord& record, 
   record.color_srv.Release();
   record.color_rtv.Release();
   record.depth_texture.Release();
+  record.depth_srv.Release();
   record.depth_dsv.Release();
+  record.depth_read_only_dsv.Release();
   record.width = 0;
   record.height = 0;
 
@@ -772,10 +809,15 @@ void DiligentBackend::recreateRenderTargetResources(RenderTargetRecord& record, 
     depth_desc.MipLevels = 1;
     depth_desc.Format = record.desc.stencil ? Diligent::TEX_FORMAT_D24_UNORM_S8_UINT
                                             : Diligent::TEX_FORMAT_D32_FLOAT;
-    depth_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL;
+    depth_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
     device_->CreateTexture(depth_desc, nullptr, &record.depth_texture);
     if (record.depth_texture) {
+      record.depth_srv = record.depth_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
       record.depth_dsv = record.depth_texture->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
+      Diligent::TextureViewDesc read_only_dsv_desc{};
+      read_only_dsv_desc.ViewType = Diligent::TEXTURE_VIEW_READ_ONLY_DEPTH_STENCIL;
+      read_only_dsv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D;
+      record.depth_texture->CreateView(read_only_dsv_desc, &record.depth_read_only_dsv);
     }
   }
 

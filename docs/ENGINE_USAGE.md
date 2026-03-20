@@ -39,6 +39,23 @@ cmake -B build \
 cmake --build build --target karma_network_demo
 ```
 
+## Renderer Diagnostics
+For Vulkan-side renderer debugging, Karma exposes two environment variables:
+
+```bash
+KARMA_VK_VALIDATION=1
+KARMA_DILIGENT_DEBUG=1
+```
+
+- `KARMA_VK_VALIDATION=1` enables Diligent's Vulkan validation path and shader buffer size checks.
+- `KARMA_DILIGENT_DEBUG=1` forwards Diligent debug messages to stderr without enabling Vulkan validation.
+
+Typical crash or hang triage run:
+
+```bash
+KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/karma_laser_example
+```
+
 ## Basic App Structure
 ```cpp
 class MyGame : public karma::app::GameInterface {
@@ -98,6 +115,15 @@ that owns its UI system and submits draw data into `UIContext` each frame:
 - `UIContext::createTextureRGBA8(...)` for UI textures
 
 The engine renders your UI draw lists on top of the 3D frame.
+
+## Particle Effects
+
+Particle effects are ECS-driven through `ParticleLibrary`,
+`ParticleEffectComponent`, `ParticleEffectOverrideComponent`, and
+`ParticleSystem`.
+
+For the intended registration/binding/restart workflow, see
+[PARTICLE_SYSTEM.md](PARTICLE_SYSTEM.md).
 
 ## ECS Point Containment Queries
 Karma exposes ECS-facing point containment helpers in `karma/ecs/collider_queries.h`:

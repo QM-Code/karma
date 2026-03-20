@@ -63,6 +63,8 @@ struct DrawConstants {
   float local_light_color_intensity[64][4];
   float local_light_spot_params[64][4];
   float local_light_meta[4];
+  float material_params0[4];
+  float material_params1[4];
 };
 
 struct ForwardPlusComputeConstants {

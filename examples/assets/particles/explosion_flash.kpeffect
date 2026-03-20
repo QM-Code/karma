@@ -1,0 +1,46 @@
+# Additive flash pass for the replayable explosion.
+layer = 0
+depth_test = false
+blend_mode = additive
+use_soft_mask = false
+texture = glow_atlas
+
+enabled = true
+playing = true
+loop = false
+emit_burst_on_start = true
+
+atlas_columns = 4
+atlas_rows = 1
+atlas_frame_count = 4
+animate_over_lifetime = true
+random_start_frame = false
+
+max_particles = 20
+burst_count = 5
+seed = 1901
+spawn_rate = 0.0
+duration = 0.0
+particle_lifetime_min = 0.20
+particle_lifetime_max = 0.32
+start_size_min = 4.2
+start_size_max = 5.7
+end_size_min = 0.68
+end_size_max = 1.05
+size_curve_exponent = 0.48
+alpha_curve_exponent = 0.34
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -4.0
+angular_velocity_max = 4.0
+spawn_shape = sphere
+spawn_radius_min = 0.08
+spawn_radius_max = 0.36
+radial_speed_min = 0.35
+radial_speed_max = 1.50
+velocity_min = -0.16, 0.18, -0.16
+velocity_max = 0.16, 0.58, 0.16
+acceleration = 0.0, -0.1, 0.0
+drag = 1.8
+start_color = 1.0, 0.90, 0.52, 0.95
+end_color = 1.0, 0.20, 0.04, 0.0

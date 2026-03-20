@@ -34,6 +34,7 @@ class GraphicsDevice {
   void destroyRenderTarget(RenderTargetId target);
 
   void submit(const DrawItem& item);
+  void submitParticles(const ParticleBatch& batch);
   void retireInstance(InstanceId instance);
   void renderLayer(LayerId layer, RenderTargetId target = kDefaultRenderTarget);
   void drawLine(const math::Vec3& start, const math::Vec3& end, const math::Color& color,

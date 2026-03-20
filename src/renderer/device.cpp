@@ -112,6 +112,12 @@ void GraphicsDevice::submit(const DrawItem& item) {
   }
 }
 
+void GraphicsDevice::submitParticles(const ParticleBatch& batch) {
+  if (backend_) {
+    backend_->submitParticles(batch);
+  }
+}
+
 void GraphicsDevice::retireInstance(InstanceId instance) {
   if (backend_) {
     backend_->retireInstance(instance);

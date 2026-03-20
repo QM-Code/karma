@@ -1,0 +1,48 @@
+# Alpha shell layer for the particle-first energy orb.
+layer = 0
+depth_test = true
+blend_mode = alpha
+alignment = billboard
+shading_mode = shell
+use_soft_mask = false
+texture = orb_shell_atlas
+fresnel_power = 4.6
+fresnel_strength = 1.34
+refraction_strength = 7.0
+interior_glow = 0.28
+
+enabled = true
+playing = true
+loop = true
+emit_burst_on_start = true
+
+atlas_columns = 6
+atlas_rows = 1
+atlas_frame_count = 6
+animate_over_lifetime = true
+random_start_frame = false
+
+max_particles = 4
+burst_count = 1
+seed = 5101
+spawn_rate = 1.9
+duration = 0.0
+particle_lifetime_min = 0.86
+particle_lifetime_max = 1.08
+start_size_min = 2.78
+start_size_max = 2.96
+end_size_min = 2.96
+end_size_max = 3.12
+size_curve_exponent = 0.86
+alpha_curve_exponent = 1.02
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -0.10
+angular_velocity_max = 0.10
+spawn_box_extents = 0.0, 0.0, 0.0
+velocity_min = -0.01, -0.01, -0.01
+velocity_max = 0.01, 0.01, 0.01
+acceleration = 0.0, 0.0, 0.0
+drag = 3.8
+start_color = 0.86, 0.96, 1.0, 0.66
+end_color = 0.76, 0.93, 1.0, 0.24

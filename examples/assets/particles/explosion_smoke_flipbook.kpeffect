@@ -1,0 +1,51 @@
+# Authored late smoke volume using the Explosion01 light-no-fire sequence.
+layer = 0
+depth_test = true
+blend_mode = alpha
+use_soft_mask = false
+soft_particle_distance = 1.45
+texture = explosion01_smoke_flipbook
+
+enabled = true
+playing = true
+loop = false
+emit_burst_on_start = true
+
+atlas_columns = 5
+atlas_rows = 5
+atlas_frame_count = 25
+atlas_frame_width = 200
+atlas_frame_height = 200
+atlas_border = 4
+atlas_spacing = 4
+animate_over_lifetime = true
+random_start_frame = false
+
+max_particles = 6
+burst_count = 5
+seed = 7751
+spawn_rate = 0.0
+duration = 0.0
+particle_lifetime_min = 1.70
+particle_lifetime_max = 2.45
+start_size_min = 4.28
+start_size_max = 6.15
+end_size_min = 12.30
+end_size_max = 16.95
+size_curve_exponent = 0.42
+alpha_curve_exponent = 1.40
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -0.10
+angular_velocity_max = 0.10
+spawn_shape = sphere
+spawn_radius_min = 0.18
+spawn_radius_max = 0.69
+radial_speed_min = 0.35
+radial_speed_max = 1.20
+velocity_min = -0.28, 1.10, -0.28
+velocity_max = 0.28, 2.45, 0.28
+acceleration = 0.0, 0.42, 0.0
+drag = 0.14
+start_color = 0.80, 0.80, 0.80, 0.42
+end_color = 0.16, 0.16, 0.16, 0.0

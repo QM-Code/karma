@@ -5,6 +5,7 @@
 #include "karma/physics/physics_world.hpp"
 #include "karma/renderer/device.h"
 #include "karma/renderer/material_library.h"
+#include "karma/particles/effect_library.h"
 #include "karma/scene/scene.h"
 
 namespace karma::app {
@@ -26,18 +27,21 @@ class GameInterface {
   physics::World* physics = nullptr;
   renderer::GraphicsDevice* graphics = nullptr;
   renderer::MaterialLibrary* materials = nullptr;
+  particles::ParticleLibrary* particle_effects = nullptr;
 
   private:
   friend class EngineApp;
   void bindContext(ecs::World& world, scene::Scene& scene, input::InputSystem& input,
                    physics::World& physics, renderer::GraphicsDevice* graphics,
-                   renderer::MaterialLibrary& materials) {
+                   renderer::MaterialLibrary& materials,
+                   particles::ParticleLibrary& particle_effects) {
     this->world = &world;
     this->scene = &scene;
     this->input = &input;
     this->physics = &physics;
     this->graphics = graphics;
     this->materials = &materials;
+    this->particle_effects = &particle_effects;
   }
 
   float render_interpolation_alpha_ = 1.0f;

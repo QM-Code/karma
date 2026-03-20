@@ -41,6 +41,23 @@ struct MaterialDesc {
   std::filesystem::path vertex_shader_path;
   std::filesystem::path fragment_shader_path;
   math::Color base_color{1.0f, 1.0f, 1.0f, 1.0f};
+  math::Color emissive_color{0.0f, 0.0f, 0.0f, 1.0f};
+  float metallic = 1.0f;
+  float roughness = 1.0f;
+  float normal_scale = 1.0f;
+  float occlusion_strength = 1.0f;
+  enum class ShadingModel : uint32_t {
+    Standard = 0,
+    EnergyShell = 1,
+  };
+  ShadingModel shading_model = ShadingModel::Standard;
+  float shell_fresnel_power = 5.0f;
+  float shell_fresnel_strength = 1.0f;
+  float shell_refraction_strength = 0.08f;
+  float shell_interior_strength = 0.4f;
+  float shell_highlight_strength = 1.0f;
+  float shell_alpha_boost = 0.0f;
+  float shell_swirl_strength = 0.0f;
   TextureId base_color_texture = kInvalidTexture;
   bool unlit = false;
   bool transparent = false;
@@ -130,6 +147,51 @@ struct DrawItem {
   LayerId layer = 0;
   bool visible = true;
   bool shadow_visible = true;
+};
+
+enum class ParticleBlendMode : uint32_t {
+  Additive = 0,
+  Alpha = 1,
+  Distortion = 2,
+};
+
+enum class ParticleAlignment : uint32_t {
+  Billboard = 0,
+  Ground = 1,
+};
+
+enum class ParticleShadingMode : uint32_t {
+  Standard = 0,
+  Shell = 1,
+};
+
+struct ParticleInstance {
+  glm::vec3 position{0.0f, 0.0f, 0.0f};
+  float size = 1.0f;
+  math::Color color{1.0f, 1.0f, 1.0f, 1.0f};
+  float rotation_radians = 0.0f;
+  glm::vec2 uv_min{0.0f, 0.0f};
+  glm::vec2 uv_max{1.0f, 1.0f};
+  glm::vec2 uv_min_next{0.0f, 0.0f};
+  glm::vec2 uv_max_next{1.0f, 1.0f};
+  float frame_blend = 0.0f;
+};
+
+struct ParticleBatch {
+  LayerId layer = 0;
+  bool depth_test = true;
+  TextureId texture = kInvalidTexture;
+  ParticleBlendMode blend_mode = ParticleBlendMode::Additive;
+  ParticleAlignment alignment = ParticleAlignment::Billboard;
+  ParticleShadingMode shading_mode = ParticleShadingMode::Standard;
+  bool use_soft_mask = true;
+  float soft_particle_distance = 0.0f;
+  float distortion_strength = 0.0f;
+  float fresnel_power = 4.0f;
+  float fresnel_strength = 1.0f;
+  float refraction_strength = 0.0f;
+  float interior_glow = 0.0f;
+  std::vector<ParticleInstance> particles;
 };
 
 struct FrameInfo {

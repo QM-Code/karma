@@ -12,7 +12,10 @@
 #include "karma/input/input_system.h"
 #include "karma/audio/audio.h"
 #include "karma/audio/audio_system.h"
+#include "karma/beams/beam_path_system.h"
 #include "karma/platform/window.h"
+#include "karma/particles/effect_library.h"
+#include "karma/particles/particle_system.h"
 #include "karma/app/ui_context.h"
 #include "karma/physics/physics_world.hpp"
 #include "karma/physics/physics_system.h"
@@ -90,12 +93,15 @@ class EngineApp {
   input::InputSystem input_;
   std::unique_ptr<renderer::GraphicsDevice> graphics_;
   std::unique_ptr<renderer::RenderSystem> render_system_;
+  std::unique_ptr<beams::BeamPathSystem> beam_path_system_;
+  std::unique_ptr<particles::ParticleSystem> particle_system_;
   audio::Audio audio_;
   std::unique_ptr<audio::AudioSystem> audio_system_;
   physics::World physics_;
   ecs::World world_;
   scene::Scene scene_;
   renderer::MaterialLibrary materials_;
+  particles::ParticleLibrary particle_effects_;
   systems::SystemGraph systems_;
   EngineConfig config_{};
   std::unique_ptr<UiLayer> user_ui_;

@@ -343,6 +343,9 @@ set(KARMA_SOURCES
   src/physics/physics_world.cpp
   src/physics/physics_system.cpp
   src/geometry/mesh_loader.cpp
+  src/beams/beam_path_system.cpp
+  src/particles/effect_library.cpp
+  src/particles/particle_system.cpp
 )
 
 if (KARMA_BUILD_DEBUG_UI)
@@ -521,6 +524,30 @@ if (NOT KARMA_HEADLESS)
   target_link_libraries(karma_glb_scene_import_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_glb_scene_import_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_particle_example
+    examples/particle_example.cpp
+  )
+  target_link_libraries(karma_particle_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_particle_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_energy_orb_example
+    examples/energy_orb_example.cpp
+  )
+  target_link_libraries(karma_energy_orb_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_energy_orb_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_laser_example
+    examples/laser_example.cpp
+  )
+  target_link_libraries(karma_laser_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_laser_example karma_fix_xxhash)
   endif()
 
   if (KARMA_BUILD_IMGUI_DEMO)

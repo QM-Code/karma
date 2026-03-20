@@ -65,6 +65,9 @@ void EngineApp::initSubsystems() {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
     graphics_->setVsync(config_.vsync);
     render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_, materials_);
+    beam_path_system_ = std::make_unique<beams::BeamPathSystem>(graphics_.get());
+    particle_system_ =
+        std::make_unique<particles::ParticleSystem>(graphics_.get(), &particle_effects_);
   }
 
   systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
@@ -92,6 +95,12 @@ void EngineApp::warmUpRenderer() {
   frame.height = fb_height;
   frame.delta_time = 0.0f;
   graphics_->beginFrame(frame);
+  if (beam_path_system_) {
+    beam_path_system_->update(world_, 0.0f, 1.0f);
+  }
+  if (particle_system_) {
+    particle_system_->update(world_, 0.0f, 1.0f);
+  }
   render_system_->update(world_, scene_, 0.0f, 1.0f);
   graphics_->renderLayer(0);
   graphics_->endFrame();
@@ -111,6 +120,8 @@ void EngineApp::shutdownSubsystems() {
 #endif
   user_ui_context_ = {};
   render_system_.reset();
+  beam_path_system_.reset();
+  particle_system_.reset();
   graphics_.reset();
   window_.reset();
   running_ = false;
@@ -169,7 +180,13 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   running_ = true;
   accumulator_ = 0.0f;
   last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
-  game_->bindContext(world_, scene_, input_, physics_, graphics_.get(), materials_);
+  game_->bindContext(world_,
+                     scene_,
+                     input_,
+                     physics_,
+                     graphics_.get(),
+                     materials_,
+                     particle_effects_);
   game_->onStart();
   if (graphics_) {
     graphics_->setEnvironmentMap(config_.environment_map,
@@ -300,6 +317,12 @@ void EngineApp::tick() {
     frame.height = fb_height;
     frame.delta_time = frame_dt;
     graphics_->beginFrame(frame);
+    if (beam_path_system_) {
+      beam_path_system_->update(world_, frame_dt, render_alpha);
+    }
+    if (particle_system_) {
+      particle_system_->update(world_, frame_dt, render_alpha);
+    }
     render_system_->update(world_, scene_, frame_dt, render_alpha);
     graphics_->renderLayer(0);
     if (user_ui_) {

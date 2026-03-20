@@ -191,6 +191,9 @@ bool applyEffectField(ParticleEffectDesc& desc,
   if (key == "emit_burst_on_start") {
     return parseBool(raw_value, emitter.emit_burst_on_start);
   }
+  if (key == "local_space") {
+    return parseBool(raw_value, emitter.local_space);
+  }
   if (key == "layer") {
     return parseNumber(raw_value, emitter.layer);
   }

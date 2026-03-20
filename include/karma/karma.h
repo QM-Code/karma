@@ -34,6 +34,7 @@
 #include "karma/particles/effect_api.h"
 #include "karma/particles/particle_system.h"
 #include "karma/prefabs/effect_prefab.h"
+#include "karma/prefabs/effect_prefab_registry.h"
 #include "karma/prefabs/effect_prefab_system.h"
 #include "karma/renderer/device.h"
 #include "karma/renderer/material_library.h"

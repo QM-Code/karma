@@ -14,6 +14,7 @@ enum class EffectPrefabMemberKind : uint8_t {
   Mesh = 0,
   Particle = 1,
   Light = 2,
+  Beam = 3,
 };
 
 struct EffectPrefabInstanceComponent : ecs::ComponentTag {
@@ -28,6 +29,7 @@ struct EffectPrefabMemberComponent : ecs::ComponentTag {
   TransformComponent local_transform{};
   EffectPrefabMemberKind kind = EffectPrefabMemberKind::Mesh;
   bool mesh_visible = true;
+  bool beam_visible = true;
   float light_intensity = 0.0f;
   float light_range = 0.0f;
 };

@@ -10,6 +10,7 @@ enabled = true
 playing = true
 loop = true
 emit_burst_on_start = true
+local_space = true
 
 atlas_columns = 6
 atlas_rows = 1

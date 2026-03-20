@@ -3,6 +3,7 @@
 #include "karma/ecs/world.h"
 #include "karma/input/input_system.h"
 #include "karma/physics/physics_world.hpp"
+#include "karma/prefabs/effect_prefab_registry.h"
 #include "karma/renderer/device.h"
 #include "karma/renderer/material_library.h"
 #include "karma/particles/effect_library.h"
@@ -28,13 +29,15 @@ class GameInterface {
   renderer::GraphicsDevice* graphics = nullptr;
   renderer::MaterialLibrary* materials = nullptr;
   particles::ParticleLibrary* particle_effects = nullptr;
+  prefabs::EffectPrefabRegistry* prefab_registry = nullptr;
 
   private:
   friend class EngineApp;
   void bindContext(ecs::World& world, scene::Scene& scene, input::InputSystem& input,
                    physics::World& physics, renderer::GraphicsDevice* graphics,
                    renderer::MaterialLibrary& materials,
-                   particles::ParticleLibrary& particle_effects) {
+                   particles::ParticleLibrary& particle_effects,
+                   prefabs::EffectPrefabRegistry& prefab_registry) {
     this->world = &world;
     this->scene = &scene;
     this->input = &input;
@@ -42,6 +45,7 @@ class GameInterface {
     this->graphics = graphics;
     this->materials = &materials;
     this->particle_effects = &particle_effects;
+    this->prefab_registry = &prefab_registry;
   }
 
   float render_interpolation_alpha_ = 1.0f;

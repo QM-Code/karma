@@ -12,6 +12,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
+#include "karma/beams/beam_path_api.h"
 #include "karma/math/quat.h"
 #include "karma/particles/effect_api.h"
 
@@ -83,14 +84,18 @@ bool parseBool(std::string_view text, bool& out_value) {
   return false;
 }
 
-std::vector<std::string> splitCommaSeparated(std::string_view text) {
+std::vector<std::string> splitSeparated(std::string_view text, char delimiter) {
   std::vector<std::string> values;
   std::stringstream stream(trim(text));
   std::string part;
-  while (std::getline(stream, part, ',')) {
+  while (std::getline(stream, part, delimiter)) {
     values.push_back(trim(part));
   }
   return values;
+}
+
+std::vector<std::string> splitCommaSeparated(std::string_view text) {
+  return splitSeparated(text, ',');
 }
 
 bool parseVec3(std::string_view text, math::Vec3& out_value) {
@@ -112,6 +117,22 @@ bool parseColor(std::string_view text, math::Color& out_value) {
          parseNumber(parts[1], out_value.g) &&
          parseNumber(parts[2], out_value.b) &&
          parseNumber(parts[3], out_value.a);
+}
+
+bool parseVec3List(std::string_view text, std::vector<math::Vec3>& out_points) {
+  std::vector<math::Vec3> points;
+  for (const std::string& raw_point : splitSeparated(text, ';')) {
+    if (raw_point.empty()) {
+      continue;
+    }
+    math::Vec3 point{};
+    if (!parseVec3(raw_point, point)) {
+      return false;
+    }
+    points.push_back(point);
+  }
+  out_points = std::move(points);
+  return true;
 }
 
 math::Quat eulerDegreesToQuat(const math::Vec3& euler_degrees) {
@@ -506,6 +527,123 @@ bool applyLightField(EffectPrefabEntry& entry,
   return false;
 }
 
+bool applyBeamField(EffectPrefabEntry& entry,
+                    const std::string& key,
+                    const std::string& raw_value,
+                    std::string& out_error) {
+  if (applyTransformField(entry.local_transform, key, raw_value)) {
+    return true;
+  }
+  if (applyColorBindingField(entry.beam.core_color_binding, key, raw_value, "core_color")) {
+    return true;
+  }
+  if (applyColorBindingField(entry.beam.glow_color_binding, key, raw_value, "glow_color")) {
+    return true;
+  }
+
+  auto& beam = entry.beam.beam;
+  if (key == "points") {
+    return parseVec3List(raw_value, beam.points);
+  }
+  if (key == "core_radius") {
+    return parseNumber(raw_value, beam.core_radius);
+  }
+  if (key == "glow_radius") {
+    return parseNumber(raw_value, beam.glow_radius);
+  }
+  if (key == "core_intensity") {
+    return parseNumber(raw_value, beam.core_intensity);
+  }
+  if (key == "glow_intensity") {
+    return parseNumber(raw_value, beam.glow_intensity);
+  }
+  if (key == "endpoint_core_size") {
+    return parseNumber(raw_value, beam.endpoint_core_size);
+  }
+  if (key == "endpoint_glow_size") {
+    return parseNumber(raw_value, beam.endpoint_glow_size);
+  }
+  if (key == "light_count") {
+    int value = 0;
+    if (!parseNumber(raw_value, value) || value < 0) {
+      return false;
+    }
+    beam.light_count = static_cast<uint32_t>(value);
+    return true;
+  }
+  if (key == "light_intensity") {
+    return parseNumber(raw_value, beam.light_intensity);
+  }
+  if (key == "light_range") {
+    return parseNumber(raw_value, beam.light_range);
+  }
+  if (key == "light_spacing") {
+    return parseNumber(raw_value, beam.light_spacing);
+  }
+  if (key == "electric_intensity") {
+    return parseNumber(raw_value, beam.electric_intensity);
+  }
+  if (key == "electric_size") {
+    return parseNumber(raw_value, beam.electric_size);
+  }
+  if (key == "electric_spacing") {
+    return parseNumber(raw_value, beam.electric_spacing);
+  }
+  if (key == "electric_jitter_radius") {
+    return parseNumber(raw_value, beam.electric_jitter_radius);
+  }
+  if (key == "electric_speed") {
+    return parseNumber(raw_value, beam.electric_speed);
+  }
+  if (key == "distortion_intensity") {
+    return parseNumber(raw_value, beam.distortion_intensity);
+  }
+  if (key == "distortion_size") {
+    return parseNumber(raw_value, beam.distortion_size);
+  }
+  if (key == "distortion_spacing") {
+    return parseNumber(raw_value, beam.distortion_spacing);
+  }
+  if (key == "distortion_jitter_radius") {
+    return parseNumber(raw_value, beam.distortion_jitter_radius);
+  }
+  if (key == "distortion_strength") {
+    return parseNumber(raw_value, beam.distortion_strength);
+  }
+  if (key == "distortion_soft_particle_distance") {
+    return parseNumber(raw_value, beam.distortion_soft_particle_distance);
+  }
+  if (key == "distortion_speed") {
+    return parseNumber(raw_value, beam.distortion_speed);
+  }
+  if (key == "layer") {
+    int value = 0;
+    if (!parseNumber(raw_value, value) || value < 0) {
+      return false;
+    }
+    beam.layer = static_cast<renderer::LayerId>(value);
+    return true;
+  }
+  if (key == "visible") {
+    return parseBool(raw_value, beam.visible);
+  }
+  if (key == "depth_test") {
+    return parseBool(raw_value, beam.depth_test);
+  }
+  if (key == "closed_loop") {
+    return parseBool(raw_value, beam.closed_loop);
+  }
+  if (key == "world_space") {
+    return parseBool(raw_value, beam.world_space);
+  }
+  if (key == "endpoint_flares") {
+    return parseBool(raw_value, beam.endpoint_flares);
+  }
+
+  out_error = "unknown beam field '" + key + "'";
+  return false;
+}
+
 bool applyPrefabField(EffectPrefab& prefab,
                       const std::string& key,
                       const std::string& raw_value,
@@ -655,6 +793,30 @@ ecs::Entity createLightEntity(ecs::World& world,
   return entity;
 }
 
+ecs::Entity createBeamEntity(ecs::World& world,
+                             const EffectPrefabEntry& entry,
+                             const std::string& entity_name,
+                             const components::TransformComponent& world_transform,
+                             const std::unordered_map<std::string, math::Color>& resolved_params) {
+  components::BeamPathComponent beam = entry.beam.beam;
+  if (entry.beam.core_color_binding.enabled) {
+    beam.core_color =
+        resolveColorBinding(entry.beam.core_color_binding, resolved_params, beam.core_color);
+  }
+  if (entry.beam.glow_color_binding.enabled) {
+    beam.glow_color =
+        resolveColorBinding(entry.beam.glow_color_binding, resolved_params, beam.glow_color);
+  }
+
+  return beams::createBeamPathEntity(
+      world,
+      beams::BeamPathEntityDesc{
+          .name = entity_name,
+          .transform = world_transform,
+          .beam = std::move(beam),
+      });
+}
+
 }  // namespace
 
 bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefab) {
@@ -728,6 +890,8 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
         entry.type = EffectPrefabEntry::Type::Particle;
       } else if (section_kind == "light") {
         entry.type = EffectPrefabEntry::Type::Light;
+      } else if (section_kind == "beam") {
+        entry.type = EffectPrefabEntry::Type::Beam;
       } else {
         spdlog::error("Effect prefab parse failed: {}:{} unknown section '{}'",
                       path.string(),
@@ -784,6 +948,9 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
             break;
           case EffectPrefabEntry::Type::Light:
             ok = applyLightField(entry, key, value, parse_error);
+            break;
+          case EffectPrefabEntry::Type::Beam:
+            ok = applyBeamField(entry, key, value, parse_error);
             break;
         }
         break;
@@ -857,6 +1024,9 @@ std::optional<EffectPrefabInstance> instantiateEffectPrefab(
       case EffectPrefabEntry::Type::Light:
         member = createLightEntity(world, entry, entity_name, world_transform, resolved_params);
         break;
+      case EffectPrefabEntry::Type::Beam:
+        member = createBeamEntity(world, entry, entity_name, world_transform, resolved_params);
+        break;
     }
 
     if (!member.isValid()) {
@@ -879,6 +1049,10 @@ std::optional<EffectPrefabInstance> instantiateEffectPrefab(
         member_component.kind = components::EffectPrefabMemberKind::Light;
         member_component.light_intensity = entry.light.light.intensity;
         member_component.light_range = entry.light.light.range;
+        break;
+      case EffectPrefabEntry::Type::Beam:
+        member_component.kind = components::EffectPrefabMemberKind::Beam;
+        member_component.beam_visible = entry.beam.beam.visible;
         break;
     }
     world.add(member, std::move(member_component));
@@ -923,6 +1097,10 @@ bool setPrefabPlayback(ecs::World& world, ecs::Entity root, bool enabled) {
           world.has<components::MeshComponent>(member)) {
         world.get<components::MeshComponent>(member).visible =
             enabled && prefab_member.mesh_visible;
+      } else if (prefab_member.kind == components::EffectPrefabMemberKind::Beam &&
+                 world.has<components::BeamPathComponent>(member)) {
+        world.get<components::BeamPathComponent>(member).visible =
+            enabled && prefab_member.beam_visible;
       } else if (prefab_member.kind == components::EffectPrefabMemberKind::Light &&
                  world.has<components::LightComponent>(member)) {
         auto& light = world.get<components::LightComponent>(member);

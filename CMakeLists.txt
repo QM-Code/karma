@@ -347,6 +347,7 @@ set(KARMA_SOURCES
   src/particles/effect_library.cpp
   src/particles/particle_system.cpp
   src/prefabs/effect_prefab.cpp
+  src/prefabs/effect_prefab_registry.cpp
   src/prefabs/effect_prefab_system.cpp
 )
 
@@ -538,6 +539,7 @@ if (NOT KARMA_HEADLESS)
 
   add_executable(karma_energy_orb_example
     examples/energy_orb_example.cpp
+    examples/energy_orb_prefab_package.cpp
   )
   target_link_libraries(karma_energy_orb_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
@@ -550,6 +552,14 @@ if (NOT KARMA_HEADLESS)
   target_link_libraries(karma_laser_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_laser_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_laser_prefab_example
+    examples/laser_prefab_example.cpp
+  )
+  target_link_libraries(karma_laser_prefab_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_laser_prefab_example karma_fix_xxhash)
   endif()
 
   if (KARMA_BUILD_IMGUI_DEMO)

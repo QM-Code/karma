@@ -4,11 +4,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
 
 #include <glm/glm.hpp>
+#include <spdlog/spdlog.h>
 
 namespace karma::demo {
 
@@ -217,52 +219,33 @@ class LaserExample final : public app::GameInterface {
   }
 
   void spawnBeam() {
-    beams::createBeamPathEntity(
+    const auto beam = prefabs::instantiateEffectPrefab(
         *world,
-        beams::BeamPathEntityDesc{
+        graphics,
+        resolveExampleAssetPath("prefabs/laser_path.kprefab"),
+        prefabs::EffectPrefabInstantiateDesc{
             .name = "Laser Path",
-            .transform = components::TransformComponent{},
-            .beam =
-                components::BeamPathComponent{
-                    .points = beam_points_,
-                    .core_color = kBeamCoreColor,
-                    .glow_color = kBeamGlowColor,
-                    .core_radius = 0.21f,
-                    .glow_radius = 0.56f,
-                    .core_intensity = 2.4f,
-                    .glow_intensity = 1.45f,
-                    .endpoint_core_size = 0.42f,
-                    .endpoint_glow_size = 1.12f,
-                    .light_count = 0,
-                    .light_intensity = 1.2f,
-                    .light_range = 5.2f,
-                    .light_spacing = 1.0f,
-                    .electric_intensity = 0.9f,
-                    .electric_size = 0.16f,
-                    .electric_spacing = 0.28f,
-                    .electric_jitter_radius = 0.15f,
-                    .electric_speed = 2.0f,
-                    .distortion_intensity = 0.82f,
-                    .distortion_size = 1.28f,
-                    .distortion_spacing = 0.18f,
-                    .distortion_jitter_radius = 0.08f,
-                    .distortion_strength = 18.0f,
-                    .distortion_soft_particle_distance = 0.72f,
-                    .distortion_speed = 1.85f,
-                    .layer = 0,
-                    .visible = true,
-                    .depth_test = true,
-                    .closed_loop = false,
-                    .world_space = true,
-                    .endpoint_flares = true,
-                },
         });
+    if (!beam.has_value()) {
+      spdlog::error("Laser example failed to instantiate beam prefab");
+      return;
+    }
+
+    beam_entity_ = beam->find("beam");
+    if (!beam_entity_.isValid()) {
+      spdlog::error("Laser example beam prefab is missing the 'beam' member");
+      return;
+    }
+
+    beams::setBeamPathPoints(*world, beam_entity_, beam_points_);
+    beams::setBeamPathColors(*world, beam_entity_, kBeamCoreColor, kBeamGlowColor);
   }
 
   std::vector<math::Vec3> beam_points_;
   std::string world_mesh_;
   std::string environment_map_;
   ecs::Entity camera_entity_{};
+  ecs::Entity beam_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;

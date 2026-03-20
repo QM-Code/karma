@@ -60,6 +60,10 @@ karma::beams::createBeamPathEntity(
 To update an existing beam, call `setBeamPathPoints(...)`,
 `setBeamPathColors(...)`, or `setBeamPathVisible(...)`.
 
+Beam paths can also be authored inside a `.kprefab` through a `[beam name]`
+section, then driven at runtime by looking up the named member and calling
+`setBeamPathPoints(...)` or `setBeamPathColors(...)`.
+
 ## Runtime
 
 The engine-owned
@@ -74,3 +78,5 @@ builds and updates the render data automatically:
 
 The current end-to-end sample is
 [laser_example.cpp](/home/irie/Documents/karma/examples/laser_example.cpp).
+For the minimal prefab-only path, see
+[laser_prefab_example.cpp](/home/irie/Documents/karma/examples/laser_prefab_example.cpp).

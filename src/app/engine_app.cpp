@@ -61,6 +61,7 @@ void EngineApp::initSubsystems() {
 
   input_.setWindow(window_.get());
   effect_prefab_system_ = std::make_unique<prefabs::EffectPrefabSystem>();
+  effect_prefab_registry_ = std::make_unique<prefabs::EffectPrefabRegistry>();
 
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
@@ -125,6 +126,11 @@ void EngineApp::shutdownSubsystems() {
   user_ui_context_ = {};
   render_system_.reset();
   effect_prefab_system_.reset();
+  if (effect_prefab_registry_) {
+    effect_prefab_registry_->shutdown();
+    effect_prefab_registry_->clearContext();
+  }
+  effect_prefab_registry_.reset();
   beam_path_system_.reset();
   particle_system_.reset();
   graphics_.reset();
@@ -191,7 +197,15 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      physics_,
                      graphics_.get(),
                      materials_,
-                     particle_effects_);
+                     particle_effects_,
+                     *effect_prefab_registry_);
+  if (effect_prefab_registry_) {
+    effect_prefab_registry_->bindContext(prefabs::EffectPrefabPackageContext{
+        .graphics = graphics_.get(),
+        .materials = &materials_,
+        .particle_effects = &particle_effects_,
+    });
+  }
   game_->onStart();
   if (graphics_) {
     graphics_->setEnvironmentMap(config_.environment_map,

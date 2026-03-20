@@ -128,13 +128,16 @@ For the intended registration/binding/restart workflow, see
 ## Effect Prefabs
 
 Layered effects that need multiple ECS entities can be authored as `.kprefab`
-files and instantiated with `prefabs::instantiateEffectPrefab(...)`.
+files and instantiated either directly with `prefabs::instantiateEffectPrefab(...)`
+or through `prefabs::EffectPrefabRegistry` when the prefab also needs one-time
+runtime setup such as generated textures or particle registrations.
 
 Use this when one gameplay effect is really a bundle of:
 
 - particle layers
 - mesh shells
 - lights
+- beam-path entities
 
 For the file format and runtime helper API, see
 [EFFECT_PREFABS.md](EFFECT_PREFABS.md).

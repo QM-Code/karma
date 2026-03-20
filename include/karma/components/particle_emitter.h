@@ -18,6 +18,7 @@ struct ParticleEmitterComponent : ecs::ComponentTag {
   bool playing = true;
   bool loop = true;
   bool emit_burst_on_start = true;
+  bool local_space = false;
   renderer::LayerId layer = 0;
   bool depth_test = true;
   renderer::ParticleBlendMode blend_mode = renderer::ParticleBlendMode::Additive;

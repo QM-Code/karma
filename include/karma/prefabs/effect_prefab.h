@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "karma/components/effect_prefab.h"
+#include "karma/components/beam_path.h"
 #include "karma/components/light.h"
 #include "karma/components/mesh.h"
 #include "karma/components/particle_effect_override.h"
@@ -62,11 +63,18 @@ struct EffectPrefabLightDesc {
   EffectPrefabColorBinding color_binding{};
 };
 
+struct EffectPrefabBeamDesc {
+  components::BeamPathComponent beam{};
+  EffectPrefabColorBinding core_color_binding{};
+  EffectPrefabColorBinding glow_color_binding{};
+};
+
 struct EffectPrefabEntry {
   enum class Type : uint8_t {
     Mesh = 0,
     Particle = 1,
     Light = 2,
+    Beam = 3,
   };
 
   Type type = Type::Mesh;
@@ -75,6 +83,7 @@ struct EffectPrefabEntry {
   EffectPrefabMeshDesc mesh{};
   EffectPrefabParticleDesc particle{};
   EffectPrefabLightDesc light{};
+  EffectPrefabBeamDesc beam{};
 };
 
 struct EffectPrefab {

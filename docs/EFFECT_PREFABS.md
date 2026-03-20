@@ -7,6 +7,8 @@ The core pieces are:
 
 - `prefabs::loadEffectPrefab(...)`
 - `prefabs::instantiateEffectPrefab(...)`
+- `prefabs::EffectPrefabRegistry`
+- `prefabs::instantiateRegisteredPrefab(...)`
 - `prefabs::setPrefabPlayback(...)`
 - `prefabs::restartPrefab(...)`
 - `prefabs::EffectPrefabSystem` (engine-owned, updates child transforms)
@@ -19,14 +21,15 @@ entities:
 - one or more particle layers
 - one or more mesh shells
 - one or more lights
+- one or more beam-path entities
 
 Instead of constructing all of that in C++, author it once in a `.kprefab`
 file and instantiate it with one call.
 
 ## Typical Flow
 
-1. Register any shared particle effect keys and texture aliases as usual.
-2. Load or instantiate a `.kprefab`.
+1. Either instantiate a `.kprefab` directly, or register it in an `EffectPrefabRegistry`.
+2. If needed, let the registry prepare package dependencies such as textures or particle keys.
 3. Pass prefab parameters such as colors at instantiate time.
 4. Move the root entity by changing its `TransformComponent`.
 5. Toggle or restart the whole effect through the prefab helper API.
@@ -53,6 +56,81 @@ That creates:
 - one child ECS entity per prefab entry
 - automatic transform syncing from root to children every frame
 
+For a minimal end-to-end usage example, see
+[../examples/laser_prefab_example.cpp](../examples/laser_prefab_example.cpp),
+which sets up a simple scene and instantiates
+[../examples/assets/prefabs/laser_path.kprefab](../examples/assets/prefabs/laser_path.kprefab)
+directly with one call.
+
+## Registry Packages
+
+Use `EffectPrefabRegistry` when a prefab also needs one-time runtime setup,
+for example:
+
+- generated textures
+- particle effect registrations
+- material registrations
+
+The registry owns those package callbacks and can instantiate by prefab key
+instead of file path:
+
+```cpp
+prefab_registry->registerPrefab(
+    "laser_path",
+    prefabs::RegisteredEffectPrefabDesc{
+        .prefab_path = "examples/assets/prefabs/laser_path.kprefab",
+    });
+
+const auto laser = prefab_registry->instantiate(
+    *world,
+    "laser_path",
+    prefabs::EffectPrefabInstantiateDesc{
+        .name = "Laser",
+    });
+```
+
+There is also a free helper:
+
+```cpp
+const auto laser = prefabs::instantiateRegisteredPrefab(
+    *world,
+    *prefab_registry,
+    "laser_path");
+```
+
+## Using The Orb Prefab Today
+
+The orb is now fully packaged behind the registry layer. The reference
+implementation lives in
+[../examples/energy_orb_prefab_package.cpp](../examples/energy_orb_prefab_package.cpp),
+which registers:
+
+- the prefab file
+- generated orb atlas textures
+- the orb particle effect keys and texture aliases
+
+Usage in gameplay code is:
+
+```cpp
+karma::demo::registerEnergyOrbPrefabPackage(*prefab_registry);
+
+const auto orb = prefab_registry->instantiate(
+    *world,
+    karma::demo::kEnergyOrbPrefabKey,
+    prefabs::EffectPrefabInstantiateDesc{
+        .name = "Energy Orb",
+        .transform = transform,
+        .color_overrides = {{"accent", color}},
+    });
+```
+
+The reference implementation is the orb sample in
+[../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp), which:
+
+1. registers the orb package once;
+2. instantiates the prefab by key;
+3. moves and controls the prefab root like any other ECS entity.
+
 ## Runtime Control
 
 ```cpp
@@ -65,6 +143,7 @@ prefabs::restartPrefab(*world, orb->root);
 - mesh visibility
 - particle enabled/playing state
 - light intensity/range
+- beam visibility
 
 ## File Format
 
@@ -77,6 +156,7 @@ Supported sections:
 - `[mesh name]`
 - `[particle name]`
 - `[light name]`
+- `[beam name]`
 
 Comments start with `#`.
 
@@ -130,7 +210,7 @@ effect-specific helper functions such as `createOrb(...)`.
 
 ## Supported Entry Fields
 
-Shared transform fields on mesh/particle/light entries:
+Shared transform fields on mesh/particle/light/beam entries:
 
 - `position`
 - `rotation_deg`
@@ -164,6 +244,40 @@ Light fields:
 - `inner_cone_degrees`
 - `outer_cone_degrees`
 - `shadow_extent`
+
+Beam fields:
+
+- `points`
+- `core_color*`
+- `glow_color*`
+- `core_radius`
+- `glow_radius`
+- `core_intensity`
+- `glow_intensity`
+- `endpoint_core_size`
+- `endpoint_glow_size`
+- `light_count`
+- `light_intensity`
+- `light_range`
+- `light_spacing`
+- `electric_intensity`
+- `electric_size`
+- `electric_spacing`
+- `electric_jitter_radius`
+- `electric_speed`
+- `distortion_intensity`
+- `distortion_size`
+- `distortion_spacing`
+- `distortion_jitter_radius`
+- `distortion_strength`
+- `distortion_soft_particle_distance`
+- `distortion_speed`
+- `layer`
+- `visible`
+- `depth_test`
+- `closed_loop`
+- `world_space`
+- `endpoint_flares`
 
 ## Notes
 

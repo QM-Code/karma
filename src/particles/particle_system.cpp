@@ -77,6 +77,10 @@ float horizontalLengthSquared(const math::Vec3& v) {
   return v.x * v.x + v.z * v.z;
 }
 
+float maxComponent(const math::Vec3& v) {
+  return std::max(v.x, std::max(v.y, v.z));
+}
+
 math::Vec3 randomVec3(uint32_t& state,
                       const math::Vec3& min_v,
                       const math::Vec3& max_v) {
@@ -462,7 +466,9 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     }
 
     auto resolve_ground_collision = [&](Particle& particle) {
-      if (!emitter.collide_with_ground || particle.position.y > emitter.ground_height) {
+      if (emitter.local_space ||
+          !emitter.collide_with_ground ||
+          particle.position.y > emitter.ground_height) {
         return;
       }
 
@@ -531,10 +537,10 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     }
     state.particles.resize(alive_count);
 
-    const math::Vec3 emitter_position =
-        transform.getInterpolatedPosition(interpolation_alpha);
-    const math::Quat emitter_rotation =
-        transform.getInterpolatedRotation(interpolation_alpha);
+    const math::Vec3 emitter_position = transform.getInterpolatedPosition(interpolation_alpha);
+    const math::Quat emitter_rotation = transform.getInterpolatedRotation(interpolation_alpha);
+    const math::Vec3 emitter_scale = transform.getScale();
+    const float emitter_uniform_scale = std::max(maxComponent(emitter_scale), 0.0001f);
 
     auto spawn_particle = [&]() {
       if (state.particles.size() >= state.max_particles) {
@@ -547,8 +553,13 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
                            resolveRadialVelocity(state.rng_state, emitter, local_offset));
 
       Particle particle{};
-      particle.position = add(emitter_position, math::rotateVec(emitter_rotation, local_offset));
-      particle.velocity = math::rotateVec(emitter_rotation, local_velocity);
+      if (emitter.local_space) {
+        particle.position = local_offset;
+        particle.velocity = local_velocity;
+      } else {
+        particle.position = add(emitter_position, math::rotateVec(emitter_rotation, local_offset));
+        particle.velocity = math::rotateVec(emitter_rotation, local_velocity);
+      }
       particle.lifetime = std::max(
           randomRange(state.rng_state, emitter.particle_lifetime_min, emitter.particle_lifetime_max),
           0.01f);
@@ -651,9 +662,20 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
           resolveParticleFrameSelection(emitter, particle.age, t, particle.frame_offset);
       computeAtlasUvRect(emitter, frame_selection.current, uv_min, uv_max);
       computeAtlasUvRect(emitter, frame_selection.next, uv_min_next, uv_max_next);
+      math::Vec3 world_position = particle.position;
+      float world_size = size;
+      if (emitter.local_space) {
+        const math::Vec3 scaled_local = {
+            particle.position.x * emitter_scale.x,
+            particle.position.y * emitter_scale.y,
+            particle.position.z * emitter_scale.z,
+        };
+        world_position = add(emitter_position, math::rotateVec(emitter_rotation, scaled_local));
+        world_size *= emitter_uniform_scale;
+      }
       batch.particles.push_back(renderer::ParticleInstance{
-          .position = glm::vec3(particle.position.x, particle.position.y, particle.position.z),
-          .size = size,
+          .position = glm::vec3(world_position.x, world_position.y, world_position.z),
+          .size = world_size,
           .color = color,
           .rotation_radians = particle.rotation,
           .uv_min = uv_min,

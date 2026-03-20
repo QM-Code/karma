@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <optional>
-#include <utility>
 #include <vector>
 
 namespace karma::demo {
@@ -16,12 +14,7 @@ constexpr float kPi = 3.14159265358979323846f;
 constexpr int kAtlasFrameSize = 128;
 constexpr int kAtlasFrameCount = 6;
 constexpr math::Vec3 kOrbBasePosition{0.0f, 1.85f, 0.0f};
-constexpr float kOrbScale = 0.25f * 0.75f;
-constexpr float kOrbDistortionScale = 0.5f;
-constexpr float kOrbLightScale = 0.75f * 0.5f;
-constexpr float kOrbShellUniformScale = 7.0f * kOrbScale;
 constexpr math::Color kOrbAccentColor{0.18f, 1.0f, 0.28f, 1.0f};
-constexpr math::Color kOrbHotCoreColor{1.0f, 1.0f, 1.0f, 1.0f};
 
 struct Vec2 {
   float x = 0.0f;
@@ -35,29 +28,6 @@ float saturate(float value) {
 float smoothStep01(float value) {
   const float t = saturate(value);
   return t * t * (3.0f - 2.0f * t);
-}
-
-float lerpFloat(float a, float b, float t) {
-  return a + (b - a) * std::clamp(t, 0.0f, 1.0f);
-}
-
-math::Color lerpColor(const math::Color& a, const math::Color& b, float t) {
-  const float s = std::clamp(t, 0.0f, 1.0f);
-  return {
-      lerpFloat(a.r, b.r, s),
-      lerpFloat(a.g, b.g, s),
-      lerpFloat(a.b, b.b, s),
-      lerpFloat(a.a, b.a, s),
-  };
-}
-
-math::Color scaleColor(const math::Color& color, float scale, float alpha = 1.0f) {
-  return {
-      saturate(color.r * scale),
-      saturate(color.g * scale),
-      saturate(color.b * scale),
-      saturate(alpha),
-  };
 }
 
 std::uint8_t toByte(float value) {
@@ -105,43 +75,6 @@ components::TransformComponent makeTransform(const math::Vec3& position) {
   return transform;
 }
 
-components::TransformComponent makeScaledTransform(const math::Vec3& position, float uniform_scale) {
-  components::TransformComponent transform = makeTransform(position);
-  transform.setScale({uniform_scale, uniform_scale, uniform_scale});
-  return transform;
-}
-
-ecs::Entity createParticleEffectEntity(ecs::World& world,
-                                       std::string_view name,
-                                       std::string_view effect_key,
-                                       const math::Vec3& position,
-                                       std::optional<components::ParticleEffectOverrideComponent>
-                                           effect_override = std::nullopt) {
-  return particles::createEffectEntity(world,
-                                       particles::ParticleEffectEntityDesc{
-                                           .name = name,
-                                           .effect_key = effect_key,
-                                           .transform = makeTransform(position),
-                                           .enabled = true,
-                                           .playing = true,
-                                           .effect_override = std::move(effect_override),
-                                       });
-}
-
-void setEntityPositionIfAlive(ecs::World& world, ecs::Entity entity, const math::Vec3& position) {
-  if (!world.isAlive(entity) || !world.has<components::TransformComponent>(entity)) {
-    return;
-  }
-  world.get<components::TransformComponent>(entity).setPosition(position);
-}
-
-void setMeshVisibilityIfAlive(ecs::World& world, ecs::Entity entity, bool visible) {
-  if (!world.isAlive(entity) || !world.has<components::MeshComponent>(entity)) {
-    return;
-  }
-  world.get<components::MeshComponent>(entity).visible = visible;
-}
-
 void destroyTextureIfValid(renderer::GraphicsDevice* graphics, renderer::TextureId& texture) {
   if (graphics == nullptr || texture == renderer::kInvalidTexture) {
     return;
@@ -150,9 +83,7 @@ void destroyTextureIfValid(renderer::GraphicsDevice* graphics, renderer::Texture
   texture = renderer::kInvalidTexture;
 }
 
-std::vector<std::uint8_t> buildOrbCoreAtlas(int frame_size,
-                                            int frame_count,
-                                            const math::Color& accent_color) {
+std::vector<std::uint8_t> buildOrbCoreAtlas(int frame_size, int frame_count) {
   const int width = frame_size * frame_count;
   const int height = frame_size;
   std::vector<std::uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u,
@@ -183,21 +114,20 @@ std::vector<std::uint8_t> buildOrbCoreAtlas(int frame_size,
         const float plasma = core * (0.28f + 0.38f * swirl_a + 0.24f * swirl_b + 0.22f * turbulence);
         const float hotspot =
             std::exp(-((px * 0.74f) * (px * 0.74f) + (py * 1.05f) * (py * 1.05f)) * 7.5f);
-        const float filament =
-            smoothStep01(saturate(1.0f - std::abs(std::sin(angle * 3.5f + radius * 10.0f - t * 10.5f)) * (0.45f + radius * 0.8f)));
+        const float filament = smoothStep01(
+            saturate(1.0f - std::abs(std::sin(angle * 3.5f + radius * 10.0f - t * 10.5f)) *
+                                 (0.45f + radius * 0.8f)));
 
         const float intensity = saturate(plasma + hotspot * 0.65f + filament * core * 0.18f);
         const float alpha = saturate(intensity * (0.75f + core * 0.35f));
-        const float hot_mix = saturate(hotspot * 0.82f + core * 0.34f + filament * 0.16f);
-        const math::Color edge_color = scaleColor(accent_color, 0.36f + intensity * 0.64f);
-        const math::Color final_color = lerpColor(edge_color, kOrbHotCoreColor, hot_mix);
+        const float value = saturate(intensity * 0.72f + hotspot * 0.28f);
 
         const size_t dst_x = static_cast<size_t>(frame * frame_size + x);
         const size_t dst_index =
             (static_cast<size_t>(y) * static_cast<size_t>(width) + dst_x) * 4u;
-        pixels[dst_index + 0u] = toByte(final_color.r);
-        pixels[dst_index + 1u] = toByte(final_color.g);
-        pixels[dst_index + 2u] = toByte(final_color.b);
+        pixels[dst_index + 0u] = toByte(value);
+        pixels[dst_index + 1u] = toByte(value);
+        pixels[dst_index + 2u] = toByte(value);
         pixels[dst_index + 3u] = toByte(alpha);
       }
     }
@@ -206,9 +136,7 @@ std::vector<std::uint8_t> buildOrbCoreAtlas(int frame_size,
   return pixels;
 }
 
-std::vector<std::uint8_t> buildOrbArcAtlas(int frame_size,
-                                           int frame_count,
-                                           const math::Color& accent_color) {
+std::vector<std::uint8_t> buildOrbArcAtlas(int frame_size, int frame_count) {
   const int width = frame_size * frame_count;
   const int height = frame_size;
   std::vector<std::uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u,
@@ -246,7 +174,9 @@ std::vector<std::uint8_t> buildOrbArcAtlas(int frame_size,
           const float dist1 = distanceToSegmentSquared(point, p1, p2);
           const float line = std::exp(-std::min(dist0, dist1) * 180.0f);
           const float endpoint =
-              std::exp(-((point.x - p2.x) * (point.x - p2.x) + (point.y - p2.y) * (point.y - p2.y)) * 90.0f);
+              std::exp(-((point.x - p2.x) * (point.x - p2.x) +
+                         (point.y - p2.y) * (point.y - p2.y)) *
+                       90.0f);
           arc_intensity += line * (0.85f + endpoint * 0.45f);
         }
 
@@ -255,16 +185,14 @@ std::vector<std::uint8_t> buildOrbArcAtlas(int frame_size,
         if (alpha <= 0.002f) {
           continue;
         }
-        const float hot_mix = saturate(arc_intensity * 0.74f + central_glow * 0.18f);
-        const math::Color edge_color = scaleColor(accent_color, 0.52f + alpha * 0.48f);
-        const math::Color final_color = lerpColor(edge_color, kOrbHotCoreColor, hot_mix);
 
+        const float value = saturate(arc_intensity * 0.76f + central_glow * 0.24f);
         const size_t dst_x = static_cast<size_t>(frame * frame_size + x);
         const size_t dst_index =
             (static_cast<size_t>(y) * static_cast<size_t>(width) + dst_x) * 4u;
-        pixels[dst_index + 0u] = toByte(final_color.r);
-        pixels[dst_index + 1u] = toByte(final_color.g);
-        pixels[dst_index + 2u] = toByte(final_color.b);
+        pixels[dst_index + 0u] = toByte(value);
+        pixels[dst_index + 1u] = toByte(value);
+        pixels[dst_index + 2u] = toByte(value);
         pixels[dst_index + 3u] = toByte(alpha);
       }
     }
@@ -273,9 +201,7 @@ std::vector<std::uint8_t> buildOrbArcAtlas(int frame_size,
   return pixels;
 }
 
-std::vector<std::uint8_t> buildOrbHaloAtlas(int frame_size,
-                                            int frame_count,
-                                            const math::Color& accent_color) {
+std::vector<std::uint8_t> buildOrbHaloAtlas(int frame_size, int frame_count) {
   const int width = frame_size * frame_count;
   const int height = frame_size;
   std::vector<std::uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u,
@@ -298,23 +224,19 @@ std::vector<std::uint8_t> buildOrbHaloAtlas(int frame_size,
         const float ring_width = 0.16f;
         const float halo =
             saturate(1.0f - std::abs(radius - ring_radius) / std::max(ring_width, 0.01f));
-        const float outer =
-            std::pow(saturate(1.0f - radius / 1.05f), 1.8f) * 0.36f;
+        const float outer = std::pow(saturate(1.0f - radius / 1.05f), 1.8f) * 0.36f;
         const float wisps =
             0.5f + 0.5f * std::sin((px * 4.5f - py * 6.5f + t * 4.8f) * kPi) *
                        std::cos((px * 7.0f + py * 3.8f - t * 4.0f) * kPi);
         const float alpha = saturate(halo * (0.34f + wisps * 0.18f) + outer * 0.12f);
-        const math::Color halo_color =
-            lerpColor(scaleColor(accent_color, 0.46f + alpha * 0.34f),
-                      kOrbHotCoreColor,
-                      alpha * 0.12f);
+        const float value = saturate(alpha * 1.1f);
 
         const size_t dst_x = static_cast<size_t>(frame * frame_size + x);
         const size_t dst_index =
             (static_cast<size_t>(y) * static_cast<size_t>(width) + dst_x) * 4u;
-        pixels[dst_index + 0u] = toByte(halo_color.r);
-        pixels[dst_index + 1u] = toByte(halo_color.g);
-        pixels[dst_index + 2u] = toByte(halo_color.b);
+        pixels[dst_index + 0u] = toByte(value);
+        pixels[dst_index + 1u] = toByte(value);
+        pixels[dst_index + 2u] = toByte(value);
         pixels[dst_index + 3u] = toByte(alpha);
       }
     }
@@ -351,7 +273,8 @@ std::vector<std::uint8_t> buildOrbDistortionAtlas(int frame_size, int frame_coun
             0.5f + 0.5f * std::sin(angle * 3.0f - radius * 8.5f + t * kPi * 1.8f);
         const float alpha = saturate(body * (0.78f + turbulence * 0.18f + inner_swirl * 0.12f));
 
-        Vec2 radial{radius > 1.0e-4f ? px / radius : 0.0f, radius > 1.0e-4f ? py / radius : -1.0f};
+        Vec2 radial{radius > 1.0e-4f ? px / radius : 0.0f,
+                    radius > 1.0e-4f ? py / radius : -1.0f};
         Vec2 tangent{-radial.y, radial.x};
         const float flow_tangent =
             std::sin(angle * 4.2f - radius * 7.0f + t * kPi * 2.4f) * 0.76f +
@@ -399,34 +322,6 @@ void registerParticleEffects(particles::ParticleLibrary& particle_effects,
   });
 }
 
-renderer::MaterialId createOrbShellMaterial(renderer::GraphicsDevice& graphics,
-                                            const math::Color& accent_color) {
-  renderer::MaterialDesc desc{};
-  const math::Color shell_tint = lerpColor(accent_color, kOrbHotCoreColor, 0.16f);
-  desc.base_color = {shell_tint.r, shell_tint.g, shell_tint.b, 0.16f};
-  desc.emissive_color = {
-      accent_color.r * 0.12f,
-      accent_color.g * 0.16f,
-      accent_color.b * 0.12f,
-      1.0f,
-  };
-  desc.metallic = 0.0f;
-  desc.roughness = 0.015f;
-  desc.occlusion_strength = 0.0f;
-  desc.shading_model = renderer::MaterialDesc::ShadingModel::EnergyShell;
-  desc.shell_fresnel_power = 6.1f;
-  desc.shell_fresnel_strength = 1.55f;
-  desc.shell_refraction_strength = 0.24f;
-  desc.shell_interior_strength = 0.60f;
-  desc.shell_highlight_strength = 1.34f;
-  desc.shell_alpha_boost = 0.15f;
-  desc.shell_swirl_strength = 0.82f;
-  desc.transparent = true;
-  desc.depth_write = false;
-  desc.double_sided = true;
-  return graphics.createMaterial(desc);
-}
-
 }  // namespace
 
 class EnergyOrbExample final : public app::GameInterface {
@@ -441,24 +336,20 @@ class EnergyOrbExample final : public app::GameInterface {
     input->bindKey("restart_orb", platform::Key::R, input::Trigger::Pressed);
 
     const std::string world_mesh = resolveExampleAssetPath("world.glb").string();
-    const std::string orb_shell_mesh = resolveExampleAssetPath("shot.glb").string();
     const std::string environment_map =
         resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
 
-    const std::vector<std::uint8_t> core_atlas =
-        buildOrbCoreAtlas(kAtlasFrameSize, kAtlasFrameCount, kOrbAccentColor);
+    const std::vector<std::uint8_t> core_atlas = buildOrbCoreAtlas(kAtlasFrameSize, kAtlasFrameCount);
     core_texture_ = graphics->createTextureRGBA8(kAtlasFrameSize * kAtlasFrameCount,
                                                  kAtlasFrameSize,
                                                  core_atlas.data());
 
-    const std::vector<std::uint8_t> arc_atlas =
-        buildOrbArcAtlas(kAtlasFrameSize, kAtlasFrameCount, kOrbAccentColor);
+    const std::vector<std::uint8_t> arc_atlas = buildOrbArcAtlas(kAtlasFrameSize, kAtlasFrameCount);
     arc_texture_ = graphics->createTextureRGBA8(kAtlasFrameSize * kAtlasFrameCount,
                                                 kAtlasFrameSize,
                                                 arc_atlas.data());
 
-    const std::vector<std::uint8_t> halo_atlas =
-        buildOrbHaloAtlas(kAtlasFrameSize, kAtlasFrameCount, kOrbAccentColor);
+    const std::vector<std::uint8_t> halo_atlas = buildOrbHaloAtlas(kAtlasFrameSize, kAtlasFrameCount);
     halo_texture_ = graphics->createTextureRGBA8(kAtlasFrameSize * kAtlasFrameCount,
                                                  kAtlasFrameSize,
                                                  halo_atlas.data());
@@ -477,127 +368,49 @@ class EnergyOrbExample final : public app::GameInterface {
                               distortion_texture_);
     }
 
-    auto world_entity = world->createEntity();
+    const ecs::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{.mesh_key = world_mesh});
 
-    auto environment_entity = world->createEntity();
+    const ecs::Entity environment_entity = world->createEntity();
     world->setName(environment_entity, "Environment");
-    world->add(environment_entity, components::EnvironmentComponent{
-        .environment_map = environment_map,
-        .intensity = 0.18f,
-        .draw_skybox = false,
-    });
+    world->add(environment_entity,
+               components::EnvironmentComponent{
+                   .environment_map = environment_map,
+                   .intensity = 0.18f,
+                   .draw_skybox = false,
+               });
 
-    auto sun_entity = world->createEntity();
+    const ecs::Entity sun_entity = world->createEntity();
     world->setName(sun_entity, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 40.0f, 0.0f});
     sun_transform.setRotation(math::fromYawPitch(0.48f, -0.82f));
     world->add(sun_entity, sun_transform);
-    world->add(sun_entity, components::LightComponent{
-        .type = components::LightComponent::Type::Directional,
-        .color = {0.80f, 0.84f, 1.0f, 1.0f},
-        .intensity = 0.36f,
-        .shadow_extent = 50.0f,
-    });
-
-    auto orb_light_entity = world->createEntity();
-    world->setName(orb_light_entity, "Orb Light");
-    world->add(orb_light_entity, makeTransform(kOrbBasePosition));
-    world->add(orb_light_entity, components::LightComponent{
-                                       .type = components::LightComponent::Type::Point,
-                                       .color = {0.62f, 1.0f, 0.70f, 1.0f},
-                                       .intensity = 26.0f * kOrbLightScale,
-                                       .range = 18.0f * kOrbScale,
-                                       .casts_shadows = false,
-                                   });
-    orb_light_entity_ = orb_light_entity;
-
-    const renderer::MaterialId orb_shell_material =
-        graphics != nullptr ? createOrbShellMaterial(*graphics, kOrbAccentColor)
-                            : renderer::kInvalidMaterial;
-    auto orb_shell_mesh_entity = world->createEntity();
-    world->setName(orb_shell_mesh_entity, "Energy Orb Shell Mesh");
-    world->add(orb_shell_mesh_entity,
-               makeScaledTransform(kOrbBasePosition, kOrbShellUniformScale));
-    world->add(orb_shell_mesh_entity,
-               components::MeshComponent{
-                   .mesh_key = orb_shell_mesh,
-                   .material_id = orb_shell_material,
-                   .owns_material_id = orb_shell_material != renderer::kInvalidMaterial,
-                   .shadow_visible = false,
+    world->add(sun_entity,
+               components::LightComponent{
+                   .type = components::LightComponent::Type::Directional,
+                   .color = {0.80f, 0.84f, 1.0f, 1.0f},
+                   .intensity = 0.36f,
+                   .shadow_extent = 50.0f,
                });
-    orb_shell_mesh_entity_ = orb_shell_mesh_entity;
 
-    if (particle_effects != nullptr) {
-      const components::ParticleEffectOverrideComponent core_override{
-          .size_scale = kOrbScale,
-          .radius_scale = kOrbScale,
-          .velocity_scale = kOrbScale,
-          .start_color = math::Color{kOrbHotCoreColor.r, kOrbHotCoreColor.g, kOrbHotCoreColor.b, 0.98f},
-          .end_color = math::Color{kOrbAccentColor.r * 0.85f,
-                                   kOrbAccentColor.g * 0.92f,
-                                   kOrbAccentColor.b * 0.85f,
-                                   0.0f},
-      };
-      const components::ParticleEffectOverrideComponent arc_override{
-          .size_scale = kOrbScale,
-          .radius_scale = kOrbScale,
-          .velocity_scale = kOrbScale,
-          .start_color = math::Color{kOrbHotCoreColor.r, kOrbHotCoreColor.g, kOrbHotCoreColor.b, 1.0f},
-          .end_color = math::Color{kOrbAccentColor.r * 0.92f,
-                                   kOrbAccentColor.g * 0.98f,
-                                   kOrbAccentColor.b * 0.92f,
-                                   0.0f},
-      };
-      const components::ParticleEffectOverrideComponent halo_override{
-          .size_scale = kOrbScale,
-          .radius_scale = kOrbScale,
-          .velocity_scale = kOrbScale,
-          .start_color = math::Color{kOrbAccentColor.r * 0.28f,
-                                     kOrbAccentColor.g * 0.48f,
-                                     kOrbAccentColor.b * 0.28f,
-                                     0.08f},
-          .end_color = math::Color{kOrbAccentColor.r * 0.12f,
-                                   kOrbAccentColor.g * 0.22f,
-                                   kOrbAccentColor.b * 0.12f,
-                                   0.0f},
-      };
-      const components::ParticleEffectOverrideComponent distortion_override{
-          .size_scale = kOrbScale * kOrbDistortionScale,
-          .radius_scale = kOrbScale,
-          .velocity_scale = kOrbScale,
-          .start_color = math::Color{kOrbHotCoreColor.r, kOrbHotCoreColor.g, kOrbHotCoreColor.b, 0.92f},
-          .end_color = math::Color{kOrbHotCoreColor.r, kOrbHotCoreColor.g, kOrbHotCoreColor.b, 0.0f},
-      };
-
-      orb_core_entity_ = createParticleEffectEntity(*world,
-                                                    "Energy Orb Core",
-                                                    "energy_orb_core",
-                                                    kOrbBasePosition,
-                                                    core_override);
-      orb_arc_entity_ = createParticleEffectEntity(*world,
-                                                   "Energy Orb Arcs",
-                                                   "energy_orb_arcs",
-                                                   kOrbBasePosition,
-                                                   arc_override);
-      orb_halo_entity_ = createParticleEffectEntity(*world,
-                                                    "Energy Orb Halo",
-                                                    "energy_orb_halo",
-                                                    kOrbBasePosition,
-                                                    halo_override);
-      orb_distortion_entity_ = createParticleEffectEntity(*world,
-                                                          "Energy Orb Distortion",
-                                                          "energy_orb_distortion",
-                                                          kOrbBasePosition,
-                                                          distortion_override);
+    const auto orb = prefabs::instantiateEffectPrefab(
+        *world,
+        graphics,
+        resolveExampleAssetPath("prefabs/energy_orb.kprefab"),
+        prefabs::EffectPrefabInstantiateDesc{
+            .name = "Energy Orb",
+            .transform = makeTransform(kOrbBasePosition),
+            .color_overrides = {{"accent", kOrbAccentColor}},
+        });
+    if (orb.has_value()) {
+      orb_root_entity_ = orb->root;
     }
 
-    auto camera_entity = world->createEntity();
-    world->setName(camera_entity, "Camera");
-    camera_entity_ = camera_entity;
+    camera_entity_ = world->createEntity();
+    world->setName(camera_entity_, "Camera");
     camera_yaw_ = 0.0f;
     target_camera_yaw_ = 0.0f;
     camera_pitch_ = -0.12f;
@@ -605,12 +418,13 @@ class EnergyOrbExample final : public app::GameInterface {
     components::TransformComponent camera_transform{};
     camera_transform.setPosition({0.0f, 2.35f, 6.6f});
     camera_transform.setRotation(math::fromYawPitch(camera_yaw_, camera_pitch_));
-    world->add(camera_entity, camera_transform);
-    world->add(camera_entity, components::CameraComponent{
-        .near_clip = 0.05f,
-        .far_clip = 120.0f,
-        .is_primary = true,
-    });
+    world->add(camera_entity_, camera_transform);
+    world->add(camera_entity_,
+               components::CameraComponent{
+                   .near_clip = 0.05f,
+                   .far_clip = 120.0f,
+                   .is_primary = true,
+               });
   }
 
   void onFixedUpdate(float dt) override {
@@ -618,8 +432,6 @@ class EnergyOrbExample final : public app::GameInterface {
   }
 
   void onUpdate(float dt) override {
-    time_ += dt;
-
     if (world->isAlive(camera_entity_)) {
       const float look_sensitivity = 0.0008f;
       const float move_speed = 14.0f;
@@ -639,7 +451,7 @@ class EnergyOrbExample final : public app::GameInterface {
       const math::Quat cam_rot = math::fromYawPitch(camera_yaw_, camera_pitch_);
       math::Vec3 forward = math::normalize(math::rotateVec(cam_rot, {0.0f, 0.0f, -1.0f}));
       const math::Vec3 up{0.0f, 1.0f, 0.0f};
-      math::Vec3 right = math::normalize(math::cross(forward, up));
+      const math::Vec3 right = math::normalize(math::cross(forward, up));
 
       float forward_input = 0.0f;
       float right_input = 0.0f;
@@ -658,53 +470,13 @@ class EnergyOrbExample final : public app::GameInterface {
 
     if (input->actionPressed("toggle_orb")) {
       orb_enabled_ = !orb_enabled_;
-      setOrbPlayback(orb_enabled_);
+      prefabs::setPrefabPlayback(*world, orb_root_entity_, orb_enabled_);
     }
 
     if (input->actionPressed("restart_orb")) {
-      restartOrbEffects();
+      prefabs::restartPrefab(*world, orb_root_entity_);
       orb_enabled_ = true;
-      setOrbPlayback(true);
-    }
-
-    const math::Vec3 orb_position = kOrbBasePosition;
-
-    setEntityPositionIfAlive(*world, orb_shell_mesh_entity_, orb_position);
-    setEntityPositionIfAlive(*world, orb_core_entity_, orb_position);
-    setEntityPositionIfAlive(*world, orb_halo_entity_, orb_position);
-    setEntityPositionIfAlive(*world, orb_distortion_entity_, orb_position);
-
-    if (world->isAlive(orb_arc_entity_) && world->has<components::TransformComponent>(orb_arc_entity_)) {
-      auto& transform = world->get<components::TransformComponent>(orb_arc_entity_);
-      transform.setPosition(orb_position);
-      transform.setRotation(
-          math::fromYawPitch(time_ * 0.72f, std::sin(time_ * 0.62f) * 0.12f));
-    }
-
-    if (world->isAlive(orb_light_entity_) &&
-        world->has<components::TransformComponent>(orb_light_entity_) &&
-        world->has<components::LightComponent>(orb_light_entity_)) {
-      auto& transform = world->get<components::TransformComponent>(orb_light_entity_);
-      auto& light = world->get<components::LightComponent>(orb_light_entity_);
-      transform.setPosition({orb_position.x, orb_position.y + 0.02f, orb_position.z});
-
-      if (!orb_enabled_) {
-        light.intensity = 0.0f;
-        light.range = 0.1f;
-      } else {
-        const float pulse = 0.60f + 0.25f * (0.5f + 0.5f * std::sin(time_ * 2.1f)) +
-                            0.15f * (0.5f + 0.5f * std::sin(time_ * 5.3f + 1.1f));
-        const math::Color pulsed_light_color =
-            lerpColor(kOrbAccentColor, kOrbHotCoreColor, 0.34f + pulse * 0.22f);
-        light.color = {
-            pulsed_light_color.r,
-            pulsed_light_color.g,
-            pulsed_light_color.b,
-            1.0f,
-        };
-        light.intensity = (18.0f + pulse * 16.0f) * kOrbLightScale;
-        light.range = (12.0f + pulse * 8.0f) * kOrbScale;
-      }
+      prefabs::setPrefabPlayback(*world, orb_root_entity_, true);
     }
   }
 
@@ -716,34 +488,13 @@ class EnergyOrbExample final : public app::GameInterface {
   }
 
  private:
-  void setOrbPlayback(bool playing) {
-    setMeshVisibilityIfAlive(*world, orb_shell_mesh_entity_, playing);
-    particles::setEffectPlaying(*world, orb_core_entity_, playing);
-    particles::setEffectPlaying(*world, orb_arc_entity_, playing);
-    particles::setEffectPlaying(*world, orb_halo_entity_, playing);
-    particles::setEffectPlaying(*world, orb_distortion_entity_, playing);
-  }
-
-  void restartOrbEffects() {
-    particles::restartEffect(*world, orb_core_entity_);
-    particles::restartEffect(*world, orb_arc_entity_);
-    particles::restartEffect(*world, orb_halo_entity_);
-    particles::restartEffect(*world, orb_distortion_entity_);
-  }
-
-  ecs::Entity orb_shell_mesh_entity_{};
-  ecs::Entity orb_core_entity_{};
-  ecs::Entity orb_arc_entity_{};
-  ecs::Entity orb_halo_entity_{};
-  ecs::Entity orb_distortion_entity_{};
-  ecs::Entity orb_light_entity_{};
+  ecs::Entity orb_root_entity_{};
   ecs::Entity camera_entity_{};
   renderer::TextureId core_texture_ = renderer::kInvalidTexture;
   renderer::TextureId arc_texture_ = renderer::kInvalidTexture;
   renderer::TextureId halo_texture_ = renderer::kInvalidTexture;
   renderer::TextureId distortion_texture_ = renderer::kInvalidTexture;
   bool orb_enabled_ = true;
-  float time_ = 0.0f;
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;
@@ -758,34 +509,27 @@ int main() {
 
   karma::app::EngineConfig config;
   config.window.title = "Karma Energy Orb Example";
-  config.window.samples = 1;
-  config.cursor_visible = true;
-  config.enable_anisotropy = true;
-  config.anisotropy_level = 16;
+  config.window.width = 1600;
+  config.window.height = 900;
+  config.vsync = true;
   config.generate_mipmaps = true;
+  config.enable_anisotropy = true;
+  config.anisotropy_level = 8;
   config.forward_plus_tile_size = 16;
   config.forward_plus_max_lights_per_tile = 128;
   config.shadow_map_size = 2048;
+  config.shadow_bias = 0.0009f;
   config.shadow_pcf_radius = 1;
-  config.shadow_bias = 0.0006f;
-  config.shadow_raster_depth_bias = 0;
-  config.shadow_raster_slope_bias = 0.0f;
-  config.shadow_receiver_bias_scale = 0.75f;
-  config.shadow_normal_bias_scale = 1.0f;
-  config.point_shadow_constant_bias = 0.0012f;
-  config.point_shadow_slope_bias_scale = 2.0f;
-  config.point_shadow_normal_bias_scale = 1.5f;
-  config.point_shadow_receiver_bias_scale = 0.35f;
-  config.local_light_distance_damping = 0.08f;
-  config.local_light_range_falloff_exponent = 1.1f;
-  config.ao_affects_local_lights = false;
-  config.local_light_directional_shadow_lift_strength = 0.55f;
-  config.lighting_exposure = 1.0f;
+  config.local_light_distance_damping = 0.05f;
+  config.local_light_range_falloff_exponent = 1.35f;
+  config.lighting_exposure = 1.15f;
+  config.environment_map = karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
+  config.environment_intensity = 0.18f;
+  config.environment_draw_skybox = false;
 
   engine.start(game, config);
   while (engine.isRunning()) {
     engine.tick();
   }
-
   return 0;
 }

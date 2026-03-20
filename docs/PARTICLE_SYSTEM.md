@@ -180,4 +180,5 @@ The particle examples in [../examples/particle_example.cpp](../examples/particle
 and [../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp)
 demonstrate this pattern for both staged one-shot explosions and looping
 ambient effects built from layered particle passes, mesh shells, authored
-`.kpeffect` assets, runtime overrides, and hot reload.
+`.kpeffect` assets, runtime overrides, hot reload, and file-backed effect
+prefabs. For the layered prefab side, see [EFFECT_PREFABS.md](EFFECT_PREFABS.md).

@@ -346,6 +346,8 @@ set(KARMA_SOURCES
   src/beams/beam_path_system.cpp
   src/particles/effect_library.cpp
   src/particles/particle_system.cpp
+  src/prefabs/effect_prefab.cpp
+  src/prefabs/effect_prefab_system.cpp
 )
 
 if (KARMA_BUILD_DEBUG_UI)

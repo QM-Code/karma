@@ -60,6 +60,7 @@ void EngineApp::initSubsystems() {
   }
 
   input_.setWindow(window_.get());
+  effect_prefab_system_ = std::make_unique<prefabs::EffectPrefabSystem>();
 
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
@@ -95,6 +96,9 @@ void EngineApp::warmUpRenderer() {
   frame.height = fb_height;
   frame.delta_time = 0.0f;
   graphics_->beginFrame(frame);
+  if (effect_prefab_system_) {
+    effect_prefab_system_->update(world_, 0.0f, 1.0f);
+  }
   if (beam_path_system_) {
     beam_path_system_->update(world_, 0.0f, 1.0f);
   }
@@ -120,6 +124,7 @@ void EngineApp::shutdownSubsystems() {
 #endif
   user_ui_context_ = {};
   render_system_.reset();
+  effect_prefab_system_.reset();
   beam_path_system_.reset();
   particle_system_.reset();
   graphics_.reset();
@@ -283,6 +288,9 @@ void EngineApp::tick() {
   }
   game_->render_interpolation_alpha_ = render_alpha;
   game_->onUpdate(frame_dt);
+  if (effect_prefab_system_) {
+    effect_prefab_system_->update(world_, frame_dt, render_alpha);
+  }
   if (audio_system_) {
     audio_system_->update(world_, frame_dt);
   }

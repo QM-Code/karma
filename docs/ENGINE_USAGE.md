@@ -125,6 +125,20 @@ Particle effects are ECS-driven through `ParticleLibrary`,
 For the intended registration/binding/restart workflow, see
 [PARTICLE_SYSTEM.md](PARTICLE_SYSTEM.md).
 
+## Effect Prefabs
+
+Layered effects that need multiple ECS entities can be authored as `.kprefab`
+files and instantiated with `prefabs::instantiateEffectPrefab(...)`.
+
+Use this when one gameplay effect is really a bundle of:
+
+- particle layers
+- mesh shells
+- lights
+
+For the file format and runtime helper API, see
+[EFFECT_PREFABS.md](EFFECT_PREFABS.md).
+
 ## ECS Point Containment Queries
 Karma exposes ECS-facing point containment helpers in `karma/ecs/collider_queries.h`:
 

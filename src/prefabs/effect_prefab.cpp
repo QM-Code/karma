@@ -2,10 +2,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string_view>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 
 #include <glm/ext/quaternion_float.hpp>
@@ -13,6 +17,7 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/beams/beam_path_api.h"
+#include "karma/components/particle_emitter.h"
 #include "karma/math/quat.h"
 #include "karma/particles/effect_api.h"
 
@@ -22,12 +27,14 @@ namespace {
 
 std::string trim(std::string_view text) {
   size_t start = 0;
-  while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])) != 0) {
+  while (start < text.size() &&
+         std::isspace(static_cast<unsigned char>(text[start])) != 0) {
     ++start;
   }
 
   size_t end = text.size();
-  while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
+  while (end > start &&
+         std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
     --end;
   }
 
@@ -57,6 +64,7 @@ bool parseNumber(std::string_view text, T& out_value) {
   if (value.empty()) {
     return false;
   }
+
   try {
     if constexpr (std::is_same_v<T, float>) {
       out_value = std::stof(value);
@@ -136,14 +144,14 @@ bool parseVec3List(std::string_view text, std::vector<math::Vec3>& out_points) {
 }
 
 math::Quat eulerDegreesToQuat(const math::Vec3& euler_degrees) {
-  const glm::vec3 euler_radians = glm::radians(glm::vec3(euler_degrees.x,
-                                                         euler_degrees.y,
-                                                         euler_degrees.z));
+  const glm::vec3 euler_radians = glm::radians(
+      glm::vec3(euler_degrees.x, euler_degrees.y, euler_degrees.z));
   const glm::quat q = glm::quat(euler_radians);
   return {q.x, q.y, q.z, q.w};
 }
 
-bool parseShadingModel(std::string_view text, renderer::MaterialDesc::ShadingModel& out_value) {
+bool parseShadingModel(std::string_view text,
+                       renderer::MaterialDesc::ShadingModel& out_value) {
   const std::string value = lowercase(trim(text));
   if (value == "standard" || value == "default") {
     out_value = renderer::MaterialDesc::ShadingModel::Standard;
@@ -155,6 +163,35 @@ bool parseShadingModel(std::string_view text, renderer::MaterialDesc::ShadingMod
   }
   if (value == "wave_volume" || value == "wavevolume" || value == "wave") {
     out_value = renderer::MaterialDesc::ShadingModel::WaveVolume;
+    return true;
+  }
+  if (value == "sphere_halo" || value == "spherehalo" || value == "halo") {
+    out_value = renderer::MaterialDesc::ShadingModel::SphereHalo;
+    return true;
+  }
+  if (value == "screen_wave" || value == "screenwave") {
+    out_value = renderer::MaterialDesc::ShadingModel::ScreenWave;
+    return true;
+  }
+  if (value == "sphere_glow_volume" || value == "sphereglowvolume") {
+    out_value = renderer::MaterialDesc::ShadingModel::SphereGlowVolume;
+    return true;
+  }
+  if (value == "volumetric_sphere" || value == "volumetricsphere") {
+    out_value = renderer::MaterialDesc::ShadingModel::VolumetricSphere;
+    return true;
+  }
+  return false;
+}
+
+bool parseBlendMode(std::string_view text, renderer::MaterialDesc::BlendMode& out_value) {
+  const std::string value = lowercase(trim(text));
+  if (value == "alpha") {
+    out_value = renderer::MaterialDesc::BlendMode::Alpha;
+    return true;
+  }
+  if (value == "additive" || value == "add") {
+    out_value = renderer::MaterialDesc::BlendMode::Additive;
     return true;
   }
   return false;
@@ -177,6 +214,74 @@ bool parseLightType(std::string_view text, components::LightComponent::Type& out
   return false;
 }
 
+bool parseParamType(std::string_view text, EffectPrefabParameter::Type& out_value) {
+  const std::string value = lowercase(trim(text));
+  if (value == "bool" || value == "boolean") {
+    out_value = EffectPrefabParameter::Type::Bool;
+    return true;
+  }
+  if (value == "float" || value == "number") {
+    out_value = EffectPrefabParameter::Type::Float;
+    return true;
+  }
+  if (value == "vec3" || value == "float3") {
+    out_value = EffectPrefabParameter::Type::Vec3;
+    return true;
+  }
+  if (value == "color" || value == "rgba") {
+    out_value = EffectPrefabParameter::Type::Color;
+    return true;
+  }
+  if (value == "string" || value == "path") {
+    out_value = EffectPrefabParameter::Type::String;
+    return true;
+  }
+  return false;
+}
+
+bool parseParamValue(EffectPrefabParameter::Type type,
+                     std::string_view text,
+                     EffectPrefabParamValue& out_value) {
+  switch (type) {
+    case EffectPrefabParameter::Type::Bool: {
+      bool value = false;
+      if (!parseBool(text, value)) {
+        return false;
+      }
+      out_value = value;
+      return true;
+    }
+    case EffectPrefabParameter::Type::Float: {
+      float value = 0.0f;
+      if (!parseNumber(text, value)) {
+        return false;
+      }
+      out_value = value;
+      return true;
+    }
+    case EffectPrefabParameter::Type::Vec3: {
+      math::Vec3 value{};
+      if (!parseVec3(text, value)) {
+        return false;
+      }
+      out_value = value;
+      return true;
+    }
+    case EffectPrefabParameter::Type::Color: {
+      math::Color value{};
+      if (!parseColor(text, value)) {
+        return false;
+      }
+      out_value = value;
+      return true;
+    }
+    case EffectPrefabParameter::Type::String:
+      out_value = stripQuotes(trim(text));
+      return true;
+  }
+  return false;
+}
+
 math::Vec3 multiplyVec3(const math::Vec3& a, const math::Vec3& b) {
   return {a.x * b.x, a.y * b.y, a.z * b.z};
 }
@@ -185,8 +290,9 @@ math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b) {
   return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
-components::TransformComponent composeTransform(const components::TransformComponent& root,
-                                                const components::TransformComponent& local) {
+components::TransformComponent composeTransform(
+    const components::TransformComponent& root,
+    const components::TransformComponent& local) {
   components::TransformComponent world_transform{};
   const math::Vec3 scaled_local = multiplyVec3(local.getPosition(), root.getScale());
   const math::Vec3 rotated_local = math::rotateVec(root.getRotation(), scaled_local);
@@ -210,15 +316,47 @@ math::Color multiplyColor(const math::Color& a, const math::Color& b) {
   return {a.r * b.r, a.g * b.g, a.b * b.b, a.a * b.a};
 }
 
+bool tryGetParamColor(const std::unordered_map<std::string, EffectPrefabParamValue>& params,
+                      std::string_view name,
+                      math::Color& out_color) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return false;
+  }
+  if (const auto* color = std::get_if<math::Color>(&it->second)) {
+    out_color = *color;
+    return true;
+  }
+  if (const auto* vec = std::get_if<math::Vec3>(&it->second)) {
+    out_color = {vec->x, vec->y, vec->z, 1.0f};
+    return true;
+  }
+  return false;
+}
+
+bool tryGetParamFloat(const std::unordered_map<std::string, EffectPrefabParamValue>& params,
+                      std::string_view name,
+                      float& out_value) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return false;
+  }
+  if (const auto* value = std::get_if<float>(&it->second)) {
+    out_value = *value;
+    return true;
+  }
+  return false;
+}
+
 math::Color resolveColorBinding(
     const EffectPrefabColorBinding& binding,
-    const std::unordered_map<std::string, math::Color>& resolved_params,
+    const std::unordered_map<std::string, EffectPrefabParamValue>& params,
     const math::Color& fallback) {
   math::Color color = binding.value.value_or(fallback);
   if (!binding.param.empty()) {
-    const auto it = resolved_params.find(binding.param);
-    if (it != resolved_params.end()) {
-      color = it->second;
+    math::Color param_color{};
+    if (tryGetParamColor(params, binding.param, param_color)) {
+      color = param_color;
     }
   }
   color = multiplyColor(color, binding.scale);
@@ -228,7 +366,24 @@ math::Color resolveColorBinding(
   return color;
 }
 
+float resolveFloatBinding(const EffectPrefabFloatBinding& binding,
+                          const std::unordered_map<std::string, EffectPrefabParamValue>& params,
+                          float fallback) {
+  float value = binding.value.value_or(fallback);
+  if (!binding.param.empty()) {
+    float param_value = 0.0f;
+    if (tryGetParamFloat(params, binding.param, param_value)) {
+      value = param_value;
+    }
+  }
+  return value * binding.scale + binding.bias;
+}
+
 void markBindingEnabled(EffectPrefabColorBinding& binding) {
+  binding.enabled = true;
+}
+
+void markBindingEnabled(EffectPrefabFloatBinding& binding) {
   binding.enabled = true;
 }
 
@@ -316,6 +471,41 @@ bool applyColorBindingField(EffectPrefabColorBinding& binding,
   return false;
 }
 
+bool applyFloatBindingField(EffectPrefabFloatBinding& binding,
+                            const std::string& key,
+                            const std::string& raw_value,
+                            const std::string& prefix) {
+  if (key == prefix) {
+    float value = 0.0f;
+    if (!parseNumber(raw_value, value)) {
+      return false;
+    }
+    binding.value = value;
+    markBindingEnabled(binding);
+    return true;
+  }
+  if (key == prefix + "_param") {
+    binding.param = stripQuotes(trim(raw_value));
+    markBindingEnabled(binding);
+    return !binding.param.empty();
+  }
+  if (key == prefix + "_scale") {
+    if (!parseNumber(raw_value, binding.scale)) {
+      return false;
+    }
+    markBindingEnabled(binding);
+    return true;
+  }
+  if (key == prefix + "_bias") {
+    if (!parseNumber(raw_value, binding.bias)) {
+      return false;
+    }
+    markBindingEnabled(binding);
+    return true;
+  }
+  return false;
+}
+
 bool applyMeshField(EffectPrefab& prefab,
                     EffectPrefabEntry& entry,
                     const std::string& key,
@@ -363,6 +553,9 @@ bool applyMeshField(EffectPrefab& prefab,
   if (key == "material.shading_model") {
     return parseShadingModel(raw_value, material.shading_model);
   }
+  if (key == "material.blend_mode") {
+    return parseBlendMode(raw_value, material.blend_mode);
+  }
   if (key == "material.shell_fresnel_power") {
     return parseNumber(raw_value, material.shell_fresnel_power);
   }
@@ -384,6 +577,9 @@ bool applyMeshField(EffectPrefab& prefab,
   if (key == "material.shell_swirl_strength") {
     return parseNumber(raw_value, material.shell_swirl_strength);
   }
+  if (key == "material.shell_body_strength") {
+    return parseNumber(raw_value, material.shell_body_strength);
+  }
   if (key == "material.wave_tint_strength") {
     return parseNumber(raw_value, material.wave_tint_strength);
   }
@@ -395,6 +591,9 @@ bool applyMeshField(EffectPrefab& prefab,
   }
   if (key == "material.wave_noise_strength") {
     return parseNumber(raw_value, material.wave_noise_strength);
+  }
+  if (key == "material.analytic_sphere_normals") {
+    return parseBool(raw_value, material.analytic_sphere_normals);
   }
   if (key == "material.unlit") {
     return parseBool(raw_value, material.unlit);
@@ -446,7 +645,7 @@ bool applyParticleField(EffectPrefabEntry& entry,
     return parseBool(raw_value, entry.particle.preserve_playing);
   }
 
-  auto& override = entry.particle.effect_override;
+  auto& effect_override = entry.particle.effect_override;
   if (applyColorBindingField(entry.particle.start_color_binding,
                              key,
                              raw_value,
@@ -460,31 +659,31 @@ bool applyParticleField(EffectPrefabEntry& entry,
     return true;
   }
   if (key == "override.active") {
-    return parseBool(raw_value, override.active);
+    return parseBool(raw_value, effect_override.active);
   }
   if (key == "override.time_scale") {
-    return parseNumber(raw_value, override.time_scale);
+    return parseNumber(raw_value, effect_override.time_scale);
   }
   if (key == "override.spawn_rate_scale") {
-    return parseNumber(raw_value, override.spawn_rate_scale);
+    return parseNumber(raw_value, effect_override.spawn_rate_scale);
   }
   if (key == "override.lifetime_scale") {
-    return parseNumber(raw_value, override.lifetime_scale);
+    return parseNumber(raw_value, effect_override.lifetime_scale);
   }
   if (key == "override.size_scale") {
-    return parseNumber(raw_value, override.size_scale);
+    return parseNumber(raw_value, effect_override.size_scale);
   }
   if (key == "override.radius_scale") {
-    return parseNumber(raw_value, override.radius_scale);
+    return parseNumber(raw_value, effect_override.radius_scale);
   }
   if (key == "override.velocity_scale") {
-    return parseNumber(raw_value, override.velocity_scale);
+    return parseNumber(raw_value, effect_override.velocity_scale);
   }
   if (key == "override.angular_velocity_scale") {
-    return parseNumber(raw_value, override.angular_velocity_scale);
+    return parseNumber(raw_value, effect_override.angular_velocity_scale);
   }
   if (key == "override.alpha_scale") {
-    return parseNumber(raw_value, override.alpha_scale);
+    return parseNumber(raw_value, effect_override.alpha_scale);
   }
 
   out_error = "unknown particle field '" + key + "'";
@@ -501,14 +700,14 @@ bool applyLightField(EffectPrefabEntry& entry,
   if (applyColorBindingField(entry.light.color_binding, key, raw_value, "color")) {
     return true;
   }
+  if (applyFloatBindingField(entry.light.intensity_binding, key, raw_value, "intensity")) {
+    return true;
+  }
+  if (applyFloatBindingField(entry.light.range_binding, key, raw_value, "range")) {
+    return true;
+  }
   if (key == "type") {
     return parseLightType(raw_value, entry.light.light.type);
-  }
-  if (key == "intensity") {
-    return parseNumber(raw_value, entry.light.light.intensity);
-  }
-  if (key == "range") {
-    return parseNumber(raw_value, entry.light.light.range);
   }
   if (key == "casts_shadows") {
     return parseBool(raw_value, entry.light.light.casts_shadows);
@@ -644,6 +843,60 @@ bool applyBeamField(EffectPrefabEntry& entry,
   return false;
 }
 
+bool applyVolumeSphereField(EffectPrefabEntry& entry,
+                            const std::string& key,
+                            const std::string& raw_value,
+                            std::string& out_error) {
+  if (applyTransformField(entry.local_transform, key, raw_value)) {
+    return true;
+  }
+  if (applyColorBindingField(entry.volume_sphere.color_binding, key, raw_value, "color")) {
+    return true;
+  }
+  if (applyColorBindingField(entry.volume_sphere.emissive_color_binding,
+                             key,
+                             raw_value,
+                             "emissive_color")) {
+    return true;
+  }
+  if (applyFloatBindingField(entry.volume_sphere.radius_binding, key, raw_value, "radius")) {
+    return true;
+  }
+  if (applyFloatBindingField(entry.volume_sphere.center_opacity_binding,
+                             key,
+                             raw_value,
+                             "center_opacity")) {
+    return true;
+  }
+  if (applyFloatBindingField(entry.volume_sphere.distortion_strength_binding,
+                             key,
+                             raw_value,
+                             "distortion_strength")) {
+    return true;
+  }
+  if (applyFloatBindingField(entry.volume_sphere.noise_strength_binding,
+                             key,
+                             raw_value,
+                             "noise_strength")) {
+    return true;
+  }
+  if (applyFloatBindingField(entry.volume_sphere.overlay_depth_binding,
+                             key,
+                             raw_value,
+                             "overlay_depth")) {
+    return true;
+  }
+  if (key == "visible") {
+    return parseBool(raw_value, entry.volume_sphere.volume.visible);
+  }
+  if (key == "scale_with_transform") {
+    return parseBool(raw_value, entry.volume_sphere.volume.scale_with_transform);
+  }
+
+  out_error = "unknown volume sphere field '" + key + "'";
+  return false;
+}
+
 bool applyPrefabField(EffectPrefab& prefab,
                       const std::string& key,
                       const std::string& raw_value,
@@ -656,14 +909,17 @@ bool applyPrefabField(EffectPrefab& prefab,
   return false;
 }
 
-bool applyColorParameterField(EffectPrefabColorParameter& param,
-                              const std::string& key,
-                              const std::string& raw_value,
-                              std::string& out_error) {
-  if (key == "default") {
-    return parseColor(raw_value, param.default_value);
+bool applyParameterField(EffectPrefabParameter& param,
+                         const std::string& key,
+                         const std::string& raw_value,
+                         std::string& out_error) {
+  if (key == "type") {
+    return parseParamType(raw_value, param.type);
   }
-  out_error = "unknown color parameter field '" + key + "'";
+  if (key == "default") {
+    return parseParamValue(param.type, raw_value, param.default_value);
+  }
+  out_error = "unknown param field '" + key + "'";
   return false;
 }
 
@@ -685,25 +941,45 @@ bool parseSectionHeader(std::string_view raw_header,
   return true;
 }
 
-std::unordered_map<std::string, math::Color> resolveColorParameters(
+std::optional<std::filesystem::path> resolvePrefabSourcePath(
+    const std::filesystem::path& path) {
+  std::filesystem::path resolved = path;
+  if (std::filesystem::is_directory(resolved)) {
+    resolved /= "prefab.kprefab";
+  }
+  resolved = std::filesystem::absolute(resolved).lexically_normal();
+  if (!std::filesystem::exists(resolved)) {
+    return std::nullopt;
+  }
+  return resolved;
+}
+
+std::unordered_map<std::string, EffectPrefabParamValue> resolveParameters(
     const EffectPrefab& prefab,
     const EffectPrefabInstantiateDesc& desc) {
-  std::unordered_map<std::string, math::Color> resolved;
-  for (const auto& param : prefab.color_parameters) {
+  std::unordered_map<std::string, EffectPrefabParamValue> resolved;
+  resolved.reserve(prefab.parameters.size() + desc.param_overrides.size() +
+                   desc.color_overrides.size());
+
+  for (const auto& param : prefab.parameters) {
     resolved[param.name] = param.default_value;
   }
   for (const auto& override : desc.color_overrides) {
     resolved[override.name] = override.value;
   }
+  for (const auto& override : desc.param_overrides) {
+    resolved[override.name] = override.value;
+  }
   return resolved;
 }
 
-ecs::Entity createMeshEntity(ecs::World& world,
-                             renderer::GraphicsDevice* graphics,
-                             const EffectPrefabEntry& entry,
-                             const std::string& entity_name,
-                             const components::TransformComponent& world_transform,
-                             const std::unordered_map<std::string, math::Color>& resolved_params) {
+ecs::Entity createMeshEntity(
+    ecs::World& world,
+    renderer::GraphicsDevice* graphics,
+    const EffectPrefabEntry& entry,
+    const std::string& entity_name,
+    const components::TransformComponent& world_transform,
+    const std::unordered_map<std::string, EffectPrefabParamValue>& resolved_params) {
   ecs::Entity entity = world.createEntity();
   if (!entity_name.empty()) {
     world.setName(entity, entity_name);
@@ -714,10 +990,9 @@ ecs::Entity createMeshEntity(ecs::World& world,
   if (graphics != nullptr) {
     renderer::MaterialDesc material_desc = entry.mesh.material.material;
     if (entry.mesh.material.base_color_binding.enabled) {
-      material_desc.base_color =
-          resolveColorBinding(entry.mesh.material.base_color_binding,
-                              resolved_params,
-                              material_desc.base_color);
+      material_desc.base_color = resolveColorBinding(entry.mesh.material.base_color_binding,
+                                                     resolved_params,
+                                                     material_desc.base_color);
     }
     if (entry.mesh.material.emissive_color_binding.enabled) {
       material_desc.emissive_color =
@@ -744,7 +1019,7 @@ ecs::Entity createParticleEntity(
     const EffectPrefabEntry& entry,
     const std::string& entity_name,
     const components::TransformComponent& world_transform,
-    const std::unordered_map<std::string, math::Color>& resolved_params) {
+    const std::unordered_map<std::string, EffectPrefabParamValue>& resolved_params) {
   std::optional<components::ParticleEffectOverrideComponent> effect_override =
       entry.particle.effect_override;
   if (entry.particle.start_color_binding.enabled) {
@@ -775,29 +1050,39 @@ ecs::Entity createParticleEntity(
       });
 }
 
-ecs::Entity createLightEntity(ecs::World& world,
-                              const EffectPrefabEntry& entry,
-                              const std::string& entity_name,
-                              const components::TransformComponent& world_transform,
-                              const std::unordered_map<std::string, math::Color>& resolved_params) {
+ecs::Entity createLightEntity(
+    ecs::World& world,
+    const EffectPrefabEntry& entry,
+    const std::string& entity_name,
+    const components::TransformComponent& world_transform,
+    const std::unordered_map<std::string, EffectPrefabParamValue>& resolved_params) {
   ecs::Entity entity = world.createEntity();
   if (!entity_name.empty()) {
     world.setName(entity, entity_name);
   }
   world.add(entity, world_transform);
+
   components::LightComponent light = entry.light.light;
   if (entry.light.color_binding.enabled) {
     light.color = resolveColorBinding(entry.light.color_binding, resolved_params, light.color);
+  }
+  if (entry.light.intensity_binding.enabled) {
+    light.intensity =
+        resolveFloatBinding(entry.light.intensity_binding, resolved_params, light.intensity);
+  }
+  if (entry.light.range_binding.enabled) {
+    light.range = resolveFloatBinding(entry.light.range_binding, resolved_params, light.range);
   }
   world.add(entity, light);
   return entity;
 }
 
-ecs::Entity createBeamEntity(ecs::World& world,
-                             const EffectPrefabEntry& entry,
-                             const std::string& entity_name,
-                             const components::TransformComponent& world_transform,
-                             const std::unordered_map<std::string, math::Color>& resolved_params) {
+ecs::Entity createBeamEntity(
+    ecs::World& world,
+    const EffectPrefabEntry& entry,
+    const std::string& entity_name,
+    const components::TransformComponent& world_transform,
+    const std::unordered_map<std::string, EffectPrefabParamValue>& resolved_params) {
   components::BeamPathComponent beam = entry.beam.beam;
   if (entry.beam.core_color_binding.enabled) {
     beam.core_color =
@@ -817,27 +1102,88 @@ ecs::Entity createBeamEntity(ecs::World& world,
       });
 }
 
+ecs::Entity createVolumeSphereEntity(
+    ecs::World& world,
+    const EffectPrefabEntry& entry,
+    const std::string& entity_name,
+    const components::TransformComponent& world_transform,
+    const std::unordered_map<std::string, EffectPrefabParamValue>& resolved_params) {
+  ecs::Entity entity = world.createEntity();
+  if (!entity_name.empty()) {
+    world.setName(entity, entity_name);
+  }
+  world.add(entity, world_transform);
+
+  components::VolumeSphereComponent sphere = entry.volume_sphere.volume;
+  if (entry.volume_sphere.color_binding.enabled) {
+    sphere.color =
+        resolveColorBinding(entry.volume_sphere.color_binding, resolved_params, sphere.color);
+  }
+  if (entry.volume_sphere.emissive_color_binding.enabled) {
+    sphere.emissive_color =
+        resolveColorBinding(entry.volume_sphere.emissive_color_binding,
+                            resolved_params,
+                            sphere.emissive_color);
+  }
+  if (entry.volume_sphere.radius_binding.enabled) {
+    sphere.radius =
+        resolveFloatBinding(entry.volume_sphere.radius_binding, resolved_params, sphere.radius);
+  }
+  if (entry.volume_sphere.center_opacity_binding.enabled) {
+    sphere.center_opacity =
+        resolveFloatBinding(entry.volume_sphere.center_opacity_binding,
+                            resolved_params,
+                            sphere.center_opacity);
+  }
+  if (entry.volume_sphere.distortion_strength_binding.enabled) {
+    sphere.distortion_strength =
+        resolveFloatBinding(entry.volume_sphere.distortion_strength_binding,
+                            resolved_params,
+                            sphere.distortion_strength);
+  }
+  if (entry.volume_sphere.noise_strength_binding.enabled) {
+    sphere.noise_strength =
+        resolveFloatBinding(entry.volume_sphere.noise_strength_binding,
+                            resolved_params,
+                            sphere.noise_strength);
+  }
+  if (entry.volume_sphere.overlay_depth_binding.enabled) {
+    sphere.overlay_depth =
+        resolveFloatBinding(entry.volume_sphere.overlay_depth_binding,
+                            resolved_params,
+                            sphere.overlay_depth);
+  }
+  world.add(entity, sphere);
+  return entity;
+}
+
 }  // namespace
 
 bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefab) {
-  std::ifstream file(path);
+  const auto resolved_path = resolvePrefabSourcePath(path);
+  if (!resolved_path.has_value()) {
+    spdlog::error("Prefab load failed: could not resolve {}", path.string());
+    return false;
+  }
+
+  std::ifstream file(*resolved_path);
   if (!file.is_open()) {
-    spdlog::error("Effect prefab load failed: could not open {}", path.string());
+    spdlog::error("Prefab load failed: could not open {}", resolved_path->string());
     return false;
   }
 
   EffectPrefab prefab{};
-  prefab.source_path = std::filesystem::absolute(path);
+  prefab.source_path = *resolved_path;
 
   enum class ActiveSection {
     None,
     Prefab,
-    Color,
+    Param,
     Entry,
   };
 
   ActiveSection active_section = ActiveSection::None;
-  size_t active_color_index = 0u;
+  size_t active_param_index = 0u;
   size_t active_entry_index = 0u;
 
   std::string line;
@@ -860,8 +1206,8 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
       if (!parseSectionHeader(std::string_view(trimmed).substr(1u, trimmed.size() - 2u),
                               section_kind,
                               section_name)) {
-        spdlog::error("Effect prefab parse failed: {}:{} invalid section header",
-                      path.string(),
+        spdlog::error("Prefab parse failed: {}:{} invalid section header",
+                      resolved_path->string(),
                       line_number);
         return false;
       }
@@ -870,16 +1216,16 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
         active_section = ActiveSection::Prefab;
         continue;
       }
-      if (section_kind == "color") {
+      if (section_kind == "param") {
         if (section_name.empty()) {
-          spdlog::error("Effect prefab parse failed: {}:{} color section missing name",
-                        path.string(),
+          spdlog::error("Prefab parse failed: {}:{} param section missing name",
+                        resolved_path->string(),
                         line_number);
           return false;
         }
-        active_color_index = prefab.color_parameters.size();
-        prefab.color_parameters.push_back(EffectPrefabColorParameter{.name = section_name});
-        active_section = ActiveSection::Color;
+        active_param_index = prefab.parameters.size();
+        prefab.parameters.push_back(EffectPrefabParameter{.name = section_name});
+        active_section = ActiveSection::Param;
         continue;
       }
 
@@ -892,17 +1238,19 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
         entry.type = EffectPrefabEntry::Type::Light;
       } else if (section_kind == "beam") {
         entry.type = EffectPrefabEntry::Type::Beam;
+      } else if (section_kind == "volume_sphere" || section_kind == "volumesphere") {
+        entry.type = EffectPrefabEntry::Type::VolumeSphere;
       } else {
-        spdlog::error("Effect prefab parse failed: {}:{} unknown section '{}'",
-                      path.string(),
+        spdlog::error("Prefab parse failed: {}:{} unknown section '{}'",
+                      resolved_path->string(),
                       line_number,
                       section_kind);
         return false;
       }
 
       if (section_name.empty()) {
-        spdlog::error("Effect prefab parse failed: {}:{} {} section missing name",
-                      path.string(),
+        spdlog::error("Prefab parse failed: {}:{} {} section missing name",
+                      resolved_path->string(),
                       line_number,
                       section_kind);
         return false;
@@ -917,8 +1265,8 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
 
     const size_t equals_pos = trimmed.find('=');
     if (equals_pos == std::string::npos) {
-      spdlog::error("Effect prefab parse failed: {}:{} missing '='",
-                    path.string(),
+      spdlog::error("Prefab parse failed: {}:{} missing '='",
+                    resolved_path->string(),
                     line_number);
       return false;
     }
@@ -927,15 +1275,13 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
     const std::string value = trim(std::string_view(trimmed).substr(equals_pos + 1u));
     std::string parse_error;
     bool ok = false;
+
     switch (active_section) {
       case ActiveSection::Prefab:
         ok = applyPrefabField(prefab, key, value, parse_error);
         break;
-      case ActiveSection::Color:
-        ok = applyColorParameterField(prefab.color_parameters[active_color_index],
-                                      key,
-                                      value,
-                                      parse_error);
+      case ActiveSection::Param:
+        ok = applyParameterField(prefab.parameters[active_param_index], key, value, parse_error);
         break;
       case ActiveSection::Entry: {
         auto& entry = prefab.entries[active_entry_index];
@@ -952,6 +1298,9 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
           case EffectPrefabEntry::Type::Beam:
             ok = applyBeamField(entry, key, value, parse_error);
             break;
+          case EffectPrefabEntry::Type::VolumeSphere:
+            ok = applyVolumeSphereField(entry, key, value, parse_error);
+            break;
         }
         break;
       }
@@ -961,8 +1310,8 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
     }
 
     if (!ok) {
-      spdlog::error("Effect prefab parse failed: {}:{} {}",
-                    path.string(),
+      spdlog::error("Prefab parse failed: {}:{} {}",
+                    resolved_path->string(),
                     line_number,
                     parse_error.empty() ? "invalid value" : parse_error);
       return false;
@@ -970,7 +1319,7 @@ bool loadEffectPrefab(const std::filesystem::path& path, EffectPrefab& out_prefa
   }
 
   if (prefab.name.empty()) {
-    prefab.name = path.stem().string();
+    prefab.name = resolved_path->stem().string();
   }
 
   out_prefab = std::move(prefab);
@@ -997,8 +1346,7 @@ std::optional<EffectPrefabInstance> instantiateEffectPrefab(
   }
   world.add(root, desc.transform);
 
-  const std::unordered_map<std::string, math::Color> resolved_params =
-      resolveColorParameters(prefab, desc);
+  const auto resolved_params = resolveParameters(prefab, desc);
 
   components::EffectPrefabInstanceComponent instance_component{};
   instance_component.prefab_name = prefab.name;
@@ -1008,15 +1356,15 @@ std::optional<EffectPrefabInstance> instantiateEffectPrefab(
   instance.root = root;
 
   for (const auto& entry : prefab.entries) {
-    const std::string entity_name =
-        !root_name.empty() ? root_name + "/" + entry.name : entry.name;
+    const std::string entity_name = !root_name.empty() ? root_name + "/" + entry.name : entry.name;
     const components::TransformComponent world_transform =
         composeTransform(desc.transform, entry.local_transform);
 
     ecs::Entity member{};
     switch (entry.type) {
       case EffectPrefabEntry::Type::Mesh:
-        member = createMeshEntity(world, graphics, entry, entity_name, world_transform, resolved_params);
+        member = createMeshEntity(
+            world, graphics, entry, entity_name, world_transform, resolved_params);
         break;
       case EffectPrefabEntry::Type::Particle:
         member = createParticleEntity(world, entry, entity_name, world_transform, resolved_params);
@@ -1026,6 +1374,10 @@ std::optional<EffectPrefabInstance> instantiateEffectPrefab(
         break;
       case EffectPrefabEntry::Type::Beam:
         member = createBeamEntity(world, entry, entity_name, world_transform, resolved_params);
+        break;
+      case EffectPrefabEntry::Type::VolumeSphere:
+        member = createVolumeSphereEntity(
+            world, entry, entity_name, world_transform, resolved_params);
         break;
     }
 
@@ -1045,14 +1397,27 @@ std::optional<EffectPrefabInstance> instantiateEffectPrefab(
       case EffectPrefabEntry::Type::Particle:
         member_component.kind = components::EffectPrefabMemberKind::Particle;
         break;
-      case EffectPrefabEntry::Type::Light:
+      case EffectPrefabEntry::Type::Light: {
         member_component.kind = components::EffectPrefabMemberKind::Light;
-        member_component.light_intensity = entry.light.light.intensity;
-        member_component.light_range = entry.light.light.range;
+        components::LightComponent light = entry.light.light;
+        if (entry.light.intensity_binding.enabled) {
+          light.intensity =
+              resolveFloatBinding(entry.light.intensity_binding, resolved_params, light.intensity);
+        }
+        if (entry.light.range_binding.enabled) {
+          light.range = resolveFloatBinding(entry.light.range_binding, resolved_params, light.range);
+        }
+        member_component.light_intensity = light.intensity;
+        member_component.light_range = light.range;
         break;
+      }
       case EffectPrefabEntry::Type::Beam:
         member_component.kind = components::EffectPrefabMemberKind::Beam;
         member_component.beam_visible = entry.beam.beam.visible;
+        break;
+      case EffectPrefabEntry::Type::VolumeSphere:
+        member_component.kind = components::EffectPrefabMemberKind::VolumeSphere;
+        member_component.volume_sphere_visible = entry.volume_sphere.volume.visible;
         break;
     }
     world.add(member, std::move(member_component));
@@ -1106,6 +1471,10 @@ bool setPrefabPlayback(ecs::World& world, ecs::Entity root, bool enabled) {
         auto& light = world.get<components::LightComponent>(member);
         light.intensity = enabled ? prefab_member.light_intensity : 0.0f;
         light.range = enabled ? prefab_member.light_range : 0.0f;
+      } else if (prefab_member.kind == components::EffectPrefabMemberKind::VolumeSphere &&
+                 world.has<components::VolumeSphereComponent>(member)) {
+        world.get<components::VolumeSphereComponent>(member).visible =
+            enabled && prefab_member.volume_sphere_visible;
       }
     }
 

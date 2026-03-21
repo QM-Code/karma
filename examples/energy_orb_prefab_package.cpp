@@ -370,12 +370,12 @@ void cleanupEnergyOrbPackage(const prefabs::EffectPrefabPackageContext& context,
 
 }  // namespace
 
-bool registerEnergyOrbPrefabPackage(prefabs::EffectPrefabRegistry& registry) {
+bool registerEnergyOrbPrefabPackage(prefabs::PrefabRegistry& registry) {
   const auto state = std::make_shared<EnergyOrbPackageState>();
   return registry.registerPrefab(
       std::string(kEnergyOrbPrefabKey),
-      prefabs::RegisteredEffectPrefabDesc{
-          .prefab_path = resolveExampleAssetPath("prefabs/energy_orb.kprefab"),
+      prefabs::RegisteredPrefabDesc{
+          .prefab_path = resolveExampleAssetPath("prefabs/energy_orb"),
           .prepare =
               [state](const prefabs::EffectPrefabPackageContext& context) {
                 return prepareEnergyOrbPackage(context, state);

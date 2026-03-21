@@ -8,6 +8,6 @@ namespace karma::demo {
 
 inline constexpr std::string_view kEnergyOrbPrefabKey = "energy_orb";
 
-bool registerEnergyOrbPrefabPackage(prefabs::EffectPrefabRegistry& registry);
+bool registerEnergyOrbPrefabPackage(prefabs::PrefabRegistry& registry);
 
 }  // namespace karma::demo

@@ -148,6 +148,20 @@ class DiligentBackend final : public Backend {
     float shell_highlight_strength = 1.0f;
     float shell_alpha_boost = 0.0f;
     float shell_swirl_strength = 0.0f;
+    bool analytic_sphere_normals = false;
+    float shell_body_strength = 1.0f;
+    float screen_center_x = 0.5f;
+    float screen_center_y = 0.5f;
+    float screen_radius_x = 0.25f;
+    float screen_radius_y = 0.25f;
+    float wave_tint_strength = 0.75f;
+    float wave_distortion_strength = 0.6f;
+    float wave_edge_strength = 0.35f;
+    float wave_noise_strength = 0.65f;
+    glm::vec3 volume_center{0.0f, 0.0f, 0.0f};
+    float volume_radius = 1.0f;
+    float volume_density = 1.0f;
+    renderer::MaterialDesc::BlendMode blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> base_color_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> metallic_roughness_srv;
@@ -156,6 +170,8 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_double_sided_srb;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> additive_srb;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> additive_double_sided_srb;
   };
 
   struct MaterialSetRecord {
@@ -281,6 +297,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> transparent_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> transparent_double_sided_pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> additive_pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> additive_double_sided_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> camera_override_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> camera_override_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> camera_override_user_constants_;
@@ -292,6 +310,9 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>
       transparent_double_sided_default_material_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> additive_default_material_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>
+      additive_double_sided_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shadow_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> constants_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_color_;

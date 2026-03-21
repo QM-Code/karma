@@ -1,7 +1,7 @@
-# Prefab-backed beam path style for the laser sample.
+# Prefab-backed beam path style for reusable laser beams.
 
 [prefab]
-name = Laser Path
+name = Beam
 
 [param glow]
 type = color

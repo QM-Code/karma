@@ -2845,6 +2845,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   bind_forward_plus_static_resources(pipeline_state_.RawPtr());
   bind_forward_plus_static_resources(transparent_pipeline_state_.RawPtr());
   bind_forward_plus_static_resources(transparent_double_sided_pipeline_state_.RawPtr());
+  bind_forward_plus_static_resources(additive_pipeline_state_.RawPtr());
+  bind_forward_plus_static_resources(additive_double_sided_pipeline_state_.RawPtr());
 
   glm::vec3 shadow_light_dir = directional_light_.direction;
   if (glm::length(shadow_light_dir) < 1e-4f) {
@@ -3807,6 +3809,17 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   base_constants.camera_forward[1] = cam_forward.y;
   base_constants.camera_forward[2] = cam_forward.z;
   base_constants.camera_forward[3] = 0.0f;
+  base_constants.screen_params[0] = static_cast<float>(render_width);
+  base_constants.screen_params[1] = static_cast<float>(render_height);
+  base_constants.screen_params[2] =
+      render_width > 0 ? 1.0f / static_cast<float>(render_width) : 0.0f;
+  base_constants.screen_params[3] =
+      render_height > 0 ? 1.0f / static_cast<float>(render_height) : 0.0f;
+  base_constants.camera_clip_params[0] = std::max(camera_.near_clip, 0.001f);
+  base_constants.camera_clip_params[1] =
+      std::max(camera_.far_clip, base_constants.camera_clip_params[0] + 0.001f);
+  base_constants.camera_clip_params[2] = camera_.perspective ? 1.0f : 0.0f;
+  base_constants.camera_clip_params[3] = 0.0f;
   if (cpu_forward_plus_ready) {
     base_constants.forward_plus_params[0] = 1.0f;
     base_constants.forward_plus_params[1] = 1.0f;
@@ -3901,6 +3914,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     return mat_it != materials_.end() ? &mat_it->second : nullptr;
   };
 
+  auto uses_post_particle_transparent_pass = [&](const MaterialRecord* mat) {
+    if (!mat) {
+      return false;
+    }
+    return mat->shading_model == renderer::MaterialDesc::ShadingModel::EnergyShell ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereGlowVolume ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere;
+  };
+
   for (const auto& entry : instances_) {
     const auto& instance = entry.second;
     if (instance.layer != layer) {
@@ -3951,7 +3976,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                   ? glm::vec3(instance.transform * glm::vec4(mesh.bounds_center, 1.0f))
                   : glm::vec3(instance.transform[3]);
           auto& target_draws =
-              (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::EnergyShell)
+              uses_post_particle_transparent_pass(mat)
                   ? post_particle_transparent_forward_draws
                   : transparent_forward_draws;
           target_draws.push_back(TransparentForwardDraw{
@@ -3981,7 +4006,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                 ? glm::vec3(instance.transform * glm::vec4(mesh.bounds_center, 1.0f))
                 : glm::vec3(instance.transform[3]);
         auto& target_draws =
-            (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::EnergyShell)
+            uses_post_particle_transparent_pass(mat)
                 ? post_particle_transparent_forward_draws
                 : transparent_forward_draws;
         target_draws.push_back(TransparentForwardDraw{
@@ -4013,9 +4038,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
             });
   std::sort(transparent_forward_draws.begin(),
             transparent_forward_draws.end(),
-            [](const TransparentForwardDraw& a, const TransparentForwardDraw& b) {
+            [&](const TransparentForwardDraw& a, const TransparentForwardDraw& b) {
               if (a.depth != b.depth) {
                 return a.depth > b.depth;
+              }
+              const MaterialRecord* mat_a = lookup_material(a.key.material);
+              const MaterialRecord* mat_b = lookup_material(b.key.material);
+              const bool additive_a =
+                  mat_a && mat_a->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+              const bool additive_b =
+                  mat_b && mat_b->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+              if (additive_a != additive_b) {
+                return !additive_a && additive_b;
               }
               if (a.key.material != b.key.material) {
                 return a.key.material < b.key.material;
@@ -4030,9 +4064,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
             });
   std::sort(post_particle_transparent_forward_draws.begin(),
             post_particle_transparent_forward_draws.end(),
-            [](const TransparentForwardDraw& a, const TransparentForwardDraw& b) {
+            [&](const TransparentForwardDraw& a, const TransparentForwardDraw& b) {
               if (a.depth != b.depth) {
                 return a.depth > b.depth;
+              }
+              const MaterialRecord* mat_a = lookup_material(a.key.material);
+              const MaterialRecord* mat_b = lookup_material(b.key.material);
+              const bool additive_a =
+                  mat_a && mat_a->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+              const bool additive_b =
+                  mat_b && mat_b->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+              if (additive_a != additive_b) {
+                return !additive_a && additive_b;
               }
               if (a.key.material != b.key.material) {
                 return a.key.material < b.key.material;
@@ -4174,10 +4217,47 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     constants.material_params0[1] = mat ? mat->shell_fresnel_power : 5.0f;
     constants.material_params0[2] = mat ? mat->shell_fresnel_strength : 1.0f;
     constants.material_params0[3] = mat ? mat->shell_refraction_strength : 0.08f;
-    constants.material_params1[0] = mat ? mat->shell_interior_strength : 0.4f;
-    constants.material_params1[1] = mat ? mat->shell_highlight_strength : 1.0f;
-    constants.material_params1[2] = mat ? mat->shell_alpha_boost : 0.0f;
-    constants.material_params1[3] = mat ? mat->shell_swirl_strength : 0.0f;
+    if (mat && (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
+                mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave)) {
+      constants.material_params1[0] = mat->wave_tint_strength;
+      constants.material_params1[1] = mat->wave_distortion_strength;
+      constants.material_params1[2] = mat->wave_edge_strength;
+      constants.material_params1[3] = mat->wave_noise_strength;
+    } else if (mat &&
+               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
+      constants.material_params1[0] = mat->volume_center.x;
+      constants.material_params1[1] = mat->volume_center.y;
+      constants.material_params1[2] = mat->volume_center.z;
+      constants.material_params1[3] = mat->volume_radius;
+    } else {
+      constants.material_params1[0] = mat ? mat->shell_interior_strength : 0.4f;
+      constants.material_params1[1] = mat ? mat->shell_highlight_strength : 1.0f;
+      constants.material_params1[2] = mat ? mat->shell_alpha_boost : 0.0f;
+      constants.material_params1[3] = mat ? mat->shell_swirl_strength : 0.0f;
+    }
+    if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo) {
+      constants.material_params2[0] = mat->screen_center_x;
+      constants.material_params2[1] = mat->screen_center_y;
+      constants.material_params2[2] = mat->screen_radius_x;
+      constants.material_params2[3] = mat->screen_radius_y;
+    } else if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave) {
+      constants.material_params2[0] = mat->screen_center_x;
+      constants.material_params2[1] = mat->screen_center_y;
+      constants.material_params2[2] = mat->screen_radius_x;
+      constants.material_params2[3] = mat->screen_radius_y;
+    } else if (mat &&
+               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
+      constants.material_params2[0] = mat->volume_density;
+      constants.material_params2[1] = mat->wave_distortion_strength;
+      constants.material_params2[2] = mat->wave_noise_strength;
+      constants.material_params2[3] = 0.0f;
+    } else {
+      constants.material_params2[0] =
+          (mat && mat->analytic_sphere_normals) ? 1.0f : 0.0f;
+      constants.material_params2[1] = mat ? mat->shell_body_strength : 1.0f;
+      constants.material_params2[2] = (mat && mat->desc.unlit) ? 1.0f : 0.0f;
+      constants.material_params2[3] = 0.0f;
+    }
     {
       Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                                 Diligent::MAP_FLAG_DISCARD);
@@ -4192,7 +4272,17 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     if (!transparent || use_custom_shader_override) {
       return active_forward_pipeline;
     }
+    const bool additive =
+        mat && mat->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
     const bool double_sided = mat && mat->desc.double_sided;
+    if (additive) {
+      if (double_sided && additive_double_sided_pipeline_state_) {
+        return additive_double_sided_pipeline_state_;
+      }
+      if (additive_pipeline_state_) {
+        return additive_pipeline_state_;
+      }
+    }
     if (double_sided && transparent_double_sided_pipeline_state_) {
       return transparent_double_sided_pipeline_state_;
     }
@@ -4217,12 +4307,30 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
 
     const bool double_sided = mat && mat->desc.double_sided;
+    const bool additive =
+        mat && mat->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
     if (double_sided) {
+      if (additive) {
+        if (mat && mat->additive_double_sided_srb) {
+          return mat->additive_double_sided_srb;
+        }
+        if (additive_double_sided_default_material_srb_) {
+          return additive_double_sided_default_material_srb_;
+        }
+      }
       if (mat && mat->transparent_double_sided_srb) {
         return mat->transparent_double_sided_srb;
       }
       if (transparent_double_sided_default_material_srb_) {
         return transparent_double_sided_default_material_srb_;
+      }
+    }
+    if (additive) {
+      if (mat && mat->additive_srb) {
+        return mat->additive_srb;
+      }
+      if (additive_default_material_srb_) {
+        return additive_default_material_srb_;
       }
     }
     if (mat && mat->transparent_srb) {
@@ -4344,11 +4452,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   }
 
   auto draw_transparent_forward_draws =
-      [&](const std::vector<TransparentForwardDraw>& draws) {
+      [&](const std::vector<TransparentForwardDraw>& draws,
+          Diligent::ITextureView* scene_color_sample_srv,
+          Diligent::ITextureView* scene_depth_sample_srv) {
     if (draws.empty()) {
       return;
     }
-    context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    ensureParticleFallbackDepthResource();
+    auto* transparent_dsv = particle_dsv ? particle_dsv : dsv;
+    context_->SetRenderTargets(1,
+                               &rtv,
+                               transparent_dsv,
+                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     context_->SetViewports(1,
                            &viewport,
                            static_cast<Diligent::Uint32>(render_width),
@@ -4358,6 +4473,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     bound_mesh_vb = nullptr;
     bound_instance_vb = nullptr;
     bound_index_buffer = nullptr;
+    Diligent::ITextureView* bound_scene_color = nullptr;
+    Diligent::ITextureView* bound_scene_depth = nullptr;
 
     for (const auto& draw : draws) {
       auto mesh_it = meshes_.find(draw.key.mesh);
@@ -4386,6 +4503,29 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       update_forward_material_constants(draw.key.material, draw.key.mesh, mesh, mat);
 
       Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, pipeline, true);
+      if (mat &&
+          (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) &&
+          srb) {
+        Diligent::ITextureView* desired_scene_color =
+            scene_color_sample_srv ? scene_color_sample_srv : default_base_color_;
+        Diligent::ITextureView* desired_scene_depth =
+            scene_depth_sample_srv ? scene_depth_sample_srv : particle_fallback_depth_srv_;
+        if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneColor")) {
+          if (desired_scene_color != bound_scene_color || srb != bound_forward_srb) {
+            var->Set(desired_scene_color);
+            bound_scene_color = desired_scene_color;
+            bound_forward_srb = nullptr;
+          }
+        }
+        if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth")) {
+          if (desired_scene_depth != bound_scene_depth || srb != bound_forward_srb) {
+            var->Set(desired_scene_depth);
+            bound_scene_depth = desired_scene_depth;
+            bound_forward_srb = nullptr;
+          }
+        }
+      }
       if (srb && srb != bound_forward_srb) {
         context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         bound_forward_srb = srb;
@@ -4401,7 +4541,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
   };
 
-  draw_transparent_forward_draws(transparent_forward_draws);
+  draw_transparent_forward_draws(transparent_forward_draws, nullptr, nullptr);
 
   ensureParticleResources();
   ensureLineResources();
@@ -4908,7 +5048,34 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                  particle_texture_var_alpha_no_depth_,
                  particle_scene_color_var_alpha_no_depth_,
                  particle_scene_depth_var_alpha_no_depth_);
-  draw_transparent_forward_draws(post_particle_transparent_forward_draws);
+  bool require_post_particle_scene_color_copy = false;
+  for (const auto& draw : post_particle_transparent_forward_draws) {
+    const MaterialRecord* mat = lookup_material(draw.key.material);
+    if (mat &&
+        (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
+         mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere)) {
+      require_post_particle_scene_color_copy = true;
+      break;
+    }
+  }
+  Diligent::ITextureView* post_particle_scene_color_sample_srv = particle_scene_color_srv;
+  if (require_post_particle_scene_color_copy && particle_scene_texture) {
+    ensureParticleSceneCopyResources(render_width,
+                                     render_height,
+                                     particle_scene_texture->GetDesc().Format);
+    if (particle_scene_color_copy_tex_ && particle_scene_color_copy_srv_) {
+      Diligent::CopyTextureAttribs copy_attribs{
+          particle_scene_texture,
+          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+          particle_scene_color_copy_tex_,
+          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
+      context_->CopyTexture(copy_attribs);
+      post_particle_scene_color_sample_srv = particle_scene_color_copy_srv_;
+    }
+  }
+  draw_transparent_forward_draws(post_particle_transparent_forward_draws,
+                                 post_particle_scene_color_sample_srv,
+                                 particle_scene_depth_srv);
   draw_lines(line_vertices_depth_, line_pipeline_state_depth_, line_srb_depth_);
   draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
 
@@ -5191,10 +5358,14 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
   bind_env_to_srb(default_material_srb_);
   bind_env_to_srb(transparent_default_material_srb_);
   bind_env_to_srb(transparent_double_sided_default_material_srb_);
+  bind_env_to_srb(additive_default_material_srb_);
+  bind_env_to_srb(additive_double_sided_default_material_srb_);
   for (auto& entry : materials_) {
     bind_env_to_srb(entry.second.srb);
     bind_env_to_srb(entry.second.transparent_srb);
     bind_env_to_srb(entry.second.transparent_double_sided_srb);
+    bind_env_to_srb(entry.second.additive_srb);
+    bind_env_to_srb(entry.second.additive_double_sided_srb);
   }
 }
 
@@ -5232,7 +5403,9 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
   for (auto& entry : materials_) {
     for (auto* srb : {entry.second.srb.RawPtr(),
                       entry.second.transparent_srb.RawPtr(),
-                      entry.second.transparent_double_sided_srb.RawPtr()}) {
+                      entry.second.transparent_double_sided_srb.RawPtr(),
+                      entry.second.additive_srb.RawPtr(),
+                      entry.second.additive_double_sided_srb.RawPtr()}) {
       if (!srb) {
         continue;
       }
@@ -5246,7 +5419,9 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
   }
   for (auto* srb : {default_material_srb_.RawPtr(),
                     transparent_default_material_srb_.RawPtr(),
-                    transparent_double_sided_default_material_srb_.RawPtr()}) {
+                    transparent_double_sided_default_material_srb_.RawPtr(),
+                    additive_default_material_srb_.RawPtr(),
+                    additive_double_sided_default_material_srb_.RawPtr()}) {
     if (!srb) {
       continue;
     }

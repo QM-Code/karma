@@ -10,6 +10,8 @@ GraphicsDevice::GraphicsDevice(karma::platform::Window& window) {
 GraphicsDevice::~GraphicsDevice() = default;
 
 void GraphicsDevice::beginFrame(const FrameInfo& frame) {
+  framebuffer_width_ = frame.width;
+  framebuffer_height_ = frame.height;
   if (backend_) {
     backend_->beginFrame(frame);
   }
@@ -22,9 +24,16 @@ void GraphicsDevice::endFrame() {
 }
 
 void GraphicsDevice::resize(int width, int height) {
+  framebuffer_width_ = width;
+  framebuffer_height_ = height;
   if (backend_) {
     backend_->resize(width, height);
   }
+}
+
+void GraphicsDevice::getFramebufferSize(int& width, int& height) const {
+  width = framebuffer_width_;
+  height = framebuffer_height_;
 }
 
 MeshId GraphicsDevice::createMesh(const MeshData& mesh) {

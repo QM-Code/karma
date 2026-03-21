@@ -38,6 +38,10 @@ struct MeshData {
 };
 
 struct MaterialDesc {
+  enum class BlendMode : uint32_t {
+    Alpha = 0,
+    Additive = 1,
+  };
   std::filesystem::path vertex_shader_path;
   std::filesystem::path fragment_shader_path;
   math::Color base_color{1.0f, 1.0f, 1.0f, 1.0f};
@@ -49,6 +53,11 @@ struct MaterialDesc {
   enum class ShadingModel : uint32_t {
     Standard = 0,
     EnergyShell = 1,
+    WaveVolume = 2,
+    SphereHalo = 3,
+    ScreenWave = 4,
+    SphereGlowVolume = 5,
+    VolumetricSphere = 6,
   };
   ShadingModel shading_model = ShadingModel::Standard;
   float shell_fresnel_power = 5.0f;
@@ -58,9 +67,23 @@ struct MaterialDesc {
   float shell_highlight_strength = 1.0f;
   float shell_alpha_boost = 0.0f;
   float shell_swirl_strength = 0.0f;
+  bool analytic_sphere_normals = false;
+  float shell_body_strength = 1.0f;
+  float screen_center_x = 0.5f;
+  float screen_center_y = 0.5f;
+  float screen_radius_x = 0.25f;
+  float screen_radius_y = 0.25f;
+  float wave_tint_strength = 0.75f;
+  float wave_distortion_strength = 0.6f;
+  float wave_edge_strength = 0.35f;
+  float wave_noise_strength = 0.65f;
+  glm::vec3 volume_center{0.0f, 0.0f, 0.0f};
+  float volume_radius = 1.0f;
+  float volume_density = 1.0f;
   TextureId base_color_texture = kInvalidTexture;
   bool unlit = false;
   bool transparent = false;
+  BlendMode blend_mode = BlendMode::Alpha;
   bool depth_test = true;
   bool depth_write = true;
   bool wireframe = false;

@@ -22,6 +22,7 @@
 #include "karma/components/tag.h"
 #include "karma/components/transform.h"
 #include "karma/components/visibility.h"
+#include "karma/components/volume_sphere.h"
 #include "karma/ecs/collider_queries.h"
 #include "karma/ecs/world.h"
 #include "karma/input/input_system.h"
@@ -41,3 +42,4 @@
 #include "karma/scene/scene.h"
 #include "karma/scene/glb_scene_import.h"
 #include "karma/app/ui_context.h"
+#include "karma/volumes/volume_sphere_system.h"

@@ -3,9 +3,23 @@
 
 #include <string>
 
+#include <spdlog/spdlog.h>
+
 namespace karma::demo {
 
-class LaserPrefabExample final : public app::GameInterface {
+namespace {
+
+constexpr math::Vec3 kSpherePosition{0.0f, 2.2f, -5.3f};
+
+components::TransformComponent makeTransform(const math::Vec3& position) {
+  components::TransformComponent transform{};
+  transform.setPosition(position);
+  return transform;
+}
+
+}  // namespace
+
+class VolumetricSpherePrefabExample final : public app::GameInterface {
  public:
   void onStart() override {
     world_mesh_ = resolveExampleAssetPath("world.glb").string();
@@ -14,13 +28,11 @@ class LaserPrefabExample final : public app::GameInterface {
     spawnWorld();
     spawnLighting();
     spawnCamera();
-    spawnBeam();
+    spawnSphere();
   }
 
   void onFixedUpdate(float dt) override { (void)dt; }
-
   void onUpdate(float dt) override { (void)dt; }
-
   void onShutdown() override {}
 
  private:
@@ -37,7 +49,7 @@ class LaserPrefabExample final : public app::GameInterface {
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                  .environment_map = environment_map_,
-                                 .intensity = 0.28f,
+                                 .intensity = 0.16f,
                                  .draw_skybox = true,
                              });
   }
@@ -47,12 +59,12 @@ class LaserPrefabExample final : public app::GameInterface {
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 48.0f, 0.0f});
-    sun_transform.setRotation(math::fromYawPitch(0.52f, -0.92f));
+    sun_transform.setRotation(math::fromYawPitch(0.54f, -0.92f));
     world->add(sun, sun_transform);
     world->add(sun, components::LightComponent{
                         .type = components::LightComponent::Type::Directional,
-                        .color = {1.0f, 0.95f, 0.90f, 1.0f},
-                        .intensity = 0.72f,
+                        .color = {1.0f, 0.97f, 0.92f, 1.0f},
+                        .intensity = 0.42f,
                     });
   }
 
@@ -60,25 +72,29 @@ class LaserPrefabExample final : public app::GameInterface {
     const ecs::Entity camera = world->createEntity();
     world->setName(camera, "Camera");
     components::TransformComponent camera_transform{};
-    camera_transform.setPosition({1.4f, 9.0f, 22.0f});
-    camera_transform.setRotation(math::fromYawPitch(0.02f, -0.34f));
+    camera_transform.setPosition({0.0f, 2.55f, 6.7f});
+    camera_transform.setRotation(math::fromYawPitch(0.0f, -0.03f));
     components::CameraComponent camera_component{};
-    camera_component.near_clip = 0.05f;
-    camera_component.far_clip = 200.0f;
+    camera_component.near_clip = 0.03f;
+    camera_component.far_clip = 220.0f;
     camera_component.render_shadows = false;
     camera_component.is_primary = true;
     world->add(camera, camera_transform);
     world->add(camera, camera_component);
   }
 
-  void spawnBeam() {
-    prefabs::instantiatePrefab(
+  void spawnSphere() {
+    const auto instance = prefabs::instantiatePrefab(
         *world,
         graphics,
-        resolveExampleAssetPath("prefabs/beam"),
+        resolveExampleAssetPath("prefabs/volumetric_sphere"),
         prefabs::PrefabInstantiateDesc{
-            .name = "Prefab Laser",
+            .name = "Prefab Volumetric Sphere",
+            .transform = makeTransform(kSpherePosition),
         });
+    if (!instance.has_value()) {
+      spdlog::error("Volumetric sphere prefab example failed to instantiate the prefab");
+    }
   }
 
   std::string world_mesh_;
@@ -89,10 +105,10 @@ class LaserPrefabExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  karma::demo::LaserPrefabExample game;
+  karma::demo::VolumetricSpherePrefabExample game;
 
   karma::app::EngineConfig config;
-  config.window.title = "Karma Laser Prefab Example";
+  config.window.title = "Karma Volumetric Sphere Prefab Example";
   config.window.samples = 1;
   config.cursor_visible = true;
   config.enable_anisotropy = true;

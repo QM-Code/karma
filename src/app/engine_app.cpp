@@ -61,7 +61,7 @@ void EngineApp::initSubsystems() {
 
   input_.setWindow(window_.get());
   effect_prefab_system_ = std::make_unique<prefabs::EffectPrefabSystem>();
-  effect_prefab_registry_ = std::make_unique<prefabs::EffectPrefabRegistry>();
+  effect_prefab_registry_ = std::make_unique<prefabs::PrefabRegistry>();
 
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
@@ -70,6 +70,7 @@ void EngineApp::initSubsystems() {
     beam_path_system_ = std::make_unique<beams::BeamPathSystem>(graphics_.get());
     particle_system_ =
         std::make_unique<particles::ParticleSystem>(graphics_.get(), &particle_effects_);
+    volume_sphere_system_ = std::make_unique<volumes::VolumeSphereSystem>(graphics_.get());
   }
 
   systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
@@ -106,6 +107,9 @@ void EngineApp::warmUpRenderer() {
   if (particle_system_) {
     particle_system_->update(world_, 0.0f, 1.0f);
   }
+  if (volume_sphere_system_) {
+    volume_sphere_system_->update(world_, 0.0f, 1.0f);
+  }
   render_system_->update(world_, scene_, 0.0f, 1.0f);
   graphics_->renderLayer(0);
   graphics_->endFrame();
@@ -133,6 +137,7 @@ void EngineApp::shutdownSubsystems() {
   effect_prefab_registry_.reset();
   beam_path_system_.reset();
   particle_system_.reset();
+  volume_sphere_system_.reset();
   graphics_.reset();
   window_.reset();
   running_ = false;
@@ -200,7 +205,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      particle_effects_,
                      *effect_prefab_registry_);
   if (effect_prefab_registry_) {
-    effect_prefab_registry_->bindContext(prefabs::EffectPrefabPackageContext{
+    effect_prefab_registry_->bindContext(prefabs::PrefabPackageContext{
         .graphics = graphics_.get(),
         .materials = &materials_,
         .particle_effects = &particle_effects_,
@@ -344,6 +349,9 @@ void EngineApp::tick() {
     }
     if (particle_system_) {
       particle_system_->update(world_, frame_dt, render_alpha);
+    }
+    if (volume_sphere_system_) {
+      volume_sphere_system_->update(world_, frame_dt, render_alpha);
     }
     render_system_->update(world_, scene_, frame_dt, render_alpha);
     graphics_->renderLayer(0);

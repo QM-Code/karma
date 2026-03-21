@@ -46,10 +46,10 @@ class EnergyOrbExample final : public app::GameInterface {
       const auto orb = prefab_registry->instantiate(
           *world,
           kEnergyOrbPrefabKey,
-          prefabs::EffectPrefabInstantiateDesc{
+          prefabs::PrefabInstantiateDesc{
               .name = "Energy Orb",
               .transform = makeTransform(kOrbBasePosition),
-              .color_overrides = {{"accent", kOrbAccentColor}},
+              .param_overrides = {{"accent", kOrbAccentColor}},
           });
       if (orb.has_value()) {
         orb_root_entity_ = orb->root;

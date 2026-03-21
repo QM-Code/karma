@@ -13,6 +13,7 @@ class GraphicsDevice {
   void beginFrame(const FrameInfo& frame);
   void endFrame();
   void resize(int width, int height);
+  void getFramebufferSize(int& width, int& height) const;
 
   MeshId createMesh(const MeshData& mesh);
   MeshId createMeshFromFile(const std::filesystem::path& path);
@@ -76,6 +77,8 @@ class GraphicsDevice {
 
  private:
   std::unique_ptr<renderer_backend::Backend> backend_;
+  int framebuffer_width_ = 0;
+  int framebuffer_height_ = 0;
 };
 
 }  // namespace karma::renderer

@@ -1,52 +1,65 @@
-# Karma Effect Prefabs
+# Karma Prefabs
 
-Karma now has a small file-backed ECS prefab workflow for layered runtime
-effects such as the orb sample.
+Karma prefabs are file-backed ECS subtrees. A prefab instantiates one root
+entity plus any number of child entities under it, and the engine keeps the
+children synced to the root transform automatically.
+
+The current prefab runtime supports these authored entry types:
+
+- `mesh`
+- `particle`
+- `light`
+- `beam`
+- `volume_sphere`
 
 The core pieces are:
 
-- `prefabs::loadEffectPrefab(...)`
-- `prefabs::instantiateEffectPrefab(...)`
-- `prefabs::EffectPrefabRegistry`
-- `prefabs::instantiateRegisteredPrefab(...)`
+- `prefabs::loadPrefab(...)`
+- `prefabs::instantiatePrefab(...)`
+- `prefabs::PrefabRegistry`
 - `prefabs::setPrefabPlayback(...)`
 - `prefabs::restartPrefab(...)`
-- `prefabs::EffectPrefabSystem` (engine-owned, updates child transforms)
+- `prefabs::EffectPrefabSystem` (engine-owned child transform syncing)
 
 ## What It Solves
 
-Use an effect prefab when one gameplay effect is really a bundle of ECS
-entities:
+Use a prefab when one gameplay object is really a bundle of ECS entities:
 
-- one or more particle layers
-- one or more mesh shells
-- one or more lights
-- one or more beam-path entities
+- a mesh shell plus one or more lights
+- a layered particle effect
+- a reusable beam setup
+- an analytic volume sphere with helper lights
 
-Instead of constructing all of that in C++, author it once in a `.kprefab`
-file and instantiate it with one call.
+Instead of building that subtree in C++, author it once in a prefab manifest
+and instantiate it with one call.
 
-## Typical Flow
+## Canonical Workflow
 
-1. Either instantiate a `.kprefab` directly, or register it in an `EffectPrefabRegistry`.
-2. If needed, let the registry prepare package dependencies such as textures or particle keys.
-3. Pass prefab parameters such as colors at instantiate time.
-4. Move the root entity by changing its `TransformComponent`.
-5. Toggle or restart the whole effect through the prefab helper API.
+1. Author `prefab.kprefab` in a directory, or author a standalone `.kprefab` file.
+2. Instantiate it directly from a file or directory path.
+3. Optionally pass typed parameter overrides at instantiate time.
+4. Move, scale, or destroy the prefab by operating on its root entity.
+5. If the prefab also needs one-time runtime setup, register it in a `PrefabRegistry`.
 
-## Instantiating
+## Direct Instantiation
+
+The canonical direct API is:
 
 ```cpp
 #include "karma/prefabs/effect_prefab.h"
 
-const auto orb = prefabs::instantiateEffectPrefab(
+const auto instance = prefabs::instantiatePrefab(
     *world,
     graphics,
-    "examples/assets/prefabs/energy_orb.kprefab",
-    prefabs::EffectPrefabInstantiateDesc{
-        .name = "Energy Orb",
+    "examples/assets/prefabs/volumetric_sphere",
+    prefabs::PrefabInstantiateDesc{
+        .name = "Shield",
         .transform = transform,
-        .color_overrides = {{"accent", math::Color{0.18f, 1.0f, 0.28f, 1.0f}}},
+        .param_overrides = {
+            {"color", math::Color{0.18f, 0.82f, 1.0f, 1.0f}},
+            {"radius", 4.2f},
+            {"opacity", 0.5f},
+        },
     });
 ```
 
@@ -54,88 +67,57 @@ That creates:
 
 - one root ECS entity
 - one child ECS entity per prefab entry
-- automatic transform syncing from root to children every frame
+- automatic root-to-child transform syncing every frame
 
-For a minimal end-to-end usage example, see
-[../examples/laser_prefab_example.cpp](../examples/laser_prefab_example.cpp),
-which sets up a simple scene and instantiates
-[../examples/assets/prefabs/laser_path.kprefab](../examples/assets/prefabs/laser_path.kprefab)
-directly with one call.
+If the path is a directory, Karma loads `prefab.kprefab` from that directory.
+
+For a minimal end-to-end example, see
+[../examples/volumetric_sphere_example.cpp](../examples/volumetric_sphere_example.cpp),
+which instantiates
+[../examples/assets/prefabs/volumetric_sphere/prefab.kprefab](../examples/assets/prefabs/volumetric_sphere/prefab.kprefab)
+by passing the prefab directory path directly.
 
 ## Registry Packages
 
-Use `EffectPrefabRegistry` when a prefab also needs one-time runtime setup,
-for example:
+Use `PrefabRegistry` when a prefab also needs one-time runtime setup, for
+example:
 
 - generated textures
 - particle effect registrations
 - material registrations
 
-The registry owns those package callbacks and can instantiate by prefab key
+The registry owns those prepare/cleanup callbacks and can instantiate by key
 instead of file path:
 
 ```cpp
 prefab_registry->registerPrefab(
-    "laser_path",
-    prefabs::RegisteredEffectPrefabDesc{
-        .prefab_path = "examples/assets/prefabs/laser_path.kprefab",
+    "energy_orb",
+    prefabs::RegisteredPrefabDesc{
+        .prefab_path = "examples/assets/prefabs/energy_orb",
+        .prepare = prepare_callback,
+        .cleanup = cleanup_callback,
     });
-
-const auto laser = prefab_registry->instantiate(
-    *world,
-    "laser_path",
-    prefabs::EffectPrefabInstantiateDesc{
-        .name = "Laser",
-    });
-```
-
-There is also a free helper:
-
-```cpp
-const auto laser = prefabs::instantiateRegisteredPrefab(
-    *world,
-    *prefab_registry,
-    "laser_path");
-```
-
-## Using The Orb Prefab Today
-
-The orb is now fully packaged behind the registry layer. The reference
-implementation lives in
-[../examples/energy_orb_prefab_package.cpp](../examples/energy_orb_prefab_package.cpp),
-which registers:
-
-- the prefab file
-- generated orb atlas textures
-- the orb particle effect keys and texture aliases
-
-Usage in gameplay code is:
-
-```cpp
-karma::demo::registerEnergyOrbPrefabPackage(*prefab_registry);
 
 const auto orb = prefab_registry->instantiate(
     *world,
-    karma::demo::kEnergyOrbPrefabKey,
-    prefabs::EffectPrefabInstantiateDesc{
-        .name = "Energy Orb",
+    "energy_orb",
+    prefabs::PrefabInstantiateDesc{
+        .name = "Orb",
         .transform = transform,
-        .color_overrides = {{"accent", color}},
+        .param_overrides = {
+            {"accent", math::Color{0.18f, 1.0f, 0.28f, 1.0f}},
+        },
     });
 ```
 
-The reference implementation is the orb sample in
-[../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp), which:
-
-1. registers the orb package once;
-2. instantiates the prefab by key;
-3. moves and controls the prefab root like any other ECS entity.
+The orb sample is the reference implementation for that path:
+[../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp).
 
 ## Runtime Control
 
 ```cpp
-prefabs::setPrefabPlayback(*world, orb->root, false);
-prefabs::restartPrefab(*world, orb->root);
+prefabs::setPrefabPlayback(*world, instance->root, false);
+prefabs::restartPrefab(*world, instance->root);
 ```
 
 `setPrefabPlayback(...)` currently handles:
@@ -144,6 +126,7 @@ prefabs::restartPrefab(*world, orb->root);
 - particle enabled/playing state
 - light intensity/range
 - beam visibility
+- volume sphere visibility
 
 ## File Format
 
@@ -152,11 +135,12 @@ The format is line-oriented like `.kpeffect`.
 Supported sections:
 
 - `[prefab]`
-- `[color name]`
+- `[param name]`
 - `[mesh name]`
 - `[particle name]`
 - `[light name]`
 - `[beam name]`
+- `[volume_sphere name]`
 
 Comments start with `#`.
 
@@ -164,53 +148,57 @@ Example:
 
 ```ini
 [prefab]
-name = Energy Orb
+name = Volumetric Sphere
 
-[color accent]
-default = 0.18, 1.0, 0.28, 1.0
+[param color]
+type = color
+default = 0.18, 0.82, 1.0, 1.0
 
-[mesh shell]
-mesh = ../shot.glb
-uniform_scale = 1.3125
-shadow_visible = false
-material.base_color_param = accent
-material.base_color_scale = 1.0, 1.0, 1.0, 0.16
-material.shading_model = energy_shell
-material.transparent = true
-material.depth_write = false
-material.double_sided = true
+[param radius]
+type = float
+default = 4.2
 
-[particle core]
-effect = energy_orb_core
-override.size_scale = 0.1875
-override.end_color_param = accent
-override.end_color_scale = 0.85, 0.92, 0.85, 0.0
+[volume_sphere body]
+color_param = color
+radius_param = radius
+center_opacity = 0.5
+distortion_strength = 1.4
 
 [light glow]
 type = point
-color_param = accent
-intensity = 9.75
-range = 3.0
+color_param = color
+intensity = 180.0
+range = 52.0
 casts_shadows = false
 ```
 
-## Color Parameters
+## Parameters
 
-Color parameters are the first prefab constant surface.
+Prefab parameters are typed. Supported parameter types are:
 
-Each color-capable field can bind to:
+- `bool`
+- `float`
+- `vec3`
+- `color`
+- `string`
 
-- a literal color
-- a named prefab color parameter
-- a per-channel scale
-- an optional mix color + mix factor
+Fields bind to parameters through the usual `*_param` pattern. Color bindings
+also support `*_scale`, `*_mix`, and `*_mix_factor`. Float bindings support
+`*_scale` and `*_bias`.
 
-That keeps one prefab reusable across multiple variants without introducing
-effect-specific helper functions such as `createOrb(...)`.
+Examples:
+
+- `material.base_color_param = accent`
+- `range_param = light_range`
+- `radius_param = radius`
+
+`color_overrides` still work as a convenience bridge, but the forward-looking
+surface is `param_overrides`.
 
 ## Supported Entry Fields
 
-Shared transform fields on mesh/particle/light/beam entries:
+Shared transform fields on `mesh`, `particle`, `light`, `beam`, and
+`volume_sphere` entries:
 
 - `position`
 - `rotation_deg`
@@ -222,7 +210,7 @@ Mesh fields:
 - `mesh`
 - `visible`
 - `shadow_visible`
-- `material.*` for the current `MaterialDesc` surface
+- `material.*`
 
 Particle fields:
 
@@ -232,14 +220,14 @@ Particle fields:
 - `auto_apply`
 - `preserve_enabled`
 - `preserve_playing`
-- `override.*` for the current `ParticleEffectOverrideComponent` surface
+- `override.*`
 
 Light fields:
 
 - `type`
 - `color*`
-- `intensity`
-- `range`
+- `intensity*`
+- `range*`
 - `casts_shadows`
 - `inner_cone_degrees`
 - `outer_cone_degrees`
@@ -260,18 +248,8 @@ Beam fields:
 - `light_intensity`
 - `light_range`
 - `light_spacing`
-- `electric_intensity`
-- `electric_size`
-- `electric_spacing`
-- `electric_jitter_radius`
-- `electric_speed`
-- `distortion_intensity`
-- `distortion_size`
-- `distortion_spacing`
-- `distortion_jitter_radius`
-- `distortion_strength`
-- `distortion_soft_particle_distance`
-- `distortion_speed`
+- `electric_*`
+- `distortion_*`
 - `layer`
 - `visible`
 - `depth_test`
@@ -279,12 +257,17 @@ Beam fields:
 - `world_space`
 - `endpoint_flares`
 
-## Notes
+Volume sphere fields:
 
-- Prefabs are ECS composition, not a renderer-only feature.
-- Child transforms follow the root, but particle simulation still uses the
-  authored emitter settings. Root scaling is best treated as a placement tool,
-  not a full resimulation control.
-- The orb sample in
-  [../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp)
-  is the reference implementation for this workflow.
+- `color*`
+- `emissive_color*`
+- `radius*`
+- `center_opacity*`
+- `distortion_strength*`
+- `noise_strength*`
+- `overlay_depth*`
+- `visible`
+- `scale_with_transform`
+
+`*` means the field accepts the typed binding form, such as `*_param`,
+`*_scale`, or `*_bias`.

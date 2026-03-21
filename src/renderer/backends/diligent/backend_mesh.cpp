@@ -125,12 +125,22 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
     if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
       var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
     }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneColor")) {
+      var->Set(default_base_color_);
+    }
+    ensureParticleFallbackDepthResource();
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth")) {
+      var->Set(particle_fallback_depth_srv_);
+    }
   };
 
   initialize_srb(pipeline_state_.RawPtr(), record.srb);
   initialize_srb(transparent_pipeline_state_.RawPtr(), record.transparent_srb);
   initialize_srb(transparent_double_sided_pipeline_state_.RawPtr(),
                  record.transparent_double_sided_srb);
+  initialize_srb(additive_pipeline_state_.RawPtr(), record.additive_srb);
+  initialize_srb(additive_double_sided_pipeline_state_.RawPtr(),
+                 record.additive_double_sided_srb);
 }
 
 DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
@@ -466,6 +476,20 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
   record.shell_highlight_strength = material.shell_highlight_strength;
   record.shell_alpha_boost = material.shell_alpha_boost;
   record.shell_swirl_strength = material.shell_swirl_strength;
+  record.analytic_sphere_normals = material.analytic_sphere_normals;
+  record.shell_body_strength = material.shell_body_strength;
+  record.screen_center_x = material.screen_center_x;
+  record.screen_center_y = material.screen_center_y;
+  record.screen_radius_x = material.screen_radius_x;
+  record.screen_radius_y = material.screen_radius_y;
+  record.wave_tint_strength = material.wave_tint_strength;
+  record.wave_distortion_strength = material.wave_distortion_strength;
+  record.wave_edge_strength = material.wave_edge_strength;
+  record.wave_noise_strength = material.wave_noise_strength;
+  record.volume_center = material.volume_center;
+  record.volume_radius = material.volume_radius;
+  record.volume_density = material.volume_density;
+  record.blend_mode = material.blend_mode;
   if (material.base_color_texture != renderer::kInvalidTexture) {
     auto tex_it = textures_.find(material.base_color_texture);
     if (tex_it != textures_.end()) {
@@ -588,6 +612,20 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material, const render
   it->second.shell_highlight_strength = desc.shell_highlight_strength;
   it->second.shell_alpha_boost = desc.shell_alpha_boost;
   it->second.shell_swirl_strength = desc.shell_swirl_strength;
+  it->second.analytic_sphere_normals = desc.analytic_sphere_normals;
+  it->second.shell_body_strength = desc.shell_body_strength;
+  it->second.screen_center_x = desc.screen_center_x;
+  it->second.screen_center_y = desc.screen_center_y;
+  it->second.screen_radius_x = desc.screen_radius_x;
+  it->second.screen_radius_y = desc.screen_radius_y;
+  it->second.wave_tint_strength = desc.wave_tint_strength;
+  it->second.wave_distortion_strength = desc.wave_distortion_strength;
+  it->second.wave_edge_strength = desc.wave_edge_strength;
+  it->second.wave_noise_strength = desc.wave_noise_strength;
+  it->second.volume_center = desc.volume_center;
+  it->second.volume_radius = desc.volume_radius;
+  it->second.volume_density = desc.volume_density;
+  it->second.blend_mode = desc.blend_mode;
   it->second.base_color_srv = {};
   if (desc.base_color_texture != renderer::kInvalidTexture) {
     auto tex_it = textures_.find(desc.base_color_texture);

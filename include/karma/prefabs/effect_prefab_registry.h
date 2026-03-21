@@ -75,4 +75,18 @@ std::optional<EffectPrefabInstance> instantiateRegisteredPrefab(
     std::string_view key,
     const EffectPrefabInstantiateDesc& desc = {});
 
+using PrefabPackageContext = EffectPrefabPackageContext;
+using PrefabPrepareCallback = EffectPrefabPrepareCallback;
+using PrefabCleanupCallback = EffectPrefabCleanupCallback;
+using RegisteredPrefabDesc = RegisteredEffectPrefabDesc;
+using PrefabRegistry = EffectPrefabRegistry;
+
+inline std::optional<PrefabInstance> instantiatePrefab(
+    ecs::World& world,
+    PrefabRegistry& registry,
+    std::string_view key,
+    const PrefabInstantiateDesc& desc = {}) {
+  return registry.instantiate(world, key, desc);
+}
+
 }  // namespace karma::prefabs

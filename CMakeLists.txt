@@ -349,6 +349,7 @@ set(KARMA_SOURCES
   src/prefabs/effect_prefab.cpp
   src/prefabs/effect_prefab_registry.cpp
   src/prefabs/effect_prefab_system.cpp
+  src/volumes/volume_sphere_system.cpp
 )
 
 if (KARMA_BUILD_DEBUG_UI)
@@ -560,6 +561,39 @@ if (NOT KARMA_HEADLESS)
   target_link_libraries(karma_laser_prefab_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_laser_prefab_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_wave_example
+    examples/wave_example.cpp
+  )
+  target_link_libraries(karma_wave_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_wave_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_volumetric_sphere_example
+    examples/volumetric_sphere_example.cpp
+  )
+  target_link_libraries(karma_volumetric_sphere_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_volumetric_sphere_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_volumetric_sphere_prefab_example
+    examples/volumetric_sphere_prefab_example.cpp
+  )
+  target_link_libraries(karma_volumetric_sphere_prefab_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_volumetric_sphere_prefab_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_prefab_gallery_example
+    examples/prefab_gallery_example.cpp
+    examples/energy_orb_prefab_package.cpp
+  )
+  target_link_libraries(karma_prefab_gallery_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_prefab_gallery_example karma_fix_xxhash)
   endif()
 
   if (KARMA_BUILD_IMGUI_DEMO)

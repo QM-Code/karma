@@ -219,11 +219,11 @@ class LaserExample final : public app::GameInterface {
   }
 
   void spawnBeam() {
-    const auto beam = prefabs::instantiateEffectPrefab(
+    const auto beam = prefabs::instantiatePrefab(
         *world,
         graphics,
-        resolveExampleAssetPath("prefabs/laser_path.kprefab"),
-        prefabs::EffectPrefabInstantiateDesc{
+        resolveExampleAssetPath("prefabs/beam"),
+        prefabs::PrefabInstantiateDesc{
             .name = "Laser Path",
         });
     if (!beam.has_value()) {

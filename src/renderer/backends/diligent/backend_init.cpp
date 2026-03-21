@@ -116,6 +116,8 @@ cbuffer Constants
     float4 g_LightColor;
     float4 g_CameraPos;
     float4 g_CameraForward;
+    float4 g_ScreenParams;
+    float4 g_CameraClipParams;
     float4 g_ForwardPlusParams;
     float4 g_LocalLightPositionRange[64];
     float4 g_LocalLightDirectionType[64];
@@ -124,6 +126,7 @@ cbuffer Constants
     float4 g_LocalLightMeta;
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
+    float4 g_MaterialParams2;
 };
 
 struct VSInput
@@ -205,7 +208,9 @@ void DiligentBackend::recreateShadowMap() {
   if (shadow_map_srv_) {
     for (auto* pso : {pipeline_state_.RawPtr(),
                       transparent_pipeline_state_.RawPtr(),
-                      transparent_double_sided_pipeline_state_.RawPtr()}) {
+                      transparent_double_sided_pipeline_state_.RawPtr(),
+                      additive_pipeline_state_.RawPtr(),
+                      additive_double_sided_pipeline_state_.RawPtr()}) {
       if (!pso) {
         continue;
       }
@@ -267,7 +272,9 @@ void DiligentBackend::recreatePointShadowMap() {
 
   for (auto* pso : {pipeline_state_.RawPtr(),
                     transparent_pipeline_state_.RawPtr(),
-                    transparent_double_sided_pipeline_state_.RawPtr()}) {
+                    transparent_double_sided_pipeline_state_.RawPtr(),
+                    additive_pipeline_state_.RawPtr(),
+                    additive_double_sided_pipeline_state_.RawPtr()}) {
     if (!pso) {
       continue;
     }
@@ -481,6 +488,8 @@ cbuffer Constants
     float4 g_LightColor;
     float4 g_CameraPos;
     float4 g_CameraForward;
+    float4 g_ScreenParams;
+    float4 g_CameraClipParams;
     float4 g_ForwardPlusParams;
     float4 g_LocalLightPositionRange[64];
     float4 g_LocalLightDirectionType[64];
@@ -489,6 +498,7 @@ cbuffer Constants
     float4 g_LocalLightMeta;
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
+    float4 g_MaterialParams2;
 };
 
 struct VSInput
@@ -555,6 +565,8 @@ cbuffer Constants
     float4 g_LightColor;
     float4 g_CameraPos;
     float4 g_CameraForward;
+    float4 g_ScreenParams;
+    float4 g_CameraClipParams;
     float4 g_ForwardPlusParams;
     float4 g_LocalLightPositionRange[64];
     float4 g_LocalLightDirectionType[64];
@@ -563,6 +575,7 @@ cbuffer Constants
     float4 g_LocalLightMeta;
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
+    float4 g_MaterialParams2;
 };
 
 Texture2D g_BaseColorTex;
@@ -573,6 +586,8 @@ Texture2D g_EmissiveTex;
 TextureCube g_IrradianceTex;
 TextureCube g_PrefilterTex;
 Texture2D g_BRDFLUT;
+Texture2D g_SceneColor;
+Texture2D<float> g_SceneDepth;
 Texture2DArray<float> g_ShadowMap;
 Texture2DArray<float> g_PointShadowMap;
 SamplerState g_SamplerColor;
@@ -850,6 +865,28 @@ float Noise3(float3 p)
     return lerp(n0, n1, f.z);
 }
 
+float LinearizeSceneDepth(float depth)
+{
+    float near_clip = max(g_CameraClipParams.x, 0.001);
+    float far_clip = max(g_CameraClipParams.y, near_clip + 0.001);
+    if (g_CameraClipParams.z > 0.5)
+    {
+        return (near_clip * far_clip) /
+               max(far_clip - depth * (far_clip - near_clip), 1.0e-4);
+    }
+    return near_clip + depth * (far_clip - near_clip);
+}
+
+float3 SafeNormalize(float3 v, float3 fallback)
+{
+    float len_sq = dot(v, v);
+    if (len_sq <= 1.0e-8)
+    {
+        return fallback;
+    }
+    return v * rsqrt(len_sq);
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
     const float PI = 3.14159265;
@@ -1054,7 +1091,27 @@ float4 main(PSInput input) : SV_TARGET
         float highlight_strength = max(g_MaterialParams1.y, 0.0);
         float alpha_boost = g_MaterialParams1.z;
         float swirl_strength = saturate(g_MaterialParams1.w);
+        bool analytic_sphere_normals = g_MaterialParams2.x > 0.5;
+        float body_strength = saturate(g_MaterialParams2.y);
+        bool shell_unlit = g_MaterialParams2.z > 0.5;
         float time = g_LocalLightMeta.w;
+
+        if (analytic_sphere_normals)
+        {
+            float3 sphere_center_ws = mul(g_Model, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+            float3 sphere_offset_ws = input.WorldPos - sphere_center_ws;
+            float sphere_offset_len = max(length(sphere_offset_ws), 1.0e-5);
+            float3 sphere_dir = sphere_offset_ws / sphere_offset_len;
+            n = sphere_dir;
+            geom_n = sphere_dir;
+        }
+
+        if (dot(n, v) < 0.0)
+        {
+            n = -n;
+            geom_n = -geom_n;
+        }
+        ndotv = max(dot(n, v), 0.0);
 
         float rim = saturate(pow(1.0 - ndotv, fresnel_power) * fresnel_strength);
         float3 refract_dir = refract(-v, n, 1.0 / (1.0 + refraction_strength * 0.35));
@@ -1062,10 +1119,16 @@ float4 main(PSInput input) : SV_TARGET
         {
             refract_dir = -v;
         }
+        float3 reflect_dir = reflect(-v, n);
         float refract_mip = saturate(roughness * 0.35 + (1.0 - ndotv) * 0.08) * g_EnvParams.y;
+        float reflect_mip = saturate(roughness) * g_EnvParams.y;
         float3 env_refract =
             g_PrefilterTex.SampleLevel(g_SamplerColor, refract_dir, refract_mip).rgb * g_EnvParams.x;
-        float body = pow(ndotv, 1.65);
+        float3 prefiltered_reflect =
+            g_PrefilterTex.SampleLevel(g_SamplerColor, reflect_dir, reflect_mip).rgb;
+        float2 brdf_reflect = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, roughness)).rg;
+        float3 env_reflect = prefiltered_reflect * (spec_color * brdf_reflect.x + brdf_reflect.y);
+        float body = pow(ndotv, 1.65) * body_strength;
         float center_glow = body * (0.18 + interior_strength * 0.82);
         float3 shell_tint = base_color * (0.32 + interior_strength * 0.68);
         float light_glint =
@@ -1074,38 +1137,419 @@ float4 main(PSInput input) : SV_TARGET
         float3 sphere_offset_ws = input.WorldPos - sphere_center_ws;
         float sphere_offset_len = max(length(sphere_offset_ws), 1.0e-5);
         float3 sphere_dir = sphere_offset_ws / sphere_offset_len;
-        float flow_time = time * 0.28;
-        float3 shell_domain = sphere_dir * 3.6;
-        float warp_a = Noise3(shell_domain.yzx * 1.85 +
-                              float3(flow_time * 0.58, -flow_time * 0.34, flow_time * 0.29));
-        float warp_b = Noise3(shell_domain.zxy * 1.55 +
-                              float3(-flow_time * 0.31, flow_time * 0.49, flow_time * 0.37));
+        float flow_time = time * 0.32;
+        float3 shell_domain = sphere_dir * 5.8;
+        float warp_a = Noise3(shell_domain.yzx * 2.45 +
+                              float3(flow_time * 0.72, -flow_time * 0.41, flow_time * 0.36));
+        float warp_b = Noise3(shell_domain.zxy * 2.05 +
+                              float3(-flow_time * 0.38, flow_time * 0.61, flow_time * 0.44));
         float3 island_domain =
-            shell_domain * 4.2 +
-            (float3(warp_a, warp_b, 0.5 * (warp_a + warp_b)) - 0.5) * 1.65 +
-            float3(flow_time * 0.36, -flow_time * 0.31, flow_time * 0.24);
+            shell_domain * 5.9 +
+            (float3(warp_a, warp_b, 0.5 * (warp_a + warp_b)) - 0.5) * 1.30 +
+            float3(flow_time * 0.42, -flow_time * 0.36, flow_time * 0.29);
         float islands_base = Noise3(island_domain);
-        float islands_detail = Noise3(island_domain * 2.65 + float3(4.2, -7.1, 2.8));
-        float islands_field = islands_base * 0.72 + islands_detail * 0.28;
+        float islands_detail = Noise3(island_domain * 3.85 + float3(4.2, -7.1, 2.8));
+        float islands_field = islands_base * 0.58 + islands_detail * 0.42;
         float threshold =
-            0.56 + 0.08 * Noise3(shell_domain * 1.15 + float3(-flow_time * 0.18,
-                                                               flow_time * 0.14,
+            0.43 + 0.05 * Noise3(shell_domain * 1.65 + float3(-flow_time * 0.22,
+                                                               flow_time * 0.18,
                                                                1.7));
-        float islands_mask = smoothstep(threshold - 0.09, threshold + 0.02, islands_field);
-        float islands_soft = smoothstep(threshold - 0.16, threshold + 0.10, islands_field);
-        float visibility = lerp(1.0, 0.12 + islands_mask * 0.88, swirl_strength);
+        float islands_mask = smoothstep(threshold - 0.05, threshold + 0.010, islands_field);
+        float islands_soft = smoothstep(threshold - 0.10, threshold + 0.04, islands_field);
+        float visibility = lerp(1.0, 0.10 + islands_mask * 0.90, swirl_strength);
 
-        lit = env_refract * (0.42 + interior_strength * 0.34) +
-              env_spec * (0.30 + rim * 0.85) +
-              shell_tint * center_glow +
-              base_color * rim * (0.20 + highlight_strength * 0.95) +
-              g_LightColor.rgb * light_glint;
-        lit += emissive * (1.0 + interior_strength * 0.28);
+        const float refract_scale = 0.08 + 0.92 * body_strength;
+        const float spec_scale = 0.16 + 0.84 * body_strength;
+        const float halo = pow(saturate(rim), 0.72) * (0.28 + highlight_strength * 0.42);
+
+        if (shell_unlit)
+        {
+            float3 key_dir = normalize(float3(-0.26, 0.64, 0.72));
+            float key_gloss =
+                pow(saturate(dot(reflect(-key_dir, n), v)), 28.0) * (highlight_strength * 0.72);
+            float3 self_tint = lerp(shell_tint, base_color, 0.42);
+            lit = self_tint * (0.26 + center_glow * 1.12 + halo * 0.48);
+            lit += base_color * (rim * (0.52 + highlight_strength * 1.08) + halo * 0.92);
+            lit += emissive * (1.10 + interior_strength * 0.30 + center_glow * 0.42 + halo * 1.12);
+            lit += float3(1.0, 1.0, 1.0) * key_gloss;
+            base_alpha = saturate(base_alpha * (0.26 + 0.16 * body_strength) +
+                                  rim * (0.42 + highlight_strength * 0.30) +
+                                  halo * (0.20 + highlight_strength * 0.16) +
+                                  center_glow * (0.20 + alpha_boost * 1.40) +
+                                  0.04);
+        }
+        else
+        {
+            lit = env_refract * (0.42 + interior_strength * 0.34) * refract_scale +
+                  env_reflect * ((0.10 + rim * 0.85) * spec_scale + halo * 0.24) +
+                  shell_tint * center_glow +
+                  base_color * (rim * (0.20 + highlight_strength * 0.95) + halo * 0.85) +
+                  g_LightColor.rgb * light_glint;
+            lit += emissive * (0.45 + interior_strength * 0.28 + halo * 0.80);
+            base_alpha = saturate(base_alpha * 0.24 * (0.10 + 0.90 * body_strength) +
+                                  rim * (0.34 + highlight_strength * 0.24) +
+                                  halo * (0.12 + highlight_strength * 0.18) +
+                                  center_glow * (0.10 + alpha_boost));
+        }
         lit *= lerp(1.0, 0.52 + islands_soft * 0.48, swirl_strength);
-        base_alpha = saturate(base_alpha * 0.24 +
-                              rim * (0.34 + highlight_strength * 0.24) +
-                              center_glow * (0.10 + alpha_boost));
         base_alpha *= visibility;
+    }
+    else if (shading_mode == 3u)
+    {
+        float halo_tightness = max(g_MaterialParams0.y, 0.25);
+        float halo_intensity = max(g_MaterialParams0.z, 0.0);
+        float inner_radius = saturate(g_MaterialParams1.x);
+        float highlight_strength = max(g_MaterialParams1.y, 0.0);
+        float alpha_boost = max(g_MaterialParams1.z, 0.0);
+        float shimmer_strength = saturate(g_MaterialParams1.w);
+        float2 screen_center = g_MaterialParams2.xy;
+        float2 screen_radius = max(g_MaterialParams2.zw, float2(1.0e-4, 1.0e-4));
+        float use_projected = step(1.0e-4, min(g_MaterialParams2.z, g_MaterialParams2.w));
+        float2 projected_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+        float2 sample_uv = lerp(input.UV, projected_uv, use_projected);
+        float2 centered_uv = use_projected > 0.5 ? (sample_uv - screen_center) / screen_radius
+                                                 : (input.UV * 2.0 - 1.0);
+        float radial_sq = dot(centered_uv, centered_uv);
+        float radial = sqrt(saturate(radial_sq));
+        float inner_feather = max(0.008, (1.0 - inner_radius) * 0.08);
+        float inner_mask = smoothstep(inner_radius - inner_feather,
+                                      inner_radius + inner_feather,
+                                      radial);
+        float aura_t = saturate((radial - inner_radius) / max(1.0 - inner_radius, 1.0e-4));
+        float aura_t_sq = aura_t * aura_t;
+
+        float glow = exp(-aura_t_sq * (2.4 + halo_tightness * 1.45));
+        float core = exp(-aura_t_sq * (8.5 + halo_tightness * 4.2));
+
+        float time = g_LocalLightMeta.w;
+        float3 domain = float3(centered_uv * (2.8 + halo_tightness * 0.45), time * 0.22);
+        float noise_a = Noise3(domain);
+        float noise_b = Noise3(domain.yzx * 2.4 + float3(2.4, -1.2, 4.1));
+        float shimmer_wave = 0.5 + 0.5 * sin(time * 2.1 + noise_a * 5.6 + noise_b * 3.1);
+        float shimmer = lerp(1.0, 0.84 + shimmer_wave * 0.26, shimmer_strength);
+
+        float edge_fade = 1.0 - smoothstep(0.88, 1.05, aura_t);
+        float halo_profile = saturate(inner_mask * glow * edge_fade);
+        float core_profile = saturate(inner_mask * core * (0.82 + highlight_strength * 0.42));
+
+        lit = base_color * halo_profile * (0.92 + halo_intensity * 0.58) +
+              emissive * (halo_profile * (1.18 + halo_intensity * 0.76) +
+                          core_profile * (0.78 + highlight_strength * 0.82));
+        lit *= shimmer;
+
+        base_alpha = saturate(base_alpha * halo_profile * (1.18 + alpha_boost * 0.82) +
+                              core_profile * (0.34 + alpha_boost * 0.38));
+    }
+    else if (shading_mode == 4u)
+    {
+        float tint_strength = max(g_MaterialParams1.x, 0.0);
+        float distortion_strength = max(g_MaterialParams1.y, 0.0);
+        float edge_strength = max(g_MaterialParams1.z, 0.0);
+        float noise_strength = saturate(g_MaterialParams1.w);
+        float2 screen_center = g_MaterialParams2.xy;
+        float2 screen_radius = max(g_MaterialParams2.zw, float2(1.0e-4, 1.0e-4));
+        float time = g_LocalLightMeta.w;
+
+        float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+        float2 centered_uv = (screen_uv - screen_center) / screen_radius;
+        float radial = length(centered_uv);
+        float full_overlay = step(0.95, min(screen_radius.x, screen_radius.y));
+        float3 domain = float3(centered_uv * (3.8 + noise_strength * 1.6), time * 0.35);
+        float noise_a = Noise3(domain);
+        float noise_b = Noise3(domain.yzx * 2.4 + float3(3.1, -1.7, 4.6));
+        float noise_c = Noise3(domain.zxy * 1.8 + float3(-2.2, 1.3, -3.8));
+        float shimmer =
+            0.5 + 0.5 * sin(time * 1.8 + noise_a * 6.1 + noise_b * 3.7 + noise_c * 2.5);
+
+        if (full_overlay > 0.5)
+        {
+            float mask = 1.0;
+            float2 distort_dir = normalize(float2(noise_a - 0.5, noise_b - 0.5) + 1.0e-4);
+            float distort_scale =
+                (0.0030 + distortion_strength * 0.0105) * (0.84 + shimmer * 0.34);
+            float2 distorted_uv = clamp(screen_uv + distort_dir * distort_scale * mask, 0.001, 0.999);
+
+            float3 scene_color = g_SceneColor.Sample(g_SamplerColor, distorted_uv).rgb;
+            float edge = pow(saturate(radial), 1.4);
+            float tint_mix = 0.34 + shimmer * 0.10;
+            float3 tint = lerp(float3(1.0, 1.0, 1.0),
+                               float3(0.92, 0.97, 1.0) + base_color * (0.34 + tint_strength * 0.46),
+                               tint_mix + edge_strength * 0.18 + edge * 0.08);
+            float tint_amount = saturate(tint_mix + edge_strength * 0.14 + edge * 0.08);
+            float overlay_alpha = 0.94;
+            lit = lerp(scene_color, scene_color * tint, tint_amount) +
+                  emissive * (0.16 + shimmer * 0.18) +
+                  tint * (0.026 + edge * 0.034);
+            base_alpha = saturate(overlay_alpha);
+        }
+        else
+        {
+            float aura_width = 0.62 + edge_strength * 0.48;
+            float aura_t = saturate((radial - 1.0) / max(aura_width, 1.0e-4));
+            float aura_gate = smoothstep(0.965, 1.0, radial);
+            float aura_fade = 1.0 - smoothstep(1.0 + aura_width,
+                                               1.0 + aura_width * 1.22,
+                                               radial);
+            float glow = exp(-aura_t * (0.52 + edge_strength * 0.32));
+            float core = exp(-(aura_t * aura_t) * (3.1 + edge_strength * 1.65));
+            float halo = aura_gate * aura_fade * glow * (1.95 + tint_strength * 1.05);
+            float hot_band = aura_gate * aura_fade * core * (1.25 + tint_strength * 0.72);
+
+            float3 outer_color = base_color * halo * (1.65 + edge_strength * 0.95);
+            float3 inner_hot =
+                emissive * (halo * (3.45 + tint_strength * 1.20) +
+                            hot_band * (4.35 + edge_strength * 1.55));
+            lit = (outer_color + inner_hot) * (0.94 + shimmer * 0.22);
+            base_alpha = saturate(halo * 0.78 + hot_band * 0.42);
+        }
+    }
+    else if (shading_mode == 6u)
+    {
+        float3 sphere_center_ws = g_MaterialParams1.xyz;
+        float sphere_radius = max(g_MaterialParams1.w, 1.0e-4);
+        float density = max(g_MaterialParams2.x, 0.0);
+        float distortion_strength = max(g_MaterialParams2.y, 0.0);
+        float noise_strength = saturate(g_MaterialParams2.z);
+        float time = g_LocalLightMeta.w;
+
+        float3 ro = g_CameraPos.xyz - sphere_center_ws;
+        float3 ray_dir = SafeNormalize(input.WorldPos - g_CameraPos.xyz, -g_CameraForward.xyz);
+        float ray_forward = max(dot(ray_dir, g_CameraForward.xyz), 1.0e-4);
+        float half_b = dot(ro, ray_dir);
+        float c = dot(ro, ro) - sphere_radius * sphere_radius;
+        float h = half_b * half_b - c;
+        if (h <= 0.0)
+        {
+            discard;
+        }
+        h = sqrt(h);
+        float t0 = -half_b - h;
+        float t1 = -half_b + h;
+        if (t1 <= 0.0)
+        {
+            discard;
+        }
+
+        float t_enter = max(t0, 0.0);
+        float t_exit = max(t1, t_enter + 1.0e-4);
+        float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+        float raw_scene_depth = g_SceneDepth.Sample(g_SamplerData, screen_uv);
+        float scene_linear_depth = LinearizeSceneDepth(raw_scene_depth);
+        float scene_t = scene_linear_depth / ray_forward;
+        if (raw_scene_depth >= 0.9999)
+        {
+            scene_t = t_exit;
+        }
+
+        float t_hit = min(t_exit, max(scene_t, t_enter));
+        float path_length = max(t_hit - t_enter, 0.0);
+        if (path_length <= 1.0e-4)
+        {
+            discard;
+        }
+
+        float full_diameter = sphere_radius * 2.0;
+        float transmittance = exp(-density * full_diameter);
+        float opacity = saturate(1.0 - transmittance);
+
+        float sample_t = lerp(t_enter, t_hit, 0.5);
+        float3 sample_local =
+            (g_CameraPos.xyz + ray_dir * sample_t - sphere_center_ws) / sphere_radius;
+        float3 noise_domain =
+            sample_local * (2.4 + noise_strength * 1.6) +
+            float3(time * 0.46, -time * 0.34, time * 0.29);
+        float noise_a = Noise3(noise_domain * 1.6);
+        float noise_b = Noise3(noise_domain.yzx * 2.3 + float3(2.1, -1.4, 4.3));
+        float2 distort_dir = normalize(float2(noise_a - 0.5, noise_b - 0.5) + 1.0e-4);
+        float distort_scale =
+            (0.0012 + distortion_strength * 0.0060) *
+            (0.82 + 0.18 * sin(time * 1.9 + noise_a * 5.8 + noise_b * 3.1));
+        float2 distorted_uv = clamp(screen_uv + distort_dir * distort_scale, 0.001, 0.999);
+
+        float3 scene_color = g_SceneColor.Sample(g_SamplerColor, distorted_uv).rgb;
+        float3 medium_color =
+            lerp(float3(0.04, 0.04, 0.04),
+                 saturate(base_color * 0.92 + float3(0.08, 0.08, 0.08)),
+                 0.96);
+        float3 fluorescent_glow =
+            emissive * (5.5 + opacity * 14.0) +
+            base_color * (0.45 + opacity * 0.80);
+        lit = scene_color * transmittance + medium_color * opacity + fluorescent_glow;
+        base_alpha = 1.0;
+    }
+    else if (shading_mode == 5u)
+    {
+        float density_power = max(g_MaterialParams0.y, 0.25);
+        float edge_boost = max(g_MaterialParams0.z, 0.0);
+        float shell_softness = max(g_MaterialParams0.w, 0.0);
+        float inner_radius_ratio = saturate(g_MaterialParams1.x);
+        float highlight_strength = max(g_MaterialParams1.y, 0.0);
+        float alpha_boost = max(g_MaterialParams1.z, 0.0);
+        float shimmer_strength = saturate(g_MaterialParams1.w);
+        float time = g_LocalLightMeta.w;
+
+        float3 sphere_center_ws = mul(g_Model, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+        float3 axis_x = mul(g_Model, float4(1.0, 0.0, 0.0, 0.0)).xyz;
+        float3 axis_y = mul(g_Model, float4(0.0, 1.0, 0.0, 0.0)).xyz;
+        float3 axis_z = mul(g_Model, float4(0.0, 0.0, 1.0, 0.0)).xyz;
+        float outer_radius = max(max(length(axis_x), length(axis_y)), length(axis_z));
+        outer_radius = max(outer_radius, 1.0e-4);
+        float inner_radius = outer_radius * inner_radius_ratio;
+
+        float3 ray_dir = SafeNormalize(input.WorldPos - g_CameraPos.xyz, -g_CameraForward.xyz);
+        float3 ro = g_CameraPos.xyz - sphere_center_ws;
+        float3 sphere_dir = SafeNormalize(input.WorldPos - sphere_center_ws, n);
+        n = sphere_dir;
+        geom_n = sphere_dir;
+        float shell_ndotv = saturate(dot(n, v));
+
+        float proj = dot(ro, ray_dir);
+        float closest_sq = max(dot(ro, ro) - proj * proj, 0.0);
+        float radial = sqrt(closest_sq) / outer_radius;
+        float aura_inner = inner_radius_ratio;
+        float aura_t = saturate((radial - aura_inner) / max(1.0 - aura_inner, 1.0e-4));
+        float aura_gate = smoothstep(aura_inner - 0.010, aura_inner + 0.006, radial);
+        float aura_fade = 1.0 - smoothstep(0.88, 1.06, aura_t);
+
+        float flow_time = time * 0.34;
+        float3 domain = sphere_dir * (3.4 + shell_softness * 1.2) +
+                        float3(flow_time * 0.41, -flow_time * 0.28, flow_time * 0.23);
+        float noise_a = Noise3(domain * 1.35);
+        float noise_b = Noise3(domain.yzx * 2.25 + float3(2.3, -1.2, 4.1));
+        float shimmer_wave =
+            0.5 + 0.5 * sin(time * 2.0 + noise_a * 6.0 + noise_b * 3.4);
+        float shimmer = lerp(1.0, 0.82 + shimmer_wave * 0.34, shimmer_strength);
+
+        float glow = exp(-aura_t * (0.85 + density_power * 0.55));
+        float core = exp(-(aura_t * aura_t) * (4.2 + density_power * 1.8));
+        float soft_edge = pow(saturate(1.0 - shell_ndotv), 1.8 + edge_boost * 0.3);
+        float halo = aura_gate * aura_fade * glow * (1.45 + highlight_strength * 0.75) +
+                     soft_edge * 0.10;
+        float hot_band = aura_gate * aura_fade * core * (0.72 + highlight_strength * 0.42);
+
+        lit = base_color * halo * (1.45 + edge_boost * 0.80) +
+              emissive * (halo * (2.35 + alpha_boost * 0.95) +
+                          hot_band * (1.85 + highlight_strength * 0.92));
+        lit *= shimmer;
+        base_alpha = saturate(halo * (0.62 + alpha_boost * 0.28) +
+                              hot_band * (0.16 + alpha_boost * 0.12));
+    }
+    else if (shading_mode == 2u)
+    {
+        float fresnel_power = max(g_MaterialParams0.y, 0.001);
+        float fresnel_strength = max(g_MaterialParams0.z, 0.0);
+        float refraction_strength = max(g_MaterialParams0.w, 0.0);
+        float tint_strength = max(g_MaterialParams1.x, 0.0);
+        float distortion_strength = max(g_MaterialParams1.y, 0.0);
+        float edge_strength = max(g_MaterialParams1.z, 0.0);
+        float noise_strength = saturate(g_MaterialParams1.w);
+        float time = g_LocalLightMeta.w;
+
+        float3 sphere_center_ws = mul(g_Model, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+        float3 axis_x = mul(g_Model, float4(1.0, 0.0, 0.0, 0.0)).xyz;
+        float3 axis_y = mul(g_Model, float4(0.0, 1.0, 0.0, 0.0)).xyz;
+        float3 axis_z = mul(g_Model, float4(0.0, 0.0, 1.0, 0.0)).xyz;
+        float sphere_radius = max(max(length(axis_x), length(axis_y)), length(axis_z));
+        sphere_radius = max(sphere_radius, 1.0e-4);
+
+        float3 ro = g_CameraPos.xyz - sphere_center_ws;
+        bool camera_inside = dot(ro, ro) < sphere_radius * sphere_radius;
+        if (!camera_inside && !input.FrontFace)
+        {
+            discard;
+        }
+
+        float3 ray_dir = SafeNormalize(input.WorldPos - g_CameraPos.xyz, -g_CameraForward.xyz);
+        float ray_forward = max(dot(ray_dir, g_CameraForward.xyz), 1.0e-4);
+        float half_b = dot(ro, ray_dir);
+        float c = dot(ro, ro) - sphere_radius * sphere_radius;
+        float h = half_b * half_b - c;
+        if (h <= 0.0)
+        {
+            discard;
+        }
+        h = sqrt(h);
+        float t0 = -half_b - h;
+        float t1 = -half_b + h;
+        if (t1 <= 0.0)
+        {
+            discard;
+        }
+        float t_enter = max(t0, 0.0);
+        float t_exit = max(t1, t_enter + 1.0e-4);
+
+        float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+        float raw_scene_depth = g_SceneDepth.Sample(g_SamplerData, screen_uv);
+        float scene_linear_depth = LinearizeSceneDepth(raw_scene_depth);
+        float scene_t = scene_linear_depth / ray_forward;
+        if (raw_scene_depth >= 0.9999)
+        {
+            scene_t = t_exit;
+        }
+        float t_hit = min(t_exit, max(scene_t, t_enter));
+        float thickness = max(t_hit - t_enter, 0.0);
+        float thickness_norm = saturate(thickness / max(sphere_radius * 2.0, 1.0e-4));
+        if (thickness <= 1.0e-4)
+        {
+            discard;
+        }
+
+        float sample_t0 = t_enter + thickness * 0.35;
+        float sample_t1 = t_enter + thickness * 0.72;
+        float3 sample_local0 =
+            (g_CameraPos.xyz + ray_dir * sample_t0 - sphere_center_ws) / sphere_radius;
+        float3 sample_local1 =
+            (g_CameraPos.xyz + ray_dir * sample_t1 - sphere_center_ws) / sphere_radius;
+
+        float3 sphere_normal = SafeNormalize(input.WorldPos - sphere_center_ws, n);
+        n = sphere_normal;
+        geom_n = sphere_normal;
+        float shell_ndotv = saturate(dot(n, v));
+        float rim = saturate(pow(1.0 - shell_ndotv, fresnel_power) * fresnel_strength);
+
+        float flow_time = time * 0.38;
+        float3 volume_domain0 =
+            sample_local0 * (2.4 + noise_strength * 1.8) +
+            float3(flow_time * 0.31, -flow_time * 0.24, flow_time * 0.19);
+        float3 volume_domain1 =
+            sample_local1.yzx * (4.0 + noise_strength * 2.0) +
+            float3(-flow_time * 0.28, flow_time * 0.21, flow_time * 0.26);
+        float noise_a = Noise3(volume_domain0 * 1.25);
+        float noise_b = Noise3(volume_domain0.yzx * 2.15 + float3(2.3, -1.7, 4.6));
+        float noise_c = Noise3(volume_domain1.zxy * 1.75 + float3(-3.2, 1.4, -2.5));
+        float shimmer =
+            0.5 + 0.5 * sin(time * 1.9 + noise_a * 6.0 + noise_b * 3.2 + noise_c * 2.7);
+
+        float path_strength = saturate(thickness_norm * (camera_inside ? 1.45 : 0.78));
+        float2 distort_dir = normalize(float2(noise_a - 0.5, noise_b - 0.5) + 1.0e-4);
+        float distort_scale =
+            (0.0018 + distortion_strength * 0.0075) *
+            (0.35 + path_strength * 0.90 + shimmer * 0.18);
+        float2 distorted_uv = clamp(screen_uv + distort_dir * distort_scale, 0.001, 0.999);
+
+        float3 scene_color = g_SceneColor.Sample(g_SamplerColor, distorted_uv).rgb;
+        float tint_mix = saturate((camera_inside ? 0.54 : 0.22) +
+                                  path_strength * (0.70 + tint_strength * 0.24) +
+                                  shimmer * 0.08);
+        float3 tint_target =
+            lerp(float3(1.0, 1.0, 1.0),
+                 float3(0.94, 0.98, 1.02) + base_color * (0.28 + tint_strength * 0.42),
+                 tint_mix);
+
+        float boundary_glow = saturate(0.20 +
+                                       rim * (0.28 + edge_strength * 0.24) +
+                                       shimmer * 0.14);
+        float3 glow =
+            emissive * (0.36 + path_strength * 0.34 + shimmer * 0.14) +
+            base_color * (boundary_glow * (0.24 + edge_strength * 0.24) +
+                          path_strength * 0.10);
+
+        lit = scene_color * tint_target + glow;
+
+        float base_mix = camera_inside ? 0.76 : 0.34;
+        base_alpha = saturate(base_mix +
+                              path_strength * (0.46 + tint_strength * 0.18) +
+                              rim * (camera_inside ? 0.16 : 0.10));
     }
     else
     {
@@ -1294,6 +1738,8 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerData", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SceneColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_NormalTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
@@ -1362,6 +1808,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   auto create_transparent_pipeline =
       [&](const char* name,
           Diligent::CULL_MODE cull_mode,
+          bool additive,
           Diligent::RefCntAutoPtr<Diligent::IPipelineState>& out_pso) {
         Diligent::GraphicsPipelineStateCreateInfo transparent_ci = pso_ci;
         transparent_ci.PSODesc.Name = name;
@@ -1372,19 +1819,31 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         auto& blend = transparent_graphics.BlendDesc.RenderTargets[0];
         blend.BlendEnable = true;
         blend.SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
-        blend.DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+        blend.DestBlend = additive ? Diligent::BLEND_FACTOR_ONE
+                                   : Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
         blend.BlendOp = Diligent::BLEND_OPERATION_ADD;
         blend.SrcBlendAlpha = Diligent::BLEND_FACTOR_ONE;
-        blend.DestBlendAlpha = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+        blend.DestBlendAlpha = additive ? Diligent::BLEND_FACTOR_ONE
+                                        : Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
         blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
         out_pso = device_with_cache_.CreateGraphicsPipelineState(transparent_ci);
       };
   create_transparent_pipeline("Karma Transparent Pipeline",
                               Diligent::CULL_MODE_BACK,
+                              false,
                               transparent_pipeline_state_);
   create_transparent_pipeline("Karma Transparent Pipeline (DoubleSided)",
                               Diligent::CULL_MODE_NONE,
+                              false,
                               transparent_double_sided_pipeline_state_);
+  create_transparent_pipeline("Karma Additive Pipeline",
+                              Diligent::CULL_MODE_BACK,
+                              true,
+                              additive_pipeline_state_);
+  create_transparent_pipeline("Karma Additive Pipeline (DoubleSided)",
+                              Diligent::CULL_MODE_NONE,
+                              true,
+                              additive_double_sided_pipeline_state_);
 
   if (!pipeline_state_) {
     return;
@@ -1429,6 +1888,9 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
     bound = bind_constants_to_pipeline(transparent_pipeline_state_.RawPtr()) || bound;
     bound =
         bind_constants_to_pipeline(transparent_double_sided_pipeline_state_.RawPtr()) || bound;
+    bound = bind_constants_to_pipeline(additive_pipeline_state_.RawPtr()) || bound;
+    bound =
+        bind_constants_to_pipeline(additive_double_sided_pipeline_state_.RawPtr()) || bound;
     if (!bound) {
     }
 
@@ -1506,7 +1968,8 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                        default_env_tex_);
   env_srv_ = default_env_;
 
-  if (pipeline_state_ || transparent_pipeline_state_ || transparent_double_sided_pipeline_state_) {
+  if (pipeline_state_ || transparent_pipeline_state_ || transparent_double_sided_pipeline_state_ ||
+      additive_pipeline_state_ || additive_double_sided_pipeline_state_) {
     auto bind_shadow_static_resources = [&](Diligent::IPipelineState* pso) {
       if (!pso) {
         return;
@@ -1531,9 +1994,12 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
     bind_shadow_static_resources(pipeline_state_.RawPtr());
     bind_shadow_static_resources(transparent_pipeline_state_.RawPtr());
     bind_shadow_static_resources(transparent_double_sided_pipeline_state_.RawPtr());
+    bind_shadow_static_resources(additive_pipeline_state_.RawPtr());
+    bind_shadow_static_resources(additive_double_sided_pipeline_state_.RawPtr());
   }
 
   recreateShadowPipeline();
+  ensureParticleFallbackDepthResource();
 
   auto initialize_default_material_srb =
       [&](Diligent::IPipelineState* pso,
@@ -1584,6 +2050,12 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
           var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
         }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneColor")) {
+          var->Set(default_base_color_);
+        }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth")) {
+          var->Set(particle_fallback_depth_srv_);
+        }
       };
 
   if (pipeline_state_) {
@@ -1605,6 +2077,10 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                   transparent_default_material_srb_);
   initialize_default_material_srb(transparent_double_sided_pipeline_state_.RawPtr(),
                                   transparent_double_sided_default_material_srb_);
+  initialize_default_material_srb(additive_pipeline_state_.RawPtr(),
+                                  additive_default_material_srb_);
+  initialize_default_material_srb(additive_double_sided_pipeline_state_.RawPtr(),
+                                  additive_double_sided_default_material_srb_);
 
   ensureLineResources();
 

@@ -29,7 +29,7 @@ class GameInterface {
   renderer::GraphicsDevice* graphics = nullptr;
   renderer::MaterialLibrary* materials = nullptr;
   particles::ParticleLibrary* particle_effects = nullptr;
-  prefabs::EffectPrefabRegistry* prefab_registry = nullptr;
+  prefabs::PrefabRegistry* prefab_registry = nullptr;
 
   private:
   friend class EngineApp;
@@ -37,7 +37,7 @@ class GameInterface {
                    physics::World& physics, renderer::GraphicsDevice* graphics,
                    renderer::MaterialLibrary& materials,
                    particles::ParticleLibrary& particle_effects,
-                   prefabs::EffectPrefabRegistry& prefab_registry) {
+                   prefabs::PrefabRegistry& prefab_registry) {
     this->world = &world;
     this->scene = &scene;
     this->input = &input;

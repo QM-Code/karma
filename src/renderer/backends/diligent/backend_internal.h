@@ -57,6 +57,8 @@ struct DrawConstants {
   float light_color[4];
   float camera_pos[4];
   float camera_forward[4];
+  float screen_params[4];
+  float camera_clip_params[4];
   float forward_plus_params[4];
   float local_light_position_range[64][4];
   float local_light_direction_type[64][4];
@@ -65,6 +67,7 @@ struct DrawConstants {
   float local_light_meta[4];
   float material_params0[4];
   float material_params1[4];
+  float material_params2[4];
 };
 
 struct ForwardPlusComputeConstants {

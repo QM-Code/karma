@@ -1,22 +1,22 @@
-#include "karma/prefabs/effect_prefab_registry.h"
+#include "karma/prefabs/prefab_registry.h"
 
 #include <spdlog/spdlog.h>
 
 namespace karma::prefabs {
 
-EffectPrefabRegistry::~EffectPrefabRegistry() {
+PrefabRegistry::~PrefabRegistry() {
   shutdown();
 }
 
-void EffectPrefabRegistry::bindContext(const EffectPrefabPackageContext& context) {
+void PrefabRegistry::bindContext(const PrefabPackageContext& context) {
   context_ = context;
 }
 
-void EffectPrefabRegistry::clearContext() {
+void PrefabRegistry::clearContext() {
   context_ = {};
 }
 
-bool EffectPrefabRegistry::registerPrefab(const std::string& key, RegisteredEffectPrefabDesc desc) {
+bool PrefabRegistry::registerPrefab(const std::string& key, RegisteredPrefabDesc desc) {
   if (key.empty()) {
     return false;
   }
@@ -35,7 +35,7 @@ bool EffectPrefabRegistry::registerPrefab(const std::string& key, RegisteredEffe
   return true;
 }
 
-void EffectPrefabRegistry::unregisterPrefab(const std::string& key) {
+void PrefabRegistry::unregisterPrefab(const std::string& key) {
   auto it = entries_.find(key);
   if (it == entries_.end()) {
     return;
@@ -44,16 +44,16 @@ void EffectPrefabRegistry::unregisterPrefab(const std::string& key) {
   entries_.erase(it);
 }
 
-void EffectPrefabRegistry::clear() {
+void PrefabRegistry::clear() {
   shutdown();
   entries_.clear();
 }
 
-bool EffectPrefabRegistry::hasPrefab(std::string_view key) const {
+bool PrefabRegistry::hasPrefab(std::string_view key) const {
   return entries_.find(std::string(key)) != entries_.end();
 }
 
-const RegisteredEffectPrefabDesc* EffectPrefabRegistry::find(std::string_view key) const {
+const RegisteredPrefabDesc* PrefabRegistry::find(std::string_view key) const {
   const auto it = entries_.find(std::string(key));
   if (it == entries_.end()) {
     return nullptr;
@@ -61,10 +61,10 @@ const RegisteredEffectPrefabDesc* EffectPrefabRegistry::find(std::string_view ke
   return &it->second.desc;
 }
 
-bool EffectPrefabRegistry::prepare(std::string_view key) {
+bool PrefabRegistry::prepare(std::string_view key) {
   auto it = entries_.find(std::string(key));
   if (it == entries_.end()) {
-    spdlog::error("Effect prefab registry prepare failed: unknown key '{}'", key);
+    spdlog::error("Prefab registry prepare failed: unknown key '{}'", key);
     return false;
   }
 
@@ -74,7 +74,7 @@ bool EffectPrefabRegistry::prepare(std::string_view key) {
   }
 
   if (entry.desc.prepare && !entry.desc.prepare(context_)) {
-    spdlog::error("Effect prefab registry prepare failed: key '{}' setup callback returned false",
+    spdlog::error("Prefab registry prepare failed: key '{}' setup callback returned false",
                   key);
     return false;
   }
@@ -83,20 +83,20 @@ bool EffectPrefabRegistry::prepare(std::string_view key) {
   return true;
 }
 
-void EffectPrefabRegistry::shutdown() {
+void PrefabRegistry::shutdown() {
   for (auto& [key, entry] : entries_) {
     (void)key;
     cleanupEntry(entry);
   }
 }
 
-std::optional<EffectPrefabInstance> EffectPrefabRegistry::instantiate(
+std::optional<PrefabInstance> PrefabRegistry::instantiate(
     ecs::World& world,
     std::string_view key,
-    const EffectPrefabInstantiateDesc& desc) {
+    const PrefabInstantiateDesc& desc) {
   auto it = entries_.find(std::string(key));
   if (it == entries_.end()) {
-    spdlog::error("Effect prefab instantiate failed: unknown registered key '{}'", key);
+    spdlog::error("Prefab instantiate failed: unknown registered key '{}'", key);
     return std::nullopt;
   }
 
@@ -104,10 +104,10 @@ std::optional<EffectPrefabInstance> EffectPrefabRegistry::instantiate(
     return std::nullopt;
   }
 
-  return instantiateEffectPrefab(world, context_.graphics, it->second.desc.prefab_path, desc);
+  return instantiatePrefab(world, context_.graphics, it->second.desc.prefab_path, desc);
 }
 
-void EffectPrefabRegistry::cleanupEntry(Entry& entry) {
+void PrefabRegistry::cleanupEntry(Entry& entry) {
   if (!entry.prepared) {
     return;
   }
@@ -117,11 +117,11 @@ void EffectPrefabRegistry::cleanupEntry(Entry& entry) {
   entry.prepared = false;
 }
 
-std::optional<EffectPrefabInstance> instantiateRegisteredPrefab(
+std::optional<PrefabInstance> instantiateRegisteredPrefab(
     ecs::World& world,
-    EffectPrefabRegistry& registry,
+    PrefabRegistry& registry,
     std::string_view key,
-    const EffectPrefabInstantiateDesc& desc) {
+    const PrefabInstantiateDesc& desc) {
   return registry.instantiate(world, key, desc);
 }
 

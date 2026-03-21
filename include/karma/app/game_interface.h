@@ -3,7 +3,7 @@
 #include "karma/ecs/world.h"
 #include "karma/input/input_system.h"
 #include "karma/physics/physics_world.hpp"
-#include "karma/prefabs/effect_prefab_registry.h"
+#include "karma/prefabs/prefab_registry.h"
 #include "karma/renderer/device.h"
 #include "karma/renderer/material_library.h"
 #include "karma/particles/effect_library.h"

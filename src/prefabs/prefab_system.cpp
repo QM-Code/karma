@@ -1,9 +1,9 @@
-#include "karma/prefabs/effect_prefab_system.h"
+#include "karma/prefabs/prefab_system.h"
 
 #include <algorithm>
 #include <vector>
 
-#include "karma/components/effect_prefab.h"
+#include "karma/components/prefab_instance.h"
 #include "karma/math/quat.h"
 
 namespace karma::prefabs {
@@ -31,17 +31,17 @@ components::TransformComponent composeTransform(const components::TransformCompo
 
 }  // namespace
 
-void EffectPrefabSystem::update(ecs::World& world, float dt, float interpolation_alpha) {
+void PrefabSystem::update(ecs::World& world, float dt, float interpolation_alpha) {
   (void)dt;
   (void)interpolation_alpha;
 
   const std::vector<ecs::Entity> members =
-      world.view<components::EffectPrefabMemberComponent, components::TransformComponent>();
+      world.view<components::PrefabMemberComponent, components::TransformComponent>();
   std::vector<ecs::Entity> stale_members;
   stale_members.reserve(members.size());
 
   for (const ecs::Entity member_entity : members) {
-    auto& member = world.get<components::EffectPrefabMemberComponent>(member_entity);
+    auto& member = world.get<components::PrefabMemberComponent>(member_entity);
     if (!world.isAlive(member.root) || !world.has<components::TransformComponent>(member.root)) {
       stale_members.push_back(member_entity);
       continue;
@@ -56,9 +56,9 @@ void EffectPrefabSystem::update(ecs::World& world, float dt, float interpolation
     world.destroyEntity(stale);
   }
 
-  const std::vector<ecs::Entity> roots = world.view<components::EffectPrefabInstanceComponent>();
+  const std::vector<ecs::Entity> roots = world.view<components::PrefabInstanceComponent>();
   for (const ecs::Entity root : roots) {
-    auto& instance = world.get<components::EffectPrefabInstanceComponent>(root);
+    auto& instance = world.get<components::PrefabInstanceComponent>(root);
     instance.members.erase(
         std::remove_if(instance.members.begin(),
                        instance.members.end(),

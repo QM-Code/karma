@@ -4,7 +4,7 @@
 
 namespace karma::prefabs {
 
-class EffectPrefabSystem {
+class PrefabSystem {
  public:
   void update(ecs::World& world, float dt, float interpolation_alpha);
 };

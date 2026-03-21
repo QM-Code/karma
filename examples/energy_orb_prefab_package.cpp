@@ -306,7 +306,7 @@ std::vector<std::uint8_t> buildOrbDistortionAtlas(int frame_size, int frame_coun
   return pixels;
 }
 
-bool prepareEnergyOrbPackage(const prefabs::EffectPrefabPackageContext& context,
+bool prepareEnergyOrbPackage(const prefabs::PrefabPackageContext& context,
                              const std::shared_ptr<EnergyOrbPackageState>& state) {
   if (context.graphics == nullptr || context.particle_effects == nullptr) {
     return false;
@@ -349,7 +349,7 @@ bool prepareEnergyOrbPackage(const prefabs::EffectPrefabPackageContext& context,
   });
 }
 
-void cleanupEnergyOrbPackage(const prefabs::EffectPrefabPackageContext& context,
+void cleanupEnergyOrbPackage(const prefabs::PrefabPackageContext& context,
                              const std::shared_ptr<EnergyOrbPackageState>& state) {
   if (context.particle_effects != nullptr) {
     context.particle_effects->unregisterEffect("energy_orb_core");
@@ -377,11 +377,11 @@ bool registerEnergyOrbPrefabPackage(prefabs::PrefabRegistry& registry) {
       prefabs::RegisteredPrefabDesc{
           .prefab_path = resolveExampleAssetPath("prefabs/energy_orb"),
           .prepare =
-              [state](const prefabs::EffectPrefabPackageContext& context) {
+              [state](const prefabs::PrefabPackageContext& context) {
                 return prepareEnergyOrbPackage(context, state);
               },
           .cleanup =
-              [state](const prefabs::EffectPrefabPackageContext& context) {
+              [state](const prefabs::PrefabPackageContext& context) {
                 cleanupEnergyOrbPackage(context, state);
               },
       });

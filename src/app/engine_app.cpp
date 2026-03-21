@@ -60,8 +60,8 @@ void EngineApp::initSubsystems() {
   }
 
   input_.setWindow(window_.get());
-  effect_prefab_system_ = std::make_unique<prefabs::EffectPrefabSystem>();
-  effect_prefab_registry_ = std::make_unique<prefabs::PrefabRegistry>();
+  prefab_system_ = std::make_unique<prefabs::PrefabSystem>();
+  prefab_registry_ = std::make_unique<prefabs::PrefabRegistry>();
 
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
@@ -98,8 +98,8 @@ void EngineApp::warmUpRenderer() {
   frame.height = fb_height;
   frame.delta_time = 0.0f;
   graphics_->beginFrame(frame);
-  if (effect_prefab_system_) {
-    effect_prefab_system_->update(world_, 0.0f, 1.0f);
+  if (prefab_system_) {
+    prefab_system_->update(world_, 0.0f, 1.0f);
   }
   if (beam_path_system_) {
     beam_path_system_->update(world_, 0.0f, 1.0f);
@@ -129,12 +129,12 @@ void EngineApp::shutdownSubsystems() {
 #endif
   user_ui_context_ = {};
   render_system_.reset();
-  effect_prefab_system_.reset();
-  if (effect_prefab_registry_) {
-    effect_prefab_registry_->shutdown();
-    effect_prefab_registry_->clearContext();
+  prefab_system_.reset();
+  if (prefab_registry_) {
+    prefab_registry_->shutdown();
+    prefab_registry_->clearContext();
   }
-  effect_prefab_registry_.reset();
+  prefab_registry_.reset();
   beam_path_system_.reset();
   particle_system_.reset();
   volume_sphere_system_.reset();
@@ -203,9 +203,9 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      graphics_.get(),
                      materials_,
                      particle_effects_,
-                     *effect_prefab_registry_);
-  if (effect_prefab_registry_) {
-    effect_prefab_registry_->bindContext(prefabs::PrefabPackageContext{
+                     *prefab_registry_);
+  if (prefab_registry_) {
+    prefab_registry_->bindContext(prefabs::PrefabPackageContext{
         .graphics = graphics_.get(),
         .materials = &materials_,
         .particle_effects = &particle_effects_,
@@ -307,8 +307,8 @@ void EngineApp::tick() {
   }
   game_->render_interpolation_alpha_ = render_alpha;
   game_->onUpdate(frame_dt);
-  if (effect_prefab_system_) {
-    effect_prefab_system_->update(world_, frame_dt, render_alpha);
+  if (prefab_system_) {
+    prefab_system_->update(world_, frame_dt, render_alpha);
   }
   if (audio_system_) {
     audio_system_->update(world_, frame_dt);

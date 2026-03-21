@@ -10,7 +10,7 @@
 
 namespace karma::components {
 
-enum class EffectPrefabMemberKind : uint8_t {
+enum class PrefabMemberKind : uint8_t {
   Mesh = 0,
   Particle = 1,
   Light = 2,
@@ -18,17 +18,17 @@ enum class EffectPrefabMemberKind : uint8_t {
   VolumeSphere = 4,
 };
 
-struct EffectPrefabInstanceComponent : ecs::ComponentTag {
+struct PrefabInstanceComponent : ecs::ComponentTag {
   std::string prefab_name;
   std::vector<ecs::Entity> members;
   bool enabled = true;
 };
 
-struct EffectPrefabMemberComponent : ecs::ComponentTag {
+struct PrefabMemberComponent : ecs::ComponentTag {
   ecs::Entity root{};
   std::string name;
   TransformComponent local_transform{};
-  EffectPrefabMemberKind kind = EffectPrefabMemberKind::Mesh;
+  PrefabMemberKind kind = PrefabMemberKind::Mesh;
   bool mesh_visible = true;
   bool beam_visible = true;
   bool volume_sphere_visible = true;

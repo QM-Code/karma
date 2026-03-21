@@ -19,7 +19,7 @@ The core pieces are:
 - `prefabs::PrefabRegistry`
 - `prefabs::setPrefabPlayback(...)`
 - `prefabs::restartPrefab(...)`
-- `prefabs::EffectPrefabSystem` (engine-owned child transform syncing)
+- `prefabs::PrefabSystem` (engine-owned child transform syncing)
 
 ## What It Solves
 
@@ -46,7 +46,7 @@ and instantiate it with one call.
 The canonical direct API is:
 
 ```cpp
-#include "karma/prefabs/effect_prefab.h"
+#include "karma/prefabs/prefab.h"
 
 const auto instance = prefabs::instantiatePrefab(
     *world,
@@ -192,8 +192,8 @@ Examples:
 - `range_param = light_range`
 - `radius_param = radius`
 
-`color_overrides` still work as a convenience bridge, but the forward-looking
-surface is `param_overrides`.
+Instantiation uses typed `param_overrides` only. Color overrides are just
+regular prefab parameters of type `color`.
 
 ## Supported Entry Fields
 

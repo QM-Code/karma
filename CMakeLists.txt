@@ -346,9 +346,16 @@ set(KARMA_SOURCES
   src/beams/beam_path_system.cpp
   src/particles/effect_library.cpp
   src/particles/particle_system.cpp
-  src/prefabs/effect_prefab.cpp
-  src/prefabs/effect_prefab_registry.cpp
-  src/prefabs/effect_prefab_system.cpp
+  src/prefabs/prefab_parser.cpp
+  src/prefabs/prefab_parse_support.cpp
+  src/prefabs/prefab_parse_mesh.cpp
+  src/prefabs/prefab_parse_particle.cpp
+  src/prefabs/prefab_parse_light.cpp
+  src/prefabs/prefab_parse_beam.cpp
+  src/prefabs/prefab_parse_volume_sphere.cpp
+  src/prefabs/prefab_runtime.cpp
+  src/prefabs/prefab_registry.cpp
+  src/prefabs/prefab_system.cpp
   src/volumes/volume_sphere_system.cpp
 )
 

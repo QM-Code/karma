@@ -16,8 +16,8 @@
 #include "karma/platform/window.h"
 #include "karma/particles/effect_library.h"
 #include "karma/particles/particle_system.h"
-#include "karma/prefabs/effect_prefab_system.h"
-#include "karma/prefabs/effect_prefab_registry.h"
+#include "karma/prefabs/prefab_system.h"
+#include "karma/prefabs/prefab_registry.h"
 #include "karma/volumes/volume_sphere_system.h"
 #include "karma/app/ui_context.h"
 #include "karma/physics/physics_world.hpp"
@@ -96,8 +96,8 @@ class EngineApp {
   input::InputSystem input_;
   std::unique_ptr<renderer::GraphicsDevice> graphics_;
   std::unique_ptr<renderer::RenderSystem> render_system_;
-  std::unique_ptr<prefabs::EffectPrefabSystem> effect_prefab_system_;
-  std::unique_ptr<prefabs::PrefabRegistry> effect_prefab_registry_;
+  std::unique_ptr<prefabs::PrefabSystem> prefab_system_;
+  std::unique_ptr<prefabs::PrefabRegistry> prefab_registry_;
   std::unique_ptr<beams::BeamPathSystem> beam_path_system_;
   std::unique_ptr<particles::ParticleSystem> particle_system_;
   std::unique_ptr<volumes::VolumeSphereSystem> volume_sphere_system_;

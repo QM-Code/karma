@@ -35,7 +35,7 @@ class GraphicsDevice {
   void destroyRenderTarget(RenderTargetId target);
 
   void submit(const DrawItem& item);
-  void submitParticles(const ParticleBatch& batch);
+  void submitParticles(ParticleBatch batch);
   void retireInstance(InstanceId instance);
   void renderLayer(LayerId layer, RenderTargetId target = kDefaultRenderTarget);
   void drawLine(const math::Vec3& start, const math::Vec3& end, const math::Color& color,
@@ -51,7 +51,7 @@ class GraphicsDevice {
   void setVsync(bool enabled);
   void setAnisotropy(bool enabled, int level);
   void setGenerateMips(bool enabled);
-  void setForwardPlusSettings(int tile_size, int max_lights_per_tile);
+  void setForwardPlusSettings(int tile_size, int max_lights_per_tile, int max_local_lights);
   ForwardPlusStats getForwardPlusStats() const;
   void setShadowSettings(float bias,
                          int map_size,
@@ -64,6 +64,7 @@ class GraphicsDevice {
                               float slope_bias_scale,
                               float normal_bias_scale,
                               float receiver_bias_scale);
+  void setPointShadowLightLimit(int max_lights);
   void setLocalLightingSettings(float distance_damping,
                                 float range_falloff_exponent,
                                 bool ao_affects_local_lights,

@@ -1,0 +1,78 @@
+# Replayable staged explosion prefab.
+
+[prefab]
+name = Explosion
+
+[particle flash]
+effect = explosion_flash
+position = 0.0, 0.80, 0.0
+enabled = false
+playing = false
+
+[particle fireball]
+effect = explosion_fireball
+position = 0.0, 0.75, 0.0
+enabled = false
+playing = false
+
+[particle heat]
+effect = explosion_heat
+position = 0.0, 0.82, 0.0
+enabled = false
+playing = false
+
+[particle core_flipbook]
+effect = explosion_core_flipbook
+position = 0.0, 0.88, 0.0
+enabled = false
+playing = false
+
+[particle smoke_flipbook]
+effect = explosion_smoke_flipbook
+position = 0.0, 0.92, 0.0
+enabled = false
+playing = false
+
+[particle embers]
+effect = explosion_embers
+position = 0.0, 0.90, 0.0
+enabled = false
+playing = false
+
+[particle shock_ring]
+effect = explosion_shock_ring
+position = 0.0, 0.09, 0.0
+enabled = false
+playing = false
+
+[particle debris]
+effect = explosion_debris
+position = 0.0, 0.86, 0.0
+enabled = false
+playing = false
+
+[particle dust_ring]
+effect = explosion_dust_ring
+position = 0.0, 0.04, 0.0
+enabled = false
+playing = false
+
+[particle smoke]
+effect = explosion_smoke
+position = 0.0, 0.85, 0.0
+enabled = false
+playing = false
+
+[particle scorch]
+effect = explosion_scorch
+position = 0.0, 0.03, 0.0
+enabled = false
+playing = false
+
+[light glow]
+type = point
+position = 0.0, 1.35, 0.0
+color = 1.0, 0.75, 0.45, 1.0
+intensity = 78.0
+range = 51.0
+casts_shadows = false

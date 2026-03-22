@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
 #include <filesystem>
 #include <initializer_list>
 #include <optional>
@@ -75,6 +76,8 @@ class ParticleLibrary {
   std::unordered_map<std::string, EffectFileRecord> effect_files_;
   std::unordered_map<std::string, renderer::TextureId> texture_aliases_;
   uint64_t version_ = 0;
+  std::chrono::steady_clock::time_point next_poll_time_{};
+  std::chrono::milliseconds poll_interval_{250};
 };
 
 }  // namespace karma::particles

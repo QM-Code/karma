@@ -40,7 +40,7 @@ struct DrawConstants {
   float light_view_proj[16];
   float shadow_uv_proj[16];
   float shadow_cascade_uv_proj[4][16];
-  float point_shadow_uv_proj[12][16];
+  float point_shadow_uv_proj[96][16];
   float base_color_factor[4];
   float emissive_factor[4];
   float pbr_params[4];

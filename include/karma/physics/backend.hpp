@@ -6,6 +6,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace karma::physics_backend {
 
@@ -55,7 +56,10 @@ public:
     virtual void setVelocity(const glm::vec3& velocity) = 0;
     virtual void setAngularVelocity(const glm::vec3& angularVelocity) = 0;
     virtual bool isGrounded() const = 0;
+    virtual bool getGroundContact(karma::physics::PhysicsGroundContact& outContact) const = 0;
+    virtual void collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const = 0;
     virtual void destroy() = 0;
+    virtual std::uintptr_t nativeHandle() const = 0;
 };
 
 class PhysicsWorldBackend {
@@ -70,6 +74,10 @@ public:
     virtual std::unique_ptr<PhysicsPlayerControllerBackend> createPlayer(const glm::vec3& size) = 0;
     virtual std::unique_ptr<PhysicsStaticBodyBackend> createStaticMesh(const std::string& meshPath) = 0;
     virtual bool raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const = 0;
+    virtual bool raycastDetailed(const glm::vec3& from,
+                                 const glm::vec3& to,
+                                 karma::physics::PhysicsGroundContact& outHit) const = 0;
+    virtual void collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const = 0;
 };
 
 std::unique_ptr<PhysicsWorldBackend> CreatePhysicsWorldBackend();

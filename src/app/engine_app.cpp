@@ -7,6 +7,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "karma/collision/collision_event_system.h"
 #include "karma/debug/debug_overlay.h"
 
 namespace karma::app {
@@ -37,7 +38,8 @@ std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
                                                     config_.local_light_range_falloff_exponent,
                                                     config_.ao_affects_local_lights,
                                                     config_.local_light_directional_shadow_lift_strength,
-                                                    config_.lighting_exposure);
+                                                    config_.lighting_exposure,
+                                                    config_.forward_plus_max_local_lights);
 }
 #endif
 
@@ -73,7 +75,10 @@ void EngineApp::initSubsystems() {
     volume_sphere_system_ = std::make_unique<volumes::VolumeSphereSystem>(graphics_.get());
   }
 
-  systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
+  const auto physics_system_id = systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
+  const auto collision_system_id =
+      systems_.addSystem(std::make_unique<collision::CollisionEventSystem>());
+  systems_.addDependency(collision_system_id, physics_system_id);
   audio_system_ = std::make_unique<audio::AudioSystem>(audio_);
   // Register other systems here (PhysicsSystem, AudioSystem, etc.).
 }
@@ -174,7 +179,8 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     graphics_->setGenerateMips(config_.generate_mipmaps);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
     graphics_->setForwardPlusSettings(config_.forward_plus_tile_size,
-                                      config_.forward_plus_max_lights_per_tile);
+                                      config_.forward_plus_max_lights_per_tile,
+                                      config_.forward_plus_max_local_lights);
     graphics_->setShadowSettings(config_.shadow_bias,
                                  config_.shadow_map_size,
                                  config_.shadow_pcf_radius,
@@ -182,6 +188,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                  config_.shadow_raster_slope_bias,
                                  config_.shadow_receiver_bias_scale,
                                  config_.shadow_normal_bias_scale);
+    graphics_->setPointShadowLightLimit(config_.point_shadow_max_lights);
     graphics_->setPointShadowSettings(config_.point_shadow_constant_bias,
                                       config_.point_shadow_slope_bias_scale,
                                       config_.point_shadow_normal_bias_scale,
@@ -298,6 +305,7 @@ void EngineApp::tick() {
     game_->onFixedUpdate(fixed_dt_);
     // Physics runs via SystemGraph.
     systems_.update(world_, fixed_dt_);
+    game_->onPostFixedUpdate(fixed_dt_);
     accumulator_ -= fixed_dt_;
   }
 

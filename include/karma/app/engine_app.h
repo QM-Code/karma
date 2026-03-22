@@ -49,6 +49,7 @@ struct EngineConfig {
   bool generate_mipmaps = false;
   int forward_plus_tile_size = 16;
   int forward_plus_max_lights_per_tile = 128;
+  int forward_plus_max_local_lights = 4096;
   int shadow_map_size = 2048;
   float shadow_bias = 0.0006f;
   int shadow_pcf_radius = 0;
@@ -60,6 +61,7 @@ struct EngineConfig {
   float point_shadow_slope_bias_scale = 2.0f;
   float point_shadow_normal_bias_scale = 1.5f;
   float point_shadow_receiver_bias_scale = 0.35f;
+  int point_shadow_max_lights = 2;
   float local_light_distance_damping = 0.02f;
   float local_light_range_falloff_exponent = 1.1f;
   bool ao_affects_local_lights = false;

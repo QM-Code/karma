@@ -47,7 +47,7 @@ class Backend {
   virtual void destroyRenderTarget(renderer::RenderTargetId target) = 0;
 
   virtual void submit(const renderer::DrawItem& item) = 0;
-  virtual void submitParticles(const renderer::ParticleBatch& batch) = 0;
+  virtual void submitParticles(renderer::ParticleBatch batch) = 0;
   virtual void retireInstance(renderer::InstanceId instance) = 0;
   virtual void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) = 0;
   virtual void drawLine(const math::Vec3& start, const math::Vec3& end,
@@ -64,7 +64,9 @@ class Backend {
   virtual void setVsync(bool enabled) = 0;
   virtual void setAnisotropy(bool enabled, int level) = 0;
   virtual void setGenerateMips(bool enabled) = 0;
-  virtual void setForwardPlusSettings(int tile_size, int max_lights_per_tile) = 0;
+  virtual void setForwardPlusSettings(int tile_size,
+                                      int max_lights_per_tile,
+                                      int max_local_lights) = 0;
   virtual renderer::ForwardPlusStats getForwardPlusStats() const = 0;
   virtual void setShadowSettings(float bias,
                                  int map_size,
@@ -77,6 +79,7 @@ class Backend {
                                       float slope_bias_scale,
                                       float normal_bias_scale,
                                       float receiver_bias_scale) = 0;
+  virtual void setPointShadowLightLimit(int max_lights) = 0;
   virtual void setLocalLightingSettings(float distance_damping,
                                         float range_falloff_exponent,
                                         bool ao_affects_local_lights,

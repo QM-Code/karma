@@ -11,6 +11,7 @@
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/BodyLockInterface.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -78,6 +79,11 @@ public:
 
 inline Vec3 toJph(const glm::vec3& v) { return Vec3(v.x, v.y, v.z); }
 inline glm::vec3 toGlm(const Vec3& v) { return glm::vec3(v.GetX(), v.GetY(), v.GetZ()); }
+inline glm::vec3 toGlmRVec(const RVec3& v) {
+    return glm::vec3(static_cast<float>(v.GetX()),
+                     static_cast<float>(v.GetY()),
+                     static_cast<float>(v.GetZ()));
+}
 
 void JoltTrace(const char* fmt, ...) {
     va_list list;
@@ -107,6 +113,52 @@ void initJoltOnce() {
 
 namespace karma::physics_backend {
 
+class PhysicsWorldJoltContactListener final : public JPH::ContactListener {
+public:
+    explicit PhysicsWorldJoltContactListener(PhysicsWorldJolt& world) : world_(world) {}
+
+    void OnContactAdded(const JPH::Body& inBody1,
+                        const JPH::Body& inBody2,
+                        const JPH::ContactManifold& inManifold,
+                        JPH::ContactSettings& /*ioSettings*/) override {
+        store(inBody1, inBody2, inManifold);
+    }
+
+    void OnContactPersisted(const JPH::Body& inBody1,
+                            const JPH::Body& inBody2,
+                            const JPH::ContactManifold& inManifold,
+                            JPH::ContactSettings& /*ioSettings*/) override {
+        store(inBody1, inBody2, inManifold);
+    }
+
+private:
+    void store(const JPH::Body& inBody1,
+               const JPH::Body& inBody2,
+               const JPH::ContactManifold& inManifold) {
+        if (inManifold.mRelativeContactPointsOn1.empty() || inManifold.mRelativeContactPointsOn2.empty()) {
+            return;
+        }
+
+        const auto key = PhysicsWorldJolt::ContactKey{
+            .a = inBody1.GetID().GetIndexAndSequenceNumber(),
+            .b = inBody2.GetID().GetIndexAndSequenceNumber(),
+        };
+
+        const karma::physics::PhysicsContact contact{
+            .handle_a = static_cast<std::uintptr_t>(key.a),
+            .handle_b = static_cast<std::uintptr_t>(key.b),
+            .point_a = toGlmRVec(inManifold.GetWorldSpaceContactPointOn1(0)),
+            .point_b = toGlmRVec(inManifold.GetWorldSpaceContactPointOn2(0)),
+            .normal_a_to_b = toGlm(inManifold.mWorldSpaceNormal),
+        };
+
+        std::lock_guard<std::mutex> lock(world_.contacts_mutex_);
+        world_.contacts_[key] = contact;
+    }
+
+    PhysicsWorldJolt& world_;
+};
+
 PhysicsWorldJolt::PhysicsWorldJolt() {
     initJoltOnce();
 
@@ -127,6 +179,8 @@ PhysicsWorldJolt::PhysicsWorldJolt() {
                          objectPairFilter);
 
     physicsSystem_->SetGravity(Vec3(0, -9.8f, 0));
+    contactListener_ = std::make_unique<PhysicsWorldJoltContactListener>(*this);
+    physicsSystem_->SetContactListener(contactListener_.get());
 }
 
 PhysicsWorldJolt::~PhysicsWorldJolt() {
@@ -137,6 +191,10 @@ PhysicsWorldJolt::~PhysicsWorldJolt() {
 
 void PhysicsWorldJolt::update(float deltaTime) {
     if (!physicsSystem_) return;
+    {
+        std::lock_guard<std::mutex> lock(contacts_mutex_);
+        contacts_.clear();
+    }
     physicsSystem_->Update(deltaTime, 1, tempAllocator_.get(), jobSystem_.get());
 }
 
@@ -214,6 +272,43 @@ bool PhysicsWorldJolt::raycast(const glm::vec3& from, const glm::vec3& to, glm::
         hitNormal = glm::vec3(0.0f);
     }
     return true;
+}
+
+bool PhysicsWorldJolt::raycastDetailed(const glm::vec3& from,
+                                       const glm::vec3& to,
+                                       karma::physics::PhysicsGroundContact& outHit) const {
+    if (!physicsSystem_) return false;
+
+    RVec3 origin(from.x, from.y, from.z);
+    Vec3 direction(to.x - from.x, to.y - from.y, to.z - from.z);
+    RRayCast ray(origin, direction);
+    RayCastResult result;
+    if (!physicsSystem_->GetNarrowPhaseQuery().CastRay(ray, result)) {
+        return false;
+    }
+
+    outHit.grounded = true;
+    outHit.point = glm::vec3(from) +
+                   glm::vec3(direction.GetX(), direction.GetY(), direction.GetZ()) * result.mFraction;
+    outHit.support_handle = static_cast<std::uintptr_t>(result.mBodyID.GetIndexAndSequenceNumber());
+
+    BodyLockRead lock(physicsSystem_->GetBodyLockInterface(), result.mBodyID);
+    if (lock.Succeeded()) {
+        outHit.normal = toGlm(lock.GetBody().GetWorldSpaceSurfaceNormal(
+            result.mSubShapeID2, ray.GetPointOnRay(result.mFraction)));
+    } else {
+        outHit.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+    return true;
+}
+
+void PhysicsWorldJolt::collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const {
+    std::lock_guard<std::mutex> lock(contacts_mutex_);
+    outContacts.reserve(outContacts.size() + contacts_.size());
+    for (const auto& [key, contact] : contacts_) {
+        (void)key;
+        outContacts.push_back(contact);
+    }
 }
 
 void PhysicsWorldJolt::removeBody(const JPH::BodyID& id) const {

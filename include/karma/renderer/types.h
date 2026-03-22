@@ -131,6 +131,7 @@ struct DirectionalLightData {
   float intensity = 1.0f;
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   float shadow_extent = 0.0f;
+  bool casts_shadows = false;
 };
 
 enum class LightType : uint32_t {
@@ -154,10 +155,12 @@ struct LightData {
 struct ForwardPlusStats {
   uint32_t tile_size = 16;
   uint32_t max_lights_per_tile = 128;
+  uint32_t max_local_lights = 4096;
   uint32_t tiles_x = 0;
   uint32_t tiles_y = 0;
   uint32_t local_light_count = 0;
   bool active = false;
+  bool cpu_fallback = false;
   bool overflow_risk = false;
 };
 
@@ -188,6 +191,11 @@ enum class ParticleShadingMode : uint32_t {
   Shell = 1,
 };
 
+enum class ParticlePresentationMode : uint32_t {
+  Baked = 0,
+  Simulated = 1,
+};
+
 struct ParticleInstance {
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   float size = 1.0f;
@@ -198,6 +206,11 @@ struct ParticleInstance {
   glm::vec2 uv_min_next{0.0f, 0.0f};
   glm::vec2 uv_max_next{1.0f, 1.0f};
   float frame_blend = 0.0f;
+  math::Color color_end{1.0f, 1.0f, 1.0f, 1.0f};
+  float size_end = 1.0f;
+  float normalized_age = 0.0f;
+  float age_seconds = 0.0f;
+  uint32_t frame_offset = 0u;
 };
 
 struct ParticleBatch {
@@ -207,6 +220,7 @@ struct ParticleBatch {
   ParticleBlendMode blend_mode = ParticleBlendMode::Additive;
   ParticleAlignment alignment = ParticleAlignment::Billboard;
   ParticleShadingMode shading_mode = ParticleShadingMode::Standard;
+  ParticlePresentationMode presentation_mode = ParticlePresentationMode::Baked;
   bool use_soft_mask = true;
   float soft_particle_distance = 0.0f;
   float distortion_strength = 0.0f;
@@ -214,6 +228,19 @@ struct ParticleBatch {
   float fresnel_strength = 1.0f;
   float refraction_strength = 0.0f;
   float interior_glow = 0.0f;
+  float size_curve_exponent = 1.0f;
+  float alpha_curve_exponent = 1.0f;
+  uint32_t atlas_columns = 1u;
+  uint32_t atlas_rows = 1u;
+  uint32_t atlas_frame_count = 1u;
+  bool animate_over_lifetime = false;
+  uint32_t atlas_frame_width = 0u;
+  uint32_t atlas_frame_height = 0u;
+  uint32_t atlas_border_x = 0u;
+  uint32_t atlas_border_y = 0u;
+  uint32_t atlas_spacing_x = 0u;
+  uint32_t atlas_spacing_y = 0u;
+  float animation_fps = 0.0f;
   std::vector<ParticleInstance> particles;
 };
 

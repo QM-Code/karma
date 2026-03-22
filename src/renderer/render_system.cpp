@@ -157,6 +157,7 @@ renderer::DirectionalLightData toDirectionalLight(const components::LightCompone
   out.direction = basis * glm::vec3(0.0f, 0.0f, -1.0f);
   out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.shadow_extent = light.shadow_extent;
+  out.casts_shadows = light.casts_shadows;
   return out;
 }
 

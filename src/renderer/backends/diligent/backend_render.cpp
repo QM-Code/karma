@@ -18,14 +18,18 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <unordered_map>
 
 namespace karma::renderer_backend {
 
 namespace {
+constexpr double kWrappedShaderTimeSeconds = 4096.0;
+
 struct alignas(16) LineConstants {
   float view_proj[16];
 };
@@ -40,6 +44,10 @@ struct alignas(16) ParticleConstants {
   float camera_params[4];
   float camera_position[4];
   float shading_params[4];
+  float presentation_params[4];
+  float atlas_params0[4];
+  float atlas_params1[4];
+  float atlas_params2[4];
 };
 
 struct alignas(16) EnvConstants {
@@ -68,11 +76,122 @@ struct ParticleVertex {
 };
 
 struct alignas(16) ParticleInstanceGpu {
-  float position_size[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-  float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-  float rotation[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+  float position_age[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float color_start[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  float color_end[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  float rotation_size[4] = {1.0f, 0.0f, 1.0f, 1.0f};
   float uv_rect[4] = {0.0f, 0.0f, 1.0f, 1.0f};
   float uv_rect_next[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+  float params[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+std::uint32_t floatBits(float value) {
+  std::uint32_t bits = 0;
+  static_assert(sizeof(bits) == sizeof(value));
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+template <typename T>
+void hashCombine(std::size_t& seed, const T& value) {
+  const std::size_t value_hash = std::hash<T>{}(value);
+  seed ^= value_hash + 0x9e3779b9u + (seed << 6u) + (seed >> 2u);
+}
+
+template <typename T, bool KeepStrongReferences = false>
+T* getMappedData(Diligent::MapHelper<T, KeepStrongReferences>& map) {
+  return static_cast<T*>(map);
+}
+
+struct ParticleBatchGroupKey {
+  renderer::TextureId texture = renderer::kInvalidTexture;
+  renderer::ParticleAlignment alignment = renderer::ParticleAlignment::Billboard;
+  renderer::ParticleShadingMode shading_mode = renderer::ParticleShadingMode::Standard;
+  renderer::ParticlePresentationMode presentation_mode =
+      renderer::ParticlePresentationMode::Baked;
+  bool use_soft_mask = true;
+  float soft_particle_distance = 0.0f;
+  float distortion_strength = 0.0f;
+  float fresnel_power = 4.0f;
+  float fresnel_strength = 1.0f;
+  float refraction_strength = 0.0f;
+  float interior_glow = 0.0f;
+  float size_curve_exponent = 1.0f;
+  float alpha_curve_exponent = 1.0f;
+  std::uint32_t atlas_columns = 1u;
+  std::uint32_t atlas_rows = 1u;
+  std::uint32_t atlas_frame_count = 1u;
+  bool animate_over_lifetime = false;
+  std::uint32_t atlas_frame_width = 0u;
+  std::uint32_t atlas_frame_height = 0u;
+  std::uint32_t atlas_border_x = 0u;
+  std::uint32_t atlas_border_y = 0u;
+  std::uint32_t atlas_spacing_x = 0u;
+  std::uint32_t atlas_spacing_y = 0u;
+  float animation_fps = 0.0f;
+
+  bool operator==(const ParticleBatchGroupKey& other) const {
+    return texture == other.texture &&
+           alignment == other.alignment &&
+           shading_mode == other.shading_mode &&
+           presentation_mode == other.presentation_mode &&
+           use_soft_mask == other.use_soft_mask &&
+           floatBits(soft_particle_distance) == floatBits(other.soft_particle_distance) &&
+           floatBits(distortion_strength) == floatBits(other.distortion_strength) &&
+           floatBits(fresnel_power) == floatBits(other.fresnel_power) &&
+           floatBits(fresnel_strength) == floatBits(other.fresnel_strength) &&
+           floatBits(refraction_strength) == floatBits(other.refraction_strength) &&
+           floatBits(interior_glow) == floatBits(other.interior_glow) &&
+           floatBits(size_curve_exponent) == floatBits(other.size_curve_exponent) &&
+           floatBits(alpha_curve_exponent) == floatBits(other.alpha_curve_exponent) &&
+           atlas_columns == other.atlas_columns &&
+           atlas_rows == other.atlas_rows &&
+           atlas_frame_count == other.atlas_frame_count &&
+           animate_over_lifetime == other.animate_over_lifetime &&
+           atlas_frame_width == other.atlas_frame_width &&
+           atlas_frame_height == other.atlas_frame_height &&
+           atlas_border_x == other.atlas_border_x &&
+           atlas_border_y == other.atlas_border_y &&
+           atlas_spacing_x == other.atlas_spacing_x &&
+           atlas_spacing_y == other.atlas_spacing_y &&
+           floatBits(animation_fps) == floatBits(other.animation_fps);
+  }
+};
+
+struct ParticleBatchGroupKeyHash {
+  std::size_t operator()(const ParticleBatchGroupKey& key) const {
+    std::size_t seed = 0;
+    hashCombine(seed, key.texture);
+    hashCombine(seed, static_cast<std::uint32_t>(key.alignment));
+    hashCombine(seed, static_cast<std::uint32_t>(key.shading_mode));
+    hashCombine(seed, static_cast<std::uint32_t>(key.presentation_mode));
+    hashCombine(seed, key.use_soft_mask);
+    hashCombine(seed, floatBits(key.soft_particle_distance));
+    hashCombine(seed, floatBits(key.distortion_strength));
+    hashCombine(seed, floatBits(key.fresnel_power));
+    hashCombine(seed, floatBits(key.fresnel_strength));
+    hashCombine(seed, floatBits(key.refraction_strength));
+    hashCombine(seed, floatBits(key.interior_glow));
+    hashCombine(seed, floatBits(key.size_curve_exponent));
+    hashCombine(seed, floatBits(key.alpha_curve_exponent));
+    hashCombine(seed, key.atlas_columns);
+    hashCombine(seed, key.atlas_rows);
+    hashCombine(seed, key.atlas_frame_count);
+    hashCombine(seed, key.animate_over_lifetime);
+    hashCombine(seed, key.atlas_frame_width);
+    hashCombine(seed, key.atlas_frame_height);
+    hashCombine(seed, key.atlas_border_x);
+    hashCombine(seed, key.atlas_border_y);
+    hashCombine(seed, key.atlas_spacing_x);
+    hashCombine(seed, key.atlas_spacing_y);
+    hashCombine(seed, floatBits(key.animation_fps));
+    return seed;
+  }
+};
+
+struct AdditiveParticleGroup {
+  ParticleBatchGroupKey key{};
+  std::vector<ParticleInstanceGpu> gpu_particles;
 };
 
 InstanceTransformData packInstanceTransform(const glm::mat4& transform) {
@@ -85,18 +204,37 @@ InstanceTransformData packInstanceTransform(const glm::mat4& transform) {
   return out;
 }
 
-bool projectSphereToScreenRect(const glm::mat4& view_proj,
+bool projectSphereToScreenRect(const glm::mat4& view,
+                               const glm::mat4& view_proj,
                                const glm::vec3& center_ws,
                                float radius_ws,
+                               float near_clip,
                                float screen_width,
                                float screen_height,
                                glm::vec4& out_rect) {
   if (!std::isfinite(center_ws.x) || !std::isfinite(center_ws.y) || !std::isfinite(center_ws.z) ||
       !std::isfinite(radius_ws) || radius_ws <= 0.0f ||
+      !std::isfinite(near_clip) || near_clip <= 0.0f ||
       !std::isfinite(screen_width) || !std::isfinite(screen_height) ||
       screen_width <= 0.0f || screen_height <= 0.0f) {
     out_rect = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
     return false;
+  }
+
+  const glm::vec3 center_vs = glm::vec3(view * glm::vec4(center_ws, 1.0f));
+  if (!std::isfinite(center_vs.x) || !std::isfinite(center_vs.y) || !std::isfinite(center_vs.z)) {
+    out_rect = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+    return false;
+  }
+
+  const float max_screen_x = std::max(screen_width - 1.0f, 0.0f);
+  const float max_screen_y = std::max(screen_height - 1.0f, 0.0f);
+  // When the light sphere intersects the near plane, corner sampling tends to
+  // underestimate the visible screen coverage and produces hard cut lines in
+  // the tiled-light path as the camera moves through the light volume.
+  if (-center_vs.z <= radius_ws + near_clip) {
+    out_rect = glm::vec4(0.0f, 0.0f, max_screen_x, max_screen_y);
+    return true;
   }
 
   float min_x = std::numeric_limits<float>::max();
@@ -148,8 +286,6 @@ bool projectSphereToScreenRect(const glm::mat4& view_proj,
     return false;
   }
 
-  const float max_screen_x = std::max(screen_width - 1.0f, 0.0f);
-  const float max_screen_y = std::max(screen_height - 1.0f, 0.0f);
   out_rect.x = std::clamp(min_x, 0.0f, max_screen_x);
   out_rect.y = std::clamp(min_y, 0.0f, max_screen_y);
   out_rect.z = std::clamp(max_x, 0.0f, max_screen_x);
@@ -654,17 +790,23 @@ cbuffer Constants
     float4 g_CameraParams;
     float4 g_CameraPosition;
     float4 g_ShadingParams;
+    float4 g_PresentationParams;
+    float4 g_AtlasParams0;
+    float4 g_AtlasParams1;
+    float4 g_AtlasParams2;
 };
 
 struct VSInput
 {
     float2 corner : ATTRIB0;
     float2 uv : ATTRIB1;
-    float4 position_size : ATTRIB2;
-    float4 color : ATTRIB3;
-    float4 rotation : ATTRIB4;
-    float4 uv_rect : ATTRIB5;
-    float4 uv_rect_next : ATTRIB6;
+    float4 position_age : ATTRIB2;
+    float4 color_start : ATTRIB3;
+    float4 color_end : ATTRIB4;
+    float4 rotation_size : ATTRIB5;
+    float4 uv_rect : ATTRIB6;
+    float4 uv_rect_next : ATTRIB7;
+    float4 params : ATTRIB8;
 };
 
 struct PSInput
@@ -678,22 +820,124 @@ struct PSInput
     float3 world_pos : TEXCOORD4;
 };
 
+float ApplyCurveExponent(float t, float exponent)
+{
+    float clamped_t = saturate(t);
+    if (abs(exponent - 1.0) <= 1.0e-4)
+    {
+        return clamped_t;
+    }
+    return pow(clamped_t, max(exponent, 1.0e-3));
+}
+
+void ComputeFrameUv(uint frame_index, out float2 uv_min, out float2 uv_max)
+{
+    uint columns = max((uint)g_AtlasParams0.x, 1u);
+    uint rows = max((uint)g_AtlasParams0.y, 1u);
+    uint frame_count = max((uint)g_AtlasParams0.z, 1u);
+    uint clamped_frame = min(frame_index, frame_count - 1u);
+    uint column = clamped_frame % columns;
+    uint row = clamped_frame / columns;
+
+    float frame_width = g_AtlasParams1.x;
+    float frame_height = g_AtlasParams1.y;
+    float border_x = g_AtlasParams1.z;
+    float border_y = g_AtlasParams1.w;
+    float spacing_x = g_AtlasParams2.x;
+    float spacing_y = g_AtlasParams2.y;
+
+    if (frame_width > 0.0 && frame_height > 0.0)
+    {
+        float texture_width =
+            (float)columns * frame_width +
+            (columns > 0u ? (float)(columns - 1u) * spacing_x : 0.0) +
+            border_x * 2.0;
+        float texture_height =
+            (float)rows * frame_height +
+            (rows > 0u ? (float)(rows - 1u) * spacing_y : 0.0) +
+            border_y * 2.0;
+        float frame_x = border_x + (float)column * (frame_width + spacing_x);
+        float frame_y = border_y + (float)row * (frame_height + spacing_y);
+        uv_min = float2(frame_x / max(texture_width, 1.0e-4),
+                        frame_y / max(texture_height, 1.0e-4));
+        uv_max = float2((frame_x + frame_width) / max(texture_width, 1.0e-4),
+                        (frame_y + frame_height) / max(texture_height, 1.0e-4));
+        return;
+    }
+
+    float inv_columns = 1.0 / (float)columns;
+    float inv_rows = 1.0 / (float)rows;
+    uv_min = float2((float)column * inv_columns, (float)row * inv_rows);
+    uv_max = float2((float)(column + 1u) * inv_columns, (float)(row + 1u) * inv_rows);
+}
+
 PSInput main(VSInput input)
 {
-    float2 local = input.corner * input.position_size.w;
-    float2 rotated = float2(local.x * input.rotation.x - local.y * input.rotation.y,
-                            local.x * input.rotation.y + local.y * input.rotation.x);
-    float3 world = input.position_size.xyz +
+    float normalized_age = saturate(input.position_age.w);
+    float size = input.rotation_size.z;
+    float4 color = input.color_start;
+    float2 uv_min = input.uv_rect.xy;
+    float2 uv_max = input.uv_rect.zw;
+    float2 uv_min_next = input.uv_rect_next.xy;
+    float2 uv_max_next = input.uv_rect_next.zw;
+    float frame_blend = saturate(input.params.x);
+    if (g_PresentationParams.z > 0.5)
+    {
+        float size_t = ApplyCurveExponent(normalized_age, g_PresentationParams.x);
+        float alpha_t = ApplyCurveExponent(normalized_age, g_PresentationParams.y);
+        size = lerp(input.rotation_size.z, input.rotation_size.w, size_t);
+        color.rgb = lerp(input.color_start.rgb, input.color_end.rgb, normalized_age);
+        color.a = lerp(input.color_start.a, input.color_end.a, alpha_t);
+
+        uint frame_count = max((uint)g_AtlasParams0.z, 1u);
+        if (frame_count > 1u)
+        {
+            float frame_position = 0.0;
+            if (g_AtlasParams0.w > 0.5)
+            {
+                frame_position = normalized_age * (float)(frame_count - 1u);
+                uint current_frame = min((uint)floor(frame_position), frame_count - 1u);
+                uint next_frame = min(current_frame + 1u, frame_count - 1u);
+                frame_blend = saturate(frame_position - (float)current_frame);
+                ComputeFrameUv(current_frame, uv_min, uv_max);
+                ComputeFrameUv(next_frame, uv_min_next, uv_max_next);
+            }
+            else
+            {
+                frame_position = max(input.params.z, 0.0) * g_AtlasParams2.z + input.params.y;
+                float wrapped_position = fmod(frame_position, (float)frame_count);
+                float normalized_position =
+                    wrapped_position >= 0.0 ? wrapped_position : wrapped_position + (float)frame_count;
+                uint current_frame = ((uint)floor(normalized_position)) % frame_count;
+                uint next_frame = (current_frame + 1u) % frame_count;
+                frame_blend = saturate(normalized_position - (float)current_frame);
+                ComputeFrameUv(current_frame, uv_min, uv_max);
+                ComputeFrameUv(next_frame, uv_min_next, uv_max_next);
+            }
+        }
+        else
+        {
+            ComputeFrameUv(0u, uv_min, uv_max);
+            uv_min_next = uv_min;
+            uv_max_next = uv_max;
+            frame_blend = 0.0;
+        }
+    }
+
+    float2 local = input.corner * size;
+    float2 rotated = float2(local.x * input.rotation_size.x - local.y * input.rotation_size.y,
+                            local.x * input.rotation_size.y + local.y * input.rotation_size.x);
+    float3 world = input.position_age.xyz +
                    g_CameraRight.xyz * rotated.x +
                    g_CameraUp.xyz * rotated.y;
 
     PSInput output;
     output.pos = mul(float4(world, 1.0f), g_ViewProj);
-    output.uv = lerp(input.uv_rect.xy, input.uv_rect.zw, input.uv);
-    output.uv_next = lerp(input.uv_rect_next.xy, input.uv_rect_next.zw, input.uv);
+    output.uv = lerp(uv_min, uv_max, input.uv);
+    output.uv_next = lerp(uv_min_next, uv_max_next, input.uv);
     output.local_uv = input.uv;
-    output.color = input.color;
-    output.frame_blend = saturate(input.rotation.z);
+    output.color = color;
+    output.frame_blend = frame_blend;
     output.world_pos = world;
     return output;
 }
@@ -711,6 +955,7 @@ cbuffer Constants
     float4 g_CameraParams;
     float4 g_CameraPosition;
     float4 g_ShadingParams;
+    float4 g_PresentationParams;
 };
 
 Texture2D g_Texture;
@@ -991,6 +1236,19 @@ bool matrixChangedBeyondEpsilon(const glm::mat4& a, const glm::mat4& b, float ep
   return false;
 }
 
+Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_format) {
+  switch (depth_format) {
+    case Diligent::TEX_FORMAT_D32_FLOAT:
+      return Diligent::TEX_FORMAT_R32_FLOAT;
+    case Diligent::TEX_FORMAT_D24_UNORM_S8_UINT:
+      return Diligent::TEX_FORMAT_R24_UNORM_X8_TYPELESS;
+    case Diligent::TEX_FORMAT_D32_FLOAT_S8X24_UINT:
+      return Diligent::TEX_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+    default:
+      return Diligent::TEX_FORMAT_UNKNOWN;
+  }
+}
+
 }  // namespace
 
 void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
@@ -998,7 +1256,11 @@ void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
       (frame.width != current_width_ || frame.height != current_height_)) {
     resize(frame.width, frame.height);
   }
-  accumulated_time_seconds_ += std::max(frame.delta_time, 0.0f);
+  accumulated_time_seconds_ += static_cast<double>(std::max(frame.delta_time, 0.0f));
+  if (accumulated_time_seconds_ >= kWrappedShaderTimeSeconds) {
+    accumulated_time_seconds_ =
+        std::fmod(accumulated_time_seconds_, kWrappedShaderTimeSeconds);
+  }
   if (!particle_batches_.empty()) {
     particle_batches_.clear();
   }
@@ -1101,8 +1363,17 @@ void DiligentBackend::ensureDefaultSceneResources(int width, int height) {
     return;
   }
 
-  default_scene_depth_srv_ =
-      default_scene_depth_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+  Diligent::TextureViewDesc depth_srv_desc{};
+  depth_srv_desc.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
+  depth_srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D;
+  depth_srv_desc.Format = resolveDepthSrvFormat(depth_desc.Format);
+  if (depth_srv_desc.Format != Diligent::TEX_FORMAT_UNKNOWN) {
+    default_scene_depth_tex_->CreateView(depth_srv_desc, &default_scene_depth_srv_);
+  }
+  if (!default_scene_depth_srv_) {
+    default_scene_depth_srv_ =
+        default_scene_depth_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+  }
   default_scene_depth_dsv_ =
       default_scene_depth_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
   if (!default_scene_depth_srv_ || !default_scene_depth_dsv_) {
@@ -1224,7 +1495,7 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   record.shadow_visible = item.shadow_visible;
 }
 
-void DiligentBackend::submitParticles(const renderer::ParticleBatch& batch) {
+void DiligentBackend::submitParticles(renderer::ParticleBatch batch) {
   if (batch.particles.empty()) {
     return;
   }
@@ -1235,6 +1506,7 @@ void DiligentBackend::submitParticles(const renderer::ParticleBatch& batch) {
   record.blend_mode = batch.blend_mode;
   record.alignment = batch.alignment;
   record.shading_mode = batch.shading_mode;
+  record.presentation_mode = batch.presentation_mode;
   record.use_soft_mask = batch.use_soft_mask;
   record.soft_particle_distance = batch.soft_particle_distance;
   record.distortion_strength = batch.distortion_strength;
@@ -1242,7 +1514,20 @@ void DiligentBackend::submitParticles(const renderer::ParticleBatch& batch) {
   record.fresnel_strength = batch.fresnel_strength;
   record.refraction_strength = batch.refraction_strength;
   record.interior_glow = batch.interior_glow;
-  record.particles = batch.particles;
+  record.size_curve_exponent = batch.size_curve_exponent;
+  record.alpha_curve_exponent = batch.alpha_curve_exponent;
+  record.atlas_columns = batch.atlas_columns;
+  record.atlas_rows = batch.atlas_rows;
+  record.atlas_frame_count = batch.atlas_frame_count;
+  record.animate_over_lifetime = batch.animate_over_lifetime;
+  record.atlas_frame_width = batch.atlas_frame_width;
+  record.atlas_frame_height = batch.atlas_frame_height;
+  record.atlas_border_x = batch.atlas_border_x;
+  record.atlas_border_y = batch.atlas_border_y;
+  record.atlas_spacing_x = batch.atlas_spacing_x;
+  record.atlas_spacing_y = batch.atlas_spacing_y;
+  record.animation_fps = batch.animation_fps;
+  record.particles = std::move(batch.particles);
   particle_batches_.push_back(std::move(record));
 }
 
@@ -1446,26 +1731,37 @@ void DiligentBackend::ensureParticleResources() {
                               static_cast<Diligent::Uint32>(sizeof(ParticleVertex))},
       Diligent::LayoutElement{2, 1, 4, Diligent::VT_FLOAT32, false,
                               static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu,
-                                                                     position_size)),
+                                                                     position_age)),
                               static_cast<Diligent::Uint32>(sizeof(ParticleInstanceGpu)),
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{3, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu, color)),
+                              static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu,
+                                                                     color_start)),
                               static_cast<Diligent::Uint32>(sizeof(ParticleInstanceGpu)),
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
                               static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu,
-                                                                     rotation)),
+                                                                     color_end)),
                               static_cast<Diligent::Uint32>(sizeof(ParticleInstanceGpu)),
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
                               static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu,
-                                                                     uv_rect)),
+                                                                     rotation_size)),
                               static_cast<Diligent::Uint32>(sizeof(ParticleInstanceGpu)),
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
                               static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu,
+                                                                     uv_rect)),
+                              static_cast<Diligent::Uint32>(sizeof(ParticleInstanceGpu)),
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu,
                                                                      uv_rect_next)),
+                              static_cast<Diligent::Uint32>(sizeof(ParticleInstanceGpu)),
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{8, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(offsetof(ParticleInstanceGpu,
+                                                                     params)),
                               static_cast<Diligent::Uint32>(sizeof(ParticleInstanceGpu)),
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
   };
@@ -2523,9 +2819,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     const auto& light = lights_[idx];
     if (is_local_light(light)) {
       glm::vec4 screen_rect(1.0f, 1.0f, 0.0f, 0.0f);
-      projectSphereToScreenRect(camera_view_proj,
+      projectSphereToScreenRect(view,
+                                camera_view_proj,
                                 light.position,
                                 std::max(light.range, 0.0f),
+                                std::max(camera_.near_clip, 0.001f),
                                 static_cast<float>(std::max(render_width, 1)),
                                 static_cast<float>(std::max(render_height, 1)),
                                 screen_rect);
@@ -2533,10 +2831,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       forward_plus_light_source_index.push_back(idx);
     }
   }
-  static constexpr size_t kMaxForwardPlusLightCount = 4096u;
-  if (forward_plus_lights_gpu.size() > kMaxForwardPlusLightCount) {
-    forward_plus_lights_gpu.resize(kMaxForwardPlusLightCount);
-    forward_plus_light_source_index.resize(kMaxForwardPlusLightCount);
+  const size_t max_forward_plus_light_count =
+      static_cast<size_t>(std::max(forward_plus_max_local_lights_, 1));
+  if (forward_plus_lights_gpu.size() > max_forward_plus_light_count) {
+    forward_plus_lights_gpu.resize(max_forward_plus_light_count);
+    forward_plus_light_source_index.resize(max_forward_plus_light_count);
     forward_plus_overflow_risk = true;
   }
 
@@ -2561,12 +2860,14 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
             [](const PointShadowSelection& a, const PointShadowSelection& b) {
               return a.distance_sq < b.distance_sq;
             });
+  const Diligent::Uint32 point_shadow_light_limit = static_cast<Diligent::Uint32>(
+      std::clamp(point_shadow_max_lights_, 1, kMaxPointShadowLights));
   std::array<renderer::LightData, kMaxPointShadowLights> point_shadow_lights{};
   std::array<size_t, kMaxPointShadowLights> point_shadow_light_source_indices{};
   std::array<size_t, kMaxPointShadowLights> point_shadow_local_light_indices{};
   Diligent::Uint32 point_shadow_light_count = 0;
   for (const auto& candidate : point_shadow_candidates) {
-    if (point_shadow_light_count >= static_cast<Diligent::Uint32>(kMaxPointShadowLights)) {
+    if (point_shadow_light_count >= point_shadow_light_limit) {
       break;
     }
     if (candidate.local_light_index >= forward_plus_lights_gpu.size() ||
@@ -2629,21 +2930,17 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     return true;
   };
 
-  static constexpr size_t kCpuForwardPlusDirectLightCount = 8u;
   static constexpr size_t kCpuForwardPlusFallbackLightCount = 64u;
+  // The direct CPU path already has room for 64 local lights in DrawConstants,
+  // so keep scenes within that budget on the stable direct path and reserve the
+  // tiled compute path for genuinely higher local-light counts.
+  static constexpr size_t kCpuForwardPlusDirectLightCount = kCpuForwardPlusFallbackLightCount;
   const bool forward_plus_compute_available =
       forward_plus_compute_pso_ && forward_plus_compute_srb_ && forward_plus_compute_cb_;
   std::array<ForwardPlusGpuLight, kCpuForwardPlusFallbackLightCount> cpu_forward_plus_lights{};
   Diligent::Uint32 cpu_forward_plus_light_count = 0;
   bool cpu_forward_plus_ready = false;
-  const bool use_cpu_forward_plus_fallback =
-      !forward_plus_lights_gpu.empty() &&
-      render_width > 0 &&
-      render_height > 0 &&
-      (!forward_plus_compute_available ||
-       forward_plus_lights_gpu.size() <= kCpuForwardPlusDirectLightCount);
-
-  if (use_cpu_forward_plus_fallback) {
+  auto enable_cpu_forward_plus_fallback = [&]() {
     active_forward_plus_tiles_x = 1;
     active_forward_plus_tiles_y = 1;
     active_forward_plus_tile_size = static_cast<Diligent::Uint32>(
@@ -2662,13 +2959,20 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       forward_plus_overflow_risk = true;
     }
     cpu_forward_plus_ready = cpu_forward_plus_light_count > 0;
+  };
+
+  const bool can_use_forward_plus =
+      !forward_plus_lights_gpu.empty() && render_width > 0 && render_height > 0;
+  const bool prefer_cpu_forward_plus_fallback =
+      can_use_forward_plus &&
+      (!forward_plus_compute_available ||
+       forward_plus_lights_gpu.size() <= kCpuForwardPlusDirectLightCount);
+
+  if (prefer_cpu_forward_plus_fallback) {
+    enable_cpu_forward_plus_fallback();
   }
 
-  if (!use_cpu_forward_plus_fallback &&
-      !forward_plus_lights_gpu.empty() &&
-      render_width > 0 &&
-      render_height > 0 &&
-      forward_plus_compute_available) {
+  if (!cpu_forward_plus_ready && can_use_forward_plus && forward_plus_compute_available) {
     const size_t forward_plus_tile_count =
         static_cast<size_t>(forward_plus_tiles_x) * static_cast<size_t>(forward_plus_tiles_y);
     const size_t forward_plus_index_count =
@@ -2763,9 +3067,13 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         context_->TransitionResourceStates(2, barriers);
 
         forward_plus_ready = true;
+      } else {
+        forward_plus_overflow_risk = true;
+        enable_cpu_forward_plus_fallback();
       }
     } else {
       forward_plus_overflow_risk = true;
+      enable_cpu_forward_plus_fallback();
     }
   }
 
@@ -2781,72 +3089,97 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       static_cast<uint32_t>(std::min<size_t>(forward_plus_lights_gpu.size(),
                                              std::numeric_limits<uint32_t>::max()));
   forward_plus_stats_.active = forward_plus_ready || cpu_forward_plus_ready;
+  forward_plus_stats_.cpu_fallback = cpu_forward_plus_ready;
   forward_plus_stats_.overflow_risk = forward_plus_overflow_risk;
 
-  auto bind_forward_plus_static_resources = [&](Diligent::IPipelineState* pso) {
-    if (!pso) {
+  Diligent::IBufferView* desired_forward_plus_light_srv = nullptr;
+  Diligent::IBufferView* desired_forward_plus_tile_count_srv = nullptr;
+  Diligent::IBufferView* desired_forward_plus_tile_index_srv = nullptr;
+  if (forward_plus_ready) {
+    desired_forward_plus_light_srv = forward_plus_light_srv_;
+    desired_forward_plus_tile_count_srv = forward_plus_tile_count_srv_;
+    desired_forward_plus_tile_index_srv = forward_plus_tile_index_srv_;
+  } else {
+    const bool fallback_srvs_ready =
+        ensure_forward_plus_buffer(forward_plus_light_buffer_,
+                                   forward_plus_light_srv_,
+                                   nullptr,
+                                   forward_plus_light_capacity_,
+                                   1u,
+                                   static_cast<Diligent::Uint32>(sizeof(ForwardPlusGpuLight)),
+                                   Diligent::BIND_SHADER_RESOURCE,
+                                   "Karma Forward+ Fallback Lights") &&
+        ensure_forward_plus_buffer(forward_plus_tile_count_buffer_,
+                                   forward_plus_tile_count_srv_,
+                                   nullptr,
+                                   forward_plus_tile_count_capacity_,
+                                   1u,
+                                   static_cast<Diligent::Uint32>(sizeof(uint32_t)),
+                                   Diligent::BIND_SHADER_RESOURCE,
+                                   "Karma Forward+ Fallback Tile Counts") &&
+        ensure_forward_plus_buffer(forward_plus_tile_index_buffer_,
+                                   forward_plus_tile_index_srv_,
+                                   nullptr,
+                                   forward_plus_tile_index_capacity_,
+                                   1u,
+                                   static_cast<Diligent::Uint32>(sizeof(uint32_t)),
+                                   Diligent::BIND_SHADER_RESOURCE,
+                                   "Karma Forward+ Fallback Tile Indices");
+    if (fallback_srvs_ready) {
+      desired_forward_plus_light_srv = forward_plus_light_srv_;
+      desired_forward_plus_tile_count_srv = forward_plus_tile_count_srv_;
+      desired_forward_plus_tile_index_srv = forward_plus_tile_index_srv_;
+    }
+  }
+
+  auto bind_forward_plus_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
+    if (!srb ||
+        !desired_forward_plus_light_srv ||
+        !desired_forward_plus_tile_count_srv ||
+        !desired_forward_plus_tile_index_srv) {
       return;
     }
-    if (forward_plus_ready) {
-      if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                   "g_ForwardPlusLights")) {
-        var->Set(forward_plus_light_srv_);
-      }
-      if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                   "g_ForwardPlusTileLightCounts")) {
-        var->Set(forward_plus_tile_count_srv_);
-      }
-      if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                   "g_ForwardPlusTileLightIndices")) {
-        var->Set(forward_plus_tile_index_srv_);
-      }
-    } else {
-      const bool fallback_srvs_ready =
-          ensure_forward_plus_buffer(forward_plus_light_buffer_,
-                                     forward_plus_light_srv_,
-                                     nullptr,
-                                     forward_plus_light_capacity_,
-                                     1u,
-                                     static_cast<Diligent::Uint32>(sizeof(ForwardPlusGpuLight)),
-                                     Diligent::BIND_SHADER_RESOURCE,
-                                     "Karma Forward+ Fallback Lights") &&
-          ensure_forward_plus_buffer(forward_plus_tile_count_buffer_,
-                                     forward_plus_tile_count_srv_,
-                                     nullptr,
-                                     forward_plus_tile_count_capacity_,
-                                     1u,
-                                     static_cast<Diligent::Uint32>(sizeof(uint32_t)),
-                                     Diligent::BIND_SHADER_RESOURCE,
-                                     "Karma Forward+ Fallback Tile Counts") &&
-          ensure_forward_plus_buffer(forward_plus_tile_index_buffer_,
-                                     forward_plus_tile_index_srv_,
-                                     nullptr,
-                                     forward_plus_tile_index_capacity_,
-                                     1u,
-                                     static_cast<Diligent::Uint32>(sizeof(uint32_t)),
-                                     Diligent::BIND_SHADER_RESOURCE,
-                                     "Karma Forward+ Fallback Tile Indices");
-      if (fallback_srvs_ready) {
-        if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                     "g_ForwardPlusLights")) {
-          var->Set(forward_plus_light_srv_);
-        }
-        if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                     "g_ForwardPlusTileLightCounts")) {
-          var->Set(forward_plus_tile_count_srv_);
-        }
-        if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                                     "g_ForwardPlusTileLightIndices")) {
-          var->Set(forward_plus_tile_index_srv_);
-        }
-      }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights")) {
+      var->Set(desired_forward_plus_light_srv);
+    }
+    if (auto* var =
+            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts")) {
+      var->Set(desired_forward_plus_tile_count_srv);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                           "g_ForwardPlusTileLightIndices")) {
+      var->Set(desired_forward_plus_tile_index_srv);
     }
   };
-  bind_forward_plus_static_resources(pipeline_state_.RawPtr());
-  bind_forward_plus_static_resources(transparent_pipeline_state_.RawPtr());
-  bind_forward_plus_static_resources(transparent_double_sided_pipeline_state_.RawPtr());
-  bind_forward_plus_static_resources(additive_pipeline_state_.RawPtr());
-  bind_forward_plus_static_resources(additive_double_sided_pipeline_state_.RawPtr());
+  auto bind_shadow_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
+    bindShadowResourcesToSrb(srb);
+  };
+  bind_forward_plus_to_srb(shader_resources_);
+  bind_forward_plus_to_srb(default_material_srb_);
+  bind_forward_plus_to_srb(transparent_default_material_srb_);
+  bind_forward_plus_to_srb(transparent_double_sided_default_material_srb_);
+  bind_forward_plus_to_srb(additive_default_material_srb_);
+  bind_forward_plus_to_srb(additive_double_sided_default_material_srb_);
+  bind_forward_plus_to_srb(camera_override_srb_);
+  bind_shadow_to_srb(shader_resources_);
+  bind_shadow_to_srb(default_material_srb_);
+  bind_shadow_to_srb(transparent_default_material_srb_);
+  bind_shadow_to_srb(transparent_double_sided_default_material_srb_);
+  bind_shadow_to_srb(additive_default_material_srb_);
+  bind_shadow_to_srb(additive_double_sided_default_material_srb_);
+  bind_shadow_to_srb(camera_override_srb_);
+  for (auto& entry : materials_) {
+    bind_forward_plus_to_srb(entry.second.srb);
+    bind_forward_plus_to_srb(entry.second.transparent_srb);
+    bind_forward_plus_to_srb(entry.second.transparent_double_sided_srb);
+    bind_forward_plus_to_srb(entry.second.additive_srb);
+    bind_forward_plus_to_srb(entry.second.additive_double_sided_srb);
+    bind_shadow_to_srb(entry.second.srb);
+    bind_shadow_to_srb(entry.second.transparent_srb);
+    bind_shadow_to_srb(entry.second.transparent_double_sided_srb);
+    bind_shadow_to_srb(entry.second.additive_srb);
+    bind_shadow_to_srb(entry.second.additive_double_sided_srb);
+  }
 
   glm::vec3 shadow_light_dir = directional_light_.direction;
   if (glm::length(shadow_light_dir) < 1e-4f) {
@@ -3127,8 +3460,10 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
   }
   const bool camera_renders_shadows = camera_.render_shadows;
+  const bool directional_light_casts_shadows = directional_light_.casts_shadows;
   const bool can_render_directional_shadows =
-      camera_renders_shadows && shadow_pipeline_state_ && has_shadow_dsv;
+      camera_renders_shadows && directional_light_casts_shadows &&
+      shadow_pipeline_state_ && has_shadow_dsv;
   const bool can_render_point_shadows =
       camera_renders_shadows && shadow_pipeline_state_ && point_shadow_map_srv_ && has_point_shadow_dsv &&
       point_shadow_light_count > 0;
@@ -3161,6 +3496,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   };
 
   bool point_shadow_force_full_refresh = false;
+  bool point_shadow_light_transform_changed = false;
   for (Diligent::Uint32 slot = 0; slot < point_shadow_light_count; ++slot) {
     if (slot >= static_cast<Diligent::Uint32>(kMaxPointShadowLights)) {
       break;
@@ -3178,6 +3514,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       point_shadow_force_full_refresh = point_shadow_force_full_refresh || slot_identity_changed;
     } else if (slot_position_changed || slot_range_changed) {
       mark_point_shadow_slot_dirty(slot, false);
+      point_shadow_light_transform_changed = true;
     }
     point_shadow_slot_source_index_[slot] = source_index;
     point_shadow_slot_position_[slot] = light.position;
@@ -3250,7 +3587,10 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     } else {
       const Diligent::Uint32 active_face_count =
           point_shadow_light_count * static_cast<Diligent::Uint32>(kPointShadowFaceCount);
-      const Diligent::Uint32 update_budget = std::max(point_shadow_faces_per_frame_budget_, 1u);
+      const Diligent::Uint32 update_budget =
+          point_shadow_light_transform_changed
+              ? active_face_count
+              : std::max(point_shadow_faces_per_frame_budget_, 1u);
       Diligent::Uint32 visited = 0;
       while (point_shadow_face_update_count < update_budget && visited < active_face_count) {
         if (active_face_count == 0) {
@@ -3356,7 +3696,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     {
       Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                                 Diligent::MAP_FLAG_DISCARD);
-      *mapped = pass_constants;
+      auto* mapped_constants = getMappedData(mapped);
+      if (mapped_constants == nullptr) {
+        return;
+      }
+      *mapped_constants = pass_constants;
     }
     for (const auto& batch : shadow_batches) {
       if (batch.transforms.empty()) {
@@ -3389,7 +3733,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         Diligent::MapHelper<InstanceTransformData> instance_map(context_, instance_vb_,
                                                                 Diligent::MAP_WRITE,
                                                                 Diligent::MAP_FLAG_DISCARD);
-        std::memcpy(instance_map, filtered_shadow_transforms.data(),
+        auto* mapped_instances = getMappedData(instance_map);
+        if (mapped_instances == nullptr) {
+          continue;
+        }
+        std::memcpy(mapped_instances, filtered_shadow_transforms.data(),
                     filtered_shadow_transforms.size() * sizeof(InstanceTransformData));
       }
 
@@ -3572,7 +3920,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       const float range_ws = std::max(point_light.range, 0.1f);
       const float near_plane = std::max(range_ws * 0.02f, 0.05f);
       const float far_plane = std::max(range_ws, near_plane + 0.1f);
-      const glm::mat4 face_proj = glm::perspective(glm::radians(90.0f), 1.0f, near_plane, far_plane);
+      const glm::mat4 face_proj = glm::perspective(glm::radians(92.0f), 1.0f, near_plane, far_plane);
       const glm::mat4 face_view =
           glm::lookAt(point_light.position,
                       point_light.position + kPointShadowFaceDirs[face],
@@ -3760,7 +4108,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       break;
     }
   }
-  const bool shadow_ready = camera_renders_shadows && directional_shadow_cache_valid_ &&
+  const bool shadow_ready = camera_renders_shadows && directional_light_casts_shadows &&
+                            directional_shadow_cache_valid_ &&
                             shadow_pipeline_state_ && shadow_map_srv_ &&
                             has_shadow_cascade_dsv && shadow_sampler_;
   base_constants.shadow_params[0] = shadow_ready ? 1.0f : 0.0f;
@@ -3826,7 +4175,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     base_constants.forward_plus_params[2] = 1.0f;
     base_constants.forward_plus_params[3] = 0.0f;
     base_constants.local_light_meta[0] = static_cast<float>(cpu_forward_plus_light_count);
-    base_constants.local_light_meta[1] = 0.0f;
+    base_constants.local_light_meta[1] = static_cast<float>(cpu_forward_plus_light_count);
     base_constants.local_light_meta[2] = 0.0f;
     base_constants.local_light_meta[3] = 0.0f;
     for (Diligent::Uint32 idx = 0; idx < cpu_forward_plus_light_count; ++idx) {
@@ -3850,11 +4199,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     base_constants.forward_plus_params[3] =
         forward_plus_ready ? static_cast<float>(active_forward_plus_max_lights_per_tile) : 0.0f;
     base_constants.local_light_meta[0] = 0.0f;
-    base_constants.local_light_meta[1] = 0.0f;
+    base_constants.local_light_meta[1] = static_cast<float>(forward_plus_lights_gpu.size());
     base_constants.local_light_meta[2] = 0.0f;
     base_constants.local_light_meta[3] = 0.0f;
   }
-  base_constants.local_light_meta[3] = accumulated_time_seconds_;
+  base_constants.local_light_meta[3] = static_cast<float>(accumulated_time_seconds_);
   base_constants.env_params[0] = environment_intensity_;
   base_constants.env_params[1] = env_max_mip;
   base_constants.env_params[2] = static_cast<float>(env_debug_mode_);
@@ -3864,14 +4213,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   thread_local std::unordered_map<ForwardBatchKey, size_t, ForwardBatchKeyHash>
       opaque_forward_batch_lookup;
   thread_local std::vector<TransparentForwardDraw> transparent_forward_draws;
+  thread_local std::vector<TransparentForwardDraw>
+      pre_particle_scene_sample_transparent_forward_draws;
   thread_local std::vector<TransparentForwardDraw> post_particle_transparent_forward_draws;
   opaque_forward_batches.clear();
   opaque_forward_batch_lookup.clear();
   transparent_forward_draws.clear();
+  pre_particle_scene_sample_transparent_forward_draws.clear();
   post_particle_transparent_forward_draws.clear();
   opaque_forward_batches.reserve(instances_.size());
   opaque_forward_batch_lookup.reserve(instances_.size());
   transparent_forward_draws.reserve(instances_.size());
+  pre_particle_scene_sample_transparent_forward_draws.reserve(instances_.size() / 4 + 1);
   post_particle_transparent_forward_draws.reserve(instances_.size() / 4 + 1);
 
   auto append_opaque_forward_batch = [&](const ForwardBatchKey& key, const glm::mat4& transform) {
@@ -3919,10 +4272,16 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       return false;
     }
     return mat->shading_model == renderer::MaterialDesc::ShadingModel::EnergyShell ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
            mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo ||
            mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereGlowVolume ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereGlowVolume;
+  };
+
+  auto uses_pre_particle_scene_sample_pass = [&](const MaterialRecord* mat) {
+    if (!mat) {
+      return false;
+    }
+    return mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
            mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere;
   };
 
@@ -3975,10 +4334,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
               mesh.bounds_radius > 0.0f
                   ? glm::vec3(instance.transform * glm::vec4(mesh.bounds_center, 1.0f))
                   : glm::vec3(instance.transform[3]);
-          auto& target_draws =
-              uses_post_particle_transparent_pass(mat)
-                  ? post_particle_transparent_forward_draws
-                  : transparent_forward_draws;
+          auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
+                                   ? pre_particle_scene_sample_transparent_forward_draws
+                                   : (uses_post_particle_transparent_pass(mat)
+                                          ? post_particle_transparent_forward_draws
+                                          : transparent_forward_draws);
           target_draws.push_back(TransparentForwardDraw{
               .key = key,
               .transform = instance.transform,
@@ -4005,10 +4365,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
             mesh.bounds_radius > 0.0f
                 ? glm::vec3(instance.transform * glm::vec4(mesh.bounds_center, 1.0f))
                 : glm::vec3(instance.transform[3]);
-        auto& target_draws =
-            uses_post_particle_transparent_pass(mat)
-                ? post_particle_transparent_forward_draws
-                : transparent_forward_draws;
+        auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
+                                 ? pre_particle_scene_sample_transparent_forward_draws
+                                 : (uses_post_particle_transparent_pass(mat)
+                                        ? post_particle_transparent_forward_draws
+                                        : transparent_forward_draws);
         target_draws.push_back(TransparentForwardDraw{
             .key = key,
             .transform = instance.transform,
@@ -4036,58 +4397,40 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
               }
               return static_cast<uint32_t>(a.key.indexed) < static_cast<uint32_t>(b.key.indexed);
             });
+  auto compare_transparent_draws = [&](const TransparentForwardDraw& a,
+                                       const TransparentForwardDraw& b) {
+    if (a.depth != b.depth) {
+      return a.depth > b.depth;
+    }
+    const MaterialRecord* mat_a = lookup_material(a.key.material);
+    const MaterialRecord* mat_b = lookup_material(b.key.material);
+    const bool additive_a =
+        mat_a && mat_a->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+    const bool additive_b =
+        mat_b && mat_b->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+    if (additive_a != additive_b) {
+      return !additive_a && additive_b;
+    }
+    if (a.key.material != b.key.material) {
+      return a.key.material < b.key.material;
+    }
+    if (a.key.mesh != b.key.mesh) {
+      return a.key.mesh < b.key.mesh;
+    }
+    if (a.key.index_offset != b.key.index_offset) {
+      return a.key.index_offset < b.key.index_offset;
+    }
+    return a.key.index_count < b.key.index_count;
+  };
   std::sort(transparent_forward_draws.begin(),
             transparent_forward_draws.end(),
-            [&](const TransparentForwardDraw& a, const TransparentForwardDraw& b) {
-              if (a.depth != b.depth) {
-                return a.depth > b.depth;
-              }
-              const MaterialRecord* mat_a = lookup_material(a.key.material);
-              const MaterialRecord* mat_b = lookup_material(b.key.material);
-              const bool additive_a =
-                  mat_a && mat_a->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
-              const bool additive_b =
-                  mat_b && mat_b->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
-              if (additive_a != additive_b) {
-                return !additive_a && additive_b;
-              }
-              if (a.key.material != b.key.material) {
-                return a.key.material < b.key.material;
-              }
-              if (a.key.mesh != b.key.mesh) {
-                return a.key.mesh < b.key.mesh;
-              }
-              if (a.key.index_offset != b.key.index_offset) {
-                return a.key.index_offset < b.key.index_offset;
-              }
-              return a.key.index_count < b.key.index_count;
-            });
+            compare_transparent_draws);
+  std::sort(pre_particle_scene_sample_transparent_forward_draws.begin(),
+            pre_particle_scene_sample_transparent_forward_draws.end(),
+            compare_transparent_draws);
   std::sort(post_particle_transparent_forward_draws.begin(),
             post_particle_transparent_forward_draws.end(),
-            [&](const TransparentForwardDraw& a, const TransparentForwardDraw& b) {
-              if (a.depth != b.depth) {
-                return a.depth > b.depth;
-              }
-              const MaterialRecord* mat_a = lookup_material(a.key.material);
-              const MaterialRecord* mat_b = lookup_material(b.key.material);
-              const bool additive_a =
-                  mat_a && mat_a->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
-              const bool additive_b =
-                  mat_b && mat_b->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
-              if (additive_a != additive_b) {
-                return !additive_a && additive_b;
-              }
-              if (a.key.material != b.key.material) {
-                return a.key.material < b.key.material;
-              }
-              if (a.key.mesh != b.key.mesh) {
-                return a.key.mesh < b.key.mesh;
-              }
-              if (a.key.index_offset != b.key.index_offset) {
-                return a.key.index_offset < b.key.index_offset;
-              }
-              return a.key.index_count < b.key.index_count;
-            });
+            compare_transparent_draws);
 
   const auto& adapter_info = device_->GetAdapterInfo();
   const bool disable_depth_prepass_for_driver =
@@ -4100,64 +4443,77 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     context_->SetRenderTargets(0, nullptr, dsv,
                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     context_->SetPipelineState(depth_prepass_pipeline_state_);
+    bool depth_prepass_ready = true;
     {
       Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                                 Diligent::MAP_FLAG_DISCARD);
-      *mapped = base_constants;
+      auto* mapped_constants = getMappedData(mapped);
+      if (mapped_constants == nullptr) {
+        depth_prepass_ready = false;
+      } else {
+        *mapped_constants = base_constants;
+      }
     }
 
-    for (const auto& batch : opaque_forward_batches) {
-      if (batch.transforms.empty()) {
-        continue;
-      }
-      auto mesh_it = meshes_.find(batch.key.mesh);
-      if (mesh_it == meshes_.end()) {
-        continue;
-      }
-      const auto& mesh = mesh_it->second;
-      if (!mesh.vertex_buffer) {
-        continue;
-      }
-      if (!ensure_instance_buffer(batch.transforms.size())) {
-        continue;
-      }
-      {
-        Diligent::MapHelper<InstanceTransformData> instance_map(context_, instance_vb_,
-                                                                Diligent::MAP_WRITE,
-                                                                Diligent::MAP_FLAG_DISCARD);
-        std::memcpy(instance_map, batch.transforms.data(),
-                    batch.transforms.size() * sizeof(InstanceTransformData));
-      }
-
-      Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
-      Diligent::Uint64 offsets[] = {0, 0};
-      context_->SetVertexBuffers(0,
-                                 2,
-                                 vbs,
-                                 offsets,
-                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-                                 Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
-
-      if (batch.key.indexed) {
-        if (!is_valid_indexed_draw(mesh, batch.key.index_offset, batch.key.index_count)) {
+    if (depth_prepass_ready) {
+      for (const auto& batch : opaque_forward_batches) {
+        if (batch.transforms.empty()) {
           continue;
         }
-        context_->SetIndexBuffer(mesh.index_buffer,
-                                 0,
-                                 Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-        Diligent::DrawIndexedAttribs indexed{};
-        indexed.IndexType = Diligent::VT_UINT32;
-        indexed.NumIndices = batch.key.index_count;
-        indexed.FirstIndexLocation = batch.key.index_offset;
-        indexed.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-        indexed.Flags = kHotPathDrawFlags;
-        context_->DrawIndexed(indexed);
-      } else {
-        Diligent::DrawAttribs draw_attrs{};
-        draw_attrs.NumVertices = mesh.vertex_count;
-        draw_attrs.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
-        draw_attrs.Flags = kHotPathDrawFlags;
-        context_->Draw(draw_attrs);
+        auto mesh_it = meshes_.find(batch.key.mesh);
+        if (mesh_it == meshes_.end()) {
+          continue;
+        }
+        const auto& mesh = mesh_it->second;
+        if (!mesh.vertex_buffer) {
+          continue;
+        }
+        if (!ensure_instance_buffer(batch.transforms.size())) {
+          continue;
+        }
+        {
+          Diligent::MapHelper<InstanceTransformData> instance_map(context_, instance_vb_,
+                                                                  Diligent::MAP_WRITE,
+                                                                  Diligent::MAP_FLAG_DISCARD);
+          auto* mapped_instances = getMappedData(instance_map);
+          if (mapped_instances == nullptr) {
+            continue;
+          }
+          std::memcpy(mapped_instances,
+                      batch.transforms.data(),
+                      batch.transforms.size() * sizeof(InstanceTransformData));
+        }
+
+        Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
+        Diligent::Uint64 offsets[] = {0, 0};
+        context_->SetVertexBuffers(0,
+                                   2,
+                                   vbs,
+                                   offsets,
+                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                   Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+
+        if (batch.key.indexed) {
+          if (!is_valid_indexed_draw(mesh, batch.key.index_offset, batch.key.index_count)) {
+            continue;
+          }
+          context_->SetIndexBuffer(mesh.index_buffer,
+                                   0,
+                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+          Diligent::DrawIndexedAttribs indexed{};
+          indexed.IndexType = Diligent::VT_UINT32;
+          indexed.NumIndices = batch.key.index_count;
+          indexed.FirstIndexLocation = batch.key.index_offset;
+          indexed.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
+          indexed.Flags = kHotPathDrawFlags;
+          context_->DrawIndexed(indexed);
+        } else {
+          Diligent::DrawAttribs draw_attrs{};
+          draw_attrs.NumVertices = mesh.vertex_count;
+          draw_attrs.NumInstances = static_cast<Diligent::Uint32>(batch.transforms.size());
+          draw_attrs.Flags = kHotPathDrawFlags;
+          context_->Draw(draw_attrs);
+        }
       }
     }
 
@@ -4177,7 +4533,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   {
     Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                               Diligent::MAP_FLAG_DISCARD);
-    *mapped = base_constants;
+    auto* mapped_constants = getMappedData(mapped);
+    if (mapped_constants == nullptr) {
+      return;
+    }
+    *mapped_constants = base_constants;
   }
   if (use_custom_shader_override && camera_override_srb_) {
     context_->CommitShaderResources(camera_override_srb_,
@@ -4188,10 +4548,10 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   auto update_forward_material_constants = [&](renderer::MaterialId material_id,
                                                renderer::MeshId mesh_id,
                                                const MeshRecord& mesh,
-                                               const MaterialRecord* mat) {
+                                               const MaterialRecord* mat) -> bool {
     if (material_id == last_constants_material &&
         (material_id != renderer::kInvalidMaterial || mesh_id == last_constants_mesh)) {
-      return;
+      return true;
     }
     DrawConstants constants = base_constants;
     glm::vec4 base_color = mat ? mat->base_color_factor : mesh.base_color;
@@ -4261,10 +4621,15 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     {
       Diligent::MapHelper<DrawConstants> mapped(context_, constants_, Diligent::MAP_WRITE,
                                                 Diligent::MAP_FLAG_DISCARD);
-      *mapped = constants;
+      auto* mapped_constants = getMappedData(mapped);
+      if (mapped_constants == nullptr) {
+        return false;
+      }
+      *mapped_constants = constants;
     }
     last_constants_material = material_id;
     last_constants_mesh = mesh_id;
+    return true;
   };
 
   auto resolve_forward_pipeline =
@@ -4355,7 +4720,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       Diligent::MapHelper<InstanceTransformData> instance_map(context_, instance_vb_,
                                                               Diligent::MAP_WRITE,
                                                               Diligent::MAP_FLAG_DISCARD);
-      std::memcpy(instance_map,
+      auto* mapped_instances = getMappedData(instance_map);
+      if (mapped_instances == nullptr) {
+        return false;
+      }
+      std::memcpy(mapped_instances,
                   transforms,
                   transform_count * sizeof(InstanceTransformData));
     }
@@ -4430,7 +4799,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       }
     }
 
-    update_forward_material_constants(batch.key.material, batch.key.mesh, mesh, mat);
+    if (!update_forward_material_constants(batch.key.material, batch.key.mesh, mesh, mat)) {
+      continue;
+    }
 
     if (!use_custom_shader_override) {
       Diligent::IShaderResourceBinding* srb =
@@ -4500,7 +4871,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         bound_index_buffer = nullptr;
       }
 
-      update_forward_material_constants(draw.key.material, draw.key.mesh, mesh, mat);
+      if (!update_forward_material_constants(draw.key.material, draw.key.mesh, mesh, mat)) {
+        continue;
+      }
 
       Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, pipeline, true);
       if (mat &&
@@ -4547,7 +4920,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   ensureLineResources();
 
   bool allow_distortion_particles = false;
-  bool require_scene_color_copy = false;
+  bool require_scene_color_copy =
+      !pre_particle_scene_sample_transparent_forward_draws.empty();
   Diligent::ITextureView* particle_scene_color_sample_srv = particle_scene_color_srv;
   for (const auto& batch : particle_batches_) {
     if (batch.layer != layer || batch.particles.empty()) {
@@ -4576,6 +4950,12 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
   }
 
+  if (!pre_particle_scene_sample_transparent_forward_draws.empty()) {
+    draw_transparent_forward_draws(pre_particle_scene_sample_transparent_forward_draws,
+                                   particle_scene_color_sample_srv,
+                                   particle_scene_depth_srv);
+  }
+
   auto resolve_particle_texture = [&](renderer::TextureId texture_id) -> Diligent::ITextureView* {
     if (texture_id != renderer::kInvalidTexture) {
       auto it = textures_.find(texture_id);
@@ -4589,17 +4969,22 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   auto append_gpu_particle = [&](std::vector<ParticleInstanceGpu>& gpu_particles,
                                  const renderer::ParticleInstance& particle) {
     ParticleInstanceGpu gpu{};
-    gpu.position_size[0] = particle.position.x;
-    gpu.position_size[1] = particle.position.y;
-    gpu.position_size[2] = particle.position.z;
-    gpu.position_size[3] = particle.size;
-    gpu.color[0] = particle.color.r;
-    gpu.color[1] = particle.color.g;
-    gpu.color[2] = particle.color.b;
-    gpu.color[3] = particle.color.a;
-    gpu.rotation[0] = std::cos(particle.rotation_radians);
-    gpu.rotation[1] = std::sin(particle.rotation_radians);
-    gpu.rotation[2] = particle.frame_blend;
+    gpu.position_age[0] = particle.position.x;
+    gpu.position_age[1] = particle.position.y;
+    gpu.position_age[2] = particle.position.z;
+    gpu.position_age[3] = particle.normalized_age;
+    gpu.color_start[0] = particle.color.r;
+    gpu.color_start[1] = particle.color.g;
+    gpu.color_start[2] = particle.color.b;
+    gpu.color_start[3] = particle.color.a;
+    gpu.color_end[0] = particle.color_end.r;
+    gpu.color_end[1] = particle.color_end.g;
+    gpu.color_end[2] = particle.color_end.b;
+    gpu.color_end[3] = particle.color_end.a;
+    gpu.rotation_size[0] = std::cos(particle.rotation_radians);
+    gpu.rotation_size[1] = std::sin(particle.rotation_radians);
+    gpu.rotation_size[2] = particle.size;
+    gpu.rotation_size[3] = particle.size_end;
     gpu.uv_rect[0] = particle.uv_min.x;
     gpu.uv_rect[1] = particle.uv_min.y;
     gpu.uv_rect[2] = particle.uv_max.x;
@@ -4608,6 +4993,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     gpu.uv_rect_next[1] = particle.uv_min_next.y;
     gpu.uv_rect_next[2] = particle.uv_max_next.x;
     gpu.uv_rect_next[3] = particle.uv_max_next.y;
+    gpu.params[0] = particle.frame_blend;
+    gpu.params[1] = static_cast<float>(particle.frame_offset);
+    gpu.params[2] = particle.age_seconds;
     gpu_particles.push_back(gpu);
   };
 
@@ -4647,11 +5035,18 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
 
     thread_local std::vector<ParticleInstanceGpu> gpu_particles;
+    thread_local std::vector<AdditiveParticleGroup> additive_groups;
+    thread_local std::unordered_map<ParticleBatchGroupKey,
+                                    std::size_t,
+                                    ParticleBatchGroupKeyHash>
+        additive_group_lookup;
     struct SortedParticle {
       const renderer::ParticleInstance* particle = nullptr;
       renderer::TextureId texture = renderer::kInvalidTexture;
       renderer::ParticleAlignment alignment = renderer::ParticleAlignment::Billboard;
       renderer::ParticleShadingMode shading_mode = renderer::ParticleShadingMode::Standard;
+      renderer::ParticlePresentationMode presentation_mode =
+          renderer::ParticlePresentationMode::Baked;
       bool use_soft_mask = true;
       float soft_particle_distance = 0.0f;
       float distortion_strength = 0.0f;
@@ -4659,6 +5054,19 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       float fresnel_strength = 1.0f;
       float refraction_strength = 0.0f;
       float interior_glow = 0.0f;
+      float size_curve_exponent = 1.0f;
+      float alpha_curve_exponent = 1.0f;
+      std::uint32_t atlas_columns = 1u;
+      std::uint32_t atlas_rows = 1u;
+      std::uint32_t atlas_frame_count = 1u;
+      bool animate_over_lifetime = false;
+      std::uint32_t atlas_frame_width = 0u;
+      std::uint32_t atlas_frame_height = 0u;
+      std::uint32_t atlas_border_x = 0u;
+      std::uint32_t atlas_border_y = 0u;
+      std::uint32_t atlas_spacing_x = 0u;
+      std::uint32_t atlas_spacing_y = 0u;
+      float animation_fps = 0.0f;
       float depth = 0.0f;
     };
     thread_local std::vector<SortedParticle> sorted_particles;
@@ -4671,13 +5079,27 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     auto draw_particle_span = [&](renderer::TextureId texture_id,
                                   renderer::ParticleAlignment alignment,
                                   renderer::ParticleShadingMode shading_mode,
+                                  renderer::ParticlePresentationMode presentation_mode,
                                   bool use_soft_mask,
                                   float soft_particle_distance,
                                   float distortion_strength,
                                   float fresnel_power,
                                   float fresnel_strength,
                                   float refraction_strength,
-                                  float interior_glow) {
+                                  float interior_glow,
+                                  float size_curve_exponent,
+                                  float alpha_curve_exponent,
+                                  std::uint32_t atlas_columns,
+                                  std::uint32_t atlas_rows,
+                                  std::uint32_t atlas_frame_count,
+                                  bool animate_over_lifetime,
+                                  std::uint32_t atlas_frame_width,
+                                  std::uint32_t atlas_frame_height,
+                                  std::uint32_t atlas_border_x,
+                                  std::uint32_t atlas_border_y,
+                                  std::uint32_t atlas_spacing_x,
+                                  std::uint32_t atlas_spacing_y,
+                                  float animation_fps) {
       if (gpu_particles.empty()) {
         return;
       }
@@ -4687,6 +5109,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       {
         Diligent::MapHelper<ParticleInstanceGpu> instance_map(
             context_, particle_instance_vb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+        if (static_cast<ParticleInstanceGpu*>(instance_map) == nullptr) {
+          return;
+        }
         std::memcpy(instance_map,
                     gpu_particles.data(),
                     gpu_particles.size() * sizeof(ParticleInstanceGpu));
@@ -4733,11 +5158,31 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       constants.shading_params[1] = std::max(fresnel_strength, 0.0f);
       constants.shading_params[2] = std::max(refraction_strength, 0.0f);
       constants.shading_params[3] = std::max(interior_glow, 0.0f);
+      constants.presentation_params[0] = std::max(size_curve_exponent, 0.001f);
+      constants.presentation_params[1] = std::max(alpha_curve_exponent, 0.001f);
+      constants.presentation_params[2] =
+          static_cast<float>(static_cast<uint32_t>(presentation_mode));
+      constants.presentation_params[3] = 0.0f;
+      constants.atlas_params0[0] = static_cast<float>(std::max(atlas_columns, 1u));
+      constants.atlas_params0[1] = static_cast<float>(std::max(atlas_rows, 1u));
+      constants.atlas_params0[2] = static_cast<float>(std::max(atlas_frame_count, 1u));
+      constants.atlas_params0[3] = animate_over_lifetime ? 1.0f : 0.0f;
+      constants.atlas_params1[0] = static_cast<float>(atlas_frame_width);
+      constants.atlas_params1[1] = static_cast<float>(atlas_frame_height);
+      constants.atlas_params1[2] = static_cast<float>(atlas_border_x);
+      constants.atlas_params1[3] = static_cast<float>(atlas_border_y);
+      constants.atlas_params2[0] = static_cast<float>(atlas_spacing_x);
+      constants.atlas_params2[1] = static_cast<float>(atlas_spacing_y);
+      constants.atlas_params2[2] = std::max(animation_fps, 0.0f);
+      constants.atlas_params2[3] = 0.0f;
       {
         Diligent::MapHelper<ParticleConstants> cb_map(context_,
                                                       particle_cb_,
                                                       Diligent::MAP_WRITE,
                                                       Diligent::MAP_FLAG_DISCARD);
+        if (static_cast<ParticleConstants*>(cb_map) == nullptr) {
+          return;
+        }
         *cb_map = constants;
       }
 
@@ -4799,6 +5244,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     };
 
     if (blend_mode == renderer::ParticleBlendMode::Additive) {
+      additive_groups.clear();
+      additive_group_lookup.clear();
+      additive_groups.reserve(particle_batches_.size());
+      additive_group_lookup.reserve(particle_batches_.size());
+
       for (const auto& batch : particle_batches_) {
         if (batch.layer != layer ||
             batch.depth_test != depth_test ||
@@ -4807,21 +5257,71 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
           continue;
         }
 
-        gpu_particles.clear();
-        gpu_particles.reserve(batch.particles.size());
-        for (const auto& particle : batch.particles) {
-          append_gpu_particle(gpu_particles, particle);
+        const ParticleBatchGroupKey key{
+            .texture = batch.texture,
+            .alignment = batch.alignment,
+            .shading_mode = batch.shading_mode,
+            .presentation_mode = batch.presentation_mode,
+            .use_soft_mask = batch.use_soft_mask,
+            .soft_particle_distance = batch.soft_particle_distance,
+            .distortion_strength = batch.distortion_strength,
+            .fresnel_power = batch.fresnel_power,
+            .fresnel_strength = batch.fresnel_strength,
+            .refraction_strength = batch.refraction_strength,
+            .interior_glow = batch.interior_glow,
+            .size_curve_exponent = batch.size_curve_exponent,
+            .alpha_curve_exponent = batch.alpha_curve_exponent,
+            .atlas_columns = batch.atlas_columns,
+            .atlas_rows = batch.atlas_rows,
+            .atlas_frame_count = batch.atlas_frame_count,
+            .animate_over_lifetime = batch.animate_over_lifetime,
+            .atlas_frame_width = batch.atlas_frame_width,
+            .atlas_frame_height = batch.atlas_frame_height,
+            .atlas_border_x = batch.atlas_border_x,
+            .atlas_border_y = batch.atlas_border_y,
+            .atlas_spacing_x = batch.atlas_spacing_x,
+            .atlas_spacing_y = batch.atlas_spacing_y,
+            .animation_fps = batch.animation_fps,
+        };
+        auto [it, inserted] = additive_group_lookup.emplace(key, additive_groups.size());
+        if (inserted) {
+          additive_groups.push_back(AdditiveParticleGroup{.key = key});
         }
-        draw_particle_span(batch.texture,
-                           batch.alignment,
-                           batch.shading_mode,
-                           batch.use_soft_mask,
-                           batch.soft_particle_distance,
-                           batch.distortion_strength,
-                           batch.fresnel_power,
-                           batch.fresnel_strength,
-                           batch.refraction_strength,
-                           batch.interior_glow);
+        auto& group = additive_groups[it->second];
+        group.gpu_particles.reserve(group.gpu_particles.size() + batch.particles.size());
+        for (const auto& particle : batch.particles) {
+          append_gpu_particle(group.gpu_particles, particle);
+        }
+      }
+      for (auto& group : additive_groups) {
+        if (group.gpu_particles.empty()) {
+          continue;
+        }
+        gpu_particles = std::move(group.gpu_particles);
+        draw_particle_span(group.key.texture,
+                           group.key.alignment,
+                           group.key.shading_mode,
+                           group.key.presentation_mode,
+                           group.key.use_soft_mask,
+                           group.key.soft_particle_distance,
+                           group.key.distortion_strength,
+                           group.key.fresnel_power,
+                           group.key.fresnel_strength,
+                           group.key.refraction_strength,
+                           group.key.interior_glow,
+                           group.key.size_curve_exponent,
+                           group.key.alpha_curve_exponent,
+                           group.key.atlas_columns,
+                           group.key.atlas_rows,
+                           group.key.atlas_frame_count,
+                           group.key.animate_over_lifetime,
+                           group.key.atlas_frame_width,
+                           group.key.atlas_frame_height,
+                           group.key.atlas_border_x,
+                           group.key.atlas_border_y,
+                           group.key.atlas_spacing_x,
+                           group.key.atlas_spacing_y,
+                           group.key.animation_fps);
       }
       return;
     }
@@ -4841,6 +5341,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
             .texture = batch.texture,
             .alignment = batch.alignment,
             .shading_mode = batch.shading_mode,
+            .presentation_mode = batch.presentation_mode,
             .use_soft_mask = batch.use_soft_mask,
             .soft_particle_distance = batch.soft_particle_distance,
             .distortion_strength = batch.distortion_strength,
@@ -4848,6 +5349,19 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
             .fresnel_strength = batch.fresnel_strength,
             .refraction_strength = batch.refraction_strength,
             .interior_glow = batch.interior_glow,
+            .size_curve_exponent = batch.size_curve_exponent,
+            .alpha_curve_exponent = batch.alpha_curve_exponent,
+            .atlas_columns = batch.atlas_columns,
+            .atlas_rows = batch.atlas_rows,
+            .atlas_frame_count = batch.atlas_frame_count,
+            .animate_over_lifetime = batch.animate_over_lifetime,
+            .atlas_frame_width = batch.atlas_frame_width,
+            .atlas_frame_height = batch.atlas_frame_height,
+            .atlas_border_x = batch.atlas_border_x,
+            .atlas_border_y = batch.atlas_border_y,
+            .atlas_spacing_x = batch.atlas_spacing_x,
+            .atlas_spacing_y = batch.atlas_spacing_y,
+            .animation_fps = batch.animation_fps,
             .depth = glm::dot(particle.position - camera_.position, cam_forward),
         });
       }
@@ -4857,47 +5371,95 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       return;
     }
 
-    std::stable_sort(sorted_particles.begin(),
-                     sorted_particles.end(),
-                     [](const SortedParticle& a, const SortedParticle& b) {
-      if (a.depth != b.depth) {
-        return a.depth > b.depth;
-      }
-      if (a.texture != b.texture) {
-        return a.texture < b.texture;
-      }
-      if (a.alignment != b.alignment) {
-        return static_cast<uint32_t>(a.alignment) < static_cast<uint32_t>(b.alignment);
-      }
-      if (a.shading_mode != b.shading_mode) {
-        return static_cast<uint32_t>(a.shading_mode) < static_cast<uint32_t>(b.shading_mode);
-      }
-      if (a.use_soft_mask != b.use_soft_mask) {
-        return static_cast<uint32_t>(a.use_soft_mask) < static_cast<uint32_t>(b.use_soft_mask);
-      }
-      if (a.soft_particle_distance != b.soft_particle_distance) {
-        return a.soft_particle_distance < b.soft_particle_distance;
-      }
-      if (a.distortion_strength != b.distortion_strength) {
-        return a.distortion_strength < b.distortion_strength;
-      }
-      if (a.fresnel_power != b.fresnel_power) {
-        return a.fresnel_power < b.fresnel_power;
-      }
-      if (a.fresnel_strength != b.fresnel_strength) {
-        return a.fresnel_strength < b.fresnel_strength;
-      }
-      if (a.refraction_strength != b.refraction_strength) {
-        return a.refraction_strength < b.refraction_strength;
-      }
-      return a.interior_glow < b.interior_glow;
-    });
+    if (sorted_particles.size() > 1u) {
+      std::sort(sorted_particles.begin(),
+                sorted_particles.end(),
+                [](const SortedParticle& a, const SortedParticle& b) {
+        if (a.depth != b.depth) {
+          return a.depth > b.depth;
+        }
+        if (a.texture != b.texture) {
+          return a.texture < b.texture;
+        }
+        if (a.alignment != b.alignment) {
+          return static_cast<uint32_t>(a.alignment) < static_cast<uint32_t>(b.alignment);
+        }
+        if (a.shading_mode != b.shading_mode) {
+          return static_cast<uint32_t>(a.shading_mode) < static_cast<uint32_t>(b.shading_mode);
+        }
+        if (a.presentation_mode != b.presentation_mode) {
+          return static_cast<uint32_t>(a.presentation_mode) <
+                 static_cast<uint32_t>(b.presentation_mode);
+        }
+        if (a.use_soft_mask != b.use_soft_mask) {
+          return static_cast<uint32_t>(a.use_soft_mask) < static_cast<uint32_t>(b.use_soft_mask);
+        }
+        if (a.soft_particle_distance != b.soft_particle_distance) {
+          return a.soft_particle_distance < b.soft_particle_distance;
+        }
+        if (a.distortion_strength != b.distortion_strength) {
+          return a.distortion_strength < b.distortion_strength;
+        }
+        if (a.fresnel_power != b.fresnel_power) {
+          return a.fresnel_power < b.fresnel_power;
+        }
+        if (a.fresnel_strength != b.fresnel_strength) {
+          return a.fresnel_strength < b.fresnel_strength;
+        }
+        if (a.refraction_strength != b.refraction_strength) {
+          return a.refraction_strength < b.refraction_strength;
+        }
+        if (a.interior_glow != b.interior_glow) {
+          return a.interior_glow < b.interior_glow;
+        }
+        if (a.size_curve_exponent != b.size_curve_exponent) {
+          return a.size_curve_exponent < b.size_curve_exponent;
+        }
+        if (a.alpha_curve_exponent != b.alpha_curve_exponent) {
+          return a.alpha_curve_exponent < b.alpha_curve_exponent;
+        }
+        if (a.atlas_columns != b.atlas_columns) {
+          return a.atlas_columns < b.atlas_columns;
+        }
+        if (a.atlas_rows != b.atlas_rows) {
+          return a.atlas_rows < b.atlas_rows;
+        }
+        if (a.atlas_frame_count != b.atlas_frame_count) {
+          return a.atlas_frame_count < b.atlas_frame_count;
+        }
+        if (a.animate_over_lifetime != b.animate_over_lifetime) {
+          return static_cast<uint32_t>(a.animate_over_lifetime) <
+                 static_cast<uint32_t>(b.animate_over_lifetime);
+        }
+        if (a.atlas_frame_width != b.atlas_frame_width) {
+          return a.atlas_frame_width < b.atlas_frame_width;
+        }
+        if (a.atlas_frame_height != b.atlas_frame_height) {
+          return a.atlas_frame_height < b.atlas_frame_height;
+        }
+        if (a.atlas_border_x != b.atlas_border_x) {
+          return a.atlas_border_x < b.atlas_border_x;
+        }
+        if (a.atlas_border_y != b.atlas_border_y) {
+          return a.atlas_border_y < b.atlas_border_y;
+        }
+        if (a.atlas_spacing_x != b.atlas_spacing_x) {
+          return a.atlas_spacing_x < b.atlas_spacing_x;
+        }
+        if (a.atlas_spacing_y != b.atlas_spacing_y) {
+          return a.atlas_spacing_y < b.atlas_spacing_y;
+        }
+        return a.animation_fps < b.animation_fps;
+      });
+    }
 
     size_t start = 0;
     while (start < sorted_particles.size()) {
       const renderer::TextureId texture_id = sorted_particles[start].texture;
       const renderer::ParticleAlignment alignment = sorted_particles[start].alignment;
       const renderer::ParticleShadingMode shading_mode = sorted_particles[start].shading_mode;
+      const renderer::ParticlePresentationMode presentation_mode =
+          sorted_particles[start].presentation_mode;
       const bool use_soft_mask = sorted_particles[start].use_soft_mask;
       const float soft_particle_distance = sorted_particles[start].soft_particle_distance;
       const float distortion_strength = sorted_particles[start].distortion_strength;
@@ -4905,32 +5467,73 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       const float fresnel_strength = sorted_particles[start].fresnel_strength;
       const float refraction_strength = sorted_particles[start].refraction_strength;
       const float interior_glow = sorted_particles[start].interior_glow;
+      const float size_curve_exponent = sorted_particles[start].size_curve_exponent;
+      const float alpha_curve_exponent = sorted_particles[start].alpha_curve_exponent;
+      const std::uint32_t atlas_columns = sorted_particles[start].atlas_columns;
+      const std::uint32_t atlas_rows = sorted_particles[start].atlas_rows;
+      const std::uint32_t atlas_frame_count = sorted_particles[start].atlas_frame_count;
+      const bool animate_over_lifetime = sorted_particles[start].animate_over_lifetime;
+      const std::uint32_t atlas_frame_width = sorted_particles[start].atlas_frame_width;
+      const std::uint32_t atlas_frame_height = sorted_particles[start].atlas_frame_height;
+      const std::uint32_t atlas_border_x = sorted_particles[start].atlas_border_x;
+      const std::uint32_t atlas_border_y = sorted_particles[start].atlas_border_y;
+      const std::uint32_t atlas_spacing_x = sorted_particles[start].atlas_spacing_x;
+      const std::uint32_t atlas_spacing_y = sorted_particles[start].atlas_spacing_y;
+      const float animation_fps = sorted_particles[start].animation_fps;
       size_t end = start;
       gpu_particles.clear();
       while (end < sorted_particles.size() &&
              sorted_particles[end].texture == texture_id &&
              sorted_particles[end].alignment == alignment &&
              sorted_particles[end].shading_mode == shading_mode &&
+             sorted_particles[end].presentation_mode == presentation_mode &&
              sorted_particles[end].use_soft_mask == use_soft_mask &&
              sorted_particles[end].soft_particle_distance == soft_particle_distance &&
              sorted_particles[end].distortion_strength == distortion_strength &&
              sorted_particles[end].fresnel_power == fresnel_power &&
              sorted_particles[end].fresnel_strength == fresnel_strength &&
              sorted_particles[end].refraction_strength == refraction_strength &&
-             sorted_particles[end].interior_glow == interior_glow) {
+             sorted_particles[end].interior_glow == interior_glow &&
+             sorted_particles[end].size_curve_exponent == size_curve_exponent &&
+             sorted_particles[end].alpha_curve_exponent == alpha_curve_exponent &&
+             sorted_particles[end].atlas_columns == atlas_columns &&
+             sorted_particles[end].atlas_rows == atlas_rows &&
+             sorted_particles[end].atlas_frame_count == atlas_frame_count &&
+             sorted_particles[end].animate_over_lifetime == animate_over_lifetime &&
+             sorted_particles[end].atlas_frame_width == atlas_frame_width &&
+             sorted_particles[end].atlas_frame_height == atlas_frame_height &&
+             sorted_particles[end].atlas_border_x == atlas_border_x &&
+             sorted_particles[end].atlas_border_y == atlas_border_y &&
+             sorted_particles[end].atlas_spacing_x == atlas_spacing_x &&
+             sorted_particles[end].atlas_spacing_y == atlas_spacing_y &&
+             sorted_particles[end].animation_fps == animation_fps) {
         append_gpu_particle(gpu_particles, *sorted_particles[end].particle);
         ++end;
       }
       draw_particle_span(texture_id,
                          alignment,
                          shading_mode,
+                         presentation_mode,
                          use_soft_mask,
                          soft_particle_distance,
                          distortion_strength,
                          fresnel_power,
                          fresnel_strength,
                          refraction_strength,
-                         interior_glow);
+                         interior_glow,
+                         size_curve_exponent,
+                         alpha_curve_exponent,
+                         atlas_columns,
+                         atlas_rows,
+                         atlas_frame_count,
+                         animate_over_lifetime,
+                         atlas_frame_width,
+                         atlas_frame_height,
+                         atlas_border_x,
+                         atlas_border_y,
+                         atlas_spacing_x,
+                         atlas_spacing_y,
+                         animation_fps);
       start = end;
     }
   };
@@ -4975,7 +5578,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       {
         Diligent::MapHelper<LineVertex> vb_map(context_, line_vb_, Diligent::MAP_WRITE,
                                                Diligent::MAP_FLAG_DISCARD);
-        std::memcpy(vb_map, lines.data(), lines.size() * sizeof(LineVertex));
+        auto* mapped_vertices = getMappedData(vb_map);
+        if (mapped_vertices == nullptr) {
+          return;
+        }
+        std::memcpy(mapped_vertices, lines.data(), lines.size() * sizeof(LineVertex));
       }
 
       const glm::mat4 view_proj = depth_fix * projection * view;
@@ -4984,7 +5591,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       {
         Diligent::MapHelper<LineConstants> cb_map(context_, line_cb_, Diligent::MAP_WRITE,
                                                   Diligent::MAP_FLAG_DISCARD);
-        *cb_map = constants;
+        auto* mapped_constants = getMappedData(cb_map);
+        if (mapped_constants == nullptr) {
+          return;
+        }
+        *mapped_constants = constants;
       }
 
       context_->SetPipelineState(pso);
@@ -5250,7 +5861,11 @@ void DiligentBackend::updateCameraOverrideUserConstants(const renderer::CameraDa
                                                           camera_override_user_constants_,
                                                           Diligent::MAP_WRITE,
                                                           Diligent::MAP_FLAG_DISCARD);
-  *mapped = constants;
+  auto* mapped_constants = getMappedData(mapped);
+  if (mapped_constants == nullptr) {
+    return;
+  }
+  *mapped_constants = constants;
 }
 
 unsigned int DiligentBackend::getRenderTargetTextureId(renderer::RenderTargetId target) const {
@@ -5438,12 +6053,17 @@ void DiligentBackend::setGenerateMips(bool enabled) {
   generate_mips_enabled_ = enabled;
 }
 
-void DiligentBackend::setForwardPlusSettings(int tile_size, int max_lights_per_tile) {
-  forward_plus_tile_size_ = std::clamp(tile_size, 8, 64);
-  forward_plus_max_lights_per_tile_ = std::clamp(max_lights_per_tile, 8, 512);
+void DiligentBackend::setForwardPlusSettings(int tile_size,
+                                             int max_lights_per_tile,
+                                             int max_local_lights) {
+  forward_plus_tile_size_ = std::clamp(tile_size, 4, 64);
+  forward_plus_max_lights_per_tile_ = std::clamp(max_lights_per_tile, 8, 2048);
+  forward_plus_max_local_lights_ = std::clamp(max_local_lights, 1, 65536);
   forward_plus_stats_.tile_size = static_cast<uint32_t>(forward_plus_tile_size_);
   forward_plus_stats_.max_lights_per_tile =
       static_cast<uint32_t>(forward_plus_max_lights_per_tile_);
+  forward_plus_stats_.max_local_lights =
+      static_cast<uint32_t>(forward_plus_max_local_lights_);
 }
 
 renderer::ForwardPlusStats DiligentBackend::getForwardPlusStats() const {
@@ -5493,6 +6113,16 @@ void DiligentBackend::setPointShadowSettings(float constant_bias,
   point_shadow_slope_bias_scale_ = std::clamp(slope_bias_scale, 0.0f, 16.0f);
   point_shadow_normal_bias_scale_ = std::clamp(normal_bias_scale, 0.0f, 16.0f);
   point_shadow_receiver_bias_scale_ = std::clamp(receiver_bias_scale, 0.0f, 8.0f);
+}
+
+void DiligentBackend::setPointShadowLightLimit(int max_lights) {
+  const int clamped_max_lights = std::clamp(max_lights, 1, kMaxPointShadowLights);
+  if (clamped_max_lights == point_shadow_max_lights_) {
+    return;
+  }
+
+  point_shadow_max_lights_ = clamped_max_lights;
+  recreatePointShadowMap();
 }
 
 void DiligentBackend::setLocalLightingSettings(float distance_damping,

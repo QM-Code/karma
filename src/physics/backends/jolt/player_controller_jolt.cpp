@@ -24,6 +24,35 @@ RefConst<Shape> makeBoxFromHalfExtents(const glm::vec3& halfExtents) {
 
 namespace karma::physics_backend {
 
+class PhysicsPlayerControllerJolt::ContactListener final : public JPH::CharacterContactListener {
+public:
+    explicit ContactListener(PhysicsPlayerControllerJolt& owner) : owner_(owner) {}
+
+    void OnContactAdded(const JPH::CharacterVirtual* /*inCharacter*/,
+                        const JPH::BodyID& inBodyID2,
+                        const JPH::SubShapeID& /*inSubShapeID2*/,
+                        JPH::RVec3Arg inContactPosition,
+                        JPH::Vec3Arg inContactNormal,
+                        JPH::CharacterContactSettings& /*ioSettings*/) override {
+        const auto key = CharacterContactKey{.body = inBodyID2.GetIndexAndSequenceNumber()};
+        std::lock_guard<std::mutex> lock(owner_.contacts_mutex_);
+        owner_.contacts_[key] = karma::physics::PhysicsContact{
+            .handle_a = owner_.nativeHandle(),
+            .handle_b = static_cast<std::uintptr_t>(key.body),
+            .point_a = glm::vec3(owner_.getPosition()),
+            .point_b = glm::vec3(static_cast<float>(inContactPosition.GetX()),
+                                 static_cast<float>(inContactPosition.GetY()),
+                                 static_cast<float>(inContactPosition.GetZ())),
+            .normal_a_to_b = glm::vec3(static_cast<float>(inContactNormal.GetX()),
+                                       static_cast<float>(inContactNormal.GetY()),
+                                       static_cast<float>(inContactNormal.GetZ())),
+        };
+    }
+
+private:
+    PhysicsPlayerControllerJolt& owner_;
+};
+
 PhysicsPlayerControllerJolt::PhysicsPlayerControllerJolt(PhysicsWorldJolt* world,
                                                          const glm::vec3& halfExtents,
                                                          const glm::vec3& startPosition)
@@ -39,6 +68,8 @@ PhysicsPlayerControllerJolt::PhysicsPlayerControllerJolt(PhysicsWorldJolt* world
 
     RVec3 start = RVec3(startPosition.x, startPosition.y + halfExtents.y, startPosition.z);
     character_ = new CharacterVirtual(&settings, start, Quat::sIdentity(), world_->physicsSystem());
+    contactListener_ = std::make_unique<ContactListener>(*this);
+    character_->SetListener(contactListener_.get());
 }
 
 PhysicsPlayerControllerJolt::~PhysicsPlayerControllerJolt() {
@@ -104,8 +135,37 @@ bool PhysicsPlayerControllerJolt::isGrounded() const {
     return local.y <= supportCeiling;
 }
 
+bool PhysicsPlayerControllerJolt::getGroundContact(karma::physics::PhysicsGroundContact& outContact) const {
+    if (!character_ || !isGrounded()) return false;
+
+    outContact.grounded = true;
+    outContact.point = toGlmRVec(character_->GetGroundPosition());
+    outContact.normal = toGlm(character_->GetGroundNormal());
+    outContact.support_handle =
+        static_cast<std::uintptr_t>(character_->GetGroundBodyID().GetIndexAndSequenceNumber());
+    return true;
+}
+
+void PhysicsPlayerControllerJolt::collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const {
+    std::lock_guard<std::mutex> lock(contacts_mutex_);
+    outContacts.reserve(outContacts.size() + contacts_.size());
+    for (const auto& [key, contact] : contacts_) {
+        (void)key;
+        outContacts.push_back(contact);
+    }
+}
+
+std::uintptr_t PhysicsPlayerControllerJolt::nativeHandle() const {
+    return reinterpret_cast<std::uintptr_t>(character_.GetPtr());
+}
+
 void PhysicsPlayerControllerJolt::update(float dt) {
     if (!world_ || !character_ || dt <= 0.f) return;
+
+    {
+        std::lock_guard<std::mutex> lock(contacts_mutex_);
+        contacts_.clear();
+    }
 
     Vec3 gravityVec = world_->physicsSystem() ? world_->physicsSystem()->GetGravity() : Vec3(0, gravity, 0);
     const bool grounded = isGrounded();
@@ -162,6 +222,7 @@ void PhysicsPlayerControllerJolt::update(float dt) {
 }
 
 void PhysicsPlayerControllerJolt::destroy() {
+    contactListener_.reset();
     character_ = nullptr;
     world_ = nullptr;
 }

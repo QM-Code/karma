@@ -1,5 +1,6 @@
 #include "karma/renderer/device.h"
 
+#include <utility>
 
 namespace karma::renderer {
 
@@ -121,9 +122,9 @@ void GraphicsDevice::submit(const DrawItem& item) {
   }
 }
 
-void GraphicsDevice::submitParticles(const ParticleBatch& batch) {
+void GraphicsDevice::submitParticles(ParticleBatch batch) {
   if (backend_) {
-    backend_->submitParticles(batch);
+    backend_->submitParticles(std::move(batch));
   }
 }
 
@@ -199,9 +200,11 @@ void GraphicsDevice::setGenerateMips(bool enabled) {
   }
 }
 
-void GraphicsDevice::setForwardPlusSettings(int tile_size, int max_lights_per_tile) {
+void GraphicsDevice::setForwardPlusSettings(int tile_size,
+                                            int max_lights_per_tile,
+                                            int max_local_lights) {
   if (backend_) {
-    backend_->setForwardPlusSettings(tile_size, max_lights_per_tile);
+    backend_->setForwardPlusSettings(tile_size, max_lights_per_tile, max_local_lights);
   }
 }
 
@@ -239,6 +242,12 @@ void GraphicsDevice::setPointShadowSettings(float constant_bias,
                                      slope_bias_scale,
                                      normal_bias_scale,
                                      receiver_bias_scale);
+  }
+}
+
+void GraphicsDevice::setPointShadowLightLimit(int max_lights) {
+  if (backend_) {
+    backend_->setPointShadowLightLimit(max_lights);
   }
 }
 

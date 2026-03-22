@@ -24,6 +24,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -99,7 +100,7 @@ cbuffer Constants
     float4x4 g_LightViewProj;
     float4x4 g_ShadowUVProj;
     float4x4 g_ShadowCascadeUVProj[4];
-    float4x4 g_PointShadowUVProj[12];
+    float4x4 g_PointShadowUVProj[96];
     float4 g_BaseColorFactor;
     float4 g_EmissiveFactor;
     float4 g_PbrParams;
@@ -186,8 +187,19 @@ void DiligentBackend::recreateShadowMap() {
   shadow_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
   device_->CreateTexture(shadow_desc, nullptr, &shadow_map_tex_);
   if (shadow_map_tex_) {
-    if (auto* srv = shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)) {
-      shadow_map_srv_ = srv;
+    Diligent::TextureViewDesc srv_desc{};
+    srv_desc.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
+    srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
+    srv_desc.Format = Diligent::TEX_FORMAT_R32_FLOAT;
+    srv_desc.MostDetailedMip = 0;
+    srv_desc.NumMipLevels = 1;
+    srv_desc.FirstArraySlice = 0;
+    srv_desc.NumArraySlices = static_cast<Diligent::Uint32>(kShadowCascadeCount);
+    shadow_map_tex_->CreateView(srv_desc, &shadow_map_srv_);
+    if (!shadow_map_srv_) {
+      if (auto* srv = shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)) {
+        shadow_map_srv_ = srv;
+      }
     }
     for (int cascade = 0; cascade < kShadowCascadeCount; ++cascade) {
       Diligent::TextureViewDesc dsv_desc{};
@@ -248,16 +260,29 @@ void DiligentBackend::recreatePointShadowMap() {
   shadow_desc.Type = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
   shadow_desc.Width = static_cast<Diligent::Uint32>(point_shadow_map_size_);
   shadow_desc.Height = static_cast<Diligent::Uint32>(point_shadow_map_size_);
-  shadow_desc.ArraySize = static_cast<Diligent::Uint32>(kPointShadowMatrixCount);
+  const int active_point_shadow_lights = std::clamp(point_shadow_max_lights_, 1, kMaxPointShadowLights);
+  const int active_point_shadow_faces = active_point_shadow_lights * kPointShadowFaceCount;
+  shadow_desc.ArraySize = static_cast<Diligent::Uint32>(active_point_shadow_faces);
   shadow_desc.MipLevels = 1;
   shadow_desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
   shadow_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
   device_->CreateTexture(shadow_desc, nullptr, &point_shadow_map_tex_);
   if (point_shadow_map_tex_) {
-    if (auto* srv = point_shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)) {
-      point_shadow_map_srv_ = srv;
+    Diligent::TextureViewDesc srv_desc{};
+    srv_desc.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
+    srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
+    srv_desc.Format = Diligent::TEX_FORMAT_R32_FLOAT;
+    srv_desc.MostDetailedMip = 0;
+    srv_desc.NumMipLevels = 1;
+    srv_desc.FirstArraySlice = 0;
+    srv_desc.NumArraySlices = static_cast<Diligent::Uint32>(active_point_shadow_faces);
+    point_shadow_map_tex_->CreateView(srv_desc, &point_shadow_map_srv_);
+    if (!point_shadow_map_srv_) {
+      if (auto* srv = point_shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)) {
+        point_shadow_map_srv_ = srv;
+      }
     }
-    for (int face = 0; face < kPointShadowMatrixCount; ++face) {
+    for (int face = 0; face < active_point_shadow_faces; ++face) {
       Diligent::TextureViewDesc dsv_desc{};
       dsv_desc.ViewType = Diligent::TEXTURE_VIEW_DEPTH_STENCIL;
       dsv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
@@ -471,7 +496,7 @@ cbuffer Constants
     float4x4 g_LightViewProj;
     float4x4 g_ShadowUVProj;
     float4x4 g_ShadowCascadeUVProj[4];
-    float4x4 g_PointShadowUVProj[12];
+    float4x4 g_PointShadowUVProj[96];
     float4 g_BaseColorFactor;
     float4 g_EmissiveFactor;
     float4 g_PbrParams;
@@ -548,7 +573,7 @@ cbuffer Constants
     float4x4 g_LightViewProj;
     float4x4 g_ShadowUVProj;
     float4x4 g_ShadowCascadeUVProj[4];
-    float4x4 g_PointShadowUVProj[12];
+    float4x4 g_PointShadowUVProj[96];
     float4 g_BaseColorFactor;
     float4 g_EmissiveFactor;
     float4 g_PbrParams;
@@ -695,35 +720,26 @@ uint SelectPointShadowFace(float3 dir_ws)
     return dir_ws.z >= 0.0 ? 4u : 5u;
 }
 
-float SamplePointShadow(ForwardPlusLight light,
-                        float3 world_pos,
-                        float3 geom_n,
-                        float3 l_local)
+uint SelectPointShadowFaceForAxis(uint axis, float signed_component)
 {
-    if (g_PointShadowParams.x < 0.5 || light.direction_type.w < 0.5 || light.direction_type.w > 1.5)
+    if (axis == 0u)
     {
-        return 1.0;
+        return signed_component >= 0.0 ? 0u : 1u;
     }
-
-    float shadow_slot_f = light.spot_params.z;
-    if (shadow_slot_f < 0.0)
+    if (axis == 1u)
     {
-        return 1.0;
+        return signed_component >= 0.0 ? 2u : 3u;
     }
-    uint shadow_slot = (uint)(shadow_slot_f + 0.5);
-    uint active_slots = (uint)max(g_PointShadowParams.w, 0.0);
-    if (shadow_slot >= active_slots || shadow_slot >= 2u)
-    {
-        return 1.0;
-    }
+    return signed_component >= 0.0 ? 4u : 5u;
+}
 
-    float texel_size = max(g_PointShadowParams.y, 0.0);
-    float3 to_sample = world_pos - light.position_range.xyz;
-    float slope = 1.0 - saturate(dot(geom_n, l_local));
-    float normal_ws = texel_size * max(g_PointShadowTuning.z, 0.0) * (0.5 + slope);
-    float3 shadow_world_pos = world_pos + geom_n * normal_ws;
-
-    uint face = SelectPointShadowFace(to_sample);
+float SamplePointShadowFace(uint shadow_slot,
+                            uint face,
+                            float3 shadow_world_pos,
+                            float texel_size,
+                            float slope,
+                            out float valid)
+{
     uint matrix_idx = shadow_slot * 6u + face;
     float4 shadow_uv_depth = mul(g_PointShadowUVProj[matrix_idx], float4(shadow_world_pos, 1.0));
     shadow_uv_depth.xyz /= max(shadow_uv_depth.w, 1e-7);
@@ -733,6 +749,7 @@ float SamplePointShadow(ForwardPlusLight light,
         shadow_uv.y < 0.0 || shadow_uv.y > 1.0 ||
         shadow_depth < 0.0 || shadow_depth > 1.0)
     {
+        valid = 0.0;
         return 1.0;
     }
 
@@ -742,6 +759,7 @@ float SamplePointShadow(ForwardPlusLight light,
                           max(g_PointShadowTuning.w, 0.0);
     float bias = const_bias + slope_bias + receiver_bias;
     bias = min(bias, 0.04);
+    float compare_depth = shadow_depth - bias;
 
     int radius = clamp((int)g_ShadowParams.z, 0, 1);
     float shadow = 1.0;
@@ -749,7 +767,7 @@ float SamplePointShadow(ForwardPlusLight light,
     {
         shadow = g_PointShadowMap.SampleCmpLevelZero(g_ShadowSampler,
                                                      float3(shadow_uv, (float)matrix_idx),
-                                                     shadow_depth - bias);
+                                                     compare_depth);
     }
     else
     {
@@ -768,14 +786,128 @@ float SamplePointShadow(ForwardPlusLight light,
                     sum += g_PointShadowMap.SampleCmpLevelZero(g_ShadowSampler,
                                                                float3(shadow_uv + offset,
                                                                       (float)matrix_idx),
-                                                               shadow_depth - bias);
+                                                               compare_depth);
                     count += 1;
                 }
             }
         }
         shadow = (count > 0) ? (sum / count) : 1.0;
     }
+
+    valid = 1.0;
     return shadow;
+}
+
+float SamplePointShadow(ForwardPlusLight light,
+                        float3 world_pos,
+                        float3 geom_n,
+                        float3 l_local)
+{
+    if (g_PointShadowParams.x < 0.5 || light.direction_type.w < 0.5 || light.direction_type.w > 1.5)
+    {
+        return 1.0;
+    }
+
+    float shadow_slot_f = light.spot_params.z;
+    if (shadow_slot_f < 0.0)
+    {
+        return 1.0;
+    }
+    uint shadow_slot = (uint)(shadow_slot_f + 0.5);
+    uint active_slots = (uint)max(g_PointShadowParams.w, 0.0);
+    if (shadow_slot >= active_slots || shadow_slot >= 16u)
+    {
+        return 1.0;
+    }
+
+    float texel_size = max(g_PointShadowParams.y, 0.0);
+    float slope = 1.0 - saturate(dot(geom_n, l_local));
+    float normal_ws = texel_size * max(g_PointShadowTuning.z, 0.0) * (0.5 + slope);
+    float3 shadow_world_pos = world_pos + geom_n * normal_ws;
+    float3 to_sample = shadow_world_pos - light.position_range.xyz;
+    float3 a = abs(to_sample);
+    float dominant = max(max(a.x, a.y), a.z);
+    if (dominant <= 1e-6)
+    {
+        return 1.0;
+    }
+
+    float seam_start = 0.85;
+    float valid = 0.0;
+    float shadow_sum = 0.0;
+    float weight_sum = 0.0;
+
+    uint main_face = SelectPointShadowFace(to_sample);
+    float main_shadow = SamplePointShadowFace(shadow_slot,
+                                              main_face,
+                                              shadow_world_pos,
+                                              texel_size,
+                                              slope,
+                                              valid);
+    if (valid > 0.5)
+    {
+        shadow_sum += main_shadow;
+        weight_sum += 1.0;
+    }
+
+    uint seam_axis0 = 3u;
+    uint seam_axis1 = 3u;
+    float seam_ratio0 = 0.0;
+    float seam_ratio1 = 0.0;
+    if (a.x >= a.y && a.x >= a.z)
+    {
+        seam_axis0 = 1u;
+        seam_axis1 = 2u;
+        seam_ratio0 = a.y / dominant;
+        seam_ratio1 = a.z / dominant;
+    }
+    else if (a.y >= a.x && a.y >= a.z)
+    {
+        seam_axis0 = 0u;
+        seam_axis1 = 2u;
+        seam_ratio0 = a.x / dominant;
+        seam_ratio1 = a.z / dominant;
+    }
+    else
+    {
+        seam_axis0 = 0u;
+        seam_axis1 = 1u;
+        seam_ratio0 = a.x / dominant;
+        seam_ratio1 = a.y / dominant;
+    }
+
+    [unroll]
+    for (uint seam_idx = 0u; seam_idx < 2u; ++seam_idx)
+    {
+        uint seam_axis = seam_idx == 0u ? seam_axis0 : seam_axis1;
+        float seam_ratio = seam_idx == 0u ? seam_ratio0 : seam_ratio1;
+        if (seam_axis > 2u || seam_ratio <= seam_start)
+        {
+            continue;
+        }
+
+        float blend_weight = saturate((seam_ratio - seam_start) / max(1.0 - seam_start, 1e-4));
+        if (blend_weight <= 0.0)
+        {
+            continue;
+        }
+
+        float signed_component = seam_axis == 0u ? to_sample.x : (seam_axis == 1u ? to_sample.y : to_sample.z);
+        uint seam_face = SelectPointShadowFaceForAxis(seam_axis, signed_component);
+        float seam_shadow = SamplePointShadowFace(shadow_slot,
+                                                  seam_face,
+                                                  shadow_world_pos,
+                                                  texel_size,
+                                                  slope,
+                                                  valid);
+        if (valid > 0.5)
+        {
+            shadow_sum += seam_shadow * blend_weight;
+            weight_sum += blend_weight;
+        }
+    }
+
+    return weight_sum > 0.0 ? (shadow_sum / weight_sum) : 1.0;
 }
 
 void AccumulateLocalLight(ForwardPlusLight light,
@@ -965,6 +1097,7 @@ float4 main(PSInput input) : SV_TARGET
     float local_shadow_lift_energy = 0.0;
     uint cb_local_light_count = (uint)max(g_LocalLightMeta.x, 0.0);
     cb_local_light_count = min(cb_local_light_count, 64u);
+    uint total_local_light_count = (uint)max(g_LocalLightMeta.y, 0.0);
     if (cb_local_light_count > 0u)
     {
         [loop]
@@ -1000,11 +1133,16 @@ float4 main(PSInput input) : SV_TARGET
         uint tile_y = min(pixel.y / tile_size, safe_tiles_y - 1u);
         uint tile_idx = tile_y * safe_tiles_x + tile_x;
         uint light_count = min(g_ForwardPlusTileLightCounts[tile_idx], max_lights_per_tile);
+        light_count = min(light_count, total_local_light_count);
         uint base_idx = tile_idx * max_lights_per_tile;
         [loop]
         for (uint i = 0u; i < light_count; ++i)
         {
             uint light_index = g_ForwardPlusTileLightIndices[base_idx + i];
+            if (light_index >= total_local_light_count)
+            {
+                continue;
+            }
             ForwardPlusLight light = g_ForwardPlusLights[light_index];
             AccumulateLocalLight(light,
                                  input.WorldPos,
@@ -1727,15 +1865,15 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   Diligent::ShaderResourceVariableDesc vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightIndices", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightIndices", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-      {Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerData", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SceneColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
@@ -2056,6 +2194,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth")) {
           var->Set(particle_fallback_depth_srv_);
         }
+        bindShadowResourcesToSrb(out_srb);
       };
 
   if (pipeline_state_) {

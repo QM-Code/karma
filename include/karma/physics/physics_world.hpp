@@ -40,6 +40,8 @@ public:
     StaticBody createStaticMesh(const std::string& meshPath);
 
     bool raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const;
+    bool raycastDetailed(const glm::vec3& from, const glm::vec3& to, PhysicsGroundContact& outHit) const;
+    void collectContacts(std::vector<PhysicsContact>& outContacts) const;
 
 private:
     std::unique_ptr<karma::physics_backend::PhysicsWorldBackend> backend_;

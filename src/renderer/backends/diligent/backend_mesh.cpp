@@ -37,6 +37,19 @@ void computeBounds(const renderer::MeshData& mesh, glm::vec3& out_center, float&
   out_radius = 0.5f * glm::length(extents);
 }
 
+Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_format) {
+  switch (depth_format) {
+    case Diligent::TEX_FORMAT_D32_FLOAT:
+      return Diligent::TEX_FORMAT_R32_FLOAT;
+    case Diligent::TEX_FORMAT_D24_UNORM_S8_UINT:
+      return Diligent::TEX_FORMAT_R24_UNORM_X8_TYPELESS;
+    case Diligent::TEX_FORMAT_D32_FLOAT_S8X24_UINT:
+      return Diligent::TEX_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+    default:
+      return Diligent::TEX_FORMAT_UNKNOWN;
+  }
+}
+
 renderer::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
   renderer::MaterialDesc desc{};
   desc.base_color = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -65,6 +78,28 @@ renderer::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
   return desc;
 }
 }  // namespace
+
+void DiligentBackend::bindShadowResourcesToSrb(Diligent::IShaderResourceBinding* srb) const {
+  if (!srb) {
+    return;
+  }
+
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {
+    if (shadow_map_srv_) {
+      var->Set(shadow_map_srv_);
+    }
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap")) {
+    if (point_shadow_map_srv_ || shadow_map_srv_) {
+      var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_);
+    }
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler")) {
+    if (shadow_sampler_) {
+      var->Set(shadow_sampler_);
+    }
+  }
+}
 
 void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   if (!record.base_color_srv) {
@@ -132,6 +167,7 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
     if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth")) {
       var->Set(particle_fallback_depth_srv_);
     }
+    bindShadowResourcesToSrb(srb);
   };
 
   initialize_srb(pipeline_state_.RawPtr(), record.srb);
@@ -850,7 +886,16 @@ void DiligentBackend::recreateRenderTargetResources(RenderTargetRecord& record, 
     depth_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
     device_->CreateTexture(depth_desc, nullptr, &record.depth_texture);
     if (record.depth_texture) {
-      record.depth_srv = record.depth_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+      Diligent::TextureViewDesc depth_srv_desc{};
+      depth_srv_desc.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
+      depth_srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D;
+      depth_srv_desc.Format = resolveDepthSrvFormat(depth_desc.Format);
+      if (depth_srv_desc.Format != Diligent::TEX_FORMAT_UNKNOWN) {
+        record.depth_texture->CreateView(depth_srv_desc, &record.depth_srv);
+      }
+      if (!record.depth_srv) {
+        record.depth_srv = record.depth_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+      }
       record.depth_dsv = record.depth_texture->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
       Diligent::TextureViewDesc read_only_dsv_desc{};
       read_only_dsv_desc.ViewType = Diligent::TEXTURE_VIEW_READ_ONLY_DEPTH_STENCIL;

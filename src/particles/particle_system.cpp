@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -44,6 +45,9 @@ float lerpFloat(float a, float b, float t) {
 
 float applyCurveExponent(float t, float exponent) {
   const float clamped_t = std::clamp(t, 0.0f, 1.0f);
+  if (std::abs(exponent - 1.0f) <= 1.0e-4f) {
+    return clamped_t;
+  }
   return std::pow(clamped_t, std::max(exponent, 0.001f));
 }
 
@@ -278,10 +282,10 @@ struct ParticleFrameSelection {
 
 ParticleFrameSelection resolveParticleFrameSelection(
     const components::ParticleEmitterComponent& emitter,
+    uint32_t frame_count,
     float age,
     float normalized_age,
     uint32_t frame_offset) {
-  const uint32_t frame_count = resolveAtlasFrameCount(emitter);
   if (frame_count <= 1u) {
     return {};
   }
@@ -464,7 +468,6 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     if (state.particles.capacity() < state.max_particles) {
       state.particles.reserve(state.max_particles);
     }
-
     auto resolve_ground_collision = [&](Particle& particle) {
       if (emitter.local_space ||
           !emitter.collide_with_ground ||
@@ -503,7 +506,8 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     const float emitter_dt = clamped_dt * std::max(emitter.time_scale, 0.0f);
 
     size_t alive_count = 0;
-    for (auto& particle : state.particles) {
+    for (size_t particle_index = 0; particle_index < state.particles.size(); ++particle_index) {
+      auto& particle = state.particles[particle_index];
       particle.age += emitter_dt;
       if (particle.age >= particle.lifetime) {
         continue;
@@ -533,7 +537,10 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         resolve_ground_collision(particle);
       }
       particle.rotation += particle.angular_velocity * emitter_dt;
-      state.particles[alive_count++] = particle;
+      if (alive_count != particle_index) {
+        state.particles[alive_count] = particle;
+      }
+      ++alive_count;
     }
     state.particles.resize(alive_count);
 
@@ -633,37 +640,42 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     batch.blend_mode = emitter.blend_mode;
     batch.alignment = emitter.alignment;
     batch.shading_mode = emitter.shading_mode;
-    batch.use_soft_mask = emitter.use_soft_mask;
+    batch.presentation_mode = renderer::ParticlePresentationMode::Simulated;
+    // Distortion emitters currently destabilize the simulated particle path when
+    // they also sample scene depth for soft fading, so clamp that combination off.
+    batch.use_soft_mask =
+        emitter.use_soft_mask &&
+        emitter.blend_mode != renderer::ParticleBlendMode::Distortion;
     batch.soft_particle_distance = std::max(emitter.soft_particle_distance, 0.0f);
     batch.distortion_strength = std::max(emitter.distortion_strength, 0.0f);
     batch.fresnel_power = std::max(emitter.fresnel_power, 0.001f);
     batch.fresnel_strength = std::max(emitter.fresnel_strength, 0.0f);
     batch.refraction_strength = std::max(emitter.refraction_strength, 0.0f);
     batch.interior_glow = std::max(emitter.interior_glow, 0.0f);
+    batch.size_curve_exponent = std::max(emitter.size_curve_exponent, 0.001f);
+    batch.alpha_curve_exponent = std::max(emitter.alpha_curve_exponent, 0.001f);
+    batch.atlas_columns = resolveAtlasColumns(emitter);
+    batch.atlas_rows = resolveAtlasRows(emitter);
+    batch.atlas_frame_count = resolveAtlasFrameCount(emitter);
+    batch.animate_over_lifetime = emitter.animate_over_lifetime;
+    batch.atlas_frame_width = emitter.atlas_frame_width;
+    batch.atlas_frame_height = emitter.atlas_frame_height;
+    batch.atlas_border_x = emitter.atlas_border_x;
+    batch.atlas_border_y = emitter.atlas_border_y;
+    batch.atlas_spacing_x = emitter.atlas_spacing_x;
+    batch.atlas_spacing_y = emitter.atlas_spacing_y;
+    batch.animation_fps = std::max(emitter.animation_fps, 0.0f);
     batch.particles.reserve(state.particles.size());
 
     for (const auto& particle : state.particles) {
       const float t = std::clamp(particle.age / particle.lifetime, 0.0f, 1.0f);
-      const float size = lerpFloat(particle.start_size,
-                                   particle.end_size,
-                                   applyCurveExponent(t, emitter.size_curve_exponent));
-      math::Color color = lerpColor(particle.start_color, particle.end_color, t);
-      color.a = lerpFloat(particle.start_color.a,
-                          particle.end_color.a,
-                          applyCurveExponent(t, emitter.alpha_curve_exponent));
-      if (size <= 0.0f || color.a <= 0.0f) {
+      if ((particle.start_size <= 0.0f && particle.end_size <= 0.0f) ||
+          (particle.start_color.a <= 0.0f && particle.end_color.a <= 0.0f)) {
         continue;
       }
-      glm::vec2 uv_min{0.0f, 0.0f};
-      glm::vec2 uv_max{1.0f, 1.0f};
-      glm::vec2 uv_min_next{0.0f, 0.0f};
-      glm::vec2 uv_max_next{1.0f, 1.0f};
-      const ParticleFrameSelection frame_selection =
-          resolveParticleFrameSelection(emitter, particle.age, t, particle.frame_offset);
-      computeAtlasUvRect(emitter, frame_selection.current, uv_min, uv_max);
-      computeAtlasUvRect(emitter, frame_selection.next, uv_min_next, uv_max_next);
       math::Vec3 world_position = particle.position;
-      float world_size = size;
+      float world_start_size = particle.start_size;
+      float world_end_size = particle.end_size;
       if (emitter.local_space) {
         const math::Vec3 scaled_local = {
             particle.position.x * emitter_scale.x,
@@ -671,23 +683,29 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
             particle.position.z * emitter_scale.z,
         };
         world_position = add(emitter_position, math::rotateVec(emitter_rotation, scaled_local));
-        world_size *= emitter_uniform_scale;
+        world_start_size *= emitter_uniform_scale;
+        world_end_size *= emitter_uniform_scale;
       }
       batch.particles.push_back(renderer::ParticleInstance{
           .position = glm::vec3(world_position.x, world_position.y, world_position.z),
-          .size = world_size,
-          .color = color,
+          .size = world_start_size,
+          .color = particle.start_color,
           .rotation_radians = particle.rotation,
-          .uv_min = uv_min,
-          .uv_max = uv_max,
-          .uv_min_next = uv_min_next,
-          .uv_max_next = uv_max_next,
-          .frame_blend = frame_selection.blend,
+          .uv_min = {0.0f, 0.0f},
+          .uv_max = {1.0f, 1.0f},
+          .uv_min_next = {0.0f, 0.0f},
+          .uv_max_next = {1.0f, 1.0f},
+          .frame_blend = 0.0f,
+          .color_end = particle.end_color,
+          .size_end = world_end_size,
+          .normalized_age = t,
+          .age_seconds = particle.age,
+          .frame_offset = particle.frame_offset,
       });
     }
 
     if (!batch.particles.empty()) {
-      device_->submitParticles(batch);
+      device_->submitParticles(std::move(batch));
     }
   });
 }

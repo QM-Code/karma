@@ -30,7 +30,10 @@ public:
     void setVelocity(const glm::vec3& velocity) override;
     void setAngularVelocity(const glm::vec3& angularVelocity) override;
     bool isGrounded() const override;
+    bool getGroundContact(karma::physics::PhysicsGroundContact& outContact) const override;
+    void collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const override;
     void destroy() override;
+    std::uintptr_t nativeHandle() const override;
 
 private:
     void rebuildController(const glm::vec3& centerPosition);

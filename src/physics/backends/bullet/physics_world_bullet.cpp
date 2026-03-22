@@ -100,4 +100,59 @@ bool PhysicsWorldBullet::raycast(const glm::vec3& from,
     return true;
 }
 
+bool PhysicsWorldBullet::raycastDetailed(const glm::vec3& from,
+                                         const glm::vec3& to,
+                                         karma::physics::PhysicsGroundContact& outHit) const {
+    if (!dynamicsWorld_) return false;
+
+    btVector3 btFrom(from.x, from.y, from.z);
+    btVector3 btTo(to.x, to.y, to.z);
+    btCollisionWorld::ClosestRayResultCallback callback(btFrom, btTo);
+    dynamicsWorld_->rayTest(btFrom, btTo, callback);
+    if (!callback.hasHit()) {
+        return false;
+    }
+
+    const btVector3& hit = callback.m_hitPointWorld;
+    const btVector3& normal = callback.m_hitNormalWorld;
+    outHit.grounded = true;
+    outHit.point = glm::vec3(hit.x(), hit.y(), hit.z());
+    outHit.normal = glm::vec3(normal.x(), normal.y(), normal.z());
+    outHit.support_handle = reinterpret_cast<std::uintptr_t>(callback.m_collisionObject);
+    return true;
+}
+
+void PhysicsWorldBullet::collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const {
+    if (!dynamicsWorld_ || !dispatcher_) {
+        return;
+    }
+
+    const int manifold_count = dispatcher_->getNumManifolds();
+    for (int i = 0; i < manifold_count; ++i) {
+        btPersistentManifold* manifold = dispatcher_->getManifoldByIndexInternal(i);
+        if (!manifold || manifold->getNumContacts() <= 0) {
+            continue;
+        }
+
+        const btCollisionObject* object_a = manifold->getBody0();
+        const btCollisionObject* object_b = manifold->getBody1();
+        if (!object_a || !object_b) {
+            continue;
+        }
+
+        const btManifoldPoint& point = manifold->getContactPoint(0);
+        const btVector3 point_a = point.getPositionWorldOnA();
+        const btVector3 point_b = point.getPositionWorldOnB();
+        const btVector3 normal_on_b = point.m_normalWorldOnB;
+
+        outContacts.push_back(karma::physics::PhysicsContact{
+            .handle_a = reinterpret_cast<std::uintptr_t>(object_a),
+            .handle_b = reinterpret_cast<std::uintptr_t>(object_b),
+            .point_a = glm::vec3(point_a.x(), point_a.y(), point_a.z()),
+            .point_b = glm::vec3(point_b.x(), point_b.y(), point_b.z()),
+            .normal_a_to_b = glm::vec3(-normal_on_b.x(), -normal_on_b.y(), -normal_on_b.z()),
+        });
+    }
+}
+
 } // namespace karma::physics_backend

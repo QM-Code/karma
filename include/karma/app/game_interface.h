@@ -17,6 +17,7 @@ class GameInterface {
 
   virtual void onStart() = 0;
   virtual void onFixedUpdate(float dt) = 0;
+  virtual void onPostFixedUpdate(float dt) { (void)dt; }
   virtual void onUpdate(float dt) = 0;
   virtual void onShutdown() = 0;
 

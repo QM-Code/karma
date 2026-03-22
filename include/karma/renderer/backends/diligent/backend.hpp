@@ -70,7 +70,7 @@ class DiligentBackend final : public Backend {
   void destroyRenderTarget(renderer::RenderTargetId target) override;
 
   void submit(const renderer::DrawItem& item) override;
-  void submitParticles(const renderer::ParticleBatch& batch) override;
+  void submitParticles(renderer::ParticleBatch batch) override;
   void retireInstance(renderer::InstanceId instance) override;
   void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) override;
   void drawLine(const math::Vec3& start, const math::Vec3& end,
@@ -87,7 +87,9 @@ class DiligentBackend final : public Backend {
   void setVsync(bool enabled) override;
   void setAnisotropy(bool enabled, int level) override;
   void setGenerateMips(bool enabled) override;
-  void setForwardPlusSettings(int tile_size, int max_lights_per_tile) override;
+  void setForwardPlusSettings(int tile_size,
+                              int max_lights_per_tile,
+                              int max_local_lights) override;
   renderer::ForwardPlusStats getForwardPlusStats() const override;
   void setShadowSettings(float bias,
                          int map_size,
@@ -100,6 +102,7 @@ class DiligentBackend final : public Backend {
                               float slope_bias_scale,
                               float normal_bias_scale,
                               float receiver_bias_scale) override;
+  void setPointShadowLightLimit(int max_lights) override;
   void setLocalLightingSettings(float distance_damping,
                                 float range_falloff_exponent,
                                 bool ao_affects_local_lights,
@@ -225,6 +228,8 @@ class DiligentBackend final : public Backend {
     renderer::ParticleBlendMode blend_mode = renderer::ParticleBlendMode::Additive;
     renderer::ParticleAlignment alignment = renderer::ParticleAlignment::Billboard;
     renderer::ParticleShadingMode shading_mode = renderer::ParticleShadingMode::Standard;
+    renderer::ParticlePresentationMode presentation_mode =
+        renderer::ParticlePresentationMode::Baked;
     bool use_soft_mask = true;
     float soft_particle_distance = 0.0f;
     float distortion_strength = 0.0f;
@@ -232,6 +237,19 @@ class DiligentBackend final : public Backend {
     float fresnel_strength = 1.0f;
     float refraction_strength = 0.0f;
     float interior_glow = 0.0f;
+    float size_curve_exponent = 1.0f;
+    float alpha_curve_exponent = 1.0f;
+    uint32_t atlas_columns = 1u;
+    uint32_t atlas_rows = 1u;
+    uint32_t atlas_frame_count = 1u;
+    bool animate_over_lifetime = false;
+    uint32_t atlas_frame_width = 0u;
+    uint32_t atlas_frame_height = 0u;
+    uint32_t atlas_border_x = 0u;
+    uint32_t atlas_border_y = 0u;
+    uint32_t atlas_spacing_x = 0u;
+    uint32_t atlas_spacing_y = 0u;
+    float animation_fps = 0.0f;
     std::vector<renderer::ParticleInstance> particles;
   };
 
@@ -278,6 +296,7 @@ class DiligentBackend final : public Backend {
                                              const aiMaterial& material,
                                              const std::filesystem::path& asset_path);
   void initializeMaterialBindings(MaterialRecord& record);
+  void bindShadowResourcesToSrb(Diligent::IShaderResourceBinding* srb) const;
   const ImportedMaterialTemplateCacheEntry* getImportedMaterialTemplates(
       const std::filesystem::path& path);
   void ensureEnvironmentResources();
@@ -319,7 +338,7 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_data_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> shadow_sampler_;
   static constexpr int kShadowCascadeCount = 4;
-  static constexpr int kMaxPointShadowLights = 2;
+  static constexpr int kMaxPointShadowLights = 16;
   static constexpr int kPointShadowFaceCount = 6;
   static constexpr int kPointShadowMatrixCount =
       kMaxPointShadowLights * kPointShadowFaceCount;
@@ -500,6 +519,7 @@ class DiligentBackend final : public Backend {
   float local_light_directional_shadow_lift_ = 0.0f;
   float lighting_exposure_ = 1.0f;
   int point_shadow_map_size_ = 1024;
+  int point_shadow_max_lights_ = 2;
   size_t ui_vb_size_ = 0;
   size_t ui_ib_size_ = 0;
   size_t instance_vb_capacity_ = 0;
@@ -521,6 +541,7 @@ class DiligentBackend final : public Backend {
   int current_height_ = 0;
   bool warned_no_draws_ = false;
   static constexpr renderer::TextureId kRenderTargetTextureHandleBit = 0x80000000u;
+  int forward_plus_max_local_lights_ = 4096;
 
   bool directional_shadow_cache_valid_ = false;
   std::array<glm::mat4, kShadowCascadeCount> cached_cascade_light_view_proj_{};
@@ -547,8 +568,9 @@ class DiligentBackend final : public Backend {
   std::array<uint8_t, kPointShadowMatrixCount> point_shadow_face_dirty_{};
   Diligent::Uint32 point_shadow_face_cursor_ = 0;
   Diligent::Uint32 point_shadow_faces_per_frame_budget_ = 2;
-  float accumulated_time_seconds_ = 0.0f;
-  float point_shadow_position_threshold_ = 0.05f;
+  double accumulated_time_seconds_ = 0.0;
+  // Keep the cache responsive enough for animated point lights in the probe.
+  float point_shadow_position_threshold_ = 0.001f;
   float point_shadow_range_threshold_ = 0.05f;
 };
 

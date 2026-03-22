@@ -482,6 +482,17 @@ bool ParticleLibrary::registerEffectFiles(
 }
 
 void ParticleLibrary::update() {
+  if (effect_files_.empty()) {
+    return;
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  if (next_poll_time_ != std::chrono::steady_clock::time_point{} &&
+      now < next_poll_time_) {
+    return;
+  }
+  next_poll_time_ = now + poll_interval_;
+
   for (auto& [key, record] : effect_files_) {
     std::error_code ec;
     const auto write_time = std::filesystem::last_write_time(record.path, ec);

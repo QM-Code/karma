@@ -129,6 +129,40 @@ bool PhysicsPlayerControllerBullet::isGrounded() const {
     return controller_ ? controller_->onGround() : false;
 }
 
+bool PhysicsPlayerControllerBullet::getGroundContact(karma::physics::PhysicsGroundContact& outContact) const {
+    if (!ghost_ || !world_ || !world_->world() || !controller_ || !controller_->onGround()) {
+        return false;
+    }
+
+    const glm::vec3 base = getPosition();
+    const glm::vec3 from = base + glm::vec3(0.0f, halfExtents.y + 0.05f, 0.0f);
+    const glm::vec3 to = base + glm::vec3(0.0f, -0.25f, 0.0f);
+
+    btVector3 btFrom(from.x, from.y, from.z);
+    btVector3 btTo(to.x, to.y, to.z);
+    btCollisionWorld::ClosestRayResultCallback callback(btFrom, btTo);
+    callback.m_collisionObject = ghost_.get();
+    world_->world()->rayTest(btFrom, btTo, callback);
+    if (!callback.hasHit()) {
+        return false;
+    }
+
+    const btVector3& hit = callback.m_hitPointWorld;
+    const btVector3& normal = callback.m_hitNormalWorld;
+    outContact.grounded = true;
+    outContact.point = glm::vec3(hit.x(), hit.y(), hit.z());
+    outContact.normal = glm::vec3(normal.x(), normal.y(), normal.z());
+    outContact.support_handle = reinterpret_cast<std::uintptr_t>(callback.m_collisionObject);
+    return true;
+}
+
+void PhysicsPlayerControllerBullet::collectContacts(std::vector<karma::physics::PhysicsContact>& /*outContacts*/) const {
+}
+
+std::uintptr_t PhysicsPlayerControllerBullet::nativeHandle() const {
+    return reinterpret_cast<std::uintptr_t>(ghost_.get());
+}
+
 void PhysicsPlayerControllerBullet::destroy() {
     if (world_ && world_->world()) {
         if (controller_) {

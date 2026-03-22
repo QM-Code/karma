@@ -285,7 +285,8 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
                                      float local_light_range_falloff_exponent,
                                      bool ao_affects_local_lights,
                                      float local_light_directional_shadow_lift_strength,
-                                     float lighting_exposure)
+                                     float lighting_exposure,
+                                     int forward_plus_max_local_lights)
     : world_(world),
       scene_(scene),
       systems_(systems),
@@ -305,7 +306,8 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
       local_light_range_falloff_exponent_(local_light_range_falloff_exponent),
       ao_affects_local_lights_(ao_affects_local_lights),
       local_light_directional_shadow_lift_strength_(local_light_directional_shadow_lift_strength),
-      lighting_exposure_(lighting_exposure) {
+      lighting_exposure_(lighting_exposure),
+      forward_plus_max_local_lights_(forward_plus_max_local_lights) {
   IMGUI_CHECKVERSION();
   imgui_context_ = ImGui::CreateContext();
   ScopedImGuiContext context_scope(imgui_context_);
@@ -314,9 +316,11 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
   io.BackendRendererName = "karma_ui_draw";
   if (graphics_) {
     const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
-    forward_plus_tile_size_ = std::max(8, static_cast<int>(stats.tile_size));
+    forward_plus_tile_size_ = std::max(4, static_cast<int>(stats.tile_size));
     forward_plus_max_lights_per_tile_ =
         std::max(8, static_cast<int>(stats.max_lights_per_tile));
+    forward_plus_max_local_lights_ =
+        std::max(1, static_cast<int>(stats.max_local_lights));
   }
 }
 
@@ -477,12 +481,16 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
       bool fp_changed = false;
       fp_changed |= editInt("Tile Size", forward_plus_tile_size_);
       fp_changed |= editInt("Max Lights / Tile", forward_plus_max_lights_per_tile_);
+      fp_changed |= editInt("Max Local Lights", forward_plus_max_local_lights_);
       if (fp_changed) {
-        forward_plus_tile_size_ = std::clamp(forward_plus_tile_size_, 8, 64);
+        forward_plus_tile_size_ = std::clamp(forward_plus_tile_size_, 4, 64);
         forward_plus_max_lights_per_tile_ =
-            std::clamp(forward_plus_max_lights_per_tile_, 8, 512);
+            std::clamp(forward_plus_max_lights_per_tile_, 8, 2048);
+        forward_plus_max_local_lights_ =
+            std::clamp(forward_plus_max_local_lights_, 1, 65536);
         graphics_->setForwardPlusSettings(forward_plus_tile_size_,
-                                          forward_plus_max_lights_per_tile_);
+                                          forward_plus_max_lights_per_tile_,
+                                          forward_plus_max_local_lights_);
       }
       bool local_changed = false;
       local_changed |= editFloat("InvSq Softening", local_light_distance_damping_, "%.3f");
@@ -508,12 +516,15 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
       }
       const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
       ImGui::Text("Active: %s", stats.active ? "yes" : "no");
+      ImGui::Text("CPU Fallback: %s", stats.cpu_fallback ? "yes" : "no");
       ImGui::Text("Local Lights: %u", static_cast<unsigned int>(stats.local_light_count));
       ImGui::Text("Tiles: %u x %u", static_cast<unsigned int>(stats.tiles_x),
                   static_cast<unsigned int>(stats.tiles_y));
       ImGui::Text("Tile Size: %u", static_cast<unsigned int>(stats.tile_size));
       ImGui::Text("Max Lights / Tile: %u",
                   static_cast<unsigned int>(stats.max_lights_per_tile));
+      ImGui::Text("Max Local Lights: %u",
+                  static_cast<unsigned int>(stats.max_local_lights));
       if (stats.overflow_risk) {
         ImGui::Text("Warning: local light density may exceed per-tile capacity.");
       }

@@ -74,6 +74,20 @@ bool PlayerController::isGrounded() const {
     return backend_ ? backend_->isGrounded() : false;
 }
 
+bool PlayerController::getGroundContact(PhysicsGroundContact& outContact) const {
+    return backend_ ? backend_->getGroundContact(outContact) : false;
+}
+
+void PlayerController::collectContacts(std::vector<PhysicsContact>& outContacts) const {
+    if (backend_) {
+        backend_->collectContacts(outContacts);
+    }
+}
+
+std::uintptr_t PlayerController::nativeHandle() const {
+    return backend_ ? backend_->nativeHandle() : 0;
+}
+
 void PlayerController::destroy() {
     if (!backend_) {
         return;

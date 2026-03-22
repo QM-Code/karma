@@ -26,6 +26,10 @@ public:
     std::unique_ptr<PhysicsPlayerControllerBackend> createPlayer(const glm::vec3& size) override;
     std::unique_ptr<PhysicsStaticBodyBackend> createStaticMesh(const std::string& meshPath) override;
     bool raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const override;
+    bool raycastDetailed(const glm::vec3& from,
+                         const glm::vec3& to,
+                         karma::physics::PhysicsGroundContact& outHit) const override;
+    void collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const override;
 
     btDiscreteDynamicsWorld* world() { return dynamicsWorld_.get(); }
     const btDiscreteDynamicsWorld* world() const { return dynamicsWorld_.get(); }

@@ -56,6 +56,18 @@ Typical crash or hang triage run:
 KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/karma_laser_example
 ```
 
+Local-light / point-shadow sanity check:
+
+```bash
+./build/karma_light_stress_example
+./build/karma_light_stress_example --lights 16 --stats
+```
+
+For current renderer/sample handoff notes, see:
+
+- [LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
+- [LOCAL_LIGHT_PROBE_BOOTSTRAP.md](LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+
 ## Basic App Structure
 ```cpp
 class MyGame : public karma::app::GameInterface {
@@ -63,6 +75,7 @@ public:
   void onStart() override { /* create entities */ }
   void onUpdate(float dt) override { /* per-frame logic */ }
   void onFixedUpdate(float dt) override { /* fixed timestep */ }
+  void onPostFixedUpdate(float dt) override { /* post-physics fixed step */ }
 };
 
 class MyUi : public karma::app::UiLayer {
@@ -89,6 +102,7 @@ int main() {
   config.shadow_raster_slope_bias = 0.0f;
   config.shadow_receiver_bias_scale = 0.75f;
   config.shadow_normal_bias_scale = 1.0f;
+  config.point_shadow_max_lights = 4;
   config.point_shadow_constant_bias = 0.0012f;
   config.point_shadow_slope_bias_scale = 2.0f;
   config.point_shadow_normal_bias_scale = 1.5f;
@@ -144,6 +158,167 @@ Prefabs can be loaded from either a `.kprefab` file or a directory containing
 `prefab.kprefab`.
 
 For the file format and runtime helper API, see [EFFECT_PREFABS.md](EFFECT_PREFABS.md).
+
+## Collision Events
+
+For gameplay-facing `enter/stay/exit` overlap events, the intended workflow is:
+
+- add `CollisionListenerComponent` to the entity you want to monitor
+- add `CollisionEventsComponent` to receive the event buffers
+- read the results in `onPostFixedUpdate(...)`, which runs after fixed-step physics and collision systems
+
+Example:
+
+```cpp
+#include "karma/karma.h"
+
+class MyGame : public karma::app::GameInterface {
+ public:
+  void onStart() override {
+    sensor_ = world->createEntity();
+    world->add(sensor_, karma::components::TransformComponent{});
+    world->add(sensor_, karma::components::SphereColliderComponent{
+        .center = {},
+        .radius = 2.0f});
+    world->add(sensor_, karma::components::CollisionListenerComponent{
+        .enabled = true,
+        .mode = karma::components::CollisionListenMode::TriggersOnly,
+        .emit_stay = true});
+    world->add(sensor_, karma::components::CollisionEventsComponent{});
+  }
+
+  void onPostFixedUpdate(float /*dt*/) override {
+    const auto& events = world->get<karma::components::CollisionEventsComponent>(sensor_);
+
+    for (const auto& hit : events.entered) {
+      // just entered this overlap
+    }
+    for (const auto& hit : events.stayed) {
+      // still overlapping this fixed tick
+    }
+    for (const auto& hit : events.exited) {
+      // left overlap this fixed tick
+    }
+    for (const auto& hit : events.active) {
+      // currently overlapping after this fixed-step update
+    }
+  }
+
+ private:
+  karma::ecs::Entity sensor_{};
+};
+```
+
+Notes:
+
+- `entered`, `stayed`, and `exited` are transient per-fixed-tick buffers.
+- `active` is the current overlap set for that tick.
+- The engine-owned `CollisionEventSystem` currently derives these from the ECS collider query path, so it supports `Box`, `Sphere`, and `Capsule` listener entities.
+- For actual contact normals/impulses from the physics backend, that should be a later contact-event path, not this overlap system.
+
+## Physical Contact Events
+
+For solid-body contacts with point and normal data, use:
+
+- `ContactListenerComponent`
+- `ContactEventsComponent`
+
+This path is physics-driven and separate from trigger / overlap events.
+
+Each `ContactEvent` currently includes:
+
+- `other`
+- `other_shape`
+- `point`
+- `normal`
+
+Example:
+
+```cpp
+class MyGame : public karma::app::GameInterface {
+ public:
+  void onStart() override {
+    actor_ = world->createEntity();
+    world->add(actor_, karma::components::TransformComponent{});
+    world->add(actor_, karma::components::BoxColliderComponent{
+        .half_extents = {0.5f, 0.5f, 0.5f}});
+    world->add(actor_, karma::components::RigidbodyComponent{});
+    world->add(actor_, karma::components::ContactListenerComponent{
+        .enabled = true,
+        .emit_stay = true});
+    world->add(actor_, karma::components::ContactEventsComponent{});
+  }
+
+  void onPostFixedUpdate(float /*dt*/) override {
+    const auto& contacts = world->get<karma::components::ContactEventsComponent>(actor_);
+    for (const auto& hit : contacts.entered) {
+      // hit.point and hit.normal are valid for this contact
+    }
+  }
+
+ private:
+  karma::ecs::Entity actor_{};
+};
+```
+
+Notes:
+
+- This is intended for solid physical contacts, not trigger zones.
+- `normal` is reported in the listener entity's frame of reference, i.e. it points away from the contacted surface and into the listener.
+- The current runtime supports `RigidbodyComponent` bodies, and on the default Jolt backend the built-in player controller path as used in `collision_events_example.cpp`.
+
+## Ground Contact
+
+For the common gameplay question "am I touching the floor?", use
+`GroundContactComponent` on an entity that is already driven by physics.
+
+The component is opt-in output state:
+
+- `grounded` is the current grounded state after this fixed physics tick
+- `entered` is true on the tick the entity becomes grounded
+- `exited` is true on the tick the entity leaves the ground
+- `support_entity` is the current support body when it can be resolved
+- `point` is the support point when available
+- `normal` is the support normal when available
+
+Example:
+
+```cpp
+class MyGame : public karma::app::GameInterface {
+ public:
+  void onStart() override {
+    player_ = world->createEntity();
+    world->add(player_, karma::components::TransformComponent{});
+    world->add(player_, karma::components::BoxColliderComponent{
+        .half_extents = {0.5f, 1.0f, 0.5f}});
+    world->add(player_, karma::components::PlayerControllerComponent{});
+    world->add(player_, karma::components::GroundContactComponent{});
+  }
+
+  void onPostFixedUpdate(float /*dt*/) override {
+    const auto& ground = world->get<karma::components::GroundContactComponent>(player_);
+    if (ground.entered) {
+      // just landed
+    }
+    if (ground.exited) {
+      // just left the floor
+    }
+    if (ground.grounded) {
+      // standing on a support surface this tick
+    }
+  }
+
+ private:
+  karma::ecs::Entity player_{};
+};
+```
+
+Current support:
+
+- `PlayerControllerComponent`
+- `RigidbodyComponent` with `BoxColliderComponent`
+
+For box rigid bodies, the engine now also runs a short downward support probe after physics so `support_entity`, `point`, and `normal` can be resolved for common "what am I standing on?" gameplay logic.
 
 ## ECS Point Containment Queries
 Karma exposes ECS-facing point containment helpers in `karma/ecs/collider_queries.h`:
@@ -217,11 +392,8 @@ Current limitation:
 
 Trigger pattern:
 
-- Query in fixed update using gameplay transforms, not render-interpolated transforms.
-- Store the previous frame's overlapping entity set.
-- Compare previous vs current to derive `Enter`, `Stay`, and `Exit` events in your system or gameplay code.
-
-This keeps collider components as data and keeps trigger logic outside `ecs::World`.
+- Prefer `CollisionListenerComponent` + `CollisionEventsComponent` for normal `enter/stay/exit` gameplay.
+- Use the raw collider query helpers when you need one-off tests, custom filtering, or ad hoc spatial logic outside the engine-owned collision event path.
 
 ## Runtime Materials
 `GameInterface` now exposes a runtime material library through the `materials` pointer.
@@ -372,12 +544,20 @@ Current CSM setup:
 - Cascade transition blending near split boundaries
 
 Point-light shadow setup:
-- Up to 2 shadow-casting point lights are rendered each frame (nearest to camera).
+- `point_shadow_max_lights` controls the runtime budget for shadow-casting point lights.
+- The current renderer supports up to 16 shadow-casting point lights at compile time.
+- The default engine config budget remains conservative at `2`.
 - Each selected point light renders 6 faces into a depth texture array.
 - Point shadow map resolution defaults to half of `shadow_map_size` (min 256).
 - Local lights use inverse-square attenuation with a smooth range cutoff.
 - Local lights can optionally lift directional-shadow darkness via `local_light_directional_shadow_lift_strength`.
 - Point/local-light tuning is exposed in Debug UI for bias, attenuation, AO interaction, shadow lift, and exposure.
+
+Reference sample:
+
+- [../examples/light_stress_example.cpp](../examples/light_stress_example.cpp) provides the current local-light probe workflow for `1-16` safe-mode shadowed point lights.
+- [LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](LOCAL_LIGHT_SHADOW_BOOTSTRAP.md) documents the current renderer-side implementation and recent fixes.
+- [LOCAL_LIGHT_PROBE_BOOTSTRAP.md](LOCAL_LIGHT_PROBE_BOOTSTRAP.md) documents the current sample-side layout, motion, and validation workflow.
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.

@@ -4,9 +4,12 @@
 #include <unordered_map>
 
 #include "karma/components/collider.h"
+#include "karma/components/contact_events.h"
+#include "karma/components/ground_contact.h"
 #include "karma/components/player_controller.h"
 #include "karma/components/rigidbody.h"
 #include "karma/components/transform.h"
+#include "karma/ecs/collider_queries.h"
 #include "karma/ecs/world.h"
 #include "karma/physics/physics_world.hpp"
 #include "karma/systems/system.h"
@@ -29,7 +32,18 @@ class PhysicsSystem : public systems::ISystem {
   void syncRigidBodies(ecs::World& world);
   void syncDynamicBodies(ecs::World& world);
   void syncPlayerController(ecs::World& world, float dt);
+  void syncContactEvents(ecs::World& world);
+  void syncGroundContacts(ecs::World& world);
   void cleanupStale(ecs::World& world);
+
+  struct TrackedContact {
+    ecs::Entity other{};
+    ecs::queries::ColliderShape other_shape = ecs::queries::ColliderShape::Box;
+    math::Vec3 point{};
+    math::Vec3 normal{0.0f, 1.0f, 0.0f};
+  };
+
+  using ContactMap = std::unordered_map<uint64_t, TrackedContact>;
 
   World& physics_;
   std::unordered_map<uint64_t, RigidBody> rigid_bodies_;
@@ -39,9 +53,12 @@ class PhysicsSystem : public systems::ISystem {
   };
   std::unordered_map<uint64_t, BoxColliderState> box_collider_state_;
   std::unordered_map<uint64_t, StaticBody> static_bodies_;
+  std::unordered_map<std::uintptr_t, ecs::Entity> physics_entities_by_handle_;
+  std::unordered_map<uint64_t, ContactMap> previous_contacts_;
   ecs::Entity player_entity_{};
   math::Vec3 player_half_extents_{-1.0f, -1.0f, -1.0f};
   math::Vec3 player_center_{};
+  std::uintptr_t player_native_handle_ = 0;
   int player_shape_kind_ = -1;
   bool has_player_ = false;
 };

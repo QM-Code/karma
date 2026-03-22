@@ -18,6 +18,8 @@ namespace karma::beams {
 
 namespace {
 
+constexpr double kWrappedBeamTimeSeconds = 4096.0;
+
 constexpr int kEndpointTextureSize = 96;
 constexpr int kElectricTextureSize = 96;
 constexpr int kDistortionTextureSize = 96;
@@ -381,7 +383,10 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
     return;
   }
 
-  time_ += std::max(dt, 0.0f);
+  time_ += static_cast<double>(std::max(dt, 0.0f));
+  if (time_ >= kWrappedBeamTimeSeconds) {
+    time_ = std::fmod(time_, kWrappedBeamTimeSeconds);
+  }
   ensureSharedResources();
   if (endpoint_texture_ == renderer::kInvalidTexture) {
     return;
@@ -474,7 +479,8 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
                                     static_cast<float>(electric_sample_count)
                               : 0.0f;
           const math::Vec3 base_position = lerpPoint(start, end, t);
-          const float electric_time = time_ * std::max(beam.electric_speed, 0.0f);
+          const float electric_time =
+              static_cast<float>(time_ * static_cast<double>(std::max(beam.electric_speed, 0.0f)));
           const float phase =
               electric_time * 9.0f + static_cast<float>(i) * 1.27f +
               static_cast<float>(sample_index) * 0.91f;
@@ -520,7 +526,8 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
                                     static_cast<float>(distortion_sample_count)
                               : 0.0f;
           const math::Vec3 base_position = lerpPoint(start, end, t);
-          const float distortion_time = time_ * std::max(beam.distortion_speed, 0.0f);
+          const float distortion_time = static_cast<float>(
+              time_ * static_cast<double>(std::max(beam.distortion_speed, 0.0f)));
           const float phase =
               distortion_time * 3.8f + static_cast<float>(i) * 0.87f +
               static_cast<float>(sample_index) * 0.49f;
@@ -593,8 +600,9 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
         auto& light = world.get<components::LightComponent>(light_entity);
         light.type = components::LightComponent::Type::Point;
         light.color = light_color;
-        light.intensity =
-            beam.light_intensity * (0.92f + 0.08f * std::sin(time_ * 6.0f + fraction * 9.0f));
+        light.intensity = beam.light_intensity *
+                          (0.92f + 0.08f * std::sin(static_cast<float>(
+                                               time_ * 6.0 + static_cast<double>(fraction) * 9.0)));
         light.range = beam.light_range;
         light.casts_shadows = false;
       }
@@ -635,7 +643,7 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
       glow_batch.blend_mode = renderer::ParticleBlendMode::Additive;
       glow_batch.use_soft_mask = false;
       glow_batch.particles = std::move(group.glow_particles);
-      device_->submitParticles(glow_batch);
+      device_->submitParticles(std::move(glow_batch));
     }
     if (!group.core_particles.empty()) {
       renderer::ParticleBatch core_batch{};
@@ -645,7 +653,7 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
       core_batch.blend_mode = renderer::ParticleBlendMode::Additive;
       core_batch.use_soft_mask = false;
       core_batch.particles = std::move(group.core_particles);
-      device_->submitParticles(core_batch);
+      device_->submitParticles(std::move(core_batch));
     }
     if (!group.electric_glow_particles.empty()) {
       renderer::ParticleBatch electric_glow_batch{};
@@ -655,7 +663,7 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
       electric_glow_batch.blend_mode = renderer::ParticleBlendMode::Additive;
       electric_glow_batch.use_soft_mask = false;
       electric_glow_batch.particles = std::move(group.electric_glow_particles);
-      device_->submitParticles(electric_glow_batch);
+      device_->submitParticles(std::move(electric_glow_batch));
     }
     if (!group.electric_core_particles.empty()) {
       renderer::ParticleBatch electric_core_batch{};
@@ -665,12 +673,12 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
       electric_core_batch.blend_mode = renderer::ParticleBlendMode::Additive;
       electric_core_batch.use_soft_mask = false;
       electric_core_batch.particles = std::move(group.electric_core_particles);
-      device_->submitParticles(electric_core_batch);
+      device_->submitParticles(std::move(electric_core_batch));
     }
   }
 
   for (auto& batch : distortion_batches) {
-    device_->submitParticles(batch);
+    device_->submitParticles(std::move(batch));
   }
 }
 

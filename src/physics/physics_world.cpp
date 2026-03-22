@@ -64,4 +64,19 @@ bool World::raycast(const glm::vec3& from,
     return backend_->raycast(from, to, hitPoint, hitNormal);
 }
 
+bool World::raycastDetailed(const glm::vec3& from,
+                            const glm::vec3& to,
+                            PhysicsGroundContact& outHit) const {
+    if (!backend_) {
+        return false;
+    }
+    return backend_->raycastDetailed(from, to, outHit);
+}
+
+void World::collectContacts(std::vector<PhysicsContact>& outContacts) const {
+    if (backend_) {
+        backend_->collectContacts(outContacts);
+    }
+}
+
 } // namespace karma::physics

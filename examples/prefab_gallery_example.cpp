@@ -1,11 +1,15 @@
 #include "demo_asset_paths.h"
+#include "explosion_prefab_package.h"
 #include "energy_orb_prefab_package.h"
 #include "karma/karma.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
@@ -32,11 +36,22 @@ constexpr std::array<ColorVariant, 4> kColorVariants{{
 }};
 
 constexpr std::array<float, 4> kColumnX{{-18.0f, -6.0f, 6.0f, 18.0f}};
+constexpr std::array<float, 4> kExplosionColumnX{{-28.0f, -9.5f, 9.5f, 28.0f}};
 constexpr float kBeamRowZ = -12.0f;
 constexpr float kOrbRowZ = 0.0f;
 constexpr float kWaveRowZ = 12.0f;
+constexpr float kExplosionRowZ = 25.0f;
 constexpr float kBeamScale = 0.48f;
 constexpr float kWaveRadius = 2.4f;
+constexpr float kExplosionReplayPeriod = 3.6f;
+constexpr float kPerfLogPeriod = 0.1f;
+constexpr float kExplosionVisualWindow = 2.4f;
+
+struct ExplosionGalleryItem {
+  ExplosionPrefabController controller{};
+  float next_trigger_time = 0.0f;
+  float last_trigger_time = -1000.0f;
+};
 
 components::TransformComponent makeTransform(const math::Vec3& position) {
   components::TransformComponent transform{};
@@ -63,6 +78,13 @@ LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   };
 }
 
+bool envFlagEnabled(const char* name) {
+  if (const char* value = std::getenv(name)) {
+    return value[0] != '\0' && std::string(value) != "0";
+  }
+  return false;
+}
+
 }  // namespace
 
 class PrefabGalleryExample final : public app::GameInterface {
@@ -81,12 +103,27 @@ class PrefabGalleryExample final : public app::GameInterface {
     spawnLighting();
     spawnCamera();
     spawnPrefabs();
+    log_perf_stats_ = envFlagEnabled("KARMA_PREFAB_GALLERY_STATS");
+
+    if (log_perf_stats_) {
+      spdlog::info(
+          "Prefab gallery perf logging enabled: {}s window, explosion window={}s",
+          kPerfLogPeriod,
+          kExplosionVisualWindow);
+    }
   }
 
   void onFixedUpdate(float dt) override { (void)dt; }
 
   void onUpdate(float dt) override {
+    time_ += dt;
+    accumulatePerfSample(dt);
+
     if (!world->isAlive(camera_entity_)) {
+      for (auto& explosion : explosions_) {
+        updateExplosionPrefab(*world, explosion.controller, time_);
+      }
+      maybeLogPerfStats();
       return;
     }
 
@@ -124,11 +161,94 @@ class PrefabGalleryExample final : public app::GameInterface {
     camera_position.z += (forward.z * forward_input + right.z * right_input) * move_speed * dt;
     camera_transform.setPosition(camera_position);
     camera_transform.setRotation(camera_rotation);
+
+    for (auto& explosion : explosions_) {
+      if (time_ >= explosion.next_trigger_time) {
+        triggerExplosionPrefab(*world, explosion.controller, time_);
+        explosion.last_trigger_time = time_;
+        do {
+          explosion.next_trigger_time += kExplosionReplayPeriod;
+        } while (time_ >= explosion.next_trigger_time);
+      }
+      updateExplosionPrefab(*world, explosion.controller, time_);
+    }
+
+    maybeLogPerfStats();
   }
 
   void onShutdown() override {}
 
  private:
+  void accumulatePerfSample(float dt) {
+    if (!log_perf_stats_) {
+      return;
+    }
+
+    if (update_debug_count_ < 8u) {
+      spdlog::info("Gallery update: frame={} dt_ms={:.2f} sim_t={:.2f}",
+                   update_debug_count_,
+                   dt * 1000.0f,
+                   time_);
+      spdlog::default_logger()->flush();
+      update_debug_count_ += 1u;
+    }
+
+    perf_log_elapsed_ += dt;
+    perf_frame_time_sum_ += dt;
+    perf_frame_time_max_ = std::max(perf_frame_time_max_, dt);
+    perf_frame_count_ += 1u;
+  }
+
+  void maybeLogPerfStats() {
+    if (!log_perf_stats_ || perf_log_elapsed_ < kPerfLogPeriod || perf_frame_count_ == 0u) {
+      return;
+    }
+
+    std::size_t active_explosion_visuals = 0u;
+    std::size_t active_explosion_lights = 0u;
+    std::size_t pending_restarts = 0u;
+    for (const auto& explosion : explosions_) {
+      if (time_ - explosion.last_trigger_time <= kExplosionVisualWindow) {
+        active_explosion_visuals += 1u;
+      }
+      if (explosion.controller.light_active) {
+        active_explosion_lights += 1u;
+      }
+      pending_restarts += explosion.controller.scheduled_restarts.size();
+    }
+
+    int fb_width = 0;
+    int fb_height = 0;
+    renderer::ForwardPlusStats stats{};
+    if (graphics != nullptr) {
+      graphics->getFramebufferSize(fb_width, fb_height);
+      stats = graphics->getForwardPlusStats();
+    }
+
+    const float average_dt = perf_frame_time_sum_ / static_cast<float>(perf_frame_count_);
+    const float average_fps = average_dt > 1.0e-6f ? 1.0f / average_dt : 0.0f;
+    spdlog::info(
+        "Gallery perf: t={:.2f}s fps={:.1f} avg_ms={:.2f} worst_ms={:.2f} active_visuals={} active_lights={} pending_restarts={} framebuffer={}x{} local_lights={} cpu_fallback={} fp_active={}",
+        time_,
+        average_fps,
+        average_dt * 1000.0f,
+        perf_frame_time_max_ * 1000.0f,
+        active_explosion_visuals,
+        active_explosion_lights,
+        pending_restarts,
+        fb_width,
+        fb_height,
+        static_cast<unsigned int>(stats.local_light_count),
+        stats.cpu_fallback,
+        stats.active);
+    spdlog::default_logger()->flush();
+
+    perf_log_elapsed_ = 0.0f;
+    perf_frame_time_sum_ = 0.0f;
+    perf_frame_time_max_ = 0.0f;
+    perf_frame_count_ = 0u;
+  }
+
   void spawnWorld() {
     const ecs::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
@@ -192,6 +312,10 @@ class PrefabGalleryExample final : public app::GameInterface {
         !registerEnergyOrbPrefabPackage(*prefab_registry)) {
       spdlog::error("Prefab gallery failed to register the orb package");
     }
+    if (prefab_registry == nullptr ||
+        !registerExplosionPrefabPackage(*prefab_registry)) {
+      spdlog::error("Prefab gallery failed to register the explosion package");
+    }
 
     for (size_t i = 0; i < kColorVariants.size(); ++i) {
       const auto& variant = kColorVariants[i];
@@ -254,11 +378,45 @@ class PrefabGalleryExample final : public app::GameInterface {
         spdlog::error("Prefab gallery failed to instantiate {} wave", variant.name);
       }
     }
+
+    if (prefab_registry == nullptr) {
+      return;
+    }
+
+    explosions_.clear();
+    explosions_.reserve(kColorVariants.size());
+    for (size_t i = 0; i < kColorVariants.size(); ++i) {
+      const auto controller = instantiateExplosionPrefabController(
+          *world,
+          *prefab_registry,
+          prefabs::PrefabInstantiateDesc{
+              .name = std::string(kColorVariants[i].name) + " Explosion",
+              .transform = makeTransform({kExplosionColumnX[i], 0.0f, kExplosionRowZ}),
+          });
+      if (!controller.has_value()) {
+        spdlog::error("Prefab gallery failed to instantiate {} explosion",
+                      kColorVariants[i].name);
+        continue;
+      }
+      explosions_.push_back(ExplosionGalleryItem{
+          .controller = *controller,
+          .next_trigger_time = 0.9f + static_cast<float>(i) * 0.65f,
+          .last_trigger_time = -1000.0f,
+      });
+    }
   }
 
   std::string world_mesh_;
   std::string environment_map_;
   ecs::Entity camera_entity_{};
+  std::vector<ExplosionGalleryItem> explosions_{};
+  bool log_perf_stats_ = false;
+  float time_ = 0.0f;
+  float perf_log_elapsed_ = 0.0f;
+  float perf_frame_time_sum_ = 0.0f;
+  float perf_frame_time_max_ = 0.0f;
+  std::uint32_t perf_frame_count_ = 0u;
+  std::uint32_t update_debug_count_ = 0u;
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;

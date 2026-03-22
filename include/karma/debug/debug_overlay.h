@@ -48,7 +48,8 @@ class DebugOverlayLayer final : public app::UiLayer {
                     float local_light_range_falloff_exponent,
                     bool ao_affects_local_lights,
                     float local_light_directional_shadow_lift_strength,
-                    float lighting_exposure);
+                    float lighting_exposure,
+                    int forward_plus_max_local_lights);
 
   void onEvent(const platform::Event& event) override;
   void onFrame(app::UIContext& ctx) override;
@@ -81,6 +82,7 @@ class DebugOverlayLayer final : public app::UiLayer {
   float lighting_exposure_ = 1.0f;
   int forward_plus_tile_size_ = 16;
   int forward_plus_max_lights_per_tile_ = 128;
+  int forward_plus_max_local_lights_ = 4096;
   static constexpr size_t kFrameHistorySize = 180;
   std::array<float, kFrameHistorySize> frame_time_history_ms_{};
   size_t frame_time_history_cursor_ = 0;

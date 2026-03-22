@@ -329,6 +329,7 @@ set(KARMA_SOURCES
   src/audio/audio.cpp
   src/audio/backend_factory.cpp
   src/audio/audio_system.cpp
+  src/collision/collision_event_system.cpp
   src/network/transport_factory.cpp
   src/network/enet_transport.cpp
   src/input/input_system.cpp
@@ -521,6 +522,28 @@ if (NOT KARMA_HEADLESS)
     add_dependencies(karma_example karma_fix_xxhash)
   endif()
 
+  add_executable(karma_collision_events_example
+    examples/collision_events_example.cpp
+  )
+  target_link_libraries(karma_collision_events_example PRIVATE karma ${KARMA_IMGUI_TARGET})
+  if (imgui_SOURCE_DIR)
+    target_include_directories(karma_collision_events_example PRIVATE ${imgui_SOURCE_DIR})
+  endif()
+  if (NOT KARMA_IMGUI_TARGET AND DEFINED IMGUI_SOURCES)
+    target_sources(karma_collision_events_example PRIVATE ${IMGUI_SOURCES})
+  endif()
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_collision_events_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_light_stress_example
+    examples/light_stress_example.cpp
+  )
+  target_link_libraries(karma_light_stress_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_light_stress_example karma_fix_xxhash)
+  endif()
+
   add_executable(karma_material_override_example
     examples/material_override_example.cpp
   )
@@ -597,6 +620,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_prefab_gallery_example
     examples/prefab_gallery_example.cpp
     examples/energy_orb_prefab_package.cpp
+    examples/explosion_prefab_package.cpp
   )
   target_link_libraries(karma_prefab_gallery_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)

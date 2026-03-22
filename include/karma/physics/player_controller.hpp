@@ -34,6 +34,9 @@ public:
     void setAngularVelocity(const glm::vec3& angularVelocity);
 
     bool isGrounded() const;
+    bool getGroundContact(PhysicsGroundContact& outContact) const;
+    void collectContacts(std::vector<PhysicsContact>& outContacts) const;
+    std::uintptr_t nativeHandle() const;
 
     void destroy();
 

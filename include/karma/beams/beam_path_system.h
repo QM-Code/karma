@@ -48,7 +48,7 @@ class BeamPathSystem {
   std::vector<std::uint8_t> electric_texture_pixels_;
   std::vector<std::uint8_t> distortion_texture_pixels_;
   std::unordered_map<uint64_t, RuntimeState> beams_;
-  float time_ = 0.0f;
+  double time_ = 0.0;
 };
 
 }  // namespace karma::beams

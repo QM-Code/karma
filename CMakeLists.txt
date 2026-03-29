@@ -58,7 +58,10 @@ if (NOT TARGET glm::glm AND KARMA_FETCH_DEPS)
   FetchContent_MakeAvailable(glm)
 endif()
 
-if (KARMA_BUILD_IMGUI_DEMO OR KARMA_BUILD_DEBUG_UI)
+# `karma_example` and `karma_collision_events_example` both use ImGui-backed
+# UI overlays, so any non-headless build needs ImGui even when the standalone
+# ImGui demo target is disabled.
+if (NOT KARMA_HEADLESS)
   find_package(imgui CONFIG QUIET)
   if (TARGET imgui::imgui)
     set(KARMA_IMGUI_TARGET imgui::imgui)
@@ -344,6 +347,7 @@ set(KARMA_SOURCES
   src/physics/physics_world.cpp
   src/physics/physics_system.cpp
   src/geometry/mesh_loader.cpp
+  src/beams/beam_path_runtime_module.cpp
   src/beams/beam_path_system.cpp
   src/particles/effect_library.cpp
   src/particles/particle_system.cpp
@@ -354,9 +358,11 @@ set(KARMA_SOURCES
   src/prefabs/prefab_parse_light.cpp
   src/prefabs/prefab_parse_beam.cpp
   src/prefabs/prefab_parse_volume_sphere.cpp
+  src/prefabs/prefab_entry_handler.cpp
   src/prefabs/prefab_runtime.cpp
   src/prefabs/prefab_registry.cpp
   src/prefabs/prefab_system.cpp
+  src/volumes/volume_sphere_runtime_module.cpp
   src/volumes/volume_sphere_system.cpp
 )
 
@@ -376,10 +382,22 @@ if (KARMA_RENDER_BACKEND_DILIGENT)
   list(APPEND KARMA_SOURCES
     src/renderer/backends/diligent/backend_common.cpp
     src/renderer/backends/diligent/backend_init.cpp
-    src/renderer/backends/diligent/backend_mesh.cpp
     src/renderer/backends/diligent/backend_render.cpp
     src/renderer/backends/diligent/backend_textures.cpp
     src/renderer/backends/diligent/backend_ui.cpp
+    src/renderer/backends/diligent/passes/camera_override.cpp
+    src/renderer/backends/diligent/passes/environment.cpp
+    src/renderer/backends/diligent/passes/frame.cpp
+    src/renderer/backends/diligent/passes/forward.cpp
+    src/renderer/backends/diligent/passes/line.cpp
+    src/renderer/backends/diligent/passes/particle_draw.cpp
+    src/renderer/backends/diligent/passes/particles.cpp
+    src/renderer/backends/diligent/passes/render_state.cpp
+    src/renderer/backends/diligent/passes/shadows.cpp
+    src/renderer/backends/diligent/resources/materials.cpp
+    src/renderer/backends/diligent/resources/meshes.cpp
+    src/renderer/backends/diligent/resources/render_targets.cpp
+    src/renderer/backends/diligent/resources/textures.cpp
     src/renderer/backends/diligent/stb_image.cpp
   )
 endif()
@@ -625,6 +643,15 @@ if (NOT KARMA_HEADLESS)
   target_link_libraries(karma_prefab_gallery_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_prefab_gallery_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_explosion_stress_example
+    examples/explosion_stress_example.cpp
+    examples/explosion_prefab_package.cpp
+  )
+  target_link_libraries(karma_explosion_stress_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_explosion_stress_example karma_fix_xxhash)
   endif()
 
   if (KARMA_BUILD_IMGUI_DEMO)

@@ -1,25 +1,31 @@
 #include "karma/particles/particle_system.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
+#include "karma/components/camera.h"
 #include "karma/components/particle_effect.h"
 #include "karma/components/particle_effect_override.h"
 #include "karma/components/particle_emitter.h"
 #include "karma/components/transform.h"
 #include "karma/components/visibility.h"
 #include "karma/math/quat.h"
+#include "karma/math/vec3.h"
 #include "karma/particles/effect_library.h"
 #include "karma/renderer/device.h"
 
 namespace karma::particles {
 
 namespace {
+
+constexpr float kMinVisibleAlphaParticleAlpha = 0.01f;
 
 math::Vec3 add(const math::Vec3& a, const math::Vec3& b) {
   return {a.x + b.x, a.y + b.y, a.z + b.z};
@@ -73,10 +79,6 @@ float randomRange(uint32_t& state, float min_v, float max_v) {
   return min_v + (max_v - min_v) * random01(state);
 }
 
-float lengthSquared(const math::Vec3& v) {
-  return v.x * v.x + v.y * v.y + v.z * v.z;
-}
-
 float horizontalLengthSquared(const math::Vec3& v) {
   return v.x * v.x + v.z * v.z;
 }
@@ -109,6 +111,144 @@ math::Vec3 randomUnitVector(uint32_t& state) {
 
 math::Vec3 scaleVec(const math::Vec3& v, float s) {
   return {v.x * s, v.y * s, v.z * s};
+}
+
+math::Vec3 subtract(const math::Vec3& a, const math::Vec3& b) {
+  return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+using ParticleStatsClock = std::chrono::steady_clock;
+
+float elapsedMilliseconds(const ParticleStatsClock::time_point& start,
+                          const ParticleStatsClock::time_point& end) {
+  return std::chrono::duration<float, std::milli>(end - start).count();
+}
+
+void addCount(uint32_t& total, std::size_t value) {
+  const uint64_t sum = static_cast<uint64_t>(total) + static_cast<uint64_t>(value);
+  total = static_cast<uint32_t>(std::min<uint64_t>(sum, std::numeric_limits<uint32_t>::max()));
+}
+
+struct ParticleCullCamera {
+  bool valid = false;
+  bool perspective = true;
+  float fov_y_degrees = 60.0f;
+  float aspect = 1.0f;
+  float near_clip = 0.1f;
+  float far_clip = 1000.0f;
+  float ortho_left = -1.0f;
+  float ortho_right = 1.0f;
+  float ortho_top = 1.0f;
+  float ortho_bottom = -1.0f;
+  math::Vec3 position{};
+  math::Vec3 forward{0.0f, 0.0f, -1.0f};
+  math::Vec3 right{1.0f, 0.0f, 0.0f};
+  math::Vec3 up{0.0f, 1.0f, 0.0f};
+};
+
+ParticleCullCamera resolvePrimaryCullCamera(const ecs::World& world,
+                                            renderer::GraphicsDevice* device,
+                                            float interpolation_alpha) {
+  ParticleCullCamera camera{};
+  int fb_width = 1;
+  int fb_height = 1;
+  if (device != nullptr) {
+    device->getFramebufferSize(fb_width, fb_height);
+  }
+  camera.aspect =
+      fb_height > 0 ? static_cast<float>(std::max(fb_width, 1)) / static_cast<float>(fb_height)
+                    : 1.0f;
+
+  world.forEach<components::CameraComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
+    const auto& camera_component = world.get<components::CameraComponent>(entity);
+    if (!camera_component.is_primary) {
+      return true;
+    }
+
+    const auto& transform = world.get<components::TransformComponent>(entity);
+    const math::Quat rotation = transform.getInterpolatedRotation(interpolation_alpha);
+    camera.valid = true;
+    camera.perspective = camera_component.perspective;
+    camera.fov_y_degrees = camera_component.fov_y_degrees;
+    camera.near_clip = std::max(camera_component.near_clip, 0.001f);
+    camera.far_clip = std::max(camera_component.far_clip, camera.near_clip + 0.001f);
+    camera.ortho_left = camera_component.ortho_left;
+    camera.ortho_right = camera_component.ortho_right;
+    camera.ortho_top = camera_component.ortho_top;
+    camera.ortho_bottom = camera_component.ortho_bottom;
+    camera.position = transform.getInterpolatedPosition(interpolation_alpha);
+    camera.forward = math::normalize(math::rotateVec(rotation, {0.0f, 0.0f, -1.0f}));
+    camera.right = math::normalize(math::rotateVec(rotation, {1.0f, 0.0f, 0.0f}));
+    camera.up = math::normalize(math::rotateVec(rotation, {0.0f, 1.0f, 0.0f}));
+    return false;
+  });
+
+  return camera;
+}
+
+bool boundsVisibleInCamera(const ParticleCullCamera& camera,
+                           bool local_space,
+                           const math::Vec3& emitter_position,
+                           const math::Quat& emitter_rotation,
+                           const math::Vec3& emitter_scale,
+                           const math::Vec3& bounds_min,
+                           const math::Vec3& bounds_max,
+                           float max_particle_extent,
+                           float emitter_uniform_scale) {
+  if (!camera.valid) {
+    return true;
+  }
+
+  const math::Vec3 local_center = scale(add(bounds_min, bounds_max), 0.5f);
+  const math::Vec3 local_extents = scale(subtract(bounds_max, bounds_min), 0.5f);
+  math::Vec3 world_center = local_center;
+  float radius = 0.0f;
+
+  if (local_space) {
+    const math::Vec3 scaled_center{
+        local_center.x * emitter_scale.x,
+        local_center.y * emitter_scale.y,
+        local_center.z * emitter_scale.z,
+    };
+    const math::Vec3 scaled_extents{
+        std::abs(local_extents.x * emitter_scale.x),
+        std::abs(local_extents.y * emitter_scale.y),
+        std::abs(local_extents.z * emitter_scale.z),
+    };
+    world_center = add(emitter_position, math::rotateVec(emitter_rotation, scaled_center));
+    radius = std::sqrt(lengthSquared(scaled_extents)) +
+             max_particle_extent * emitter_uniform_scale;
+  } else {
+    radius = std::sqrt(lengthSquared(local_extents)) + max_particle_extent;
+  }
+
+  if (radius <= 0.0f) {
+    return true;
+  }
+
+  const math::Vec3 to_center = subtract(world_center, camera.position);
+  const float depth = math::dot(to_center, camera.forward);
+  if (depth + radius < camera.near_clip || depth - radius > camera.far_clip) {
+    return false;
+  }
+
+  const float right_distance = math::dot(to_center, camera.right);
+  const float up_distance = math::dot(to_center, camera.up);
+  if (camera.perspective) {
+    const float clamped_depth = std::max(depth, camera.near_clip);
+    const float half_height =
+        std::tan(camera.fov_y_degrees * 0.5f * 3.14159265358979323846f / 180.0f) *
+        clamped_depth;
+    const float half_width = half_height * std::max(camera.aspect, 0.001f);
+    return std::abs(right_distance) <= half_width + radius &&
+           std::abs(up_distance) <= half_height + radius;
+  }
+
+  return std::abs(right_distance) <=
+             std::max(std::abs(camera.ortho_left), std::abs(camera.ortho_right)) + radius &&
+         std::abs(up_distance) <=
+             std::max(std::abs(camera.ortho_bottom), std::abs(camera.ortho_top)) + radius;
 }
 
 uint64_t hashCombine(uint64_t seed, uint64_t value) {
@@ -371,11 +511,12 @@ void computeAtlasUvRect(const components::ParticleEmitterComponent& emitter,
 
 }  // namespace
 
-void ParticleSystem::syncEffectBindings(ecs::World& world) {
+uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
   if (library_ == nullptr) {
-    return;
+    return 0u;
   }
 
+  uint32_t binding_updates = 0u;
   library_->update();
   const uint64_t library_version = library_->version();
   world.forEach<components::ParticleEffectComponent>([&](const ecs::Entity entity) {
@@ -425,7 +566,10 @@ void ParticleSystem::syncEffectBindings(ecs::World& world) {
     effect.applied_restart_count = effect.restart_count;
     effect.applied_effect_key = effect.effect_key;
     emitters_.erase(entityKey(entity));
+    addCount(binding_updates, 1u);
   });
+
+  return binding_updates;
 }
 
 void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alpha) {
@@ -433,9 +577,15 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     return;
   }
 
-  syncEffectBindings(world);
+  renderer::ParticlePassStats frame_stats{};
+  const auto sync_start = ParticleStatsClock::now();
+  frame_stats.effect_binding_updates = syncEffectBindings(world);
+  frame_stats.sync_effect_bindings_ms =
+      elapsedMilliseconds(sync_start, ParticleStatsClock::now());
 
   const float clamped_dt = std::max(dt, 0.0f);
+  const ParticleCullCamera cull_camera =
+      resolvePrimaryCullCamera(world, device_, interpolation_alpha);
 
   for (auto it = emitters_.begin(); it != emitters_.end();) {
     ecs::Entity entity{};
@@ -457,6 +607,8 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     const auto& transform = world.get<components::TransformComponent>(entity);
     const uint64_t key = entityKey(entity);
     auto& state = emitters_[key];
+    addCount(frame_stats.simulated_emitters, 1u);
+    const auto simulation_start = ParticleStatsClock::now();
 
     if (!state.initialized) {
       const uint32_t fallback_seed =
@@ -474,6 +626,8 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
           particle.position.y > emitter.ground_height) {
         return;
       }
+
+      addCount(frame_stats.ground_collision_particles, 1u);
 
       const float rest_speed_threshold = std::max(emitter.rest_speed_threshold, 0.0f);
 
@@ -506,6 +660,10 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     const float emitter_dt = clamped_dt * std::max(emitter.time_scale, 0.0f);
 
     size_t alive_count = 0;
+    bool has_live_bounds = false;
+    math::Vec3 live_bounds_min{};
+    math::Vec3 live_bounds_max{};
+    float max_live_particle_extent = 0.0f;
     for (size_t particle_index = 0; particle_index < state.particles.size(); ++particle_index) {
       auto& particle = state.particles[particle_index];
       particle.age += emitter_dt;
@@ -514,6 +672,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       }
 
       if (particle.resting_on_ground && emitter.collide_with_ground) {
+        addCount(frame_stats.ground_collision_particles, 1u);
         const float rest_speed_threshold = std::max(emitter.rest_speed_threshold, 0.0f);
         const float slide_drag = std::clamp(
             1.0f - (emitter.drag + emitter.collision_friction) * emitter_dt, 0.0f, 1.0f);
@@ -537,12 +696,27 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         resolve_ground_collision(particle);
       }
       particle.rotation += particle.angular_velocity * emitter_dt;
+      const float particle_extent = std::max(particle.start_size, particle.end_size);
+      if (!has_live_bounds) {
+        live_bounds_min = particle.position;
+        live_bounds_max = particle.position;
+        has_live_bounds = true;
+      } else {
+        live_bounds_min.x = std::min(live_bounds_min.x, particle.position.x);
+        live_bounds_min.y = std::min(live_bounds_min.y, particle.position.y);
+        live_bounds_min.z = std::min(live_bounds_min.z, particle.position.z);
+        live_bounds_max.x = std::max(live_bounds_max.x, particle.position.x);
+        live_bounds_max.y = std::max(live_bounds_max.y, particle.position.y);
+        live_bounds_max.z = std::max(live_bounds_max.z, particle.position.z);
+      }
+      max_live_particle_extent = std::max(max_live_particle_extent, particle_extent);
       if (alive_count != particle_index) {
         state.particles[alive_count] = particle;
       }
       ++alive_count;
     }
     state.particles.resize(alive_count);
+    addCount(frame_stats.simulated_particles, alive_count);
 
     const math::Vec3 emitter_position = transform.getInterpolatedPosition(interpolation_alpha);
     const math::Quat emitter_rotation = transform.getInterpolatedRotation(interpolation_alpha);
@@ -586,6 +760,20 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
           particle.frame_offset = nextRandom(state.rng_state) % frame_count;
         }
       }
+      const float particle_extent = std::max(particle.start_size, particle.end_size);
+      if (!has_live_bounds) {
+        live_bounds_min = particle.position;
+        live_bounds_max = particle.position;
+        has_live_bounds = true;
+      } else {
+        live_bounds_min.x = std::min(live_bounds_min.x, particle.position.x);
+        live_bounds_min.y = std::min(live_bounds_min.y, particle.position.y);
+        live_bounds_min.z = std::min(live_bounds_min.z, particle.position.z);
+        live_bounds_max.x = std::max(live_bounds_max.x, particle.position.x);
+        live_bounds_max.y = std::max(live_bounds_max.y, particle.position.y);
+        live_bounds_max.z = std::max(live_bounds_max.z, particle.position.z);
+      }
+      max_live_particle_extent = std::max(max_live_particle_extent, particle_extent);
       state.particles.push_back(particle);
     };
 
@@ -630,10 +818,32 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       visible = visible && world.get<components::VisibilityComponent>(entity).visible;
     }
     if (!visible || state.particles.empty()) {
+      frame_stats.simulation_ms +=
+          elapsedMilliseconds(simulation_start, ParticleStatsClock::now());
       return;
     }
+    addCount(frame_stats.visible_emitters, 1u);
+    if (has_live_bounds &&
+        !boundsVisibleInCamera(cull_camera,
+                               emitter.local_space,
+                               emitter_position,
+                               emitter_rotation,
+                               emitter_scale,
+                               live_bounds_min,
+                               live_bounds_max,
+                               max_live_particle_extent,
+                               emitter_uniform_scale)) {
+      addCount(frame_stats.culled_emitters, 1u);
+      addCount(frame_stats.culled_particles, state.particles.size());
+      frame_stats.simulation_ms +=
+          elapsedMilliseconds(simulation_start, ParticleStatsClock::now());
+      return;
+    }
+    frame_stats.simulation_ms +=
+        elapsedMilliseconds(simulation_start, ParticleStatsClock::now());
 
-    renderer::ParticleBatch batch{};
+    const auto packing_start = ParticleStatsClock::now();
+    renderer::PackedParticleBatch batch{};
     batch.layer = emitter.layer;
     batch.depth_test = emitter.depth_test;
     batch.texture = emitter.texture;
@@ -673,6 +883,14 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
           (particle.start_color.a <= 0.0f && particle.end_color.a <= 0.0f)) {
         continue;
       }
+      if (emitter.blend_mode == renderer::ParticleBlendMode::Alpha) {
+        const float alpha_t = applyCurveExponent(t, emitter.alpha_curve_exponent);
+        const float current_alpha =
+            lerpFloat(particle.start_color.a, particle.end_color.a, alpha_t);
+        if (current_alpha <= kMinVisibleAlphaParticleAlpha) {
+          continue;
+        }
+      }
       math::Vec3 world_position = particle.position;
       float world_start_size = particle.start_size;
       float world_end_size = particle.end_size;
@@ -686,28 +904,38 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         world_start_size *= emitter_uniform_scale;
         world_end_size *= emitter_uniform_scale;
       }
-      batch.particles.push_back(renderer::ParticleInstance{
-          .position = glm::vec3(world_position.x, world_position.y, world_position.z),
-          .size = world_start_size,
-          .color = particle.start_color,
-          .rotation_radians = particle.rotation,
-          .uv_min = {0.0f, 0.0f},
-          .uv_max = {1.0f, 1.0f},
-          .uv_min_next = {0.0f, 0.0f},
-          .uv_max_next = {1.0f, 1.0f},
-          .frame_blend = 0.0f,
-          .color_end = particle.end_color,
-          .size_end = world_end_size,
-          .normalized_age = t,
-          .age_seconds = particle.age,
-          .frame_offset = particle.frame_offset,
-      });
+      renderer::ParticlePackedInstance packed{};
+      packed.position_age[0] = world_position.x;
+      packed.position_age[1] = world_position.y;
+      packed.position_age[2] = world_position.z;
+      packed.position_age[3] = t;
+      packed.color_start[0] = particle.start_color.r;
+      packed.color_start[1] = particle.start_color.g;
+      packed.color_start[2] = particle.start_color.b;
+      packed.color_start[3] = particle.start_color.a;
+      packed.color_end[0] = particle.end_color.r;
+      packed.color_end[1] = particle.end_color.g;
+      packed.color_end[2] = particle.end_color.b;
+      packed.color_end[3] = particle.end_color.a;
+      packed.rotation_size[0] = std::cos(particle.rotation);
+      packed.rotation_size[1] = std::sin(particle.rotation);
+      packed.rotation_size[2] = world_start_size;
+      packed.rotation_size[3] = world_end_size;
+      packed.params[0] = 0.0f;
+      packed.params[1] = static_cast<float>(particle.frame_offset);
+      packed.params[2] = particle.age;
+      batch.particles.push_back(packed);
     }
+    addCount(frame_stats.packed_particles, batch.particles.size());
 
     if (!batch.particles.empty()) {
-      device_->submitParticles(std::move(batch));
+      device_->submitPackedParticles(std::move(batch));
+      addCount(frame_stats.submitted_emitters, 1u);
     }
+    frame_stats.packing_ms += elapsedMilliseconds(packing_start, ParticleStatsClock::now());
   });
+
+  device_->setParticleSystemStats(frame_stats);
 }
 
 }  // namespace karma::particles

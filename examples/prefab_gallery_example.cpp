@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -427,6 +428,8 @@ class PrefabGalleryExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
+  engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
+  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeSphereRuntimeModule>());
   karma::demo::PrefabGalleryExample game;
 
   karma::app::EngineConfig config;

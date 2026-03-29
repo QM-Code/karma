@@ -1,6 +1,6 @@
 # Bright additive shock ring for the replayable explosion.
 layer = 0
-depth_test = false
+depth_test = true
 blend_mode = additive
 alignment = ground
 use_soft_mask = false

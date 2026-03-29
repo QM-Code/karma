@@ -173,5 +173,6 @@ std::optional<PrefabInstance> instantiatePrefab(
 
 bool setPrefabPlayback(ecs::World& world, ecs::Entity root, bool enabled);
 bool restartPrefab(ecs::World& world, ecs::Entity root);
+bool destroyPrefab(ecs::World& world, ecs::Entity root);
 
 }  // namespace karma::prefabs

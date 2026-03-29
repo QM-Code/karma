@@ -36,6 +36,8 @@ class GraphicsDevice {
 
   void submit(const DrawItem& item);
   void submitParticles(ParticleBatch batch);
+  void submitPackedParticles(PackedParticleBatch batch);
+  void setParticleSystemStats(const ParticlePassStats& stats);
   void retireInstance(InstanceId instance);
   void renderLayer(LayerId layer, RenderTargetId target = kDefaultRenderTarget);
   void drawLine(const math::Vec3& start, const math::Vec3& end, const math::Color& color,
@@ -53,6 +55,7 @@ class GraphicsDevice {
   void setGenerateMips(bool enabled);
   void setForwardPlusSettings(int tile_size, int max_lights_per_tile, int max_local_lights);
   ForwardPlusStats getForwardPlusStats() const;
+  ParticlePassStats getParticlePassStats() const;
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,

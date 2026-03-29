@@ -38,6 +38,8 @@ struct aiMaterial;
 
 namespace karma::renderer_backend {
 
+struct DrawConstants;
+
 class DiligentBackend final : public Backend {
  public:
   explicit DiligentBackend(karma::platform::Window& window);
@@ -71,6 +73,8 @@ class DiligentBackend final : public Backend {
 
   void submit(const renderer::DrawItem& item) override;
   void submitParticles(renderer::ParticleBatch batch) override;
+  void submitPackedParticles(renderer::PackedParticleBatch batch) override;
+  void setParticleSystemStats(const renderer::ParticlePassStats& stats) override;
   void retireInstance(renderer::InstanceId instance) override;
   void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) override;
   void drawLine(const math::Vec3& start, const math::Vec3& end,
@@ -91,6 +95,7 @@ class DiligentBackend final : public Backend {
                               int max_lights_per_tile,
                               int max_local_lights) override;
   renderer::ForwardPlusStats getForwardPlusStats() const override;
+  renderer::ParticlePassStats getParticlePassStats() const override;
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,
@@ -216,6 +221,63 @@ class DiligentBackend final : public Backend {
     bool transform_changed = true;
   };
 
+  struct ForwardBatchKey {
+    renderer::MeshId mesh = renderer::kInvalidMesh;
+    renderer::MaterialId material = renderer::kInvalidMaterial;
+    Diligent::Uint32 index_offset = 0;
+    Diligent::Uint32 index_count = 0;
+    bool indexed = false;
+
+    bool operator==(const ForwardBatchKey& other) const {
+      return mesh == other.mesh &&
+             material == other.material &&
+             index_offset == other.index_offset &&
+             index_count == other.index_count &&
+             indexed == other.indexed;
+    }
+  };
+
+  struct ForwardBatch {
+    ForwardBatchKey key{};
+    std::vector<glm::mat4> transforms;
+  };
+
+  struct TransparentForwardDraw {
+    ForwardBatchKey key{};
+    glm::mat4 transform{1.0f};
+    float depth = 0.0f;
+  };
+
+  struct ForwardLayerState {
+    std::vector<ForwardBatch> opaque_batches;
+    std::vector<TransparentForwardDraw> transparent_draws;
+    std::vector<TransparentForwardDraw> pre_particle_scene_sample_draws;
+    std::vector<TransparentForwardDraw> post_particle_draws;
+  };
+
+  struct ForwardLayerStats {
+    Diligent::Uint32 skipped_hidden = 0;
+    Diligent::Uint32 skipped_missing_vb = 0;
+    Diligent::Uint32 skipped_missing_mesh = 0;
+    Diligent::Uint32 skipped_layer = 0;
+  };
+
+  struct ParticlePassContext {
+    glm::mat4 view_proj{1.0f};
+    glm::vec3 camera_forward{0.0f, 0.0f, -1.0f};
+    glm::vec3 camera_up{0.0f, 1.0f, 0.0f};
+    glm::vec3 camera_right{1.0f, 0.0f, 0.0f};
+    Diligent::ITextureView* active_rtv = nullptr;
+    Diligent::ITextureView* active_dsv = nullptr;
+    Diligent::ITextureView* particle_dsv = nullptr;
+    Diligent::ITextureView* particle_scene_color_sample_srv = nullptr;
+    Diligent::ITextureView* particle_scene_depth_srv = nullptr;
+    int render_width = 0;
+    int render_height = 0;
+    Diligent::TEXTURE_FORMAT scene_color_format = Diligent::TEX_FORMAT_UNKNOWN;
+    bool allow_distortion_particles = false;
+  };
+
   struct LineVertex {
     float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -250,7 +312,7 @@ class DiligentBackend final : public Backend {
     uint32_t atlas_spacing_x = 0u;
     uint32_t atlas_spacing_y = 0u;
     float animation_fps = 0.0f;
-    std::vector<renderer::ParticleInstance> particles;
+    std::vector<renderer::ParticlePackedInstance> particles;
   };
 
   void initializeDevice();
@@ -268,6 +330,9 @@ class DiligentBackend final : public Backend {
   void ensureParticleSceneCopyResources(int width,
                                         int height,
                                         Diligent::TEXTURE_FORMAT format);
+  void ensureParticleHalfResAlphaResources(int width,
+                                           int height,
+                                           Diligent::TEXTURE_FORMAT format);
   void ensureParticleFallbackDepthResource();
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
                                                                    int width,
@@ -342,6 +407,61 @@ class DiligentBackend final : public Backend {
   static constexpr int kPointShadowFaceCount = 6;
   static constexpr int kPointShadowMatrixCount =
       kMaxPointShadowLights * kPointShadowFaceCount;
+  struct ShadowLayerState {
+    std::array<glm::mat4, kShadowCascadeCount> cascade_light_view_proj{};
+    std::array<glm::mat4, kShadowCascadeCount> cascade_shadow_uv_proj{};
+    std::array<float, kShadowCascadeCount> cascade_world_texel{};
+    std::array<float, kShadowCascadeCount> cascade_splits{};
+    std::array<glm::mat4, kPointShadowMatrixCount> point_shadow_uv_proj{};
+    std::array<renderer::LightData, kMaxPointShadowLights> point_shadow_lights{};
+    std::array<size_t, kMaxPointShadowLights> point_shadow_light_source_indices{};
+    std::array<size_t, kMaxPointShadowLights> point_shadow_local_light_indices{};
+    Diligent::Uint32 point_shadow_light_count = 0;
+    bool point_shadow_ready = false;
+  };
+  void renderShadowLayer(renderer::LayerId layer,
+                         float aspect,
+                         const glm::mat4& depth_fix,
+                         const glm::vec3& camera_position,
+                         const glm::vec3& cam_forward,
+                         const glm::vec3& cam_up,
+                         const glm::vec3& cam_right,
+                         bool is_gl,
+                         float fixed_bias,
+                         float shadow_texel_param,
+                         float point_shadow_texel_size,
+                         const std::vector<size_t>& local_light_source_indices,
+                         ShadowLayerState& out_state);
+  void collectForwardLayerState(renderer::LayerId layer,
+                                const glm::mat4& view_proj,
+                                const glm::vec3& camera_position,
+                                const glm::vec3& camera_forward,
+                                bool is_gl,
+                                ForwardLayerState& out_state,
+                                ForwardLayerStats& out_stats) const;
+  Diligent::Uint32 renderOpaqueForwardLayer(const ForwardLayerState& state,
+                                            const DrawConstants& base_constants,
+                                            Diligent::IPipelineState* active_forward_pipeline,
+                                            bool use_custom_shader_override,
+                                            Diligent::ITextureView* active_rtv,
+                                            Diligent::ITextureView* active_dsv,
+                                            int render_width,
+                                            int render_height);
+  Diligent::Uint32 renderTransparentForwardDraws(
+      const std::vector<TransparentForwardDraw>& draws,
+      const DrawConstants& base_constants,
+      Diligent::IPipelineState* active_forward_pipeline,
+      bool use_custom_shader_override,
+      Diligent::ITextureView* active_rtv,
+      Diligent::ITextureView* active_dsv,
+      Diligent::ITextureView* particle_dsv,
+      int render_width,
+      int render_height,
+      Diligent::ITextureView* scene_color_sample_srv,
+      Diligent::ITextureView* scene_depth_sample_srv);
+  bool forwardDrawsRequireSceneColorCopy(
+      const std::vector<TransparentForwardDraw>& draws) const;
+  void renderParticlePasses(renderer::LayerId layer, const ParticlePassContext& context);
   Diligent::RefCntAutoPtr<Diligent::ITexture> shadow_map_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_dsv_;
@@ -390,32 +510,40 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_additive_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_alpha_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_alpha_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_alpha_half_res_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_distortion_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_distortion_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_half_res_composite_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_additive_depth_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_additive_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_alpha_depth_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_alpha_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_alpha_half_res_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_distortion_depth_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_distortion_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_half_res_composite_srb_;
   Diligent::IShaderResourceVariable* particle_texture_var_additive_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_texture_var_additive_no_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_texture_var_alpha_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_texture_var_alpha_no_depth_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_texture_var_alpha_half_res_ = nullptr;
   Diligent::IShaderResourceVariable* particle_texture_var_distortion_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_texture_var_distortion_no_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_color_var_additive_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_color_var_additive_no_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_color_var_alpha_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_color_var_alpha_no_depth_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_scene_color_var_alpha_half_res_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_color_var_distortion_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_color_var_distortion_no_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_depth_var_additive_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_depth_var_additive_no_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_depth_var_alpha_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_depth_var_alpha_no_depth_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_scene_depth_var_alpha_half_res_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_depth_var_distortion_depth_ = nullptr;
   Diligent::IShaderResourceVariable* particle_scene_depth_var_distortion_no_depth_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_half_res_alpha_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_instance_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_cb_;
@@ -428,6 +556,9 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_scene_depth_read_only_dsv_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> particle_scene_color_copy_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_scene_color_copy_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> particle_half_res_alpha_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_half_res_alpha_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_half_res_alpha_rtv_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> particle_fallback_depth_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_fallback_depth_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_base_color_tex_;
@@ -533,9 +664,13 @@ class DiligentBackend final : public Backend {
   int particle_scene_color_copy_width_ = 0;
   int particle_scene_color_copy_height_ = 0;
   Diligent::TEXTURE_FORMAT particle_scene_color_copy_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  int particle_half_res_alpha_width_ = 0;
+  int particle_half_res_alpha_height_ = 0;
+  Diligent::TEXTURE_FORMAT particle_half_res_alpha_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   int forward_plus_tile_size_ = 16;
   int forward_plus_max_lights_per_tile_ = 128;
   renderer::ForwardPlusStats forward_plus_stats_{};
+  renderer::ParticlePassStats particle_pass_stats_{};
   bool warned_line_thickness_ = false;
   int current_width_ = 0;
   int current_height_ = 0;

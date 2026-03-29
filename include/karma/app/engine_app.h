@@ -6,19 +6,19 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <vector>
 
 #include "karma/app/game_interface.h"
+#include "karma/app/runtime_module.h"
 #include "karma/ecs/world.h"
 #include "karma/input/input_system.h"
 #include "karma/audio/audio.h"
 #include "karma/audio/audio_system.h"
-#include "karma/beams/beam_path_system.h"
 #include "karma/platform/window.h"
 #include "karma/particles/effect_library.h"
 #include "karma/particles/particle_system.h"
 #include "karma/prefabs/prefab_system.h"
 #include "karma/prefabs/prefab_registry.h"
-#include "karma/volumes/volume_sphere_system.h"
 #include "karma/app/ui_context.h"
 #include "karma/physics/physics_world.hpp"
 #include "karma/physics/physics_system.h"
@@ -83,12 +83,14 @@ class EngineApp {
   void requestStop();
   void setUi(std::unique_ptr<UiLayer> ui);
   void setCursorVisible(bool visible);
+  void addRuntimeModule(std::unique_ptr<RuntimeModule> module);
 
  private:
   void initSubsystems();
   void shutdownSubsystems();
   void syncSceneEntities();
   void warmUpRenderer();
+  RuntimeModuleContext makeRuntimeModuleContext();
 #if defined(KARMA_DEBUG_UI)
   std::unique_ptr<UiLayer> createDebugOverlayUi();
 #endif
@@ -100,9 +102,7 @@ class EngineApp {
   std::unique_ptr<renderer::RenderSystem> render_system_;
   std::unique_ptr<prefabs::PrefabSystem> prefab_system_;
   std::unique_ptr<prefabs::PrefabRegistry> prefab_registry_;
-  std::unique_ptr<beams::BeamPathSystem> beam_path_system_;
   std::unique_ptr<particles::ParticleSystem> particle_system_;
-  std::unique_ptr<volumes::VolumeSphereSystem> volume_sphere_system_;
   audio::Audio audio_;
   std::unique_ptr<audio::AudioSystem> audio_system_;
   physics::World physics_;
@@ -111,6 +111,7 @@ class EngineApp {
   renderer::MaterialLibrary materials_;
   particles::ParticleLibrary particle_effects_;
   systems::SystemGraph systems_;
+  std::vector<std::unique_ptr<RuntimeModule>> runtime_modules_;
   EngineConfig config_{};
   std::unique_ptr<UiLayer> user_ui_;
 #if defined(KARMA_DEBUG_UI)

@@ -65,6 +65,8 @@ Local-light / point-shadow sanity check:
 
 For current renderer/sample handoff notes, see:
 
+- [RENDERER_REFACTOR_BOOTSTRAP.md](RENDERER_REFACTOR_BOOTSTRAP.md)
+- [EFFECT_API_SPLIT_BOOTSTRAP.md](EFFECT_API_SPLIT_BOOTSTRAP.md)
 - [LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
 - [LOCAL_LIGHT_PROBE_BOOTSTRAP.md](LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
 
@@ -146,13 +148,21 @@ prefabs and instantiated either directly with `prefabs::instantiatePrefab(...)`
 or through `prefabs::PrefabRegistry` when the prefab also needs one-time
 runtime setup such as generated textures or particle registrations.
 
-The current prefab runtime supports:
+The core prefab runtime supports:
 
 - particle layers
 - mesh shells
 - lights
-- beam-path entities
-- analytic volume spheres
+
+Optional runtime modules can extend prefab instantiation with extra entry
+handlers. The engine currently ships:
+
+- `beams::BeamPathRuntimeModule` for beam-path entities
+- `volumes::VolumeSphereRuntimeModule` for analytic volume spheres
+
+If a prefab uses module-backed entries such as `beam` or `volume_sphere`,
+register the matching runtime module with `EngineApp` before calling
+`start(...)`.
 
 Prefabs can be loaded from either a `.kprefab` file or a directory containing
 `prefab.kprefab`.

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <string>
 
 #include <glm/glm.hpp>
@@ -195,6 +196,7 @@ class VolumetricSphereExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
+  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeSphereRuntimeModule>());
   karma::demo::VolumetricSphereExample game;
 
   karma::app::EngineConfig config;

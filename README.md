@@ -1,40 +1,50 @@
-# Karma sandbox
+# Karma Engine
 
-This folder holds a minimal, abstract engine skeleton you can grow into a full
-ECS + scene graph. It is intentionally decoupled from rendering/physics/etc so
-other layers can bind components to systems.
+Karma is a C++20 ECS-driven 3D game engine with a Diligent renderer, prefab and particle tooling, optional physics/audio/network backends, and sample applications under `examples/`.
 
-## Current Entry Points
+## Start Here
 
-For the actual runtime-facing repo docs, start here:
+If you are new to this repo, start with:
 
-- [docs/ENGINE_USAGE.md](/home/irie/Documents/karma/docs/ENGINE_USAGE.md)
-- [examples/README.md](/home/irie/Documents/karma/examples/README.md)
-- [NEXT_AGENT.md](/home/irie/Documents/karma/NEXT_AGENT.md)
+- [Usage Guide](docs/ENGINE_USAGE.md)
+- [Implementation Notes](docs/ENGINE_IMPLEMENTATION.md)
+- [Examples](examples/README.md)
+- [Next Agent Bootstrap](NEXT_AGENT.md)
 
-Current bootstrap handoffs:
+## Runtime Bootstrap
 
-- [docs/PARTICLE_PERF_BOOTSTRAP.md](/home/irie/Documents/karma/docs/PARTICLE_PERF_BOOTSTRAP.md)
-- [docs/PREFAB_GALLERY_BOOTSTRAP.md](/home/irie/Documents/karma/docs/PREFAB_GALLERY_BOOTSTRAP.md)
-- [docs/COLLISION_BOOTSTRAP.md](/home/irie/Documents/karma/docs/COLLISION_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](/home/irie/Documents/karma/docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](/home/irie/Documents/karma/docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+The main runtime entry point is [`src/app/engine_app.cpp`](src/app/engine_app.cpp).
 
-## Layout
+Current startup flow:
 
-- `karma/include/karma/core/`: core types (IDs, type registry helpers).
-- `karma/include/karma/ecs/`: entity/component storage and world registry.
-- `karma/include/karma/components/`: shared gameplay-ready component types.
-- `karma/include/karma/renderer/`: renderer resource descriptors/registry.
-- `karma/include/karma/scene/`: hierarchical scene graph.
-- `karma/include/karma/systems/`: abstract system interfaces and scheduling.
+- `EngineApp::start()` creates the window, graphics device, render system, prefab system, particle system, physics/collision layers, and audio layer.
+- It binds the game context, attaches any registered runtime modules, applies renderer settings from `EngineConfig`, and warms one render frame so the first visible frame does less surprise work.
+- `EngineApp::tick()` runs fixed-step gameplay and systems first, then per-frame updates, prefab/audio/UI prep, `beginFrame()`, particle updates, runtime-module updates, `RenderSystem::update()`, `renderLayer(0)`, UI, and `endFrame()`.
 
-## Design notes
+## Renderer Layout
 
-- Entities are just IDs; components live in per-type storages.
-- A `World` owns the entity registry and component storages.
-- The scene graph owns nodes and can reference entities for hierarchical
-  transforms or grouping.
-- Systems operate on a `World` and are scheduled by a small dependency graph.
+The engine-side renderer is split between scene extraction and backend execution:
 
-This is header-only for now; add `.cpp` files when implementations grow.
+- [`src/renderer/render_system.cpp`](src/renderer/render_system.cpp): ECS-to-render extraction, mesh/material binding, camera/light/environment submission, and debug draw collection.
+- [`include/karma/renderer/backends/diligent/backend.hpp`](include/karma/renderer/backends/diligent/backend.hpp): Diligent backend state and private pass entry points.
+- [`src/renderer/backends/diligent/backend_init.cpp`](src/renderer/backends/diligent/backend_init.cpp): device/bootstrap, shader and pipeline creation, shadow resources, and core renderer setup.
+- [`src/renderer/backends/diligent/backend_render.cpp`](src/renderer/backends/diligent/backend_render.cpp): frame orchestration, Forward+ setup, scene-copy orchestration, and remaining glue.
+- [`src/renderer/backends/diligent/passes/`](src/renderer/backends/diligent/passes): shadow, forward, particle, environment, line, frame, and camera-override pass code.
+- [`src/renderer/backends/diligent/resources/`](src/renderer/backends/diligent/resources): materials, meshes, render targets, and texture/resource helpers.
+
+## Current Bootstrap Handoffs
+
+Current high-signal handoff docs:
+
+- [Renderer Refactor Bootstrap](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
+- [Particle Performance Bootstrap](docs/PARTICLE_PERF_BOOTSTRAP.md)
+- [Effect API Split Bootstrap](docs/EFFECT_API_SPLIT_BOOTSTRAP.md)
+- [Explosion Stress Bootstrap](docs/EXPLOSION_STRESS_BOOTSTRAP.md)
+- [Prefab Gallery Bootstrap](docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [Collision Bootstrap](docs/COLLISION_BOOTSTRAP.md)
+- [Local Light Shadow Bootstrap](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
+- [Local Light Probe Bootstrap](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+
+## Project Reality
+
+This repo is no longer a minimal header-only skeleton. The current tree contains a working `src/` implementation with renderer, prefab, particle, optional effect-module, physics, collision, audio, and networking layers. Older docs that describe the repo as a tiny abstract sandbox are outdated.

@@ -9,6 +9,7 @@
 #include "karma/components/particle_effect_override.h"
 #include "karma/components/particle_emitter.h"
 #include "karma/components/transform.h"
+#include "karma/components/visibility.h"
 #include "karma/ecs/world.h"
 
 namespace karma::particles {
@@ -108,6 +109,9 @@ inline bool setEffectEnabled(ecs::World& world, ecs::Entity entity, bool enabled
     return false;
   }
   world.get<components::ParticleEmitterComponent>(entity).enabled = enabled;
+  if (world.has<components::VisibilityComponent>(entity)) {
+    world.get<components::VisibilityComponent>(entity).visible = enabled;
+  }
   return true;
 }
 
@@ -129,6 +133,9 @@ inline bool setEffectPlayback(ecs::World& world,
   auto& emitter = world.get<components::ParticleEmitterComponent>(entity);
   emitter.enabled = enabled;
   emitter.playing = playing;
+  if (world.has<components::VisibilityComponent>(entity)) {
+    world.get<components::VisibilityComponent>(entity).visible = enabled;
+  }
   return true;
 }
 
@@ -141,6 +148,9 @@ inline bool restartEffect(ecs::World& world, ecs::Entity entity) {
     auto& emitter = world.get<components::ParticleEmitterComponent>(entity);
     emitter.enabled = true;
     emitter.playing = true;
+  }
+  if (world.has<components::VisibilityComponent>(entity)) {
+    world.get<components::VisibilityComponent>(entity).visible = true;
   }
 
   world.get<components::ParticleEffectComponent>(entity).restart_count += 1;

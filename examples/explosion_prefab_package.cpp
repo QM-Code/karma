@@ -5,15 +5,20 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <spdlog/spdlog.h>
 
 #include "karma/karma.h"
+#include "karma/components/visibility.h"
 
 namespace karma::demo {
 
@@ -25,7 +30,7 @@ constexpr int kAtlasFrameSize = 64;
 constexpr int kAtlasFrameCount = 4;
 constexpr int kFlipbookColumns = 5;
 constexpr int kFlipbookRows = 5;
-constexpr int kFlipbookFrameSize = 200;
+constexpr int kFlipbookFrameSize = 400;
 constexpr int kFlipbookBorder = 4;
 constexpr int kFlipbookSpacing = 4;
 constexpr float kLightPulseDuration = 0.64f;
@@ -41,7 +46,13 @@ struct ExplosionPackageState {
   renderer::TextureId debris_texture = renderer::kInvalidTexture;
   renderer::TextureId explosion_flipbook_texture = renderer::kInvalidTexture;
   renderer::TextureId explosion_smoke_flipbook_texture = renderer::kInvalidTexture;
+  ExplosionFlipbookTextureSource core_flipbook_source =
+      ExplosionFlipbookTextureSource::Unknown;
+  ExplosionFlipbookTextureSource smoke_flipbook_source =
+      ExplosionFlipbookTextureSource::Unknown;
 };
+
+ExplosionPrefabPackageDebugInfo g_explosion_package_debug_info{};
 
 float saturate(float value) {
   return std::clamp(value, 0.0f, 1.0f);
@@ -54,6 +65,20 @@ float smoothStep01(float value) {
 
 std::uint8_t toByte(float value) {
   return static_cast<std::uint8_t>(std::lround(saturate(value) * 255.0f));
+}
+
+std::string_view flipbookSourceName(ExplosionFlipbookTextureSource source) {
+  switch (source) {
+    case ExplosionFlipbookTextureSource::ExrSequence:
+      return "exr_sequence";
+    case ExplosionFlipbookTextureSource::LegacySheet:
+      return "legacy_sheet";
+    case ExplosionFlipbookTextureSource::ProceduralAtlas:
+      return "procedural_atlas";
+    case ExplosionFlipbookTextureSource::Unknown:
+    default:
+      return "unknown";
+  }
 }
 
 void destroyTextureIfValid(renderer::GraphicsDevice* graphics, renderer::TextureId& texture) {
@@ -80,6 +105,649 @@ renderer::TextureId loadTextureRGBA8(renderer::GraphicsDevice& graphics,
   const renderer::TextureId texture = graphics.createTextureRGBA8(width, height, pixels);
   stbi_image_free(pixels);
   return texture;
+}
+
+struct FloatImage {
+  int width = 0;
+  int height = 0;
+  bool has_meaningful_alpha = false;
+  std::vector<float> pixels;
+};
+
+struct SequenceAtlasBuildConfig {
+  std::filesystem::path sequence_dir;
+  size_t first_frame_index = 0u;
+  size_t last_frame_index = 0u;
+  int atlas_columns = 1;
+  int atlas_rows = 1;
+  int frame_width = 0;
+  int frame_height = 0;
+  int atlas_border = 0;
+  int atlas_spacing = 0;
+  float alpha_signal_bias = 0.0f;
+  float alpha_signal_scale = 2.0f;
+  float alpha_signal_power = 1.0f;
+  float alpha_output_scale = 1.2f;
+  float source_alpha_floor = 0.35f;
+  bool use_luminance_for_alpha = false;
+  bool multiply_source_alpha = false;
+};
+
+float halfToFloat(std::uint16_t value) {
+  const std::uint32_t sign = (static_cast<std::uint32_t>(value & 0x8000u)) << 16u;
+  const std::uint32_t exponent_bits = (value >> 10u) & 0x1Fu;
+  const std::uint32_t mantissa_bits = value & 0x03FFu;
+
+  std::uint32_t float_bits = 0u;
+  if (exponent_bits == 0u) {
+    if (mantissa_bits == 0u) {
+      float_bits = sign;
+    } else {
+      int exponent = -14;
+      std::uint32_t mantissa = mantissa_bits;
+      while ((mantissa & 0x0400u) == 0u) {
+        mantissa <<= 1u;
+        --exponent;
+      }
+      mantissa &= 0x03FFu;
+      float_bits =
+          sign | (static_cast<std::uint32_t>(exponent + 127) << 23u) | (mantissa << 13u);
+    }
+  } else if (exponent_bits == 0x1Fu) {
+    float_bits = sign | 0x7F800000u | (mantissa_bits << 13u);
+  } else {
+    float_bits = sign | ((exponent_bits + 112u) << 23u) | (mantissa_bits << 13u);
+  }
+
+  float out = 0.0f;
+  std::memcpy(&out, &float_bits, sizeof(out));
+  return out;
+}
+
+FloatImage loadUncompressedExrRGBA32F(const std::filesystem::path& path) {
+  struct ChannelDef {
+    std::string name;
+    std::uint32_t pixel_type = 0u;
+    std::uint32_t x_sampling = 1u;
+    std::uint32_t y_sampling = 1u;
+  };
+
+  auto read_u32 = [](const std::vector<std::uint8_t>& bytes, size_t offset) -> std::uint32_t {
+    std::uint32_t value = 0u;
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    return value;
+  };
+
+  auto read_u64 = [](const std::vector<std::uint8_t>& bytes, size_t offset) -> std::uint64_t {
+    std::uint64_t value = 0u;
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    return value;
+  };
+
+  auto read_i32 = [](const std::vector<std::uint8_t>& bytes, size_t offset) -> std::int32_t {
+    std::int32_t value = 0;
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    return value;
+  };
+
+  auto read_f32 = [](const std::vector<std::uint8_t>& bytes, size_t offset) -> float {
+    float value = 0.0f;
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    return value;
+  };
+
+  FloatImage image{};
+  std::error_code ec;
+  const auto file_size = std::filesystem::file_size(path, ec);
+  if (ec || file_size < 16u) {
+    return image;
+  }
+
+  std::vector<std::uint8_t> bytes(static_cast<size_t>(file_size));
+  std::ifstream input(path, std::ios::binary);
+  if (!input.is_open()) {
+    return image;
+  }
+  input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  if (!input || input.gcount() != static_cast<std::streamsize>(bytes.size())) {
+    return image;
+  }
+
+  constexpr std::uint32_t kOpenExrMagic = 20000630u;
+  if (read_u32(bytes, 0u) != kOpenExrMagic) {
+    return image;
+  }
+
+  const std::uint32_t version = read_u32(bytes, 4u);
+  constexpr std::uint32_t kTiledBit = 1u << 9u;
+  constexpr std::uint32_t kDeepDataBit = 1u << 11u;
+  constexpr std::uint32_t kMultiPartBit = 1u << 12u;
+  if ((version & (kTiledBit | kDeepDataBit | kMultiPartBit)) != 0u) {
+    return image;
+  }
+
+  std::vector<ChannelDef> channels;
+  std::int32_t min_x = 0;
+  std::int32_t min_y = 0;
+  std::int32_t max_x = -1;
+  std::int32_t max_y = -1;
+  int compression = -1;
+  int line_order = 0;
+
+  size_t cursor = 8u;
+  auto read_c_string = [&](std::string& out) -> bool {
+    size_t end = cursor;
+    while (end < bytes.size() && bytes[end] != 0u) {
+      ++end;
+    }
+    if (end >= bytes.size()) {
+      return false;
+    }
+    out.assign(reinterpret_cast<const char*>(bytes.data() + cursor), end - cursor);
+    cursor = end + 1u;
+    return true;
+  };
+
+  while (cursor < bytes.size()) {
+    std::string name;
+    if (!read_c_string(name)) {
+      return FloatImage{};
+    }
+    if (name.empty()) {
+      break;
+    }
+
+    std::string type;
+    if (!read_c_string(type) || cursor + 4u > bytes.size()) {
+      return FloatImage{};
+    }
+    const std::uint32_t value_size = read_u32(bytes, cursor);
+    cursor += 4u;
+    if (cursor + static_cast<size_t>(value_size) > bytes.size()) {
+      return FloatImage{};
+    }
+
+    const size_t value_offset = cursor;
+    if (name == "compression" && type == "compression" && value_size == 1u) {
+      compression = static_cast<int>(bytes[value_offset]);
+    } else if (name == "lineOrder" && type == "lineOrder" && value_size == 1u) {
+      line_order = static_cast<int>(bytes[value_offset]);
+    } else if ((name == "dataWindow" || name == "displayWindow") && type == "box2i" &&
+               value_size == 16u && max_x < min_x) {
+      min_x = read_i32(bytes, value_offset + 0u);
+      min_y = read_i32(bytes, value_offset + 4u);
+      max_x = read_i32(bytes, value_offset + 8u);
+      max_y = read_i32(bytes, value_offset + 12u);
+    } else if (name == "channels" && type == "chlist") {
+      size_t channel_cursor = value_offset;
+      const size_t channel_end = value_offset + static_cast<size_t>(value_size);
+      while (channel_cursor < channel_end) {
+        size_t end = channel_cursor;
+        while (end < channel_end && bytes[end] != 0u) {
+          ++end;
+        }
+        if (end >= channel_end) {
+          return FloatImage{};
+        }
+        if (end == channel_cursor) {
+          break;
+        }
+
+        ChannelDef channel{};
+        channel.name.assign(reinterpret_cast<const char*>(bytes.data() + channel_cursor),
+                            end - channel_cursor);
+        channel_cursor = end + 1u;
+        if (channel_cursor + 16u > channel_end) {
+          return FloatImage{};
+        }
+        channel.pixel_type = read_u32(bytes, channel_cursor + 0u);
+        channel.x_sampling = read_u32(bytes, channel_cursor + 8u);
+        channel.y_sampling = read_u32(bytes, channel_cursor + 12u);
+        channel_cursor += 16u;
+        channels.push_back(std::move(channel));
+      }
+    }
+
+    cursor += static_cast<size_t>(value_size);
+  }
+
+  if (compression != 0 || line_order != 0 || channels.empty() || max_x < min_x || max_y < min_y) {
+    return image;
+  }
+
+  const int width = max_x - min_x + 1;
+  const int height = max_y - min_y + 1;
+  if (width <= 0 || height <= 0) {
+    return image;
+  }
+
+  const size_t offset_table_offset = cursor;
+  const size_t scanline_blocks = static_cast<size_t>(height);
+  const size_t offset_table_size = scanline_blocks * sizeof(std::uint64_t);
+  if (offset_table_offset + offset_table_size > bytes.size()) {
+    return image;
+  }
+
+  std::sort(channels.begin(), channels.end(), [](const ChannelDef& lhs, const ChannelDef& rhs) {
+    return lhs.name < rhs.name;
+  });
+
+  size_t expected_scanline_bytes = 0u;
+  for (const ChannelDef& channel : channels) {
+    if (channel.x_sampling != 1u || channel.y_sampling != 1u) {
+      return image;
+    }
+
+    size_t bytes_per_sample = 0u;
+    switch (channel.pixel_type) {
+      case 0u:
+      case 2u:
+        bytes_per_sample = 4u;
+        break;
+      case 1u:
+        bytes_per_sample = 2u;
+        break;
+      default:
+        return image;
+    }
+    expected_scanline_bytes += static_cast<size_t>(width) * bytes_per_sample;
+  }
+
+  image.width = width;
+  image.height = height;
+  image.pixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u, 0.0f);
+  for (size_t pixel = 0u; pixel < static_cast<size_t>(width) * static_cast<size_t>(height); ++pixel) {
+    image.pixels[pixel * 4u + 3u] = 1.0f;
+  }
+
+  auto channel_index_for_name = [](const std::string& name) -> int {
+    if (name == "R") {
+      return 0;
+    }
+    if (name == "G") {
+      return 1;
+    }
+    if (name == "B") {
+      return 2;
+    }
+    if (name == "A") {
+      return 3;
+    }
+    return -1;
+  };
+
+  for (size_t block = 0u; block < scanline_blocks; ++block) {
+    const std::uint64_t chunk_offset = read_u64(bytes, offset_table_offset + block * 8u);
+    if (chunk_offset + 8u > bytes.size()) {
+      return FloatImage{};
+    }
+
+    const std::int32_t scanline_y = read_i32(bytes, static_cast<size_t>(chunk_offset) + 0u);
+    const std::uint32_t data_size = read_u32(bytes, static_cast<size_t>(chunk_offset) + 4u);
+    if (data_size != expected_scanline_bytes ||
+        chunk_offset + 8u + static_cast<std::uint64_t>(data_size) > bytes.size()) {
+      return FloatImage{};
+    }
+
+    const int row = scanline_y - min_y;
+    if (row < 0 || row >= height) {
+      return FloatImage{};
+    }
+
+    size_t data_cursor = static_cast<size_t>(chunk_offset) + 8u;
+    for (const ChannelDef& channel : channels) {
+      const int rgba_channel = channel_index_for_name(channel.name);
+      for (int x = 0; x < width; ++x) {
+        float sample = 0.0f;
+        switch (channel.pixel_type) {
+          case 0u:
+            sample = static_cast<float>(read_u32(bytes, data_cursor));
+            data_cursor += 4u;
+            break;
+          case 1u: {
+            std::uint16_t half = 0u;
+            std::memcpy(&half, bytes.data() + data_cursor, sizeof(half));
+            sample = halfToFloat(half);
+            data_cursor += 2u;
+            break;
+          }
+          case 2u:
+            sample = read_f32(bytes, data_cursor);
+            data_cursor += 4u;
+            break;
+          default:
+            return FloatImage{};
+        }
+
+        if (rgba_channel >= 0) {
+          const size_t pixel_index =
+              (static_cast<size_t>(row) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4u;
+          image.pixels[pixel_index + static_cast<size_t>(rgba_channel)] = sample;
+        }
+      }
+    }
+  }
+
+  float alpha_min = std::numeric_limits<float>::max();
+  float alpha_max = std::numeric_limits<float>::lowest();
+  for (size_t index = 3u; index < image.pixels.size(); index += 4u) {
+    alpha_min = std::min(alpha_min, image.pixels[index]);
+    alpha_max = std::max(alpha_max, image.pixels[index]);
+  }
+  image.has_meaningful_alpha = (alpha_max - alpha_min) > 1.0e-4f && alpha_max > 1.0e-3f;
+  return image;
+}
+
+float toneMapHdr(float value) {
+  const float clamped = std::max(value, 0.0f);
+  const float mapped = 1.0f - std::exp(-clamped * 1.45f);
+  return std::pow(std::clamp(mapped, 0.0f, 1.0f), 1.0f / 2.2f);
+}
+
+FloatImage loadImageRGBA32F(const std::filesystem::path& path) {
+  if (path.extension() == ".exr") {
+    FloatImage image = loadUncompressedExrRGBA32F(path);
+    if (image.width > 0 && image.height > 0) {
+      return image;
+    }
+  }
+
+  FloatImage image{};
+  int width = 0;
+  int height = 0;
+  int components = 0;
+  stbi_set_flip_vertically_on_load(0);
+  float* pixels = stbi_loadf(path.string().c_str(), &width, &height, &components, 4);
+  if (pixels == nullptr || width <= 0 || height <= 0) {
+    if (pixels != nullptr) {
+      stbi_image_free(pixels);
+    }
+    return image;
+  }
+
+  image.width = width;
+  image.height = height;
+  image.pixels.assign(
+      pixels, pixels + static_cast<size_t>(width) * static_cast<size_t>(height) * 4u);
+  stbi_image_free(pixels);
+
+  float alpha_min = std::numeric_limits<float>::max();
+  float alpha_max = std::numeric_limits<float>::lowest();
+  for (size_t index = 3u; index < image.pixels.size(); index += 4u) {
+    alpha_min = std::min(alpha_min, image.pixels[index]);
+    alpha_max = std::max(alpha_max, image.pixels[index]);
+  }
+  image.has_meaningful_alpha = (alpha_max - alpha_min) > 1.0e-4f && alpha_max > 1.0e-3f;
+  return image;
+}
+
+std::array<float, 4> sampleImageBilinear(const FloatImage& image, float u, float v) {
+  if (image.width <= 0 || image.height <= 0 || image.pixels.empty()) {
+    return {0.0f, 0.0f, 0.0f, 0.0f};
+  }
+
+  const float x = std::clamp(u, 0.0f, 1.0f) * static_cast<float>(image.width - 1);
+  const float y = std::clamp(v, 0.0f, 1.0f) * static_cast<float>(image.height - 1);
+  const int x0 = static_cast<int>(std::floor(x));
+  const int y0 = static_cast<int>(std::floor(y));
+  const int x1 = std::min(x0 + 1, image.width - 1);
+  const int y1 = std::min(y0 + 1, image.height - 1);
+  const float tx = x - static_cast<float>(x0);
+  const float ty = y - static_cast<float>(y0);
+
+  auto fetch = [&](int px, int py) {
+    const size_t index =
+        (static_cast<size_t>(py) * static_cast<size_t>(image.width) + static_cast<size_t>(px)) * 4u;
+    return std::array<float, 4>{
+        image.pixels[index + 0u],
+        image.pixels[index + 1u],
+        image.pixels[index + 2u],
+        image.pixels[index + 3u],
+    };
+  };
+
+  const auto c00 = fetch(x0, y0);
+  const auto c10 = fetch(x1, y0);
+  const auto c01 = fetch(x0, y1);
+  const auto c11 = fetch(x1, y1);
+
+  std::array<float, 4> out{};
+  for (int channel = 0; channel < 4; ++channel) {
+    const float top = c00[channel] + (c10[channel] - c00[channel]) * tx;
+    const float bottom = c01[channel] + (c11[channel] - c01[channel]) * tx;
+    out[static_cast<size_t>(channel)] = top + (bottom - top) * ty;
+  }
+  return out;
+}
+
+void writePackedExplosionFrame(std::vector<std::uint8_t>& atlas_pixels,
+                               int atlas_width,
+                               int atlas_height,
+                               int dst_x,
+                               int dst_y,
+                               int dst_width,
+                               int dst_height,
+                               const FloatImage& source,
+                               const SequenceAtlasBuildConfig& config) {
+  auto write_pixel = [&](int x, int y, const std::array<std::uint8_t, 4>& rgba) {
+    if (x < 0 || y < 0 || x >= atlas_width || y >= atlas_height) {
+      return;
+    }
+    const size_t index =
+        (static_cast<size_t>(y) * static_cast<size_t>(atlas_width) + static_cast<size_t>(x)) * 4u;
+    atlas_pixels[index + 0u] = rgba[0];
+    atlas_pixels[index + 1u] = rgba[1];
+    atlas_pixels[index + 2u] = rgba[2];
+    atlas_pixels[index + 3u] = rgba[3];
+  };
+
+  std::vector<std::array<std::uint8_t, 4>> frame_pixels(
+      static_cast<size_t>(dst_width) * static_cast<size_t>(dst_height));
+  for (int y = 0; y < dst_height; ++y) {
+    for (int x = 0; x < dst_width; ++x) {
+      const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(dst_width);
+      const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(dst_height);
+      const auto sample = sampleImageBilinear(source, u, v);
+      const float mapped_r = toneMapHdr(sample[0]);
+      const float mapped_g = toneMapHdr(sample[1]);
+      const float mapped_b = toneMapHdr(sample[2]);
+      const float hdr_peak = std::max(sample[0], std::max(sample[1], sample[2]));
+      const float hdr_luminance =
+          std::max(0.0f, sample[0] * 0.2126f + sample[1] * 0.7152f + sample[2] * 0.0722f);
+      const float alpha_signal =
+          std::max((config.use_luminance_for_alpha ? hdr_luminance : hdr_peak) -
+                       config.alpha_signal_bias,
+                   0.0f);
+      float derived_alpha =
+          1.0f - std::exp(-alpha_signal * std::max(config.alpha_signal_scale, 0.0f));
+      derived_alpha = std::pow(
+          saturate(derived_alpha * std::max(config.alpha_output_scale, 0.0f)),
+          std::max(config.alpha_signal_power, 0.001f));
+      float alpha = derived_alpha;
+      if (source.has_meaningful_alpha) {
+        const float source_alpha = saturate(sample[3]);
+        if (config.multiply_source_alpha) {
+          alpha = source_alpha * derived_alpha;
+        } else {
+          alpha = std::max(derived_alpha * std::max(config.source_alpha_floor, 0.0f), source_alpha);
+        }
+      }
+
+      const auto rgba = std::array<std::uint8_t, 4>{
+          toByte(mapped_r),
+          toByte(mapped_g),
+          toByte(mapped_b),
+          toByte(alpha),
+      };
+      frame_pixels[static_cast<size_t>(y) * static_cast<size_t>(dst_width) +
+                   static_cast<size_t>(x)] = rgba;
+      write_pixel(dst_x + x, dst_y + y, rgba);
+    }
+  }
+
+  const auto sample_frame_pixel = [&](int x, int y) -> const std::array<std::uint8_t, 4>& {
+    const int clamped_x = std::clamp(x, 0, dst_width - 1);
+    const int clamped_y = std::clamp(y, 0, dst_height - 1);
+    return frame_pixels[static_cast<size_t>(clamped_y) * static_cast<size_t>(dst_width) +
+                        static_cast<size_t>(clamped_x)];
+  };
+
+  for (int y = 0; y < dst_height; ++y) {
+    const auto& left = sample_frame_pixel(0, y);
+    const auto& right = sample_frame_pixel(dst_width - 1, y);
+    for (int bleed = 1; bleed <= 2; ++bleed) {
+      write_pixel(dst_x - bleed, dst_y + y, left);
+      write_pixel(dst_x + dst_width - 1 + bleed, dst_y + y, right);
+    }
+  }
+  for (int x = 0; x < dst_width; ++x) {
+    const auto& top = sample_frame_pixel(x, 0);
+    const auto& bottom = sample_frame_pixel(x, dst_height - 1);
+    for (int bleed = 1; bleed <= 2; ++bleed) {
+      write_pixel(dst_x + x, dst_y - bleed, top);
+      write_pixel(dst_x + x, dst_y + dst_height - 1 + bleed, bottom);
+    }
+  }
+}
+
+renderer::TextureId buildSequenceAtlas(renderer::GraphicsDevice& graphics,
+                                       const SequenceAtlasBuildConfig& config) {
+  if (config.atlas_columns <= 0 || config.atlas_rows <= 0 ||
+      config.frame_width <= 0 || config.frame_height <= 0) {
+    return renderer::kInvalidTexture;
+  }
+  const int atlas_frames = config.atlas_columns * config.atlas_rows;
+  const int atlas_width =
+      config.atlas_columns * config.frame_width +
+      (config.atlas_columns - 1) * config.atlas_spacing + config.atlas_border * 2;
+  const int atlas_height =
+      config.atlas_rows * config.frame_height +
+      (config.atlas_rows - 1) * config.atlas_spacing + config.atlas_border * 2;
+  std::vector<std::filesystem::path> source_frames;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(config.sequence_dir, ec)) {
+    if (ec || !entry.is_regular_file()) {
+      continue;
+    }
+    if (entry.path().extension() == ".exr") {
+      source_frames.push_back(entry.path());
+    }
+  }
+  if (source_frames.empty()) {
+    return renderer::kInvalidTexture;
+  }
+  std::sort(source_frames.begin(), source_frames.end());
+
+  const size_t first_index = std::min(config.first_frame_index, source_frames.size() - 1u);
+  const size_t last_index =
+      std::max(first_index, std::min(config.last_frame_index, source_frames.size() - 1u));
+  std::vector<std::uint8_t> atlas_pixels(
+      static_cast<size_t>(atlas_width) * static_cast<size_t>(atlas_height) * 4u, 0u);
+
+  for (int atlas_frame = 0; atlas_frame < atlas_frames; ++atlas_frame) {
+    const float t = atlas_frames > 1
+                        ? static_cast<float>(atlas_frame) / static_cast<float>(atlas_frames - 1)
+                        : 0.0f;
+    const size_t source_index =
+        first_index + static_cast<size_t>(std::lround(
+                          static_cast<float>(last_index - first_index) * t));
+    const FloatImage source = loadImageRGBA32F(source_frames[source_index]);
+    if (source.width <= 0 || source.height <= 0) {
+      return renderer::kInvalidTexture;
+    }
+    const int column = atlas_frame % config.atlas_columns;
+    const int row = atlas_frame / config.atlas_columns;
+    const int dst_x = config.atlas_border + column * (config.frame_width + config.atlas_spacing);
+    const int dst_y = config.atlas_border + row * (config.frame_height + config.atlas_spacing);
+    writePackedExplosionFrame(atlas_pixels,
+                              atlas_width,
+                              atlas_height,
+                              dst_x,
+                              dst_y,
+                              config.frame_width,
+                              config.frame_height,
+                              source,
+                              config);
+  }
+
+  return graphics.createTextureRGBA8(atlas_width, atlas_height, atlas_pixels.data());
+}
+
+renderer::TextureId buildResampledAtlasFromImage(renderer::GraphicsDevice& graphics,
+                                                 const std::filesystem::path& source_path,
+                                                 int atlas_width,
+                                                 int atlas_height) {
+  if (atlas_width <= 0 || atlas_height <= 0) {
+    return renderer::kInvalidTexture;
+  }
+  const FloatImage source = loadImageRGBA32F(source_path);
+  if (source.width <= 0 || source.height <= 0) {
+    return renderer::kInvalidTexture;
+  }
+
+  std::vector<std::uint8_t> pixels(
+      static_cast<size_t>(atlas_width) * static_cast<size_t>(atlas_height) * 4u, 0u);
+  for (int y = 0; y < atlas_height; ++y) {
+    for (int x = 0; x < atlas_width; ++x) {
+      const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(atlas_width);
+      const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(atlas_height);
+      const auto sample = sampleImageBilinear(source, u, v);
+      const size_t index =
+          (static_cast<size_t>(y) * static_cast<size_t>(atlas_width) + static_cast<size_t>(x)) * 4u;
+      pixels[index + 0u] = toByte(sample[0]);
+      pixels[index + 1u] = toByte(sample[1]);
+      pixels[index + 2u] = toByte(sample[2]);
+      pixels[index + 3u] = toByte(sample[3]);
+    }
+  }
+
+  return graphics.createTextureRGBA8(atlas_width, atlas_height, pixels.data());
+}
+
+renderer::TextureId buildExplosionSequenceAtlas(renderer::GraphicsDevice& graphics,
+                                                const std::filesystem::path& sequence_dir) {
+  return buildSequenceAtlas(graphics,
+                            SequenceAtlasBuildConfig{
+                                .sequence_dir = sequence_dir,
+                                .first_frame_index = 1u,
+                                .last_frame_index = 74u,
+                                .atlas_columns = 5,
+                                .atlas_rows = 5,
+                                .frame_width = kFlipbookFrameSize,
+                                .frame_height = kFlipbookFrameSize,
+                                .atlas_border = 4,
+                                .atlas_spacing = 4,
+                                .alpha_signal_bias = 0.0f,
+                                .alpha_signal_scale = 2.0f,
+                                .alpha_signal_power = 1.0f,
+                                .alpha_output_scale = 1.2f,
+                                .source_alpha_floor = 0.35f,
+                                .use_luminance_for_alpha = false,
+                                .multiply_source_alpha = false,
+                            });
+}
+
+renderer::TextureId buildExplosionSmokeSequenceAtlas(renderer::GraphicsDevice& graphics,
+                                                     const std::filesystem::path& sequence_dir) {
+  return buildSequenceAtlas(graphics,
+                            SequenceAtlasBuildConfig{
+                                .sequence_dir = sequence_dir,
+                                .first_frame_index = 10u,
+                                .last_frame_index = 92u,
+                                .atlas_columns = 5,
+                                .atlas_rows = 5,
+                                .frame_width = kFlipbookFrameSize,
+                                .frame_height = kFlipbookFrameSize,
+                                .atlas_border = 4,
+                                .atlas_spacing = 4,
+                                .alpha_signal_bias = 0.185f,
+                                .alpha_signal_scale = 8.0f,
+                                .alpha_signal_power = 1.15f,
+                                .alpha_output_scale = 1.0f,
+                                .source_alpha_floor = 0.0f,
+                                .use_luminance_for_alpha = true,
+                                .multiply_source_alpha = true,
+                            });
 }
 
 std::vector<std::uint8_t> buildSparkAtlas(int frame_size, int frame_count) {
@@ -546,23 +1214,68 @@ bool prepareExplosionPackage(const prefabs::PrefabPackageContext& context,
         kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
   }
   if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
-    state->explosion_flipbook_texture = loadTextureRGBA8(
-        *context.graphics,
-        resolveExampleAssetPath("Explosion00-flipbooks/Explosion00_5x5.tga"));
+    state->explosion_flipbook_texture =
+        buildExplosionSequenceAtlas(*context.graphics,
+                                    resolveExampleAssetPath("Explosion00-sequence-exr"));
+    if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
+      spdlog::warn("Explosion prefab package EXR fire atlas build failed; falling back to resampled Explosion00_5x5 sheet");
+      const int atlas_width = kFlipbookColumns * kFlipbookFrameSize +
+                              (kFlipbookColumns - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
+      const int atlas_height = kFlipbookRows * kFlipbookFrameSize +
+                               (kFlipbookRows - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
+      state->explosion_flipbook_texture = buildResampledAtlasFromImage(
+          *context.graphics,
+          resolveExampleAssetPath("Explosion00-flipbooks/Explosion00_5x5.exr"),
+          atlas_width,
+          atlas_height);
+      if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
+        state->explosion_flipbook_texture = buildResampledAtlasFromImage(
+            *context.graphics,
+            resolveExampleAssetPath("Explosion00-flipbooks/Explosion00_5x5.tga"),
+            atlas_width,
+            atlas_height);
+      }
+      if (state->explosion_flipbook_texture != renderer::kInvalidTexture) {
+        state->core_flipbook_source = ExplosionFlipbookTextureSource::LegacySheet;
+      }
+    } else {
+      spdlog::info("Explosion prefab package built Explosion00 fire atlas from EXR sequence");
+      state->core_flipbook_source = ExplosionFlipbookTextureSource::ExrSequence;
+    }
     if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
       spdlog::error("Explosion prefab package failed to load Explosion00_5x5.tga");
       return false;
     }
   }
   if (state->explosion_smoke_flipbook_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildExplosionSmokeFlipbookAtlas();
-    const int atlas_width = kFlipbookColumns * kFlipbookFrameSize +
-                            (kFlipbookColumns - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
-    const int atlas_height = kFlipbookRows * kFlipbookFrameSize +
-                             (kFlipbookRows - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
     state->explosion_smoke_flipbook_texture =
-        context.graphics->createTextureRGBA8(atlas_width, atlas_height, atlas.data());
+        buildExplosionSmokeSequenceAtlas(*context.graphics,
+                                         resolveExampleAssetPath("Explosion01-light-nofire-sequence-exr"));
+    if (state->explosion_smoke_flipbook_texture == renderer::kInvalidTexture) {
+      spdlog::warn("Explosion prefab package EXR smoke atlas build failed; falling back to procedural smoke atlas");
+      const auto atlas = buildExplosionSmokeFlipbookAtlas();
+      const int atlas_width = kFlipbookColumns * kFlipbookFrameSize +
+                              (kFlipbookColumns - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
+      const int atlas_height = kFlipbookRows * kFlipbookFrameSize +
+                               (kFlipbookRows - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
+      state->explosion_smoke_flipbook_texture =
+          context.graphics->createTextureRGBA8(atlas_width, atlas_height, atlas.data());
+      if (state->explosion_smoke_flipbook_texture != renderer::kInvalidTexture) {
+        state->smoke_flipbook_source = ExplosionFlipbookTextureSource::ProceduralAtlas;
+      }
+    } else {
+      spdlog::info("Explosion prefab package built Explosion01 smoke atlas from EXR sequence");
+      state->smoke_flipbook_source = ExplosionFlipbookTextureSource::ExrSequence;
+    }
   }
+
+  g_explosion_package_debug_info = ExplosionPrefabPackageDebugInfo{
+      .core_flipbook_source = state->core_flipbook_source,
+      .smoke_flipbook_source = state->smoke_flipbook_source,
+  };
+  spdlog::info("Explosion prefab package flipbooks: core={} smoke={}",
+               flipbookSourceName(state->core_flipbook_source),
+               flipbookSourceName(state->smoke_flipbook_source));
 
   context.particle_effects->registerTextureAliases({
       {"spark_atlas", state->spark_texture},
@@ -668,11 +1381,18 @@ void updateExplosionLight(ecs::World& world,
   }
 
   auto& light = world.get<components::LightComponent>(controller.light);
+  components::VisibilityComponent* visibility =
+      world.has<components::VisibilityComponent>(controller.light)
+          ? &world.get<components::VisibilityComponent>(controller.light)
+          : nullptr;
   light.color = controller.light_peak_color;
 
   if (!controller.light_active) {
     light.intensity = 0.0f;
     light.range = controller.light_off_range;
+    if (visibility != nullptr) {
+      visibility->visible = false;
+    }
     return;
   }
 
@@ -683,9 +1403,15 @@ void updateExplosionLight(ecs::World& world,
     controller.light_active = false;
     light.intensity = 0.0f;
     light.range = controller.light_off_range;
+    if (visibility != nullptr) {
+      visibility->visible = false;
+    }
     return;
   }
 
+  if (visibility != nullptr) {
+    visibility->visible = true;
+  }
   const float fade = 1.0f - smoothStep01(t);
   light.intensity = controller.light_peak_intensity * std::pow(fade, 2.0f);
   light.range = std::max(controller.light_off_range,
@@ -743,6 +1469,9 @@ std::optional<ExplosionPrefabController> instantiateExplosionPrefabController(
     controller.light_peak_range = light.range;
     light.intensity = 0.0f;
     light.range = controller.light_off_range;
+    if (world.has<components::VisibilityComponent>(controller.light)) {
+      world.get<components::VisibilityComponent>(controller.light).visible = false;
+    }
   }
 
   return controller;
@@ -777,6 +1506,45 @@ void updateExplosionPrefab(ecs::World& world,
                            float time_seconds) {
   serviceScheduledRestarts(world, controller, time_seconds);
   updateExplosionLight(world, controller, time_seconds);
+}
+
+bool destroyExplosionPrefabController(ecs::World& world,
+                                      ExplosionPrefabController& controller) {
+  controller.scheduled_restarts.clear();
+  controller.light_active = false;
+
+  const bool destroyed =
+      controller.instance.valid() && prefabs::destroyPrefab(world, controller.instance.root);
+
+  controller.instance = {};
+  controller.flash = {};
+  controller.fireball = {};
+  controller.heat = {};
+  controller.core_flipbook = {};
+  controller.smoke_flipbook = {};
+  controller.embers = {};
+  controller.shock_ring = {};
+  controller.debris = {};
+  controller.dust_ring = {};
+  controller.smoke = {};
+  controller.scorch = {};
+  controller.light = {};
+  controller.light_peak_color = {};
+  controller.light_peak_intensity = 0.0f;
+  controller.light_peak_range = 0.0f;
+  controller.light_start_time = 0.0f;
+  controller.light_end_time = 0.0f;
+
+  return destroyed;
+}
+
+ExplosionPrefabPackageDebugInfo getExplosionPrefabPackageDebugInfo() {
+  return g_explosion_package_debug_info;
+}
+
+std::string_view explosionFlipbookTextureSourceName(
+    ExplosionFlipbookTextureSource source) {
+  return flipbookSourceName(source);
 }
 
 }  // namespace karma::demo

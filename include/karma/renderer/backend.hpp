@@ -48,6 +48,8 @@ class Backend {
 
   virtual void submit(const renderer::DrawItem& item) = 0;
   virtual void submitParticles(renderer::ParticleBatch batch) = 0;
+  virtual void submitPackedParticles(renderer::PackedParticleBatch batch) = 0;
+  virtual void setParticleSystemStats(const renderer::ParticlePassStats& stats) = 0;
   virtual void retireInstance(renderer::InstanceId instance) = 0;
   virtual void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) = 0;
   virtual void drawLine(const math::Vec3& start, const math::Vec3& end,
@@ -68,6 +70,7 @@ class Backend {
                                       int max_lights_per_tile,
                                       int max_local_lights) = 0;
   virtual renderer::ForwardPlusStats getForwardPlusStats() const = 0;
+  virtual renderer::ParticlePassStats getParticlePassStats() const = 0;
   virtual void setShadowSettings(float bias,
                                  int map_size,
                                  int pcf_radius,

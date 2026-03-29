@@ -12,6 +12,20 @@ namespace karma::demo {
 
 inline constexpr std::string_view kExplosionPrefabKey = "explosion";
 
+enum class ExplosionFlipbookTextureSource {
+  Unknown,
+  ExrSequence,
+  LegacySheet,
+  ProceduralAtlas,
+};
+
+struct ExplosionPrefabPackageDebugInfo {
+  ExplosionFlipbookTextureSource core_flipbook_source =
+      ExplosionFlipbookTextureSource::Unknown;
+  ExplosionFlipbookTextureSource smoke_flipbook_source =
+      ExplosionFlipbookTextureSource::Unknown;
+};
+
 struct ExplosionPrefabController {
   struct ScheduledRestart {
     ecs::Entity entity{};
@@ -55,5 +69,12 @@ void triggerExplosionPrefab(ecs::World& world,
 void updateExplosionPrefab(ecs::World& world,
                            ExplosionPrefabController& controller,
                            float time_seconds);
+
+bool destroyExplosionPrefabController(ecs::World& world,
+                                      ExplosionPrefabController& controller);
+
+ExplosionPrefabPackageDebugInfo getExplosionPrefabPackageDebugInfo();
+std::string_view explosionFlipbookTextureSourceName(
+    ExplosionFlipbookTextureSource source);
 
 }  // namespace karma::demo

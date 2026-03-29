@@ -26,6 +26,7 @@ struct ScheduledEffectRestart {
 };
 
 constexpr float kExplosionVisualScale = 1.5f;
+constexpr int kExplosionFlipbookFrameSize = 400;
 
 float scaleExplosionValue(float value) {
   return value * kExplosionVisualScale;
@@ -669,6 +670,37 @@ renderer::TextureId buildSequenceAtlas(renderer::GraphicsDevice& graphics,
   return graphics.createTextureRGBA8(atlas_width, atlas_height, atlas_pixels.data());
 }
 
+renderer::TextureId buildResampledAtlasFromImage(renderer::GraphicsDevice& graphics,
+                                                 const std::filesystem::path& source_path,
+                                                 int atlas_width,
+                                                 int atlas_height) {
+  if (atlas_width <= 0 || atlas_height <= 0) {
+    return renderer::kInvalidTexture;
+  }
+  const FloatImage source = loadImageRGBA32F(source_path);
+  if (source.width <= 0 || source.height <= 0) {
+    return renderer::kInvalidTexture;
+  }
+
+  std::vector<std::uint8_t> pixels(
+      static_cast<size_t>(atlas_width) * static_cast<size_t>(atlas_height) * 4u, 0u);
+  for (int y = 0; y < atlas_height; ++y) {
+    for (int x = 0; x < atlas_width; ++x) {
+      const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(atlas_width);
+      const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(atlas_height);
+      const auto sample = sampleImageBilinear(source, u, v);
+      const size_t index =
+          (static_cast<size_t>(y) * static_cast<size_t>(atlas_width) + static_cast<size_t>(x)) * 4u;
+      pixels[index + 0u] = toByte(sample[0]);
+      pixels[index + 1u] = toByte(sample[1]);
+      pixels[index + 2u] = toByte(sample[2]);
+      pixels[index + 3u] = toByte(sample[3]);
+    }
+  }
+
+  return graphics.createTextureRGBA8(atlas_width, atlas_height, pixels.data());
+}
+
 renderer::TextureId buildExplosionSequenceAtlas(renderer::GraphicsDevice& graphics,
                                                 const std::filesystem::path& sequence_dir) {
   return buildSequenceAtlas(graphics,
@@ -678,8 +710,8 @@ renderer::TextureId buildExplosionSequenceAtlas(renderer::GraphicsDevice& graphi
                                 .last_frame_index = 74u,
                                 .atlas_columns = 5,
                                 .atlas_rows = 5,
-                                .frame_width = 200,
-                                .frame_height = 200,
+                                .frame_width = kExplosionFlipbookFrameSize,
+                                .frame_height = kExplosionFlipbookFrameSize,
                                 .atlas_border = 4,
                                 .atlas_spacing = 4,
                                 .alpha_signal_bias = 0.0f,
@@ -701,8 +733,8 @@ renderer::TextureId buildExplosionSmokeSequenceAtlas(renderer::GraphicsDevice& g
                                 .last_frame_index = 92u,
                                 .atlas_columns = 5,
                                 .atlas_rows = 5,
-                                .frame_width = 200,
-                                .frame_height = 200,
+                                .frame_width = kExplosionFlipbookFrameSize,
+                                .frame_height = kExplosionFlipbookFrameSize,
                                 .atlas_border = 4,
                                 .atlas_spacing = 4,
                                 .alpha_signal_bias = 0.185f,
@@ -1107,8 +1139,21 @@ class ParticleExample final : public app::GameInterface {
     explosion_flipbook_texture_ =
         buildExplosionSequenceAtlas(*graphics, authored_explosion_sequence_path);
     if (explosion_flipbook_texture_ == renderer::kInvalidTexture) {
-      spdlog::warn("Explosion00 EXR sequence atlas build failed; falling back to TGA flipbook");
-      explosion_flipbook_texture_ = loadTextureRGBA8(*graphics, authored_explosion_flipbook_path);
+      spdlog::warn("Explosion00 EXR sequence atlas build failed; falling back to resampled sheet");
+      const int atlas_width = 5 * kExplosionFlipbookFrameSize + 4 * 4 + 4 * 2;
+      const int atlas_height = 5 * kExplosionFlipbookFrameSize + 4 * 4 + 4 * 2;
+      explosion_flipbook_texture_ = buildResampledAtlasFromImage(
+          *graphics,
+          resolveExampleAssetPath("Explosion00-flipbooks/Explosion00_5x5.exr"),
+          atlas_width,
+          atlas_height);
+      if (explosion_flipbook_texture_ == renderer::kInvalidTexture) {
+        explosion_flipbook_texture_ = buildResampledAtlasFromImage(
+            *graphics,
+            authored_explosion_flipbook_path,
+            atlas_width,
+            atlas_height);
+      }
     } else {
       spdlog::info("Built Explosion00 fire atlas from EXR sequence");
     }

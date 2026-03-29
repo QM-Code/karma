@@ -128,6 +128,18 @@ void GraphicsDevice::submitParticles(ParticleBatch batch) {
   }
 }
 
+void GraphicsDevice::submitPackedParticles(PackedParticleBatch batch) {
+  if (backend_) {
+    backend_->submitPackedParticles(std::move(batch));
+  }
+}
+
+void GraphicsDevice::setParticleSystemStats(const ParticlePassStats& stats) {
+  if (backend_) {
+    backend_->setParticleSystemStats(stats);
+  }
+}
+
 void GraphicsDevice::retireInstance(InstanceId instance) {
   if (backend_) {
     backend_->retireInstance(instance);
@@ -213,6 +225,13 @@ ForwardPlusStats GraphicsDevice::getForwardPlusStats() const {
     return {};
   }
   return backend_->getForwardPlusStats();
+}
+
+ParticlePassStats GraphicsDevice::getParticlePassStats() const {
+  if (!backend_) {
+    return {};
+  }
+  return backend_->getParticlePassStats();
 }
 
 void GraphicsDevice::setShadowSettings(float bias,

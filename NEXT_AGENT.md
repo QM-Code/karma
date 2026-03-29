@@ -1,22 +1,27 @@
 # Next Agent Bootstrap
 
-This repo is in an intentionally fast-moving state. Prefer clean architecture over backward compatibility unless the user explicitly asks otherwise.
+This repo is in a fast-moving state. Prefer behavior-preserving refactors first, then tighten architecture once the split points are proven. Do not revert unrelated dirty worktree changes.
 
 ## Start Here
 
-There are three active technical tracks in the current worktree:
+There are five active technical tracks in the current tree:
 
-1. particle/render performance
-2. collision/contact/ground-state ECS work
-3. local-light / point-shadow renderer work
+1. renderer monolith decomposition
+2. particle/render performance
+3. effect API split / prefab modularization
+4. collision/contact/ground-state ECS work
+5. local-light / point-shadow validation
 
 Read these first:
 
-- [docs/PARTICLE_PERF_BOOTSTRAP.md](/home/irie/Documents/karma/docs/PARTICLE_PERF_BOOTSTRAP.md)
-- [docs/PREFAB_GALLERY_BOOTSTRAP.md](/home/irie/Documents/karma/docs/PREFAB_GALLERY_BOOTSTRAP.md)
-- [docs/COLLISION_BOOTSTRAP.md](/home/irie/Documents/karma/docs/COLLISION_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](/home/irie/Documents/karma/docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](/home/irie/Documents/karma/docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+- [docs/RENDERER_REFACTOR_BOOTSTRAP.md](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
+- [docs/PARTICLE_PERF_BOOTSTRAP.md](docs/PARTICLE_PERF_BOOTSTRAP.md)
+- [docs/EFFECT_API_SPLIT_BOOTSTRAP.md](docs/EFFECT_API_SPLIT_BOOTSTRAP.md)
+- [docs/EFFECT_API_SPLIT_PLAN.md](docs/EFFECT_API_SPLIT_PLAN.md)
+- [docs/PREFAB_GALLERY_BOOTSTRAP.md](docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [docs/COLLISION_BOOTSTRAP.md](docs/COLLISION_BOOTSTRAP.md)
+- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
+- [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
 
 ## Worktree Warning
 
@@ -24,33 +29,44 @@ The worktree is intentionally dirty. Do not assume unrelated modified files are 
 
 High-signal areas right now:
 
-- [src/particles](/home/irie/Documents/karma/src/particles)
-- [src/renderer/backends/diligent/backend_render.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_render.cpp)
-- [include/karma/renderer/types.h](/home/irie/Documents/karma/include/karma/renderer/types.h)
-- [src/beams/beam_path_system.cpp](/home/irie/Documents/karma/src/beams/beam_path_system.cpp)
-- [src/volumes/volume_sphere_system.cpp](/home/irie/Documents/karma/src/volumes/volume_sphere_system.cpp)
-- [src/physics](/home/irie/Documents/karma/src/physics)
-- [src/collision](/home/irie/Documents/karma/src/collision)
-- [examples/collision_events_example.cpp](/home/irie/Documents/karma/examples/collision_events_example.cpp)
+- [`src/renderer/backends/diligent/backend_init.cpp`](src/renderer/backends/diligent/backend_init.cpp)
+- [`src/renderer/backends/diligent/backend_render.cpp`](src/renderer/backends/diligent/backend_render.cpp)
+- [`src/renderer/backends/diligent/passes/`](src/renderer/backends/diligent/passes)
+- [`src/renderer/backends/diligent/resources/`](src/renderer/backends/diligent/resources)
+- [`src/renderer/render_system.cpp`](src/renderer/render_system.cpp)
+- [`src/particles/`](src/particles)
+- [`src/beams/beam_path_system.cpp`](src/beams/beam_path_system.cpp)
+- [`src/beams/beam_path_runtime_module.cpp`](src/beams/beam_path_runtime_module.cpp)
+- [`src/volumes/volume_sphere_system.cpp`](src/volumes/volume_sphere_system.cpp)
+- [`src/volumes/volume_sphere_runtime_module.cpp`](src/volumes/volume_sphere_runtime_module.cpp)
+- [`src/prefabs/prefab_runtime.cpp`](src/prefabs/prefab_runtime.cpp)
+- [`src/prefabs/prefab_entry_handler.cpp`](src/prefabs/prefab_entry_handler.cpp)
+- [`include/karma/app/runtime_module.h`](include/karma/app/runtime_module.h)
+- [`include/karma/prefabs/prefab_entry_handler.h`](include/karma/prefabs/prefab_entry_handler.h)
+- [`src/physics/`](src/physics)
+- [`src/collision/`](src/collision)
+- [`examples/light_stress_example.cpp`](examples/light_stress_example.cpp)
+- [`examples/collision_events_example.cpp`](examples/collision_events_example.cpp)
 
-Local-only artifact intentionally left out of source work:
+Local-only artifacts intentionally left out of source work:
 
-- `build-asan/`
+- `build-local/`
+- `build-check/`
 
 ## Build Commands
 
-Use these first:
+Verified in this worktree during the renderer split:
 
 ```bash
-cmake --build build --target karma_energy_orb_example karma_prefab_gallery_example -j2
-cmake --build build --target karma_collision_events_example -j2
+cmake -S . -B build-local
+cmake --build build-local --target karma_light_stress_example -j2
 ```
 
-Useful smoke runs in this environment:
+Useful smoke checks in this environment:
 
 ```bash
-timeout 5s ./build/karma_energy_orb_example
-timeout 5s ./build/karma_collision_events_example
+timeout 5s ./build-local/karma_light_stress_example
+timeout 5s ./build-local/karma_light_stress_example --help
 ```
 
 Expected headless stop here:
@@ -59,9 +75,39 @@ Expected headless stop here:
 GLFW failed to initialize
 ```
 
-That is normal in this environment. The useful signal is whether startup / asset reload / system init succeeds before that line.
+That is normal in this environment. The useful signal is whether startup, asset loading, and system initialization succeed before that line.
 
-## Particle/Render Summary
+For the effect API split specifically, this build was also verified:
+
+```bash
+cmake --build build-local --target \
+  karma_laser_example \
+  karma_laser_prefab_example \
+  karma_volumetric_sphere_example \
+  karma_volumetric_sphere_prefab_example \
+  karma_prefab_gallery_example \
+  -j2
+```
+
+## Renderer Summary
+
+Recent renderer-structure work already in the tree:
+
+- old `backend_mesh.cpp` was replaced by `resources/materials.cpp`, `resources/meshes.cpp`, `resources/render_targets.cpp`, and `resources/textures.cpp`
+- low-risk `backend_render.cpp` lifecycle/state code moved to `passes/frame.cpp`, `passes/camera_override.cpp`, and `passes/render_state.cpp`
+- environment, line-resource setup, and particle-resource setup moved to `passes/environment.cpp`, `passes/line.cpp`, and `passes/particles.cpp`
+- shadow rendering moved to `passes/shadows.cpp`
+- forward opaque/transparent batching moved to `passes/forward.cpp`
+- particle draw batching and execution moved to `passes/particle_draw.cpp`
+- `backend_render.cpp` now mostly owns frame orchestration, Forward+ setup, scene-copy decisions, an inline line pass, and present glue
+- `backend_init.cpp` is now the largest remaining Diligent monolith
+
+If continuing there, start with:
+
+- [docs/RENDERER_REFACTOR_BOOTSTRAP.md](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
+- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
+
+## Particle / Render Perf Summary
 
 Recent particle-side work already in the tree:
 
@@ -75,16 +121,15 @@ Recent particle-side work already in the tree:
   - color interpolation
   - atlas frame selection / UV generation
 - beam-authored particles intentionally remain on the baked presentation path
-- prefab gallery explosion / wave composition now has its own handoff doc
 - wave volume proxies now render as projected screen-bounds quads instead of near-full-screen overlays
-- gallery perf logging exists behind `KARMA_PREFAB_GALLERY_STATS=1`
+- prefab gallery perf logging exists behind `KARMA_PREFAB_GALLERY_STATS=1`
 
 If continuing there, start with:
 
-- [docs/PARTICLE_PERF_BOOTSTRAP.md](/home/irie/Documents/karma/docs/PARTICLE_PERF_BOOTSTRAP.md)
-- [docs/PREFAB_GALLERY_BOOTSTRAP.md](/home/irie/Documents/karma/docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [docs/PARTICLE_PERF_BOOTSTRAP.md](docs/PARTICLE_PERF_BOOTSTRAP.md)
+- [docs/PREFAB_GALLERY_BOOTSTRAP.md](docs/PREFAB_GALLERY_BOOTSTRAP.md)
 
-## Collision/Physics Summary
+## Collision / Physics Summary
 
 Recent collision-side work already in the tree:
 
@@ -97,32 +142,47 @@ Recent collision-side work already in the tree:
 
 If continuing there, start with:
 
-- [docs/COLLISION_BOOTSTRAP.md](/home/irie/Documents/karma/docs/COLLISION_BOOTSTRAP.md)
+- [docs/COLLISION_BOOTSTRAP.md](docs/COLLISION_BOOTSTRAP.md)
 
 ## Local-Light / Shadow Summary
 
-Recent renderer-side work already in the tree:
+Recent local-light work already in the tree:
 
 - Forward+ light-path fixes past the `8 -> 9` light transition
 - point-shadow runtime light budgeting
 - explicit `R32_FLOAT` SRVs for directional and point shadow-map arrays
-- per-SRB shadow resource binding for the actual material/default draw path
-- moving-point-light shadow refresh no longer chunks through the small cache threshold/budget
+- per-SRB shadow resource binding for actual material/default draw paths
+- moving-point-light shadow refresh no longer chunks through the small cache threshold
 - reduced point-shadow seam artifacts from hard cubemap-face boundaries
-- local-light probe sample now staged for gradual `1-16` shadowed-light validation with moving light markers
+- light-stress sample staged for gradual `1-16` shadowed-light validation with moving markers
 
 If continuing there, start with:
 
-- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](/home/irie/Documents/karma/docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](/home/irie/Documents/karma/docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
+- [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
 
 ## Good Next Steps
+
+If continuing renderer decomposition:
+
+1. move the inline line draw path out of `backend_render.cpp`
+2. split Forward+ setup and SRB binding out of `backend_render.cpp`
+3. split `backend_init.cpp` by bootstrap responsibility and move inline shader strings out of it
+4. only after that, consider breaking up `passes/forward.cpp` and `passes/shadows.cpp`
 
 If continuing particle work:
 
 1. measure alpha/distortion sort cost before another architecture change
 2. explore bucketed or approximate depth ordering before GPU simulation
 3. only move simulation fully GPU-side if the user wants a larger renderer rewrite
+
+If continuing the effect API split:
+
+1. read [docs/EFFECT_API_SPLIT_BOOTSTRAP.md](docs/EFFECT_API_SPLIT_BOOTSTRAP.md) first
+2. treat runtime modularization as landed and stable enough to build on
+3. the next real architecture gap is the orb shell / material pipeline split
+4. parser/plugin decoupling for arbitrary prefab section kinds is still missing
+5. do not regress the out-of-line runtime-module ctor/dtor setup unless you also change ownership away from forward-declared system pointers
 
 If continuing collision/contact work:
 
@@ -141,4 +201,4 @@ If continuing local-light/shadow work:
 - prefer `apply_patch` for edits
 - prefer `rg` / `rg --files` for search
 - do not revert unrelated dirty worktree changes
-- the user values consistency and architecture more than compatibility
+- the user values architecture and consistency more than compatibility

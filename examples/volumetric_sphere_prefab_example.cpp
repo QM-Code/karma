@@ -1,6 +1,7 @@
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
 
+#include <memory>
 #include <string>
 
 #include <spdlog/spdlog.h>
@@ -105,6 +106,7 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
+  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeSphereRuntimeModule>());
   karma::demo::VolumetricSpherePrefabExample game;
 
   karma::app::EngineConfig config;

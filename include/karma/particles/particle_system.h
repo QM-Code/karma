@@ -25,7 +25,7 @@ class ParticleSystem {
   void update(ecs::World& world, float dt, float interpolation_alpha);
 
  private:
-  void syncEffectBindings(ecs::World& world);
+  uint32_t syncEffectBindings(ecs::World& world);
 
   struct Particle {
     math::Vec3 position{};

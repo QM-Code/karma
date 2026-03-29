@@ -14,6 +14,7 @@
 #include "karma/components/environment.h"
 #include "karma/components/light.h"
 #include "karma/components/mesh.h"
+#include "karma/components/visibility.h"
 
 namespace karma::renderer {
 
@@ -561,6 +562,15 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       [&](const ecs::Entity entity) {
     const auto& light_component = world.get<components::LightComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
+    if (light_component.type != components::LightComponent::Type::Directional) {
+      bool visible = true;
+      if (world.has<components::VisibilityComponent>(entity)) {
+        visible = world.get<components::VisibilityComponent>(entity).visible;
+      }
+      if (!visible || light_component.intensity <= 0.0f || light_component.range <= 0.0f) {
+        return true;
+      }
+    }
     lights.push_back(toLightData(light_component, transform, interpolation_alpha));
     if (!has_light && light_component.type == components::LightComponent::Type::Directional) {
       light = toDirectionalLight(light_component, transform, interpolation_alpha);

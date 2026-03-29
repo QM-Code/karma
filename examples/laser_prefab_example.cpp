@@ -1,6 +1,7 @@
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
 
+#include <memory>
 #include <string>
 
 namespace karma::demo {
@@ -89,6 +90,7 @@ class LaserPrefabExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
+  engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
   karma::demo::LaserPrefabExample game;
 
   karma::app::EngineConfig config;

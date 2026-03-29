@@ -4,11 +4,15 @@ Karma prefabs are file-backed ECS subtrees. A prefab instantiates one root
 entity plus any number of child entities under it, and the engine keeps the
 children synced to the root transform automatically.
 
-The current prefab runtime supports these authored entry types:
+The core prefab runtime supports these authored entry types:
 
 - `mesh`
 - `particle`
 - `light`
+
+Optional prefab entry handlers can extend that set. The engine currently ships
+opt-in handlers for:
+
 - `beam`
 - `volume_sphere`
 
@@ -36,10 +40,12 @@ and instantiate it with one call.
 ## Canonical Workflow
 
 1. Author `prefab.kprefab` in a directory, or author a standalone `.kprefab` file.
-2. Instantiate it directly from a file or directory path.
-3. Optionally pass typed parameter overrides at instantiate time.
-4. Move, scale, or destroy the prefab by operating on its root entity.
-5. If the prefab also needs one-time runtime setup, register it in a `PrefabRegistry`.
+2. If it uses optional entry types, register the matching runtime module before
+   `EngineApp::start(...)`.
+3. Instantiate it directly from a file or directory path.
+4. Optionally pass typed parameter overrides at instantiate time.
+5. Move, scale, or destroy the prefab by operating on its root entity.
+6. If the prefab also needs one-time runtime setup, register it in a `PrefabRegistry`.
 
 ## Direct Instantiation
 
@@ -71,11 +77,33 @@ That creates:
 
 If the path is a directory, Karma loads `prefab.kprefab` from that directory.
 
+Direct instantiation only covers the entry handlers currently registered with
+the engine. `mesh`, `particle`, and `light` are always available. `beam` and
+`volume_sphere` require their matching runtime modules.
+
 For a minimal end-to-end example, see
 [../examples/volumetric_sphere_example.cpp](../examples/volumetric_sphere_example.cpp),
 which instantiates
 [../examples/assets/prefabs/volumetric_sphere/prefab.kprefab](../examples/assets/prefabs/volumetric_sphere/prefab.kprefab)
 by passing the prefab directory path directly.
+
+## Optional Runtime Modules
+
+Beam and analytic volume-sphere prefabs are provided through opt-in runtime
+modules:
+
+```cpp
+#include <memory>
+#include "karma/karma.h"
+
+karma::app::EngineApp engine;
+engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
+engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeSphereRuntimeModule>());
+engine.start(game, config);
+```
+
+Those modules install both their runtime update logic and their prefab entry
+handlers.
 
 ## Registry Packages
 
@@ -113,6 +141,11 @@ const auto orb = prefab_registry->instantiate(
 The orb sample is the reference implementation for that path:
 [../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp).
 
+The reusable staged explosion is the reference implementation for a one-shot
+layered effect package that also needs generated atlases, EXR-backed flipbooks,
+typed controller helpers, and explicit cleanup:
+[EXPLOSION_PREFAB.md](EXPLOSION_PREFAB.md).
+
 ## Runtime Control
 
 ```cpp
@@ -141,6 +174,9 @@ Supported sections:
 - `[light name]`
 - `[beam name]`
 - `[volume_sphere name]`
+
+`beam` and `volume_sphere` sections only instantiate when their matching
+runtime modules have registered handlers.
 
 Comments start with `#`.
 

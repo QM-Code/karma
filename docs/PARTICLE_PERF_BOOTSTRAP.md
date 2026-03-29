@@ -1,5 +1,12 @@
 # Particle Performance Bootstrap
 
+This file now represents the earlier particle-performance pass only.
+
+The current explosion stress / particle renderer handoff lives in:
+
+- [EXPLOSION_STRESS_BOOTSTRAP.md](EXPLOSION_STRESS_BOOTSTRAP.md)
+- [EXPLOSION_STRESS_PERF.md](EXPLOSION_STRESS_PERF.md)
+
 This file is the handoff for the current particle-performance pass.
 
 ## What Was Optimized
@@ -10,8 +17,8 @@ Particle effect file polling no longer checks timestamps every frame.
 
 Primary files:
 
-- [effect_library.h](/home/irie/Documents/karma/include/karma/particles/effect_library.h)
-- [effect_library.cpp](/home/irie/Documents/karma/src/particles/effect_library.cpp)
+- [`../include/karma/particles/effect_library.h`](../include/karma/particles/effect_library.h)
+- [`../src/particles/effect_library.cpp`](../src/particles/effect_library.cpp)
 
 Current behavior:
 
@@ -20,26 +27,26 @@ Current behavior:
 
 ### 2. Batch submission copies
 
-Particle batches are now passed by value and moved into backend storage.
+Particle batches are passed by value and moved into backend storage.
 
 Primary files:
 
-- [backend.hpp](/home/irie/Documents/karma/include/karma/renderer/backend.hpp)
-- [device.h](/home/irie/Documents/karma/include/karma/renderer/device.h)
-- [device.cpp](/home/irie/Documents/karma/src/renderer/device.cpp)
-- [backend.hpp](/home/irie/Documents/karma/include/karma/renderer/backends/diligent/backend.hpp)
+- [`../include/karma/renderer/backend.hpp`](../include/karma/renderer/backend.hpp)
+- [`../include/karma/renderer/device.h`](../include/karma/renderer/device.h)
+- [`../src/renderer/device.cpp`](../src/renderer/device.cpp)
+- [`../include/karma/renderer/backends/diligent/backend.hpp`](../include/karma/renderer/backends/diligent/backend.hpp)
 
 ### 3. Additive draw grouping
 
-Additive particle draws are grouped by compatible render state before upload/draw.
+Additive particle draws are grouped by compatible render state before upload and draw.
 
 Primary file:
 
-- [backend_render.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_render.cpp)
+- [`../src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
 
-### 4. CPU-side simulation/presentation cuts
+### 4. CPU-side simulation and presentation cuts
 
-`ParticleSystem` does less CPU work than before.
+`ParticleSystem` now does less CPU work than before.
 
 Reduced work includes:
 
@@ -52,17 +59,17 @@ Reduced work includes:
 
 Primary file:
 
-- [particle_system.cpp](/home/irie/Documents/karma/src/particles/particle_system.cpp)
+- [`../src/particles/particle_system.cpp`](../src/particles/particle_system.cpp)
 
 ## Current Architecture
 
 There are now two particle presentation modes in:
 
-- [types.h](/home/irie/Documents/karma/include/karma/renderer/types.h)
+- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
 
 ### `Baked`
 
-Used by custom/manual particle producers like the beam path.
+Used by custom or manual particle producers like the beam path.
 
 CPU provides:
 
@@ -99,15 +106,17 @@ This split is deliberate. The heavy generic path got optimized without forcing b
 
 High-signal files for continuing this work:
 
-- [particle_system.cpp](/home/irie/Documents/karma/src/particles/particle_system.cpp)
-- [types.h](/home/irie/Documents/karma/include/karma/renderer/types.h)
-- [backend.hpp](/home/irie/Documents/karma/include/karma/renderer/backends/diligent/backend.hpp)
-- [backend_render.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_render.cpp)
-- [beam_path_system.cpp](/home/irie/Documents/karma/src/beams/beam_path_system.cpp)
+- [`../src/particles/particle_system.cpp`](../src/particles/particle_system.cpp)
+- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
+- [`../include/karma/renderer/backends/diligent/backend.hpp`](../include/karma/renderer/backends/diligent/backend.hpp)
+- [`../src/renderer/backends/diligent/passes/particles.cpp`](../src/renderer/backends/diligent/passes/particles.cpp)
+- [`../src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
+- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
+- [`../src/beams/beam_path_system.cpp`](../src/beams/beam_path_system.cpp)
 
 ## Validation
 
-Commands used during this pass:
+Historical validation for this pass used:
 
 ```bash
 cmake --build build --target karma_energy_orb_example karma_prefab_gallery_example -j2
@@ -122,17 +131,17 @@ Expected result in this environment:
 
 ## Gallery-Specific Follow-Up
 
-There is now a separate handoff for the current staged-explosion / wave-volume interaction in the prefab gallery:
+There is a separate handoff for the staged explosion and wave-volume interaction in the prefab gallery:
 
-- [PREFAB_GALLERY_BOOTSTRAP.md](/home/irie/Documents/karma/docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [PREFAB_GALLERY_BOOTSTRAP.md](PREFAB_GALLERY_BOOTSTRAP.md)
 
 Important state already in the tree:
 
-- wave / volumetric-sphere materials now sample a pre-particle scene copy instead of a post-particle copy
+- wave and volumetric-sphere materials now sample a pre-particle scene copy instead of a post-particle copy
 - wave volume proxies now render as projected screen-bounds quads instead of near-full-screen overlays
 - the prefab gallery has opt-in perf logging behind `KARMA_PREFAB_GALLERY_STATS=1`
 
-That work reduced obvious overdraw and fixed the visual disappearing-volume failure, but the gallery still has an unresolved frame-rate drop when explosions fire.
+That work reduced obvious overdraw and fixed the disappearing-volume failure, but the gallery still has an unresolved frame-rate drop when explosions fire.
 
 ## What Still Costs CPU Time
 
@@ -150,7 +159,7 @@ Secondary costs:
 
 Best next moves, in order:
 
-1. measure alpha/distortion sorting before more architecture changes
+1. measure alpha and distortion sorting before more architecture changes
 2. try bucketed or approximate depth ordering if sort cost is high
 3. only after that, evaluate a larger move toward GPU simulation
 4. for the prefab gallery specifically, isolate the heat-distortion layer before changing light/shadow code again

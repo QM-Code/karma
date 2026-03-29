@@ -1,11 +1,12 @@
 #include "karma/prefabs/prefab.h"
+#include "karma/prefabs/prefab_entry_handler.h"
 
 #include <algorithm>
 #include <optional>
 #include <unordered_map>
 
-#include "karma/beams/beam_path_api.h"
 #include "karma/components/particle_emitter.h"
+#include "karma/components/visibility.h"
 #include "karma/math/quat.h"
 #include "karma/particles/effect_api.h"
 
@@ -187,7 +188,7 @@ ecs::Entity createParticleEntity(
                             effect_override->end_color.value_or(math::Color{}));
   }
 
-  return particles::createEffectEntity(
+  const ecs::Entity entity = particles::createEffectEntity(
       world,
       particles::ParticleEffectEntityDesc{
           .name = entity_name,
@@ -200,6 +201,8 @@ ecs::Entity createParticleEntity(
           .preserve_playing = entry.particle.preserve_playing,
           .effect_override = effect_override,
       });
+  world.add(entity, components::VisibilityComponent{.visible = entry.particle.enabled});
+  return entity;
 }
 
 ecs::Entity createLightEntity(
@@ -226,86 +229,7 @@ ecs::Entity createLightEntity(
     light.range = resolveFloatBinding(entry.light.range_binding, resolved_params, light.range);
   }
   world.add(entity, light);
-  return entity;
-}
-
-ecs::Entity createBeamEntity(
-    ecs::World& world,
-    const PrefabEntry& entry,
-    const std::string& entity_name,
-    const components::TransformComponent& world_transform,
-    const std::unordered_map<std::string, PrefabParamValue>& resolved_params) {
-  components::BeamPathComponent beam = entry.beam.beam;
-  if (entry.beam.core_color_binding.enabled) {
-    beam.core_color =
-        resolveColorBinding(entry.beam.core_color_binding, resolved_params, beam.core_color);
-  }
-  if (entry.beam.glow_color_binding.enabled) {
-    beam.glow_color =
-        resolveColorBinding(entry.beam.glow_color_binding, resolved_params, beam.glow_color);
-  }
-
-  return beams::createBeamPathEntity(
-      world,
-      beams::BeamPathEntityDesc{
-          .name = entity_name,
-          .transform = world_transform,
-          .beam = std::move(beam),
-      });
-}
-
-ecs::Entity createVolumeSphereEntity(
-    ecs::World& world,
-    const PrefabEntry& entry,
-    const std::string& entity_name,
-    const components::TransformComponent& world_transform,
-    const std::unordered_map<std::string, PrefabParamValue>& resolved_params) {
-  ecs::Entity entity = world.createEntity();
-  if (!entity_name.empty()) {
-    world.setName(entity, entity_name);
-  }
-  world.add(entity, world_transform);
-
-  components::VolumeSphereComponent sphere = entry.volume_sphere.volume;
-  if (entry.volume_sphere.color_binding.enabled) {
-    sphere.color =
-        resolveColorBinding(entry.volume_sphere.color_binding, resolved_params, sphere.color);
-  }
-  if (entry.volume_sphere.emissive_color_binding.enabled) {
-    sphere.emissive_color =
-        resolveColorBinding(entry.volume_sphere.emissive_color_binding,
-                            resolved_params,
-                            sphere.emissive_color);
-  }
-  if (entry.volume_sphere.radius_binding.enabled) {
-    sphere.radius =
-        resolveFloatBinding(entry.volume_sphere.radius_binding, resolved_params, sphere.radius);
-  }
-  if (entry.volume_sphere.center_opacity_binding.enabled) {
-    sphere.center_opacity =
-        resolveFloatBinding(entry.volume_sphere.center_opacity_binding,
-                            resolved_params,
-                            sphere.center_opacity);
-  }
-  if (entry.volume_sphere.distortion_strength_binding.enabled) {
-    sphere.distortion_strength =
-        resolveFloatBinding(entry.volume_sphere.distortion_strength_binding,
-                            resolved_params,
-                            sphere.distortion_strength);
-  }
-  if (entry.volume_sphere.noise_strength_binding.enabled) {
-    sphere.noise_strength =
-        resolveFloatBinding(entry.volume_sphere.noise_strength_binding,
-                            resolved_params,
-                            sphere.noise_strength);
-  }
-  if (entry.volume_sphere.overlay_depth_binding.enabled) {
-    sphere.overlay_depth =
-        resolveFloatBinding(entry.volume_sphere.overlay_depth_binding,
-                            resolved_params,
-                            sphere.overlay_depth);
-  }
-  world.add(entity, sphere);
+  world.add(entity, components::VisibilityComponent{});
   return entity;
 }
 
@@ -338,6 +262,7 @@ std::optional<PrefabInstance> instantiatePrefab(
         composeTransform(desc.transform, entry.local_transform);
 
     ecs::Entity member{};
+    bool missing_handler = false;
     switch (entry.type) {
       case PrefabEntry::Type::Mesh:
         member = createMeshEntity(
@@ -350,15 +275,29 @@ std::optional<PrefabInstance> instantiatePrefab(
         member = createLightEntity(world, entry, entity_name, world_transform, resolved_params);
         break;
       case PrefabEntry::Type::Beam:
-        member = createBeamEntity(world, entry, entity_name, world_transform, resolved_params);
-        break;
       case PrefabEntry::Type::VolumeSphere:
-        member = createVolumeSphereEntity(
-            world, entry, entity_name, world_transform, resolved_params);
+        member = instantiatePrefabEntry(PrefabEntryHandlerContext{
+            .world = world,
+            .graphics = graphics,
+            .entry = entry,
+            .entity_name = entity_name,
+            .world_transform = world_transform,
+            .resolved_params = resolved_params,
+        });
+        missing_handler = !member.isValid();
         break;
     }
 
     if (!member.isValid()) {
+      if (missing_handler) {
+        world.destroyEntity(root);
+        for (const ecs::Entity created_member : instance.members) {
+          if (world.isAlive(created_member)) {
+            world.destroyEntity(created_member);
+          }
+        }
+        return std::nullopt;
+      }
       continue;
     }
 
@@ -474,6 +413,22 @@ bool restartPrefab(ecs::World& world, ecs::Entity root) {
     restarted_any = particles::restartEffect(world, member) || restarted_any;
   }
   return restarted_any;
+}
+
+bool destroyPrefab(ecs::World& world, ecs::Entity root) {
+  if (!world.isAlive(root) || !world.has<components::PrefabInstanceComponent>(root)) {
+    return false;
+  }
+
+  const auto members = world.get<components::PrefabInstanceComponent>(root).members;
+  for (const ecs::Entity member : members) {
+    if (world.isAlive(member)) {
+      world.destroyEntity(member);
+    }
+  }
+
+  world.destroyEntity(root);
+  return true;
 }
 
 }  // namespace karma::prefabs

@@ -147,5 +147,5 @@ Best next moves:
 Keep these constraints in mind:
 
 - do not conflate the gallery perf problem with the already-fixed local-light mode-switch bug
-- do not assume the explosion prefab uses the EXR sequence path; it does not
+- do not guess about explosion flipbook sources; check the logged `core=... smoke=...` values first
 - prefer targeted scene/perf measurements before another renderer rewrite

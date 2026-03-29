@@ -66,9 +66,18 @@ section, then driven at runtime by looking up the named member and calling
 
 ## Runtime
 
-The engine-owned
-[BeamPathSystem](/home/irie/Documents/karma/include/karma/beams/beam_path_system.h)
-builds and updates the render data automatically:
+Register
+[BeamPathRuntimeModule](/home/quinn/Documents/karma/include/karma/beams/beam_path_runtime_module.h)
+with `EngineApp` before `start(...)` to enable beam rendering and `[beam]`
+prefab sections:
+
+```cpp
+engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
+```
+
+That module owns
+[BeamPathSystem](/home/quinn/Documents/karma/include/karma/beams/beam_path_system.h)
+and builds and updates the render data automatically:
 
 - repeated additive hot-core particles along the full path
 - additive endpoint flares at every authored point

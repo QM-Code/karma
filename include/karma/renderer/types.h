@@ -164,6 +164,52 @@ struct ForwardPlusStats {
   bool overflow_risk = false;
 };
 
+struct ParticlePassStats {
+  uint32_t effect_binding_updates = 0;
+  uint32_t simulated_emitters = 0;
+  uint32_t visible_emitters = 0;
+  uint32_t culled_emitters = 0;
+  uint32_t submitted_emitters = 0;
+  uint32_t simulated_particles = 0;
+  uint32_t packed_particles = 0;
+  uint32_t culled_particles = 0;
+  uint32_t ground_collision_particles = 0;
+  uint32_t submitted_batches = 0;
+  uint32_t submitted_particles = 0;
+  uint32_t additive_batches = 0;
+  uint32_t additive_particles = 0;
+  uint32_t alpha_batches = 0;
+  uint32_t alpha_particles = 0;
+  uint32_t distortion_batches = 0;
+  uint32_t distortion_particles = 0;
+  uint32_t additive_draw_calls = 0;
+  uint32_t alpha_draw_calls = 0;
+  uint32_t distortion_draw_calls = 0;
+  uint32_t alpha_sorted_particles = 0;
+  uint32_t distortion_sorted_particles = 0;
+  uint32_t alpha_invalid_depth_particles = 0;
+  uint32_t distortion_invalid_depth_particles = 0;
+  uint32_t pre_particle_scene_sample_draws = 0;
+  uint32_t post_particle_scene_sample_draws = 0;
+  float sync_effect_bindings_ms = 0.0f;
+  float simulation_ms = 0.0f;
+  float packing_ms = 0.0f;
+  float additive_grouping_ms = 0.0f;
+  float alpha_sort_ms = 0.0f;
+  float distortion_sort_ms = 0.0f;
+  float alpha_collect_ms = 0.0f;
+  float alpha_sort_only_ms = 0.0f;
+  float alpha_span_ms = 0.0f;
+  float distortion_collect_ms = 0.0f;
+  float distortion_sort_only_ms = 0.0f;
+  float distortion_span_ms = 0.0f;
+  float draw_submission_ms = 0.0f;
+  bool scene_color_copy = false;
+  bool post_particle_scene_color_copy = false;
+  bool alpha_half_res = false;
+  bool distortion_present = false;
+};
+
 struct DrawItem {
   InstanceId instance = kInvalidInstance;
   MeshId mesh = kInvalidMesh;
@@ -213,6 +259,16 @@ struct ParticleInstance {
   uint32_t frame_offset = 0u;
 };
 
+struct alignas(16) ParticlePackedInstance {
+  float position_age[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float color_start[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  float color_end[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  float rotation_size[4] = {1.0f, 0.0f, 1.0f, 1.0f};
+  float uv_rect[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+  float uv_rect_next[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+  float params[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
 struct ParticleBatch {
   LayerId layer = 0;
   bool depth_test = true;
@@ -242,6 +298,37 @@ struct ParticleBatch {
   uint32_t atlas_spacing_y = 0u;
   float animation_fps = 0.0f;
   std::vector<ParticleInstance> particles;
+};
+
+struct PackedParticleBatch {
+  LayerId layer = 0;
+  bool depth_test = true;
+  TextureId texture = kInvalidTexture;
+  ParticleBlendMode blend_mode = ParticleBlendMode::Additive;
+  ParticleAlignment alignment = ParticleAlignment::Billboard;
+  ParticleShadingMode shading_mode = ParticleShadingMode::Standard;
+  ParticlePresentationMode presentation_mode = ParticlePresentationMode::Baked;
+  bool use_soft_mask = true;
+  float soft_particle_distance = 0.0f;
+  float distortion_strength = 0.0f;
+  float fresnel_power = 4.0f;
+  float fresnel_strength = 1.0f;
+  float refraction_strength = 0.0f;
+  float interior_glow = 0.0f;
+  float size_curve_exponent = 1.0f;
+  float alpha_curve_exponent = 1.0f;
+  uint32_t atlas_columns = 1u;
+  uint32_t atlas_rows = 1u;
+  uint32_t atlas_frame_count = 1u;
+  bool animate_over_lifetime = false;
+  uint32_t atlas_frame_width = 0u;
+  uint32_t atlas_frame_height = 0u;
+  uint32_t atlas_border_x = 0u;
+  uint32_t atlas_border_y = 0u;
+  uint32_t atlas_spacing_x = 0u;
+  uint32_t atlas_spacing_y = 0u;
+  float animation_fps = 0.0f;
+  std::vector<ParticlePackedInstance> particles;
 };
 
 struct FrameInfo {

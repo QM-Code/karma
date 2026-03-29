@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string>
@@ -256,6 +257,7 @@ class LaserExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
+  engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
   karma::demo::LaserExample game;
 
   karma::app::EngineConfig config;

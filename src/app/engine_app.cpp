@@ -50,6 +50,26 @@ EngineApp::~EngineApp() {
   shutdownSubsystems();
 }
 
+RuntimeModuleContext EngineApp::makeRuntimeModuleContext() {
+  return RuntimeModuleContext{
+      .scene = &scene_,
+      .graphics = graphics_.get(),
+      .materials = &materials_,
+      .particle_effects = &particle_effects_,
+      .prefab_registry = prefab_registry_.get(),
+  };
+}
+
+void EngineApp::addRuntimeModule(std::unique_ptr<RuntimeModule> module) {
+  if (!module) {
+    return;
+  }
+  if (running_) {
+    module->onAttach(makeRuntimeModuleContext());
+  }
+  runtime_modules_.push_back(std::move(module));
+}
+
 void EngineApp::initSubsystems() {
   window_ = platform::CreateWindow(config_.window);
   if (window_) {
@@ -69,10 +89,8 @@ void EngineApp::initSubsystems() {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
     graphics_->setVsync(config_.vsync);
     render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_, materials_);
-    beam_path_system_ = std::make_unique<beams::BeamPathSystem>(graphics_.get());
     particle_system_ =
         std::make_unique<particles::ParticleSystem>(graphics_.get(), &particle_effects_);
-    volume_sphere_system_ = std::make_unique<volumes::VolumeSphereSystem>(graphics_.get());
   }
 
   const auto physics_system_id = systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
@@ -106,14 +124,13 @@ void EngineApp::warmUpRenderer() {
   if (prefab_system_) {
     prefab_system_->update(world_, 0.0f, 1.0f);
   }
-  if (beam_path_system_) {
-    beam_path_system_->update(world_, 0.0f, 1.0f);
-  }
   if (particle_system_) {
     particle_system_->update(world_, 0.0f, 1.0f);
   }
-  if (volume_sphere_system_) {
-    volume_sphere_system_->update(world_, 0.0f, 1.0f);
+  for (auto& module : runtime_modules_) {
+    if (module) {
+      module->onWarmUp(world_);
+    }
   }
   render_system_->update(world_, scene_, 0.0f, 1.0f);
   graphics_->renderLayer(0);
@@ -140,9 +157,12 @@ void EngineApp::shutdownSubsystems() {
     prefab_registry_->clearContext();
   }
   prefab_registry_.reset();
-  beam_path_system_.reset();
   particle_system_.reset();
-  volume_sphere_system_.reset();
+  for (auto& module : runtime_modules_) {
+    if (module) {
+      module->onDetach();
+    }
+  }
   graphics_.reset();
   window_.reset();
   running_ = false;
@@ -217,6 +237,11 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
         .materials = &materials_,
         .particle_effects = &particle_effects_,
     });
+  }
+  for (auto& module : runtime_modules_) {
+    if (module) {
+      module->onAttach(makeRuntimeModuleContext());
+    }
   }
   game_->onStart();
   if (graphics_) {
@@ -352,14 +377,13 @@ void EngineApp::tick() {
     frame.height = fb_height;
     frame.delta_time = frame_dt;
     graphics_->beginFrame(frame);
-    if (beam_path_system_) {
-      beam_path_system_->update(world_, frame_dt, render_alpha);
-    }
     if (particle_system_) {
       particle_system_->update(world_, frame_dt, render_alpha);
     }
-    if (volume_sphere_system_) {
-      volume_sphere_system_->update(world_, frame_dt, render_alpha);
+    for (auto& module : runtime_modules_) {
+      if (module) {
+        module->onUpdate(world_, frame_dt, render_alpha);
+      }
     }
     render_system_->update(world_, scene_, frame_dt, render_alpha);
     graphics_->renderLayer(0);

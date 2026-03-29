@@ -17,8 +17,8 @@ atlas_frame_count = 4
 animate_over_lifetime = true
 random_start_frame = true
 
-max_particles = 300
-burst_count = 168
+max_particles = 576
+burst_count = 504
 seed = 4321
 spawn_rate = 0.0
 duration = 0.0

@@ -1,9 +1,10 @@
 #pragma once
 
 #include "karma/app/engine_app.h"
+#include "karma/app/runtime_module.h"
 #include "karma/audio/audio.h"
 #include "karma/beams/beam_path_api.h"
-#include "karma/beams/beam_path_system.h"
+#include "karma/beams/beam_path_runtime_module.h"
 #include "karma/collision/collision_event_system.h"
 #include "karma/components/audio_listener.h"
 #include "karma/components/audio_source.h"
@@ -39,6 +40,7 @@
 #include "karma/particles/effect_api.h"
 #include "karma/particles/particle_system.h"
 #include "karma/prefabs/prefab.h"
+#include "karma/prefabs/prefab_entry_handler.h"
 #include "karma/prefabs/prefab_registry.h"
 #include "karma/prefabs/prefab_system.h"
 #include "karma/renderer/device.h"
@@ -46,4 +48,4 @@
 #include "karma/scene/scene.h"
 #include "karma/scene/glb_scene_import.h"
 #include "karma/app/ui_context.h"
-#include "karma/volumes/volume_sphere_system.h"
+#include "karma/volumes/volume_sphere_runtime_module.h"

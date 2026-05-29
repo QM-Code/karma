@@ -13,6 +13,7 @@ option(KARMA_AUDIO_BACKEND_SDL "Use SDL audio backend" OFF)
 option(KARMA_NETWORK_BACKEND_ENET "Use ENet network backend" ON)
 option(KARMA_PHYSICS_BACKEND_JOLT "Use Jolt physics backend" ON)
 option(KARMA_PHYSICS_BACKEND_BULLET "Use Bullet physics backend" OFF)
+option(KARMA_ENABLE_NAVIGATION "Build Recast/Detour navigation support" ON)
 option(KARMA_FETCH_DEPS "Fetch third-party dependencies if missing" ON)
 option(KARMA_BUILD_DEBUG_UI "Build engine debug UI overlay" ON)
 option(KARMA_BUILD_IMGUI_DEMO "Build ImGui UI demo" ON)
@@ -44,10 +45,12 @@ set(KARMA_RENDER_LINK_LIBS "" CACHE STRING "Renderer backend libraries")
 set(KARMA_PHYSICS_LINK_LIBS "" CACHE STRING "Physics backend libraries")
 set(KARMA_AUDIO_LINK_LIBS "" CACHE STRING "Audio backend libraries")
 set(KARMA_NETWORK_LINK_LIBS "" CACHE STRING "Network backend libraries")
+set(KARMA_NAVIGATION_LINK_LIBS "" CACHE STRING "Navigation libraries")
 set(KARMA_EXTRA_LINK_LIBS "" CACHE STRING "Additional Karma libraries")
 set(KARMA_EXTRA_INCLUDE_DIRS "" CACHE STRING "Additional Karma include paths")
 
 include(FetchContent)
+include(CTest)
 
 find_package(glm QUIET)
 if (NOT TARGET glm::glm AND KARMA_FETCH_DEPS)
@@ -324,6 +327,29 @@ if (KARMA_PHYSICS_BACKEND_JOLT)
   endif()
 endif()
 
+if (KARMA_ENABLE_NAVIGATION)
+  find_package(RecastNavigation QUIET)
+  if (NOT TARGET Recast AND KARMA_FETCH_DEPS)
+    set(RECASTNAVIGATION_DEMO OFF CACHE BOOL "" FORCE)
+    set(RECASTNAVIGATION_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(RECASTNAVIGATION_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      recastnavigation
+      GIT_REPOSITORY https://github.com/recastnavigation/recastnavigation.git
+      GIT_TAG v1.6.0
+    )
+    FetchContent_MakeAvailable(recastnavigation)
+  endif()
+  if (TARGET Recast AND TARGET Detour)
+    list(APPEND KARMA_NAVIGATION_LINK_LIBS Recast Detour)
+    if (TARGET DebugUtils)
+      list(APPEND KARMA_NAVIGATION_LINK_LIBS DebugUtils)
+    endif()
+  else()
+    message(FATAL_ERROR "Karma: navigation enabled but Recast/Detour targets were not found.")
+  endif()
+endif()
+
 set(KARMA_SOURCES
   src/app/engine_app.cpp
   src/app/ui_context.cpp
@@ -371,6 +397,13 @@ set(KARMA_SOURCES
   src/volumes/volume_sphere_runtime_module.cpp
   src/volumes/volume_sphere_system.cpp
 )
+
+if (KARMA_ENABLE_NAVIGATION)
+  list(APPEND KARMA_SOURCES
+    src/navigation/nav_geometry.cpp
+    src/navigation/nav_mesh.cpp
+  )
+endif()
 
 if (KARMA_BUILD_DEBUG_UI)
   list(APPEND KARMA_SOURCES
@@ -499,6 +532,9 @@ endif()
 if (KARMA_BUILD_DEBUG_UI)
   target_compile_definitions(karma PUBLIC KARMA_DEBUG_UI)
 endif()
+if (KARMA_ENABLE_NAVIGATION)
+  target_compile_definitions(karma PUBLIC KARMA_ENABLE_NAVIGATION)
+endif()
 
 target_link_libraries(karma
   PUBLIC
@@ -507,6 +543,7 @@ target_link_libraries(karma
     ${KARMA_PHYSICS_LINK_LIBS}
     ${KARMA_AUDIO_LINK_LIBS}
     ${KARMA_NETWORK_LINK_LIBS}
+    ${KARMA_NAVIGATION_LINK_LIBS}
     ${KARMA_EXTRA_LINK_LIBS}
 )
 
@@ -708,4 +745,19 @@ add_executable(karma_network_demo
 target_link_libraries(karma_network_demo PRIVATE karma)
 if (TARGET karma_fix_xxhash)
   add_dependencies(karma_network_demo karma_fix_xxhash)
+endif()
+
+if (KARMA_ENABLE_NAVIGATION AND NOT KARMA_HEADLESS)
+  add_executable(karma_navmesh_example
+    examples/navmesh_example.cpp
+  )
+  target_link_libraries(karma_navmesh_example PRIVATE karma)
+endif()
+
+if (KARMA_ENABLE_NAVIGATION AND BUILD_TESTING)
+  add_executable(karma_navmesh_tests
+    tests/navmesh_tests.cpp
+  )
+  target_link_libraries(karma_navmesh_tests PRIVATE karma)
+  add_test(NAME karma_navmesh_tests COMMAND karma_navmesh_tests)
 endif()

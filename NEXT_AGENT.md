@@ -4,7 +4,7 @@ This repo is in a fast-moving state. Prefer behavior-preserving refactors first,
 
 ## Start Here
 
-There are six active technical tracks in the current tree:
+There are seven active technical tracks in the current tree:
 
 1. renderer monolith decomposition
 2. particle/render performance
@@ -12,10 +12,13 @@ There are six active technical tracks in the current tree:
 4. collision/contact/ground-state ECS work
 5. local-light / point-shadow validation
 6. GLB node animation / first-pass skeletal CPU skinning
+7. static navmesh generation and pathfinding
 
 Read these first:
 
 - [docs/GLB_ANIMATION_BOOTSTRAP.md](docs/GLB_ANIMATION_BOOTSTRAP.md)
+- [docs/NAVIGATION_BOOTSTRAP.md](docs/NAVIGATION_BOOTSTRAP.md)
+- [docs/NAVIGATION.md](docs/NAVIGATION.md)
 - [docs/RENDERER_REFACTOR_BOOTSTRAP.md](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
 - [docs/PARTICLE_PERF_BOOTSTRAP.md](docs/PARTICLE_PERF_BOOTSTRAP.md)
 - [docs/PARTICLE_SYSTEM_ANALYSIS.md](docs/PARTICLE_SYSTEM_ANALYSIS.md)
@@ -54,6 +57,10 @@ High-signal areas right now:
 - [`include/karma/animation/`](include/karma/animation)
 - [`src/scene/glb_scene_import.cpp`](src/scene/glb_scene_import.cpp)
 - [`src/scene/transform_hierarchy.cpp`](src/scene/transform_hierarchy.cpp)
+- [`include/karma/navigation/`](include/karma/navigation)
+- [`src/navigation/`](src/navigation)
+- [`examples/navmesh_example.cpp`](examples/navmesh_example.cpp)
+- [`tests/navmesh_tests.cpp`](tests/navmesh_tests.cpp)
 - [`examples/light_stress_example.cpp`](examples/light_stress_example.cpp)
 - [`examples/collision_events_example.cpp`](examples/collision_events_example.cpp)
 
@@ -146,6 +153,20 @@ If continuing there, start with:
 - [src/animation/AGENTS.md](src/animation/AGENTS.md)
 - [include/karma/animation/AGENTS.md](include/karma/animation/AGENTS.md)
 
+For the navigation work specifically, this build was verified:
+
+```bash
+cmake -S . -B build -DKARMA_FETCH_DEPS=ON -DKARMA_BUILD_RMLUI_DEMO=OFF
+cmake --build build -j2
+ctest --test-dir build -R karma_navmesh_tests --output-on-failure
+```
+
+The fully default build currently fails in this environment before all examples
+complete because RmlUi 6.0 finds `/usr/local/lib/libfreetype.a` version 2.4.9,
+which lacks newer FreeType symbols used by RmlUi. This is unrelated to the
+navigation implementation; disabling only `KARMA_BUILD_RMLUI_DEMO` lets the rest
+of the project, including `karma_navmesh_example`, build.
+
 ## Renderer Summary
 
 Recent renderer-structure work already in the tree:
@@ -222,6 +243,24 @@ If continuing there, start with:
 - [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
 - [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
 
+## Navigation Summary
+
+Recent navigation work already in the tree:
+
+- Recast/Detour dependency integration behind `KARMA_ENABLE_NAVIGATION`
+- static navmesh bake API in `include/karma/navigation/nav_mesh.h`
+- GLB prefab, ECS mesh-collider, and direct mesh geometry collection in `nav_geometry`
+- Detour path, nearest-point, and raycast query wrapper
+- navmesh/path debug drawing through existing renderer line drawing
+- minimal rendered `karma_navmesh_example` with a baked procedural navmesh and visible sample path
+- `karma_navmesh_tests` covering bake/query/failure/transform/detour cases
+- `NavMeshAgentComponent` as a placeholder state container only
+
+If continuing there, start with:
+
+- [docs/NAVIGATION_BOOTSTRAP.md](docs/NAVIGATION_BOOTSTRAP.md)
+- [docs/NAVIGATION.md](docs/NAVIGATION.md)
+
 ## Good Next Steps
 
 If continuing renderer decomposition:
@@ -267,6 +306,13 @@ If continuing GLB animation/skinning work:
 3. decide whether CPU skinning stays as debug/fallback or is replaced by GPU skinning
 4. if implementing GPU skinning, update forward and shadow passes together
 5. keep node animation, hierarchy composition, and skinning tests green
+
+If continuing navigation work:
+
+1. add a `NavigationSystem` or runtime module that owns a navmesh and consumes `NavMeshAgentComponent`
+2. add path-following behavior before adding DetourCrowd
+3. add navmesh serialization if startup rebake cost becomes visible
+4. postpone tiled/dynamic navmesh work until there is a real large-world or obstacle-carving use case
 
 ## Engineering Notes
 

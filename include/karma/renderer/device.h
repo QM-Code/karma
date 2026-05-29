@@ -16,6 +16,7 @@ class GraphicsDevice {
   void getFramebufferSize(int& width, int& height) const;
 
   MeshId createMesh(const MeshData& mesh);
+  void updateMesh(MeshId mesh, const MeshData& data);
   MeshId createMeshFromFile(const std::filesystem::path& path);
   void destroyMesh(MeshId mesh);
   bool getMeshBounds(MeshId mesh, glm::vec3& center, float& radius) const;

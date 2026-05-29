@@ -1486,8 +1486,7 @@ float4 main(PSInput input) : SV_TARGET
             discard;
         }
 
-        float full_diameter = sphere_radius * 2.0;
-        float transmittance = exp(-density * full_diameter);
+        float transmittance = exp(-density * path_length);
         float opacity = saturate(1.0 - transmittance);
 
         float sample_t = lerp(t_enter, t_hit, 0.5);
@@ -1504,6 +1503,7 @@ float4 main(PSInput input) : SV_TARGET
             (0.82 + 0.18 * sin(time * 1.9 + noise_a * 5.8 + noise_b * 3.1));
         float2 distorted_uv = clamp(screen_uv + distort_dir * distort_scale, 0.001, 0.999);
 
+        float3 background_color = g_SceneColor.Sample(g_SamplerColor, screen_uv).rgb;
         float3 scene_color = g_SceneColor.Sample(g_SamplerColor, distorted_uv).rgb;
         float3 medium_color =
             lerp(float3(0.04, 0.04, 0.04),
@@ -1512,8 +1512,23 @@ float4 main(PSInput input) : SV_TARGET
         float3 fluorescent_glow =
             emissive * (5.5 + opacity * 14.0) +
             base_color * (0.45 + opacity * 0.80);
-        lit = scene_color * transmittance + medium_color * opacity + fluorescent_glow;
-        base_alpha = 1.0;
+
+        float radial = saturate(sqrt(max(sphere_radius * sphere_radius - h * h, 0.0)) /
+                                sphere_radius);
+        float rim = pow(saturate(radial), 5.0);
+        float shimmer = 0.82 + 0.18 * sin(time * 1.9 + noise_a * 5.8 + noise_b * 3.1);
+        float3 boundary_glow =
+            (emissive * 0.38 + base_color * 0.62) *
+            rim * (0.50 + distortion_strength * 0.08 + noise_strength * 0.20) * shimmer;
+
+        float alpha = saturate(opacity + rim * (0.16 + noise_strength * 0.05));
+        float safe_alpha = max(alpha, 0.05);
+        float3 old_composite = scene_color * transmittance +
+                               medium_color * opacity +
+                               fluorescent_glow +
+                               boundary_glow;
+        lit = max((old_composite - background_color * (1.0 - alpha)) / safe_alpha, 0.0);
+        base_alpha = alpha;
     }
     else if (shading_mode == 5u)
     {

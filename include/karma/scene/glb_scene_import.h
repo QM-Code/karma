@@ -6,7 +6,9 @@
 #include <string>
 #include <vector>
 
+#include "karma/animation/animation_clip.h"
 #include "karma/components/light.h"
+#include "karma/components/skinned_mesh.h"
 #include "karma/ecs/world.h"
 #include "karma/renderer/device.h"
 #include "karma/scene/scene.h"
@@ -23,6 +25,7 @@ struct GlbSceneLoadOptions {
 
 struct GlbSceneInstantiateOptions {
   bool create_synthetic_root = false;
+  bool autoplay_animations = true;
 };
 
 struct GlbSceneImportOptions {
@@ -35,6 +38,14 @@ struct GlbScenePrefabPrimitive {
   renderer::MeshData mesh;
   renderer::MaterialDesc material;
   uint32_t source_material_index = kInvalidGlbSceneMaterial;
+  uint32_t source_mesh_index = kInvalidGlbSceneNode;
+  std::vector<components::VertexSkinInfluence> vertex_influences;
+  std::vector<uint32_t> joint_node_indices;
+  std::vector<glm::mat4> inverse_bind_matrices;
+
+  bool skinned() const {
+    return !joint_node_indices.empty() && vertex_influences.size() == mesh.vertices.size();
+  }
 };
 
 struct GlbScenePrefabNode {
@@ -55,6 +66,7 @@ struct GlbScenePrefab {
   std::filesystem::path source_path;
   uint32_t root_node = kInvalidGlbSceneNode;
   std::vector<GlbScenePrefabNode> nodes;
+  std::vector<animation::AnimationClip> animations;
 
   bool valid() const {
     return root_node != kInvalidGlbSceneNode && root_node < nodes.size();
@@ -65,6 +77,7 @@ struct GlbSceneImportResult {
   ecs::Entity root_entity{};
   scene::NodeId root_node = scene::Node::kInvalidId;
   std::vector<ecs::Entity> entities;
+  std::vector<ecs::Entity> node_entities_by_index;
 
   bool valid() const {
     return root_entity.isValid() && root_node != scene::Node::kInvalidId;

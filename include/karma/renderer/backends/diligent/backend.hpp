@@ -50,6 +50,7 @@ class DiligentBackend final : public Backend {
   void resize(int width, int height) override;
 
   renderer::MeshId createMesh(const renderer::MeshData& mesh) override;
+  void updateMesh(renderer::MeshId mesh, const renderer::MeshData& data) override;
   renderer::MeshId createMeshFromFile(const std::filesystem::path& path) override;
   void destroyMesh(renderer::MeshId mesh) override;
   bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const override;
@@ -334,6 +335,7 @@ class DiligentBackend final : public Backend {
                                            int height,
                                            Diligent::TEXTURE_FORMAT format);
   void ensureParticleFallbackDepthResource();
+  void uploadMeshBuffers(const renderer::MeshData& mesh, MeshRecord& record);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
                                                                    int width,
                                                                    int height,
@@ -671,6 +673,12 @@ class DiligentBackend final : public Backend {
   int forward_plus_max_lights_per_tile_ = 128;
   renderer::ForwardPlusStats forward_plus_stats_{};
   renderer::ParticlePassStats particle_pass_stats_{};
+  renderer::ParticlePassStats particle_stats_log_totals_{};
+  double particle_stats_log_elapsed_seconds_ = 0.0;
+  float last_frame_delta_seconds_ = 0.0f;
+  uint32_t particle_stats_log_frame_count_ = 0;
+  bool particle_stats_log_initialized_ = false;
+  bool particle_stats_log_enabled_ = false;
   bool warned_line_thickness_ = false;
   int current_width_ = 0;
   int current_height_ = 0;

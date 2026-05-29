@@ -185,15 +185,28 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
     return mat->shading_model == renderer::MaterialDesc::ShadingModel::EnergyShell ||
            mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo ||
            mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereGlowVolume;
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereGlowVolume ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere;
   };
 
   auto uses_pre_particle_scene_sample_pass = [&](const MaterialRecord* mat) {
     if (!mat) {
       return false;
     }
-    return mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere;
+    return mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume;
+  };
+
+  auto resolve_transparent_sort_depth = [&](const MaterialRecord* mat,
+                                            const MeshRecord& mesh,
+                                            const glm::mat4& transform) {
+    glm::vec3 world_center =
+        mesh.bounds_radius > 0.0f
+            ? glm::vec3(transform * glm::vec4(mesh.bounds_center, 1.0f))
+            : glm::vec3(transform[3]);
+    if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
+      world_center = mat->volume_center;
+    }
+    return glm::dot(world_center - camera_position, camera_forward);
   };
 
   for (const auto& entry : instances_) {
@@ -241,10 +254,6 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         const MaterialRecord* mat = lookup_material(mat_id);
         const bool transparent = (mat && mat->desc.transparent) || mesh.base_color.a < 0.999f;
         if (transparent) {
-          const glm::vec3 world_center =
-              mesh.bounds_radius > 0.0f
-                  ? glm::vec3(instance.transform * glm::vec4(mesh.bounds_center, 1.0f))
-                  : glm::vec3(instance.transform[3]);
           auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                    ? out_state.pre_particle_scene_sample_draws
                                    : (uses_post_particle_transparent_pass(mat)
@@ -253,7 +262,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           target_draws.push_back(TransparentForwardDraw{
               .key = key,
               .transform = instance.transform,
-              .depth = glm::dot(world_center - camera_position, camera_forward),
+              .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
           });
         } else {
           append_opaque_forward_batch(key, instance.transform);
@@ -272,10 +281,6 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
       const MaterialRecord* mat = lookup_material(mat_id);
       const bool transparent = (mat && mat->desc.transparent) || mesh.base_color.a < 0.999f;
       if (transparent) {
-        const glm::vec3 world_center =
-            mesh.bounds_radius > 0.0f
-                ? glm::vec3(instance.transform * glm::vec4(mesh.bounds_center, 1.0f))
-                : glm::vec3(instance.transform[3]);
         auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                  ? out_state.pre_particle_scene_sample_draws
                                  : (uses_post_particle_transparent_pass(mat)
@@ -284,7 +289,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         target_draws.push_back(TransparentForwardDraw{
             .key = key,
             .transform = instance.transform,
-            .depth = glm::dot(world_center - camera_position, camera_forward),
+            .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
         });
       } else {
         append_opaque_forward_batch(key, instance.transform);

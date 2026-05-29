@@ -12,6 +12,9 @@ Most game code should work through `ParticleLibrary` plus the ECS helpers in
 `karma/particles/effect_api.h` rather than manually constructing particle
 components.
 
+For the roadmap toward agent-generated `.kpeffect` files from images or visual
+references, see [PARTICLE_EFFECT_GENERATION.md](PARTICLE_EFFECT_GENERATION.md).
+
 ## Typical Flow
 
 1. Register texture aliases in `ParticleLibrary`.

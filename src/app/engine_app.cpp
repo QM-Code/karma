@@ -9,6 +9,7 @@
 
 #include "karma/collision/collision_event_system.h"
 #include "karma/debug/debug_overlay.h"
+#include "karma/scene/transform_hierarchy.h"
 
 namespace karma::app {
 
@@ -124,6 +125,9 @@ void EngineApp::warmUpRenderer() {
   if (prefab_system_) {
     prefab_system_->update(world_, 0.0f, 1.0f);
   }
+  animation_system_.update(world_, scene_, 0.0f);
+  scene::updateWorldTransforms(world_, scene_);
+  cpu_skinning_system_.update(world_, *graphics_);
   if (particle_system_) {
     particle_system_->update(world_, 0.0f, 1.0f);
   }
@@ -343,11 +347,16 @@ void EngineApp::tick() {
   if (prefab_system_) {
     prefab_system_->update(world_, frame_dt, render_alpha);
   }
+  syncSceneEntities();
+  animation_system_.update(world_, scene_, frame_dt);
+  scene::updateWorldTransforms(world_, scene_);
+  if (graphics_) {
+    cpu_skinning_system_.update(world_, *graphics_);
+  }
   if (audio_system_) {
     audio_system_->update(world_, frame_dt);
   }
   if (graphics_ && render_system_) {
-    syncSceneEntities();
     int fb_width = 0;
     int fb_height = 0;
     if (window_) {

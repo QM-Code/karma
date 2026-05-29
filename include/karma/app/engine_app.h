@@ -10,6 +10,8 @@
 
 #include "karma/app/game_interface.h"
 #include "karma/app/runtime_module.h"
+#include "karma/animation/animation_system.h"
+#include "karma/animation/cpu_skinning_system.h"
 #include "karma/ecs/world.h"
 #include "karma/input/input_system.h"
 #include "karma/audio/audio.h"
@@ -103,6 +105,8 @@ class EngineApp {
   std::unique_ptr<prefabs::PrefabSystem> prefab_system_;
   std::unique_ptr<prefabs::PrefabRegistry> prefab_registry_;
   std::unique_ptr<particles::ParticleSystem> particle_system_;
+  animation::AnimationSystem animation_system_;
+  animation::CpuSkinningSystem cpu_skinning_system_;
   audio::Audio audio_;
   std::unique_ptr<audio::AudioSystem> audio_system_;
   physics::World physics_;

@@ -4,21 +4,26 @@ This repo is in a fast-moving state. Prefer behavior-preserving refactors first,
 
 ## Start Here
 
-There are five active technical tracks in the current tree:
+There are six active technical tracks in the current tree:
 
 1. renderer monolith decomposition
 2. particle/render performance
 3. effect API split / prefab modularization
 4. collision/contact/ground-state ECS work
 5. local-light / point-shadow validation
+6. GLB node animation / first-pass skeletal CPU skinning
 
 Read these first:
 
+- [docs/GLB_ANIMATION_BOOTSTRAP.md](docs/GLB_ANIMATION_BOOTSTRAP.md)
 - [docs/RENDERER_REFACTOR_BOOTSTRAP.md](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
 - [docs/PARTICLE_PERF_BOOTSTRAP.md](docs/PARTICLE_PERF_BOOTSTRAP.md)
+- [docs/PARTICLE_SYSTEM_ANALYSIS.md](docs/PARTICLE_SYSTEM_ANALYSIS.md)
+- [docs/PARTICLE_EFFECT_GENERATION.md](docs/PARTICLE_EFFECT_GENERATION.md)
 - [docs/EFFECT_API_SPLIT_BOOTSTRAP.md](docs/EFFECT_API_SPLIT_BOOTSTRAP.md)
 - [docs/EFFECT_API_SPLIT_PLAN.md](docs/EFFECT_API_SPLIT_PLAN.md)
 - [docs/PREFAB_GALLERY_BOOTSTRAP.md](docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 - [docs/COLLISION_BOOTSTRAP.md](docs/COLLISION_BOOTSTRAP.md)
 - [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
 - [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
@@ -45,6 +50,10 @@ High-signal areas right now:
 - [`include/karma/prefabs/prefab_entry_handler.h`](include/karma/prefabs/prefab_entry_handler.h)
 - [`src/physics/`](src/physics)
 - [`src/collision/`](src/collision)
+- [`src/animation/`](src/animation)
+- [`include/karma/animation/`](include/karma/animation)
+- [`src/scene/glb_scene_import.cpp`](src/scene/glb_scene_import.cpp)
+- [`src/scene/transform_hierarchy.cpp`](src/scene/transform_hierarchy.cpp)
 - [`examples/light_stress_example.cpp`](examples/light_stress_example.cpp)
 - [`examples/collision_events_example.cpp`](examples/collision_events_example.cpp)
 
@@ -89,6 +98,54 @@ cmake --build build-local --target \
   -j2
 ```
 
+For GLB animation / first-pass skeletal skinning, these were verified:
+
+```bash
+cmake --build build --target karma_animation_tests -j2
+./build/karma_animation_tests
+ctest --test-dir build -R karma_animation_tests --output-on-failure
+cmake --build build --target karma_glb_scene_import_example karma_glb_animation_example -j2
+```
+
+`karma_animation_tests` is headless and exits silently on success.
+
+## GLB Animation / Skinning Summary
+
+Recent animation-side work already in the tree:
+
+- `LocalTransformComponent` was added for local scene hierarchy poses
+- `TransformComponent` remains the final world transform used by render,
+  physics, lights, particles, and audio
+- `scene::updateWorldTransforms(...)` composes scene roots/children and writes
+  world transforms
+- GLB scene import now creates local and world transforms for imported nodes and
+  primitive entities
+- GLB animation clips are parsed from Assimp animation channels and stored on
+  `GlbScenePrefab::animations`
+- `AnimationPlayerComponent` supports clip storage, playback state, speed, loop,
+  and helper functions for play/pause/stop and clip selection
+- imported GLB roots autoplay clip `0` when clips exist unless
+  `GlbSceneInstantiateOptions::autoplay_animations` is false
+- first-pass skeletal support imports Assimp bones, vertex weights, joint node
+  references, and inverse bind matrices into `SkinnedMeshComponent`
+- `CpuSkinningSystem` deforms bind-pose mesh data on the CPU and uploads through
+  `GraphicsDevice::updateMesh(...)`
+
+Important limitations:
+
+- no GPU skinning yet
+- no retargeting between different skeletons
+- no blending, state machine, root motion, or morph targets
+- CPU skinning is a correctness path and can be expensive
+- `MeshComponent.mesh_key = "model.glb"` remains the flat mesh path and does not
+  use this scene animation/skinning path
+
+If continuing there, start with:
+
+- [docs/GLB_ANIMATION_BOOTSTRAP.md](docs/GLB_ANIMATION_BOOTSTRAP.md)
+- [src/animation/AGENTS.md](src/animation/AGENTS.md)
+- [include/karma/animation/AGENTS.md](include/karma/animation/AGENTS.md)
+
 ## Renderer Summary
 
 Recent renderer-structure work already in the tree:
@@ -122,12 +179,16 @@ Recent particle-side work already in the tree:
   - atlas frame selection / UV generation
 - beam-authored particles intentionally remain on the baked presentation path
 - wave volume proxies now render as projected screen-bounds quads instead of near-full-screen overlays
+- analytic volumetric spheres now render post-particle, sort by real sphere center, and alpha-compose without erasing background spheres
 - prefab gallery perf logging exists behind `KARMA_PREFAB_GALLERY_STATS=1`
 
 If continuing there, start with:
 
+- [docs/PARTICLE_SYSTEM_ANALYSIS.md](docs/PARTICLE_SYSTEM_ANALYSIS.md)
+- [docs/PARTICLE_EFFECT_GENERATION.md](docs/PARTICLE_EFFECT_GENERATION.md)
 - [docs/PARTICLE_PERF_BOOTSTRAP.md](docs/PARTICLE_PERF_BOOTSTRAP.md)
 - [docs/PREFAB_GALLERY_BOOTSTRAP.md](docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 
 ## Collision / Physics Summary
 
@@ -172,9 +233,12 @@ If continuing renderer decomposition:
 
 If continuing particle work:
 
-1. measure alpha/distortion sort cost before another architecture change
-2. explore bucketed or approximate depth ordering before GPU simulation
-3. only move simulation fully GPU-side if the user wants a larger renderer rewrite
+1. read [docs/PARTICLE_SYSTEM_ANALYSIS.md](docs/PARTICLE_SYSTEM_ANALYSIS.md)
+2. add stable benchmark logging for explosion stress and prefab gallery
+3. measure alpha/distortion sort cost before another architecture change
+4. explore bucketed or approximate depth ordering before GPU simulation
+5. consider particle material/state IDs before adding more renderer state fields to emitters
+6. only move simulation fully GPU-side if the user wants a larger renderer rewrite
 
 If continuing the effect API split:
 
@@ -195,6 +259,14 @@ If continuing local-light/shadow work:
 1. tune point-shadow quality and face update strategy
 2. validate the shadow path across more scenes and hardware
 3. only replace the current depth-SRV path with a custom linear-depth format if another backend shows the old failure mode
+
+If continuing GLB animation/skinning work:
+
+1. add a windowed skeletal visual sample with a tiny generated or checked-in GLB
+2. validate a real Blender-authored skinned GLB through scene import
+3. decide whether CPU skinning stays as debug/fallback or is replaced by GPU skinning
+4. if implementing GPU skinning, update forward and shadow passes together
+5. keep node animation, hierarchy composition, and skinning tests green
 
 ## Engineering Notes
 

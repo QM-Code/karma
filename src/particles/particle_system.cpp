@@ -620,16 +620,22 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     if (state.particles.capacity() < state.max_particles) {
       state.particles.reserve(state.max_particles);
     }
+    const float emitter_dt = clamped_dt * std::max(emitter.time_scale, 0.0f);
+    const bool ground_collision_enabled = !emitter.local_space && emitter.collide_with_ground;
+    const float rest_speed_threshold = std::max(emitter.rest_speed_threshold, 0.0f);
+    const float rest_speed_threshold_sq = rest_speed_threshold * rest_speed_threshold;
+    const float surface_friction =
+        std::clamp(1.0f - emitter.collision_friction, 0.0f, 1.0f);
+    const float slide_drag =
+        std::clamp(1.0f - (emitter.drag + emitter.collision_friction) * emitter_dt, 0.0f, 1.0f);
+    const float velocity_drag = std::clamp(1.0f - emitter.drag * emitter_dt, 0.0f, 1.0f);
+
     auto resolve_ground_collision = [&](Particle& particle) {
-      if (emitter.local_space ||
-          !emitter.collide_with_ground ||
-          particle.position.y > emitter.ground_height) {
+      if (!ground_collision_enabled || particle.position.y > emitter.ground_height) {
         return;
       }
 
       addCount(frame_stats.ground_collision_particles, 1u);
-
-      const float rest_speed_threshold = std::max(emitter.rest_speed_threshold, 0.0f);
 
       particle.position.y = emitter.ground_height;
       particle.resting_on_ground = false;
@@ -639,8 +645,6 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
             -particle.velocity.y * std::clamp(emitter.bounce_damping, 0.0f, 1.0f);
       }
 
-      const float surface_friction =
-          std::clamp(1.0f - emitter.collision_friction, 0.0f, 1.0f);
       particle.velocity.x *= surface_friction;
       particle.velocity.z *= surface_friction;
 
@@ -649,15 +653,12 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       }
 
       if (particle.velocity.y == 0.0f &&
-          horizontalLengthSquared(particle.velocity) <=
-              rest_speed_threshold * rest_speed_threshold) {
+          horizontalLengthSquared(particle.velocity) <= rest_speed_threshold_sq) {
         particle.velocity.x = 0.0f;
         particle.velocity.z = 0.0f;
         particle.resting_on_ground = true;
       }
     };
-
-    const float emitter_dt = clamped_dt * std::max(emitter.time_scale, 0.0f);
 
     size_t alive_count = 0;
     bool has_live_bounds = false;
@@ -671,18 +672,14 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         continue;
       }
 
-      if (particle.resting_on_ground && emitter.collide_with_ground) {
+      if (particle.resting_on_ground && ground_collision_enabled) {
         addCount(frame_stats.ground_collision_particles, 1u);
-        const float rest_speed_threshold = std::max(emitter.rest_speed_threshold, 0.0f);
-        const float slide_drag = std::clamp(
-            1.0f - (emitter.drag + emitter.collision_friction) * emitter_dt, 0.0f, 1.0f);
         particle.velocity.x *= slide_drag;
         particle.velocity.z *= slide_drag;
         particle.position.x += particle.velocity.x * emitter_dt;
         particle.position.z += particle.velocity.z * emitter_dt;
         particle.position.y = emitter.ground_height;
-        if (horizontalLengthSquared(particle.velocity) <=
-            rest_speed_threshold * rest_speed_threshold) {
+        if (horizontalLengthSquared(particle.velocity) <= rest_speed_threshold_sq) {
           particle.velocity.x = 0.0f;
           particle.velocity.z = 0.0f;
         } else {
@@ -690,8 +687,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         }
       } else {
         particle.velocity = add(particle.velocity, scale(emitter.acceleration, emitter_dt));
-        const float drag = std::clamp(1.0f - emitter.drag * emitter_dt, 0.0f, 1.0f);
-        particle.velocity = scale(particle.velocity, drag);
+        particle.velocity = scale(particle.velocity, velocity_drag);
         particle.position = add(particle.position, scale(particle.velocity, emitter_dt));
         resolve_ground_collision(particle);
       }
@@ -904,7 +900,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         world_start_size *= emitter_uniform_scale;
         world_end_size *= emitter_uniform_scale;
       }
-      renderer::ParticlePackedInstance packed{};
+      auto& packed = batch.particles.emplace_back();
       packed.position_age[0] = world_position.x;
       packed.position_age[1] = world_position.y;
       packed.position_age[2] = world_position.z;
@@ -924,7 +920,6 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       packed.params[0] = 0.0f;
       packed.params[1] = static_cast<float>(particle.frame_offset);
       packed.params[2] = particle.age;
-      batch.particles.push_back(packed);
     }
     addCount(frame_stats.packed_particles, batch.particles.size());
 

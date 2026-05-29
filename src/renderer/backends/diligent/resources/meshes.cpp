@@ -33,14 +33,14 @@ void computeBounds(const renderer::MeshData& mesh, glm::vec3& out_center, float&
   const glm::vec3 extents = max_v - min_v;
   out_radius = 0.5f * glm::length(extents);
 }
+
 }  // namespace
 
-renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
-  const renderer::MeshId id = nextMeshId_++;
-  MeshRecord record{};
-  record.data = mesh;
-  computeBounds(mesh, record.bounds_center, record.bounds_radius);
-  record.base_color = glm::vec4(1.0f);
+void DiligentBackend::uploadMeshBuffers(const renderer::MeshData& mesh, MeshRecord& record) {
+  record.vertex_buffer.Release();
+  record.index_buffer.Release();
+  record.vertex_count = 0;
+  record.index_count = 0;
 
   if (device_ && !mesh.vertices.empty()) {
     const auto interleaved = buildInterleavedVertices(mesh);
@@ -66,6 +66,15 @@ renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
     device_->CreateBuffer(ib_desc, &ib_data, &record.index_buffer);
     record.index_count = static_cast<Diligent::Uint32>(mesh.indices.size());
   }
+}
+
+renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
+  const renderer::MeshId id = nextMeshId_++;
+  MeshRecord record{};
+  record.data = mesh;
+  computeBounds(mesh, record.bounds_center, record.bounds_radius);
+  record.base_color = glm::vec4(1.0f);
+  uploadMeshBuffers(mesh, record);
 
   if (!mesh.indices.empty()) {
     MeshRecord::Submesh submesh{};
@@ -76,6 +85,25 @@ renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
 
   meshes_[id] = std::move(record);
   return id;
+}
+
+void DiligentBackend::updateMesh(renderer::MeshId mesh, const renderer::MeshData& data) {
+  auto it = meshes_.find(mesh);
+  if (it == meshes_.end()) {
+    return;
+  }
+
+  MeshRecord& record = it->second;
+  record.data = data;
+  computeBounds(data, record.bounds_center, record.bounds_radius);
+  uploadMeshBuffers(data, record);
+  record.submeshes.clear();
+  if (!data.indices.empty()) {
+    MeshRecord::Submesh submesh{};
+    submesh.index_offset = 0;
+    submesh.index_count = static_cast<Diligent::Uint32>(data.indices.size());
+    record.submeshes.push_back(submesh);
+  }
 }
 
 renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path& path) {
@@ -102,30 +130,7 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
   record.base_color = base_color;
   computeBounds(record.data, record.bounds_center, record.bounds_radius);
 
-  if (device_ && !combined.vertices.empty()) {
-    const auto interleaved = buildInterleavedVertices(combined);
-    constexpr Diligent::Uint32 kVertexStride = static_cast<Diligent::Uint32>(12 * sizeof(float));
-    Diligent::BufferDesc vb_desc{};
-    vb_desc.Name = "Karma VB";
-    vb_desc.Usage = Diligent::USAGE_IMMUTABLE;
-    vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
-    vb_desc.ElementByteStride = kVertexStride;
-    vb_desc.Size = static_cast<Diligent::Uint32>(interleaved.size() * sizeof(float));
-    Diligent::BufferData vb_data{interleaved.data(), vb_desc.Size};
-    device_->CreateBuffer(vb_desc, &vb_data, &record.vertex_buffer);
-    record.vertex_count = static_cast<Diligent::Uint32>(combined.vertices.size());
-  }
-
-  if (device_ && !combined.indices.empty()) {
-    Diligent::BufferDesc ib_desc{};
-    ib_desc.Name = "Karma IB";
-    ib_desc.Usage = Diligent::USAGE_IMMUTABLE;
-    ib_desc.BindFlags = Diligent::BIND_INDEX_BUFFER;
-    ib_desc.Size = static_cast<Diligent::Uint32>(combined.indices.size() * sizeof(uint32_t));
-    Diligent::BufferData ib_data{combined.indices.data(), ib_desc.Size};
-    device_->CreateBuffer(ib_desc, &ib_data, &record.index_buffer);
-    record.index_count = static_cast<Diligent::Uint32>(combined.indices.size());
-  }
+  uploadMeshBuffers(combined, record);
 
   std::vector<renderer::MaterialId> material_ids;
   material_ids.resize(scene->mNumMaterials, renderer::kInvalidMaterial);

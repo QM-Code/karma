@@ -26,6 +26,7 @@ class Backend {
   virtual void resize(int width, int height) = 0;
 
   virtual renderer::MeshId createMesh(const renderer::MeshData& mesh) = 0;
+  virtual void updateMesh(renderer::MeshId mesh, const renderer::MeshData& data) = 0;
   virtual renderer::MeshId createMeshFromFile(const std::filesystem::path& path) = 0;
   virtual void destroyMesh(renderer::MeshId mesh) = 0;
   virtual bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const = 0;

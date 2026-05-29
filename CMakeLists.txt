@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(karma LANGUAGES CXX C)
 
 set(BUILD_TESTING ON CACHE BOOL "Disable CTest targets for Karma deps" FORCE)
+include(CTest)
 
 option(KARMA_WINDOW_BACKEND_GLFW "Use GLFW window backend" ON)
 option(KARMA_WINDOW_BACKEND_SDL "Use SDL window backend" OFF)
@@ -326,9 +327,14 @@ endif()
 set(KARMA_SOURCES
   src/app/engine_app.cpp
   src/app/ui_context.cpp
+  src/animation/animation_clip.cpp
+  src/animation/animation_system.cpp
+  src/animation/cpu_skinning_system.cpp
+  src/components/animation_player.cpp
   src/components/transform.cpp
   src/ecs/collider_queries.cpp
   src/scene/glb_scene_import.cpp
+  src/scene/transform_hierarchy.cpp
   src/audio/audio.cpp
   src/audio/backend_factory.cpp
   src/audio/audio_system.cpp
@@ -578,6 +584,14 @@ if (NOT KARMA_HEADLESS)
     add_dependencies(karma_glb_scene_import_example karma_fix_xxhash)
   endif()
 
+  add_executable(karma_glb_animation_example
+    examples/glb_animation_example.cpp
+  )
+  target_link_libraries(karma_glb_animation_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_glb_animation_example karma_fix_xxhash)
+  endif()
+
   add_executable(karma_particle_example
     examples/particle_example.cpp
   )
@@ -677,6 +691,14 @@ if (NOT KARMA_HEADLESS)
       add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
     endif()
   endif()
+endif()
+
+if (BUILD_TESTING)
+  add_executable(karma_animation_tests
+    tests/animation_tests.cpp
+  )
+  target_link_libraries(karma_animation_tests PRIVATE karma)
+  add_test(NAME karma_animation_tests COMMAND karma_animation_tests)
 endif()
 
 add_executable(karma_network_demo

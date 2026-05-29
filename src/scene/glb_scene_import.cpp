@@ -11,9 +11,12 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include "karma/components/animation_player.h"
 #include "karma/components/mesh.h"
+#include "karma/components/skinned_mesh.h"
 #include "karma/components/tag.h"
 #include "karma/components/transform.h"
+#include "karma/scene/transform_hierarchy.h"
 
 namespace karma::scene {
 
@@ -26,8 +29,51 @@ math::Quat toQuat(const aiQuaternion& q) {
   return {q.x, q.y, q.z, q.w};
 }
 
+glm::mat4 toGlm(const aiMatrix4x4& m) {
+  return glm::mat4{
+      m.a1, m.b1, m.c1, m.d1,
+      m.a2, m.b2, m.c2, m.d2,
+      m.a3, m.b3, m.c3, m.d3,
+      m.a4, m.b4, m.c4, m.d4,
+  };
+}
+
 std::string safeName(std::string_view base, std::string_view fallback) {
   return base.empty() ? std::string(fallback) : std::string(base);
+}
+
+void addInfluence(components::VertexSkinInfluence& influence, uint32_t joint, float weight) {
+  if (weight <= 0.0f) {
+    return;
+  }
+
+  for (int i = 0; i < 4; ++i) {
+    if (influence.weights[i] <= 0.0f) {
+      influence.joints[i] = joint;
+      influence.weights[i] = weight;
+      return;
+    }
+  }
+
+  int weakest = 0;
+  for (int i = 1; i < 4; ++i) {
+    if (influence.weights[i] < influence.weights[weakest]) {
+      weakest = i;
+    }
+  }
+  if (weight > influence.weights[weakest]) {
+    influence.joints[weakest] = joint;
+    influence.weights[weakest] = weight;
+  }
+}
+
+void normalizeInfluence(components::VertexSkinInfluence& influence) {
+  const float sum =
+      influence.weights.x + influence.weights.y + influence.weights.z + influence.weights.w;
+  if (sum <= 0.0f) {
+    return;
+  }
+  influence.weights /= sum;
 }
 
 renderer::MeshData buildMeshData(const aiMesh& mesh) {
@@ -206,7 +252,8 @@ uint32_t loadNodePrefab(const aiScene& scene,
                         const aiMatrix4x4& parent_world,
                         const std::unordered_map<std::string, const aiLight*>& lights_by_name,
                         const GlbSceneLoadOptions& options,
-                        GlbScenePrefab& prefab) {
+                        GlbScenePrefab& prefab,
+                        std::unordered_map<std::string, uint32_t>& node_indices_by_name) {
   const aiMatrix4x4 world_transform = parent_world * node.mTransformation;
 
   GlbScenePrefabNode prefab_node{};
@@ -234,6 +281,7 @@ uint32_t loadNodePrefab(const aiScene& scene,
       primitive.material = buildMaterialDesc(scene, mesh);
       primitive.source_material_index =
           mesh.mMaterialIndex < scene.mNumMaterials ? mesh.mMaterialIndex : kInvalidGlbSceneMaterial;
+      primitive.source_mesh_index = scene_mesh_index;
       prefab_node.primitives.push_back(std::move(primitive));
     }
   }
@@ -248,6 +296,7 @@ uint32_t loadNodePrefab(const aiScene& scene,
 
   const uint32_t node_index = static_cast<uint32_t>(prefab.nodes.size());
   prefab.nodes.push_back(std::move(prefab_node));
+  node_indices_by_name.try_emplace(node.mName.C_Str(), node_index);
 
   prefab.nodes[node_index].children.reserve(node.mNumChildren);
   for (unsigned int child_index = 0; child_index < node.mNumChildren; ++child_index) {
@@ -256,13 +305,145 @@ uint32_t loadNodePrefab(const aiScene& scene,
       continue;
     }
     const uint32_t imported_child =
-        loadNodePrefab(scene, *child, world_transform, lights_by_name, options, prefab);
+        loadNodePrefab(scene,
+                       *child,
+                       world_transform,
+                       lights_by_name,
+                       options,
+                       prefab,
+                       node_indices_by_name);
     if (imported_child != kInvalidGlbSceneNode) {
       prefab.nodes[node_index].children.push_back(imported_child);
     }
   }
 
   return node_index;
+}
+
+void populatePrimitiveSkinning(const aiScene& scene,
+                               const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
+                               GlbScenePrefab& prefab) {
+  for (GlbScenePrefabNode& node : prefab.nodes) {
+    for (GlbScenePrefabPrimitive& primitive : node.primitives) {
+      if (primitive.source_mesh_index >= scene.mNumMeshes ||
+          scene.mMeshes[primitive.source_mesh_index] == nullptr) {
+        continue;
+      }
+      const aiMesh& mesh = *scene.mMeshes[primitive.source_mesh_index];
+      if (!mesh.HasBones() || primitive.mesh.vertices.empty()) {
+        continue;
+      }
+
+      primitive.vertex_influences.assign(primitive.mesh.vertices.size(),
+                                         components::VertexSkinInfluence{});
+      primitive.joint_node_indices.clear();
+      primitive.inverse_bind_matrices.clear();
+      primitive.joint_node_indices.reserve(mesh.mNumBones);
+      primitive.inverse_bind_matrices.reserve(mesh.mNumBones);
+
+      for (unsigned int bone_index = 0; bone_index < mesh.mNumBones; ++bone_index) {
+        const aiBone* bone = mesh.mBones[bone_index];
+        if (bone == nullptr) {
+          continue;
+        }
+        const auto node_it = node_indices_by_name.find(bone->mName.C_Str());
+        if (node_it == node_indices_by_name.end()) {
+          continue;
+        }
+
+        const uint32_t joint_index = static_cast<uint32_t>(primitive.joint_node_indices.size());
+        primitive.joint_node_indices.push_back(node_it->second);
+        primitive.inverse_bind_matrices.push_back(toGlm(bone->mOffsetMatrix));
+
+        for (unsigned int weight_index = 0; weight_index < bone->mNumWeights; ++weight_index) {
+          const aiVertexWeight& weight = bone->mWeights[weight_index];
+          if (weight.mVertexId >= primitive.vertex_influences.size()) {
+            continue;
+          }
+          addInfluence(primitive.vertex_influences[weight.mVertexId],
+                       joint_index,
+                       weight.mWeight);
+        }
+      }
+
+      for (auto& influence : primitive.vertex_influences) {
+        normalizeInfluence(influence);
+      }
+      if (primitive.joint_node_indices.empty()) {
+        primitive.vertex_influences.clear();
+        primitive.inverse_bind_matrices.clear();
+      }
+    }
+  }
+}
+
+std::vector<animation::AnimationClip> loadAnimationClips(
+    const aiScene& scene,
+    const std::unordered_map<std::string, uint32_t>& node_indices_by_name) {
+  std::vector<animation::AnimationClip> clips;
+  clips.reserve(scene.mNumAnimations);
+
+  for (unsigned int animation_index = 0; animation_index < scene.mNumAnimations; ++animation_index) {
+    const aiAnimation* source = scene.mAnimations[animation_index];
+    if (source == nullptr) {
+      continue;
+    }
+
+    const double ticks_per_second =
+        source->mTicksPerSecond > 0.0 ? source->mTicksPerSecond : 1.0;
+    animation::AnimationClip clip{};
+    clip.name = safeName(source->mName.C_Str(), "Animation " + std::to_string(animation_index));
+    clip.ticks_per_second = static_cast<float>(ticks_per_second);
+    clip.duration_seconds = static_cast<float>(source->mDuration / ticks_per_second);
+    clip.channels.reserve(source->mNumChannels);
+
+    for (unsigned int channel_index = 0; channel_index < source->mNumChannels; ++channel_index) {
+      const aiNodeAnim* source_channel = source->mChannels[channel_index];
+      if (source_channel == nullptr) {
+        continue;
+      }
+      const auto node_it = node_indices_by_name.find(source_channel->mNodeName.C_Str());
+      if (node_it == node_indices_by_name.end()) {
+        continue;
+      }
+
+      animation::AnimationChannel channel{};
+      channel.target_node_index = node_it->second;
+      channel.position_keys.reserve(source_channel->mNumPositionKeys);
+      channel.rotation_keys.reserve(source_channel->mNumRotationKeys);
+      channel.scale_keys.reserve(source_channel->mNumScalingKeys);
+
+      for (unsigned int key_index = 0; key_index < source_channel->mNumPositionKeys; ++key_index) {
+        const aiVectorKey& key = source_channel->mPositionKeys[key_index];
+        channel.position_keys.push_back(animation::Vec3Keyframe{
+            .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
+            .value = toVec3(key.mValue),
+        });
+      }
+      for (unsigned int key_index = 0; key_index < source_channel->mNumRotationKeys; ++key_index) {
+        const aiQuatKey& key = source_channel->mRotationKeys[key_index];
+        channel.rotation_keys.push_back(animation::QuatKeyframe{
+            .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
+            .value = toQuat(key.mValue),
+        });
+      }
+      for (unsigned int key_index = 0; key_index < source_channel->mNumScalingKeys; ++key_index) {
+        const aiVectorKey& key = source_channel->mScalingKeys[key_index];
+        channel.scale_keys.push_back(animation::Vec3Keyframe{
+            .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
+            .value = toVec3(key.mValue),
+        });
+      }
+
+      clip.channels.push_back(std::move(channel));
+    }
+
+    if (!clip.channels.empty()) {
+      clips.push_back(std::move(clip));
+    }
+  }
+
+  return clips;
 }
 
 std::string nodeDisplayName(const GlbScenePrefabNode& node, uint32_t index) {
@@ -308,12 +489,17 @@ GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
     lights_by_name[light->mName.C_Str()] = light;
   }
 
+  std::unordered_map<std::string, uint32_t> node_indices_by_name;
+  node_indices_by_name.reserve(128);
   prefab.root_node = loadNodePrefab(*scene,
                                     *scene->mRootNode,
                                     aiMatrix4x4{},
                                     lights_by_name,
                                     options,
-                                    prefab);
+                                    prefab,
+                                    node_indices_by_name);
+  populatePrimitiveSkinning(*scene, node_indices_by_name, prefab);
+  prefab.animations = loadAnimationClips(*scene, node_indices_by_name);
   return prefab;
 }
 
@@ -328,6 +514,39 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     return result;
   }
 
+  result.node_entities_by_index.resize(prefab.nodes.size());
+
+  struct PendingSkin {
+    ecs::Entity entity{};
+    const GlbScenePrefabPrimitive* primitive = nullptr;
+  };
+  std::vector<PendingSkin> pending_skins;
+
+  auto attach_pending_skins = [&]() {
+    for (const PendingSkin& pending : pending_skins) {
+      if (!world.isAlive(pending.entity) || pending.primitive == nullptr ||
+          !pending.primitive->skinned()) {
+        continue;
+      }
+      std::vector<ecs::Entity> joint_entities;
+      joint_entities.reserve(pending.primitive->joint_node_indices.size());
+      for (const uint32_t joint_node_index : pending.primitive->joint_node_indices) {
+        if (joint_node_index < result.node_entities_by_index.size()) {
+          joint_entities.push_back(result.node_entities_by_index[joint_node_index]);
+        } else {
+          joint_entities.push_back({});
+        }
+      }
+      world.add(pending.entity, components::SkinnedMeshComponent{
+                                    .bind_mesh = pending.primitive->mesh,
+                                    .skinned_mesh = pending.primitive->mesh,
+                                    .vertex_influences = pending.primitive->vertex_influences,
+                                    .joint_entities = std::move(joint_entities),
+                                    .inverse_bind_matrices = pending.primitive->inverse_bind_matrices,
+                                    .enabled = true});
+    }
+  };
+
   std::function<std::pair<ecs::Entity, scene::NodeId>(uint32_t, scene::NodeId)> instantiate_node;
   instantiate_node = [&](uint32_t prefab_node_index,
                          scene::NodeId parent_node) -> std::pair<ecs::Entity, scene::NodeId> {
@@ -338,6 +557,10 @@ GlbSceneImportResult instantiateGlbScenePrefab(
                            prefab_node.world_position,
                            prefab_node.world_rotation,
                            prefab_node.world_scale});
+    world.add(entity, components::LocalTransformComponent{
+                          prefab_node.local_position,
+                          prefab_node.local_rotation,
+                          prefab_node.local_scale});
     if (prefab_node.has_light) {
       world.add(entity, prefab_node.light);
     }
@@ -347,6 +570,9 @@ GlbSceneImportResult instantiateGlbScenePrefab(
       scene.reparent(node_id, parent_node);
     }
     result.entities.push_back(entity);
+    if (prefab_node_index < result.node_entities_by_index.size()) {
+      result.node_entities_by_index[prefab_node_index] = entity;
+    }
 
     for (size_t primitive_index = 0; primitive_index < prefab_node.primitives.size(); ++primitive_index) {
       const auto& primitive = prefab_node.primitives[primitive_index];
@@ -357,6 +583,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
                                      prefab_node.world_position,
                                      prefab_node.world_rotation,
                                      prefab_node.world_scale});
+      world.add(primitive_entity, components::LocalTransformComponent{});
 
       const renderer::MeshId mesh_id = device.createMesh(primitive.mesh);
       renderer::MaterialId material_id = renderer::kInvalidMaterial;
@@ -373,6 +600,9 @@ GlbSceneImportResult instantiateGlbScenePrefab(
                                      .owns_mesh_id = mesh_id != renderer::kInvalidMesh,
                                      .owns_material_id = material_id != renderer::kInvalidMaterial,
                                      .visible = true});
+      if (primitive.skinned()) {
+        pending_skins.push_back(PendingSkin{.entity = primitive_entity, .primitive = &primitive});
+      }
 
       const scene::NodeId primitive_node = scene.createNode(primitive_entity);
       scene.reparent(primitive_node, node_id);
@@ -392,17 +622,42 @@ GlbSceneImportResult instantiateGlbScenePrefab(
         prefab.source_path.stem().empty() ? std::string("Imported GLB") : prefab.source_path.stem().string();
     world.setName(root_entity, root_name);
     world.add(root_entity, components::TransformComponent{});
+    world.add(root_entity, components::LocalTransformComponent{});
     const scene::NodeId root_node = scene.createNode(root_entity);
     result.entities.push_back(root_entity);
     instantiate_node(prefab.root_node, root_node);
     result.root_entity = root_entity;
     result.root_node = root_node;
+    attach_pending_skins();
+    if (!prefab.animations.empty()) {
+      world.add(root_entity, components::AnimationPlayerComponent{
+                                 .clips = prefab.animations,
+                                 .node_entities_by_index = result.node_entities_by_index,
+                                 .current_clip_index = 0,
+                                 .time_seconds = 0.0f,
+                                 .speed = 1.0f,
+                                 .loop = true,
+                                 .playing = options.autoplay_animations});
+    }
+    updateWorldTransforms(world, scene);
     return result;
   }
 
   const auto [root_entity, root_node] = instantiate_node(prefab.root_node, scene::Node::kInvalidId);
   result.root_entity = root_entity;
   result.root_node = root_node;
+  attach_pending_skins();
+  if (!prefab.animations.empty()) {
+    world.add(root_entity, components::AnimationPlayerComponent{
+                               .clips = prefab.animations,
+                               .node_entities_by_index = result.node_entities_by_index,
+                               .current_clip_index = 0,
+                               .time_seconds = 0.0f,
+                               .speed = 1.0f,
+                               .loop = true,
+                               .playing = options.autoplay_animations});
+  }
+  updateWorldTransforms(world, scene);
   return result;
 }
 

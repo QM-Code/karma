@@ -30,6 +30,7 @@ Renderer-side composition files:
 
 - [backend_render.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_render.cpp)
 - [backend_init.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_init.cpp)
+- [VOLUMETRIC_SPHERE_TRANSPARENCY.md](/home/irie/Documents/karma/docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 
 ## Explosion Prefab Status
 
@@ -51,7 +52,7 @@ Two important renderer-side fixes are already in the tree:
 
 ### 1. Volume / particle composition split
 
-`WaveVolume` and `VolumetricSphere` materials no longer sample a post-particle scene copy.
+`WaveVolume` materials no longer sample a post-particle scene copy.
 
 Instead:
 
@@ -59,9 +60,33 @@ Instead:
 - they sample an opaque / pre-particle scene-color copy
 - explosion particles no longer become part of the wave volumes' sampled background
 
+`VolumetricSphere` materials are routed through the post-particle transparent
+bucket. This keeps analytic spheres from being permanently underneath beam and
+particle effects when the sphere is in front in 3D space. This is still an
+approximation: transparent effects do not yet share a full transparency-depth
+composition buffer, so front/back ordering between arbitrary transparent effects
+can still need a more deliberate renderer pass.
+
+Volumetric spheres also use their analytic world-space sphere center as the
+transparent sort key. The rendered mesh is a screen-space proxy quad placed at a
+fixed overlay depth, so sorting by proxy transform depth causes multiple spheres
+to tie and appear to fight for foreground order.
+
+Volumetric spheres now also return path-length opacity as transparent alpha
+instead of writing an opaque scene-color composite. Their shader compensates the
+source color for normal alpha blending so the single-sphere appearance stays
+close to the old refractive, glowing, crisp-edged result while background
+volumetric spheres remain visible through foreground spheres.
+
 Primary file:
 
+- [forward.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/passes/forward.cpp)
+- [backend_init.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_init.cpp)
 - [backend_render.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_render.cpp)
+
+Detailed handoff:
+
+- [VOLUMETRIC_SPHERE_TRANSPARENCY.md](/home/irie/Documents/karma/docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 
 ### 2. Volume-sphere proxy optimization
 

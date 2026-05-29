@@ -14,6 +14,17 @@ class World;
 
 namespace karma::components {
 
+struct LocalTransformComponent : ecs::ComponentTag {
+  LocalTransformComponent() = default;
+  LocalTransformComponent(const math::Vec3& position, const math::Quat& rotation = {},
+                          const math::Vec3& scale = {1.0f, 1.0f, 1.0f})
+      : position(position), rotation(rotation), scale(scale) {}
+
+  math::Vec3 position{};
+  math::Quat rotation{};
+  math::Vec3 scale{1.0f, 1.0f, 1.0f};
+};
+
 class TransformComponent : public ecs::ComponentTag {
  public:
   TransformComponent();

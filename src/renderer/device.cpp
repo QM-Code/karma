@@ -41,6 +41,12 @@ MeshId GraphicsDevice::createMesh(const MeshData& mesh) {
   return backend_ ? backend_->createMesh(mesh) : kInvalidMesh;
 }
 
+void GraphicsDevice::updateMesh(MeshId mesh, const MeshData& data) {
+  if (backend_) {
+    backend_->updateMesh(mesh, data);
+  }
+}
+
 MeshId GraphicsDevice::createMeshFromFile(const std::filesystem::path& path) {
   return backend_ ? backend_->createMeshFromFile(path) : kInvalidMesh;
 }

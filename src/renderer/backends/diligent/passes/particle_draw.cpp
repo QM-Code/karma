@@ -143,7 +143,8 @@ struct ParticleBatchGroupKeyHash {
 
 struct AdditiveParticleGroup {
   ParticleBatchGroupKey key{};
-  std::vector<ParticleInstanceGpu> gpu_particles;
+  std::vector<std::size_t> batch_indices;
+  std::size_t particle_count = 0u;
 };
 
 struct PreparedParticleSpan {
@@ -554,26 +555,28 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
         additive_groups.push_back(AdditiveParticleGroup{.key = key});
       }
       auto& group = additive_groups[it->second];
-      group.gpu_particles.reserve(group.gpu_particles.size() + batch.particles.size());
-      group.gpu_particles.insert(group.gpu_particles.end(),
-                                 batch.particles.begin(),
-                                 batch.particles.end());
+      group.batch_indices.push_back(batch_index);
+      group.particle_count += batch.particles.size();
     }
 
     stream.particles.reserve(total_particles);
     stream.spans.reserve(additive_groups.size());
     for (const auto& group : additive_groups) {
-      if (group.gpu_particles.empty()) {
+      if (group.particle_count == 0u) {
         continue;
       }
       const std::size_t particle_offset = stream.particles.size();
-      stream.particles.insert(stream.particles.end(),
-                              group.gpu_particles.begin(),
-                              group.gpu_particles.end());
+      stream.particles.reserve(stream.particles.size() + group.particle_count);
+      for (const std::size_t batch_index : group.batch_indices) {
+        const auto& batch = particle_batches_[batch_index];
+        stream.particles.insert(stream.particles.end(),
+                                batch.particles.begin(),
+                                batch.particles.end());
+      }
       stream.spans.push_back(PreparedParticleSpan{
           .key = group.key,
           .particle_offset = particle_offset,
-          .particle_count = group.gpu_particles.size(),
+          .particle_count = stream.particles.size() - particle_offset,
       });
     }
 

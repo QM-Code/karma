@@ -9,13 +9,25 @@
 #include <Graphics/GraphicsEngine/interface/GraphicsTypes.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <limits>
+#include <string_view>
+
+#include <spdlog/spdlog.h>
 
 namespace karma::renderer_backend {
 
 namespace {
 constexpr double kWrappedShaderTimeSeconds = 4096.0;
+
+bool envFlagEnabled(std::string_view value) {
+  if (value.empty()) {
+    return false;
+  }
+  return value != "0" && value != "false" && value != "FALSE" && value != "off" &&
+         value != "OFF";
+}
 
 template <typename RecordT, typename BatchT>
 void copyParticleBatchMetadata(RecordT& record, const BatchT& batch) {
@@ -130,11 +142,23 @@ Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_fo
 }  // namespace
 
 void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
+  if (!particle_stats_log_initialized_) {
+    particle_stats_log_initialized_ = true;
+    if (const char* value = std::getenv("KARMA_PARTICLE_STATS")) {
+      particle_stats_log_enabled_ = envFlagEnabled(value);
+    }
+    if (particle_stats_log_enabled_) {
+      spdlog::info(
+          "KARMA_PARTICLE_STATS enabled; logging averaged final particle pass stats once per second");
+    }
+  }
+
   if (isValidSize(frame.width, frame.height) &&
       (frame.width != current_width_ || frame.height != current_height_)) {
     resize(frame.width, frame.height);
   }
   particle_pass_stats_ = {};
+  last_frame_delta_seconds_ = std::max(frame.delta_time, 0.0f);
   accumulated_time_seconds_ += static_cast<double>(std::max(frame.delta_time, 0.0f));
   if (accumulated_time_seconds_ >= kWrappedShaderTimeSeconds) {
     accumulated_time_seconds_ =

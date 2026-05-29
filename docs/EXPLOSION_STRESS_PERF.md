@@ -33,6 +33,16 @@ Environment equivalent:
 KARMA_EXPLOSION_STRESS_STATS=1 ./build-local/karma_explosion_stress_example
 ```
 
+Renderer-level particle diagnostics:
+
+```bash
+KARMA_PARTICLE_STATS=1 ./build-local/karma_explosion_stress_example --stats
+```
+
+`KARMA_PARTICLE_STATS=1` logs averaged final `ParticlePassStats` once per
+second after particle render submission. The line is intentionally stable
+`key=value` text so runs can be compared with grep, diffs, or simple scripts.
+
 ## Runtime Controls
 
 Command-line flags:
@@ -45,6 +55,7 @@ Command-line flags:
 Environment variables:
 
 - `KARMA_EXPLOSION_STRESS_STATS=1`
+- `KARMA_PARTICLE_STATS=1`
 - `KARMA_EXPLOSION_STRESS_DISABLE=heat,smoke`
 
 Layer tokens:
@@ -154,6 +165,11 @@ Primary files:
 ## How To Read The Log
 
 The sample prints one `Explosion stress: ...` line when stats logging is enabled.
+When `KARMA_PARTICLE_STATS=1` is set, the renderer also prints one
+`Particle stats: ...` line per second. Prefer the renderer line when comparing
+particle changes across examples because it is emitted after final render
+submission and includes simulation, packing, sorting, grouping, scene-copy, and
+draw-submission fields in one place.
 
 The startup path also prints flipbook-source lines:
 
@@ -192,6 +208,138 @@ Key fields:
 - `alpha_half_res`
   - true when the half-resolution alpha path is active
 
+## Captured Baseline: 2026-05-17
+
+Local build target:
+
+```bash
+cmake --build build --target karma_explosion_stress_example karma_prefab_gallery_example
+```
+
+Default explosion stress:
+
+```bash
+timeout 12s env KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 \
+  ./build/karma_explosion_stress_example --stats
+```
+
+Representative steady-state averages:
+
+- `fps=60-62`
+- `simulated_particles=3400-3500`, `packed_particles=3420-3500`
+- `simulation_ms=0.27-0.31`
+- `packing_ms=0.23-0.26`
+- `additive_grouping_ms=0.20-0.25`
+- `alpha_sort_ms=0.06-0.07`, `distortion_sort_ms=0.008-0.010`
+- `draw_submission_ms=0.30-0.35`
+- `alpha_draw_calls=140-155`
+
+Prefab gallery:
+
+```bash
+timeout 12s env KARMA_PARTICLE_STATS=1 KARMA_PREFAB_GALLERY_STATS=1 \
+  ./build/karma_prefab_gallery_example
+```
+
+Representative active-window averages:
+
+- `fps=60-61`
+- `simulated_particles=2200-2900`, `packed_particles=2200-2830`
+- `simulation_ms=0.35-0.53`
+- `packing_ms=0.32-0.48`
+- `additive_grouping_ms=0.25-0.33`
+- `alpha_sort_ms=0.04-0.08`, `distortion_sort_ms=0.05-0.09`
+- `draw_submission_ms=0.29-0.55`
+- `submitted_batches=35-43`
+
+Heavier stress sweep:
+
+```bash
+timeout 12s env KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 \
+  ./build/karma_explosion_stress_example --stats --explosions 25 --period 2.0
+```
+
+Representative steady-state averages:
+
+- `fps=60-61`
+- `simulated_emitters=275`, `visible_emitters=163-164`
+- `simulated_particles=14600-14700`, `packed_particles=14780-14800`
+- `submitted_batches=163`, `submitted_particles=14780-14800`
+- `simulation_ms=1.06-1.18`
+- `packing_ms=0.84-0.96`
+- `additive_grouping_ms=1.86-2.02`
+- `alpha_sort_ms=0.27-0.29`, `distortion_sort_ms=0.03`
+- `draw_submission_ms=0.41-0.47`
+
+Interpretation:
+
+- Default and gallery slowdown is not primarily sorting; alpha/distortion sort
+  costs are small compared with grouping, simulation, packing, and draw
+  submission.
+- The heavy sweep makes additive grouping the largest measured particle-side
+  cost, followed by simulation and packing.
+- Particle count matters because the costs scale with roughly `15k` packed
+  particles and `160+` visible/submitted emitters, but the current bottleneck
+  presents first as CPU-side grouping/simulation/packing rather than GPU draw
+  submission or exact sort.
+- The next optimization should target additive grouping and span/batch
+  fragmentation before replacing the sort algorithm.
+
+## Optimization Pass: 2026-05-17
+
+Changes:
+
+- Additive grouping now keeps grouped batch references and copies particles only
+  once into the prepared upload stream.
+- Simulated particle packing now constructs `ParticlePackedInstance` values
+  directly in the batch vector.
+- Ground-collision simulation now hoists stable drag/friction/rest constants out
+  of the per-particle loop.
+
+Heavy stress after the first pass:
+
+```bash
+timeout 10s env KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 \
+  ./build/karma_explosion_stress_example --stats --explosions 25 --period 2.0
+```
+
+Representative steady-state averages:
+
+- `fps=60-61`
+- `simulated_particles=14600-14790`, `packed_particles=14770-14790`
+- `simulation_ms=0.92-1.15`
+- `packing_ms=0.83-1.07`
+- `additive_grouping_ms=0.23-0.27`
+- `alpha_sort_ms=0.26-0.34`, `distortion_sort_ms=0.03`
+- `draw_submission_ms=0.45-0.63`
+
+Prefab gallery after the first pass:
+
+```bash
+timeout 10s env KARMA_PARTICLE_STATS=1 KARMA_PREFAB_GALLERY_STATS=1 \
+  ./build/karma_prefab_gallery_example
+```
+
+Representative active-window averages:
+
+- `fps=60`
+- `simulated_particles=2100-2900`, `packed_particles=2130-2890`
+- `simulation_ms=0.10-0.35`
+- `packing_ms=0.11-0.36`
+- `additive_grouping_ms=0.05-0.11`
+- `alpha_sort_ms=0.01-0.05`, `distortion_sort_ms=0.02-0.05`
+- `draw_submission_ms=0.09-0.35`
+
+Updated interpretation:
+
+- Additive grouping is no longer the first bottleneck in the measured scenes.
+- The remaining particle-side costs are simulation and packing under heavy
+  particle counts, with draw submission occasionally visible in the stress
+  harness.
+- The next renderer-side target is persistent/reused packed-batch storage or a
+  lower-copy submission path. The next simulation target is reducing work for
+  resting ground-collision particles.
+
 ## High-Signal Interpretations
 
 - `world_*` counts climbing while only one replay window is active:
@@ -218,6 +366,6 @@ The engineering summary and continuation notes for this work live in:
 
 ## Environment Note
 
-In the headless Codex environment, windowed runtime validation still fails at
-GLFW initialization. Build validation is reliable here; steady-state runtime
-perf numbers should be captured on a normal desktop session.
+Runtime validation can depend on the active display/driver session. If GLFW
+startup fails in a headless environment, build validation is still reliable and
+steady-state perf numbers should be captured on a normal desktop session.

@@ -394,6 +394,16 @@ public:
                     ev.type = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) ? EventType::MouseButtonDown : EventType::MouseButtonUp;
                     ev.mouseButton = toMouseButton(event.button.button);
                     ev.mods = toModifiers(SDL_GetModState());
+                    int winW = 0;
+                    int winH = 0;
+                    int fbW = 0;
+                    int fbH = 0;
+                    SDL_GetWindowSize(window, &winW, &winH);
+                    SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
+                    const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
+                    const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
+                    ev.x = event.button.x * scaleX;
+                    ev.y = event.button.y * scaleY;
                     eventsBuffer.push_back(ev);
                     break;
                 }

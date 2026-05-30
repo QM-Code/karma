@@ -41,6 +41,14 @@ class InputSystem {
   bool actionPressed(const std::string& action) const;
   float mouseDeltaX() const { return mouse_delta_x_; }
   float mouseDeltaY() const { return mouse_delta_y_; }
+  bool mousePosition(double& x, double& y) const {
+    if (!has_mouse_pos_) {
+      return false;
+    }
+    x = last_mouse_x_;
+    y = last_mouse_y_;
+    return true;
+  }
 
   void clear();
 

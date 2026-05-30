@@ -49,6 +49,9 @@ set(KARMA_NAVIGATION_LINK_LIBS "" CACHE STRING "Navigation libraries")
 set(KARMA_EXTRA_LINK_LIBS "" CACHE STRING "Additional Karma libraries")
 set(KARMA_EXTRA_INCLUDE_DIRS "" CACHE STRING "Additional Karma include paths")
 
+find_package(Threads REQUIRED)
+list(APPEND KARMA_EXTRA_LINK_LIBS Threads::Threads)
+
 include(FetchContent)
 include(CTest)
 
@@ -402,6 +405,7 @@ if (KARMA_ENABLE_NAVIGATION)
   list(APPEND KARMA_SOURCES
     src/navigation/nav_geometry.cpp
     src/navigation/nav_mesh.cpp
+    src/navigation/navigation_system.cpp
   )
 endif()
 

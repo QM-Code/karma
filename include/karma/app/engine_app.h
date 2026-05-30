@@ -127,6 +127,9 @@ class EngineApp {
   uint64_t last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
 
   bool running_ = false;
+  bool frame_diag_initialized_ = false;
+  bool frame_diag_enabled_ = false;
+  float frame_diag_threshold_ms_ = 25.0f;
   float fixed_dt_ = 1.0f / 60.0f;
   float accumulator_ = 0.0f;
   std::chrono::steady_clock::time_point last_time_{};

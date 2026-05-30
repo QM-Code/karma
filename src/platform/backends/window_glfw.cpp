@@ -483,6 +483,19 @@ private:
             ev.mouseButton = toMouseButton(button);
             ev.mods = toModifiers(mods);
             ev.type = (action == GLFW_PRESS) ? EventType::MouseButtonDown : EventType::MouseButtonUp;
+            double xpos = 0.0;
+            double ypos = 0.0;
+            int winW = 0;
+            int winH = 0;
+            int fbW = 0;
+            int fbH = 0;
+            glfwGetCursorPos(w, &xpos, &ypos);
+            glfwGetWindowSize(w, &winW, &winH);
+            glfwGetFramebufferSize(w, &fbW, &fbH);
+            const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
+            const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
+            ev.x = xpos * scaleX;
+            ev.y = ypos * scaleY;
             self->eventsBuffer.push_back(ev);
         });
 

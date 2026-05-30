@@ -77,10 +77,14 @@ void InputSystem::update(const std::vector<platform::Event>& events) {
   }
 
   for (const auto& event : events) {
-    if (event.type == platform::EventType::MouseMove) {
+    if (event.type == platform::EventType::MouseMove ||
+        event.type == platform::EventType::MouseButtonDown ||
+        event.type == platform::EventType::MouseButtonUp) {
       if (has_mouse_pos_) {
-        mouse_delta_x_ += static_cast<float>(event.x - last_mouse_x_);
-        mouse_delta_y_ += static_cast<float>(event.y - last_mouse_y_);
+        if (event.type == platform::EventType::MouseMove) {
+          mouse_delta_x_ += static_cast<float>(event.x - last_mouse_x_);
+          mouse_delta_y_ += static_cast<float>(event.y - last_mouse_y_);
+        }
       }
       last_mouse_x_ = event.x;
       last_mouse_y_ = event.y;

@@ -1,12 +1,14 @@
 #include "karma/navigation/nav_geometry.h"
 
 #include <cstdint>
+#include <string>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include "karma/components/collider.h"
 #include "karma/components/mesh.h"
+#include "karma/components/nav_mesh.h"
 #include "karma/components/transform.h"
 #include "karma/ecs/world.h"
 #include "karma/geometry/mesh_loader.h"
@@ -40,7 +42,8 @@ glm::mat4 makeTransform(const math::Vec3& position,
 template <class Mesh>
 void appendMesh(NavMeshInputGeometry& out,
                 const Mesh& mesh,
-                const glm::mat4& transform) {
+                const glm::mat4& transform,
+                unsigned char area) {
   const uint32_t base_vertex = static_cast<uint32_t>(out.vertices.size());
   out.vertices.reserve(out.vertices.size() + mesh.vertices.size());
   for (const glm::vec3& vertex : mesh.vertices) {
@@ -59,7 +62,43 @@ void appendMesh(NavMeshInputGeometry& out,
     out.indices.push_back(base_vertex + a);
     out.indices.push_back(base_vertex + b);
     out.indices.push_back(base_vertex + c);
+    out.triangle_areas.push_back(area);
   }
+}
+
+void appendOffMeshLinks(NavMeshInputGeometry& geometry,
+                        const ecs::World& world,
+                        uint32_t source_mask) {
+  world.forEach<components::NavOffMeshLinkComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
+        const auto& link = world.get<components::NavOffMeshLinkComponent>(entity);
+        if (!link.enabled || (link.layer_mask & source_mask) == 0u) {
+          return;
+        }
+
+        const auto& start_transform = world.get<components::TransformComponent>(entity);
+        const math::Vec3 start_position = start_transform.getPosition();
+        math::Vec3 end_position = start_position;
+        if (link.end_entity.isValid() &&
+            world.isAlive(link.end_entity) &&
+            world.has<components::TransformComponent>(link.end_entity)) {
+          end_position = world.get<components::TransformComponent>(link.end_entity).getPosition();
+        }
+
+        geometry.off_mesh_connections.push_back({
+            .start = {start_position.x + link.start_offset.x,
+                      start_position.y + link.start_offset.y,
+                      start_position.z + link.start_offset.z},
+            .end = {end_position.x + link.end_offset.x,
+                    end_position.y + link.end_offset.y,
+                    end_position.z + link.end_offset.z},
+            .radius = link.radius,
+            .area = link.area,
+            .flags = link.flags,
+            .bidirectional = link.bidirectional,
+            .user_id = link.user_id,
+        });
+      });
 }
 
 }  // namespace
@@ -68,8 +107,9 @@ void appendGeometry(NavMeshInputGeometry& out,
                     const renderer::MeshData& mesh,
                     const math::Vec3& position,
                     const math::Quat& rotation,
-                    const math::Vec3& scale) {
-  appendMesh(out, mesh, makeTransform(position, rotation, scale));
+                    const math::Vec3& scale,
+                    unsigned char area) {
+  appendMesh(out, mesh, makeTransform(position, rotation, scale), area);
 }
 
 NavMeshInputGeometry collectNavMeshGeometry(const scene::GlbScenePrefab& prefab) {
@@ -90,8 +130,47 @@ NavMeshInputGeometry collectNavMeshGeometry(const scene::GlbScenePrefab& prefab)
   return geometry;
 }
 
-NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world) {
+NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t source_mask) {
   NavMeshInputGeometry geometry;
+  bool has_explicit_surfaces = false;
+  world.forEach<components::NavMeshSurfaceComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
+        const auto& surface = world.get<components::NavMeshSurfaceComponent>(entity);
+        if (!surface.enabled || (surface.layer_mask & source_mask) == 0u) {
+          return;
+        }
+        has_explicit_surfaces = true;
+
+        const auto& transform = world.get<components::TransformComponent>(entity);
+        const glm::mat4 world_transform = makeTransform(transform.getPosition(),
+                                                        transform.getRotation(),
+                                                        transform.getScale());
+        const unsigned char area = surface.walkable ? surface.area : kNavAreaNull;
+        if (surface.mesh_data) {
+          appendMesh(geometry, *surface.mesh_data, world_transform, area);
+          return;
+        }
+
+        std::string mesh_key = surface.mesh_key;
+        if (mesh_key.empty() && world.has<components::MeshComponent>(entity)) {
+          mesh_key = world.get<components::MeshComponent>(entity).mesh_key;
+        }
+        if (mesh_key.empty()) {
+          return;
+        }
+
+        const std::vector<karma::geometry::MeshData> meshes =
+            karma::geometry::loadGLB(mesh_key);
+        for (const auto& mesh : meshes) {
+          appendMesh(geometry, mesh, world_transform, area);
+        }
+      });
+
+  if (has_explicit_surfaces) {
+    appendOffMeshLinks(geometry, world, source_mask);
+    return geometry;
+  }
+
   world.forEach<components::MeshColliderComponent, components::MeshComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
         const auto& mesh_component = world.get<components::MeshComponent>(entity);
@@ -106,11 +185,11 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world) {
         const std::vector<karma::geometry::MeshData> meshes =
             karma::geometry::loadGLB(mesh_component.mesh_key);
         for (const auto& mesh : meshes) {
-          appendMesh(geometry, mesh, world_transform);
+          appendMesh(geometry, mesh, world_transform, kNavAreaDefault);
         }
       });
+  appendOffMeshLinks(geometry, world, source_mask);
   return geometry;
 }
 
 }  // namespace karma::navigation
-

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+#include <exception>
 #include <string>
 
 #include <spdlog/spdlog.h>
@@ -12,6 +14,37 @@
 #include "karma/scene/transform_hierarchy.h"
 
 namespace karma::app {
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+double elapsedMs(Clock::time_point start, Clock::time_point end) {
+  return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 &&
+         std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 &&
+         std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
+
+float envFloat(const char* value, float fallback) {
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  try {
+    return std::stof(value);
+  } catch (const std::exception&) {
+    return fallback;
+  }
+}
+
+}  // namespace
 
 EngineApp::EngineApp() = default;
 
@@ -192,6 +225,10 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
   spdlog::set_level(spdlog::level::trace);
   config_ = config;
+  if (const char* vsync_env = std::getenv("KARMA_ENGINE_VSYNC")) {
+    config_.vsync = envFlagEnabled(vsync_env);
+    spdlog::info("KARMA_ENGINE_VSYNC override: {}", config_.vsync ? "on" : "off");
+  }
   fixed_dt_ = config_.fixed_dt;
   const char* debug_env = std::getenv("KARMA_ENGINE_EDITOR_DEBUG");
   debug_ui_enabled_ = debug_env && std::string(debug_env) != "0";
@@ -294,14 +331,29 @@ void EngineApp::tick() {
     return;
   }
 
+  if (!frame_diag_initialized_) {
+    frame_diag_initialized_ = true;
+    frame_diag_enabled_ = envFlagEnabled(std::getenv("KARMA_ENGINE_FRAME_DIAG"));
+    frame_diag_threshold_ms_ =
+        std::max(0.0f, envFloat(std::getenv("KARMA_ENGINE_FRAME_DIAG_THRESHOLD_MS"),
+                                frame_diag_threshold_ms_));
+    if (frame_diag_enabled_) {
+      spdlog::info("KARMA_ENGINE_FRAME_DIAG enabled; logging frames >= {:.2f} ms",
+                   frame_diag_threshold_ms_);
+    }
+  }
+
+  const auto tick_start = Clock::now();
   const auto now = std::chrono::steady_clock::now();
-  float frame_dt = std::chrono::duration<float>(now - last_time_).count();
+  const float raw_frame_dt = std::chrono::duration<float>(now - last_time_).count();
+  float frame_dt = raw_frame_dt;
   if (frame_dt > config_.max_frame_dt) {
     frame_dt = config_.max_frame_dt;
   }
   last_time_ = now;
   accumulator_ += frame_dt;
 
+  auto section_start = Clock::now();
   if (window_) {
     window_->pollEvents();
     for (const auto& event : window_->events()) {
@@ -320,6 +372,8 @@ void EngineApp::tick() {
       requestStop();
     }
   }
+  auto section_end = Clock::now();
+  const double events_ms = elapsedMs(section_start, section_end);
 
   if (!running_) {
     if (game_) {
@@ -330,38 +384,86 @@ void EngineApp::tick() {
     return;
   }
 
+  int fixed_steps = 0;
+  section_start = section_end;
   while (accumulator_ >= fixed_dt_) {
     game_->onFixedUpdate(fixed_dt_);
     // Physics runs via SystemGraph.
     systems_.update(world_, fixed_dt_);
     game_->onPostFixedUpdate(fixed_dt_);
     accumulator_ -= fixed_dt_;
+    ++fixed_steps;
   }
+  section_end = Clock::now();
+  const double fixed_ms = elapsedMs(section_start, section_end);
 
   float render_alpha = 1.0f;
   if (fixed_dt_ > 0.0f) {
     render_alpha = std::clamp(accumulator_ / fixed_dt_, 0.0f, 1.0f);
   }
   game_->render_interpolation_alpha_ = render_alpha;
+
+  section_start = section_end;
   game_->onUpdate(frame_dt);
+  section_end = Clock::now();
+  const double game_update_ms = elapsedMs(section_start, section_end);
+
+  section_start = section_end;
   if (prefab_system_) {
     prefab_system_->update(world_, frame_dt, render_alpha);
   }
+  section_end = Clock::now();
+  const double prefab_ms = elapsedMs(section_start, section_end);
+
+  section_start = section_end;
   syncSceneEntities();
+  section_end = Clock::now();
+  const double sync_scene_ms = elapsedMs(section_start, section_end);
+
+  section_start = section_end;
   animation_system_.update(world_, scene_, frame_dt);
+  section_end = Clock::now();
+  const double animation_ms = elapsedMs(section_start, section_end);
+
+  section_start = section_end;
   scene::updateWorldTransforms(world_, scene_);
+  section_end = Clock::now();
+  const double scene_transforms_ms = elapsedMs(section_start, section_end);
+
+  section_start = section_end;
   if (graphics_) {
     cpu_skinning_system_.update(world_, *graphics_);
   }
+  section_end = Clock::now();
+  const double skinning_ms = elapsedMs(section_start, section_end);
+
+  section_start = section_end;
   if (audio_system_) {
     audio_system_->update(world_, frame_dt);
   }
+  section_end = Clock::now();
+  const double audio_ms = elapsedMs(section_start, section_end);
+
+  double framebuffer_ms = 0.0;
+  double ui_frame_ms = 0.0;
+  double begin_frame_ms = 0.0;
+  double particles_ms = 0.0;
+  double runtime_modules_ms = 0.0;
+  double render_system_ms = 0.0;
+  double render_layer_ms = 0.0;
+  double render_ui_ms = 0.0;
+  double end_frame_ms = 0.0;
+  double swap_buffers_ms = 0.0;
   if (graphics_ && render_system_) {
     int fb_width = 0;
     int fb_height = 0;
+    section_start = section_end;
     if (window_) {
       window_->getFramebufferSize(fb_width, fb_height);
     }
+    section_end = Clock::now();
+    framebuffer_ms = elapsedMs(section_start, section_end);
+
     auto prepare_ui_context = [&](UIContext& ctx) {
       ctx.frame_.dt = frame_dt;
       ctx.frame_.viewport_w = fb_width;
@@ -371,6 +473,8 @@ void EngineApp::tick() {
       ctx.input_ = &input_;
       ctx.device_ = graphics_.get();
     };
+
+    section_start = section_end;
     if (user_ui_) {
       prepare_ui_context(user_ui_context_);
       user_ui_->onFrame(user_ui_context_);
@@ -381,21 +485,46 @@ void EngineApp::tick() {
       debug_ui_->onFrame(debug_ui_context_);
     }
 #endif
+    section_end = Clock::now();
+    ui_frame_ms = elapsedMs(section_start, section_end);
+
     renderer::FrameInfo frame{};
     frame.width = fb_width;
     frame.height = fb_height;
     frame.delta_time = frame_dt;
+
+    section_start = section_end;
     graphics_->beginFrame(frame);
+    section_end = Clock::now();
+    begin_frame_ms = elapsedMs(section_start, section_end);
+
+    section_start = section_end;
     if (particle_system_) {
       particle_system_->update(world_, frame_dt, render_alpha);
     }
+    section_end = Clock::now();
+    particles_ms = elapsedMs(section_start, section_end);
+
+    section_start = section_end;
     for (auto& module : runtime_modules_) {
       if (module) {
         module->onUpdate(world_, frame_dt, render_alpha);
       }
     }
+    section_end = Clock::now();
+    runtime_modules_ms = elapsedMs(section_start, section_end);
+
+    section_start = section_end;
     render_system_->update(world_, scene_, frame_dt, render_alpha);
+    section_end = Clock::now();
+    render_system_ms = elapsedMs(section_start, section_end);
+
+    section_start = section_end;
     graphics_->renderLayer(0);
+    section_end = Clock::now();
+    render_layer_ms = elapsedMs(section_start, section_end);
+
+    section_start = section_end;
     if (user_ui_) {
       graphics_->renderUi(user_ui_context_.draw_data_);
     }
@@ -404,12 +533,62 @@ void EngineApp::tick() {
       graphics_->renderUi(debug_ui_context_.draw_data_);
     }
 #endif
+    section_end = Clock::now();
+    render_ui_ms = elapsedMs(section_start, section_end);
+
+    section_start = section_end;
     graphics_->endFrame();
+    section_end = Clock::now();
+    end_frame_ms = elapsedMs(section_start, section_end);
+
+    section_start = section_end;
     if (window_) {
 #if !defined(BZ3_RENDER_BACKEND_DILIGENT)
       window_->swapBuffers();
 #endif
     }
+    section_end = Clock::now();
+    swap_buffers_ms = elapsedMs(section_start, section_end);
+  }
+
+  const auto tick_end = Clock::now();
+  const double tick_total_ms = elapsedMs(tick_start, tick_end);
+  const double raw_frame_ms = static_cast<double>(raw_frame_dt) * 1000.0;
+  if (frame_diag_enabled_ &&
+      (raw_frame_ms >= static_cast<double>(frame_diag_threshold_ms_) ||
+       tick_total_ms >= static_cast<double>(frame_diag_threshold_ms_))) {
+    spdlog::info(
+        "Engine frame diag: raw_dt={:.3f}ms clamped_dt={:.3f}ms tick={:.3f}ms "
+        "events={:.3f} fixed={:.3f}({}) game={:.3f} prefab={:.3f} sync_scene={:.3f} "
+        "animation={:.3f} scene_xform={:.3f} skinning={:.3f} audio={:.3f} "
+        "fb={:.3f} ui_frame={:.3f} begin={:.3f} particles={:.3f} modules={:.3f} "
+        "render_system={:.3f} render_layer={:.3f} render_ui={:.3f} end_frame={:.3f} "
+        "swap={:.3f} alpha={:.3f} accumulator={:.3f}",
+        raw_frame_ms,
+        static_cast<double>(frame_dt) * 1000.0,
+        tick_total_ms,
+        events_ms,
+        fixed_ms,
+        fixed_steps,
+        game_update_ms,
+        prefab_ms,
+        sync_scene_ms,
+        animation_ms,
+        scene_transforms_ms,
+        skinning_ms,
+        audio_ms,
+        framebuffer_ms,
+        ui_frame_ms,
+        begin_frame_ms,
+        particles_ms,
+        runtime_modules_ms,
+        render_system_ms,
+        render_layer_ms,
+        render_ui_ms,
+        end_frame_ms,
+        swap_buffers_ms,
+        render_alpha,
+        accumulator_);
   }
 
   if (!running_) {

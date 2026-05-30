@@ -89,7 +89,7 @@ Embers:
 
 Source:
 
-- [`../examples/assets/particles/explosion_embers.kpeffect`](../examples/assets/particles/explosion_embers.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_embers.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_embers.kpeffect)
 
 Debris:
 
@@ -98,7 +98,7 @@ Debris:
 
 Source:
 
-- [`../examples/assets/particles/explosion_debris.kpeffect`](../examples/assets/particles/explosion_debris.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_debris.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_debris.kpeffect)
 
 ## Current Visual Package State
 
@@ -107,19 +107,18 @@ state:
 
 - the shock ring depth-tests correctly
 - the main smoke layers are darker than the earlier defaults
-- core and smoke flipbooks prefer EXR sequence atlases
-- shared flipbook metadata now targets `400x400` atlas frames
-- fire falls back to a resampled legacy sheet if the EXR sequence path fails
-- smoke falls back to the procedural atlas if the smoke EXR path fails
+- core and smoke flipbooks use generated procedural atlases by default
+- opt-in EXR flipbook metadata targets `400x400` atlas frames
+- either EXR path falls back to a procedural atlas if it fails
 
 Primary files:
 
 - [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
 - [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
-- [`../examples/assets/particles/explosion_core_flipbook.kpeffect`](../examples/assets/particles/explosion_core_flipbook.kpeffect)
-- [`../examples/assets/particles/explosion_smoke_flipbook.kpeffect`](../examples/assets/particles/explosion_smoke_flipbook.kpeffect)
-- [`../examples/assets/particles/explosion_shock_ring.kpeffect`](../examples/assets/particles/explosion_shock_ring.kpeffect)
-- [`../examples/assets/particles/explosion_smoke.kpeffect`](../examples/assets/particles/explosion_smoke.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_smoke.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_smoke.kpeffect)
 
 ## Current Engine-Side Fixes
 
@@ -179,7 +178,6 @@ The startup path also prints flipbook-source lines:
 Possible source values:
 
 - `exr_sequence`
-- `legacy_sheet`
 - `procedural_atlas`
 - `unknown`
 
@@ -352,10 +350,10 @@ Updated interpretation:
   - the heat-distortion layer is active and still paying for scene-color sampling
 - `alpha_half_res=true` with poor performance:
   - the problem is probably not raw alpha pixel cost alone
-- `core=legacy_sheet`:
-  - the fire flipbook EXR path failed and the package is on its fallback atlas
+- `core=procedural_atlas`:
+  - the fire flipbook is using the generated fast/default atlas or the EXR path failed
 - `smoke=procedural_atlas`:
-  - the smoke flipbook EXR path failed and the package is on its procedural fallback
+  - the smoke flipbook is using the generated fast/default atlas or the EXR path failed
 
 ## Related Handoff
 

@@ -8,6 +8,8 @@ Primary sources:
 - [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
 - [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
 - [`../examples/assets/prefabs/explosion/prefab.kprefab`](../examples/assets/prefabs/explosion/prefab.kprefab)
+- [`../examples/assets/prefabs/explosion/particles/`](../examples/assets/prefabs/explosion/particles/)
+- [`../examples/assets/prefabs/explosion/source/`](../examples/assets/prefabs/explosion/source/)
 
 ## What It Provides
 
@@ -17,7 +19,16 @@ that a plain `.kprefab` file cannot do by itself:
 - generated procedural atlases for flash / fireball / smoke / heat / rings / debris
 - EXR-backed flipbook atlases for the core fire and late smoke passes
 - package-scoped particle effect registration
+- shared EXR cache / load helpers used by both prefab and particle examples
 - typed controller helpers for trigger / update / cleanup
+
+The explosion prefab is self-contained under
+`examples/assets/prefabs/explosion/`. The `.kprefab` file references
+package-scoped particle keys such as `prefabs/explosion/core_flipbook`, the
+effect files live in `particles/`, and the EXR validation sequences live in
+`source/`. The package registers its own `prefabs/explosion/...` texture
+aliases, so explosion effects do not depend on the global particle demo alias
+namespace.
 
 The prefab itself is a layered one-shot bundle:
 
@@ -82,10 +93,9 @@ Current state:
 
 - the shock ring depth-tests correctly
 - the smoke layers are darker than the earlier authored defaults
-- core and smoke flipbooks prefer EXR sequence atlases at runtime
-- shared flipbook metadata is authored for `400x400` atlas frames
-- if the fire EXR path fails, the package falls back to a resampled legacy sheet
-- if the smoke EXR path fails, the package falls back to the procedural smoke atlas
+- core and smoke flipbooks use generated procedural atlases by default
+- opt-in EXR flipbook metadata is authored for `400x400` atlas frames
+- if either EXR path fails, the package falls back to a procedural atlas
 
 Debugging helpers:
 
@@ -100,9 +110,15 @@ The stress sample also logs:
 Possible source values:
 
 - `exr_sequence`
-- `legacy_sheet`
 - `procedural_atlas`
 - `unknown`
+
+Flipbook startup controls:
+
+- `KARMA_EXPLOSION_FLIPBOOK_SOURCE=fast` uses generated procedural atlases and is the default.
+- `KARMA_EXPLOSION_FLIPBOOK_SOURCE=exr` loads or builds the EXR-derived atlases.
+- `KARMA_EXPLOSION_FLIPBOOK_SOURCE=auto` uses a valid generated cache, or builds it if missing.
+- `KARMA_EXPLOSION_FLIPBOOK_REBUILD=1` forces EXR cache regeneration.
 
 ## Stress-Tuned Content Note
 

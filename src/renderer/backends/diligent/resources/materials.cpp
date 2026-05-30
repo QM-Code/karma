@@ -51,17 +51,18 @@ void DiligentBackend::bindShadowResourcesToSrb(Diligent::IShaderResourceBinding*
 
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {
     if (shadow_map_srv_) {
-      var->Set(shadow_map_srv_);
+      var->Set(shadow_map_srv_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
   }
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap")) {
     if (point_shadow_map_srv_ || shadow_map_srv_) {
-      var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_);
+      var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_,
+               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
   }
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler")) {
     if (shadow_sampler_) {
-      var->Set(shadow_sampler_);
+      var->Set(shadow_sampler_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
   }
 }

@@ -622,8 +622,10 @@ void DiligentBackend::ensureEnvironmentResources() {
     Diligent::TextureData init{};
     init.pSubResources = &subres;
     init.NumSubresources = 1;
-    device_->CreateTexture(desc, &init, &env_equirect_tex_);
-    if (env_equirect_tex_) {
+    Diligent::RefCntAutoPtr<Diligent::ITexture> next_env_equirect_tex;
+    device_->CreateTexture(desc, &init, &next_env_equirect_tex);
+    if (next_env_equirect_tex) {
+      env_equirect_tex_ = std::move(next_env_equirect_tex);
       env_equirect_srv_ = env_equirect_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
     }
   }

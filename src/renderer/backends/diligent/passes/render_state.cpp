@@ -55,6 +55,13 @@ void DiligentBackend::setLights(const std::vector<renderer::LightData>& lights) 
 
 void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float intensity,
                                         bool draw_skybox) {
+  if (environment_map_ == path &&
+      environment_intensity_ == intensity &&
+      draw_skybox_ == draw_skybox &&
+      !env_dirty_ &&
+      (path.empty() || env_cubemap_srv_)) {
+    return;
+  }
   environment_intensity_ = intensity;
   environment_map_ = path;
   draw_skybox_ = draw_skybox;
@@ -87,13 +94,16 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
     if (!brdf) {
     }
     if (irr) {
-      irr->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+      irr->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_,
+               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
     if (pre) {
-      pre->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+      pre->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_,
+               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
     if (brdf) {
-      brdf->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+      brdf->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_,
+                Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
   };
 
@@ -135,7 +145,8 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
   sampler_color.AddressU = Diligent::TEXTURE_ADDRESS_WRAP;
   sampler_color.AddressV = Diligent::TEXTURE_ADDRESS_WRAP;
   sampler_color.AddressW = Diligent::TEXTURE_ADDRESS_WRAP;
-  device_->CreateSampler(sampler_color, &sampler_color_);
+  Diligent::RefCntAutoPtr<Diligent::ISampler> next_sampler_color;
+  device_->CreateSampler(sampler_color, &next_sampler_color);
 
   Diligent::SamplerDesc sampler_data{};
   sampler_data.MinFilter = Diligent::FILTER_TYPE_LINEAR;
@@ -144,7 +155,11 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
   sampler_data.AddressU = Diligent::TEXTURE_ADDRESS_WRAP;
   sampler_data.AddressV = Diligent::TEXTURE_ADDRESS_WRAP;
   sampler_data.AddressW = Diligent::TEXTURE_ADDRESS_WRAP;
-  device_->CreateSampler(sampler_data, &sampler_data_);
+  Diligent::RefCntAutoPtr<Diligent::ISampler> next_sampler_data;
+  device_->CreateSampler(sampler_data, &next_sampler_data);
+
+  sampler_color_ = std::move(next_sampler_color);
+  sampler_data_ = std::move(next_sampler_data);
 
   for (auto& entry : materials_) {
     for (auto* srb : {entry.second.srb.RawPtr(),
@@ -156,10 +171,10 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
         continue;
       }
       if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
-        var->Set(sampler_color_);
+        var->Set(sampler_color_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
       }
       if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
-        var->Set(sampler_data_);
+        var->Set(sampler_data_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
       }
     }
   }
@@ -172,10 +187,10 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
       continue;
     }
     if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
-      var->Set(sampler_color_);
+      var->Set(sampler_color_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
     if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
-      var->Set(sampler_data_);
+      var->Set(sampler_data_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
   }
 }

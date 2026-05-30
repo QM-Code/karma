@@ -1,10 +1,10 @@
-# Authored late smoke volume using the Explosion01 light-no-fire sequence.
+# Fast default late smoke volume using a lower-resolution procedural atlas.
 layer = 0
 depth_test = true
 blend_mode = alpha
 use_soft_mask = false
 soft_particle_distance = 1.45
-texture = explosion01_smoke_flipbook
+texture = prefabs/explosion/explosion01_smoke_flipbook
 
 enabled = true
 playing = true
@@ -14,10 +14,10 @@ emit_burst_on_start = true
 atlas_columns = 5
 atlas_rows = 5
 atlas_frame_count = 25
-atlas_frame_width = 400
-atlas_frame_height = 400
-atlas_border = 4
-atlas_spacing = 4
+atlas_frame_width = 96
+atlas_frame_height = 96
+atlas_border = 2
+atlas_spacing = 2
 animate_over_lifetime = true
 random_start_frame = false
 

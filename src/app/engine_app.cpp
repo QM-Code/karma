@@ -48,6 +48,16 @@ float envFloat(const char* value, float fallback) {
 
 EngineApp::EngineApp() = default;
 
+namespace {
+
+double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now() - start)
+      .count();
+}
+
+}  // namespace
+
 #if defined(KARMA_DEBUG_UI)
 std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
   if (!debug_ui_enabled_) {
@@ -140,6 +150,7 @@ void EngineApp::warmUpRenderer() {
     return;
   }
 
+  const auto warmup_start = std::chrono::steady_clock::now();
   syncSceneEntities();
   int fb_width = 0;
   int fb_height = 0;
@@ -147,6 +158,7 @@ void EngineApp::warmUpRenderer() {
     window_->getFramebufferSize(fb_width, fb_height);
   }
   if (fb_width <= 0 || fb_height <= 0) {
+    spdlog::info("Renderer warm-up skipped: framebuffer={}x{}", fb_width, fb_height);
     return;
   }
 
@@ -172,6 +184,7 @@ void EngineApp::warmUpRenderer() {
   render_system_->update(world_, scene_, 0.0f, 1.0f);
   graphics_->renderLayer(0);
   graphics_->endFrame();
+  spdlog::info("Renderer warm-up took {:.2f} ms", elapsedMilliseconds(warmup_start));
 }
 
 void EngineApp::shutdownSubsystems() {
@@ -286,9 +299,12 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
   game_->onStart();
   if (graphics_) {
+    const auto environment_start = std::chrono::steady_clock::now();
     graphics_->setEnvironmentMap(config_.environment_map,
                                  config_.environment_intensity,
                                  config_.environment_draw_skybox);
+    spdlog::info("Engine environment setup took {:.2f} ms",
+                 elapsedMilliseconds(environment_start));
   }
   warmUpRenderer();
   accumulator_ = 0.0f;

@@ -3,7 +3,7 @@ layer = 0
 depth_test = false
 blend_mode = additive
 use_soft_mask = false
-texture = glow_atlas
+texture = prefabs/explosion/glow_atlas
 
 enabled = true
 playing = true

@@ -5,11 +5,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -86,11 +88,32 @@ bool envFlagEnabled(const char* name) {
   return false;
 }
 
+double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now() - start)
+      .count();
+}
+
+class ScopedStartupTimer {
+ public:
+  explicit ScopedStartupTimer(std::string label)
+      : label_(std::move(label)), start_(std::chrono::steady_clock::now()) {}
+
+  ~ScopedStartupTimer() {
+    spdlog::info("{} took {:.2f} ms", label_, elapsedMilliseconds(start_));
+  }
+
+ private:
+  std::string label_;
+  std::chrono::steady_clock::time_point start_;
+};
+
 }  // namespace
 
 class PrefabGalleryExample final : public app::GameInterface {
  public:
   void onStart() override {
+    startup_start_ = std::chrono::steady_clock::now();
     input->bindKey("cam_forward", platform::Key::W);
     input->bindKey("cam_backward", platform::Key::S);
     input->bindKey("cam_left", platform::Key::A);
@@ -98,12 +121,23 @@ class PrefabGalleryExample final : public app::GameInterface {
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
     world_mesh_ = resolveExampleAssetPath("world.glb").string();
-    environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
 
-    spawnWorld();
-    spawnLighting();
-    spawnCamera();
-    spawnPrefabs();
+    {
+      ScopedStartupTimer timer("Prefab gallery world spawn");
+      spawnWorld();
+    }
+    {
+      ScopedStartupTimer timer("Prefab gallery lighting spawn");
+      spawnLighting();
+    }
+    {
+      ScopedStartupTimer timer("Prefab gallery camera spawn");
+      spawnCamera();
+    }
+    {
+      ScopedStartupTimer timer("Prefab gallery prefab spawn");
+      spawnPrefabs();
+    }
     log_perf_stats_ = envFlagEnabled("KARMA_PREFAB_GALLERY_STATS");
 
     if (log_perf_stats_) {
@@ -117,6 +151,11 @@ class PrefabGalleryExample final : public app::GameInterface {
   void onFixedUpdate(float dt) override { (void)dt; }
 
   void onUpdate(float dt) override {
+    if (!first_update_logged_) {
+      spdlog::info("Prefab gallery first onUpdate after onStart begin took {:.2f} ms",
+                   elapsedMilliseconds(startup_start_));
+      first_update_logged_ = true;
+    }
     time_ += dt;
     accumulatePerfSample(dt);
 
@@ -258,14 +297,6 @@ class PrefabGalleryExample final : public app::GameInterface {
                                  .mesh_key = world_mesh_,
                                  .visible = true,
                              });
-
-    const ecs::Entity environment = world->createEntity();
-    world->setName(environment, "Environment");
-    world->add(environment, components::EnvironmentComponent{
-                                 .environment_map = environment_map_,
-                                 .intensity = 0.18f,
-                                 .draw_skybox = false,
-                             });
   }
 
   void spawnLighting() {
@@ -309,13 +340,22 @@ class PrefabGalleryExample final : public app::GameInterface {
   }
 
   void spawnPrefabs() {
-    if (prefab_registry == nullptr ||
-        !registerEnergyOrbPrefabPackage(*prefab_registry)) {
+    if (prefab_registry == nullptr) {
       spdlog::error("Prefab gallery failed to register the orb package");
-    }
-    if (prefab_registry == nullptr ||
-        !registerExplosionPrefabPackage(*prefab_registry)) {
       spdlog::error("Prefab gallery failed to register the explosion package");
+    } else {
+      {
+        ScopedStartupTimer timer("Prefab gallery orb package registration");
+        if (!registerEnergyOrbPrefabPackage(*prefab_registry)) {
+          spdlog::error("Prefab gallery failed to register the orb package");
+        }
+      }
+      {
+        ScopedStartupTimer timer("Prefab gallery explosion package registration");
+        if (!registerExplosionPrefabPackage(*prefab_registry)) {
+          spdlog::error("Prefab gallery failed to register the explosion package");
+        }
+      }
     }
 
     for (size_t i = 0; i < kColorVariants.size(); ++i) {
@@ -408,10 +448,10 @@ class PrefabGalleryExample final : public app::GameInterface {
   }
 
   std::string world_mesh_;
-  std::string environment_map_;
   ecs::Entity camera_entity_{};
   std::vector<ExplosionGalleryItem> explosions_{};
   bool log_perf_stats_ = false;
+  bool first_update_logged_ = false;
   float time_ = 0.0f;
   float perf_log_elapsed_ = 0.0f;
   float perf_frame_time_sum_ = 0.0f;
@@ -422,6 +462,7 @@ class PrefabGalleryExample final : public app::GameInterface {
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;
   float target_camera_pitch_ = 0.0f;
+  std::chrono::steady_clock::time_point startup_start_{};
 };
 
 }  // namespace karma::demo

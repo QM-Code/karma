@@ -1,0 +1,51 @@
+# EXR validation late smoke volume using Explosion01-light-nofire-sequence-exr.
+layer = 0
+depth_test = false
+blend_mode = alpha
+use_soft_mask = false
+soft_particle_distance = 1.45
+texture = prefabs/explosion/explosion01_smoke_flipbook
+
+enabled = true
+playing = true
+loop = false
+emit_burst_on_start = true
+
+atlas_columns = 5
+atlas_rows = 5
+atlas_frame_count = 25
+atlas_frame_width = 400
+atlas_frame_height = 400
+atlas_border = 4
+atlas_spacing = 4
+animate_over_lifetime = true
+random_start_frame = false
+
+max_particles = 5
+burst_count = 4
+seed = 7751
+spawn_rate = 0.0
+duration = 0.0
+particle_lifetime_min = 2.00
+particle_lifetime_max = 2.85
+start_size_min = 7.40
+start_size_max = 9.60
+end_size_min = 17.80
+end_size_max = 23.20
+size_curve_exponent = 0.38
+alpha_curve_exponent = 1.42
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -0.08
+angular_velocity_max = 0.08
+spawn_shape = sphere
+spawn_radius_min = 0.10
+spawn_radius_max = 0.42
+radial_speed_min = 0.22
+radial_speed_max = 0.85
+velocity_min = -0.16, 0.82, -0.16
+velocity_max = 0.16, 1.78, 0.16
+acceleration = 0.0, 0.26, 0.0
+drag = 0.12
+start_color = 0.68, 0.68, 0.66, 0.48
+end_color = 0.13, 0.12, 0.11, 0.0

@@ -5,14 +5,20 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
+#include <chrono>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -33,7 +39,15 @@ constexpr int kFlipbookRows = 5;
 constexpr int kFlipbookFrameSize = 400;
 constexpr int kFlipbookBorder = 4;
 constexpr int kFlipbookSpacing = 4;
+constexpr int kFastCoreFlipbookFrameSize = 128;
+constexpr int kFastCoreFlipbookBorder = 2;
+constexpr int kFastCoreFlipbookSpacing = 2;
+constexpr int kFastSmokeFlipbookFrameSize = 96;
+constexpr int kFastSmokeFlipbookBorder = 2;
+constexpr int kFastSmokeFlipbookSpacing = 2;
 constexpr float kLightPulseDuration = 0.64f;
+constexpr std::uint32_t kAtlasCacheMagic = 0x5441584bu;  // "KXAT" little-endian.
+constexpr std::uint32_t kAtlasCacheVersion = 1u;
 
 struct ExplosionPackageState {
   renderer::TextureId spark_texture = renderer::kInvalidTexture;
@@ -71,8 +85,6 @@ std::string_view flipbookSourceName(ExplosionFlipbookTextureSource source) {
   switch (source) {
     case ExplosionFlipbookTextureSource::ExrSequence:
       return "exr_sequence";
-    case ExplosionFlipbookTextureSource::LegacySheet:
-      return "legacy_sheet";
     case ExplosionFlipbookTextureSource::ProceduralAtlas:
       return "procedural_atlas";
     case ExplosionFlipbookTextureSource::Unknown:
@@ -81,30 +93,54 @@ std::string_view flipbookSourceName(ExplosionFlipbookTextureSource source) {
   }
 }
 
+std::string trim(std::string_view text) {
+  size_t start = 0u;
+  while (start < text.size() &&
+         std::isspace(static_cast<unsigned char>(text[start])) != 0) {
+    ++start;
+  }
+  size_t end = text.size();
+  while (end > start &&
+         std::isspace(static_cast<unsigned char>(text[end - 1u])) != 0) {
+    --end;
+  }
+  return std::string(text.substr(start, end - start));
+}
+
+std::string lowercase(std::string_view text) {
+  std::string out(text);
+  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return out;
+}
+
+double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now() - start)
+      .count();
+}
+
+class ScopedStartupTimer {
+ public:
+  explicit ScopedStartupTimer(std::string label)
+      : label_(std::move(label)), start_(std::chrono::steady_clock::now()) {}
+
+  ~ScopedStartupTimer() {
+    spdlog::info("{} took {:.2f} ms", label_, elapsedMilliseconds(start_));
+  }
+
+ private:
+  std::string label_;
+  std::chrono::steady_clock::time_point start_;
+};
+
 void destroyTextureIfValid(renderer::GraphicsDevice* graphics, renderer::TextureId& texture) {
   if (graphics == nullptr || texture == renderer::kInvalidTexture) {
     return;
   }
   graphics->destroyTexture(texture);
   texture = renderer::kInvalidTexture;
-}
-
-renderer::TextureId loadTextureRGBA8(renderer::GraphicsDevice& graphics,
-                                     const std::filesystem::path& path) {
-  int width = 0;
-  int height = 0;
-  int components = 0;
-  stbi_set_flip_vertically_on_load(0);
-  stbi_uc* pixels = stbi_load(path.string().c_str(), &width, &height, &components, 4);
-  if (pixels == nullptr || width <= 0 || height <= 0) {
-    if (pixels != nullptr) {
-      stbi_image_free(pixels);
-    }
-    return renderer::kInvalidTexture;
-  }
-  const renderer::TextureId texture = graphics.createTextureRGBA8(width, height, pixels);
-  stbi_image_free(pixels);
-  return texture;
 }
 
 struct FloatImage {
@@ -132,6 +168,32 @@ struct SequenceAtlasBuildConfig {
   bool use_luminance_for_alpha = false;
   bool multiply_source_alpha = false;
 };
+
+struct CpuAtlasRGBA8 {
+  int width = 0;
+  int height = 0;
+  std::vector<std::uint8_t> pixels;
+
+  bool valid() const {
+    return width > 0 && height > 0 &&
+           pixels.size() == static_cast<size_t>(width) *
+                                static_cast<size_t>(height) * 4u;
+  }
+};
+
+int flipbookAtlasWidth(int frame_size = kFlipbookFrameSize,
+                       int border = kFlipbookBorder,
+                       int spacing = kFlipbookSpacing) {
+  return kFlipbookColumns * frame_size +
+         (kFlipbookColumns - 1) * spacing + border * 2;
+}
+
+int flipbookAtlasHeight(int frame_size = kFlipbookFrameSize,
+                        int border = kFlipbookBorder,
+                        int spacing = kFlipbookSpacing) {
+  return kFlipbookRows * frame_size +
+         (kFlipbookRows - 1) * spacing + border * 2;
+}
 
 float halfToFloat(std::uint16_t value) {
   const std::uint32_t sign = (static_cast<std::uint32_t>(value & 0x8000u)) << 16u;
@@ -610,38 +672,287 @@ void writePackedExplosionFrame(std::vector<std::uint8_t>& atlas_pixels,
   }
 }
 
-renderer::TextureId buildSequenceAtlas(renderer::GraphicsDevice& graphics,
-                                       const SequenceAtlasBuildConfig& config) {
-  if (config.atlas_columns <= 0 || config.atlas_rows <= 0 ||
-      config.frame_width <= 0 || config.frame_height <= 0) {
-    return renderer::kInvalidTexture;
+int sequenceAtlasWidth(const SequenceAtlasBuildConfig& config) {
+  return config.atlas_columns * config.frame_width +
+         (config.atlas_columns - 1) * config.atlas_spacing + config.atlas_border * 2;
+}
+
+int sequenceAtlasHeight(const SequenceAtlasBuildConfig& config) {
+  return config.atlas_rows * config.frame_height +
+         (config.atlas_rows - 1) * config.atlas_spacing + config.atlas_border * 2;
+}
+
+std::string normalizedPathString(const std::filesystem::path& path) {
+  std::error_code ec;
+  const std::filesystem::path canonical = std::filesystem::weakly_canonical(path, ec);
+  if (!ec) {
+    return canonical.string();
   }
-  const int atlas_frames = config.atlas_columns * config.atlas_rows;
-  const int atlas_width =
-      config.atlas_columns * config.frame_width +
-      (config.atlas_columns - 1) * config.atlas_spacing + config.atlas_border * 2;
-  const int atlas_height =
-      config.atlas_rows * config.frame_height +
-      (config.atlas_rows - 1) * config.atlas_spacing + config.atlas_border * 2;
+  const std::filesystem::path absolute = std::filesystem::absolute(path, ec);
+  if (!ec) {
+    return absolute.lexically_normal().string();
+  }
+  return path.lexically_normal().string();
+}
+
+std::vector<std::filesystem::path> listExrFrames(const std::filesystem::path& sequence_dir,
+                                                 std::int64_t* newest_write_tick = nullptr) {
+  if (newest_write_tick != nullptr) {
+    *newest_write_tick = 0;
+  }
+
   std::vector<std::filesystem::path> source_frames;
   std::error_code ec;
-  for (const auto& entry : std::filesystem::directory_iterator(config.sequence_dir, ec)) {
-    if (ec || !entry.is_regular_file()) {
+  for (const auto& entry : std::filesystem::directory_iterator(sequence_dir, ec)) {
+    if (ec) {
+      break;
+    }
+    std::error_code entry_ec;
+    if (!entry.is_regular_file(entry_ec) || entry_ec) {
       continue;
     }
-    if (entry.path().extension() == ".exr") {
-      source_frames.push_back(entry.path());
+    if (lowercase(entry.path().extension().string()) != ".exr") {
+      continue;
+    }
+    source_frames.push_back(entry.path());
+    if (newest_write_tick != nullptr) {
+      const auto write_time = std::filesystem::last_write_time(entry.path(), entry_ec);
+      if (!entry_ec) {
+        const auto tick =
+            static_cast<std::int64_t>(write_time.time_since_epoch().count());
+        *newest_write_tick = std::max(*newest_write_tick, tick);
+      }
     }
   }
-  if (source_frames.empty()) {
-    return renderer::kInvalidTexture;
-  }
   std::sort(source_frames.begin(), source_frames.end());
+  return source_frames;
+}
+
+std::uint64_t fnv1a64(std::string_view text) {
+  std::uint64_t hash = 14695981039346656037ull;
+  for (const char c : text) {
+    hash ^= static_cast<std::uint8_t>(c);
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
+std::string buildAtlasCacheKey(const SequenceAtlasBuildConfig& config,
+                               size_t source_frame_count,
+                               std::int64_t newest_write_tick) {
+  std::ostringstream key;
+  key << "sequence_dir=" << normalizedPathString(config.sequence_dir)
+      << "\nsource_frame_count=" << source_frame_count
+      << "\nnewest_write_tick=" << newest_write_tick
+      << "\nfirst_frame_index=" << config.first_frame_index
+      << "\nlast_frame_index=" << config.last_frame_index
+      << "\natlas_columns=" << config.atlas_columns
+      << "\natlas_rows=" << config.atlas_rows
+      << "\nframe_width=" << config.frame_width
+      << "\nframe_height=" << config.frame_height
+      << "\natlas_border=" << config.atlas_border
+      << "\natlas_spacing=" << config.atlas_spacing
+      << "\nalpha_signal_bias=" << config.alpha_signal_bias
+      << "\nalpha_signal_scale=" << config.alpha_signal_scale
+      << "\nalpha_signal_power=" << config.alpha_signal_power
+      << "\nalpha_output_scale=" << config.alpha_output_scale
+      << "\nsource_alpha_floor=" << config.source_alpha_floor
+      << "\nuse_luminance_for_alpha=" << config.use_luminance_for_alpha
+      << "\nmultiply_source_alpha=" << config.multiply_source_alpha;
+  return key.str();
+}
+
+std::filesystem::path generatedCacheDir() {
+  return resolveExamplePath("cache") / "generated";
+}
+
+std::filesystem::path atlasCachePath(std::string_view label, std::uint64_t key_hash) {
+  return generatedCacheDir() /
+         ("explosion_flipbook_" + std::string(label) + "_" +
+          std::to_string(key_hash) + ".rgba8");
+}
+
+bool readExact(std::istream& input, void* data, size_t bytes) {
+  input.read(reinterpret_cast<char*>(data), static_cast<std::streamsize>(bytes));
+  return input.good() || input.gcount() == static_cast<std::streamsize>(bytes);
+}
+
+template <typename T>
+bool readValue(std::istream& input, T& value) {
+  return readExact(input, &value, sizeof(value));
+}
+
+template <typename T>
+bool writeValue(std::ostream& output, const T& value) {
+  output.write(reinterpret_cast<const char*>(&value), sizeof(value));
+  return output.good();
+}
+
+bool readCachedAtlas(std::string_view label,
+                     const SequenceAtlasBuildConfig& config,
+                     CpuAtlasRGBA8& out_atlas) {
+  std::int64_t newest_write_tick = 0;
+  const auto source_frames = listExrFrames(config.sequence_dir, &newest_write_tick);
+  if (source_frames.empty()) {
+    return false;
+  }
+
+  const std::string key =
+      buildAtlasCacheKey(config, source_frames.size(), newest_write_tick);
+  const std::uint64_t key_hash = fnv1a64(key);
+  const std::filesystem::path path = atlasCachePath(label, key_hash);
+
+  std::ifstream input(path, std::ios::binary);
+  if (!input.is_open()) {
+    return false;
+  }
+
+  std::uint32_t magic = 0u;
+  std::uint32_t version = 0u;
+  std::uint32_t width = 0u;
+  std::uint32_t height = 0u;
+  std::uint64_t cached_key_hash = 0u;
+  std::uint64_t pixel_bytes = 0u;
+  std::uint32_t key_size = 0u;
+  if (!readValue(input, magic) || !readValue(input, version) ||
+      !readValue(input, width) || !readValue(input, height) ||
+      !readValue(input, cached_key_hash) || !readValue(input, pixel_bytes) ||
+      !readValue(input, key_size)) {
+    return false;
+  }
+
+  const int expected_width = sequenceAtlasWidth(config);
+  const int expected_height = sequenceAtlasHeight(config);
+  const std::uint64_t expected_bytes =
+      static_cast<std::uint64_t>(expected_width) *
+      static_cast<std::uint64_t>(expected_height) * 4ull;
+  if (magic != kAtlasCacheMagic || version != kAtlasCacheVersion ||
+      width != static_cast<std::uint32_t>(expected_width) ||
+      height != static_cast<std::uint32_t>(expected_height) ||
+      cached_key_hash != key_hash || pixel_bytes != expected_bytes ||
+      key_size != key.size() || key_size > 64u * 1024u) {
+    return false;
+  }
+
+  std::string cached_key(key_size, '\0');
+  if (!cached_key.empty() && !readExact(input, cached_key.data(), cached_key.size())) {
+    return false;
+  }
+  if (cached_key != key) {
+    return false;
+  }
+
+  CpuAtlasRGBA8 atlas{};
+  atlas.width = static_cast<int>(width);
+  atlas.height = static_cast<int>(height);
+  atlas.pixels.resize(static_cast<size_t>(pixel_bytes));
+  if (!atlas.pixels.empty() && !readExact(input, atlas.pixels.data(), atlas.pixels.size())) {
+    return false;
+  }
+  if (!atlas.valid()) {
+    return false;
+  }
+
+  out_atlas = std::move(atlas);
+  spdlog::info("Explosion prefab package loaded cached {} EXR atlas: {}",
+               label,
+               path.string());
+  return true;
+}
+
+bool writeCachedAtlas(std::string_view label,
+                      const SequenceAtlasBuildConfig& config,
+                      const CpuAtlasRGBA8& atlas) {
+  if (!atlas.valid()) {
+    return false;
+  }
+
+  std::int64_t newest_write_tick = 0;
+  const auto source_frames = listExrFrames(config.sequence_dir, &newest_write_tick);
+  if (source_frames.empty()) {
+    return false;
+  }
+
+  const std::string key =
+      buildAtlasCacheKey(config, source_frames.size(), newest_write_tick);
+  const std::uint64_t key_hash = fnv1a64(key);
+  const std::filesystem::path path = atlasCachePath(label, key_hash);
+
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  if (ec) {
+    spdlog::warn("Failed to create explosion atlas cache directory '{}': {}",
+                 path.parent_path().string(),
+                 ec.message());
+    return false;
+  }
+
+  const std::filesystem::path tmp_path = path.string() + ".tmp";
+  std::ofstream output(tmp_path, std::ios::binary | std::ios::trunc);
+  if (!output.is_open()) {
+    return false;
+  }
+
+  const std::uint32_t width = static_cast<std::uint32_t>(atlas.width);
+  const std::uint32_t height = static_cast<std::uint32_t>(atlas.height);
+  const std::uint64_t pixel_bytes = static_cast<std::uint64_t>(atlas.pixels.size());
+  const std::uint32_t key_size = static_cast<std::uint32_t>(key.size());
+  if (!writeValue(output, kAtlasCacheMagic) ||
+      !writeValue(output, kAtlasCacheVersion) ||
+      !writeValue(output, width) || !writeValue(output, height) ||
+      !writeValue(output, key_hash) || !writeValue(output, pixel_bytes) ||
+      !writeValue(output, key_size)) {
+    return false;
+  }
+  output.write(key.data(), static_cast<std::streamsize>(key.size()));
+  output.write(reinterpret_cast<const char*>(atlas.pixels.data()),
+               static_cast<std::streamsize>(atlas.pixels.size()));
+  output.close();
+  if (!output.good()) {
+    std::filesystem::remove(tmp_path, ec);
+    return false;
+  }
+
+  std::filesystem::rename(tmp_path, path, ec);
+  if (ec) {
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp_path, path, ec);
+  }
+  if (ec) {
+    spdlog::warn("Failed to write explosion atlas cache '{}': {}",
+                 path.string(),
+                 ec.message());
+    std::filesystem::remove(tmp_path, ec);
+    return false;
+  }
+
+  spdlog::info("Explosion prefab package wrote cached {} EXR atlas: {}",
+               label,
+               path.string());
+  return true;
+}
+
+CpuAtlasRGBA8 buildSequenceAtlasPixels(const SequenceAtlasBuildConfig& config) {
+  if (config.atlas_columns <= 0 || config.atlas_rows <= 0 ||
+      config.frame_width <= 0 || config.frame_height <= 0) {
+    return {};
+  }
+  const int atlas_frames = config.atlas_columns * config.atlas_rows;
+  const int atlas_width = sequenceAtlasWidth(config);
+  const int atlas_height = sequenceAtlasHeight(config);
+  const std::vector<std::filesystem::path> source_frames = listExrFrames(config.sequence_dir);
+  if (source_frames.empty()) {
+    return {};
+  }
 
   const size_t first_index = std::min(config.first_frame_index, source_frames.size() - 1u);
   const size_t last_index =
       std::max(first_index, std::min(config.last_frame_index, source_frames.size() - 1u));
-  std::vector<std::uint8_t> atlas_pixels(
+  CpuAtlasRGBA8 atlas{};
+  atlas.width = atlas_width;
+  atlas.height = atlas_height;
+  atlas.pixels.assign(
       static_cast<size_t>(atlas_width) * static_cast<size_t>(atlas_height) * 4u, 0u);
 
   for (int atlas_frame = 0; atlas_frame < atlas_frames; ++atlas_frame) {
@@ -653,13 +964,13 @@ renderer::TextureId buildSequenceAtlas(renderer::GraphicsDevice& graphics,
                           static_cast<float>(last_index - first_index) * t));
     const FloatImage source = loadImageRGBA32F(source_frames[source_index]);
     if (source.width <= 0 || source.height <= 0) {
-      return renderer::kInvalidTexture;
+      return {};
     }
     const int column = atlas_frame % config.atlas_columns;
     const int row = atlas_frame / config.atlas_columns;
     const int dst_x = config.atlas_border + column * (config.frame_width + config.atlas_spacing);
     const int dst_y = config.atlas_border + row * (config.frame_height + config.atlas_spacing);
-    writePackedExplosionFrame(atlas_pixels,
+    writePackedExplosionFrame(atlas.pixels,
                               atlas_width,
                               atlas_height,
                               dst_x,
@@ -670,84 +981,119 @@ renderer::TextureId buildSequenceAtlas(renderer::GraphicsDevice& graphics,
                               config);
   }
 
-  return graphics.createTextureRGBA8(atlas_width, atlas_height, atlas_pixels.data());
+  return atlas;
 }
 
-renderer::TextureId buildResampledAtlasFromImage(renderer::GraphicsDevice& graphics,
-                                                 const std::filesystem::path& source_path,
-                                                 int atlas_width,
-                                                 int atlas_height) {
-  if (atlas_width <= 0 || atlas_height <= 0) {
+renderer::TextureId uploadAtlasRGBA8(renderer::GraphicsDevice& graphics,
+                                     const CpuAtlasRGBA8& atlas) {
+  if (!atlas.valid()) {
     return renderer::kInvalidTexture;
   }
-  const FloatImage source = loadImageRGBA32F(source_path);
-  if (source.width <= 0 || source.height <= 0) {
-    return renderer::kInvalidTexture;
-  }
+  return graphics.createTextureRGBA8(atlas.width, atlas.height, atlas.pixels.data());
+}
 
-  std::vector<std::uint8_t> pixels(
-      static_cast<size_t>(atlas_width) * static_cast<size_t>(atlas_height) * 4u, 0u);
-  for (int y = 0; y < atlas_height; ++y) {
-    for (int x = 0; x < atlas_width; ++x) {
-      const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(atlas_width);
-      const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(atlas_height);
-      const auto sample = sampleImageBilinear(source, u, v);
-      const size_t index =
-          (static_cast<size_t>(y) * static_cast<size_t>(atlas_width) + static_cast<size_t>(x)) * 4u;
-      pixels[index + 0u] = toByte(sample[0]);
-      pixels[index + 1u] = toByte(sample[1]);
-      pixels[index + 2u] = toByte(sample[2]);
-      pixels[index + 3u] = toByte(sample[3]);
+SequenceAtlasBuildConfig explosionFireSequenceConfig(
+    const std::filesystem::path& sequence_dir) {
+  return SequenceAtlasBuildConfig{
+      .sequence_dir = sequence_dir,
+      .first_frame_index = 4u,
+      .last_frame_index = 54u,
+      .atlas_columns = kFlipbookColumns,
+      .atlas_rows = kFlipbookRows,
+      .frame_width = kFlipbookFrameSize,
+      .frame_height = kFlipbookFrameSize,
+      .atlas_border = kFlipbookBorder,
+      .atlas_spacing = kFlipbookSpacing,
+      .alpha_signal_bias = 0.032f,
+      .alpha_signal_scale = 4.0f,
+      .alpha_signal_power = 0.90f,
+      .alpha_output_scale = 1.35f,
+      .source_alpha_floor = 0.0f,
+      .use_luminance_for_alpha = false,
+      .multiply_source_alpha = false,
+  };
+}
+
+SequenceAtlasBuildConfig explosionSmokeSequenceConfig(
+    const std::filesystem::path& sequence_dir) {
+  return SequenceAtlasBuildConfig{
+      .sequence_dir = sequence_dir,
+      .first_frame_index = 10u,
+      .last_frame_index = 92u,
+      .atlas_columns = kFlipbookColumns,
+      .atlas_rows = kFlipbookRows,
+      .frame_width = kFlipbookFrameSize,
+      .frame_height = kFlipbookFrameSize,
+      .atlas_border = kFlipbookBorder,
+      .atlas_spacing = kFlipbookSpacing,
+      .alpha_signal_bias = 0.185f,
+      .alpha_signal_scale = 8.0f,
+      .alpha_signal_power = 1.10f,
+      .alpha_output_scale = 1.15f,
+      .source_alpha_floor = 0.0f,
+      .use_luminance_for_alpha = true,
+      .multiply_source_alpha = false,
+  };
+}
+
+std::vector<std::uint8_t> buildExplosionCoreFlipbookAtlas(int frame_size = kFlipbookFrameSize,
+                                                          int border = kFlipbookBorder,
+                                                          int spacing = kFlipbookSpacing);
+std::vector<std::uint8_t> buildExplosionSmokeFlipbookAtlas(int frame_size = kFlipbookFrameSize,
+                                                           int border = kFlipbookBorder,
+                                                           int spacing = kFlipbookSpacing);
+
+renderer::TextureId buildCachedExrSequenceAtlas(renderer::GraphicsDevice& graphics,
+                                                std::string_view label,
+                                                const SequenceAtlasBuildConfig& config,
+                                                bool rebuild_cache) {
+  if (!rebuild_cache) {
+    CpuAtlasRGBA8 cached_atlas{};
+    {
+      ScopedStartupTimer timer("Explosion prefab package " + std::string(label) +
+                               " EXR cache lookup");
+      if (readCachedAtlas(label, config, cached_atlas)) {
+        return uploadAtlasRGBA8(graphics, cached_atlas);
+      }
     }
+  } else {
+    spdlog::info("Explosion prefab package {} EXR cache rebuild requested", label);
   }
 
-  return graphics.createTextureRGBA8(atlas_width, atlas_height, pixels.data());
+  CpuAtlasRGBA8 atlas{};
+  {
+    ScopedStartupTimer timer("Explosion prefab package " + std::string(label) +
+                             " EXR atlas build");
+    atlas = buildSequenceAtlasPixels(config);
+  }
+  if (!atlas.valid()) {
+    return renderer::kInvalidTexture;
+  }
+
+  writeCachedAtlas(label, config, atlas);
+  return uploadAtlasRGBA8(graphics, atlas);
 }
 
-renderer::TextureId buildExplosionSequenceAtlas(renderer::GraphicsDevice& graphics,
-                                                const std::filesystem::path& sequence_dir) {
-  return buildSequenceAtlas(graphics,
-                            SequenceAtlasBuildConfig{
-                                .sequence_dir = sequence_dir,
-                                .first_frame_index = 1u,
-                                .last_frame_index = 74u,
-                                .atlas_columns = 5,
-                                .atlas_rows = 5,
-                                .frame_width = kFlipbookFrameSize,
-                                .frame_height = kFlipbookFrameSize,
-                                .atlas_border = 4,
-                                .atlas_spacing = 4,
-                                .alpha_signal_bias = 0.0f,
-                                .alpha_signal_scale = 2.0f,
-                                .alpha_signal_power = 1.0f,
-                                .alpha_output_scale = 1.2f,
-                                .source_alpha_floor = 0.35f,
-                                .use_luminance_for_alpha = false,
-                                .multiply_source_alpha = false,
-                            });
+renderer::TextureId buildProceduralExplosionCoreFlipbook(renderer::GraphicsDevice& graphics,
+                                                        int frame_size,
+                                                        int border,
+                                                        int spacing) {
+  ScopedStartupTimer timer("Explosion prefab package procedural fire atlas generation");
+  const auto atlas = buildExplosionCoreFlipbookAtlas(frame_size, border, spacing);
+  return graphics.createTextureRGBA8(flipbookAtlasWidth(frame_size, border, spacing),
+                                     flipbookAtlasHeight(frame_size, border, spacing),
+                                     atlas.data());
 }
 
-renderer::TextureId buildExplosionSmokeSequenceAtlas(renderer::GraphicsDevice& graphics,
-                                                     const std::filesystem::path& sequence_dir) {
-  return buildSequenceAtlas(graphics,
-                            SequenceAtlasBuildConfig{
-                                .sequence_dir = sequence_dir,
-                                .first_frame_index = 10u,
-                                .last_frame_index = 92u,
-                                .atlas_columns = 5,
-                                .atlas_rows = 5,
-                                .frame_width = kFlipbookFrameSize,
-                                .frame_height = kFlipbookFrameSize,
-                                .atlas_border = 4,
-                                .atlas_spacing = 4,
-                                .alpha_signal_bias = 0.185f,
-                                .alpha_signal_scale = 8.0f,
-                                .alpha_signal_power = 1.15f,
-                                .alpha_output_scale = 1.0f,
-                                .source_alpha_floor = 0.0f,
-                                .use_luminance_for_alpha = true,
-                                .multiply_source_alpha = true,
-                            });
+renderer::TextureId buildProceduralExplosionSmokeFlipbook(renderer::GraphicsDevice& graphics,
+                                                         int frame_size,
+                                                         int border,
+                                                         int spacing) {
+  ScopedStartupTimer timer("Explosion prefab package procedural smoke atlas generation");
+  const auto atlas = buildExplosionSmokeFlipbookAtlas(frame_size, border, spacing);
+  return graphics.createTextureRGBA8(flipbookAtlasWidth(frame_size, border, spacing),
+                                     flipbookAtlasHeight(frame_size, border, spacing),
+                                     atlas.data());
 }
 
 std::vector<std::uint8_t> buildSparkAtlas(int frame_size, int frame_count) {
@@ -1085,11 +1431,11 @@ void writeAtlasPixel(std::vector<std::uint8_t>& pixels,
   pixels[index + 3u] = rgba[3];
 }
 
-std::vector<std::uint8_t> buildExplosionSmokeFlipbookAtlas() {
-  const int atlas_width = kFlipbookColumns * kFlipbookFrameSize +
-                          (kFlipbookColumns - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
-  const int atlas_height = kFlipbookRows * kFlipbookFrameSize +
-                           (kFlipbookRows - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
+std::vector<std::uint8_t> buildExplosionCoreFlipbookAtlas(int frame_size,
+                                                          int border,
+                                                          int spacing) {
+  const int atlas_width = flipbookAtlasWidth(frame_size, border, spacing);
+  const int atlas_height = flipbookAtlasHeight(frame_size, border, spacing);
   std::vector<std::uint8_t> pixels(
       static_cast<size_t>(atlas_width) * static_cast<size_t>(atlas_height) * 4u,
       0u);
@@ -1099,18 +1445,105 @@ std::vector<std::uint8_t> buildExplosionSmokeFlipbookAtlas() {
                     static_cast<float>(std::max(kFlipbookColumns * kFlipbookRows - 1, 1));
     const int column = frame % kFlipbookColumns;
     const int row = frame / kFlipbookColumns;
-    const int frame_x = kFlipbookBorder + column * (kFlipbookFrameSize + kFlipbookSpacing);
-    const int frame_y = kFlipbookBorder + row * (kFlipbookFrameSize + kFlipbookSpacing);
+    const int frame_x = border + column * (frame_size + spacing);
+    const int frame_y = border + row * (frame_size + spacing);
 
     std::vector<std::array<std::uint8_t, 4>> frame_pixels(
-        static_cast<size_t>(kFlipbookFrameSize) * static_cast<size_t>(kFlipbookFrameSize));
+        static_cast<size_t>(frame_size) * static_cast<size_t>(frame_size));
 
-    for (int y = 0; y < kFlipbookFrameSize; ++y) {
-      for (int x = 0; x < kFlipbookFrameSize; ++x) {
+    for (int y = 0; y < frame_size; ++y) {
+      for (int x = 0; x < frame_size; ++x) {
         const float px =
-            (static_cast<float>(x) + 0.5f) / static_cast<float>(kFlipbookFrameSize) * 2.0f - 1.0f;
+            (static_cast<float>(x) + 0.5f) / static_cast<float>(frame_size) * 2.0f - 1.0f;
         const float py =
-            1.0f - (static_cast<float>(y) + 0.5f) / static_cast<float>(kFlipbookFrameSize) * 2.0f;
+            1.0f - (static_cast<float>(y) + 0.5f) / static_cast<float>(frame_size) * 2.0f;
+        const float stretch_y = 0.82f + t * 0.42f;
+        const float radius =
+            std::sqrt(px * px * (1.08f + t * 0.55f) +
+                      (py + 0.10f - t * 0.18f) * (py + 0.10f - t * 0.18f) /
+                          std::max(stretch_y * stretch_y, 0.05f));
+        const float plume =
+            saturate(1.0f - radius * (1.35f + t * 0.50f));
+        const float core =
+            saturate(1.0f - std::sqrt(px * px * (3.7f + t * 0.8f) +
+                                      (py - 0.02f) * (py - 0.02f) * (1.6f + t)));
+        const float rim =
+            saturate(1.0f - std::abs(radius - (0.36f + t * 0.22f)) * (4.0f - t * 0.7f));
+        const float flicker =
+            0.80f + 0.20f * std::sin((px * 7.5f + py * 4.0f + t * 7.2f) * kPi) *
+                        std::cos((py * 5.2f - px * 3.4f - t * 4.3f) * kPi);
+        const float alpha = saturate((core * 0.88f + plume * 0.62f + rim * 0.35f) *
+                                     flicker * (1.0f - t * 0.34f));
+        const float heat = saturate(core * 1.15f + plume * 0.72f + rim * 0.38f);
+        const float ember = saturate(rim * 0.55f + plume * (1.0f - t) * 0.35f);
+        const auto rgba = std::array<std::uint8_t, 4>{
+            toByte(0.95f + heat * 0.05f),
+            toByte(0.18f + heat * 0.62f),
+            toByte(0.02f + ember * 0.20f),
+            toByte(alpha),
+        };
+        frame_pixels[static_cast<size_t>(y) * static_cast<size_t>(frame_size) +
+                     static_cast<size_t>(x)] = rgba;
+        writeAtlasPixel(pixels, atlas_width, atlas_height, frame_x + x, frame_y + y, rgba);
+      }
+    }
+
+    const auto sample_frame_pixel = [&](int x, int y) -> const std::array<std::uint8_t, 4>& {
+      const int clamped_x = std::clamp(x, 0, frame_size - 1);
+      const int clamped_y = std::clamp(y, 0, frame_size - 1);
+      return frame_pixels[static_cast<size_t>(clamped_y) * static_cast<size_t>(frame_size) +
+                          static_cast<size_t>(clamped_x)];
+    };
+
+    for (int y = 0; y < frame_size; ++y) {
+      const auto& left = sample_frame_pixel(0, y);
+      const auto& right = sample_frame_pixel(frame_size - 1, y);
+      for (int bleed = 1; bleed <= 2; ++bleed) {
+        writeAtlasPixel(pixels, atlas_width, atlas_height, frame_x - bleed, frame_y + y, left);
+        writeAtlasPixel(
+            pixels, atlas_width, atlas_height, frame_x + frame_size - 1 + bleed, frame_y + y, right);
+      }
+    }
+    for (int x = 0; x < frame_size; ++x) {
+      const auto& top = sample_frame_pixel(x, 0);
+      const auto& bottom = sample_frame_pixel(x, frame_size - 1);
+      for (int bleed = 1; bleed <= 2; ++bleed) {
+        writeAtlasPixel(pixels, atlas_width, atlas_height, frame_x + x, frame_y - bleed, top);
+        writeAtlasPixel(
+            pixels, atlas_width, atlas_height, frame_x + x, frame_y + frame_size - 1 + bleed, bottom);
+      }
+    }
+  }
+
+  return pixels;
+}
+
+std::vector<std::uint8_t> buildExplosionSmokeFlipbookAtlas(int frame_size,
+                                                           int border,
+                                                           int spacing) {
+  const int atlas_width = flipbookAtlasWidth(frame_size, border, spacing);
+  const int atlas_height = flipbookAtlasHeight(frame_size, border, spacing);
+  std::vector<std::uint8_t> pixels(
+      static_cast<size_t>(atlas_width) * static_cast<size_t>(atlas_height) * 4u,
+      0u);
+
+  for (int frame = 0; frame < kFlipbookColumns * kFlipbookRows; ++frame) {
+    const float t = static_cast<float>(frame) /
+                    static_cast<float>(std::max(kFlipbookColumns * kFlipbookRows - 1, 1));
+    const int column = frame % kFlipbookColumns;
+    const int row = frame / kFlipbookColumns;
+    const int frame_x = border + column * (frame_size + spacing);
+    const int frame_y = border + row * (frame_size + spacing);
+
+    std::vector<std::array<std::uint8_t, 4>> frame_pixels(
+        static_cast<size_t>(frame_size) * static_cast<size_t>(frame_size));
+
+    for (int y = 0; y < frame_size; ++y) {
+      for (int x = 0; x < frame_size; ++x) {
+        const float px =
+            (static_cast<float>(x) + 0.5f) / static_cast<float>(frame_size) * 2.0f - 1.0f;
+        const float py =
+            1.0f - (static_cast<float>(y) + 0.5f) / static_cast<float>(frame_size) * 2.0f;
         const float swirl =
             0.22f * std::sin((px * 2.1f + py * 1.3f + t * 0.7f) * kTau) +
             0.18f * std::cos((py * 1.7f - px * 1.1f - t * 0.4f) * kTau);
@@ -1131,35 +1564,35 @@ std::vector<std::uint8_t> buildExplosionSmokeFlipbookAtlas() {
             toByte(0.46f * density),
             toByte(alpha),
         };
-        frame_pixels[static_cast<size_t>(y) * static_cast<size_t>(kFlipbookFrameSize) +
+        frame_pixels[static_cast<size_t>(y) * static_cast<size_t>(frame_size) +
                      static_cast<size_t>(x)] = rgba;
         writeAtlasPixel(pixels, atlas_width, atlas_height, frame_x + x, frame_y + y, rgba);
       }
     }
 
     const auto sample_frame_pixel = [&](int x, int y) -> const std::array<std::uint8_t, 4>& {
-      const int clamped_x = std::clamp(x, 0, kFlipbookFrameSize - 1);
-      const int clamped_y = std::clamp(y, 0, kFlipbookFrameSize - 1);
-      return frame_pixels[static_cast<size_t>(clamped_y) * static_cast<size_t>(kFlipbookFrameSize) +
+      const int clamped_x = std::clamp(x, 0, frame_size - 1);
+      const int clamped_y = std::clamp(y, 0, frame_size - 1);
+      return frame_pixels[static_cast<size_t>(clamped_y) * static_cast<size_t>(frame_size) +
                           static_cast<size_t>(clamped_x)];
     };
 
-    for (int y = 0; y < kFlipbookFrameSize; ++y) {
+    for (int y = 0; y < frame_size; ++y) {
       const auto& left = sample_frame_pixel(0, y);
-      const auto& right = sample_frame_pixel(kFlipbookFrameSize - 1, y);
+      const auto& right = sample_frame_pixel(frame_size - 1, y);
       for (int bleed = 1; bleed <= 2; ++bleed) {
         writeAtlasPixel(pixels, atlas_width, atlas_height, frame_x - bleed, frame_y + y, left);
         writeAtlasPixel(
-            pixels, atlas_width, atlas_height, frame_x + kFlipbookFrameSize - 1 + bleed, frame_y + y, right);
+            pixels, atlas_width, atlas_height, frame_x + frame_size - 1 + bleed, frame_y + y, right);
       }
     }
-    for (int x = 0; x < kFlipbookFrameSize; ++x) {
+    for (int x = 0; x < frame_size; ++x) {
       const auto& top = sample_frame_pixel(x, 0);
-      const auto& bottom = sample_frame_pixel(x, kFlipbookFrameSize - 1);
+      const auto& bottom = sample_frame_pixel(x, frame_size - 1);
       for (int bleed = 1; bleed <= 2; ++bleed) {
         writeAtlasPixel(pixels, atlas_width, atlas_height, frame_x + x, frame_y - bleed, top);
         writeAtlasPixel(
-            pixels, atlas_width, atlas_height, frame_x + x, frame_y + kFlipbookFrameSize - 1 + bleed, bottom);
+            pixels, atlas_width, atlas_height, frame_x + x, frame_y + frame_size - 1 + bleed, bottom);
       }
     }
   }
@@ -1173,99 +1606,127 @@ bool prepareExplosionPackage(const prefabs::PrefabPackageContext& context,
     return false;
   }
 
-  if (state->spark_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildSparkAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->spark_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
-  }
-  if (state->glow_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildGlowAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->glow_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
-  }
-  if (state->smoke_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildSmokeAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->smoke_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
-  }
-  if (state->heat_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildHeatAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->heat_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
-  }
-  if (state->dust_ring_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildDustRingAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->dust_ring_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
-  }
-  if (state->shock_ring_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildShockRingAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->shock_ring_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
-  }
-  if (state->scorch_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildScorchAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->scorch_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
-  }
-  if (state->debris_texture == renderer::kInvalidTexture) {
-    const auto atlas = buildDebrisAtlas(kAtlasFrameSize, kAtlasFrameCount);
-    state->debris_texture = context.graphics->createTextureRGBA8(
-        kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+  ScopedStartupTimer package_timer("Explosion prefab package prepare");
+  const ExplosionFlipbookSourceMode flipbook_source_mode =
+      parseExplosionFlipbookSourceMode();
+  const bool rebuild_flipbook_cache = explosionFlipbookRebuildRequested();
+  const bool use_fast_flipbook_effects =
+      flipbook_source_mode == ExplosionFlipbookSourceMode::Fast;
+  const int core_fallback_frame_size =
+      use_fast_flipbook_effects ? kFastCoreFlipbookFrameSize : kFlipbookFrameSize;
+  const int core_fallback_border =
+      use_fast_flipbook_effects ? kFastCoreFlipbookBorder : kFlipbookBorder;
+  const int core_fallback_spacing =
+      use_fast_flipbook_effects ? kFastCoreFlipbookSpacing : kFlipbookSpacing;
+  const int smoke_fallback_frame_size =
+      use_fast_flipbook_effects ? kFastSmokeFlipbookFrameSize : kFlipbookFrameSize;
+  const int smoke_fallback_border =
+      use_fast_flipbook_effects ? kFastSmokeFlipbookBorder : kFlipbookBorder;
+  const int smoke_fallback_spacing =
+      use_fast_flipbook_effects ? kFastSmokeFlipbookSpacing : kFlipbookSpacing;
+  spdlog::info("Explosion prefab package flipbook mode={} rebuild_cache={}",
+               explosionFlipbookSourceModeName(flipbook_source_mode),
+               rebuild_flipbook_cache);
+
+  {
+    ScopedStartupTimer timer("Explosion prefab package small procedural atlas generation");
+    if (state->spark_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildSparkAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->spark_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
+    if (state->glow_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildGlowAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->glow_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
+    if (state->smoke_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildSmokeAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->smoke_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
+    if (state->heat_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildHeatAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->heat_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
+    if (state->dust_ring_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildDustRingAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->dust_ring_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
+    if (state->shock_ring_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildShockRingAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->shock_ring_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
+    if (state->scorch_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildScorchAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->scorch_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
+    if (state->debris_texture == renderer::kInvalidTexture) {
+      const auto atlas = buildDebrisAtlas(kAtlasFrameSize, kAtlasFrameCount);
+      state->debris_texture = context.graphics->createTextureRGBA8(
+          kAtlasFrameSize * kAtlasFrameCount, kAtlasFrameSize, atlas.data());
+    }
   }
   if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
-    state->explosion_flipbook_texture =
-        buildExplosionSequenceAtlas(*context.graphics,
-                                    resolveExampleAssetPath("Explosion00-sequence-exr"));
-    if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
-      spdlog::warn("Explosion prefab package EXR fire atlas build failed; falling back to resampled Explosion00_5x5 sheet");
-      const int atlas_width = kFlipbookColumns * kFlipbookFrameSize +
-                              (kFlipbookColumns - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
-      const int atlas_height = kFlipbookRows * kFlipbookFrameSize +
-                               (kFlipbookRows - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
-      state->explosion_flipbook_texture = buildResampledAtlasFromImage(
-          *context.graphics,
-          resolveExampleAssetPath("Explosion00-flipbooks/Explosion00_5x5.exr"),
-          atlas_width,
-          atlas_height);
-      if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
-        state->explosion_flipbook_texture = buildResampledAtlasFromImage(
-            *context.graphics,
-            resolveExampleAssetPath("Explosion00-flipbooks/Explosion00_5x5.tga"),
-            atlas_width,
-            atlas_height);
-      }
+    if (flipbook_source_mode != ExplosionFlipbookSourceMode::Fast) {
+      state->explosion_flipbook_texture =
+          buildExplosionPackageFireExrFlipbook(*context.graphics, rebuild_flipbook_cache);
       if (state->explosion_flipbook_texture != renderer::kInvalidTexture) {
-        state->core_flipbook_source = ExplosionFlipbookTextureSource::LegacySheet;
+        state->core_flipbook_source = ExplosionFlipbookTextureSource::ExrSequence;
+        spdlog::info(
+            "Explosion prefab package loaded Explosion00 fire atlas from EXR source");
       }
-    } else {
-      spdlog::info("Explosion prefab package built Explosion00 fire atlas from EXR sequence");
-      state->core_flipbook_source = ExplosionFlipbookTextureSource::ExrSequence;
     }
     if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
-      spdlog::error("Explosion prefab package failed to load Explosion00_5x5.tga");
+      if (flipbook_source_mode != ExplosionFlipbookSourceMode::Fast) {
+        spdlog::warn(
+            "Explosion prefab package EXR fire atlas unavailable; falling back to procedural atlas");
+      }
+      state->explosion_flipbook_texture =
+          buildProceduralExplosionCoreFlipbook(*context.graphics,
+                                               core_fallback_frame_size,
+                                               core_fallback_border,
+                                               core_fallback_spacing);
+      if (state->explosion_flipbook_texture != renderer::kInvalidTexture) {
+        state->core_flipbook_source = ExplosionFlipbookTextureSource::ProceduralAtlas;
+      }
+    }
+    if (state->explosion_flipbook_texture == renderer::kInvalidTexture) {
+      spdlog::error("Explosion prefab package failed to create fire flipbook atlas");
       return false;
     }
   }
   if (state->explosion_smoke_flipbook_texture == renderer::kInvalidTexture) {
-    state->explosion_smoke_flipbook_texture =
-        buildExplosionSmokeSequenceAtlas(*context.graphics,
-                                         resolveExampleAssetPath("Explosion01-light-nofire-sequence-exr"));
-    if (state->explosion_smoke_flipbook_texture == renderer::kInvalidTexture) {
-      spdlog::warn("Explosion prefab package EXR smoke atlas build failed; falling back to procedural smoke atlas");
-      const auto atlas = buildExplosionSmokeFlipbookAtlas();
-      const int atlas_width = kFlipbookColumns * kFlipbookFrameSize +
-                              (kFlipbookColumns - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
-      const int atlas_height = kFlipbookRows * kFlipbookFrameSize +
-                               (kFlipbookRows - 1) * kFlipbookSpacing + kFlipbookBorder * 2;
+    if (flipbook_source_mode != ExplosionFlipbookSourceMode::Fast) {
       state->explosion_smoke_flipbook_texture =
-          context.graphics->createTextureRGBA8(atlas_width, atlas_height, atlas.data());
+          buildExplosionPackageSmokeExrFlipbook(*context.graphics, rebuild_flipbook_cache);
+      if (state->explosion_smoke_flipbook_texture != renderer::kInvalidTexture) {
+        state->smoke_flipbook_source = ExplosionFlipbookTextureSource::ExrSequence;
+        spdlog::info(
+            "Explosion prefab package loaded Explosion01 smoke atlas from EXR source");
+      }
+    }
+    if (state->explosion_smoke_flipbook_texture == renderer::kInvalidTexture) {
+      if (flipbook_source_mode != ExplosionFlipbookSourceMode::Fast) {
+        spdlog::warn(
+            "Explosion prefab package EXR smoke atlas unavailable; falling back to procedural smoke atlas");
+      }
+      state->explosion_smoke_flipbook_texture =
+          buildProceduralExplosionSmokeFlipbook(*context.graphics,
+                                               smoke_fallback_frame_size,
+                                               smoke_fallback_border,
+                                               smoke_fallback_spacing);
       if (state->explosion_smoke_flipbook_texture != renderer::kInvalidTexture) {
         state->smoke_flipbook_source = ExplosionFlipbookTextureSource::ProceduralAtlas;
       }
-    } else {
-      spdlog::info("Explosion prefab package built Explosion01 smoke atlas from EXR sequence");
-      state->smoke_flipbook_source = ExplosionFlipbookTextureSource::ExrSequence;
+    }
+    if (state->explosion_smoke_flipbook_texture == renderer::kInvalidTexture) {
+      spdlog::error("Explosion prefab package failed to create smoke flipbook atlas");
+      return false;
     }
   }
 
@@ -1278,59 +1739,75 @@ bool prepareExplosionPackage(const prefabs::PrefabPackageContext& context,
                flipbookSourceName(state->smoke_flipbook_source));
 
   context.particle_effects->registerTextureAliases({
-      {"spark_atlas", state->spark_texture},
-      {"glow_atlas", state->glow_texture},
-      {"smoke_atlas", state->smoke_texture},
-      {"heat_atlas", state->heat_texture},
-      {"dust_ring_atlas", state->dust_ring_texture},
-      {"shock_ring_atlas", state->shock_ring_texture},
-      {"scorch_atlas", state->scorch_texture},
-      {"debris_atlas", state->debris_texture},
-      {"explosion00_flipbook", state->explosion_flipbook_texture},
-      {"explosion01_smoke_flipbook", state->explosion_smoke_flipbook_texture},
+      {kExplosionTextureSpark, state->spark_texture},
+      {kExplosionTextureGlow, state->glow_texture},
+      {kExplosionTextureSmoke, state->smoke_texture},
+      {kExplosionTextureHeat, state->heat_texture},
+      {kExplosionTextureDustRing, state->dust_ring_texture},
+      {kExplosionTextureShockRing, state->shock_ring_texture},
+      {kExplosionTextureScorch, state->scorch_texture},
+      {kExplosionTextureDebris, state->debris_texture},
+      {kExplosionTextureCoreFlipbook, state->explosion_flipbook_texture},
+      {kExplosionTextureSmokeFlipbook, state->explosion_smoke_flipbook_texture},
   });
 
+  const std::filesystem::path core_flipbook_effect_path =
+      use_fast_flipbook_effects
+          ? explosionPackageAssetPath("particles/explosion_core_flipbook_fast.kpeffect")
+          : explosionPackageAssetPath("particles/explosion_core_flipbook.kpeffect");
+  const std::filesystem::path smoke_flipbook_effect_path =
+      use_fast_flipbook_effects
+          ? explosionPackageAssetPath("particles/explosion_smoke_flipbook_fast.kpeffect")
+          : explosionPackageAssetPath("particles/explosion_smoke_flipbook.kpeffect");
+
   return context.particle_effects->registerEffectFiles({
-      {"explosion_flash", resolveExampleAssetPath("particles/explosion_flash.kpeffect")},
-      {"explosion_fireball", resolveExampleAssetPath("particles/explosion_fireball.kpeffect")},
-      {"explosion_smoke", resolveExampleAssetPath("particles/explosion_smoke.kpeffect")},
-      {"explosion_heat", resolveExampleAssetPath("particles/explosion_heat.kpeffect")},
-      {"explosion_shock_ring", resolveExampleAssetPath("particles/explosion_shock_ring.kpeffect")},
-      {"explosion_dust_ring", resolveExampleAssetPath("particles/explosion_dust_ring.kpeffect")},
-      {"explosion_scorch", resolveExampleAssetPath("particles/explosion_scorch.kpeffect")},
-      {"explosion_debris", resolveExampleAssetPath("particles/explosion_debris.kpeffect")},
-      {"explosion_embers", resolveExampleAssetPath("particles/explosion_embers.kpeffect")},
-      {"explosion_core_flipbook",
-       resolveExampleAssetPath("particles/explosion_core_flipbook.kpeffect")},
-      {"explosion_smoke_flipbook",
-       resolveExampleAssetPath("particles/explosion_smoke_flipbook.kpeffect")},
+      {kExplosionEffectFlash,
+       explosionPackageAssetPath("particles/explosion_flash.kpeffect")},
+      {kExplosionEffectFireball,
+       explosionPackageAssetPath("particles/explosion_fireball.kpeffect")},
+      {kExplosionEffectSmoke,
+       explosionPackageAssetPath("particles/explosion_smoke.kpeffect")},
+      {kExplosionEffectHeat,
+       explosionPackageAssetPath("particles/explosion_heat.kpeffect")},
+      {kExplosionEffectShockRing,
+       explosionPackageAssetPath("particles/explosion_shock_ring.kpeffect")},
+      {kExplosionEffectDustRing,
+       explosionPackageAssetPath("particles/explosion_dust_ring.kpeffect")},
+      {kExplosionEffectScorch,
+       explosionPackageAssetPath("particles/explosion_scorch.kpeffect")},
+      {kExplosionEffectDebris,
+       explosionPackageAssetPath("particles/explosion_debris.kpeffect")},
+      {kExplosionEffectEmbers,
+       explosionPackageAssetPath("particles/explosion_embers.kpeffect")},
+      {kExplosionEffectCoreFlipbook, core_flipbook_effect_path},
+      {kExplosionEffectSmokeFlipbook, smoke_flipbook_effect_path},
   });
 }
 
 void cleanupExplosionPackage(const prefabs::PrefabPackageContext& context,
                              const std::shared_ptr<ExplosionPackageState>& state) {
   if (context.particle_effects != nullptr) {
-    context.particle_effects->unregisterEffect("explosion_flash");
-    context.particle_effects->unregisterEffect("explosion_fireball");
-    context.particle_effects->unregisterEffect("explosion_smoke");
-    context.particle_effects->unregisterEffect("explosion_heat");
-    context.particle_effects->unregisterEffect("explosion_shock_ring");
-    context.particle_effects->unregisterEffect("explosion_dust_ring");
-    context.particle_effects->unregisterEffect("explosion_scorch");
-    context.particle_effects->unregisterEffect("explosion_debris");
-    context.particle_effects->unregisterEffect("explosion_embers");
-    context.particle_effects->unregisterEffect("explosion_core_flipbook");
-    context.particle_effects->unregisterEffect("explosion_smoke_flipbook");
-    context.particle_effects->unregisterTextureAlias("spark_atlas");
-    context.particle_effects->unregisterTextureAlias("glow_atlas");
-    context.particle_effects->unregisterTextureAlias("smoke_atlas");
-    context.particle_effects->unregisterTextureAlias("heat_atlas");
-    context.particle_effects->unregisterTextureAlias("dust_ring_atlas");
-    context.particle_effects->unregisterTextureAlias("shock_ring_atlas");
-    context.particle_effects->unregisterTextureAlias("scorch_atlas");
-    context.particle_effects->unregisterTextureAlias("debris_atlas");
-    context.particle_effects->unregisterTextureAlias("explosion00_flipbook");
-    context.particle_effects->unregisterTextureAlias("explosion01_smoke_flipbook");
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectFlash));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectFireball));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectSmoke));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectHeat));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectShockRing));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectDustRing));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectScorch));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectDebris));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectEmbers));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectCoreFlipbook));
+    context.particle_effects->unregisterEffect(std::string(kExplosionEffectSmokeFlipbook));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureSpark));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureGlow));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureSmoke));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureHeat));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureDustRing));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureShockRing));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureScorch));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureDebris));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureCoreFlipbook));
+    context.particle_effects->unregisterTextureAlias(std::string(kExplosionTextureSmokeFlipbook));
   }
 
   destroyTextureIfValid(context.graphics, state->spark_texture);
@@ -1421,12 +1898,80 @@ void updateExplosionLight(ecs::World& world,
 
 }  // namespace
 
+std::string_view explosionFlipbookSourceModeName(ExplosionFlipbookSourceMode mode) {
+  switch (mode) {
+    case ExplosionFlipbookSourceMode::Fast:
+      return "fast";
+    case ExplosionFlipbookSourceMode::Exr:
+      return "exr";
+    case ExplosionFlipbookSourceMode::Auto:
+      return "auto";
+    default:
+      return "fast";
+  }
+}
+
+ExplosionFlipbookSourceMode parseExplosionFlipbookSourceMode() {
+  const char* value = std::getenv("KARMA_EXPLOSION_FLIPBOOK_SOURCE");
+  if (value == nullptr || value[0] == '\0') {
+    return ExplosionFlipbookSourceMode::Fast;
+  }
+
+  const std::string normalized = lowercase(trim(value));
+  if (normalized == "fast") {
+    return ExplosionFlipbookSourceMode::Fast;
+  }
+  if (normalized == "exr") {
+    return ExplosionFlipbookSourceMode::Exr;
+  }
+  if (normalized == "auto") {
+    return ExplosionFlipbookSourceMode::Auto;
+  }
+
+  spdlog::warn(
+      "Unknown KARMA_EXPLOSION_FLIPBOOK_SOURCE='{}'; expected fast, exr, or auto. Using fast.",
+      value);
+  return ExplosionFlipbookSourceMode::Fast;
+}
+
+bool explosionFlipbookRebuildRequested() {
+  const char* value = std::getenv("KARMA_EXPLOSION_FLIPBOOK_REBUILD");
+  if (value == nullptr) {
+    return false;
+  }
+  const std::string normalized = lowercase(trim(value));
+  return normalized == "1" || normalized == "true" || normalized == "yes" ||
+         normalized == "on";
+}
+
+renderer::TextureId buildExplosionPackageFireExrFlipbook(
+    renderer::GraphicsDevice& graphics,
+    bool rebuild_cache) {
+  return buildCachedExrSequenceAtlas(
+      graphics,
+      "fire",
+      explosionFireSequenceConfig(
+          explosionPackageAssetPath("source/Explosion00-sequence-exr")),
+      rebuild_cache);
+}
+
+renderer::TextureId buildExplosionPackageSmokeExrFlipbook(
+    renderer::GraphicsDevice& graphics,
+    bool rebuild_cache) {
+  return buildCachedExrSequenceAtlas(
+      graphics,
+      "smoke",
+      explosionSmokeSequenceConfig(
+          explosionPackageAssetPath("source/Explosion01-light-nofire-sequence-exr")),
+      rebuild_cache);
+}
+
 bool registerExplosionPrefabPackage(prefabs::PrefabRegistry& registry) {
   const auto state = std::make_shared<ExplosionPackageState>();
   return registry.registerPrefab(
       std::string(kExplosionPrefabKey),
       prefabs::RegisteredPrefabDesc{
-          .prefab_path = resolveExampleAssetPath("prefabs/explosion"),
+          .prefab_path = explosionPackageAssetPath({}),
           .prepare =
               [state](const prefabs::PrefabPackageContext& context) {
                 return prepareExplosionPackage(context, state);
@@ -1493,8 +2038,8 @@ void triggerExplosionPrefab(ecs::World& world,
   queueRestart(controller, controller.embers, 0.05f, time_seconds);
   queueRestart(controller, controller.debris, 0.05f, time_seconds);
   queueRestart(controller, controller.dust_ring, 0.05f, time_seconds);
-  queueRestart(controller, controller.smoke_flipbook, 0.08f, time_seconds);
-  queueRestart(controller, controller.smoke, 0.10f, time_seconds);
+  queueRestart(controller, controller.smoke_flipbook, 0.22f, time_seconds);
+  queueRestart(controller, controller.smoke, 0.24f, time_seconds);
   queueRestart(controller, controller.scorch, 0.12f, time_seconds);
 
   serviceScheduledRestarts(world, controller, time_seconds);

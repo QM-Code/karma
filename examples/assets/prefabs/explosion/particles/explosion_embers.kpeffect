@@ -4,7 +4,7 @@ depth_test = true
 blend_mode = additive
 alignment = billboard
 use_soft_mask = false
-texture = spark_atlas
+texture = prefabs/explosion/spark_atlas
 
 enabled = true
 playing = true

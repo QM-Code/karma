@@ -4,7 +4,7 @@ depth_test = true
 blend_mode = alpha
 use_soft_mask = false
 soft_particle_distance = 1.35
-texture = smoke_atlas
+texture = prefabs/explosion/smoke_atlas
 
 enabled = true
 playing = true

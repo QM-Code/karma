@@ -4,7 +4,7 @@ depth_test = true
 blend_mode = additive
 alignment = ground
 use_soft_mask = false
-texture = shock_ring_atlas
+texture = prefabs/explosion/shock_ring_atlas
 
 enabled = true
 playing = true

@@ -252,11 +252,13 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
       vb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
       vb_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(ParticleInstanceGpu));
-      device_->CreateBuffer(vb_desc, nullptr, &particle_instance_vb_);
-      if (!particle_instance_vb_) {
+      Diligent::RefCntAutoPtr<Diligent::IBuffer> next_particle_instance_vb;
+      device_->CreateBuffer(vb_desc, nullptr, &next_particle_instance_vb);
+      if (!next_particle_instance_vb) {
         particle_instance_capacity_ = 0;
         return false;
       }
+      particle_instance_vb_ = std::move(next_particle_instance_vb);
       particle_instance_capacity_ = new_capacity;
     }
     return true;

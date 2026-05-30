@@ -5,7 +5,7 @@ blend_mode = distortion
 use_soft_mask = true
 soft_particle_distance = 1.15
 distortion_strength = 32.0
-texture = heat_atlas
+texture = prefabs/explosion/heat_atlas
 
 enabled = true
 playing = true

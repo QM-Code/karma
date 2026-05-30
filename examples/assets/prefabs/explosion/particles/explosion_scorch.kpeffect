@@ -5,7 +5,7 @@ blend_mode = alpha
 alignment = ground
 use_soft_mask = false
 soft_particle_distance = 0.30
-texture = scorch_atlas
+texture = prefabs/explosion/scorch_atlas
 
 enabled = true
 playing = true

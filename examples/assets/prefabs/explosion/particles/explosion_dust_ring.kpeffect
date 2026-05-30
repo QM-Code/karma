@@ -5,7 +5,7 @@ blend_mode = alpha
 alignment = ground
 use_soft_mask = false
 soft_particle_distance = 0.55
-texture = dust_ring_atlas
+texture = prefabs/explosion/dust_ring_atlas
 
 enabled = true
 playing = true

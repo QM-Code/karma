@@ -35,11 +35,13 @@ particle_effects->clearTextureAliases();
 particle_effects->registerTextureAliases({
     {"smoke_atlas", smoke_texture},
     {"spark_atlas", spark_texture},
+    {"prefabs/explosion/spark_atlas", spark_texture},
 });
 
 particle_effects->registerEffectFiles({
     {"smoke_plume", "examples/assets/particles/smoke_plume.kpeffect"},
-    {"explosion_embers", "examples/assets/particles/explosion_embers.kpeffect"},
+    {"prefabs/explosion/embers",
+     "examples/assets/prefabs/explosion/particles/explosion_embers.kpeffect"},
 });
 ```
 
@@ -70,7 +72,7 @@ particles::bindEffect(
     *world,
     entity,
     particles::ParticleEffectBindingDesc{
-        .effect_key = "explosion_embers",
+        .effect_key = "prefabs/explosion/embers",
         .playing = false,
     });
 ```

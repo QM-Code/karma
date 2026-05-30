@@ -5,7 +5,7 @@ blend_mode = alpha
 alignment = billboard
 use_soft_mask = false
 soft_particle_distance = 0.18
-texture = debris_atlas
+texture = prefabs/explosion/debris_atlas
 
 enabled = true
 playing = true

@@ -126,20 +126,19 @@ Current state:
 
 - shock ring depth-testing is enabled
 - smoke tinting is darker than the earlier defaults
-- core and smoke flipbooks prefer EXR sequence atlases
-- shared flipbook metadata now targets `400x400` atlas frames
-- fire falls back to a resampled legacy sheet when the EXR sequence path fails
-- smoke falls back to the procedural atlas when the smoke EXR path fails
+- core and smoke flipbooks use generated procedural atlases by default
+- opt-in EXR flipbook metadata targets `400x400` atlas frames
+- either EXR path falls back to a procedural atlas if it fails
 - the package exposes flipbook source debug info and the stress sample logs it
 
 Primary files:
 
 - [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
 - [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
-- [`../examples/assets/particles/explosion_core_flipbook.kpeffect`](../examples/assets/particles/explosion_core_flipbook.kpeffect)
-- [`../examples/assets/particles/explosion_smoke_flipbook.kpeffect`](../examples/assets/particles/explosion_smoke_flipbook.kpeffect)
-- [`../examples/assets/particles/explosion_shock_ring.kpeffect`](../examples/assets/particles/explosion_shock_ring.kpeffect)
-- [`../examples/assets/particles/explosion_smoke.kpeffect`](../examples/assets/particles/explosion_smoke.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_smoke.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_smoke.kpeffect)
 
 ## What The Stats Proved
 
@@ -173,8 +172,8 @@ counts were raised:
 
 Primary files:
 
-- [`../examples/assets/particles/explosion_embers.kpeffect`](../examples/assets/particles/explosion_embers.kpeffect)
-- [`../examples/assets/particles/explosion_debris.kpeffect`](../examples/assets/particles/explosion_debris.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_embers.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_embers.kpeffect)
+- [`../examples/assets/prefabs/explosion/particles/explosion_debris.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_debris.kpeffect)
 
 ## Key Files For Future Work
 

@@ -635,6 +635,7 @@ if (NOT KARMA_HEADLESS)
 
   add_executable(karma_particle_example
     examples/particle_example.cpp
+    examples/explosion_prefab_package.cpp
   )
   target_link_libraries(karma_particle_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)

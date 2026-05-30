@@ -13,24 +13,26 @@ The prefab gallery scene currently showcases four prefab families in one scene:
 
 Primary file:
 
-- [prefab_gallery_example.cpp](/home/irie/Documents/karma/examples/prefab_gallery_example.cpp)
+- [`../examples/prefab_gallery_example.cpp`](../examples/prefab_gallery_example.cpp)
 
 Explosion package files:
 
-- [explosion_prefab_package.h](/home/irie/Documents/karma/examples/explosion_prefab_package.h)
-- [explosion_prefab_package.cpp](/home/irie/Documents/karma/examples/explosion_prefab_package.cpp)
-- [prefab.kprefab](/home/irie/Documents/karma/examples/assets/prefabs/explosion/prefab.kprefab)
+- [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
+- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
+- [`../examples/assets/prefabs/explosion/prefab.kprefab`](../examples/assets/prefabs/explosion/prefab.kprefab)
+- [`../examples/assets/prefabs/explosion/particles/`](../examples/assets/prefabs/explosion/particles/)
+- [`../examples/assets/prefabs/explosion/source/`](../examples/assets/prefabs/explosion/source/)
 
 Wave / volume files:
 
-- [prefab.kprefab](/home/irie/Documents/karma/examples/assets/prefabs/wave/prefab.kprefab)
-- [volume_sphere_system.cpp](/home/irie/Documents/karma/src/volumes/volume_sphere_system.cpp)
+- [`../examples/assets/prefabs/wave/prefab.kprefab`](../examples/assets/prefabs/wave/prefab.kprefab)
+- [`../src/volumes/volume_sphere_system.cpp`](../src/volumes/volume_sphere_system.cpp)
 
 Renderer-side composition files:
 
-- [backend_render.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_render.cpp)
-- [backend_init.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_init.cpp)
-- [VOLUMETRIC_SPHERE_TRANSPARENCY.md](/home/irie/Documents/karma/docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
+- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
+- [`../src/renderer/backends/diligent/backend_init.cpp`](../src/renderer/backends/diligent/backend_init.cpp)
+- [`VOLUMETRIC_SPHERE_TRANSPARENCY.md`](VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 
 ## Explosion Prefab Status
 
@@ -40,11 +42,11 @@ Important behavior:
 
 - the prefab stages flash, fireball, heat, authored core flipbook, authored smoke flipbook, embers, shock ring, debris, dust, smoke, scorch, and a pulsed point light
 - the gallery instantiates four explosion controllers and replays them on a staggered timer
-- the package does **not** use the EXR-sequence build path from `particle_example.cpp`
-- the authored fire flipbook is loaded from `Explosion00_5x5.tga`
-- the authored smoke flipbook is generated into a runtime atlas texture
+- the package defaults to generated procedural fire/smoke flipbook atlases
+- the authored EXR sequence path is opt-in for validation
+- the fast flipbook metadata uses lower-resolution atlas frames
 
-That means any gallery-only authored-flipbook inconsistency is more likely a runtime/rendering problem than an EXR import problem.
+That means any gallery-only flipbook inconsistency is more likely a runtime/rendering problem than an EXR import problem.
 
 ## Renderer Changes Already Landed
 
@@ -80,13 +82,13 @@ volumetric spheres remain visible through foreground spheres.
 
 Primary file:
 
-- [forward.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/passes/forward.cpp)
-- [backend_init.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_init.cpp)
-- [backend_render.cpp](/home/irie/Documents/karma/src/renderer/backends/diligent/backend_render.cpp)
+- [`../src/renderer/backends/diligent/passes/forward.cpp`](../src/renderer/backends/diligent/passes/forward.cpp)
+- [`../src/renderer/backends/diligent/backend_init.cpp`](../src/renderer/backends/diligent/backend_init.cpp)
+- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
 
 Detailed handoff:
 
-- [VOLUMETRIC_SPHERE_TRANSPARENCY.md](/home/irie/Documents/karma/docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
+- [`VOLUMETRIC_SPHERE_TRANSPARENCY.md`](VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 
 ### 2. Volume-sphere proxy optimization
 
@@ -100,7 +102,7 @@ Current behavior:
 
 Primary file:
 
-- [volume_sphere_system.cpp](/home/irie/Documents/karma/src/volumes/volume_sphere_system.cpp)
+- [`../src/volumes/volume_sphere_system.cpp`](../src/volumes/volume_sphere_system.cpp)
 
 This removed the largest obvious overdraw waste, but it did **not** fully solve the gallery FPS drop.
 
@@ -144,7 +146,7 @@ Those logs report:
 
 Primary file:
 
-- [prefab_gallery_example.cpp](/home/irie/Documents/karma/examples/prefab_gallery_example.cpp)
+- [`../examples/prefab_gallery_example.cpp`](../examples/prefab_gallery_example.cpp)
 
 ## Important Environment Note
 

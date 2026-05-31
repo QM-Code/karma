@@ -37,28 +37,28 @@ The worktree is intentionally dirty. Do not assume unrelated modified files are 
 
 High-signal areas right now:
 
-- [`src/renderer/backends/diligent/backend_init.cpp`](src/renderer/backends/diligent/backend_init.cpp)
-- [`src/renderer/backends/diligent/backend_render.cpp`](src/renderer/backends/diligent/backend_render.cpp)
-- [`src/renderer/backends/diligent/passes/`](src/renderer/backends/diligent/passes)
-- [`src/renderer/backends/diligent/resources/`](src/renderer/backends/diligent/resources)
-- [`src/renderer/render_system.cpp`](src/renderer/render_system.cpp)
-- [`src/particles/`](src/particles)
-- [`src/beams/beam_path_system.cpp`](src/beams/beam_path_system.cpp)
-- [`src/beams/beam_path_runtime_module.cpp`](src/beams/beam_path_runtime_module.cpp)
-- [`src/volumes/volume_sphere_system.cpp`](src/volumes/volume_sphere_system.cpp)
-- [`src/volumes/volume_sphere_runtime_module.cpp`](src/volumes/volume_sphere_runtime_module.cpp)
-- [`src/prefabs/prefab_runtime.cpp`](src/prefabs/prefab_runtime.cpp)
-- [`src/prefabs/prefab_entry_handler.cpp`](src/prefabs/prefab_entry_handler.cpp)
-- [`include/karma/app/runtime_module.h`](include/karma/app/runtime_module.h)
-- [`include/karma/prefabs/prefab_entry_handler.h`](include/karma/prefabs/prefab_entry_handler.h)
-- [`src/physics/`](src/physics)
-- [`src/collision/`](src/collision)
-- [`src/animation/`](src/animation)
-- [`include/karma/animation/`](include/karma/animation)
-- [`src/scene/glb_scene_import.cpp`](src/scene/glb_scene_import.cpp)
-- [`src/scene/transform_hierarchy.cpp`](src/scene/transform_hierarchy.cpp)
-- [`include/karma/navigation/`](include/karma/navigation)
-- [`src/navigation/`](src/navigation)
+- [`src/rendering/renderer/backends/diligent/backend_init.cpp`](src/rendering/renderer/backends/diligent/backend_init.cpp)
+- [`src/rendering/renderer/backends/diligent/backend_render.cpp`](src/rendering/renderer/backends/diligent/backend_render.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/`](src/rendering/renderer/backends/diligent/passes)
+- [`src/rendering/renderer/backends/diligent/resources/`](src/rendering/renderer/backends/diligent/resources)
+- [`src/rendering/renderer/render_system.cpp`](src/rendering/renderer/render_system.cpp)
+- [`src/features/visual/particles/`](src/particles)
+- [`src/features/visual/beams/beam_path_system.cpp`](src/features/visual/beams/beam_path_system.cpp)
+- [`src/features/visual/beams/beam_path_runtime_module.cpp`](src/features/visual/beams/beam_path_runtime_module.cpp)
+- [`src/features/visual/volumes/volume_sphere_system.cpp`](src/features/visual/volumes/volume_sphere_system.cpp)
+- [`src/features/visual/volumes/volume_sphere_runtime_module.cpp`](src/features/visual/volumes/volume_sphere_runtime_module.cpp)
+- [`src/content/prefabs/prefab_runtime.cpp`](src/content/prefabs/prefab_runtime.cpp)
+- [`src/content/prefabs/prefab_entry_handler.cpp`](src/content/prefabs/prefab_entry_handler.cpp)
+- [`include/karma/runtime/app/runtime_module.h`](include/karma/runtime/app/runtime_module.h)
+- [`include/karma/content/prefabs/prefab_entry_handler.h`](include/karma/content/prefabs/prefab_entry_handler.h)
+- [`src/simulation/physics/`](src/physics)
+- [`src/simulation/collision/`](src/collision)
+- [`src/simulation/animation/`](src/animation)
+- [`include/karma/simulation/animation/`](include/karma/animation)
+- [`src/content/importers/glb_scene_import.cpp`](src/content/importers/glb_scene_import.cpp)
+- [`src/world/scene/transform_hierarchy.cpp`](src/world/scene/transform_hierarchy.cpp)
+- [`include/karma/simulation/navigation/`](include/karma/navigation)
+- [`src/simulation/navigation/`](src/navigation)
 - [`examples/navmesh_example.cpp`](examples/navmesh_example.cpp)
 - [`tests/navmesh_tests.cpp`](tests/navmesh_tests.cpp)
 - [`examples/light_stress_example.cpp`](examples/light_stress_example.cpp)
@@ -150,8 +150,8 @@ Important limitations:
 If continuing there, start with:
 
 - [docs/GLB_ANIMATION_BOOTSTRAP.md](docs/GLB_ANIMATION_BOOTSTRAP.md)
-- [src/animation/AGENTS.md](src/animation/AGENTS.md)
-- [include/karma/animation/AGENTS.md](include/karma/animation/AGENTS.md)
+- [src/simulation/animation/AGENTS.md](src/simulation/animation/AGENTS.md)
+- [include/karma/simulation/animation/AGENTS.md](include/karma/simulation/animation/AGENTS.md)
 
 For the navigation work specifically, this build was verified:
 
@@ -248,7 +248,7 @@ If continuing there, start with:
 Recent navigation work already in the tree:
 
 - Recast/Detour dependency integration behind `KARMA_ENABLE_NAVIGATION`
-- static navmesh bake API in `include/karma/navigation/nav_mesh.h`
+- static navmesh bake API in `include/karma/simulation/navigation/nav_mesh.h`
 - GLB prefab, ECS mesh-collider, and direct mesh geometry collection in `nav_geometry`
 - Detour path, nearest-point, and raycast query wrapper
 - navmesh/path debug drawing through existing renderer line drawing

@@ -9,7 +9,7 @@ This engine now has a reusable particle workflow built around five pieces:
 - `particles::ParticleSystem`: engine-owned system that applies effects, simulates particles, and submits particle batches to the renderer.
 
 Most game code should work through `ParticleLibrary` plus the ECS helpers in
-`karma/particles/effect_api.h` rather than manually constructing particle
+`karma/features/visual/particles/effect_api.h` rather than manually constructing particle
 components.
 
 For the roadmap toward agent-generated `.kpeffect` files from images or visual
@@ -50,7 +50,7 @@ Use texture aliases inside `.kpeffect` files with `texture = alias_name`.
 ## Binding Effects To ECS Entities
 
 ```cpp
-#include "karma/particles/effect_api.h"
+#include "karma/features/visual/particles/effect_api.h"
 
 components::TransformComponent transform{};
 transform.setPosition({0.0f, 1.0f, 0.0f});

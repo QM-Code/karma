@@ -23,20 +23,20 @@ pose used by imported GLB node animation and hierarchy composition.
 
 ## Key Files
 
-- `include/karma/animation/animation_clip.h`
-- `src/animation/animation_clip.cpp`
-- `include/karma/animation/animation_system.h`
-- `src/animation/animation_system.cpp`
-- `include/karma/animation/cpu_skinning_system.h`
-- `src/animation/cpu_skinning_system.cpp`
-- `include/karma/components/animation_player.h`
-- `src/components/animation_player.cpp`
-- `include/karma/components/skinned_mesh.h`
-- `include/karma/components/transform.h`
-- `include/karma/scene/transform_hierarchy.h`
-- `src/scene/transform_hierarchy.cpp`
-- `include/karma/scene/glb_scene_import.h`
-- `src/scene/glb_scene_import.cpp`
+- `include/karma/simulation/animation/animation_clip.h`
+- `src/simulation/animation/animation_clip.cpp`
+- `include/karma/simulation/animation/animation_system.h`
+- `src/simulation/animation/animation_system.cpp`
+- `include/karma/simulation/animation/cpu_skinning_system.h`
+- `src/simulation/animation/cpu_skinning_system.cpp`
+- `include/karma/world/components/animation_player.h`
+- `src/world/components/animation_player.cpp`
+- `include/karma/world/components/skinned_mesh.h`
+- `include/karma/world/components/transform.h`
+- `include/karma/world/scene/transform_hierarchy.h`
+- `src/world/scene/transform_hierarchy.cpp`
+- `include/karma/content/importers/glb_scene_import.h`
+- `src/content/importers/glb_scene_import.cpp`
 - `examples/glb_animation_example.cpp`
 - `tests/animation_tests.cpp`
 

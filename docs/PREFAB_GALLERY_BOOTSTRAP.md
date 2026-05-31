@@ -26,12 +26,12 @@ Explosion package files:
 Wave / volume files:
 
 - [`../examples/assets/prefabs/wave/prefab.kprefab`](../examples/assets/prefabs/wave/prefab.kprefab)
-- [`../src/volumes/volume_sphere_system.cpp`](../src/volumes/volume_sphere_system.cpp)
+- [`../src/features/visual/volumes/volume_sphere_system.cpp`](../src/features/visual/volumes/volume_sphere_system.cpp)
 
 Renderer-side composition files:
 
-- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
-- [`../src/renderer/backends/diligent/backend_init.cpp`](../src/renderer/backends/diligent/backend_init.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_render.cpp`](../src/rendering/renderer/backends/diligent/backend_render.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_init.cpp`](../src/rendering/renderer/backends/diligent/backend_init.cpp)
 - [`VOLUMETRIC_SPHERE_TRANSPARENCY.md`](VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 
 ## Explosion Prefab Status
@@ -82,9 +82,9 @@ volumetric spheres remain visible through foreground spheres.
 
 Primary file:
 
-- [`../src/renderer/backends/diligent/passes/forward.cpp`](../src/renderer/backends/diligent/passes/forward.cpp)
-- [`../src/renderer/backends/diligent/backend_init.cpp`](../src/renderer/backends/diligent/backend_init.cpp)
-- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/forward.cpp`](../src/rendering/renderer/backends/diligent/passes/forward.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_init.cpp`](../src/rendering/renderer/backends/diligent/backend_init.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_render.cpp`](../src/rendering/renderer/backends/diligent/backend_render.cpp)
 
 Detailed handoff:
 
@@ -102,7 +102,7 @@ Current behavior:
 
 Primary file:
 
-- [`../src/volumes/volume_sphere_system.cpp`](../src/volumes/volume_sphere_system.cpp)
+- [`../src/features/visual/volumes/volume_sphere_system.cpp`](../src/features/visual/volumes/volume_sphere_system.cpp)
 
 This removed the largest obvious overdraw waste, but it did **not** fully solve the gallery FPS drop.
 

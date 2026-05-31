@@ -5,7 +5,7 @@ of 3D points as a continuous energy beam.
 
 ## Authoring
 
-Use [BeamPathComponent](/home/irie/Documents/karma/include/karma/components/beam_path.h)
+Use [BeamPathComponent](/home/irie/Documents/karma/include/karma/world/components/beam_path.h)
 to describe the path and its look:
 
 - `points`: ordered path vertices
@@ -26,7 +26,7 @@ to describe the path and its look:
 ## Helper API
 
 For concise ECS setup, use
-[beam_path_api.h](/home/irie/Documents/karma/include/karma/beams/beam_path_api.h):
+[beam_path_api.h](/home/irie/Documents/karma/include/karma/features/visual/beams/beam_path_api.h):
 
 ```cpp
 const std::vector<karma::math::Vec3> points = {
@@ -67,7 +67,7 @@ section, then driven at runtime by looking up the named member and calling
 ## Runtime
 
 Register
-[BeamPathRuntimeModule](/home/quinn/Documents/karma/include/karma/beams/beam_path_runtime_module.h)
+[BeamPathRuntimeModule](/home/quinn/Documents/karma/include/karma/features/visual/beams/beam_path_runtime_module.h)
 with `EngineApp` before `start(...)` to enable beam rendering and `[beam]`
 prefab sections:
 
@@ -76,7 +76,7 @@ engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>())
 ```
 
 That module owns
-[BeamPathSystem](/home/quinn/Documents/karma/include/karma/beams/beam_path_system.h)
+[BeamPathSystem](/home/quinn/Documents/karma/include/karma/features/visual/beams/beam_path_system.h)
 and builds and updates the render data automatically:
 
 - repeated additive hot-core particles along the full path

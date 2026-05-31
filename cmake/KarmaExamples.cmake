@@ -1,0 +1,190 @@
+if (NOT KARMA_HEADLESS)
+  add_executable(karma_example
+    examples/main.cpp
+  )
+
+  target_link_libraries(karma_example PRIVATE karma ${KARMA_IMGUI_TARGET})
+  if (imgui_SOURCE_DIR)
+    target_include_directories(karma_example PRIVATE ${imgui_SOURCE_DIR})
+  endif()
+  if (NOT KARMA_IMGUI_TARGET AND DEFINED IMGUI_SOURCES)
+    target_sources(karma_example PRIVATE ${IMGUI_SOURCES})
+  endif()
+
+  if (KARMA_XXHASH_ARCHIVE AND CMAKE_AR AND CMAKE_C_COMPILER)
+    set(KARMA_XXHASH_STAMP "${CMAKE_BINARY_DIR}/karma_xxhash.stamp")
+    add_custom_command(
+      OUTPUT ${KARMA_XXHASH_STAMP}
+      COMMAND ${CMAKE_C_COMPILER} -c ${KARMA_XXHASH_SOURCE} -o ${KARMA_XXHASH_OBJECT}
+      COMMAND ${CMAKE_AR} qc ${KARMA_XXHASH_ARCHIVE} ${KARMA_XXHASH_OBJECT}
+      COMMAND ${CMAKE_RANLIB} ${KARMA_XXHASH_ARCHIVE}
+      COMMAND ${CMAKE_COMMAND} -E touch ${KARMA_XXHASH_STAMP}
+      COMMENT "Rebuilding xxhash static archive"
+      VERBATIM)
+    add_custom_target(karma_fix_xxhash DEPENDS ${KARMA_XXHASH_STAMP})
+    add_dependencies(karma_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_collision_events_example
+    examples/collision_events_example.cpp
+  )
+  target_link_libraries(karma_collision_events_example PRIVATE karma ${KARMA_IMGUI_TARGET})
+  if (imgui_SOURCE_DIR)
+    target_include_directories(karma_collision_events_example PRIVATE ${imgui_SOURCE_DIR})
+  endif()
+  if (NOT KARMA_IMGUI_TARGET AND DEFINED IMGUI_SOURCES)
+    target_sources(karma_collision_events_example PRIVATE ${IMGUI_SOURCES})
+  endif()
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_collision_events_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_light_stress_example
+    examples/light_stress_example.cpp
+  )
+  target_link_libraries(karma_light_stress_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_light_stress_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_material_override_example
+    examples/material_override_example.cpp
+  )
+  target_link_libraries(karma_material_override_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_material_override_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_glb_scene_import_example
+    examples/glb_scene_import_example.cpp
+  )
+  target_link_libraries(karma_glb_scene_import_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_glb_scene_import_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_glb_animation_example
+    examples/glb_animation_example.cpp
+  )
+  target_link_libraries(karma_glb_animation_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_glb_animation_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_particle_example
+    examples/particle_example.cpp
+    examples/explosion_prefab_package.cpp
+  )
+  target_link_libraries(karma_particle_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_particle_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_energy_orb_example
+    examples/energy_orb_example.cpp
+    examples/energy_orb_prefab_package.cpp
+  )
+  target_link_libraries(karma_energy_orb_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_energy_orb_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_laser_example
+    examples/laser_example.cpp
+  )
+  target_link_libraries(karma_laser_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_laser_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_laser_prefab_example
+    examples/laser_prefab_example.cpp
+  )
+  target_link_libraries(karma_laser_prefab_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_laser_prefab_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_wave_example
+    examples/wave_example.cpp
+  )
+  target_link_libraries(karma_wave_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_wave_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_volumetric_sphere_example
+    examples/volumetric_sphere_example.cpp
+  )
+  target_link_libraries(karma_volumetric_sphere_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_volumetric_sphere_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_volumetric_sphere_prefab_example
+    examples/volumetric_sphere_prefab_example.cpp
+  )
+  target_link_libraries(karma_volumetric_sphere_prefab_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_volumetric_sphere_prefab_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_prefab_gallery_example
+    examples/prefab_gallery_example.cpp
+    examples/energy_orb_prefab_package.cpp
+    examples/explosion_prefab_package.cpp
+  )
+  target_link_libraries(karma_prefab_gallery_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_prefab_gallery_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_explosion_stress_example
+    examples/explosion_stress_example.cpp
+    examples/explosion_prefab_package.cpp
+  )
+  target_link_libraries(karma_explosion_stress_example PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_explosion_stress_example karma_fix_xxhash)
+  endif()
+
+  if (KARMA_BUILD_IMGUI_DEMO)
+    add_executable(karma_imgui_ui_demo
+      examples/imgui_ui_demo.cpp
+      ${IMGUI_SOURCES}
+    )
+    target_link_libraries(karma_imgui_ui_demo PRIVATE karma ${KARMA_IMGUI_TARGET})
+    if (imgui_SOURCE_DIR)
+      target_include_directories(karma_imgui_ui_demo PRIVATE ${imgui_SOURCE_DIR})
+    endif()
+    if (TARGET karma_fix_xxhash)
+      add_dependencies(karma_imgui_ui_demo karma_fix_xxhash)
+    endif()
+  endif()
+
+  if (KARMA_BUILD_RMLUI_DEMO)
+    add_executable(karma_rmlui_ui_demo
+      examples/rmlui_ui_demo.cpp
+    )
+    target_link_libraries(karma_rmlui_ui_demo PRIVATE karma ${KARMA_RMLUI_TARGET})
+    if (TARGET karma_fix_xxhash)
+      add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
+    endif()
+  endif()
+endif()
+
+add_executable(karma_network_demo
+  examples/network_demo.cpp
+)
+
+target_link_libraries(karma_network_demo PRIVATE karma)
+if (TARGET karma_fix_xxhash)
+  add_dependencies(karma_network_demo karma_fix_xxhash)
+endif()
+
+if (KARMA_ENABLE_NAVIGATION AND NOT KARMA_HEADLESS)
+  add_executable(karma_navmesh_example
+    examples/navmesh_example.cpp
+  )
+  target_link_libraries(karma_navmesh_example PRIVATE karma)
+endif()

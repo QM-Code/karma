@@ -9,27 +9,27 @@ Read this with:
 - `docs/PARTICLE_PERF_BOOTSTRAP.md`
 - `docs/EXPLOSION_PREFAB.md`
 - `docs/EXPLOSION_STRESS_PERF.md`
-- `src/particles/particle_system.cpp`
-- `src/renderer/backends/diligent/passes/particle_draw.cpp`
+- `src/features/visual/particles/particle_system.cpp`
+- `src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`
 
 ## High-Level Structure
 
 The particle system is split across four layers:
 
 - Public API and ECS helpers:
-  `include/karma/particles/effect_api.h`,
-  `include/karma/particles/effect_library.h`, and
-  `include/karma/particles/particle_system.h`.
+  `include/karma/features/visual/particles/effect_api.h`,
+  `include/karma/features/visual/particles/effect_library.h`, and
+  `include/karma/features/visual/particles/particle_system.h`.
 - ECS data:
-  `include/karma/components/particle_effect.h`,
-  `include/karma/components/particle_effect_override.h`, and
-  `include/karma/components/particle_emitter.h`.
+  `include/karma/world/components/particle_effect.h`,
+  `include/karma/world/components/particle_effect_override.h`, and
+  `include/karma/world/components/particle_emitter.h`.
 - Runtime simulation:
-  `src/particles/effect_library.cpp` and
-  `src/particles/particle_system.cpp`.
+  `src/features/visual/particles/effect_library.cpp` and
+  `src/features/visual/particles/particle_system.cpp`.
 - Renderer backend:
-  `src/renderer/backends/diligent/passes/particles.cpp` and
-  `src/renderer/backends/diligent/passes/particle_draw.cpp`.
+  `src/rendering/renderer/backends/diligent/passes/particles.cpp` and
+  `src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`.
 
 Authored content lives under:
 
@@ -590,14 +590,14 @@ Initial diagnostic finding:
 
 ## Files To Watch
 
-- `src/particles/particle_system.cpp`
-- `src/particles/effect_library.cpp`
-- `include/karma/components/particle_emitter.h`
-- `include/karma/components/particle_effect_override.h`
-- `src/renderer/backends/diligent/passes/particle_draw.cpp`
-- `src/renderer/backends/diligent/passes/particles.cpp`
-- `src/prefabs/prefab_parse_particle.cpp`
-- `src/prefabs/prefab_runtime.cpp`
+- `src/features/visual/particles/particle_system.cpp`
+- `src/features/visual/particles/effect_library.cpp`
+- `include/karma/world/components/particle_emitter.h`
+- `include/karma/world/components/particle_effect_override.h`
+- `src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`
+- `src/rendering/renderer/backends/diligent/passes/particles.cpp`
+- `src/content/prefabs/prefab_parse_particle.cpp`
+- `src/content/prefabs/prefab_runtime.cpp`
 - `examples/explosion_prefab_package.cpp`
 - `examples/assets/particles/*.kpeffect`
 - `examples/assets/prefabs/*/prefab.kprefab`

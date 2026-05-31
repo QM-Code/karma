@@ -28,8 +28,8 @@ The format is simple and strict:
 
 Primary files:
 
-- [particle_emitter.h](/home/irie/Documents/karma/include/karma/components/particle_emitter.h)
-- [effect_library.cpp](/home/irie/Documents/karma/src/particles/effect_library.cpp)
+- [particle_emitter.h](/home/irie/Documents/karma/include/karma/world/components/particle_emitter.h)
+- [effect_library.cpp](/home/irie/Documents/karma/src/features/visual/particles/effect_library.cpp)
 - [PARTICLE_SYSTEM.md](/home/irie/Documents/karma/docs/PARTICLE_SYSTEM.md)
 - [examples/assets/particles](/home/irie/Documents/karma/examples/assets/particles)
 

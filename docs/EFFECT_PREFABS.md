@@ -52,7 +52,7 @@ and instantiate it with one call.
 The canonical direct API is:
 
 ```cpp
-#include "karma/prefabs/prefab.h"
+#include "karma/content/prefabs/prefab.h"
 
 const auto instance = prefabs::instantiatePrefab(
     *world,

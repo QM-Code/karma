@@ -331,10 +331,10 @@ Current support:
 For box rigid bodies, the engine now also runs a short downward support probe after physics so `support_entity`, `point`, and `normal` can be resolved for common "what am I standing on?" gameplay logic.
 
 ## ECS Point Containment Queries
-Karma exposes ECS-facing point containment helpers in `karma/ecs/collider_queries.h`:
+Karma exposes ECS-facing point containment helpers in `karma/world/ecs/collider_queries.h`:
 
 ```cpp
-#include "karma/ecs/collider_queries.h"
+#include "karma/world/ecs/collider_queries.h"
 
 using karma::ecs::queries::PointContainmentFilter;
 

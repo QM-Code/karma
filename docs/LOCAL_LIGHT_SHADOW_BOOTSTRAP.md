@@ -36,25 +36,25 @@ That is the change that brought visible point-light illumination and shadows bac
 
 Shadow resource allocation, comparison sampler setup, and shading code:
 
-- [`../src/renderer/backends/diligent/backend_init.cpp`](../src/renderer/backends/diligent/backend_init.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_init.cpp`](../src/rendering/renderer/backends/diligent/backend_init.cpp)
 
 SRB shadow rebinding on actual material draw paths:
 
-- [`../src/renderer/backends/diligent/resources/materials.cpp`](../src/renderer/backends/diligent/resources/materials.cpp)
+- [`../src/rendering/renderer/backends/diligent/resources/materials.cpp`](../src/rendering/renderer/backends/diligent/resources/materials.cpp)
 
 Point-shadow slot selection, cache invalidation, and face rendering:
 
-- [`../src/renderer/backends/diligent/passes/shadows.cpp`](../src/renderer/backends/diligent/passes/shadows.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/shadows.cpp`](../src/rendering/renderer/backends/diligent/passes/shadows.cpp)
 
 Forward shading consumption and frame orchestration:
 
-- [`../src/renderer/backends/diligent/passes/forward.cpp`](../src/renderer/backends/diligent/passes/forward.cpp)
-- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/forward.cpp`](../src/rendering/renderer/backends/diligent/passes/forward.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_render.cpp`](../src/rendering/renderer/backends/diligent/backend_render.cpp)
 
 Backend state and limits:
 
-- [`../include/karma/renderer/backends/diligent/backend.hpp`](../include/karma/renderer/backends/diligent/backend.hpp)
-- [`../src/app/engine_app.cpp`](../src/app/engine_app.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend.hpp`](../src/rendering/renderer/backends/diligent/backend.hpp)
+- [`../src/runtime/app/engine_app.cpp`](../src/runtime/app/engine_app.cpp)
 
 Probe sample:
 

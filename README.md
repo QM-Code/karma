@@ -13,7 +13,7 @@ If you are new to this repo, start with:
 
 ## Runtime Bootstrap
 
-The main runtime entry point is [`src/app/engine_app.cpp`](src/app/engine_app.cpp).
+The main runtime entry point is [`src/runtime/app/engine_app.cpp`](src/runtime/app/engine_app.cpp).
 
 Current startup flow:
 
@@ -25,12 +25,12 @@ Current startup flow:
 
 The engine-side renderer is split between scene extraction and backend execution:
 
-- [`src/renderer/render_system.cpp`](src/renderer/render_system.cpp): ECS-to-render extraction, mesh/material binding, camera/light/environment submission, and debug draw collection.
-- [`include/karma/renderer/backends/diligent/backend.hpp`](include/karma/renderer/backends/diligent/backend.hpp): Diligent backend state and private pass entry points.
-- [`src/renderer/backends/diligent/backend_init.cpp`](src/renderer/backends/diligent/backend_init.cpp): device/bootstrap, shader and pipeline creation, shadow resources, and core renderer setup.
-- [`src/renderer/backends/diligent/backend_render.cpp`](src/renderer/backends/diligent/backend_render.cpp): frame orchestration, Forward+ setup, scene-copy orchestration, and remaining glue.
-- [`src/renderer/backends/diligent/passes/`](src/renderer/backends/diligent/passes): shadow, forward, particle, environment, line, frame, and camera-override pass code.
-- [`src/renderer/backends/diligent/resources/`](src/renderer/backends/diligent/resources): materials, meshes, render targets, and texture/resource helpers.
+- [`src/rendering/renderer/render_system.cpp`](src/rendering/renderer/render_system.cpp): ECS-to-render extraction, mesh/material binding, camera/light/environment submission, and debug draw collection.
+- [`src/rendering/renderer/backends/diligent/backend.hpp`](src/rendering/renderer/backends/diligent/backend.hpp): Diligent backend state and private pass entry points.
+- [`src/rendering/renderer/backends/diligent/backend_init.cpp`](src/rendering/renderer/backends/diligent/backend_init.cpp): device/bootstrap, shader and pipeline creation, shadow resources, and core renderer setup.
+- [`src/rendering/renderer/backends/diligent/backend_render.cpp`](src/rendering/renderer/backends/diligent/backend_render.cpp): frame orchestration, Forward+ setup, scene-copy orchestration, and remaining glue.
+- [`src/rendering/renderer/backends/diligent/passes/`](src/rendering/renderer/backends/diligent/passes): shadow, forward, particle, environment, line, frame, and camera-override pass code.
+- [`src/rendering/renderer/backends/diligent/resources/`](src/rendering/renderer/backends/diligent/resources): materials, meshes, render targets, and texture/resource helpers.
 
 ## Current Bootstrap Handoffs
 

@@ -131,10 +131,10 @@ Primary files:
 
 Primary files:
 
-- [`../include/karma/prefabs/prefab.h`](../include/karma/prefabs/prefab.h)
-- [`../src/prefabs/prefab_runtime.cpp`](../src/prefabs/prefab_runtime.cpp)
+- [`../include/karma/content/prefabs/prefab.h`](../include/karma/content/prefabs/prefab.h)
+- [`../src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
 - [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
-- [`../src/renderer/render_system.cpp`](../src/renderer/render_system.cpp)
+- [`../src/rendering/renderer/render_system.cpp`](../src/rendering/renderer/render_system.cpp)
 
 ### Particle simulation / submission
 
@@ -145,9 +145,9 @@ Primary files:
 
 Primary files:
 
-- [`../src/particles/particle_system.cpp`](../src/particles/particle_system.cpp)
-- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
-- [`../src/renderer/backends/diligent/passes/frame.cpp`](../src/renderer/backends/diligent/passes/frame.cpp)
+- [`../src/features/visual/particles/particle_system.cpp`](../src/features/visual/particles/particle_system.cpp)
+- [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
+- [`../src/rendering/renderer/backends/diligent/passes/frame.cpp`](../src/rendering/renderer/backends/diligent/passes/frame.cpp)
 - [`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp)
 
 ### Renderer refactor
@@ -158,8 +158,8 @@ Primary files:
 
 Primary files:
 
-- [`../src/renderer/backends/diligent/passes/particles.cpp`](../src/renderer/backends/diligent/passes/particles.cpp)
-- [`../src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particles.cpp`](../src/rendering/renderer/backends/diligent/passes/particles.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`](../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp)
 
 ## How To Read The Log
 

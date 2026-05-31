@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-#include "karma/prefabs/prefab_registry.h"
+#include "karma/content/prefabs/prefab_registry.h"
 
 namespace karma::demo {
 

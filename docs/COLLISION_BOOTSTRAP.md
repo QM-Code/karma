@@ -16,33 +16,33 @@ They are intentionally not collapsed into one API.
 
 Overlap events:
 
-- [collision_events.h](/home/irie/Documents/karma/include/karma/components/collision_events.h)
+- [collision_events.h](/home/irie/Documents/karma/include/karma/world/components/collision_events.h)
 
 Solid contact events:
 
-- [contact_events.h](/home/irie/Documents/karma/include/karma/components/contact_events.h)
+- [contact_events.h](/home/irie/Documents/karma/include/karma/world/components/contact_events.h)
 
 Grounded/support state:
 
-- [ground_contact.h](/home/irie/Documents/karma/include/karma/components/ground_contact.h)
+- [ground_contact.h](/home/irie/Documents/karma/include/karma/world/components/ground_contact.h)
 
 Game-facing fixed-step hook:
 
-- [game_interface.h](/home/irie/Documents/karma/include/karma/app/game_interface.h)
+- [game_interface.h](/home/irie/Documents/karma/include/karma/runtime/app/game_interface.h)
 
 ## Runtime Systems
 
 Overlap diffing system:
 
-- [collision_event_system.cpp](/home/irie/Documents/karma/src/collision/collision_event_system.cpp)
+- [collision_event_system.cpp](/home/irie/Documents/karma/src/simulation/collision/collision_event_system.cpp)
 
 Physics-driven contact + grounded updates:
 
-- [physics_system.cpp](/home/irie/Documents/karma/src/physics/physics_system.cpp)
+- [physics_system.cpp](/home/irie/Documents/karma/src/simulation/physics/physics_system.cpp)
 
 Engine integration:
 
-- [engine_app.cpp](/home/irie/Documents/karma/src/app/engine_app.cpp)
+- [engine_app.cpp](/home/irie/Documents/karma/src/runtime/app/engine_app.cpp)
 
 ## Current Behavior
 

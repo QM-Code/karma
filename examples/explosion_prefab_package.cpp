@@ -24,7 +24,7 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/karma.h"
-#include "karma/components/visibility.h"
+#include "karma/world/components/visibility.h"
 
 namespace karma::demo {
 

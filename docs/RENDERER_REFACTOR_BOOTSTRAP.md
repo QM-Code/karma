@@ -20,51 +20,51 @@ The old large Diligent files were cut in this order:
 
 Old `backend_mesh.cpp` was replaced by:
 
-- [`src/renderer/backends/diligent/resources/materials.cpp`](../src/renderer/backends/diligent/resources/materials.cpp)
-- [`src/renderer/backends/diligent/resources/meshes.cpp`](../src/renderer/backends/diligent/resources/meshes.cpp)
-- [`src/renderer/backends/diligent/resources/render_targets.cpp`](../src/renderer/backends/diligent/resources/render_targets.cpp)
-- [`src/renderer/backends/diligent/resources/textures.cpp`](../src/renderer/backends/diligent/resources/textures.cpp)
+- [`src/rendering/renderer/backends/diligent/resources/materials.cpp`](../src/rendering/renderer/backends/diligent/resources/materials.cpp)
+- [`src/rendering/renderer/backends/diligent/resources/meshes.cpp`](../src/rendering/renderer/backends/diligent/resources/meshes.cpp)
+- [`src/rendering/renderer/backends/diligent/resources/render_targets.cpp`](../src/rendering/renderer/backends/diligent/resources/render_targets.cpp)
+- [`src/rendering/renderer/backends/diligent/resources/textures.cpp`](../src/rendering/renderer/backends/diligent/resources/textures.cpp)
 
 ### 2. Low-risk frame/state helpers
 
 Moved out of `backend_render.cpp` into:
 
-- [`src/renderer/backends/diligent/passes/frame.cpp`](../src/renderer/backends/diligent/passes/frame.cpp)
-- [`src/renderer/backends/diligent/passes/camera_override.cpp`](../src/renderer/backends/diligent/passes/camera_override.cpp)
-- [`src/renderer/backends/diligent/passes/render_state.cpp`](../src/renderer/backends/diligent/passes/render_state.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/frame.cpp`](../src/rendering/renderer/backends/diligent/passes/frame.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/camera_override.cpp`](../src/rendering/renderer/backends/diligent/passes/camera_override.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/render_state.cpp`](../src/rendering/renderer/backends/diligent/passes/render_state.cpp)
 
 ### 3. Setup-heavy render helpers
 
 Moved into:
 
-- [`src/renderer/backends/diligent/passes/environment.cpp`](../src/renderer/backends/diligent/passes/environment.cpp)
-- [`src/renderer/backends/diligent/passes/line.cpp`](../src/renderer/backends/diligent/passes/line.cpp)
-- [`src/renderer/backends/diligent/passes/particles.cpp`](../src/renderer/backends/diligent/passes/particles.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/environment.cpp`](../src/rendering/renderer/backends/diligent/passes/environment.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/line.cpp`](../src/rendering/renderer/backends/diligent/passes/line.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/particles.cpp`](../src/rendering/renderer/backends/diligent/passes/particles.cpp)
 
 ### 4. Heavy draw paths
 
 Moved into:
 
-- [`src/renderer/backends/diligent/passes/shadows.cpp`](../src/renderer/backends/diligent/passes/shadows.cpp)
-- [`src/renderer/backends/diligent/passes/forward.cpp`](../src/renderer/backends/diligent/passes/forward.cpp)
-- [`src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/shadows.cpp`](../src/rendering/renderer/backends/diligent/passes/shadows.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/forward.cpp`](../src/rendering/renderer/backends/diligent/passes/forward.cpp)
+- [`src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`](../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp)
 
 ## Current Layout
 
 Scene extraction still starts in:
 
-- [`src/renderer/render_system.cpp`](../src/renderer/render_system.cpp)
+- [`src/rendering/renderer/render_system.cpp`](../src/rendering/renderer/render_system.cpp)
 
 Backend state and private split points live in:
 
-- [`include/karma/renderer/backends/diligent/backend.hpp`](../include/karma/renderer/backends/diligent/backend.hpp)
+- [`src/rendering/renderer/backends/diligent/backend.hpp`](../src/rendering/renderer/backends/diligent/backend.hpp)
 
 Current Diligent layout:
 
-- [`src/renderer/backends/diligent/backend_init.cpp`](../src/renderer/backends/diligent/backend_init.cpp): device/bootstrap, PSO creation, inline shader code, shadow resource allocation, and static resource binding
-- [`src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp): frame orchestration, Forward+ preparation, scene-copy flow, remaining line draw path, and present glue
-- [`src/renderer/backends/diligent/passes/`](../src/renderer/backends/diligent/passes): isolated pass implementations
-- [`src/renderer/backends/diligent/resources/`](../src/renderer/backends/diligent/resources): non-frame resource ownership and binding helpers
+- [`src/rendering/renderer/backends/diligent/backend_init.cpp`](../src/rendering/renderer/backends/diligent/backend_init.cpp): device/bootstrap, PSO creation, inline shader code, shadow resource allocation, and static resource binding
+- [`src/rendering/renderer/backends/diligent/backend_render.cpp`](../src/rendering/renderer/backends/diligent/backend_render.cpp): frame orchestration, Forward+ preparation, scene-copy flow, remaining line draw path, and present glue
+- [`src/rendering/renderer/backends/diligent/passes/`](../src/rendering/renderer/backends/diligent/passes): isolated pass implementations
+- [`src/rendering/renderer/backends/diligent/resources/`](../src/rendering/renderer/backends/diligent/resources): non-frame resource ownership and binding helpers
 
 ## Current Hotspots
 
@@ -90,9 +90,9 @@ That means the remaining decomposition priority is still:
 - active render-target selection and clear/present flow
 - camera basis setup and base constant setup
 - Forward+ light gathering, compute/fallback setup, and SRB rebinding
-- the call into [`passes/shadows.cpp`](../src/renderer/backends/diligent/passes/shadows.cpp)
+- the call into [`passes/shadows.cpp`](../src/rendering/renderer/backends/diligent/passes/shadows.cpp)
 - pre-particle and post-particle scene-copy orchestration
-- an inline debug line draw lambda that should move into [`passes/line.cpp`](../src/renderer/backends/diligent/passes/line.cpp)
+- an inline debug line draw lambda that should move into [`passes/line.cpp`](../src/rendering/renderer/backends/diligent/passes/line.cpp)
 
 That file is now a glue/orchestration file, but it still has enough logic to merit one more round of splitting.
 

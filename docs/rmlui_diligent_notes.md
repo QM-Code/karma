@@ -67,8 +67,8 @@ The core fix was to mirror the DiligentEngineXRmlUI rendering pipeline closely:
 
 Where the changes live
 ----------------------
-- UI backend: `src/renderer/backends/diligent/backend_ui.cpp`
-- UI backend fields: `include/karma/renderer/backends/diligent/backend.hpp`
+- UI backend: `src/rendering/renderer/backends/diligent/backend_ui.cpp`
+- UI backend fields: `src/rendering/renderer/backends/diligent/backend.hpp`
 - RmlUi demo font resolution: `examples/rmlui_ui_demo.cpp`
 
 Minimal runtime log kept

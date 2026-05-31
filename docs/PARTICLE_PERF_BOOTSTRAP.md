@@ -17,8 +17,8 @@ Particle effect file polling no longer checks timestamps every frame.
 
 Primary files:
 
-- [`../include/karma/particles/effect_library.h`](../include/karma/particles/effect_library.h)
-- [`../src/particles/effect_library.cpp`](../src/particles/effect_library.cpp)
+- [`../include/karma/features/visual/particles/effect_library.h`](../include/karma/features/visual/particles/effect_library.h)
+- [`../src/features/visual/particles/effect_library.cpp`](../src/features/visual/particles/effect_library.cpp)
 
 Current behavior:
 
@@ -31,10 +31,10 @@ Particle batches are passed by value and moved into backend storage.
 
 Primary files:
 
-- [`../include/karma/renderer/backend.hpp`](../include/karma/renderer/backend.hpp)
-- [`../include/karma/renderer/device.h`](../include/karma/renderer/device.h)
-- [`../src/renderer/device.cpp`](../src/renderer/device.cpp)
-- [`../include/karma/renderer/backends/diligent/backend.hpp`](../include/karma/renderer/backends/diligent/backend.hpp)
+- [`../include/karma/rendering/renderer/backend.hpp`](../include/karma/rendering/renderer/backend.hpp)
+- [`../include/karma/rendering/renderer/device.h`](../include/karma/rendering/renderer/device.h)
+- [`../src/rendering/renderer/device.cpp`](../src/rendering/renderer/device.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend.hpp`](../src/rendering/renderer/backends/diligent/backend.hpp)
 
 ### 3. Additive draw grouping
 
@@ -42,7 +42,7 @@ Additive particle draws are grouped by compatible render state before upload and
 
 Primary file:
 
-- [`../src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`](../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp)
 
 ### 4. CPU-side simulation and presentation cuts
 
@@ -59,13 +59,13 @@ Reduced work includes:
 
 Primary file:
 
-- [`../src/particles/particle_system.cpp`](../src/particles/particle_system.cpp)
+- [`../src/features/visual/particles/particle_system.cpp`](../src/features/visual/particles/particle_system.cpp)
 
 ## Current Architecture
 
 There are now two particle presentation modes in:
 
-- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
+- [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
 
 ### `Baked`
 
@@ -106,13 +106,13 @@ This split is deliberate. The heavy generic path got optimized without forcing b
 
 High-signal files for continuing this work:
 
-- [`../src/particles/particle_system.cpp`](../src/particles/particle_system.cpp)
-- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
-- [`../include/karma/renderer/backends/diligent/backend.hpp`](../include/karma/renderer/backends/diligent/backend.hpp)
-- [`../src/renderer/backends/diligent/passes/particles.cpp`](../src/renderer/backends/diligent/passes/particles.cpp)
-- [`../src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
-- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
-- [`../src/beams/beam_path_system.cpp`](../src/beams/beam_path_system.cpp)
+- [`../src/features/visual/particles/particle_system.cpp`](../src/features/visual/particles/particle_system.cpp)
+- [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
+- [`../src/rendering/renderer/backends/diligent/backend.hpp`](../src/rendering/renderer/backends/diligent/backend.hpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particles.cpp`](../src/rendering/renderer/backends/diligent/passes/particles.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`](../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_render.cpp`](../src/rendering/renderer/backends/diligent/backend_render.cpp)
+- [`../src/features/visual/beams/beam_path_system.cpp`](../src/features/visual/beams/beam_path_system.cpp)
 
 ## Validation
 

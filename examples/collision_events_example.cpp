@@ -7,7 +7,7 @@
 
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
-#include "karma/components/environment.h"
+#include "karma/world/components/environment.h"
 
 #include <imgui.h>
 

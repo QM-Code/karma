@@ -8,10 +8,11 @@
 #include <string_view>
 #include <vector>
 
-#include "karma/ecs/world.h"
-#include "karma/prefabs/prefab.h"
-#include "karma/prefabs/prefab_registry.h"
-#include "karma/renderer/types.h"
+#include "karma/world/ecs/world.h"
+#include "karma/content/prefabs/prefab.h"
+#include "karma/content/prefabs/prefab_runtime.h"
+#include "karma/content/prefabs/prefab_registry.h"
+#include "karma/rendering/renderer/ids.h"
 
 namespace karma::demo {
 

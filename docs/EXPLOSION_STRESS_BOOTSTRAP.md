@@ -35,11 +35,11 @@ Current state:
 
 Primary files:
 
-- [`../include/karma/prefabs/prefab.h`](../include/karma/prefabs/prefab.h)
-- [`../src/prefabs/prefab_runtime.cpp`](../src/prefabs/prefab_runtime.cpp)
+- [`../include/karma/content/prefabs/prefab.h`](../include/karma/content/prefabs/prefab.h)
+- [`../src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
 - [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
 - [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
-- [`../src/renderer/render_system.cpp`](../src/renderer/render_system.cpp)
+- [`../src/rendering/renderer/render_system.cpp`](../src/rendering/renderer/render_system.cpp)
 
 ### 2. Particle system instrumentation
 
@@ -68,9 +68,9 @@ Added categories include:
 
 Primary files:
 
-- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
-- [`../src/renderer/device.cpp`](../src/renderer/device.cpp)
-- [`../src/renderer/backends/diligent/passes/render_state.cpp`](../src/renderer/backends/diligent/passes/render_state.cpp)
+- [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
+- [`../src/rendering/renderer/device.cpp`](../src/rendering/renderer/device.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/render_state.cpp`](../src/rendering/renderer/backends/diligent/passes/render_state.cpp)
 - [`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp)
 
 ### 3. Particle submission path cleanup
@@ -88,10 +88,10 @@ Current state:
 
 Primary files:
 
-- [`../include/karma/renderer/backend.hpp`](../include/karma/renderer/backend.hpp)
-- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
-- [`../src/particles/particle_system.cpp`](../src/particles/particle_system.cpp)
-- [`../src/renderer/backends/diligent/passes/frame.cpp`](../src/renderer/backends/diligent/passes/frame.cpp)
+- [`../include/karma/rendering/renderer/backend.hpp`](../include/karma/rendering/renderer/backend.hpp)
+- [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
+- [`../src/features/visual/particles/particle_system.cpp`](../src/features/visual/particles/particle_system.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/frame.cpp`](../src/rendering/renderer/backends/diligent/passes/frame.cpp)
 
 ### 4. Renderer-side alpha restructuring
 
@@ -113,9 +113,9 @@ Current state:
 
 Primary files:
 
-- [`../src/renderer/backends/diligent/passes/particles.cpp`](../src/renderer/backends/diligent/passes/particles.cpp)
-- [`../src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
-- [`../src/renderer/backends/diligent/backend_render.cpp`](../src/renderer/backends/diligent/backend_render.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particles.cpp`](../src/rendering/renderer/backends/diligent/passes/particles.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`](../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp)
+- [`../src/rendering/renderer/backends/diligent/backend_render.cpp`](../src/rendering/renderer/backends/diligent/backend_render.cpp)
 
 ### 5. Prefab packaging / visual polish
 
@@ -181,13 +181,13 @@ Most useful files if this area regresses again:
 
 - [`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp)
 - [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
-- [`../src/particles/particle_system.cpp`](../src/particles/particle_system.cpp)
-- [`../include/karma/renderer/types.h`](../include/karma/renderer/types.h)
-- [`../src/renderer/backends/diligent/passes/frame.cpp`](../src/renderer/backends/diligent/passes/frame.cpp)
-- [`../src/renderer/backends/diligent/passes/particles.cpp`](../src/renderer/backends/diligent/passes/particles.cpp)
-- [`../src/renderer/backends/diligent/passes/particle_draw.cpp`](../src/renderer/backends/diligent/passes/particle_draw.cpp)
-- [`../src/renderer/render_system.cpp`](../src/renderer/render_system.cpp)
-- [`../src/prefabs/prefab_runtime.cpp`](../src/prefabs/prefab_runtime.cpp)
+- [`../src/features/visual/particles/particle_system.cpp`](../src/features/visual/particles/particle_system.cpp)
+- [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
+- [`../src/rendering/renderer/backends/diligent/passes/frame.cpp`](../src/rendering/renderer/backends/diligent/passes/frame.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particles.cpp`](../src/rendering/renderer/backends/diligent/passes/particles.cpp)
+- [`../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`](../src/rendering/renderer/backends/diligent/passes/particle_draw.cpp)
+- [`../src/rendering/renderer/render_system.cpp`](../src/rendering/renderer/render_system.cpp)
+- [`../src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
 
 ## Validation
 

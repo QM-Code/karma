@@ -1,6 +1,6 @@
 #include "karma/ui/rmlui_overlay.h"
 
-#include "karma/renderer/backends/diligent/backend.hpp"
+#include "karma/rendering/renderer/backends/diligent_access.hpp"
 
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Input.h>
@@ -937,16 +937,11 @@ void RmlUiOverlay::ensurePipeline(renderer::GraphicsDevice& device) {
   if (color_pso_.pipeline_state) {
     return;
   }
-  auto* backend = dynamic_cast<renderer_backend::DiligentBackend*>(device.backend());
-  if (!backend) {
-    spdlog::error("RmlUiOverlay requires Diligent backend.");
-    return;
-  }
-
-  render_device_ = backend->getDevice();
-  context_ = backend->getContext();
-  swap_chain_ = backend->getSwapChain();
+  render_device_ = renderer_backend::diligentRenderDevice(device.backend());
+  context_ = renderer_backend::diligentDeviceContext(device.backend());
+  swap_chain_ = renderer_backend::diligentSwapChain(device.backend());
   if (!render_device_ || !context_ || !swap_chain_) {
+    spdlog::error("RmlUiOverlay requires Diligent backend.");
     return;
   }
   {

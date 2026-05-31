@@ -1,13 +1,13 @@
-#include "karma/animation/animation_clip.h"
-#include "karma/animation/animation_system.h"
-#include "karma/animation/cpu_skinning_system.h"
-#include "karma/components/animation_player.h"
-#include "karma/components/skinned_mesh.h"
-#include "karma/components/transform.h"
-#include "karma/ecs/world.h"
-#include "karma/scene/glb_scene_import.h"
-#include "karma/scene/scene.h"
-#include "karma/scene/transform_hierarchy.h"
+#include "karma/simulation/animation/animation_clip.h"
+#include "karma/simulation/animation/animation_system.h"
+#include "karma/simulation/animation/cpu_skinning_system.h"
+#include "karma/world/components/animation_player.h"
+#include "karma/world/components/skinned_mesh.h"
+#include "karma/world/components/transform.h"
+#include "karma/world/ecs/world.h"
+#include "karma/content/importers/glb_scene_import.h"
+#include "karma/world/scene/scene.h"
+#include "karma/world/scene/transform_hierarchy.h"
 
 #include <cassert>
 #include <cstdint>

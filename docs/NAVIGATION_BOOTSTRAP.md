@@ -5,8 +5,8 @@ This is the handoff for the current static navmesh/pathfinding pass.
 ## Current State
 
 - Recast/Detour is integrated behind `KARMA_ENABLE_NAVIGATION` in `CMakeLists.txt`.
-- Public API lives under `include/karma/navigation/`.
-- Implementation lives in `src/navigation/`.
+- Public API lives under `include/karma/simulation/navigation/`.
+- Implementation lives in `src/simulation/navigation/`.
 - `karma::navigation::NavMesh` bakes static triangle geometry with Recast and owns the Detour navmesh.
 - `karma::navigation::NavQuery` wraps nearest-point, path/straight-path,
   sliced path, raycast, height, wall-distance, random-point, and local surface

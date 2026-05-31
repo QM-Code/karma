@@ -41,9 +41,9 @@ Current state:
 
 Primary files:
 
-- [`../include/karma/app/runtime_module.h`](../include/karma/app/runtime_module.h)
-- [`../include/karma/app/engine_app.h`](../include/karma/app/engine_app.h)
-- [`../src/app/engine_app.cpp`](../src/app/engine_app.cpp)
+- [`../include/karma/runtime/app/runtime_module.h`](../include/karma/runtime/app/runtime_module.h)
+- [`../include/karma/runtime/app/engine_app.h`](../include/karma/runtime/app/engine_app.h)
+- [`../src/runtime/app/engine_app.cpp`](../src/runtime/app/engine_app.cpp)
 
 ### 2. Beam and volume behavior moved behind opt-in modules
 
@@ -61,10 +61,10 @@ Current state:
 
 Primary files:
 
-- [`../include/karma/beams/beam_path_runtime_module.h`](../include/karma/beams/beam_path_runtime_module.h)
-- [`../src/beams/beam_path_runtime_module.cpp`](../src/beams/beam_path_runtime_module.cpp)
-- [`../include/karma/volumes/volume_sphere_runtime_module.h`](../include/karma/volumes/volume_sphere_runtime_module.h)
-- [`../src/volumes/volume_sphere_runtime_module.cpp`](../src/volumes/volume_sphere_runtime_module.cpp)
+- [`../include/karma/features/visual/beams/beam_path_runtime_module.h`](../include/karma/features/visual/beams/beam_path_runtime_module.h)
+- [`../src/features/visual/beams/beam_path_runtime_module.cpp`](../src/features/visual/beams/beam_path_runtime_module.cpp)
+- [`../include/karma/features/visual/volumes/volume_sphere_runtime_module.h`](../include/karma/features/visual/volumes/volume_sphere_runtime_module.h)
+- [`../src/features/visual/volumes/volume_sphere_runtime_module.cpp`](../src/features/visual/volumes/volume_sphere_runtime_module.cpp)
 - [`../include/karma/karma.h`](../include/karma/karma.h)
 - [`../examples/laser_example.cpp`](../examples/laser_example.cpp)
 - [`../examples/laser_prefab_example.cpp`](../examples/laser_prefab_example.cpp)
@@ -90,11 +90,11 @@ Current state:
 
 Primary files:
 
-- [`../include/karma/prefabs/prefab_entry_handler.h`](../include/karma/prefabs/prefab_entry_handler.h)
-- [`../src/prefabs/prefab_entry_handler.cpp`](../src/prefabs/prefab_entry_handler.cpp)
-- [`../src/prefabs/prefab_runtime.cpp`](../src/prefabs/prefab_runtime.cpp)
-- [`../src/beams/beam_path_runtime_module.cpp`](../src/beams/beam_path_runtime_module.cpp)
-- [`../src/volumes/volume_sphere_runtime_module.cpp`](../src/volumes/volume_sphere_runtime_module.cpp)
+- [`../include/karma/content/prefabs/prefab_entry_handler.h`](../include/karma/content/prefabs/prefab_entry_handler.h)
+- [`../src/content/prefabs/prefab_entry_handler.cpp`](../src/content/prefabs/prefab_entry_handler.cpp)
+- [`../src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
+- [`../src/features/visual/beams/beam_path_runtime_module.cpp`](../src/features/visual/beams/beam_path_runtime_module.cpp)
+- [`../src/features/visual/volumes/volume_sphere_runtime_module.cpp`](../src/features/visual/volumes/volume_sphere_runtime_module.cpp)
 
 ### 4. Public docs and examples now reflect the split
 
@@ -128,10 +128,10 @@ This was already hit once during validation.
 
 Files to watch:
 
-- [`../include/karma/beams/beam_path_runtime_module.h`](../include/karma/beams/beam_path_runtime_module.h)
-- [`../src/beams/beam_path_runtime_module.cpp`](../src/beams/beam_path_runtime_module.cpp)
-- [`../include/karma/volumes/volume_sphere_runtime_module.h`](../include/karma/volumes/volume_sphere_runtime_module.h)
-- [`../src/volumes/volume_sphere_runtime_module.cpp`](../src/volumes/volume_sphere_runtime_module.cpp)
+- [`../include/karma/features/visual/beams/beam_path_runtime_module.h`](../include/karma/features/visual/beams/beam_path_runtime_module.h)
+- [`../src/features/visual/beams/beam_path_runtime_module.cpp`](../src/features/visual/beams/beam_path_runtime_module.cpp)
+- [`../include/karma/features/visual/volumes/volume_sphere_runtime_module.h`](../include/karma/features/visual/volumes/volume_sphere_runtime_module.h)
+- [`../src/features/visual/volumes/volume_sphere_runtime_module.cpp`](../src/features/visual/volumes/volume_sphere_runtime_module.cpp)
 
 ### The prefab handler registry is global state
 

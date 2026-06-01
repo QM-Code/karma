@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -10,6 +9,7 @@
 
 #include "karma/runtime/app/game_interface.h"
 #include "karma/runtime/app/runtime_module.h"
+#include "karma/core/time.h"
 #include "karma/simulation/animation/animation_system.h"
 #include "karma/simulation/animation/cpu_skinning_system.h"
 #include "karma/world/ecs/world.h"
@@ -132,7 +132,7 @@ class EngineApp {
   float frame_diag_threshold_ms_ = 25.0f;
   float fixed_dt_ = 1.0f / 60.0f;
   float accumulator_ = 0.0f;
-  std::chrono::steady_clock::time_point last_time_{};
+  core::SteadyClock::time_point last_time_{};
 };
 
 }  // namespace karma::app

@@ -12,6 +12,7 @@
 #include "karma/world/components/light.h"
 #include "karma/world/components/transform.h"
 #include "karma/core/math/quat.h"
+#include "karma/core/math/vec3.h"
 #include "karma/rendering/renderer/device.h"
 
 namespace karma::beams {
@@ -52,10 +53,6 @@ math::Vec3 scalePoint(const math::Vec3& point, const math::Vec3& scale) {
   return {point.x * scale.x, point.y * scale.y, point.z * scale.z};
 }
 
-math::Vec3 add(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
 math::Vec3 lerpPoint(const math::Vec3& a, const math::Vec3& b, float t) {
   const float s = std::clamp(t, 0.0f, 1.0f);
   return {
@@ -75,7 +72,7 @@ math::Vec3 transformLocalPoint(const components::TransformComponent* transform,
   const math::Vec3 scaled = scalePoint(point, transform->getScale());
   const math::Quat rotation = transform->getInterpolatedRotation(interpolation_alpha);
   const math::Vec3 rotated = math::rotateVec(rotation, scaled);
-  return add(transform->getInterpolatedPosition(interpolation_alpha), rotated);
+  return math::add(transform->getInterpolatedPosition(interpolation_alpha), rotated);
 }
 
 std::vector<std::uint8_t> buildEndpointTexture() {
@@ -492,7 +489,8 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
           const glm::vec3 offset =
               right * (jitter_a * beam.electric_jitter_radius) +
               up * (jitter_b * beam.electric_jitter_radius);
-          const math::Vec3 electric_position = add(base_position, {offset.x, offset.y, offset.z});
+          const math::Vec3 electric_position =
+              math::add(base_position, {offset.x, offset.y, offset.z});
           const float rotation = phase * 0.21f + phase_b * 0.09f;
           group.electric_glow_particles.push_back(
               makeParticle(electric_position,
@@ -540,7 +538,7 @@ void BeamPathSystem::update(ecs::World& world, float dt, float interpolation_alp
               right * (jitter_a * beam.distortion_jitter_radius * 0.55f) +
               up * (jitter_b * beam.distortion_jitter_radius * 0.55f);
           const math::Vec3 distortion_position =
-              add(base_position, {offset.x, offset.y, offset.z});
+              math::add(base_position, {offset.x, offset.y, offset.z});
 
           renderer::ParticleInstance particle =
               makeParticle(distortion_position,

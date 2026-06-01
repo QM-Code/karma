@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cstdint>
 #include <cmath>
 #include <filesystem>
@@ -47,24 +46,18 @@ float smoothStep01(float value) {
   return t * t * (3.0f - 2.0f * t);
 }
 
-double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
-  return std::chrono::duration<double, std::milli>(
-             std::chrono::steady_clock::now() - start)
-      .count();
-}
-
 class ScopedStartupTimer {
  public:
   explicit ScopedStartupTimer(std::string label)
-      : label_(std::move(label)), start_(std::chrono::steady_clock::now()) {}
+      : label_(std::move(label)), start_(core::SteadyClock::now()) {}
 
   ~ScopedStartupTimer() {
-    spdlog::info("{} took {:.2f} ms", label_, elapsedMilliseconds(start_));
+    spdlog::info("{} took {:.2f} ms", label_, core::elapsedMillisecondsSince(start_));
   }
 
  private:
   std::string label_;
-  std::chrono::steady_clock::time_point start_;
+  core::SteadyClock::time_point start_;
 };
 
 int explosionFlipbookAtlasWidth(int frame_size = kExplosionFlipbookFrameSize,

@@ -1,7 +1,6 @@
 #include "karma/runtime/app/engine_app.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -10,17 +9,15 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/simulation/collision/collision_event_system.h"
+#if defined(KARMA_ENABLE_NAVIGATION)
+#include "karma/simulation/navigation/navigation_system.h"
+#endif
 #include "karma/runtime/debug/debug_overlay.h"
+#include "karma/core/time.h"
 #include "karma/world/scene/transform_hierarchy.h"
 
 namespace karma::app {
 namespace {
-
-using Clock = std::chrono::steady_clock;
-
-double elapsedMs(Clock::time_point start, Clock::time_point end) {
-  return std::chrono::duration<double, std::milli>(end - start).count();
-}
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -47,16 +44,6 @@ float envFloat(const char* value, float fallback) {
 }  // namespace
 
 EngineApp::EngineApp() = default;
-
-namespace {
-
-double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
-  return std::chrono::duration<double, std::milli>(
-             std::chrono::steady_clock::now() - start)
-      .count();
-}
-
-}  // namespace
 
 #if defined(KARMA_DEBUG_UI)
 std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
@@ -141,6 +128,9 @@ void EngineApp::initSubsystems() {
   const auto collision_system_id =
       systems_.addSystem(std::make_unique<collision::CollisionEventSystem>());
   systems_.addDependency(collision_system_id, physics_system_id);
+#if defined(KARMA_ENABLE_NAVIGATION)
+  systems_.addSystem(std::make_unique<navigation::NavigationSystem>());
+#endif
   audio_system_ = std::make_unique<audio::AudioSystem>(audio_);
   // Register other systems here (PhysicsSystem, AudioSystem, etc.).
 }
@@ -150,7 +140,7 @@ void EngineApp::warmUpRenderer() {
     return;
   }
 
-  const auto warmup_start = std::chrono::steady_clock::now();
+  const auto warmup_start = core::SteadyClock::now();
   syncSceneEntities();
   int fb_width = 0;
   int fb_height = 0;
@@ -184,7 +174,8 @@ void EngineApp::warmUpRenderer() {
   render_system_->update(world_, scene_, 0.0f, 1.0f);
   graphics_->renderLayer(0);
   graphics_->endFrame();
-  spdlog::info("Renderer warm-up took {:.2f} ms", elapsedMilliseconds(warmup_start));
+  spdlog::info("Renderer warm-up took {:.2f} ms",
+               core::elapsedMillisecondsSince(warmup_start));
 }
 
 void EngineApp::shutdownSubsystems() {
@@ -284,7 +275,8 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      graphics_.get(),
                      materials_,
                      particle_effects_,
-                     *prefab_registry_);
+                     *prefab_registry_,
+                     systems_);
   if (prefab_registry_) {
     prefab_registry_->bindContext(prefabs::PrefabPackageContext{
         .graphics = graphics_.get(),
@@ -298,17 +290,18 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     }
   }
   game_->onStart();
+  systems_.update(world_, 0.0f);
   if (graphics_) {
-    const auto environment_start = std::chrono::steady_clock::now();
+    const auto environment_start = core::SteadyClock::now();
     graphics_->setEnvironmentMap(config_.environment_map,
                                  config_.environment_intensity,
                                  config_.environment_draw_skybox);
     spdlog::info("Engine environment setup took {:.2f} ms",
-                 elapsedMilliseconds(environment_start));
+                 core::elapsedMillisecondsSince(environment_start));
   }
   warmUpRenderer();
   accumulator_ = 0.0f;
-  last_time_ = std::chrono::steady_clock::now();
+  last_time_ = core::SteadyClock::now();
 }
 
 void EngineApp::requestStop() {
@@ -359,9 +352,9 @@ void EngineApp::tick() {
     }
   }
 
-  const auto tick_start = Clock::now();
-  const auto now = std::chrono::steady_clock::now();
-  const float raw_frame_dt = std::chrono::duration<float>(now - last_time_).count();
+  const auto tick_start = core::SteadyClock::now();
+  const auto now = core::SteadyClock::now();
+  const float raw_frame_dt = core::elapsedSeconds(last_time_, now);
   float frame_dt = raw_frame_dt;
   if (frame_dt > config_.max_frame_dt) {
     frame_dt = config_.max_frame_dt;
@@ -369,7 +362,7 @@ void EngineApp::tick() {
   last_time_ = now;
   accumulator_ += frame_dt;
 
-  auto section_start = Clock::now();
+  auto section_start = core::SteadyClock::now();
   if (window_) {
     window_->pollEvents();
     for (const auto& event : window_->events()) {
@@ -388,8 +381,8 @@ void EngineApp::tick() {
       requestStop();
     }
   }
-  auto section_end = Clock::now();
-  const double events_ms = elapsedMs(section_start, section_end);
+  auto section_end = core::SteadyClock::now();
+  const double events_ms = core::elapsedMilliseconds(section_start, section_end);
 
   if (!running_) {
     if (game_) {
@@ -410,8 +403,8 @@ void EngineApp::tick() {
     accumulator_ -= fixed_dt_;
     ++fixed_steps;
   }
-  section_end = Clock::now();
-  const double fixed_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double fixed_ms = core::elapsedMilliseconds(section_start, section_end);
 
   float render_alpha = 1.0f;
   if (fixed_dt_ > 0.0f) {
@@ -421,44 +414,44 @@ void EngineApp::tick() {
 
   section_start = section_end;
   game_->onUpdate(frame_dt);
-  section_end = Clock::now();
-  const double game_update_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double game_update_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   if (prefab_system_) {
     prefab_system_->update(world_, frame_dt, render_alpha);
   }
-  section_end = Clock::now();
-  const double prefab_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double prefab_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   syncSceneEntities();
-  section_end = Clock::now();
-  const double sync_scene_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double sync_scene_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   animation_system_.update(world_, scene_, frame_dt);
-  section_end = Clock::now();
-  const double animation_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double animation_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   scene::updateWorldTransforms(world_, scene_);
-  section_end = Clock::now();
-  const double scene_transforms_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double scene_transforms_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   if (graphics_) {
     cpu_skinning_system_.update(world_, *graphics_);
   }
-  section_end = Clock::now();
-  const double skinning_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double skinning_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   if (audio_system_) {
     audio_system_->update(world_, frame_dt);
   }
-  section_end = Clock::now();
-  const double audio_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  const double audio_ms = core::elapsedMilliseconds(section_start, section_end);
 
   double framebuffer_ms = 0.0;
   double ui_frame_ms = 0.0;
@@ -477,8 +470,8 @@ void EngineApp::tick() {
     if (window_) {
       window_->getFramebufferSize(fb_width, fb_height);
     }
-    section_end = Clock::now();
-    framebuffer_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    framebuffer_ms = core::elapsedMilliseconds(section_start, section_end);
 
     auto prepare_ui_context = [&](UIContext& ctx) {
       ctx.frame_.dt = frame_dt;
@@ -501,8 +494,8 @@ void EngineApp::tick() {
       debug_ui_->onFrame(debug_ui_context_);
     }
 #endif
-    section_end = Clock::now();
-    ui_frame_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    ui_frame_ms = core::elapsedMilliseconds(section_start, section_end);
 
     renderer::FrameInfo frame{};
     frame.width = fb_width;
@@ -511,15 +504,15 @@ void EngineApp::tick() {
 
     section_start = section_end;
     graphics_->beginFrame(frame);
-    section_end = Clock::now();
-    begin_frame_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    begin_frame_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
     if (particle_system_) {
       particle_system_->update(world_, frame_dt, render_alpha);
     }
-    section_end = Clock::now();
-    particles_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    particles_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
     for (auto& module : runtime_modules_) {
@@ -527,18 +520,18 @@ void EngineApp::tick() {
         module->onUpdate(world_, frame_dt, render_alpha);
       }
     }
-    section_end = Clock::now();
-    runtime_modules_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    runtime_modules_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
     render_system_->update(world_, scene_, frame_dt, render_alpha);
-    section_end = Clock::now();
-    render_system_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    render_system_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
     graphics_->renderLayer(0);
-    section_end = Clock::now();
-    render_layer_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    render_layer_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
     if (user_ui_) {
@@ -549,13 +542,13 @@ void EngineApp::tick() {
       graphics_->renderUi(debug_ui_context_.draw_data_);
     }
 #endif
-    section_end = Clock::now();
-    render_ui_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    render_ui_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
     graphics_->endFrame();
-    section_end = Clock::now();
-    end_frame_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    end_frame_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
     if (window_) {
@@ -563,12 +556,12 @@ void EngineApp::tick() {
       window_->swapBuffers();
 #endif
     }
-    section_end = Clock::now();
-    swap_buffers_ms = elapsedMs(section_start, section_end);
+    section_end = core::SteadyClock::now();
+    swap_buffers_ms = core::elapsedMilliseconds(section_start, section_end);
   }
 
-  const auto tick_end = Clock::now();
-  const double tick_total_ms = elapsedMs(tick_start, tick_end);
+  const auto tick_end = core::SteadyClock::now();
+  const double tick_total_ms = core::elapsedMilliseconds(tick_start, tick_end);
   const double raw_frame_ms = static_cast<double>(raw_frame_dt) * 1000.0;
   if (frame_diag_enabled_ &&
       (raw_frame_ms >= static_cast<double>(frame_diag_threshold_ms_) ||

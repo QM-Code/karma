@@ -13,7 +13,6 @@
 #include <Graphics/GraphicsTools/interface/MapHelper.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -26,16 +25,11 @@
 
 #include <glm/geometric.hpp>
 
+#include "karma/core/time.h"
+
 namespace karma::renderer_backend {
 
 namespace {
-
-using ParticleDrawClock = std::chrono::steady_clock;
-
-float elapsedMilliseconds(const ParticleDrawClock::time_point& start,
-                          const ParticleDrawClock::time_point& end) {
-  return std::chrono::duration<float, std::milli>(end - start).count();
-}
 
 std::uint32_t floatBits(float value) {
   std::uint32_t bits = 0;
@@ -365,7 +359,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       return;
     }
 
-    const auto submission_start = ParticleDrawClock::now();
+    const auto submission_start = core::SteadyClock::now();
     if (!upload_prepared_particles(stream)) {
       return;
     }
@@ -528,11 +522,11 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     }
 
     particle_pass_stats_.draw_submission_ms +=
-        elapsedMilliseconds(submission_start, ParticleDrawClock::now());
+        core::elapsedMilliseconds(submission_start, core::SteadyClock::now());
   };
 
   auto build_additive_stream = [&](bool depth_test, PreparedParticleStream& stream) {
-    const auto grouping_start = ParticleDrawClock::now();
+    const auto grouping_start = core::SteadyClock::now();
     stream.particles.clear();
     stream.spans.clear();
     additive_groups.clear();
@@ -583,7 +577,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     }
 
     particle_pass_stats_.additive_grouping_ms +=
-        elapsedMilliseconds(grouping_start, ParticleDrawClock::now());
+        core::elapsedMilliseconds(grouping_start, core::SteadyClock::now());
   };
 
   struct SortedStreamBuildMetrics {
@@ -599,7 +593,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     stream.particles.clear();
     stream.spans.clear();
 
-    const auto collect_start = ParticleDrawClock::now();
+    const auto collect_start = core::SteadyClock::now();
     sorted_particles.clear();
     for (std::size_t batch_index = 0; batch_index < particle_batches_.size(); ++batch_index) {
       const auto& batch = particle_batches_[batch_index];
@@ -634,7 +628,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
         });
       }
     }
-    metrics.collect_ms = elapsedMilliseconds(collect_start, ParticleDrawClock::now());
+    metrics.collect_ms = core::elapsedMilliseconds(collect_start, core::SteadyClock::now());
 
     if (sorted_particles.empty()) {
       return metrics;
@@ -649,13 +643,13 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       particle_pass_stats_.distortion_sorted_particles += sorted_particle_count;
     }
 
-    const auto sort_only_start = ParticleDrawClock::now();
+    const auto sort_only_start = core::SteadyClock::now();
     if (sorted_particles.size() > 1u) {
       std::sort(sorted_particles.begin(), sorted_particles.end(), sortedParticleLess);
     }
-    metrics.sort_only_ms = elapsedMilliseconds(sort_only_start, ParticleDrawClock::now());
+    metrics.sort_only_ms = core::elapsedMilliseconds(sort_only_start, core::SteadyClock::now());
 
-    const auto span_start = ParticleDrawClock::now();
+    const auto span_start = core::SteadyClock::now();
     stream.particles.reserve(sorted_particles.size());
     stream.spans.reserve(sorted_particles.size());
     std::size_t start = 0u;
@@ -675,7 +669,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       });
       start = end;
     }
-    metrics.span_ms = elapsedMilliseconds(span_start, ParticleDrawClock::now());
+    metrics.span_ms = core::elapsedMilliseconds(span_start, core::SteadyClock::now());
     return metrics;
   };
 
@@ -706,7 +700,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       return;
     }
 
-    const auto composite_start = ParticleDrawClock::now();
+    const auto composite_start = core::SteadyClock::now();
     particle_half_res_alpha_var_->Set(particle_half_res_alpha_srv_);
     auto* rtv = context.active_rtv;
     context_->SetRenderTargets(1, &rtv, nullptr, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
@@ -724,7 +718,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     draw.Flags = kHotPathDrawFlags;
     context_->Draw(draw);
     particle_pass_stats_.draw_submission_ms +=
-        elapsedMilliseconds(composite_start, ParticleDrawClock::now());
+        core::elapsedMilliseconds(composite_start, core::SteadyClock::now());
   };
 
   if (context.allow_distortion_particles) {

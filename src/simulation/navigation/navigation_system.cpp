@@ -1,7 +1,6 @@
 #include "karma/simulation/navigation/navigation_system.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
@@ -12,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "karma/core/time.h"
+#include "karma/core/math/vec3.h"
 #include "karma/world/components/nav_mesh.h"
 #include "karma/world/components/nav_mesh_agent.h"
 #include "karma/world/components/transform.h"
@@ -21,28 +22,6 @@
 
 namespace karma::navigation {
 namespace {
-
-using Clock = std::chrono::steady_clock;
-
-double elapsedMs(Clock::time_point start, Clock::time_point end) {
-  return std::chrono::duration<double, std::milli>(end - start).count();
-}
-
-math::Vec3 add(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
-math::Vec3 subtract(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-
-math::Vec3 scale(const math::Vec3& v, float s) {
-  return {v.x * s, v.y * s, v.z * s};
-}
-
-float length(const math::Vec3& v) {
-  return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
 
 uint64_t entityKey(ecs::Entity entity) {
   return (static_cast<uint64_t>(entity.index) << 32u) |
@@ -128,7 +107,7 @@ struct PathJob {
   math::Vec3 destination{};
   math::Vec3 search_extents{2.0f, 4.0f, 2.0f};
   NavQueryFilter filter{};
-  Clock::time_point submitted_at{};
+  core::SteadyClock::time_point submitted_at{};
   int max_points = 256;
 };
 
@@ -192,8 +171,8 @@ void moveAgents(ecs::World& world, float dt) {
         float remaining = agent.speed * dt;
         while (remaining > 0.0f && agent.next_waypoint < agent.path.size()) {
           const math::Vec3 target = agent.path[agent.next_waypoint];
-          const math::Vec3 delta = subtract(target, current);
-          const float distance = length(delta);
+          const math::Vec3 delta = math::subtract(target, current);
+          const float distance = math::length(delta);
           if (distance <= agent.stopping_distance) {
             current = target;
             ++agent.next_waypoint;
@@ -201,7 +180,7 @@ void moveAgents(ecs::World& world, float dt) {
           }
 
           const float step = std::min(remaining, distance);
-          current = add(current, scale(delta, step / distance));
+          current = math::add(current, math::scale(delta, step / distance));
           remaining -= step;
           if (step < distance) {
             break;
@@ -210,7 +189,8 @@ void moveAgents(ecs::World& world, float dt) {
 
         const math::Vec3 next_world = worldSpacePosition(current, agent, previous_world.y);
         transform.setPosition(next_world);
-        agent.current_velocity = scale(subtract(next_world, previous_world), 1.0f / dt);
+        agent.current_velocity =
+            math::scale(math::subtract(next_world, previous_world), 1.0f / dt);
 
         if (agent.next_waypoint >= agent.path.size()) {
           agent.status = agent.current_path_partial
@@ -284,9 +264,10 @@ struct NavigationSystem::WorkerState {
       result.nav_mesh_entity = job.nav_mesh_entity;
       result.request_id = job.request_id;
       result.nav_mesh_build_version = job.nav_mesh_build_version;
-      result.worker_queue_wait_ms = elapsedMs(job.submitted_at, Clock::now());
+      result.worker_queue_wait_ms =
+          core::elapsedMilliseconds(job.submitted_at, core::SteadyClock::now());
 
-      const auto solve_start = Clock::now();
+      const auto solve_start = core::SteadyClock::now();
       if (job.snapshot == nullptr || !job.snapshot->valid()) {
         result.path.status = NavStatus::NoNavMesh;
       } else {
@@ -311,7 +292,8 @@ struct NavigationSystem::WorkerState {
                                                job.filter);
         }
       }
-      result.worker_solve_ms = elapsedMs(solve_start, Clock::now());
+      result.worker_solve_ms =
+          core::elapsedMilliseconds(solve_start, core::SteadyClock::now());
       result.path_point_count = static_cast<uint32_t>(result.path.points.size());
 
       {
@@ -374,7 +356,7 @@ void NavigationSystem::submitPathRequests(ecs::World& world) {
         job.destination = agent.destination;
         job.search_extents = agent.search_extents;
         job.filter = agent.query_filter;
-        job.submitted_at = Clock::now();
+        job.submitted_at = core::SteadyClock::now();
 
         const bool active_path = hasActivePath(agent);
         agent.path_requested = false;
@@ -463,27 +445,27 @@ NavigationSystem::NavigationSystem()
 NavigationSystem::~NavigationSystem() = default;
 
 void NavigationSystem::update(ecs::World& world, float dt) {
-  const auto update_start = Clock::now();
+  const auto update_start = core::SteadyClock::now();
   auto section_start = update_start;
   rebuildNavMeshes(world);
-  auto section_end = Clock::now();
-  stats_.last_rebuild_ms = elapsedMs(section_start, section_end);
+  auto section_end = core::SteadyClock::now();
+  stats_.last_rebuild_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   submitPathRequests(world);
-  section_end = Clock::now();
-  stats_.last_submit_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  stats_.last_submit_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   moveAgents(world, dt);
-  section_end = Clock::now();
-  stats_.last_move_ms = elapsedMs(section_start, section_end);
+  section_end = core::SteadyClock::now();
+  stats_.last_move_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   applyCompletedPaths(world);
-  section_end = Clock::now();
-  stats_.last_apply_ms = elapsedMs(section_start, section_end);
-  stats_.last_update_ms = elapsedMs(update_start, section_end);
+  section_end = core::SteadyClock::now();
+  stats_.last_apply_ms = core::elapsedMilliseconds(section_start, section_end);
+  stats_.last_update_ms = core::elapsedMilliseconds(update_start, section_end);
 }
 
 void NavigationSystem::debugDraw(ecs::World& world,

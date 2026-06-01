@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -115,24 +114,18 @@ std::string lowercase(std::string_view text) {
   return out;
 }
 
-double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
-  return std::chrono::duration<double, std::milli>(
-             std::chrono::steady_clock::now() - start)
-      .count();
-}
-
 class ScopedStartupTimer {
  public:
   explicit ScopedStartupTimer(std::string label)
-      : label_(std::move(label)), start_(std::chrono::steady_clock::now()) {}
+      : label_(std::move(label)), start_(core::SteadyClock::now()) {}
 
   ~ScopedStartupTimer() {
-    spdlog::info("{} took {:.2f} ms", label_, elapsedMilliseconds(start_));
+    spdlog::info("{} took {:.2f} ms", label_, core::elapsedMillisecondsSince(start_));
   }
 
  private:
   std::string label_;
-  std::chrono::steady_clock::time_point start_;
+  core::SteadyClock::time_point start_;
 };
 
 void destroyTextureIfValid(renderer::GraphicsDevice* graphics, renderer::TextureId& texture) {

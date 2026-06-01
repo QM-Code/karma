@@ -1,7 +1,6 @@
 #include "karma/features/visual/particles/particle_system.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -18,6 +17,7 @@
 #include "karma/world/components/visibility.h"
 #include "karma/core/math/quat.h"
 #include "karma/core/math/vec3.h"
+#include "karma/core/time.h"
 #include "karma/features/visual/particles/effect_library.h"
 #include "karma/rendering/renderer/device.h"
 
@@ -26,14 +26,6 @@ namespace karma::particles {
 namespace {
 
 constexpr float kMinVisibleAlphaParticleAlpha = 0.01f;
-
-math::Vec3 add(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
-math::Vec3 scale(const math::Vec3& v, float s) {
-  return {v.x * s, v.y * s, v.z * s};
-}
 
 math::Color lerpColor(const math::Color& a, const math::Color& b, float t) {
   const float s = std::clamp(t, 0.0f, 1.0f);
@@ -107,21 +99,6 @@ math::Vec3 randomUnitVector(uint32_t& state) {
       z,
       radial * std::sin(angle),
   };
-}
-
-math::Vec3 scaleVec(const math::Vec3& v, float s) {
-  return {v.x * s, v.y * s, v.z * s};
-}
-
-math::Vec3 subtract(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-
-using ParticleStatsClock = std::chrono::steady_clock;
-
-float elapsedMilliseconds(const ParticleStatsClock::time_point& start,
-                          const ParticleStatsClock::time_point& end) {
-  return std::chrono::duration<float, std::milli>(end - start).count();
 }
 
 void addCount(uint32_t& total, std::size_t value) {
@@ -200,8 +177,8 @@ bool boundsVisibleInCamera(const ParticleCullCamera& camera,
     return true;
   }
 
-  const math::Vec3 local_center = scale(add(bounds_min, bounds_max), 0.5f);
-  const math::Vec3 local_extents = scale(subtract(bounds_max, bounds_min), 0.5f);
+  const math::Vec3 local_center = math::scale(math::add(bounds_min, bounds_max), 0.5f);
+  const math::Vec3 local_extents = math::scale(math::subtract(bounds_max, bounds_min), 0.5f);
   math::Vec3 world_center = local_center;
   float radius = 0.0f;
 
@@ -216,7 +193,7 @@ bool boundsVisibleInCamera(const ParticleCullCamera& camera,
         std::abs(local_extents.y * emitter_scale.y),
         std::abs(local_extents.z * emitter_scale.z),
     };
-    world_center = add(emitter_position, math::rotateVec(emitter_rotation, scaled_center));
+    world_center = math::add(emitter_position, math::rotateVec(emitter_rotation, scaled_center));
     radius = std::sqrt(lengthSquared(scaled_extents)) +
              max_particle_extent * emitter_uniform_scale;
   } else {
@@ -227,7 +204,7 @@ bool boundsVisibleInCamera(const ParticleCullCamera& camera,
     return true;
   }
 
-  const math::Vec3 to_center = subtract(world_center, camera.position);
+  const math::Vec3 to_center = math::subtract(world_center, camera.position);
   const float depth = math::dot(to_center, camera.forward);
   if (depth + radius < camera.near_clip || depth - radius > camera.far_clip) {
     return false;
@@ -324,14 +301,14 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   emitter.start_size_max *= size_scale;
   emitter.end_size_min *= size_scale;
   emitter.end_size_max *= size_scale;
-  emitter.spawn_box_extents = scaleVec(emitter.spawn_box_extents, radius_scale);
+  emitter.spawn_box_extents = math::scale(emitter.spawn_box_extents, radius_scale);
   emitter.spawn_radius_min *= radius_scale;
   emitter.spawn_radius_max *= radius_scale;
   emitter.radial_speed_min *= velocity_scale;
   emitter.radial_speed_max *= velocity_scale;
-  emitter.velocity_min = scaleVec(emitter.velocity_min, velocity_scale);
-  emitter.velocity_max = scaleVec(emitter.velocity_max, velocity_scale);
-  emitter.acceleration = scaleVec(emitter.acceleration, velocity_scale);
+  emitter.velocity_min = math::scale(emitter.velocity_min, velocity_scale);
+  emitter.velocity_max = math::scale(emitter.velocity_max, velocity_scale);
+  emitter.acceleration = math::scale(emitter.acceleration, velocity_scale);
   emitter.angular_velocity_min *= angular_velocity_scale;
   emitter.angular_velocity_max *= angular_velocity_scale;
 
@@ -374,7 +351,7 @@ math::Vec3 randomSpawnOffset(uint32_t& state,
   } else {
     radius = randomRange(state, radius_min, radius_max);
   }
-  return scaleVec(randomUnitVector(state), radius);
+  return math::scale(randomUnitVector(state), radius);
 }
 
 math::Vec3 resolveRadialVelocity(uint32_t& state,
@@ -389,10 +366,10 @@ math::Vec3 resolveRadialVelocity(uint32_t& state,
     direction = randomUnitVector(state);
   } else {
     const float inv_length = 1.0f / std::sqrt(lengthSquared(direction));
-    direction = scaleVec(direction, inv_length);
+    direction = math::scale(direction, inv_length);
   }
 
-  return scaleVec(direction, randomRange(state, emitter.radial_speed_min, emitter.radial_speed_max));
+  return math::scale(direction, randomRange(state, emitter.radial_speed_min, emitter.radial_speed_max));
 }
 
 uint32_t resolveAtlasColumns(const components::ParticleEmitterComponent& emitter) {
@@ -578,10 +555,10 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
   }
 
   renderer::ParticlePassStats frame_stats{};
-  const auto sync_start = ParticleStatsClock::now();
+  const auto sync_start = core::SteadyClock::now();
   frame_stats.effect_binding_updates = syncEffectBindings(world);
   frame_stats.sync_effect_bindings_ms =
-      elapsedMilliseconds(sync_start, ParticleStatsClock::now());
+      core::elapsedMilliseconds(sync_start, core::SteadyClock::now());
 
   const float clamped_dt = std::max(dt, 0.0f);
   const ParticleCullCamera cull_camera =
@@ -608,7 +585,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     const uint64_t key = entityKey(entity);
     auto& state = emitters_[key];
     addCount(frame_stats.simulated_emitters, 1u);
-    const auto simulation_start = ParticleStatsClock::now();
+    const auto simulation_start = core::SteadyClock::now();
 
     if (!state.initialized) {
       const uint32_t fallback_seed =
@@ -686,9 +663,9 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
           particle.resting_on_ground = false;
         }
       } else {
-        particle.velocity = add(particle.velocity, scale(emitter.acceleration, emitter_dt));
-        particle.velocity = scale(particle.velocity, velocity_drag);
-        particle.position = add(particle.position, scale(particle.velocity, emitter_dt));
+        particle.velocity = math::add(particle.velocity, math::scale(emitter.acceleration, emitter_dt));
+        particle.velocity = math::scale(particle.velocity, velocity_drag);
+        particle.position = math::add(particle.position, math::scale(particle.velocity, emitter_dt));
         resolve_ground_collision(particle);
       }
       particle.rotation += particle.angular_velocity * emitter_dt;
@@ -726,7 +703,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       const math::Vec3 local_offset = randomSpawnOffset(state.rng_state, emitter);
       math::Vec3 local_velocity =
           randomVec3(state.rng_state, emitter.velocity_min, emitter.velocity_max);
-      local_velocity = add(local_velocity,
+      local_velocity = math::add(local_velocity,
                            resolveRadialVelocity(state.rng_state, emitter, local_offset));
 
       Particle particle{};
@@ -734,7 +711,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         particle.position = local_offset;
         particle.velocity = local_velocity;
       } else {
-        particle.position = add(emitter_position, math::rotateVec(emitter_rotation, local_offset));
+        particle.position = math::add(emitter_position, math::rotateVec(emitter_rotation, local_offset));
         particle.velocity = math::rotateVec(emitter_rotation, local_velocity);
       }
       particle.lifetime = std::max(
@@ -815,7 +792,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     }
     if (!visible || state.particles.empty()) {
       frame_stats.simulation_ms +=
-          elapsedMilliseconds(simulation_start, ParticleStatsClock::now());
+          core::elapsedMilliseconds(simulation_start, core::SteadyClock::now());
       return;
     }
     addCount(frame_stats.visible_emitters, 1u);
@@ -832,13 +809,13 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       addCount(frame_stats.culled_emitters, 1u);
       addCount(frame_stats.culled_particles, state.particles.size());
       frame_stats.simulation_ms +=
-          elapsedMilliseconds(simulation_start, ParticleStatsClock::now());
+          core::elapsedMilliseconds(simulation_start, core::SteadyClock::now());
       return;
     }
     frame_stats.simulation_ms +=
-        elapsedMilliseconds(simulation_start, ParticleStatsClock::now());
+        core::elapsedMilliseconds(simulation_start, core::SteadyClock::now());
 
-    const auto packing_start = ParticleStatsClock::now();
+    const auto packing_start = core::SteadyClock::now();
     renderer::PackedParticleBatch batch{};
     batch.layer = emitter.layer;
     batch.depth_test = emitter.depth_test;
@@ -896,7 +873,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
             particle.position.y * emitter_scale.y,
             particle.position.z * emitter_scale.z,
         };
-        world_position = add(emitter_position, math::rotateVec(emitter_rotation, scaled_local));
+        world_position = math::add(emitter_position, math::rotateVec(emitter_rotation, scaled_local));
         world_start_size *= emitter_uniform_scale;
         world_end_size *= emitter_uniform_scale;
       }
@@ -927,7 +904,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       device_->submitPackedParticles(std::move(batch));
       addCount(frame_stats.submitted_emitters, 1u);
     }
-    frame_stats.packing_ms += elapsedMilliseconds(packing_start, ParticleStatsClock::now());
+    frame_stats.packing_ms += core::elapsedMilliseconds(packing_start, core::SteadyClock::now());
   });
 
   device_->setParticleSystemStats(frame_stats);

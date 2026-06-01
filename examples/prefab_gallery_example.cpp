@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -88,24 +87,18 @@ bool envFlagEnabled(const char* name) {
   return false;
 }
 
-double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
-  return std::chrono::duration<double, std::milli>(
-             std::chrono::steady_clock::now() - start)
-      .count();
-}
-
 class ScopedStartupTimer {
  public:
   explicit ScopedStartupTimer(std::string label)
-      : label_(std::move(label)), start_(std::chrono::steady_clock::now()) {}
+      : label_(std::move(label)), start_(core::SteadyClock::now()) {}
 
   ~ScopedStartupTimer() {
-    spdlog::info("{} took {:.2f} ms", label_, elapsedMilliseconds(start_));
+    spdlog::info("{} took {:.2f} ms", label_, core::elapsedMillisecondsSince(start_));
   }
 
  private:
   std::string label_;
-  std::chrono::steady_clock::time_point start_;
+  core::SteadyClock::time_point start_;
 };
 
 }  // namespace
@@ -113,7 +106,7 @@ class ScopedStartupTimer {
 class PrefabGalleryExample final : public app::GameInterface {
  public:
   void onStart() override {
-    startup_start_ = std::chrono::steady_clock::now();
+    startup_start_ = core::SteadyClock::now();
     input->bindKey("cam_forward", platform::Key::W);
     input->bindKey("cam_backward", platform::Key::S);
     input->bindKey("cam_left", platform::Key::A);
@@ -153,7 +146,7 @@ class PrefabGalleryExample final : public app::GameInterface {
   void onUpdate(float dt) override {
     if (!first_update_logged_) {
       spdlog::info("Prefab gallery first onUpdate after onStart begin took {:.2f} ms",
-                   elapsedMilliseconds(startup_start_));
+                   core::elapsedMillisecondsSince(startup_start_));
       first_update_logged_ = true;
     }
     time_ += dt;
@@ -462,7 +455,7 @@ class PrefabGalleryExample final : public app::GameInterface {
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;
   float target_camera_pitch_ = 0.0f;
-  std::chrono::steady_clock::time_point startup_start_{};
+  core::SteadyClock::time_point startup_start_{};
 };
 
 }  // namespace karma::demo

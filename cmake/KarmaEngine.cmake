@@ -1,6 +1,7 @@
 set(KARMA_SOURCES
   src/runtime/app/engine_app.cpp
   src/runtime/app/ui_context.cpp
+  src/runtime/scene/scene_helpers.cpp
   src/simulation/animation/animation_clip.cpp
   src/simulation/animation/animation_system.cpp
   src/simulation/animation/cpu_skinning_system.cpp
@@ -17,6 +18,7 @@ set(KARMA_SOURCES
   src/platform/network/enet_transport.cpp
   src/runtime/input/input_system.cpp
   src/rendering/renderer/backend_factory.cpp
+  src/rendering/renderer/camera_picking.cpp
   src/rendering/renderer/device.cpp
   src/rendering/renderer/render_system.cpp
   src/platform/window/window_factory.cpp
@@ -50,6 +52,7 @@ if (KARMA_ENABLE_NAVIGATION)
   list(APPEND KARMA_SOURCES
     src/simulation/navigation/nav_geometry.cpp
     src/simulation/navigation/nav_mesh.cpp
+    src/simulation/navigation/navigation_diagnostics.cpp
     src/simulation/navigation/navigation_system.cpp
   )
 endif()

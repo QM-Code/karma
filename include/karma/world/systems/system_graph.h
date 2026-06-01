@@ -63,6 +63,28 @@ class SystemGraph {
     return out;
   }
 
+  template <typename T>
+  T* findSystem() {
+    for (auto& [id, node] : nodes_) {
+      (void)id;
+      if (auto* system = dynamic_cast<T*>(node.system.get())) {
+        return system;
+      }
+    }
+    return nullptr;
+  }
+
+  template <typename T>
+  const T* findSystem() const {
+    for (const auto& [id, node] : nodes_) {
+      (void)id;
+      if (const auto* system = dynamic_cast<const T*>(node.system.get())) {
+        return system;
+      }
+    }
+    return nullptr;
+  }
+
  private:
   struct Node {
     SystemId id = 0;

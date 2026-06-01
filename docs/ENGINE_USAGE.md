@@ -39,6 +39,28 @@ cmake -B build \
 cmake --build build --target karma_network_demo
 ```
 
+## Core Helpers
+Karma's foundational math and timing helpers live under `karma/core`.
+
+```cpp
+#include "karma/core/math/vec3.h"
+#include "karma/core/time.h"
+
+const karma::math::Vec3 a{1.0f, 0.0f, 0.0f};
+const karma::math::Vec3 b{0.0f, 2.0f, 0.0f};
+
+const karma::math::Vec3 sum = karma::math::add(a, b);
+const karma::math::Vec3 delta = karma::math::subtract(b, a);
+const karma::math::Vec3 half = karma::math::scale(sum, 0.5f);
+
+const auto start = karma::core::SteadyClock::now();
+// ...
+const double elapsed_ms = karma::core::elapsedMillisecondsSince(start);
+```
+
+Use these helpers instead of adding local `Vec3` arithmetic or elapsed-time
+wrappers in systems, runtime code, and examples.
+
 ## Renderer Diagnostics
 For Vulkan-side renderer debugging, Karma exposes two environment variables:
 

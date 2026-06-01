@@ -8,6 +8,7 @@
 #include "karma/rendering/renderer/material_library.h"
 #include "karma/features/visual/particles/effect_library.h"
 #include "karma/world/scene/scene.h"
+#include "karma/world/systems/system_graph.h"
 
 namespace karma::app {
 
@@ -31,6 +32,7 @@ class GameInterface {
   renderer::MaterialLibrary* materials = nullptr;
   particles::ParticleLibrary* particle_effects = nullptr;
   prefabs::PrefabRegistry* prefab_registry = nullptr;
+  systems::SystemGraph* systems = nullptr;
 
   private:
   friend class EngineApp;
@@ -38,7 +40,8 @@ class GameInterface {
                    physics::World& physics, renderer::GraphicsDevice* graphics,
                    renderer::MaterialLibrary& materials,
                    particles::ParticleLibrary& particle_effects,
-                   prefabs::PrefabRegistry& prefab_registry) {
+                   prefabs::PrefabRegistry& prefab_registry,
+                   systems::SystemGraph& systems) {
     this->world = &world;
     this->scene = &scene;
     this->input = &input;
@@ -47,6 +50,7 @@ class GameInterface {
     this->materials = &materials;
     this->particle_effects = &particle_effects;
     this->prefab_registry = &prefab_registry;
+    this->systems = &systems;
   }
 
   float render_interpolation_alpha_ = 1.0f;

@@ -15,6 +15,8 @@ class PhysicsWorldBackend;
 
 namespace karma::physics {
 
+/// \ingroup karma_physics
+/// High-level physics world facade owned by `EngineApp`.
 class World {
 public:
     World();
@@ -23,24 +25,34 @@ public:
     World(const World&) = delete;
     World& operator=(const World&) = delete;
 
+    /// Steps the physics backend.
     void update(float deltaTime);
 
+    /// Sets world gravity.
     void setGravity(float gravity);
 
+    /// Creates a dynamic box body.
     RigidBody createBoxBody(const glm::vec3& halfExtents,
                             float mass,
                             const glm::vec3& position,
                             const PhysicsMaterial& material);
 
+    /// Creates or returns the default player controller.
     PlayerController& createPlayer();
+    /// Creates or returns the default player controller with an explicit size.
     PlayerController& createPlayer(const glm::vec3& size);
 
+    /// Returns the default player controller if one exists.
     PlayerController* playerController() { return playerController_.get(); }
 
+    /// Creates static mesh collision geometry.
     StaticBody createStaticMesh(const std::string& meshPath);
 
+    /// Performs a simple raycast.
     bool raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const;
+    /// Performs a raycast with support/contact metadata.
     bool raycastDetailed(const glm::vec3& from, const glm::vec3& to, PhysicsGroundContact& outHit) const;
+    /// Collects backend contacts for this step.
     void collectContacts(std::vector<PhysicsContact>& outContacts) const;
 
 private:

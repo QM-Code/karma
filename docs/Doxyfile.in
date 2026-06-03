@@ -1,0 +1,80 @@
+PROJECT_NAME           = "Karma Engine"
+PROJECT_BRIEF          = "C++20 ECS-driven 3D game engine"
+PROJECT_LOGO           = @KARMA_DOXYGEN_INPUT_DIR@/docs/logo.svg
+OUTPUT_DIRECTORY       = @KARMA_DOXYGEN_OUTPUT_DIR@
+
+INPUT                  = @KARMA_DOXYGEN_INPUT_DIR@/include/karma \
+                         @KARMA_DOXYGEN_INPUT_DIR@/docs/api/mainpage.md \
+                         @KARMA_DOXYGEN_INPUT_DIR@/docs/api/groups.dox \
+                         @KARMA_DOXYGEN_INPUT_DIR@/docs/API.md
+USE_MDFILE_AS_MAINPAGE = @KARMA_DOXYGEN_INPUT_DIR@/docs/api/mainpage.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp *.md *.dox
+EXCLUDE_PATTERNS       = */AGENTS.md
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+HTML_OUTPUT            = html
+HTML_DYNAMIC_SECTIONS  = YES
+GENERATE_TREEVIEW      = YES
+FULL_SIDEBAR           = YES
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+DISABLE_INDEX          = NO
+HAVE_DOT               = NO
+CLASS_GRAPH            = NO
+COLLABORATION_GRAPH    = NO
+GROUP_GRAPHS           = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+GRAPHICAL_HIERARCHY    = NO
+DIRECTORY_GRAPH        = NO
+
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+BUILTIN_STL_SUPPORT    = YES
+CPP_CLI_SUPPORT        = NO
+OPTIMIZE_OUTPUT_FOR_C  = NO
+OPTIMIZE_OUTPUT_JAVA   = NO
+OPTIMIZE_FOR_FORTRAN   = NO
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+INLINE_INHERITED_MEMB  = YES
+INHERIT_DOCS           = YES
+
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+PREDEFINED             = KARMA_DEBUG_UI=1 \
+                         KARMA_ENABLE_NAVIGATION=1 \
+                         BZ3_RENDER_BACKEND_DILIGENT=1 \
+                         KARMA_PHYSICS_BACKEND_JOLT=1 \
+                         KARMA_AUDIO_BACKEND_MINIAUDIO=1 \
+                         KARMA_NETWORK_BACKEND_ENET=1
+
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = NO
+MULTILINE_CPP_IS_BRIEF = NO
+
+ALIASES                = "threadsafe=@par Thread Safety^^" \
+                         "lifetime=@par Lifetime^^" \
+                         "ecs=@par ECS Contract^^" \
+                         "runtime=@par Runtime Contract^^"
+
+STRIP_FROM_PATH        = @KARMA_DOXYGEN_INPUT_DIR@
+STRIP_FROM_INC_PATH    = @KARMA_DOXYGEN_INPUT_DIR@/include
+SHORT_NAMES            = NO
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+CASE_SENSE_NAMES       = YES

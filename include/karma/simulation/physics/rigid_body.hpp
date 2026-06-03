@@ -8,6 +8,8 @@
 
 namespace karma::physics {
 
+/// \ingroup karma_physics
+/// Move-only wrapper around a backend dynamic rigid body.
 class RigidBody {
 public:
     RigidBody() = default;
@@ -18,6 +20,7 @@ public:
     RigidBody& operator=(RigidBody&& other) noexcept = default;
     ~RigidBody();
 
+    /// Returns true when a backend body exists and is valid.
     bool isValid() const;
 
     glm::vec3 getPosition() const;
@@ -36,8 +39,10 @@ public:
 
     bool isGrounded(const glm::vec3& dimensions) const;
 
+    /// Destroys the backend body.
     void destroy();
 
+    /// Returns backend-native handle for diagnostics/contact mapping.
     std::uintptr_t nativeHandle() const;
 
 private:

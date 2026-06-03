@@ -11,12 +11,15 @@
 
 namespace karma::beams {
 
+/// \ingroup karma_beams
+/// Description for creating a beam path entity.
 struct BeamPathEntityDesc {
   std::string_view name;
   components::TransformComponent transform{};
   components::BeamPathComponent beam{};
 };
 
+/// Adds or replaces `BeamPathComponent` on an existing entity.
 inline bool bindBeamPath(ecs::World& world,
                          ecs::Entity entity,
                          components::BeamPathComponent beam) {
@@ -27,6 +30,7 @@ inline bool bindBeamPath(ecs::World& world,
   return true;
 }
 
+/// Creates an entity with transform, optional name, and beam data.
 inline ecs::Entity createBeamPathEntity(ecs::World& world, const BeamPathEntityDesc& desc) {
   ecs::Entity entity = world.createEntity();
   if (!desc.name.empty()) {
@@ -37,6 +41,7 @@ inline ecs::Entity createBeamPathEntity(ecs::World& world, const BeamPathEntityD
   return entity;
 }
 
+/// Replaces authored beam points on an existing beam entity.
 inline bool setBeamPathPoints(ecs::World& world,
                               ecs::Entity entity,
                               std::vector<math::Vec3> points) {
@@ -47,6 +52,7 @@ inline bool setBeamPathPoints(ecs::World& world,
   return true;
 }
 
+/// Toggles beam visibility.
 inline bool setBeamPathVisible(ecs::World& world, ecs::Entity entity, bool visible) {
   if (!world.isAlive(entity) || !world.has<components::BeamPathComponent>(entity)) {
     return false;
@@ -55,6 +61,7 @@ inline bool setBeamPathVisible(ecs::World& world, ecs::Entity entity, bool visib
   return true;
 }
 
+/// Updates core and glow colors on an existing beam.
 inline bool setBeamPathColors(ecs::World& world,
                               ecs::Entity entity,
                               const math::Color& core_color,

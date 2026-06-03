@@ -8,6 +8,11 @@ namespace karma::beams {
 
 class BeamPathSystem;
 
+/// \ingroup karma_beams
+/// Runtime module that owns `BeamPathSystem`.
+///
+/// Register with `EngineApp::addRuntimeModule(...)` before startup when a scene
+/// contains `BeamPathComponent` entities.
 class BeamPathRuntimeModule final : public app::RuntimeModule {
  public:
   BeamPathRuntimeModule();

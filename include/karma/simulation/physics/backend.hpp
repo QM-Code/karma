@@ -10,6 +10,8 @@
 
 namespace karma::physics_backend {
 
+/// \ingroup karma_physics
+/// Backend interface for a dynamic rigid body.
 class PhysicsRigidBodyBackend {
 public:
     virtual ~PhysicsRigidBodyBackend() = default;
@@ -31,6 +33,8 @@ public:
     virtual std::uintptr_t nativeHandle() const = 0;
 };
 
+/// \ingroup karma_physics
+/// Backend interface for immovable physics geometry.
 class PhysicsStaticBodyBackend {
 public:
     virtual ~PhysicsStaticBodyBackend() = default;
@@ -41,6 +45,8 @@ public:
     virtual std::uintptr_t nativeHandle() const = 0;
 };
 
+/// \ingroup karma_physics
+/// Backend interface for a player-controller body.
 class PhysicsPlayerControllerBackend {
 public:
     virtual ~PhysicsPlayerControllerBackend() = default;
@@ -62,6 +68,8 @@ public:
     virtual std::uintptr_t nativeHandle() const = 0;
 };
 
+/// \ingroup karma_physics
+/// Backend interface for the physics world.
 class PhysicsWorldBackend {
 public:
     virtual ~PhysicsWorldBackend() = default;
@@ -80,6 +88,7 @@ public:
     virtual void collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const = 0;
 };
 
+/// Creates the configured physics backend.
 std::unique_ptr<PhysicsWorldBackend> CreatePhysicsWorldBackend();
 
 } // namespace karma::physics_backend

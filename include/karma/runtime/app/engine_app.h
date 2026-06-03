@@ -20,7 +20,6 @@
 #include "karma/features/visual/lights/light_pulse_system.h"
 #include "karma/features/visual/particles/effect_library.h"
 #include "karma/features/visual/particles/particle_system.h"
-#include "karma/content/prefabs/prefab_registry.h"
 #include "karma/runtime/app/ui_context.h"
 #include "karma/simulation/physics/physics_world.hpp"
 #include "karma/simulation/physics/physics_system.h"
@@ -36,6 +35,12 @@ class Window;
 
 namespace karma::app {
 
+/// \ingroup karma_runtime
+/// Engine startup and renderer/simulation tuning.
+///
+/// `EngineConfig` is passed once to `EngineApp::start(...)`. Runtime debug UI
+/// can expose some renderer fields for live tuning, but this struct is the
+/// canonical startup configuration.
 struct EngineConfig {
   platform::WindowConfig window{};
   float fixed_dt = 1.0f / 60.0f;
@@ -74,6 +79,16 @@ struct EngineConfig {
   float lighting_exposure = 1.0f;
 };
 
+/// \ingroup karma_runtime
+/// Application shell that owns and wires core engine subsystems.
+///
+/// `EngineApp` creates the window, graphics device, render system, particles,
+/// animation, physics/collision, audio, input, UI contexts, and optional runtime
+/// modules. Game code usually subclasses `GameInterface`, optionally registers
+/// feature modules, then calls `start()` and repeatedly calls `tick()`.
+///
+/// \lifetime `EngineApp` must outlive the bound `GameInterface` and any UI or
+/// runtime modules registered into it.
 class EngineApp {
  public:
   EngineApp();
@@ -82,12 +97,22 @@ class EngineApp {
   EngineApp(const EngineApp&) = delete;
   EngineApp& operator=(const EngineApp&) = delete;
 
+  /// Starts the engine and calls `game.onStart()` after subsystems are ready.
   void start(GameInterface& game, const EngineConfig& config = {});
+  /// Runs one frame: input/events, fixed updates, systems, render, UI, present.
   void tick();
+  /// Returns true while the window/app is still running.
   bool isRunning() const { return running_; }
+  /// Requests a graceful shutdown at the next safe point.
   void requestStop();
+  /// Sets the user UI layer. Can be called before startup.
   void setUi(std::unique_ptr<UiLayer> ui);
+  /// Shows or hides the platform cursor.
   void setCursorVisible(bool visible);
+  /// Registers an optional runtime feature module.
+  ///
+  /// Modules registered before `start()` participate in attach and warmup.
+  /// Modules registered after startup are attached immediately.
   void addRuntimeModule(std::unique_ptr<RuntimeModule> module);
 
  private:
@@ -105,7 +130,6 @@ class EngineApp {
   input::InputSystem input_;
   std::unique_ptr<renderer::GraphicsDevice> graphics_;
   std::unique_ptr<renderer::RenderSystem> render_system_;
-  std::unique_ptr<prefabs::PrefabRegistry> prefab_registry_;
   std::unique_ptr<particles::ParticleSystem> particle_system_;
   animation::AnimationSystem animation_system_;
   animation::CpuSkinningSystem cpu_skinning_system_;

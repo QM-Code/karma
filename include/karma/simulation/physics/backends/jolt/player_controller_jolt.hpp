@@ -10,6 +10,8 @@ namespace karma::physics_backend {
 
 class PhysicsWorldJolt;
 
+/// \ingroup karma_physics
+/// Jolt implementation of `PhysicsPlayerControllerBackend`.
 class PhysicsPlayerControllerJolt final : public PhysicsPlayerControllerBackend {
 public:
     PhysicsPlayerControllerJolt(PhysicsWorldJolt* world,

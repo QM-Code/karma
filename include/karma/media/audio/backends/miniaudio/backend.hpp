@@ -6,6 +6,8 @@ struct ma_engine;
 
 namespace karma::audio_backend {
 
+/// \ingroup karma_media
+/// miniaudio implementation of the audio backend interface.
 class MiniaudioBackend final : public Backend {
  public:
   MiniaudioBackend();

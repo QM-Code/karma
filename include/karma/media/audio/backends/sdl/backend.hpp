@@ -10,6 +10,8 @@ namespace karma::audio_backend {
 
 class SdlAudioClip;
 
+/// \ingroup karma_media
+/// SDL audio implementation of the audio backend interface.
 class SdlAudioBackend final : public Backend {
  public:
   SdlAudioBackend();

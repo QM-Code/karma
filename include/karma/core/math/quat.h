@@ -6,6 +6,8 @@
 
 namespace karma::math {
 
+/// \ingroup karma_core
+/// Multiplies two quaternions.
 inline Quat mul(const Quat& a, const Quat& b) {
   return {
       a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
@@ -15,6 +17,8 @@ inline Quat mul(const Quat& a, const Quat& b) {
   };
 }
 
+/// \ingroup karma_core
+/// Builds a yaw-then-pitch orientation in radians.
 inline Quat fromYawPitch(float yaw, float pitch) {
   const float half_yaw = yaw * 0.5f;
   const float half_pitch = pitch * 0.5f;
@@ -23,6 +27,8 @@ inline Quat fromYawPitch(float yaw, float pitch) {
   return mul(qy, qx);
 }
 
+/// \ingroup karma_core
+/// Rotates a vector by a quaternion.
 inline Vec3 rotateVec(const Quat& q, const Vec3& v) {
   const Quat vq{v.x, v.y, v.z, 0.0f};
   const Quat q_conj{-q.x, -q.y, -q.z, q.w};

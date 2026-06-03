@@ -6,6 +6,8 @@
 
 namespace karma::visual {
 
+/// \ingroup karma_features
+/// Updates `LightPulseComponent` envelopes on paired lights.
 class LightPulseSystem final : public systems::ISystem {
  public:
   std::string_view name() const override { return "LightPulseSystem"; }

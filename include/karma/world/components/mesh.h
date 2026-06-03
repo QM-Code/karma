@@ -7,6 +7,11 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Mesh/material binding data extracted by `RenderSystem`.
+///
+/// Key fields refer to shared assets. Direct ids can be used for runtime-created
+/// resources and ownership flags tell the render system whether to destroy them.
 struct MeshComponent : ecs::ComponentTag {
   std::string mesh_key;
   std::string material_key;

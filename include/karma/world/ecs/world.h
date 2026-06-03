@@ -18,10 +18,18 @@
 
 namespace karma::ecs {
 
+/// \ingroup karma_world_ecs
+/// Primary ECS container for entities and typed component stores.
+///
+/// `World` owns entity lifetime and component data. It is deliberately small:
+/// systems query and mutate components directly, while higher-level runtime
+/// code decides update order. Component storage is allocated lazily per type.
 class World {
  public:
+  /// Creates a live entity.
   Entity createEntity() { return registry_.create(); }
 
+  /// Destroys an entity and removes all components stored for it.
   void destroyEntity(Entity entity) {
     if (!registry_.isAlive(entity)) {
       return;
@@ -33,11 +41,15 @@ class World {
     registry_.destroy(entity);
   }
 
+  /// Returns whether an entity handle is currently alive.
   bool isAlive(Entity entity) const { return registry_.isAlive(entity); }
 
+  /// Dense list of live entities.
   const std::vector<Entity>& entities() const { return registry_.entities(); }
+  /// Entity registry version, incremented on create/destroy.
   uint64_t entityVersion() const { return registry_.version(); }
 
+  /// Adds or updates an entity name through `TagComponent`.
   void setName(Entity entity, std::string name) {
     if (has<components::TagComponent>(entity)) {
       auto& tag = get<components::TagComponent>(entity);
@@ -47,6 +59,10 @@ class World {
     }
   }
 
+  /// Adds or replaces component `T` for `entity`.
+  ///
+  /// If `T` exposes `static Validate(World&, Entity)`, validation runs before
+  /// the component is inserted.
   template <typename T>
   void add(Entity entity, T component) {
     if constexpr (HasValidate<T>::value) {
@@ -55,36 +71,43 @@ class World {
     getStorage<T>().data.add(entity, std::move(component));
   }
 
+  /// Returns true when `entity` has component `T`.
   template <typename T>
   bool has(Entity entity) const {
     return getStorage<T>().data.has(entity);
   }
 
+  /// Returns mutable component `T`; caller must ensure it exists.
   template <typename T>
   T& get(Entity entity) {
     return getStorage<T>().data.get(entity);
   }
 
+  /// Returns component `T`; caller must ensure it exists.
   template <typename T>
   const T& get(Entity entity) const {
     return getStorage<T>().data.get(entity);
   }
 
+  /// Removes component `T` if present.
   template <typename T>
   void remove(Entity entity) {
     getStorage<T>().data.remove(entity);
   }
 
+  /// Returns storage for component `T`, creating it if needed.
   template <typename T>
   ComponentStorage<T>& storage() {
     return getStorage<T>().data;
   }
 
+  /// Returns storage for component `T`, creating it if needed.
   template <typename T>
   const ComponentStorage<T>& storage() const {
     return getStorage<T>().data;
   }
 
+  /// Returns entities that have all requested component types.
   template <typename T0, typename... Ts>
   std::vector<Entity> view() const {
     std::vector<Entity> entities;
@@ -101,6 +124,9 @@ class World {
     return entities;
   }
 
+  /// Invokes `fn(entity)` for entities with all requested component types.
+  ///
+  /// If the callback returns `bool`, iteration stops when it returns false.
   template <typename T0, typename... Ts, typename Fn>
   void forEach(Fn&& fn) const {
     const auto& base = storage<T0>();

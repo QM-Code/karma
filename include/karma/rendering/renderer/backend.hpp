@@ -26,6 +26,12 @@ class Window;
 
 namespace karma::renderer_backend {
 
+/// \ingroup karma_rendering
+/// Renderer backend interface implemented by platform graphics backends.
+///
+/// `GraphicsDevice` owns an implementation and exposes the same operations to
+/// runtime code. Backends should keep API resources opaque and validate handles
+/// defensively.
 class Backend {
  public:
   virtual ~Backend() = default;
@@ -103,6 +109,7 @@ class Backend {
   virtual void renderUi(const karma::app::UIDrawData& draw_data) = 0;
 };
 
+/// Creates the configured graphics backend for a platform window.
 std::unique_ptr<Backend> CreateGraphicsBackend(karma::platform::Window& window);
 
 }  // namespace karma::renderer_backend

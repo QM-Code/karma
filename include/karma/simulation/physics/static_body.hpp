@@ -8,7 +8,8 @@
 
 namespace karma::physics {
 
-// Lightweight wrapper for immovable physics geometry (e.g., level meshes)
+/// \ingroup karma_physics
+/// Lightweight wrapper for immovable physics geometry.
 class StaticBody {
 public:
     StaticBody() = default;
@@ -19,13 +20,16 @@ public:
     StaticBody& operator=(StaticBody&& other) noexcept = default;
     ~StaticBody();
 
+    /// Returns true when a backend body exists and is valid.
     bool isValid() const;
 
     glm::vec3 getPosition() const;
     glm::quat getRotation() const;
 
+    /// Destroys the backend body.
     void destroy();
 
+    /// Returns backend-native handle for diagnostics/contact mapping.
     std::uintptr_t nativeHandle() const;
 
 private:

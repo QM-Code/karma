@@ -5,7 +5,7 @@ of 3D points as a continuous energy beam.
 
 ## Authoring
 
-Use [BeamPathComponent](/home/irie/Documents/karma/include/karma/world/components/beam_path.h)
+Use [BeamPathComponent](../include/karma/world/components/beam_path.h)
 to describe the path and its look:
 
 - `points`: ordered path vertices
@@ -26,7 +26,7 @@ to describe the path and its look:
 ## Helper API
 
 For concise ECS setup, use
-[beam_path_api.h](/home/irie/Documents/karma/include/karma/features/visual/beams/beam_path_api.h):
+[beam_path_api.h](../include/karma/features/visual/beams/beam_path_api.h):
 
 ```cpp
 const std::vector<karma::math::Vec3> points = {
@@ -86,7 +86,7 @@ separate JSON prefab for each authored variant.
 ## Runtime
 
 Register
-[BeamPathRuntimeModule](/home/quinn/Documents/karma/include/karma/features/visual/beams/beam_path_runtime_module.h)
+[BeamPathRuntimeModule](../include/karma/features/visual/beams/beam_path_runtime_module.h)
 with `EngineApp` before `start(...)` to enable rendering for entities with
 `BeamPathComponent`:
 
@@ -95,7 +95,7 @@ engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>())
 ```
 
 That module owns
-[BeamPathSystem](/home/quinn/Documents/karma/include/karma/features/visual/beams/beam_path_system.h)
+[BeamPathSystem](../include/karma/features/visual/beams/beam_path_system.h)
 and builds and updates the render data automatically:
 
 - repeated additive hot-core particles along the full path
@@ -105,6 +105,6 @@ and builds and updates the render data automatically:
 - optional distortion particles that refract the scene around the beam
 
 The current end-to-end sample is
-[laser_example.cpp](/home/irie/Documents/karma/examples/laser_example.cpp).
+[laser_example.cpp](../examples/laser_example.cpp).
 For the fixed-camera minimal prefab scene, see
-[laser_prefab_example.cpp](/home/irie/Documents/karma/examples/laser_prefab_example.cpp).
+[laser_prefab_example.cpp](../examples/laser_prefab_example.cpp).

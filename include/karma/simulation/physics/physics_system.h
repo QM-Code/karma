@@ -16,6 +16,12 @@
 
 namespace karma::physics {
 
+/// \ingroup karma_physics
+/// Syncs ECS physics components with the configured physics backend.
+///
+/// The system creates/destroys backend bodies for ECS rigid bodies, applies
+/// player-controller intent, steps physics, writes transforms, and emits
+/// contact/ground-state components.
 class PhysicsSystem : public systems::ISystem {
  public:
   explicit PhysicsSystem(World& physics) : physics_(physics) {}

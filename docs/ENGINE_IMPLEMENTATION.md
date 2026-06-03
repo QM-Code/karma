@@ -36,6 +36,8 @@ missing dependencies are fetched automatically. The ImGui demo is optional via `
 - Uses `FetchContent` for dependencies when `KARMA_FETCH_DEPS=ON`.
 - Optional libs are only compiled when enabled.
 - Demos only build if their UI backend is enabled.
+- Generated public API docs are available through the `karma_docs_api` target
+  when Doxygen is installed.
 
 ## Backends
 - **Window**: GLFW or SDL
@@ -45,5 +47,4 @@ missing dependencies are fetched automatically. The ImGui demo is optional via `
 - **Networking**: ENet
 
 ## Notes
-- Many paths in examples are absolute (for local data). Users should replace with relative or project-specific paths.
 - Clip masks require a stencil-capable depth buffer (D24S8).

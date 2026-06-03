@@ -7,6 +7,8 @@
 
 namespace karma::physics {
 
+/// \ingroup karma_physics
+/// Move-only wrapper around a backend player-controller body.
 class PlayerController {
 public:
     PlayerController() = default;
@@ -26,6 +28,7 @@ public:
     void setHalfExtents(const glm::vec3& extents);
     void setCenter(const glm::vec3& center);
 
+    /// Updates backend controller behavior for one step.
     void update(float dt);
 
     void setPosition(const glm::vec3& position);
@@ -33,11 +36,16 @@ public:
     void setVelocity(const glm::vec3& velocity);
     void setAngularVelocity(const glm::vec3& angularVelocity);
 
+    /// Returns true when the controller is touching valid support.
     bool isGrounded() const;
+    /// Returns current ground/support contact metadata.
     bool getGroundContact(PhysicsGroundContact& outContact) const;
+    /// Collects controller contact pairs.
     void collectContacts(std::vector<PhysicsContact>& outContacts) const;
+    /// Returns backend-native handle for diagnostics/contact mapping.
     std::uintptr_t nativeHandle() const;
 
+    /// Destroys the backend controller.
     void destroy();
 
 private:

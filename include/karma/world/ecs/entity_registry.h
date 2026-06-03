@@ -7,8 +7,11 @@
 
 namespace karma::ecs {
 
+/// \ingroup karma_world_ecs
+/// Owns entity allocation, liveness, generation bumps, and entity-versioning.
 class EntityRegistry {
  public:
+  /// Creates an entity, reusing a free slot when possible.
   Entity create() {
     if (!free_list_.empty()) {
       const uint32_t index = free_list_.back();
@@ -26,6 +29,7 @@ class EntityRegistry {
     return entity;
   }
 
+  /// Destroys an entity if it is still alive.
   void destroy(Entity entity) {
     if (!isAlive(entity)) {
       return;
@@ -42,12 +46,15 @@ class EntityRegistry {
     ++version_;
   }
 
+  /// Returns true if the handle matches the current slot generation.
   bool isAlive(Entity entity) const {
     return entity.index < generations_.size() &&
            generations_[entity.index] == entity.generation;
   }
 
+  /// Live entities in dense registry order.
   const std::vector<Entity>& entities() const { return alive_; }
+  /// Monotonically increments whenever entity liveness changes.
   uint64_t version() const { return version_; }
 
  private:

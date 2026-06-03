@@ -8,13 +8,19 @@
 
 namespace karma::net {
 
+/// \ingroup karma_platform
+/// Backend-native connection handle.
 using ConnectionHandle = std::uintptr_t;
 
+/// \ingroup karma_platform
+/// Packet delivery mode.
 enum class Delivery {
   Reliable,
   Unreliable
 };
 
+/// \ingroup karma_platform
+/// Network transport event.
 struct Event {
   enum class Type {
     Receive,
@@ -30,6 +36,8 @@ struct Event {
   uint16_t peer_port = 0;
 };
 
+/// \ingroup karma_platform
+/// Client-side transport interface.
 class IClientTransport {
  public:
   virtual ~IClientTransport() = default;
@@ -47,6 +55,8 @@ class IClientTransport {
   virtual std::optional<uint16_t> getRemotePort() const = 0;
 };
 
+/// \ingroup karma_platform
+/// Server-side transport interface.
 class IServerTransport {
  public:
   virtual ~IServerTransport() = default;

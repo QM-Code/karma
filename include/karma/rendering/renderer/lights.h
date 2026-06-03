@@ -8,6 +8,8 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Renderer-facing directional light state.
 struct DirectionalLightData {
   glm::vec3 direction{0.0f, -1.0f, 0.0f};
   math::Color color{1.0f, 1.0f, 1.0f, 1.0f};
@@ -17,12 +19,16 @@ struct DirectionalLightData {
   bool casts_shadows = false;
 };
 
+/// \ingroup karma_rendering
+/// Renderer-facing local/directional light kind.
 enum class LightType : uint32_t {
   Directional = 0,
   Point = 1,
   Spot = 2
 };
 
+/// \ingroup karma_rendering
+/// Renderer-facing point/spot/directional light record.
 struct LightData {
   LightType type = LightType::Point;
   glm::vec3 position{0.0f, 0.0f, 0.0f};

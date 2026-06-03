@@ -9,6 +9,12 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Authored beam-path visual effect consumed by `BeamPathRuntimeModule`.
+///
+/// Points can be local-space or world-space. The beam system generates
+/// particle ribbons/flares, optional point lights, electric shimmer, and
+/// distortion particles from this data.
 struct BeamPathComponent : ecs::ComponentTag {
   std::vector<math::Vec3> points;
   math::Color core_color{1.0f, 1.0f, 1.0f, 1.0f};

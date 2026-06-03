@@ -44,7 +44,6 @@ set(KARMA_SOURCES
   src/content/prefabs/component_serializer_registry.cpp
   src/content/prefabs/prefab_resources.cpp
   src/content/prefabs/prefab_runtime.cpp
-  src/content/prefabs/prefab_registry.cpp
   src/features/visual/volumes/volume_sphere_runtime_module.cpp
   src/features/visual/volumes/volume_sphere_system.cpp
 )

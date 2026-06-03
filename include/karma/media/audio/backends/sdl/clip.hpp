@@ -7,6 +7,8 @@
 
 namespace karma::audio_backend {
 
+/// \ingroup karma_media
+/// SDL audio clip mixed into the backend stream.
 class SdlAudioClip final : public Clip {
  public:
   SdlAudioClip(std::vector<float> samples, int channels, int max_instances);

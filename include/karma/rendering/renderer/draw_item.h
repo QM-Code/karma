@@ -7,6 +7,11 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// One renderable mesh submission.
+///
+/// `RenderSystem` builds draw items from ECS mesh/skinned-mesh data. Runtime
+/// modules can submit draw items directly when they own renderer resources.
 struct DrawItem {
   InstanceId instance = kInvalidInstance;
   MeshId mesh = kInvalidMesh;

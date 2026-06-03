@@ -11,6 +11,8 @@ namespace karma::physics_backend {
 
 class PhysicsWorldBullet;
 
+/// \ingroup karma_physics
+/// Bullet implementation of `PhysicsPlayerControllerBackend`.
 class PhysicsPlayerControllerBullet final : public PhysicsPlayerControllerBackend {
 public:
     PhysicsPlayerControllerBullet(PhysicsWorldBullet* world,

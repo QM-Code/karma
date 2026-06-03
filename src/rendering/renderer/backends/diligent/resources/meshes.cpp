@@ -10,11 +10,32 @@
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
+#include <spdlog/spdlog.h>
+
+#include "karma/core/time.h"
 
 namespace karma::renderer_backend {
 
 namespace {
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 &&
+         std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 &&
+         std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
+
+bool renderResourceDiagEnabled() {
+  static const bool enabled = envFlagEnabled(std::getenv("KARMA_RENDER_RESOURCE_DIAG"));
+  return enabled;
+}
+
 void computeBounds(const renderer::MeshData& mesh, glm::vec3& out_center, float& out_radius) {
   if (mesh.vertices.empty()) {
     out_center = glm::vec3(0.0f);
@@ -108,14 +129,23 @@ void DiligentBackend::updateMesh(renderer::MeshId mesh, const renderer::MeshData
 
 renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path& path) {
   const renderer::MeshId id = nextMeshId_++;
+  const bool diag_enabled = renderResourceDiagEnabled();
+  const auto total_start = core::SteadyClock::now();
 
   Assimp::Importer importer;
+  auto section_start = total_start;
   const aiScene* scene = importer.ReadFile(path.string(),
                                            aiProcess_Triangulate |
                                            aiProcess_GenNormals |
                                            aiProcess_CalcTangentSpace |
                                            aiProcess_JoinIdenticalVertices |
                                            aiProcess_PreTransformVertices);
+  auto section_end = core::SteadyClock::now();
+  if (diag_enabled) {
+    spdlog::info("Render resource '{}' Assimp import took {:.2f} ms",
+                 path.string(),
+                 core::elapsedMilliseconds(section_start, section_end));
+  }
   if (!scene || !scene->mRootNode) {
     meshes_[id] = MeshRecord{};
     return id;
@@ -123,17 +153,43 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
 
   glm::vec4 base_color(1.0f);
   std::vector<SubmeshInfo> submesh_infos;
+  section_start = section_end;
   const auto combined = combineMeshes(*scene, base_color, submesh_infos);
+  section_end = core::SteadyClock::now();
+  if (diag_enabled) {
+    spdlog::info(
+        "Render resource '{}' combineMeshes took {:.2f} ms (vertices={} indices={} submeshes={})",
+        path.string(),
+        core::elapsedMilliseconds(section_start, section_end),
+        combined.vertices.size(),
+        combined.indices.size(),
+        submesh_infos.size());
+  }
 
   MeshRecord record{};
   record.data = combined;
   record.base_color = base_color;
+  section_start = section_end;
   computeBounds(record.data, record.bounds_center, record.bounds_radius);
+  section_end = core::SteadyClock::now();
+  if (diag_enabled) {
+    spdlog::info("Render resource '{}' bounds took {:.2f} ms",
+                 path.string(),
+                 core::elapsedMilliseconds(section_start, section_end));
+  }
 
+  section_start = section_end;
   uploadMeshBuffers(combined, record);
+  section_end = core::SteadyClock::now();
+  if (diag_enabled) {
+    spdlog::info("Render resource '{}' GPU mesh upload took {:.2f} ms",
+                 path.string(),
+                 core::elapsedMilliseconds(section_start, section_end));
+  }
 
   std::vector<renderer::MaterialId> material_ids;
   material_ids.resize(scene->mNumMaterials, renderer::kInvalidMaterial);
+  section_start = section_end;
   for (unsigned int mat_index = 0; mat_index < scene->mNumMaterials; ++mat_index) {
     const aiMaterial* material = scene->mMaterials[mat_index];
     if (!material) {
@@ -148,7 +204,15 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
     material_ids[mat_index] = mat_id;
     record.owned_materials.push_back(mat_id);
   }
+  section_end = core::SteadyClock::now();
+  if (diag_enabled) {
+    spdlog::info("Render resource '{}' material setup took {:.2f} ms (materials={})",
+                 path.string(),
+                 core::elapsedMilliseconds(section_start, section_end),
+                 scene->mNumMaterials);
+  }
 
+  section_start = section_end;
   for (const auto& sub : submesh_infos) {
     MeshRecord::Submesh submesh{};
     submesh.index_offset = sub.index_offset;
@@ -160,8 +224,19 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
     }
     record.submeshes.push_back(submesh);
   }
+  section_end = core::SteadyClock::now();
+  if (diag_enabled) {
+    spdlog::info("Render resource '{}' submesh finalize took {:.2f} ms",
+                 path.string(),
+                 core::elapsedMilliseconds(section_start, section_end));
+  }
 
   meshes_[id] = std::move(record);
+  if (diag_enabled) {
+    spdlog::info("Render resource '{}' createMeshFromFile total took {:.2f} ms",
+                 path.string(),
+                 core::elapsedMillisecondsSince(total_start));
+  }
   return id;
 }
 

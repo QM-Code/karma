@@ -1,0 +1,191 @@
+/**
+\defgroup karma_core Core
+Foundational identifiers, type IDs, math helpers, and timing utilities.
+
+Core code has no dependency on higher Karma layers. Types here are intentionally
+small and suitable for inclusion by any other public header.
+*/
+
+/**
+\defgroup karma_world World
+ECS, data components, scene graph, and system graph contracts.
+
+The world layer owns gameplay-facing data. Rendering, simulation, content, and
+feature modules consume this data, but components themselves should not call
+higher-level systems.
+*/
+
+/**
+\defgroup karma_world_ecs ECS
+\ingroup karma_world
+Sparse-set entity/component storage and entity lifetime management.
+
+Use karma::ecs::World for normal gameplay code. Lower-level storage types are
+public so tests, tools, and specialized systems can inspect dense component
+layouts when needed.
+*/
+
+/**
+\defgroup karma_components Components
+\ingroup karma_world
+ECS components consumed by runtime systems.
+
+Components are plain data contracts. Systems own behavior and derived runtime
+state. When adding a component, document the system that writes it, the systems
+that read it, and whether it is author-authored, runtime-authored, or both.
+*/
+
+/**
+\defgroup karma_scene Scene Graph
+\ingroup karma_world
+Scene-node ownership and transform hierarchy helpers.
+
+Karma keeps local transform data and final world transforms separate. Scene
+hierarchy code composes local transforms into world-space TransformComponent
+values before render, physics, lights, audio, and particle systems consume them.
+*/
+
+/**
+\defgroup karma_systems Systems
+\ingroup karma_world
+Frame-updated ECS systems and dependency ordering.
+
+Use SystemGraph for simple system registration and dependency sorting. Engine
+owned systems are wired by runtime::EngineApp; optional visual features are
+usually exposed as RuntimeModule implementations.
+*/
+
+/**
+\defgroup karma_runtime Runtime
+Application lifecycle, engine composition, input, UI context, debug overlay, and
+scene helper utilities.
+
+Runtime code is allowed to wire lower layers together. Game code generally
+interacts with EngineApp, GameInterface, RuntimeModule, and UI layer contracts.
+*/
+
+/**
+\defgroup karma_rendering Rendering
+Renderer-facing APIs, material/mesh/texture handles, scene extraction, particle
+submission, and backend abstractions.
+
+Gameplay code should prefer ECS components and high-level helpers. Use renderer
+types directly for resources, diagnostics, picking, debug drawing, or custom
+runtime modules.
+*/
+
+/**
+\defgroup karma_simulation Simulation
+Animation, physics, collision, and navigation APIs.
+
+Simulation systems write back to ECS components rather than owning gameplay
+state invisibly. Navigation and animation are designed to remain renderer
+agnostic.
+*/
+
+/**
+\defgroup karma_animation Animation
+\ingroup karma_simulation
+Animation clips, sampling, pose math, and CPU skinning support.
+
+Node animation writes local transforms. Scene hierarchy composition writes
+world transforms. CPU skinning is a correctness/fallback path and not the final
+GPU skinning architecture.
+*/
+
+/**
+\defgroup karma_physics Physics
+\ingroup karma_simulation
+Physics backend interfaces, rigid bodies, player controllers, and physics
+world/system integration.
+
+Karma supports Jolt and Bullet backends through public physics abstractions.
+Choose one backend at configure time.
+*/
+
+/**
+\defgroup karma_navigation Navigation
+\ingroup karma_simulation
+Static navmesh baking, Detour queries, geometry collection, diagnostics, and
+the engine-owned async navigation system.
+
+Navmesh generation can collect geometry from GLB scenes, ECS mesh colliders, or
+direct mesh data. Runtime path requests are queued through NavigationSystem.
+*/
+
+/**
+\defgroup karma_content Content
+Asset loading, image/mesh helpers, GLB import, prefab instantiation, and
+prefab-local resource registration.
+
+Content APIs transform authored data into ECS components and renderer resources.
+They should not own per-frame behavior.
+*/
+
+/**
+\defgroup karma_prefabs Prefabs
+\ingroup karma_content
+JSON prefab loading, component serializer registration, prefab instantiation,
+destruction, and sidecar resource management.
+
+Prefab files describe entity composition and component payloads. Runtime
+systems still own behavior; prefab sidecars register texture aliases, effects,
+and other package-local resources needed for direct path-only instantiation.
+*/
+
+/**
+\defgroup karma_features Features
+Optional feature modules built on public lower-layer APIs.
+
+Feature modules are the right home for reusable visual behavior that is not a
+renderer backend primitive. Runtime participation should be exposed through
+factories or RuntimeModule implementations.
+*/
+
+/**
+\defgroup karma_particles Particles
+\ingroup karma_features
+Particle effect libraries, `.kpeffect` parsing, emitter binding helpers, and
+runtime particle simulation.
+
+Particle effects are authored as reusable emitter templates. Gameplay code
+binds entities to effect keys and can apply per-instance overrides.
+*/
+
+/**
+\defgroup karma_beams Beams
+\ingroup karma_features
+Beam path authoring helpers and runtime module support.
+
+Beam paths are ECS-authored visual effects built from path points, particles,
+optional lights, shimmer, and distortion. Register the runtime module before
+startup when a scene contains BeamPathComponent entities.
+*/
+
+/**
+\defgroup karma_volumes Volumes
+\ingroup karma_features
+Analytic volume-sphere feature runtime and system APIs.
+
+Volume spheres are authored as ECS data and rendered through the renderer's
+transparent volume path.
+*/
+
+/**
+\defgroup karma_ui UI
+\ingroup karma_features
+UI provider adapters that produce runtime UI draw data.
+
+Provider-specific setup belongs under features/ui/provider. The shared engine
+contract is karma::app::UiLayer.
+*/
+
+/**
+\defgroup karma_media Media
+Audio-facing APIs and audio system integration.
+*/
+
+/**
+\defgroup karma_platform Platform
+Window events, window abstraction, and network transport APIs.
+*/

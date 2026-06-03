@@ -9,6 +9,12 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Camera authoring data extracted by `RenderSystem`.
+///
+/// A scene should usually have one primary camera. Cameras can render to the
+/// default target or to named render targets, and may provide shader override
+/// paths plus small color parameter payloads for custom camera effects.
 struct CameraComponent : ecs::ComponentTag {
   bool perspective = true;
   bool render_shadows = true;

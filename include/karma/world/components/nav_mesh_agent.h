@@ -11,6 +11,8 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// High-level path-following state for `NavigationSystem`.
 enum class NavMeshAgentStatus {
   Idle,
   Requested,
@@ -22,6 +24,12 @@ enum class NavMeshAgentStatus {
   PartialPath,
 };
 
+/// \ingroup karma_components
+/// Navigation agent request/result data.
+///
+/// Game code normally calls `NavigationSystem::requestMoveTo(...)` rather than
+/// mutating request flags directly. The system writes path, status, velocity,
+/// and bookkeeping fields.
 struct NavMeshAgentComponent : ecs::ComponentTag {
   bool enabled = true;
   float speed = 3.0f;

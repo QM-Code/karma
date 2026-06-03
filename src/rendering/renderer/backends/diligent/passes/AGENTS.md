@@ -23,6 +23,6 @@ Particle optimization guidance:
 
 Relevant docs:
 
-- `docs/PARTICLE_SYSTEM_ANALYSIS.md`
-- `docs/PARTICLE_PERF_BOOTSTRAP.md`
+- `NEXT_AGENT.md`
+- `docs/PARTICLE_SYSTEM.md`
 - `docs/EXPLOSION_STRESS_PERF.md`

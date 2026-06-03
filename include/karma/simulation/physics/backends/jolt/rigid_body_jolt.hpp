@@ -9,6 +9,8 @@ namespace karma::physics_backend {
 
 class PhysicsWorldJolt;
 
+/// \ingroup karma_physics
+/// Jolt implementation of `PhysicsRigidBodyBackend`.
 class PhysicsRigidBodyJolt final : public PhysicsRigidBodyBackend {
 public:
     PhysicsRigidBodyJolt() = default;

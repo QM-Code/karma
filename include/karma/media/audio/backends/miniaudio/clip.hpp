@@ -7,6 +7,8 @@
 
 namespace karma::audio_backend {
 
+/// \ingroup karma_media
+/// miniaudio clip with a stem sound and instance pool.
 class MiniaudioClip final : public Clip {
  public:
   MiniaudioClip(ma_sound* stem, std::vector<ma_sound*> instances);

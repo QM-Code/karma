@@ -7,12 +7,19 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Particle spawn volume used by `ParticleEmitterComponent`.
 enum class ParticleSpawnShape : uint8_t {
   Box,
   Sphere,
   SphereSurface,
 };
 
+/// \ingroup karma_components
+/// Runtime particle emitter template and state contract.
+///
+/// `.kpeffect` files deserialize into this component. `ParticleSystem` owns the
+/// live particles and treats this component as authoring/playback input.
 struct ParticleEmitterComponent : ecs::ComponentTag {
   bool enabled = true;
   bool playing = true;

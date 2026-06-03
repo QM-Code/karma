@@ -12,6 +12,8 @@ class btGhostPairCallback;
 
 namespace karma::physics_backend {
 
+/// \ingroup karma_physics
+/// Bullet implementation of `PhysicsWorldBackend`.
 class PhysicsWorldBullet final : public PhysicsWorldBackend {
 public:
     PhysicsWorldBullet();

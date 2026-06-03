@@ -9,8 +9,15 @@
 
 namespace karma::collision {
 
+/// \ingroup karma_simulation
+/// ECS overlap/trigger event system.
+///
+/// The system compares collider query results frame-to-frame and writes
+/// `CollisionEventsComponent` buffers for entities with
+/// `CollisionListenerComponent`.
 class CollisionEventSystem : public systems::ISystem {
  public:
+  /// Persisted overlap used to compute enter/stay/exit transitions.
   struct TrackedContact {
     ecs::Entity other{};
     ecs::queries::ColliderShape other_shape = ecs::queries::ColliderShape::Box;

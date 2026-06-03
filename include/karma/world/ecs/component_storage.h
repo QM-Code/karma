@@ -9,9 +9,17 @@
 
 namespace karma::ecs {
 
+/// \ingroup karma_world_ecs
+/// Sparse-set storage for one component type.
+///
+/// Components are stored densely for iteration while a sparse entity-index
+/// table provides O(1) lookup. Removing a component swaps in the last dense
+/// entry, so callers must not keep indices into `denseEntities()` across
+/// mutations.
 template <typename T>
 class ComponentStorage {
  public:
+  /// Returns true when `entity` currently owns a `T` component.
   bool has(Entity entity) const {
     if (entity.index >= sparse_.size()) {
       return false;
@@ -22,10 +30,17 @@ class ComponentStorage {
            dense_[dense_index] == entity;
   }
 
+  /// Returns the mutable component for `entity`.
+  ///
+  /// The caller must ensure the component exists.
   T& get(Entity entity) { return components_[sparse_[entity.index]]; }
 
+  /// Returns the component for `entity`.
+  ///
+  /// The caller must ensure the component exists.
   const T& get(Entity entity) const { return components_[sparse_[entity.index]]; }
 
+  /// Adds or replaces the component for `entity`.
   void add(Entity entity, T component) {
     if (has(entity)) {
       components_[sparse_[entity.index]] = std::move(component);
@@ -37,6 +52,7 @@ class ComponentStorage {
     sparse_[entity.index] = dense_.size() - 1;
   }
 
+  /// Removes the component if it exists.
   void remove(Entity entity) {
     if (!has(entity)) {
       return;
@@ -54,6 +70,7 @@ class ComponentStorage {
     sparse_[entity.index] = kInvalidIndex;
   }
 
+  /// Dense entity order matching the internal component array.
   const std::vector<Entity>& denseEntities() const { return dense_; }
 
  private:

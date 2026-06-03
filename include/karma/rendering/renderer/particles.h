@@ -10,27 +10,37 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Particle blend path selected by particle emitters/batches.
 enum class ParticleBlendMode : uint32_t {
   Additive = 0,
   Alpha = 1,
   Distortion = 2,
 };
 
+/// \ingroup karma_rendering
+/// Particle orientation mode.
 enum class ParticleAlignment : uint32_t {
   Billboard = 0,
   Ground = 1,
 };
 
+/// \ingroup karma_rendering
+/// Particle shader family.
 enum class ParticleShadingMode : uint32_t {
   Standard = 0,
   Shell = 1,
 };
 
+/// \ingroup karma_rendering
+/// Whether particle presentation was pre-baked or should be evaluated on GPU.
 enum class ParticlePresentationMode : uint32_t {
   Baked = 0,
   Simulated = 1,
 };
 
+/// \ingroup karma_rendering
+/// Compatibility particle instance with fully evaluated presentation values.
 struct ParticleInstance {
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   float size = 1.0f;
@@ -48,6 +58,8 @@ struct ParticleInstance {
   uint32_t frame_offset = 0u;
 };
 
+/// \ingroup karma_rendering
+/// Packed particle instance uploaded to the renderer's particle path.
 struct alignas(16) ParticlePackedInstance {
   float position_age[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float color_start[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -58,6 +70,8 @@ struct alignas(16) ParticlePackedInstance {
   float params[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
+/// \ingroup karma_rendering
+/// Compatibility particle batch submitted by non-simulated producers.
 struct ParticleBatch {
   LayerId layer = 0;
   bool depth_test = true;
@@ -89,6 +103,8 @@ struct ParticleBatch {
   std::vector<ParticleInstance> particles;
 };
 
+/// \ingroup karma_rendering
+/// Packed particle batch submitted by `ParticleSystem`.
 struct PackedParticleBatch {
   LayerId layer = 0;
   bool depth_test = true;

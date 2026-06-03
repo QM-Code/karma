@@ -17,11 +17,19 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Extracts ECS render data and submits it to `GraphicsDevice`.
+///
+/// `RenderSystem` resolves mesh/material keys, maintains shared renderer
+/// resources, extracts cameras/lights/environment, submits skinned and static
+/// meshes, and cleans up renderer resources for destroyed entities.
 class RenderSystem {
  public:
+  /// Binds a graphics device and material library.
   RenderSystem(GraphicsDevice& device, const MaterialLibrary& material_library)
       : device_(device), material_library_(&material_library) {}
 
+  /// Extracts the world/scene for one frame and submits render data.
   void update(ecs::World& world, scene::Scene& scene, float dt, float interpolation_alpha);
 
  private:

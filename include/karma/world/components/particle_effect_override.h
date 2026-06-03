@@ -7,6 +7,8 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Per-instance multipliers and replacements applied to a particle effect.
 struct ParticleEffectOverrideComponent : ecs::ComponentTag {
   bool active = true;
   float time_scale = 1.0f;

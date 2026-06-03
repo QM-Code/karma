@@ -5,8 +5,12 @@
 
 namespace karma::app {
 
+/// \ingroup karma_runtime
+/// Renderer texture handle used by UI draw commands.
 using UITextureHandle = uint32_t;
 
+/// \ingroup karma_runtime
+/// UI texture descriptor returned by texture creation/loading helpers.
 struct UITexture {
   UITextureHandle handle = 0;
   int width = 0;
@@ -15,6 +19,8 @@ struct UITexture {
   explicit operator bool() const { return handle != 0 && width > 0 && height > 0; }
 };
 
+/// \ingroup karma_runtime
+/// One UI vertex in screen-space pixels.
 struct UIVertex {
   float x = 0.0f;
   float y = 0.0f;
@@ -23,6 +29,8 @@ struct UIVertex {
   uint32_t rgba = 0;
 };
 
+/// \ingroup karma_runtime
+/// Draw command referencing a span of `UIDrawData::indices`.
 struct UIDrawCmd {
   uint32_t index_offset = 0;
   uint32_t index_count = 0;
@@ -34,12 +42,15 @@ struct UIDrawCmd {
   UITextureHandle texture = 0;
 };
 
+/// \ingroup karma_runtime
+/// Provider-neutral UI draw list consumed by the renderer.
 struct UIDrawData {
   std::vector<UIVertex> vertices;
   std::vector<uint32_t> indices;
   std::vector<UIDrawCmd> commands;
   bool premultiplied_alpha = false;
 
+  /// Clears vertices, indices, commands, and alpha mode for a new frame.
   void clear() {
     vertices.clear();
     indices.clear();
@@ -48,6 +59,8 @@ struct UIDrawData {
   }
 };
 
+/// \ingroup karma_runtime
+/// Timing and viewport data supplied to UI layers.
 struct UIFrameInfo {
   float dt = 0.0f;
   int viewport_w = 0;

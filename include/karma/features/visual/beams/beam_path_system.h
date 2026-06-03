@@ -14,6 +14,11 @@ class GraphicsDevice;
 
 namespace karma::beams {
 
+/// \ingroup karma_beams
+/// Per-frame beam visual system.
+///
+/// The system converts `BeamPathComponent` data into particle batches and
+/// optional child light entities.
 class BeamPathSystem {
  public:
   explicit BeamPathSystem(renderer::GraphicsDevice* device);

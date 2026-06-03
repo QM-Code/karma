@@ -6,6 +6,8 @@
 
 namespace karma::navigation {
 
+/// \ingroup karma_navigation
+/// Per-frame timings logged by navigation diagnostics.
 struct NavigationDiagnosticsFrame {
   float dt = 0.0f;
   double on_update_ms = 0.0;
@@ -14,6 +16,8 @@ struct NavigationDiagnosticsFrame {
   double debug_draw_ms = 0.0;
 };
 
+/// \ingroup karma_navigation
+/// Environment-gated navigation diagnostics logger.
 class NavigationDiagnostics {
  public:
   void initializeFromEnvironment();

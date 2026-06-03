@@ -15,6 +15,8 @@ class GraphicsDevice;
 
 namespace karma::navigation {
 
+/// \ingroup karma_navigation
+/// Runtime counters and timings for `NavigationSystem`.
 struct NavigationSystemStats {
   double last_update_ms = 0.0;
   double last_rebuild_ms = 0.0;
@@ -34,6 +36,11 @@ struct NavigationSystemStats {
   bool last_worker_cache_rebuilt = false;
 };
 
+/// \ingroup karma_navigation
+/// Engine-owned async navmesh rebuild/path request system.
+///
+/// The system consumes `NavMeshComponent` and `NavMeshAgentComponent`, queues
+/// worker-thread path solves, and writes path/status data back to agents.
 class NavigationSystem : public systems::ISystem {
  public:
   NavigationSystem();
@@ -47,14 +54,18 @@ class NavigationSystem : public systems::ISystem {
   std::string_view name() const override { return "NavigationSystem"; }
   void update(ecs::World& world, float dt) override;
 
+  /// Draws current navmesh/path debug information.
   void debugDraw(ecs::World& world,
                  renderer::GraphicsDevice& graphics,
                  bool depth_test = false) const;
+  /// Latest navigation diagnostics.
   const NavigationSystemStats& stats() const { return stats_; }
 
+  /// Requests a path for an agent entity.
   static bool requestMoveTo(ecs::World& world,
                             ecs::Entity agent_entity,
                             const math::Vec3& destination);
+  /// Clears an agent path/request state.
   static void clearPath(ecs::World& world, ecs::Entity agent_entity);
 
  private:

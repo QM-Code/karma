@@ -6,6 +6,8 @@
 
 namespace karma::physics {
 
+/// \ingroup karma_physics
+/// Basic physics material parameters passed to backend body creation.
 struct PhysicsMaterial {
     float friction = 0.0f;
     float restitution = 0.0f;
@@ -13,6 +15,8 @@ struct PhysicsMaterial {
     float spinningFriction = 0.0f;
 };
 
+/// \ingroup karma_physics
+/// Backend contact pair with points and normal.
 struct PhysicsContact {
     std::uintptr_t handle_a = 0;
     std::uintptr_t handle_b = 0;
@@ -21,6 +25,8 @@ struct PhysicsContact {
     glm::vec3 normal_a_to_b{0.0f, 1.0f, 0.0f};
 };
 
+/// \ingroup karma_physics
+/// Ground/support contact result.
 struct PhysicsGroundContact {
     bool grounded = false;
     glm::vec3 point{0.0f};

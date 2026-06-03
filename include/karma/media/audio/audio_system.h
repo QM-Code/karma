@@ -12,6 +12,11 @@
 
 namespace karma::audio {
 
+/// \ingroup karma_media
+/// ECS audio source/listener system.
+///
+/// Consumes `AudioSourceComponent`, `AudioListenerComponent`, and transforms to
+/// drive backend clip playback.
 class AudioSystem final : public systems::ISystem {
  public:
   explicit AudioSystem(Audio& audio) : audio_(audio) {}

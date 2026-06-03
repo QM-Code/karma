@@ -8,6 +8,8 @@ namespace karma::volumes {
 
 class VolumeSphereSystem;
 
+/// \ingroup karma_volumes
+/// Runtime module that owns `VolumeSphereSystem`.
 class VolumeSphereRuntimeModule final : public app::RuntimeModule {
  public:
   VolumeSphereRuntimeModule();

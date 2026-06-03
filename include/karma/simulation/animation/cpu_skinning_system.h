@@ -15,21 +15,30 @@ class Scene;
 
 namespace karma::animation {
 
+/// \ingroup karma_animation
+/// Skins `bind_mesh` on the CPU using final skin matrices.
 renderer::MeshData skinMesh(const renderer::MeshData& bind_mesh,
                             const std::vector<components::VertexSkinInfluence>& influences,
                             const std::vector<glm::mat4>& skin_matrices);
 
+/// Builds a skinning palette from ECS world transforms.
 SkinningPalette buildSkinningPaletteFromWorld(
     const components::SkinnedMeshComponent& skin,
     const ecs::World& world,
     const glm::mat4& mesh_world);
 
+/// Builds a skinning palette from scene hierarchy and world transforms.
 SkinningPalette buildSkinningPaletteFromScene(
     const components::SkinnedMeshComponent& skin,
     const ecs::World& world,
     const scene::Scene& scene,
     const glm::mat4& mesh_world);
 
+/// \ingroup karma_animation
+/// CPU skinning correctness/fallback path.
+///
+/// The system builds joint palettes for `SkinnedMeshComponent`, deforms bind
+/// meshes on CPU, and uploads the result through `GraphicsDevice::updateMesh`.
 class CpuSkinningSystem {
  public:
   void update(ecs::World& world, const scene::Scene& scene, renderer::GraphicsDevice& device);

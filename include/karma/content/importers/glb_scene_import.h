@@ -15,24 +15,35 @@
 
 namespace karma::scene {
 
+/// \ingroup karma_content
+/// Sentinel node id for imported GLB scene data.
 constexpr uint32_t kInvalidGlbSceneNode = std::numeric_limits<uint32_t>::max();
+/// Sentinel material index for imported GLB scene data.
 constexpr uint32_t kInvalidGlbSceneMaterial = std::numeric_limits<uint32_t>::max();
 
+/// \ingroup karma_content
+/// Controls which GLB scene data is loaded.
 struct GlbSceneLoadOptions {
   bool import_meshes = true;
   bool import_lights = true;
 };
 
+/// \ingroup karma_content
+/// Controls how a loaded GLB prefab is instantiated into ECS/scene data.
 struct GlbSceneInstantiateOptions {
   bool create_synthetic_root = false;
   bool autoplay_animations = true;
 };
 
+/// \ingroup karma_content
+/// Combined GLB load and instantiate options for `importGlbScene`.
 struct GlbSceneImportOptions {
   GlbSceneLoadOptions load{};
   GlbSceneInstantiateOptions instantiate{};
 };
 
+/// \ingroup karma_content
+/// One renderable primitive inside an imported GLB node.
 struct GlbScenePrefabPrimitive {
   std::string name;
   renderer::MeshData mesh;
@@ -44,11 +55,14 @@ struct GlbScenePrefabPrimitive {
   std::vector<uint32_t> joint_node_indices;
   std::vector<glm::mat4> inverse_bind_matrices;
 
+  /// Returns true when the primitive has skinning payloads.
   bool skinned() const {
     return !joint_node_indices.empty() && vertex_influences.size() == mesh.vertices.size();
   }
 };
 
+/// \ingroup karma_content
+/// Imported GLB node with transforms, light, mesh primitives, and children.
 struct GlbScenePrefabNode {
   std::string name;
   math::Vec3 local_position{};
@@ -63,6 +77,8 @@ struct GlbScenePrefabNode {
   std::vector<uint32_t> children;
 };
 
+/// \ingroup karma_content
+/// In-memory GLB scene prefab before ECS instantiation.
 struct GlbScenePrefab {
   std::filesystem::path source_path;
   uint32_t root_node = kInvalidGlbSceneNode;
@@ -72,25 +88,31 @@ struct GlbScenePrefab {
   std::vector<animation::AnimationClip> animations;
   std::vector<std::string> diagnostics;
 
+  /// Returns true when root node metadata is valid.
   bool valid() const {
     return root_node != kInvalidGlbSceneNode && root_node < nodes.size();
   }
 };
 
+/// \ingroup karma_content
+/// ECS/scene entities created from a GLB scene prefab.
 struct GlbSceneImportResult {
   ecs::Entity root_entity{};
   scene::NodeId root_node = scene::Node::kInvalidId;
   std::vector<ecs::Entity> entities;
   std::vector<ecs::Entity> node_entities_by_index;
 
+  /// Returns true when a root ECS entity and scene node were created.
   bool valid() const {
     return root_entity.isValid() && root_node != scene::Node::kInvalidId;
   }
 };
 
+/// Loads a GLB scene into an in-memory prefab.
 GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
                                   const GlbSceneLoadOptions& options = {});
 
+/// Instantiates a loaded GLB scene prefab into world and scene data.
 GlbSceneImportResult instantiateGlbScenePrefab(
     ecs::World& world,
     scene::Scene& scene,
@@ -98,6 +120,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     const GlbScenePrefab& prefab,
     const GlbSceneInstantiateOptions& options = {});
 
+/// Loads and instantiates a GLB scene in one call.
 GlbSceneImportResult importGlbScene(ecs::World& world,
                                     scene::Scene& scene,
                                     renderer::GraphicsDevice& device,

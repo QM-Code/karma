@@ -4,6 +4,8 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Forward+ light-culling diagnostics.
 struct ForwardPlusStats {
   uint32_t tile_size = 16;
   uint32_t max_lights_per_tile = 128;
@@ -16,6 +18,11 @@ struct ForwardPlusStats {
   bool overflow_risk = false;
 };
 
+/// \ingroup karma_rendering
+/// Particle simulation and renderer-pass diagnostics.
+///
+/// These fields are intentionally public so examples and perf logs can report
+/// comparable counters without parsing backend internals.
 struct ParticlePassStats {
   uint32_t effect_binding_updates = 0;
   uint32_t simulated_emitters = 0;

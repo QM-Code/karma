@@ -5,12 +5,26 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Stable renderer instance handle used for submitted draw records.
 using InstanceId = uint64_t;
+/// \ingroup karma_rendering
+/// Opaque mesh resource handle.
 using MeshId = uint32_t;
+/// \ingroup karma_rendering
+/// Opaque material resource handle.
 using MaterialId = uint32_t;
+/// \ingroup karma_rendering
+/// Opaque material-set resource handle.
 using MaterialSetId = uint32_t;
+/// \ingroup karma_rendering
+/// Opaque texture resource handle.
 using TextureId = uint32_t;
+/// \ingroup karma_rendering
+/// Opaque render-target resource handle.
 using RenderTargetId = uint32_t;
+/// \ingroup karma_rendering
+/// Render layer id used to submit and draw batches independently.
 using LayerId = uint32_t;
 
 constexpr RenderTargetId kDefaultRenderTarget = 0;

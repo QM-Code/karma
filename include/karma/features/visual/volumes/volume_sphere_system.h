@@ -13,6 +13,11 @@ class GraphicsDevice;
 
 namespace karma::volumes {
 
+/// \ingroup karma_volumes
+/// Per-frame analytic volume sphere visual system.
+///
+/// The system creates/updates renderer proxy entities for source
+/// `VolumeSphereComponent` entities.
 class VolumeSphereSystem {
  public:
   explicit VolumeSphereSystem(renderer::GraphicsDevice* device);

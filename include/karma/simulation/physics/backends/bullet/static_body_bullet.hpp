@@ -12,6 +12,8 @@ namespace karma::physics_backend {
 
 class PhysicsWorldBullet;
 
+/// \ingroup karma_physics
+/// Bullet implementation of `PhysicsStaticBodyBackend`.
 class PhysicsStaticBodyBullet final : public PhysicsStaticBodyBackend {
 public:
     PhysicsStaticBodyBullet() = default;

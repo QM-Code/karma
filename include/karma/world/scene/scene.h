@@ -8,8 +8,15 @@
 
 namespace karma::scene {
 
+/// \ingroup karma_scene
+/// Lightweight scene graph that maps ECS entities to parent/child nodes.
+///
+/// The scene graph owns hierarchy relationships only. Local transforms live in
+/// `LocalTransformComponent`; final world transforms live in `TransformComponent`
+/// and are composed by `updateWorldTransforms(...)`.
 class Scene {
  public:
+  /// Creates a node, reusing an existing node for `entity` when one exists.
   NodeId createNode(core::EntityId entity = {}) {
     if (entity.isValid()) {
       const NodeId existing = findNode(entity);
@@ -31,10 +38,12 @@ class Scene {
     return id;
   }
 
+  /// Ensures there is a node for `entity`.
   NodeId ensureNode(core::EntityId entity) {
     return createNode(entity);
   }
 
+  /// Finds the node bound to `entity`, or `Node::kInvalidId`.
   NodeId findNode(core::EntityId entity) const {
     if (!entity.isValid()) {
       return Node::kInvalidId;
@@ -46,6 +55,7 @@ class Scene {
     return it->second;
   }
 
+  /// Destroys a node and detaches its children.
   void destroyNode(NodeId id) {
     if (!isAlive(id)) {
       return;
@@ -62,6 +72,7 @@ class Scene {
     free_list_.push_back(id);
   }
 
+  /// Reparents `child` under `new_parent`.
   void reparent(NodeId child, NodeId new_parent) {
     if (!isAlive(child)) {
       return;
@@ -73,14 +84,18 @@ class Scene {
     }
   }
 
+  /// Returns true when a node id is alive.
   bool isAlive(NodeId id) const {
     return id < nodes_.size() && nodes_[id].id != Node::kInvalidId;
   }
 
+  /// Returns mutable node data. Caller must ensure `id` is alive.
   Node& get(NodeId id) { return nodes_[id]; }
 
+  /// Returns node data. Caller must ensure `id` is alive.
   const Node& get(NodeId id) const { return nodes_[id]; }
 
+  /// Raw node array, including dead slots.
   const std::vector<Node>& nodes() const { return nodes_; }
 
  private:

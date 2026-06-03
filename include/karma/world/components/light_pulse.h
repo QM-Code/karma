@@ -4,6 +4,11 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Time-based light intensity/range envelope.
+///
+/// `LightPulseSystem` updates the paired `LightComponent` and can hide the
+/// entity when the pulse completes.
 struct LightPulseComponent : ecs::ComponentTag {
   bool enabled = true;
   bool active = true;

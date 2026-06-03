@@ -8,17 +8,22 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Per-camera material override lookup table.
 class MaterialOverrideTable {
  public:
+  /// Overrides `entity`'s material when rendering through `camera_key`.
   void setOverride(const std::string& camera_key, core::EntityId entity,
                    const std::string& material_key) {
     table_[makeKey(camera_key, entity)] = material_key;
   }
 
+  /// Clears a per-camera override.
   void clearOverride(const std::string& camera_key, core::EntityId entity) {
     table_.erase(makeKey(camera_key, entity));
   }
 
+  /// Finds a per-camera override material key.
   const std::string* findOverride(const std::string& camera_key,
                                   core::EntityId entity) const {
     const uint64_t key = makeKey(camera_key, entity);

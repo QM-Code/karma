@@ -5,10 +5,13 @@
 #include <glm/gtc/quaternion.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <unordered_set>
 #include <vector>
 #include <spdlog/spdlog.h>
 
+#include "karma/core/time.h"
 #include "karma/world/components/camera.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/environment.h"
@@ -19,6 +22,39 @@
 namespace karma::renderer {
 
 namespace {
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 &&
+         std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 &&
+         std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
+
+bool renderSystemDiagEnabled() {
+  static const bool enabled = envFlagEnabled(std::getenv("KARMA_RENDER_SYSTEM_DIAG"));
+  return enabled;
+}
+
+bool renderSystemDiagEveryFrameEnabled() {
+  static const bool enabled =
+      envFlagEnabled(std::getenv("KARMA_RENDER_SYSTEM_DIAG_EVERY_FRAME"));
+  return enabled;
+}
+
+void logRenderSystemStage(const bool enabled,
+                          const char* name,
+                          const core::SteadyClock::time_point start,
+                          const core::SteadyClock::time_point end) {
+  if (enabled) {
+    spdlog::info("RenderSystem stage '{}' took {:.2f} ms",
+                 name,
+                 core::elapsedMilliseconds(start, end));
+  }
+}
+
 std::string makeMaterialVariantCacheKey(const std::string& mesh_key,
                                         const std::string& material_key) {
   std::string key;
@@ -460,6 +496,17 @@ void RenderSystem::releaseSharedMaterialVariant(const std::string& mesh_key,
 
 void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/,
                           float interpolation_alpha) {
+  static size_t diag_update_count = 0;
+  const bool diag_requested = renderSystemDiagEnabled();
+  const bool diag_enabled = diag_requested &&
+                            (renderSystemDiagEveryFrameEnabled() || diag_update_count == 0);
+  if (diag_requested) {
+    ++diag_update_count;
+  }
+  const auto update_start = core::SteadyClock::now();
+  auto section_start = update_start;
+  auto section_end = update_start;
+
   if (material_library_ != nullptr &&
       material_library_->version() != last_material_library_version_) {
     for (auto& [key, record] : records_) {
@@ -472,6 +519,9 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     }
     last_material_library_version_ = material_library_->version();
   }
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "material cache refresh", section_start, section_end);
+  section_start = section_end;
 
   static bool logged_start = false;
   if (!logged_start) {
@@ -522,6 +572,10 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     return true;
   });
 
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "camera collection", section_start, section_end);
+  section_start = section_end;
+
   for (auto it = render_targets_by_key_.begin(); it != render_targets_by_key_.end();) {
     if (active_render_target_keys.find(it->first) != active_render_target_keys.end()) {
       ++it;
@@ -532,12 +586,16 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     }
     it = render_targets_by_key_.erase(it);
   }
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "render target cleanup", section_start, section_end);
+  section_start = section_end;
 
   if (!has_camera) {
     if (!warned_no_camera_) {
       warned_no_camera_ = true;
     }
     device_.setCameraActive(false);
+    logRenderSystemStage(diag_enabled, "total", update_start, core::SteadyClock::now());
     return;
   }
   warned_no_camera_ = false;
@@ -585,6 +643,9 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
   device_.setDirectionalLight(light);
   device_.setLights(lights);
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "lights", section_start, section_end);
+  section_start = section_end;
 
   bool env_found = false;
   world.forEach<components::EnvironmentComponent>([&](const ecs::Entity entity) {
@@ -610,9 +671,15 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     last_env_intensity_ = -1.0f;
     last_env_draw_skybox_ = false;
   }
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "environment", section_start, section_end);
+  section_start = section_end;
 
+  size_t mesh_entity_count = 0;
+  size_t new_render_record_count = 0;
   world.forEach<components::MeshComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
+    ++mesh_entity_count;
     const auto& mesh = world.get<components::MeshComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
 
@@ -625,9 +692,30 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     auto it = records_.find(key);
     if (it == records_.end()) {
       RenderRecord record;
+      const auto bind_mesh_start = core::SteadyClock::now();
       bindMesh(mesh, record);
+      const auto bind_mesh_end = core::SteadyClock::now();
+      if (diag_enabled) {
+        spdlog::info("RenderSystem new record entity={}:{} mesh='{}' bindMesh took {:.2f} ms",
+                     entity.index,
+                     entity.generation,
+                     mesh.mesh_key.empty() ? "<direct>" : mesh.mesh_key,
+                     core::elapsedMilliseconds(bind_mesh_start, bind_mesh_end));
+      }
+
+      const auto bind_material_start = bind_mesh_end;
       bindMaterial(mesh, record);
+      const auto bind_material_end = core::SteadyClock::now();
+      if (diag_enabled) {
+        spdlog::info(
+            "RenderSystem new record entity={}:{} material='{}' bindMaterial took {:.2f} ms",
+            entity.index,
+            entity.generation,
+            mesh.material_key.empty() ? "<source mesh>" : mesh.material_key,
+            core::elapsedMilliseconds(bind_material_start, bind_material_end));
+      }
       it = records_.emplace(key, std::move(record)).first;
+      ++new_render_record_count;
     } else {
       const bool mesh_binding_changed =
           it->second.direct_mesh_id != mesh.mesh_id ||
@@ -689,8 +777,19 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     }
     device_.submit(item);
   });
+  section_end = core::SteadyClock::now();
+  if (diag_enabled) {
+    spdlog::info("RenderSystem stage 'mesh submit' took {:.2f} ms (meshes={} new_records={})",
+                 core::elapsedMilliseconds(section_start, section_end),
+                 mesh_entity_count,
+                 new_render_record_count);
+  }
+  section_start = section_end;
 
   cleanupStaleRecords(world);
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "stale record cleanup", section_start, section_end);
+  section_start = section_end;
 
   const math::Color debug_color{0.1f, 1.0f, 0.1f, 1.0f};
   world.forEach<components::TransformComponent, components::BoxColliderComponent>(
@@ -747,6 +846,9 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
                     record_it->second.bounds_center.z},
                    record_it->second.bounds_radius, debug_color, interpolation_alpha);
   });
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "debug collider draw", section_start, section_end);
+  section_start = section_end;
 
   for (const auto& pass : offscreen_passes) {
     device_.setCamera(pass.camera);
@@ -755,6 +857,9 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
   device_.setCamera(primary_camera);
   device_.setCameraActive(true);
+  section_end = core::SteadyClock::now();
+  logRenderSystemStage(diag_enabled, "offscreen passes", section_start, section_end);
+  logRenderSystemStage(diag_enabled, "total", update_start, section_end);
 }
 
 }  // namespace karma::renderer

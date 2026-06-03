@@ -7,6 +7,11 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Audio emitter bound to a clip key loaded by `AudioSystem`.
+///
+/// `play_on_start` is consumed once by the audio system. Calling `play()`
+/// records a transient request that is consumed on the next audio update.
 class AudioSourceComponent : public ecs::ComponentTag {
  public:
   std::string clip_key;
@@ -19,8 +24,10 @@ class AudioSourceComponent : public ecs::ComponentTag {
   bool spatialized = true;
   int max_instances = 5;
 
+  /// Requests one playback instance on the next audio-system update.
   void play() { play_requested_ = true; }
 
+  /// Returns and clears a pending playback request.
   bool consumePlayRequest() {
     if (!play_requested_) {
       return false;

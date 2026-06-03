@@ -12,19 +12,30 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Selected skinning execution path.
 enum class SkinningPath {
   Cpu,
   Gpu,
   GpuUnavailableCpuFallback,
 };
 
+/// Maximum joint matrices currently supported by one renderer draw.
 constexpr uint32_t kMaxSkinningJointsPerDraw = 128;
 
+/// \ingroup karma_components
+/// Four-joint skin influence payload for one vertex.
 struct VertexSkinInfluence {
   glm::uvec4 joints{0u, 0u, 0u, 0u};
   glm::vec4 weights{0.0f, 0.0f, 0.0f, 0.0f};
 };
 
+/// \ingroup karma_components
+/// Skinning data for a renderable mesh.
+///
+/// GLB import fills bind mesh, influences, joint entities, and inverse bind
+/// matrices. `CpuSkinningSystem` currently updates `skinned_mesh` and uploads
+/// it as a correctness/fallback path.
 struct SkinnedMeshComponent : ecs::ComponentTag {
   renderer::MeshData bind_mesh;
   renderer::MeshData skinned_mesh;

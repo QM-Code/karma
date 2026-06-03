@@ -88,7 +88,6 @@ RuntimeModuleContext EngineApp::makeRuntimeModuleContext() {
       .graphics = graphics_.get(),
       .materials = &materials_,
       .particle_effects = &particle_effects_,
-      .prefab_registry = prefab_registry_.get(),
   };
 }
 
@@ -114,7 +113,6 @@ void EngineApp::initSubsystems() {
   }
 
   input_.setWindow(window_.get());
-  prefab_registry_ = std::make_unique<prefabs::PrefabRegistry>();
 
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
@@ -140,13 +138,30 @@ void EngineApp::warmUpRenderer() {
     return;
   }
 
+  const bool startup_diag = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
   const auto warmup_start = core::SteadyClock::now();
+  auto section_start = warmup_start;
   syncSceneEntities();
+  auto section_end = core::SteadyClock::now();
+  auto log_stage = [&](const char* name,
+                       const core::SteadyClock::time_point start,
+                       const core::SteadyClock::time_point end) {
+    if (startup_diag) {
+      spdlog::info("Renderer warm-up stage '{}' took {:.2f} ms",
+                   name,
+                   core::elapsedMilliseconds(start, end));
+    }
+  };
+  log_stage("sync scene", section_start, section_end);
+
+  section_start = section_end;
   int fb_width = 0;
   int fb_height = 0;
   if (window_) {
     window_->getFramebufferSize(fb_width, fb_height);
   }
+  section_end = core::SteadyClock::now();
+  log_stage("framebuffer query", section_start, section_end);
   if (fb_width <= 0 || fb_height <= 0) {
     spdlog::info("Renderer warm-up skipped: framebuffer={}x{}", fb_width, fb_height);
     return;
@@ -156,22 +171,62 @@ void EngineApp::warmUpRenderer() {
   frame.width = fb_width;
   frame.height = fb_height;
   frame.delta_time = 0.0f;
+  section_start = section_end;
   graphics_->beginFrame(frame);
+  section_end = core::SteadyClock::now();
+  log_stage("begin frame", section_start, section_end);
+
+  section_start = section_end;
   animation_system_.update(world_, scene_, 0.0f);
+  section_end = core::SteadyClock::now();
+  log_stage("animation", section_start, section_end);
+
+  section_start = section_end;
   scene::updateWorldTransforms(world_, scene_);
+  section_end = core::SteadyClock::now();
+  log_stage("scene transforms", section_start, section_end);
+
+  section_start = section_end;
   cpu_skinning_system_.update(world_, scene_, *graphics_);
+  section_end = core::SteadyClock::now();
+  log_stage("cpu skinning", section_start, section_end);
+
   if (particle_system_) {
+    section_start = section_end;
     light_pulse_system_.update(world_, 0.0f);
+    section_end = core::SteadyClock::now();
+    log_stage("light pulse", section_start, section_end);
+
+    section_start = section_end;
     particle_system_->update(world_, 0.0f, 1.0f);
+    section_end = core::SteadyClock::now();
+    log_stage("particles", section_start, section_end);
   }
+
+  section_start = section_end;
   for (auto& module : runtime_modules_) {
     if (module) {
       module->onWarmUp(world_);
     }
   }
+  section_end = core::SteadyClock::now();
+  log_stage("runtime modules", section_start, section_end);
+
+  section_start = section_end;
   render_system_->update(world_, scene_, 0.0f, 1.0f);
+  section_end = core::SteadyClock::now();
+  log_stage("render system update", section_start, section_end);
+
+  section_start = section_end;
   graphics_->renderLayer(0);
+  section_end = core::SteadyClock::now();
+  log_stage("render layer", section_start, section_end);
+
+  section_start = section_end;
   graphics_->endFrame();
+  section_end = core::SteadyClock::now();
+  log_stage("end frame", section_start, section_end);
+
   spdlog::info("Renderer warm-up took {:.2f} ms",
                core::elapsedMillisecondsSince(warmup_start));
 }
@@ -191,11 +246,6 @@ void EngineApp::shutdownSubsystems() {
 #endif
   render_system_.reset();
   prefabs::clearPrefabResourceContext();
-  if (prefab_registry_) {
-    prefab_registry_->shutdown();
-    prefab_registry_->clearContext();
-  }
-  prefab_registry_.reset();
   particle_system_.reset();
   for (auto& module : runtime_modules_) {
     if (module) {
@@ -235,10 +285,32 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   fixed_dt_ = config_.fixed_dt;
   const char* debug_env = std::getenv("KARMA_ENGINE_EDITOR_DEBUG");
   debug_ui_enabled_ = debug_env && std::string(debug_env) != "0";
+  const bool startup_diag = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  const auto startup_start = core::SteadyClock::now();
+  auto section_start = startup_start;
+  auto section_end = startup_start;
+  auto log_startup_stage = [&](const char* name,
+                               const core::SteadyClock::time_point start,
+                               const core::SteadyClock::time_point end) {
+    if (startup_diag) {
+      spdlog::info("Engine startup stage '{}' took {:.2f} ms",
+                   name,
+                   core::elapsedMilliseconds(start, end));
+    }
+  };
+
   initSubsystems();
+  section_end = core::SteadyClock::now();
+  log_startup_stage("init subsystems", section_start, section_end);
+
 #if defined(KARMA_DEBUG_UI)
+  section_start = section_end;
   debug_ui_ = createDebugOverlayUi();
+  section_end = core::SteadyClock::now();
+  log_startup_stage("debug ui", section_start, section_end);
 #endif
+
+  section_start = section_end;
   if (graphics_) {
     graphics_->setGenerateMips(config_.generate_mipmaps);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
@@ -263,10 +335,14 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                         config_.local_light_directional_shadow_lift_strength);
     graphics_->setExposure(config_.lighting_exposure);
   }
+  section_end = core::SteadyClock::now();
+  log_startup_stage("graphics settings", section_start, section_end);
+
   game_ = &game;
   running_ = true;
   accumulator_ = 0.0f;
   last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
+  section_start = section_end;
   game_->bindContext(world_,
                      scene_,
                      input_,
@@ -274,35 +350,66 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      graphics_.get(),
                      materials_,
                      particle_effects_,
-                     *prefab_registry_,
                      systems_);
-  if (prefab_registry_) {
-    prefab_registry_->bindContext(prefabs::PrefabPackageContext{
-        .graphics = graphics_.get(),
-        .materials = &materials_,
-        .particle_effects = &particle_effects_,
-    });
-  }
+  section_end = core::SteadyClock::now();
+  log_startup_stage("bind game context", section_start, section_end);
+
+  section_start = section_end;
   prefabs::bindPrefabResourceContext(prefabs::PrefabResourceContext{
       .graphics = graphics_.get(),
       .particle_effects = &particle_effects_,
   });
+  section_end = core::SteadyClock::now();
+  log_startup_stage("bind prefab context", section_start, section_end);
+
+  section_start = section_end;
   for (auto& module : runtime_modules_) {
     if (module) {
       module->onAttach(makeRuntimeModuleContext());
     }
   }
+  section_end = core::SteadyClock::now();
+  log_startup_stage("runtime module attach", section_start, section_end);
+
+  section_start = section_end;
   game_->onStart();
+  section_end = core::SteadyClock::now();
+  log_startup_stage("game onStart", section_start, section_end);
+
+  section_start = section_end;
   systems_.update(world_, 0.0f);
+  section_end = core::SteadyClock::now();
+  log_startup_stage("initial systems update", section_start, section_end);
+#if defined(KARMA_ENABLE_NAVIGATION)
+  if (startup_diag) {
+    if (const auto* nav_system = systems_.findSystem<navigation::NavigationSystem>()) {
+      const auto& stats = nav_system->stats();
+      spdlog::info(
+          "Engine startup nav stats: update={:.2f}ms rebuild={:.2f}ms submit={:.2f}ms move={:.2f}ms apply={:.2f}ms",
+          stats.last_update_ms,
+          stats.last_rebuild_ms,
+          stats.last_submit_ms,
+          stats.last_move_ms,
+          stats.last_apply_ms);
+    }
+  }
+#endif
+
   if (graphics_) {
-    const auto environment_start = core::SteadyClock::now();
+    section_start = section_end;
     graphics_->setEnvironmentMap(config_.environment_map,
                                  config_.environment_intensity,
                                  config_.environment_draw_skybox);
     spdlog::info("Engine environment setup took {:.2f} ms",
-                 core::elapsedMillisecondsSince(environment_start));
+                 core::elapsedMillisecondsSince(section_start));
+    section_end = core::SteadyClock::now();
+    log_startup_stage("engine environment setup", section_start, section_end);
   }
   warmUpRenderer();
+  if (startup_diag) {
+    spdlog::info("Engine startup through warm-up took {:.2f} ms",
+                 core::elapsedMillisecondsSince(startup_start));
+  }
   accumulator_ = 0.0f;
   last_time_ = core::SteadyClock::now();
 }

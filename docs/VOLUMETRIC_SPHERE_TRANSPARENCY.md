@@ -34,7 +34,7 @@ they are in front of those effects.
 
 Primary file:
 
-- [forward.cpp](/home/irie/Documents/karma/src/rendering/renderer/backends/diligent/passes/forward.cpp)
+- [forward.cpp](../src/rendering/renderer/backends/diligent/passes/forward.cpp)
 
 ## Sort Key
 
@@ -52,7 +52,7 @@ This gives stable front-to-back perception between multiple spheres.
 
 Primary file:
 
-- [forward.cpp](/home/irie/Documents/karma/src/rendering/renderer/backends/diligent/passes/forward.cpp)
+- [forward.cpp](../src/rendering/renderer/backends/diligent/passes/forward.cpp)
 
 ## Compositing Fix
 
@@ -76,7 +76,7 @@ appearance, while overlapping spheres no longer erase each other completely.
 
 Primary file:
 
-- [backend_init.cpp](/home/irie/Documents/karma/src/rendering/renderer/backends/diligent/backend_init.cpp)
+- [backend_init.cpp](../src/rendering/renderer/backends/diligent/backend_init.cpp)
 
 ## Current Limitations
 

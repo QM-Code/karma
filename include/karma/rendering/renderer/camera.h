@@ -12,8 +12,11 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Maximum number of camera shader color parameters.
 static constexpr uint32_t kCameraShaderUserParamCapacity = 32;
 
+/// Hashes a camera shader parameter key with FNV-1a.
 inline uint32_t cameraShaderParamKeyHash(std::string_view key) {
   uint32_t hash = 2166136261u;
   for (char c : key) {
@@ -23,11 +26,15 @@ inline uint32_t cameraShaderParamKeyHash(std::string_view key) {
   return hash;
 }
 
+/// \ingroup karma_rendering
+/// One hashed camera shader parameter.
 struct CameraShaderUserParam {
   uint32_t key_hash = 0u;
   math::Color value{};
 };
 
+/// \ingroup karma_rendering
+/// Renderer-facing camera state extracted from ECS camera/transform data.
 struct CameraData {
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};

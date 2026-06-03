@@ -7,10 +7,14 @@
 
 namespace karma::audio_backend {
 
+/// \ingroup karma_media
+/// Backend clip creation options.
 struct ClipOptions {
   int max_instances = 5;
 };
 
+/// \ingroup karma_media
+/// Backend audio clip interface.
 class Clip {
  public:
   virtual ~Clip() = default;
@@ -19,6 +23,8 @@ class Clip {
   virtual void setDistanceRange(float min_distance, float max_distance) = 0;
 };
 
+/// \ingroup karma_media
+/// Audio backend interface implemented by miniaudio or SDL adapters.
 class Backend {
  public:
   virtual ~Backend() = default;
@@ -28,6 +34,7 @@ class Backend {
   virtual void setListenerRotation(const glm::quat& rotation) = 0;
 };
 
+/// Creates the configured audio backend.
 std::unique_ptr<Backend> CreateAudioBackend();
 
 }  // namespace karma::audio_backend

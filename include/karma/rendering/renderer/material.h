@@ -11,14 +11,24 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// Alias for renderer color values.
 using Color = math::Color;
 
+/// \ingroup karma_rendering
+/// Material parameters consumed by the renderer backend.
+///
+/// The standard fields describe PBR-ish material inputs. The feature-specific
+/// fields are currently used by built-in shell, wave, halo, and volume shading
+/// models until a more general custom-material pipeline exists.
 struct MaterialDesc {
+  /// Transparent blending mode for material draws.
   enum class BlendMode : uint32_t {
     Alpha = 0,
     Additive = 1,
   };
 
+  /// Built-in material shader family.
   enum class ShadingModel : uint32_t {
     Standard = 0,
     EnergyShell = 1,
@@ -68,7 +78,10 @@ struct MaterialDesc {
   bool double_sided = false;
 };
 
+/// \ingroup karma_rendering
+/// Data-driven material resource description registered by key.
 struct MaterialResourceDesc {
+  /// Material resource construction mode.
   enum class Kind {
     MeshTint,
   };
@@ -85,6 +98,7 @@ struct MaterialResourceDesc {
   float roughness = 0.5f;
   bool double_sided = false;
 
+  /// Creates a material resource that tints materials from a mesh asset.
   static MaterialResourceDesc fromMeshTint(std::string source_mesh, Color tint) {
     MaterialResourceDesc desc{};
     desc.kind = Kind::MeshTint;

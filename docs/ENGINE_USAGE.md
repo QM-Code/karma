@@ -4,10 +4,14 @@
 Build and run the default sample:
 
 ```bash
-./setup.sh
-cmake --build build
-BZ3_DATA_DIR="$PWD/data" ./build/karma_example
+cmake -S . -B build \
+  -DKARMA_FETCH_DEPS=ON \
+  -DKARMA_BUILD_RMLUI_DEMO=OFF
+cmake --build build --parallel
+./build/karma_example
 ```
+
+For generated public API reference, see [API.md](API.md).
 
 ## Build Options
 Common toggles:
@@ -122,12 +126,12 @@ Local-light / point-shadow sanity check:
 ./build/karma_light_stress_example --lights 16 --stats
 ```
 
-For current renderer/sample handoff notes, see:
+For current renderer/sample implementation notes, see:
 
-- [RENDERER_REFACTOR_BOOTSTRAP.md](RENDERER_REFACTOR_BOOTSTRAP.md)
-- [EFFECT_API_SPLIT_BOOTSTRAP.md](EFFECT_API_SPLIT_BOOTSTRAP.md)
-- [LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
-- [LOCAL_LIGHT_PROBE_BOOTSTRAP.md](LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+- [../NEXT_AGENT.md](../NEXT_AGENT.md)
+- [VOLUMETRIC_SPHERE_TRANSPARENCY.md](VOLUMETRIC_SPHERE_TRANSPARENCY.md)
+- [BEAM_PATHS.md](BEAM_PATHS.md)
+- [EFFECT_PREFABS.md](EFFECT_PREFABS.md)
 
 ## Basic App Structure
 ```cpp
@@ -669,8 +673,7 @@ Point-light shadow setup:
 Reference sample:
 
 - [../examples/light_stress_example.cpp](../examples/light_stress_example.cpp) provides the current local-light probe workflow for `1-16` safe-mode shadowed point lights.
-- [LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](LOCAL_LIGHT_SHADOW_BOOTSTRAP.md) documents the current renderer-side implementation and recent fixes.
-- [LOCAL_LIGHT_PROBE_BOOTSTRAP.md](LOCAL_LIGHT_PROBE_BOOTSTRAP.md) documents the current sample-side layout, motion, and validation workflow.
+- [../NEXT_AGENT.md](../NEXT_AGENT.md) carries active renderer/local-light handoff notes.
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.

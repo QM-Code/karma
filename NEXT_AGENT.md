@@ -1,8 +1,13 @@
-# Next Agent Bootstrap
+# Current Agent Handoff
 
-This repo is in a fast-moving state. Prefer behavior-preserving refactors first, then tighten architecture once the split points are proven. Check the worktree before editing and do not revert unrelated user changes.
+This repo is in a fast-moving state. Prefer behavior-preserving refactors first,
+then tighten architecture once the split points are proven. Check the worktree
+before editing and do not revert unrelated user changes.
 
 ## Start Here
+
+This file is the consolidated agent handoff. The old one-off handoff and plan
+docs under `docs/` were folded here or removed after completion.
 
 There are seven active technical tracks in the current tree:
 
@@ -14,22 +19,21 @@ There are seven active technical tracks in the current tree:
 6. GLB node animation / first-pass skeletal CPU skinning
 7. static navmesh generation and pathfinding
 
-Read these first:
+Durable reference docs:
 
-- [docs/GLB_ANIMATION_BOOTSTRAP.md](docs/GLB_ANIMATION_BOOTSTRAP.md)
-- [docs/NAVIGATION_BOOTSTRAP.md](docs/NAVIGATION_BOOTSTRAP.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/ENGINE_USAGE.md](docs/ENGINE_USAGE.md)
+- [docs/ENGINE_IMPLEMENTATION.md](docs/ENGINE_IMPLEMENTATION.md)
 - [docs/NAVIGATION.md](docs/NAVIGATION.md)
-- [docs/RENDERER_REFACTOR_BOOTSTRAP.md](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
-- [docs/PARTICLE_PERF_BOOTSTRAP.md](docs/PARTICLE_PERF_BOOTSTRAP.md)
-- [docs/PARTICLE_SYSTEM_ANALYSIS.md](docs/PARTICLE_SYSTEM_ANALYSIS.md)
+- [docs/PARTICLE_SYSTEM.md](docs/PARTICLE_SYSTEM.md)
 - [docs/PARTICLE_EFFECT_GENERATION.md](docs/PARTICLE_EFFECT_GENERATION.md)
-- [docs/EFFECT_API_SPLIT_BOOTSTRAP.md](docs/EFFECT_API_SPLIT_BOOTSTRAP.md)
-- [docs/EFFECT_API_SPLIT_PLAN.md](docs/EFFECT_API_SPLIT_PLAN.md)
-- [docs/PREFAB_GALLERY_BOOTSTRAP.md](docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [docs/EFFECT_PREFABS.md](docs/EFFECT_PREFABS.md)
+- [docs/BEAM_PATHS.md](docs/BEAM_PATHS.md)
+- [docs/EXPLOSION_PREFAB.md](docs/EXPLOSION_PREFAB.md)
+- [docs/EXPLOSION_STRESS_PERF.md](docs/EXPLOSION_STRESS_PERF.md)
 - [docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
-- [docs/COLLISION_BOOTSTRAP.md](docs/COLLISION_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+- [docs/RIGGED_GLB_AUTHORING.md](docs/RIGGED_GLB_AUTHORING.md)
+- [docs/DEBUG_EDITOR.md](docs/DEBUG_EDITOR.md) if changing the runtime debug editor
 
 ## Worktree Caution
 
@@ -53,14 +57,14 @@ High-signal areas right now:
 - [`include/karma/runtime/app/runtime_module.h`](include/karma/runtime/app/runtime_module.h)
 - [`include/karma/content/prefabs/prefab_resource_context.h`](include/karma/content/prefabs/prefab_resource_context.h)
 - [`include/karma/content/prefabs/component_serializer_registry.h`](include/karma/content/prefabs/component_serializer_registry.h)
-- [`src/simulation/physics/`](src/physics)
-- [`src/simulation/collision/`](src/collision)
-- [`src/simulation/animation/`](src/animation)
-- [`include/karma/simulation/animation/`](include/karma/animation)
+- [`src/simulation/physics/`](src/simulation/physics)
+- [`src/simulation/collision/`](src/simulation/collision)
+- [`src/simulation/animation/`](src/simulation/animation)
+- [`include/karma/simulation/animation/`](include/karma/simulation/animation)
 - [`src/content/importers/glb_scene_import.cpp`](src/content/importers/glb_scene_import.cpp)
 - [`src/world/scene/transform_hierarchy.cpp`](src/world/scene/transform_hierarchy.cpp)
-- [`include/karma/simulation/navigation/`](include/karma/navigation)
-- [`src/simulation/navigation/`](src/navigation)
+- [`include/karma/simulation/navigation/`](include/karma/simulation/navigation)
+- [`src/simulation/navigation/`](src/simulation/navigation)
 - [`examples/navmesh_example.cpp`](examples/navmesh_example.cpp)
 - [`tests/navmesh_tests.cpp`](tests/navmesh_tests.cpp)
 - [`examples/light_stress_example.cpp`](examples/light_stress_example.cpp)
@@ -151,7 +155,7 @@ Important limitations:
 
 If continuing there, start with:
 
-- [docs/GLB_ANIMATION_BOOTSTRAP.md](docs/GLB_ANIMATION_BOOTSTRAP.md)
+- [docs/RIGGED_GLB_AUTHORING.md](docs/RIGGED_GLB_AUTHORING.md)
 - [src/simulation/animation/AGENTS.md](src/simulation/animation/AGENTS.md)
 - [include/karma/simulation/animation/AGENTS.md](include/karma/simulation/animation/AGENTS.md)
 
@@ -184,8 +188,9 @@ Recent renderer-structure work already in the tree:
 
 If continuing there, start with:
 
-- [docs/RENDERER_REFACTOR_BOOTSTRAP.md](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
+- [docs/ENGINE_USAGE.md](docs/ENGINE_USAGE.md)
+- [docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
+- [src/rendering/renderer/backends/diligent/passes/AGENTS.md](src/rendering/renderer/backends/diligent/passes/AGENTS.md)
 
 ## Particle / Render Perf Summary
 
@@ -204,13 +209,17 @@ Recent particle-side work already in the tree:
 - wave volume proxies now render as projected screen-bounds quads instead of near-full-screen overlays
 - analytic volumetric spheres now render post-particle, sort by real sphere center, and alpha-compose without erasing background spheres
 - prefab gallery perf logging exists behind `KARMA_PREFAB_GALLERY_STATS=1`
+- direct-load staged explosion prefabs use `prefab.resources.json` sidecars for
+  prefab-local atlas textures and effect files
+- EXR source folders for the explosion are reference assets only, not runtime
+  dependencies
 
 If continuing there, start with:
 
-- [docs/PARTICLE_SYSTEM_ANALYSIS.md](docs/PARTICLE_SYSTEM_ANALYSIS.md)
+- [docs/PARTICLE_SYSTEM.md](docs/PARTICLE_SYSTEM.md)
 - [docs/PARTICLE_EFFECT_GENERATION.md](docs/PARTICLE_EFFECT_GENERATION.md)
-- [docs/PARTICLE_PERF_BOOTSTRAP.md](docs/PARTICLE_PERF_BOOTSTRAP.md)
-- [docs/PREFAB_GALLERY_BOOTSTRAP.md](docs/PREFAB_GALLERY_BOOTSTRAP.md)
+- [docs/EXPLOSION_PREFAB.md](docs/EXPLOSION_PREFAB.md)
+- [docs/EXPLOSION_STRESS_PERF.md](docs/EXPLOSION_STRESS_PERF.md)
 - [docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 
 ## Collision / Physics Summary
@@ -226,7 +235,11 @@ Recent collision-side work already in the tree:
 
 If continuing there, start with:
 
-- [docs/COLLISION_BOOTSTRAP.md](docs/COLLISION_BOOTSTRAP.md)
+- [examples/collision_events_example.cpp](examples/collision_events_example.cpp)
+- [src/simulation/collision/](src/simulation/collision)
+- [include/karma/world/components/collision_events.h](include/karma/world/components/collision_events.h)
+- [include/karma/world/components/contact_events.h](include/karma/world/components/contact_events.h)
+- [include/karma/world/components/ground_contact.h](include/karma/world/components/ground_contact.h)
 
 ## Local-Light / Shadow Summary
 
@@ -242,8 +255,9 @@ Recent local-light work already in the tree:
 
 If continuing there, start with:
 
-- [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
-- [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
+- [docs/ENGINE_USAGE.md](docs/ENGINE_USAGE.md)
+- [examples/light_stress_example.cpp](examples/light_stress_example.cpp)
+- [src/rendering/renderer/backends/diligent/passes/shadows.cpp](src/rendering/renderer/backends/diligent/passes/shadows.cpp)
 
 ## Navigation Summary
 
@@ -260,8 +274,9 @@ Recent navigation work already in the tree:
 
 If continuing there, start with:
 
-- [docs/NAVIGATION_BOOTSTRAP.md](docs/NAVIGATION_BOOTSTRAP.md)
 - [docs/NAVIGATION.md](docs/NAVIGATION.md)
+- [examples/navmesh_example.cpp](examples/navmesh_example.cpp)
+- [tests/navmesh_tests.cpp](tests/navmesh_tests.cpp)
 
 ## Good Next Steps
 
@@ -269,25 +284,31 @@ If continuing renderer decomposition:
 
 1. move the inline line draw path out of `backend_render.cpp`
 2. split Forward+ setup and SRB binding out of `backend_render.cpp`
-3. split `backend_init.cpp` by bootstrap responsibility and move inline shader strings out of it
+3. split `backend_init.cpp` by initialization responsibility and move inline shader strings out of it
 4. only after that, consider breaking up `passes/forward.cpp` and `passes/shadows.cpp`
 
 If continuing particle work:
 
-1. read [docs/PARTICLE_SYSTEM_ANALYSIS.md](docs/PARTICLE_SYSTEM_ANALYSIS.md)
-2. add stable benchmark logging for explosion stress and prefab gallery
-3. measure alpha/distortion sort cost before another architecture change
-4. explore bucketed or approximate depth ordering before GPU simulation
-5. consider particle material/state IDs before adding more renderer state fields to emitters
-6. only move simulation fully GPU-side if the user wants a larger renderer rewrite
+1. use [docs/EXPLOSION_STRESS_PERF.md](docs/EXPLOSION_STRESS_PERF.md) as the
+   measurement guide
+2. capture `KARMA_PREFAB_GALLERY_STATS=1` output on a stable windowing session
+3. compare against `karma_explosion_stress_example --disable heat` if heat
+   distortion remains a suspect
+4. measure alpha/distortion sort cost before another architecture change
+5. explore bucketed or approximate depth ordering before GPU simulation
+6. consider particle material/state IDs before adding more renderer state fields to emitters
+7. only move simulation fully GPU-side if the user wants a larger renderer rewrite
 
 If continuing the effect API split:
 
-1. read [docs/EFFECT_API_SPLIT_BOOTSTRAP.md](docs/EFFECT_API_SPLIT_BOOTSTRAP.md) first
-2. treat runtime modularization as landed and stable enough to build on
-3. the next real architecture gap is the orb shell / material pipeline split
-4. parser/plugin decoupling for arbitrary prefab section kinds is still missing
-5. do not regress the out-of-line runtime-module ctor/dtor setup unless you also change ownership away from forward-declared system pointers
+1. treat runtime modularization as landed and stable enough to build on
+2. keep runtime-module constructors/destructors out of line while public headers
+   forward-declare private system types
+3. remember that prefab loading now deserializes component payloads by component
+   type name; old prefab section handlers and entry enum values are gone
+4. the component serializer registry is still process-global state
+5. the next real architecture gaps are scoped component serializer ownership,
+   schema validation, and the orb shell / material pipeline split
 
 If continuing collision/contact work:
 

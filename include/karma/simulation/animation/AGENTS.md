@@ -4,7 +4,8 @@ This directory exposes public animation APIs.
 
 Before changing headers, read:
 
-- `docs/GLB_ANIMATION_BOOTSTRAP.md`
+- `NEXT_AGENT.md`
+- `docs/RIGGED_GLB_AUTHORING.md`
 - `src/simulation/animation/AGENTS.md`
 
 API constraints:

@@ -5,7 +5,13 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Light data extracted by `RenderSystem`.
+///
+/// Directional, point, and spot lights share one component. Point lights can
+/// request shadows when the renderer has point-shadow budget available.
 struct LightComponent : ecs::ComponentTag {
+  /// Light shape/type consumed by the renderer.
   enum class Type {
     Directional,
     Point,

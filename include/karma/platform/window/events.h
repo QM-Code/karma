@@ -4,6 +4,8 @@
 
 namespace karma::platform {
 
+/// \ingroup karma_platform
+/// Platform-independent key enum used by events and input bindings.
 enum class Key {
   Unknown,
   A, B, C, D, E, F, G, H, I, J, K, L, M,
@@ -48,6 +50,8 @@ enum class Key {
   World2
 };
 
+/// \ingroup karma_platform
+/// Platform-independent mouse button enum.
 enum class MouseButton {
   Left,
   Right,
@@ -59,6 +63,8 @@ enum class MouseButton {
   Button8
 };
 
+/// \ingroup karma_platform
+/// Keyboard modifier state.
 struct Modifiers {
   bool shift = false;
   bool control = false;
@@ -66,6 +72,8 @@ struct Modifiers {
   bool super = false;
 };
 
+/// \ingroup karma_platform
+/// Window/input event kind.
 enum class EventType {
   KeyDown,
   KeyUp,
@@ -79,6 +87,8 @@ enum class EventType {
   WindowClose
 };
 
+/// \ingroup karma_platform
+/// Platform-independent window/input event.
 struct Event {
   EventType type = EventType::KeyDown;
   Key key = Key::Unknown;

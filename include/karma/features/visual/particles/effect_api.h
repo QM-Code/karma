@@ -14,6 +14,8 @@
 
 namespace karma::particles {
 
+/// \ingroup karma_particles
+/// Binding options for attaching a named particle effect to an entity.
 struct ParticleEffectBindingDesc {
   std::string_view effect_key;
   bool enabled = true;
@@ -25,6 +27,8 @@ struct ParticleEffectBindingDesc {
   std::optional<components::ParticleEffectOverrideComponent> effect_override;
 };
 
+/// \ingroup karma_particles
+/// Creation options for a new particle effect entity.
 struct ParticleEffectEntityDesc {
   std::string_view name;
   std::string_view effect_key;
@@ -38,6 +42,7 @@ struct ParticleEffectEntityDesc {
   std::optional<components::ParticleEffectOverrideComponent> effect_override;
 };
 
+/// Binds an existing entity to a named particle effect.
 inline bool bindEffect(ecs::World& world,
                        ecs::Entity entity,
                        const ParticleEffectBindingDesc& desc) {
@@ -68,6 +73,7 @@ inline bool bindEffect(ecs::World& world,
   return true;
 }
 
+/// Creates a transform entity and binds it to a named particle effect.
 inline ecs::Entity createEffectEntity(ecs::World& world,
                                       const ParticleEffectEntityDesc& desc) {
   ecs::Entity entity = world.createEntity();
@@ -90,6 +96,7 @@ inline ecs::Entity createEffectEntity(ecs::World& world,
   return entity;
 }
 
+/// Adds or replaces per-instance effect overrides.
 inline bool setEffectOverrides(ecs::World& world,
                                ecs::Entity entity,
                                components::ParticleEffectOverrideComponent effect_override) {
@@ -100,6 +107,7 @@ inline bool setEffectOverrides(ecs::World& world,
   return true;
 }
 
+/// Removes per-instance effect overrides.
 inline bool clearEffectOverrides(ecs::World& world, ecs::Entity entity) {
   if (!world.isAlive(entity) || !world.has<components::ParticleEffectOverrideComponent>(entity)) {
     return false;
@@ -108,6 +116,7 @@ inline bool clearEffectOverrides(ecs::World& world, ecs::Entity entity) {
   return true;
 }
 
+/// Enables or disables an effect and matching visibility when present.
 inline bool setEffectEnabled(ecs::World& world, ecs::Entity entity, bool enabled) {
   if (!world.isAlive(entity) || !world.has<components::ParticleEmitterComponent>(entity)) {
     return false;
@@ -119,6 +128,7 @@ inline bool setEffectEnabled(ecs::World& world, ecs::Entity entity, bool enabled
   return true;
 }
 
+/// Sets whether an emitter is actively playing.
 inline bool setEffectPlaying(ecs::World& world, ecs::Entity entity, bool playing) {
   if (!world.isAlive(entity) || !world.has<components::ParticleEmitterComponent>(entity)) {
     return false;
@@ -127,6 +137,7 @@ inline bool setEffectPlaying(ecs::World& world, ecs::Entity entity, bool playing
   return true;
 }
 
+/// Sets both effect enabled and playback state.
 inline bool setEffectPlayback(ecs::World& world,
                               ecs::Entity entity,
                               bool enabled,
@@ -143,6 +154,7 @@ inline bool setEffectPlayback(ecs::World& world,
   return true;
 }
 
+/// Restarts an effect by incrementing its restart counter.
 inline bool restartEffect(ecs::World& world, ecs::Entity entity) {
   if (!world.isAlive(entity) || !world.has<components::ParticleEffectComponent>(entity)) {
     return false;

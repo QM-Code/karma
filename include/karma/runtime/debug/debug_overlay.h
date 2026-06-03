@@ -28,6 +28,11 @@ class SystemGraph;
 
 namespace karma::debug {
 
+/// \ingroup karma_runtime
+/// Built-in ImGui debug overlay for scene, renderer, and frame diagnostics.
+///
+/// This layer is compiled when `KARMA_BUILD_DEBUG_UI` is enabled. It uses the
+/// same `UiLayer` contract as application UI and should remain optional.
 class DebugOverlayLayer final : public app::UiLayer {
  public:
   DebugOverlayLayer(ecs::World* world,

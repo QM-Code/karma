@@ -9,6 +9,8 @@
 
 namespace karma::platform {
 
+/// \ingroup karma_platform
+/// Platform window creation settings.
 struct WindowConfig {
   int width = 1280;
   int height = 720;
@@ -20,6 +22,8 @@ struct WindowConfig {
   int samples = 4;
 };
 
+/// \ingroup karma_platform
+/// Platform window abstraction used by runtime and renderer backend creation.
 class Window {
  public:
   virtual ~Window() = default;
@@ -50,8 +54,11 @@ class Window {
   virtual void* nativeHandle() const = 0;
 };
 
+/// Creates the configured default window backend.
 std::unique_ptr<Window> CreateWindow(const WindowConfig& config);
+/// Creates a GLFW window backend.
 std::unique_ptr<Window> CreateGlfwWindow(const WindowConfig& config);
+/// Creates an SDL window backend.
 std::unique_ptr<Window> CreateSdlWindow(const WindowConfig& config);
 
 }  // namespace karma::platform

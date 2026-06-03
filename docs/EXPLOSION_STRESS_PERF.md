@@ -347,11 +347,11 @@ Updated interpretation:
 - `smoke=procedural_atlas`:
   - the smoke flipbook is using the generated fast/default atlas or the EXR path failed
 
-## Related Handoff
+## Related Docs
 
-The engineering summary and continuation notes for this work live in:
+The current engineering handoff and prefab authoring notes live in:
 
-- [EXPLOSION_STRESS_BOOTSTRAP.md](EXPLOSION_STRESS_BOOTSTRAP.md)
+- [../NEXT_AGENT.md](../NEXT_AGENT.md)
 - [EXPLOSION_PREFAB.md](EXPLOSION_PREFAB.md)
 
 ## Environment Note

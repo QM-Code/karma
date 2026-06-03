@@ -10,6 +10,11 @@
 
 namespace karma::audio {
 
+/// \ingroup karma_media
+/// Shared audio clip handle.
+///
+/// Clips are cached by `Audio` and can play overlapping instances up to their
+/// configured backend limit.
 class AudioClip {
  public:
   AudioClip() = delete;
@@ -19,9 +24,12 @@ class AudioClip {
   AudioClip& operator=(AudioClip&&) noexcept = default;
   ~AudioClip() = default;
 
+  /// Plays the clip at a world position using current spatial defaults.
   void play(const glm::vec3& position, float volume = 1.0f) const;
+  /// Plays the clip with explicit spatial distance settings.
   void playSpatial(const glm::vec3& position, float volume,
                    float min_distance, float max_distance) const;
+  /// Sets default spatialization for future `play()` calls.
   void setSpatialDefaults(bool spatialized, float min_distance, float max_distance);
 
  private:
@@ -34,13 +42,18 @@ class AudioClip {
   float max_distance_ = 20.0f;
 };
 
+/// \ingroup karma_media
+/// Audio facade owned by `EngineApp`.
 class Audio {
  public:
   Audio();
   ~Audio();
 
+  /// Loads or returns a cached clip.
   AudioClip loadClip(const std::string& filepath, int maxInstances = 5);
+  /// Updates listener world position.
   void setListenerPosition(const glm::vec3& position);
+  /// Updates listener world rotation.
   void setListenerRotation(const glm::quat& rotation);
 
  private:

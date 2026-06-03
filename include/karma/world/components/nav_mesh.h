@@ -12,6 +12,8 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Marks mesh geometry as a source surface for navmesh builds.
 struct NavMeshSurfaceComponent : ecs::ComponentTag {
   bool enabled = true;
   uint32_t layer_mask = 0xffffffffu;
@@ -21,6 +23,8 @@ struct NavMeshSurfaceComponent : ecs::ComponentTag {
   std::string mesh_key;
 };
 
+/// \ingroup karma_components
+/// Authored off-mesh navigation connection.
 struct NavOffMeshLinkComponent : ecs::ComponentTag {
   bool enabled = true;
   uint32_t layer_mask = 0xffffffffu;
@@ -34,6 +38,8 @@ struct NavOffMeshLinkComponent : ecs::ComponentTag {
   uint32_t user_id = 0;
 };
 
+/// \ingroup karma_components
+/// Owns a baked navigation mesh and build settings for an entity.
 struct NavMeshComponent : ecs::ComponentTag {
   bool enabled = true;
   bool build_on_start = true;

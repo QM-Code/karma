@@ -1,5 +1,11 @@
 #pragma once
 
+/// \file
+/// Convenience umbrella header for the common Karma public API.
+///
+/// Prefer narrower `karma/<layer>/...` includes in library code. Examples and
+/// small applications may include this header for convenience.
+
 #include "karma/runtime/app/engine_app.h"
 #include "karma/runtime/app/runtime_module.h"
 #include "karma/simulation/animation/animation_clip.h"
@@ -56,7 +62,6 @@
 #include "karma/features/visual/lights/light_pulse_system.h"
 #include "karma/content/prefabs/prefab.h"
 #include "karma/content/prefabs/component_serializer_registry.h"
-#include "karma/content/prefabs/prefab_registry.h"
 #include "karma/content/prefabs/prefab_resource_context.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/rendering/renderer/camera_picking.h"

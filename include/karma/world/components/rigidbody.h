@@ -5,6 +5,8 @@
 
 namespace karma::components {
 
+/// \ingroup karma_components
+/// Dynamic rigid-body authoring data consumed by `PhysicsSystem`.
 class RigidbodyComponent : public ecs::ComponentTag {
  public:
   float mass = 1.0f;

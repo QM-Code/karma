@@ -17,13 +17,21 @@ namespace karma::particles {
 
 class ParticleLibrary;
 
+/// \ingroup karma_particles
+/// Runtime particle simulation and renderer submission system.
+///
+/// The system consumes `ParticleEmitterComponent`, `ParticleEffectComponent`,
+/// and `ParticleEffectOverrideComponent`. Live particles are internal runtime
+/// state keyed by entity.
 class ParticleSystem {
  public:
   explicit ParticleSystem(renderer::GraphicsDevice* device,
                           ParticleLibrary* library = nullptr)
       : device_(device), library_(library) {}
 
+  /// Updates emitters, simulates live particles, and submits renderer batches.
   void update(ecs::World& world, float dt, float interpolation_alpha);
+  /// Returns current live particle count for one entity.
   std::size_t liveParticleCount(ecs::Entity entity) const;
 
  private:

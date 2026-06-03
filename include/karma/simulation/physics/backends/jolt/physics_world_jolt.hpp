@@ -18,6 +18,8 @@ namespace karma::physics_backend {
 
 class PhysicsWorldJoltContactListener;
 
+/// \ingroup karma_physics
+/// Jolt implementation of `PhysicsWorldBackend`.
 class PhysicsWorldJolt final : public PhysicsWorldBackend {
 public:
     PhysicsWorldJolt();

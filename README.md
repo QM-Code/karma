@@ -1,50 +1,163 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="Karma Engine logo" width="180">
+</p>
+
 # Karma Engine
 
-Karma is a C++20 ECS-driven 3D game engine with a Diligent renderer, prefab and particle tooling, optional physics/audio/network backends, and sample applications under `examples/`.
+Karma is a C++20 ECS-driven 3D game engine. The current tree is a working
+static library plus examples, with a layered runtime, Diligent/Vulkan rendering,
+prefabs, particles, GLB import, animation/skinning, physics/collision,
+navigation, audio, networking, and UI adapters.
 
-## Start Here
+## Current State
 
-If you are new to this repo, start with:
+Karma is organized as layered engine code under `include/karma/<layer>` and
+`src/<layer>`. The important layers are:
+
+- `core`: IDs, type helpers, math, and timing.
+- `world`: ECS, components, system graph, and scene hierarchy.
+- `simulation`: animation, physics, collision, and Recast/Detour navigation.
+- `rendering`: renderer-facing APIs, renderer systems, and Diligent backend.
+- `media`: audio APIs and backends.
+- `content`: importers, geometry loading, prefabs, and resource sidecars.
+- `platform`: window and network edges.
+- `features`: optional visual/UI feature modules.
+- `runtime`: `EngineApp`, input, UI context, debug overlay, and app wiring.
+
+The default non-headless build currently enables GLFW, Diligent, miniaudio,
+ENet, Jolt, navigation, debug UI, ImGui demo, and the RmlUi demo. RmlUi can be
+disabled when you do not need that demo or adapter.
+
+## Quick Start
+
+```bash
+cmake -S . -B build \
+  -DKARMA_FETCH_DEPS=ON \
+  -DKARMA_BUILD_RMLUI_DEMO=OFF
+
+cmake --build build --parallel
+./build/karma_example
+```
+
+Useful focused targets:
+
+```bash
+cmake --build build --target karma_navmesh_example --parallel
+cmake --build build --target karma_prefab_gallery_example --parallel
+cmake --build build --target karma_explosion_stress_example --parallel
+cmake --build build --target karma_animation_tests --parallel
+ctest --test-dir build --output-on-failure
+```
+
+For a headless build that skips window/render backends and graphics demos:
+
+```bash
+cmake -S . -B build-headless -DKARMA_HEADLESS=ON
+cmake --build build-headless --target karma_network_demo --parallel
+```
+
+## Major Features
+
+- ECS runtime with fixed-step updates, per-frame systems, scene graph transforms,
+  app/game interfaces, and optional runtime modules.
+- Diligent renderer with Forward+ local lights, directional shadows, point-light
+  shadows, transparent passes, debug lines, particles, UI draw-data composition,
+  and environment/texture/mesh resource management.
+- Content pipeline for GLB scene import, materials, cameras/lights, node
+  animation, first-pass CPU skinning, JSON prefabs, and prefab-local
+  `prefab.resources.json` registrations.
+- Particle tooling with `.kpeffect` files, hot reload, emitter overrides,
+  flipbooks, distortion, ground-aligned particles, soft particles, and renderer
+  performance diagnostics.
+- Visual feature modules for beam paths, analytic volume spheres, light pulses,
+  energy orbs, staged explosions, and prefab gallery scenes.
+- Simulation stack with Jolt or Bullet physics backends, collision/contact ECS
+  events, grounded/support state, player controllers, static navmesh baking, and
+  Detour path queries.
+- UI adapters for ImGui and RmlUi behind `runtime/app/UiLayer`.
+- Audio and networking through miniaudio/SDL and ENet-backed abstractions.
+
+## Examples
+
+The examples under [examples/](examples/) cover the current engine surface:
+
+- `karma_example`: main demo scene.
+- `karma_navmesh_example`: click-to-move navmesh sample over the GLB world.
+- `karma_glb_scene_import_example` and `karma_glb_animation_example`: authored
+  GLB import, animation, and skinning paths.
+- `karma_particle_example`, `karma_explosion_stress_example`, and
+  `karma_prefab_gallery_example`: particle and prefab stress/proof scenes.
+- `karma_laser_example`, `karma_energy_orb_example`,
+  `karma_volumetric_sphere_example`, and `karma_wave_example`: visual feature
+  module samples.
+- `karma_collision_events_example`: trigger, contact, and grounded-state demo.
+- `karma_light_stress_example`: Forward+ local-light and point-shadow probe.
+- `karma_imgui_ui_demo`, `karma_rmlui_ui_demo`, and `karma_network_demo`:
+  provider and platform demos.
+
+See [examples/README.md](examples/README.md) for the full target list and
+runtime flags.
+
+## Build Options
+
+Common CMake switches:
+
+- `KARMA_FETCH_DEPS`: fetch missing third-party dependencies with CMake
+  `FetchContent`.
+- `KARMA_HEADLESS`: disable window/render backends and graphics demos.
+- `KARMA_RENDER_BACKEND_DILIGENT`: enable the Diligent renderer.
+- `KARMA_WINDOW_BACKEND_GLFW` / `KARMA_WINDOW_BACKEND_SDL`: select one window
+  backend.
+- `KARMA_PHYSICS_BACKEND_JOLT` / `KARMA_PHYSICS_BACKEND_BULLET`: select one
+  physics backend.
+- `KARMA_AUDIO_BACKEND_MINIAUDIO` / `KARMA_AUDIO_BACKEND_SDL`: select one audio
+  backend.
+- `KARMA_ENABLE_NAVIGATION`: build Recast/Detour navigation support.
+- `KARMA_BUILD_DEBUG_UI`: build the runtime debug overlay.
+- `KARMA_BUILD_IMGUI_DEMO`, `KARMA_BUILD_RMLUI_DEMO`, `KARMA_ENABLE_RMLUI`:
+  optional UI demos/adapters.
+
+## Runtime Diagnostics
+
+Useful environment flags:
+
+- `KARMA_ENGINE_STARTUP_DIAG=1`: startup-stage timing for example boot triage.
+- `KARMA_ENGINE_FRAME_DIAG=1`: per-frame runtime timing.
+- `KARMA_PARTICLE_STATS=1`: renderer particle-pass diagnostics.
+- `KARMA_EXPLOSION_STRESS_STATS=1`: explosion stress scene perf logs.
+- `KARMA_PREFAB_GALLERY_STATS=1`: prefab gallery perf logs.
+- `KARMA_LIGHT_PROBE_STATS=1`: local-light probe stats.
+- `KARMA_VK_VALIDATION=1` and `KARMA_DILIGENT_DEBUG=1`: Vulkan/Diligent debug
+  output.
+
+## Documentation
+
+Start with:
 
 - [Usage Guide](docs/ENGINE_USAGE.md)
+- [API Documentation](docs/API.md)
 - [Implementation Notes](docs/ENGINE_IMPLEMENTATION.md)
+- [Architecture](docs/ARCHITECTURE.md)
 - [Examples](examples/README.md)
-- [Next Agent Bootstrap](NEXT_AGENT.md)
+- [Current Agent Handoff](NEXT_AGENT.md)
 
-## Runtime Bootstrap
+Focused references:
 
-The main runtime entry point is [`src/runtime/app/engine_app.cpp`](src/runtime/app/engine_app.cpp).
+- [Navigation](docs/NAVIGATION.md)
+- [Particle System](docs/PARTICLE_SYSTEM.md)
+- [Particle Effect Generation](docs/PARTICLE_EFFECT_GENERATION.md)
+- [Effect Prefabs](docs/EFFECT_PREFABS.md)
+- [Beam Paths](docs/BEAM_PATHS.md)
+- [Explosion Prefab](docs/EXPLOSION_PREFAB.md)
+- [Explosion Stress Performance](docs/EXPLOSION_STRESS_PERF.md)
+- [Rigged GLB Authoring](docs/RIGGED_GLB_AUTHORING.md)
+- [Volumetric Sphere Transparency](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
+- [Debug Editor](docs/DEBUG_EDITOR.md)
 
-Current startup flow:
+## Notes For Contributors
 
-- `EngineApp::start()` creates the window, graphics device, render system, prefab system, particle system, physics/collision layers, and audio layer.
-- It binds the game context, attaches any registered runtime modules, applies renderer settings from `EngineConfig`, and warms one render frame so the first visible frame does less surprise work.
-- `EngineApp::tick()` runs fixed-step gameplay and systems first, then per-frame updates, prefab/audio/UI prep, `beginFrame()`, particle updates, runtime-module updates, `RenderSystem::update()`, `renderLayer(0)`, UI, and `endFrame()`.
-
-## Renderer Layout
-
-The engine-side renderer is split between scene extraction and backend execution:
-
-- [`src/rendering/renderer/render_system.cpp`](src/rendering/renderer/render_system.cpp): ECS-to-render extraction, mesh/material binding, camera/light/environment submission, and debug draw collection.
-- [`src/rendering/renderer/backends/diligent/backend.hpp`](src/rendering/renderer/backends/diligent/backend.hpp): Diligent backend state and private pass entry points.
-- [`src/rendering/renderer/backends/diligent/backend_init.cpp`](src/rendering/renderer/backends/diligent/backend_init.cpp): device/bootstrap, shader and pipeline creation, shadow resources, and core renderer setup.
-- [`src/rendering/renderer/backends/diligent/backend_render.cpp`](src/rendering/renderer/backends/diligent/backend_render.cpp): frame orchestration, Forward+ setup, scene-copy orchestration, and remaining glue.
-- [`src/rendering/renderer/backends/diligent/passes/`](src/rendering/renderer/backends/diligent/passes): shadow, forward, particle, environment, line, frame, and camera-override pass code.
-- [`src/rendering/renderer/backends/diligent/resources/`](src/rendering/renderer/backends/diligent/resources): materials, meshes, render targets, and texture/resource helpers.
-
-## Current Bootstrap Handoffs
-
-Current high-signal handoff docs:
-
-- [Renderer Refactor Bootstrap](docs/RENDERER_REFACTOR_BOOTSTRAP.md)
-- [Particle Performance Bootstrap](docs/PARTICLE_PERF_BOOTSTRAP.md)
-- [Effect API Split Bootstrap](docs/EFFECT_API_SPLIT_BOOTSTRAP.md)
-- [Explosion Stress Bootstrap](docs/EXPLOSION_STRESS_BOOTSTRAP.md)
-- [Prefab Gallery Bootstrap](docs/PREFAB_GALLERY_BOOTSTRAP.md)
-- [Collision Bootstrap](docs/COLLISION_BOOTSTRAP.md)
-- [Local Light Shadow Bootstrap](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
-- [Local Light Probe Bootstrap](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
-
-## Project Reality
-
-This repo is no longer a minimal header-only skeleton. The current tree contains a working `src/` implementation with renderer, prefab, particle, optional effect-module, physics, collision, audio, and networking layers. Older docs that describe the repo as a tiny abstract sandbox are outdated.
+Check `git status` before editing; the worktree is often intentionally dirty
+while engine tasks are in progress. Follow [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for module placement and dependency direction. Active continuation notes belong
+in [NEXT_AGENT.md](NEXT_AGENT.md); durable usage, authoring, and diagnostic
+material belongs under `docs/`.

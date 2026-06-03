@@ -4,6 +4,12 @@
 
 namespace karma::core {
 
+/// \ingroup karma_core
+/// Generational handle used for ECS entities and scene-facing references.
+///
+/// The `index` selects a slot and `generation` prevents stale handles from
+/// becoming valid after a slot is reused. Default-constructed handles are
+/// invalid and can be used as nullable entity references.
 struct EntityId {
   uint32_t index = kInvalidIndex;
   uint32_t generation = 0;

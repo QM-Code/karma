@@ -4,11 +4,14 @@
 
 namespace karma::renderer {
 
+/// \ingroup karma_rendering
+/// World-space ray generated from a screen point and camera state.
 struct ScreenRay {
   math::Vec3 origin{};
   math::Vec3 direction{};
 };
 
+/// Converts a screen-space point into a world-space camera ray.
 bool screenPointToWorldRay(double screen_x,
                            double screen_y,
                            int viewport_width,

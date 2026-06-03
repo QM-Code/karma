@@ -1,0 +1,807 @@
+{
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Explosion",
+      "parent": null,
+      "components": {
+        "TagComponent": {
+          "name": "Explosion"
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": 1,
+      "name": "flash",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "flash"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.8,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.8,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/flash",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "fireball",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "fireball"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.75,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.75,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/fireball",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.03
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "heat",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "heat"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.82,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.82,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/heat",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.04
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "core_flipbook",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "core_flipbook"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.88,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.88,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/core_flipbook",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.01
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "smoke_flipbook",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "smoke_flipbook"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.92,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.92,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/smoke_flipbook",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.22
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "embers",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "embers"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.9,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.9,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/embers",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.05
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 7,
+      "name": "shock_ring",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "shock_ring"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.09,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.09,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/shock_ring",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.04
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 8,
+      "name": "debris",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "debris"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.86,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.86,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/debris",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.05
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 9,
+      "name": "dust_ring",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "dust_ring"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.04,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.04,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/dust_ring",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.05
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 10,
+      "name": "smoke",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "smoke"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.85,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.85,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/smoke",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.24
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 11,
+      "name": "scorch",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "scorch"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            0.03,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            0.03,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "prefabs/explosion/scorch",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.12
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "glow",
+      "parent": 0,
+      "components": {
+        "TagComponent": {
+          "name": "glow"
+        },
+        "LocalTransformComponent": {
+          "position": [
+            0,
+            1.35,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "TransformComponent": {
+          "position": [
+            0,
+            1.35,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [
+            1,
+            0.75,
+            0.45,
+            1
+          ],
+          "intensity": 0,
+          "range": 0.1,
+          "inner_cone_degrees": 15,
+          "outer_cone_degrees": 30,
+          "casts_shadows": false,
+          "shadow_extent": 0
+        },
+        "VisibilityComponent": {
+          "visible": false,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        },
+        "LightPulseComponent": {
+          "enabled": true,
+          "active": true,
+          "start_delay": 0,
+          "duration": 0.64,
+          "peak_intensity": 78,
+          "peak_range": 51,
+          "off_intensity": 0,
+          "off_range": 0.1,
+          "intensity_power": 2,
+          "range_power": 0.5,
+          "range_floor_factor": 0.35,
+          "hide_after_completion": true
+        }
+      }
+    }
+  ]
+}

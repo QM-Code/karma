@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Energy Orb",
+      "parent": null,
+      "components": {
+        "TagComponent": { "name": "Energy Orb" },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        }
+      }
+    },
+    {
+      "id": 1,
+      "name": "shell",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "shell" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1.3125, 1.3125, 1.3125]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1.3125, 1.3125, 1.3125]
+        },
+        "MeshComponent": {
+          "mesh_key": "examples/assets/shot.glb",
+          "material_key": "",
+          "texture_key": "",
+          "visible": true,
+          "shadow_visible": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "core",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "core" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "energy_orb_core",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true
+        },
+        "ParticleEffectOverrideComponent": {
+          "size_scale": 0.1875,
+          "radius_scale": 0.1875,
+          "velocity_scale": 0.1875,
+          "start_color": [1, 1, 1, 0.98],
+          "end_color": [0.153, 0.92, 0.238, 0]
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "arcs",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "arcs" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "energy_orb_arcs",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true
+        },
+        "ParticleEffectOverrideComponent": {
+          "size_scale": 0.1875,
+          "radius_scale": 0.1875,
+          "velocity_scale": 0.1875,
+          "start_color": [1, 1, 1, 1],
+          "end_color": [0.1656, 0.98, 0.2576, 0]
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "halo",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "halo" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "energy_orb_halo",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true
+        },
+        "ParticleEffectOverrideComponent": {
+          "size_scale": 0.1875,
+          "radius_scale": 0.1875,
+          "velocity_scale": 0.1875,
+          "start_color": [0.0504, 0.48, 0.0784, 0.08],
+          "end_color": [0.0216, 0.22, 0.0336, 0]
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "distortion",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "distortion" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "energy_orb_distortion",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true
+        },
+        "ParticleEffectOverrideComponent": {
+          "size_scale": 0.09375,
+          "radius_scale": 0.1875,
+          "velocity_scale": 0.1875,
+          "start_color": [1, 1, 1, 0.92],
+          "end_color": [1, 1, 1, 0]
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "glow",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "glow" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [0.4588, 1, 0.5248, 1],
+          "intensity": 9.75,
+          "range": 3,
+          "inner_cone_degrees": 15,
+          "outer_cone_degrees": 30,
+          "casts_shadows": false,
+          "shadow_extent": 0
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    }
+  ]
+}

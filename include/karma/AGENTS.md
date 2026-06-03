@@ -12,3 +12,7 @@ Do not add forwarding headers for old include paths.
 Public headers should expose data contracts and narrow subsystem APIs. Keep
 backend internals and large implementation records in `src/` unless users
 actually need them.
+
+UI provider adapters use `include/karma/features/ui/<provider>`. Their public
+API should be a small provider-specific factory around the generic
+`runtime/app/UiLayer` contract.

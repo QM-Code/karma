@@ -1,4 +1,10 @@
 if (BUILD_TESTING)
+  add_executable(karma_prefab_tests
+    tests/prefab_tests.cpp
+  )
+  target_link_libraries(karma_prefab_tests PRIVATE karma)
+  add_test(NAME karma_prefab_tests COMMAND karma_prefab_tests)
+
   add_executable(karma_animation_tests
     tests/animation_tests.cpp
   )

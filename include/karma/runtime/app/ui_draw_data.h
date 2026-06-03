@@ -7,6 +7,14 @@ namespace karma::app {
 
 using UITextureHandle = uint32_t;
 
+struct UITexture {
+  UITextureHandle handle = 0;
+  int width = 0;
+  int height = 0;
+
+  explicit operator bool() const { return handle != 0 && width > 0 && height > 0; }
+};
+
 struct UIVertex {
   float x = 0.0f;
   float y = 0.0f;

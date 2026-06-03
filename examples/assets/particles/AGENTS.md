@@ -4,10 +4,10 @@ This directory contains authored `.kpeffect` templates.
 
 Authoring rules:
 
-- Use stable texture aliases; package or example code must register them before
-  the effect is instantiated.
+- Use stable texture aliases; prefab resource sidecars, packages, or example
+  code must register them before the effect is instantiated.
 - Keep emitter behavior in `.kpeffect`; keep composition and positioning in
-  `.kprefab`.
+  JSON prefabs.
 - Use `local_space = true` for attached looping effects and `local_space =
   false` for detached smoke, debris, and explosions.
 - Keep high particle counts intentional and documented. Stress-test assets are

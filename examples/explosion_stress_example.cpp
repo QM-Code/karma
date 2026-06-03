@@ -1,5 +1,4 @@
 #include "demo_asset_paths.h"
-#include "explosion_prefab_package.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -76,9 +75,15 @@ constexpr std::array<ExplosionLayerOption, 12> kExplosionLayerOptions{{
 }};
 
 struct ExplosionStressItem {
-  ExplosionPrefabController controller{};
+  math::Vec3 position{};
+  std::string name;
   float next_trigger_time = 0.0f;
   float last_trigger_time = -1000.0f;
+};
+
+struct ActiveExplosionInstance {
+  ecs::Entity root{};
+  float destroy_time = 0.0f;
 };
 
 components::TransformComponent makeTransform(const math::Vec3& position) {
@@ -315,23 +320,27 @@ class ExplosionStressExample final : public app::GameInterface {
       return;
     }
 
-    std::size_t active_explosion_visuals = 0u;
-    std::size_t active_explosion_lights = 0u;
-    std::size_t pending_restarts = 0u;
+    std::size_t recently_triggered_explosions = 0u;
     for (const auto& explosion : explosions_) {
       if (time_ - explosion.last_trigger_time <= kExplosionVisualWindow) {
-        active_explosion_visuals += 1u;
+        recently_triggered_explosions += 1u;
       }
-      if (explosion.controller.light_active) {
-        active_explosion_lights += 1u;
+    }
+    const std::size_t active_explosion_visuals = active_explosions_.size();
+    std::size_t active_explosion_lights = 0u;
+    if (world != nullptr) {
+      for (ecs::Entity entity :
+           world->view<components::LightPulseComponent, components::LightComponent>()) {
+        const auto& pulse = world->get<components::LightPulseComponent>(entity);
+        if (pulse.active) {
+          active_explosion_lights += 1u;
+        }
       }
-      pending_restarts += explosion.controller.scheduled_restarts.size();
     }
 
     int fb_width = 0;
     int fb_height = 0;
-    const std::size_t total_prefabs =
-        world != nullptr ? world->view<components::PrefabInstanceComponent>().size() : 0u;
+    const std::size_t total_prefabs = explosions_.size();
     const std::size_t total_emitters =
         world != nullptr ? world->view<components::ParticleEmitterComponent>().size() : 0u;
     const std::size_t total_lights =
@@ -347,15 +356,15 @@ class ExplosionStressExample final : public app::GameInterface {
     const float average_dt = perf_frame_time_sum_ / static_cast<float>(perf_frame_count_);
     const float average_fps = average_dt > 1.0e-6f ? 1.0f / average_dt : 0.0f;
     spdlog::info(
-        "Explosion stress: t={:.2f}s fps={:.1f} avg_ms={:.2f} worst_ms={:.2f} configured={} active_visuals={} active_lights={} pending_restarts={} world_prefabs={} world_emitters={} world_lights={} trigger_interval_ms={:.0f} framebuffer={}x{} local_lights={} cpu_fallback={} fp_active={} part_sys_ms(sync/sim/pack)={:.2f}/{:.2f}/{:.2f} part_render_ms(add/asort/dsort/draw)={:.2f}/{:.2f}/{:.2f}/{:.2f} part_alpha_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} part_dist_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} fx_apply={} part_sys_emit(iter/vis/cull/sub)={}/{}/{}/{} part_sys_particles(sim/pack/cull/ground)={}/{}/{}/{} part_batches={}/{}/{} part_particles={}/{}/{} part_draws={}/{}/{} part_sorted={}/{} part_bad_depth={}/{} scene_samples={}/{} scene_copy={} post_copy={} alpha_half_res={}",
+        "Explosion stress: t={:.2f}s fps={:.1f} avg_ms={:.2f} worst_ms={:.2f} configured={} active_visuals={} recent_triggers={} active_lights={} world_prefabs={} world_emitters={} world_lights={} trigger_interval_ms={:.0f} framebuffer={}x{} local_lights={} cpu_fallback={} fp_active={} part_sys_ms(sync/sim/pack)={:.2f}/{:.2f}/{:.2f} part_render_ms(add/asort/dsort/draw)={:.2f}/{:.2f}/{:.2f}/{:.2f} part_alpha_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} part_dist_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} fx_apply={} part_sys_emit(iter/vis/cull/sub)={}/{}/{}/{} part_sys_particles(sim/pack/cull/ground)={}/{}/{}/{} part_batches={}/{}/{} part_particles={}/{}/{} part_draws={}/{}/{} part_sorted={}/{} part_bad_depth={}/{} scene_samples={}/{} scene_copy={} post_copy={} alpha_half_res={}",
         time_,
         average_fps,
         average_dt * 1000.0f,
         perf_frame_time_max_ * 1000.0f,
         explosion_count_,
         active_explosion_visuals,
+        recently_triggered_explosions,
         active_explosion_lights,
-        pending_restarts,
         total_prefabs,
         total_emitters,
         total_lights,
@@ -415,17 +424,18 @@ class ExplosionStressExample final : public app::GameInterface {
   void updateExplosions() {
     for (auto& explosion : explosions_) {
       if (time_ >= explosion.next_trigger_time) {
-        triggerExplosionPrefab(*world, explosion.controller, time_);
-        explosion.last_trigger_time = time_;
+        if (spawnExplosion(explosion)) {
+          explosion.last_trigger_time = time_;
+        }
         do {
           explosion.next_trigger_time += replay_period_seconds_;
         } while (time_ >= explosion.next_trigger_time);
       }
-      updateExplosionPrefab(*world, explosion.controller, time_);
     }
+    cleanupExpiredExplosions();
   }
 
-  void disableExplosionEmitter(ecs::Entity& entity) {
+  void disableExplosionEmitter(ecs::Entity entity) {
     if (!entity.isValid()) {
       return;
     }
@@ -433,59 +443,61 @@ class ExplosionStressExample final : public app::GameInterface {
     if (world->has<components::VisibilityComponent>(entity)) {
       world->get<components::VisibilityComponent>(entity).visible = false;
     }
-    entity = {};
   }
 
-  void disableExplosionLight(ExplosionPrefabController& controller) {
-    if (world->isAlive(controller.light) &&
-        world->has<components::LightComponent>(controller.light)) {
-      auto& light = world->get<components::LightComponent>(controller.light);
+  void disableExplosionLight(ecs::Entity light_entity) {
+    if (world->isAlive(light_entity) &&
+        world->has<components::LightComponent>(light_entity)) {
+      auto& light = world->get<components::LightComponent>(light_entity);
       light.intensity = 0.0f;
-      light.range = controller.light_off_range;
+      light.range = 0.1f;
     }
-    if (world->has<components::VisibilityComponent>(controller.light)) {
-      world->get<components::VisibilityComponent>(controller.light).visible = false;
+    if (world->has<components::LightPulseComponent>(light_entity)) {
+      auto& pulse = world->get<components::LightPulseComponent>(light_entity);
+      pulse.enabled = false;
+      pulse.active = false;
     }
-    controller.light_active = false;
-    controller.light = {};
+    if (world->has<components::VisibilityComponent>(light_entity)) {
+      world->get<components::VisibilityComponent>(light_entity).visible = false;
+    }
   }
 
-  void applyLayerSelection(ExplosionPrefabController& controller) {
+  void applyLayerSelection(const prefabs::PrefabInstance& instance) {
     if (!isLayerEnabled(enabled_layers_, kLayerFlash)) {
-      disableExplosionEmitter(controller.flash);
+      disableExplosionEmitter(instance.find("flash"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerFireball)) {
-      disableExplosionEmitter(controller.fireball);
+      disableExplosionEmitter(instance.find("fireball"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerHeat)) {
-      disableExplosionEmitter(controller.heat);
+      disableExplosionEmitter(instance.find("heat"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerCoreFlipbook)) {
-      disableExplosionEmitter(controller.core_flipbook);
+      disableExplosionEmitter(instance.find("core_flipbook"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerSmokeFlipbook)) {
-      disableExplosionEmitter(controller.smoke_flipbook);
+      disableExplosionEmitter(instance.find("smoke_flipbook"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerEmbers)) {
-      disableExplosionEmitter(controller.embers);
+      disableExplosionEmitter(instance.find("embers"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerShockRing)) {
-      disableExplosionEmitter(controller.shock_ring);
+      disableExplosionEmitter(instance.find("shock_ring"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerDebris)) {
-      disableExplosionEmitter(controller.debris);
+      disableExplosionEmitter(instance.find("debris"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerDustRing)) {
-      disableExplosionEmitter(controller.dust_ring);
+      disableExplosionEmitter(instance.find("dust_ring"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerSmoke)) {
-      disableExplosionEmitter(controller.smoke);
+      disableExplosionEmitter(instance.find("smoke"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerScorch)) {
-      disableExplosionEmitter(controller.scorch);
+      disableExplosionEmitter(instance.find("scorch"));
     }
     if (!isLayerEnabled(enabled_layers_, kLayerLight)) {
-      disableExplosionLight(controller);
+      disableExplosionLight(instance.find("glow"));
     }
   }
 
@@ -552,12 +564,6 @@ class ExplosionStressExample final : public app::GameInterface {
   }
 
   void spawnExplosions() {
-    if (prefab_registry == nullptr ||
-        !registerExplosionPrefabPackage(*prefab_registry)) {
-      spdlog::error("Explosion stress failed to register the explosion prefab package");
-      return;
-    }
-
     explosions_.clear();
     explosions_.reserve(static_cast<std::size_t>(explosion_count_));
 
@@ -576,37 +582,53 @@ class ExplosionStressExample final : public app::GameInterface {
           (static_cast<float>(z) - half_depth) * kExplosionSpacing,
       };
 
-      auto controller = instantiateExplosionPrefabController(
-          *world,
-          *prefab_registry,
-          prefabs::PrefabInstantiateDesc{
-              .name = "Explosion " + std::to_string(index + 1),
-              .transform = makeTransform(position),
-          });
-      if (!controller.has_value()) {
-        spdlog::error("Explosion stress failed to instantiate controller {}", index + 1);
-        continue;
-      }
-      applyLayerSelection(*controller);
-
       explosions_.push_back(ExplosionStressItem{
-          .controller = *controller,
+          .position = position,
+          .name = "Explosion " + std::to_string(index + 1),
           .next_trigger_time = 0.8f + static_cast<float>(index) * trigger_stagger,
           .last_trigger_time = -1000.0f,
       });
     }
+  }
 
-    const ExplosionPrefabPackageDebugInfo debug_info =
-        getExplosionPrefabPackageDebugInfo();
-    spdlog::info("Explosion stress flipbooks: core={} smoke={}",
-                 explosionFlipbookTextureSourceName(debug_info.core_flipbook_source),
-                 explosionFlipbookTextureSourceName(debug_info.smoke_flipbook_source));
+  bool spawnExplosion(const ExplosionStressItem& explosion) {
+    const auto instance = prefabs::instantiatePrefab(
+        *world,
+        *scene,
+        resolveExampleAssetPath("prefabs/explosion"),
+        prefabs::PrefabInstantiateDesc{
+            .root_transform = makeTransform(explosion.position),
+            .name_override = explosion.name,
+        });
+    if (!instance.has_value()) {
+      spdlog::error("Explosion stress failed to instantiate {}", explosion.name);
+      return false;
+    }
+
+    applyLayerSelection(*instance);
+    active_explosions_.push_back(ActiveExplosionInstance{
+        .root = instance->root,
+        .destroy_time = time_ + kExplosionVisualWindow,
+    });
+    return true;
+  }
+
+  void cleanupExpiredExplosions() {
+    for (auto it = active_explosions_.begin(); it != active_explosions_.end();) {
+      if (time_ < it->destroy_time) {
+        ++it;
+        continue;
+      }
+      prefabs::destroyPrefab(*world, *scene, it->root);
+      it = active_explosions_.erase(it);
+    }
   }
 
   std::string world_mesh_;
   std::string environment_map_;
   ecs::Entity camera_entity_{};
   std::vector<ExplosionStressItem> explosions_{};
+  std::vector<ActiveExplosionInstance> active_explosions_{};
   int explosion_count_ = kDefaultExplosionCount;
   float replay_period_seconds_ = kDefaultReplayPeriod;
   bool log_stats_ = false;

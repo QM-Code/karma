@@ -28,25 +28,32 @@ set(KARMA_SOURCES
   src/simulation/physics/player_controller.cpp
   src/simulation/physics/physics_world.cpp
   src/simulation/physics/physics_system.cpp
+  src/content/image/stb_image.cpp
   src/content/geometry/mesh_loader.cpp
   src/features/visual/beams/beam_path_runtime_module.cpp
   src/features/visual/beams/beam_path_system.cpp
+  src/features/visual/lights/light_pulse_system.cpp
   src/features/visual/particles/effect_library.cpp
   src/features/visual/particles/particle_system.cpp
-  src/content/prefabs/prefab_parser.cpp
-  src/content/prefabs/prefab_parse_support.cpp
-  src/content/prefabs/prefab_parse_mesh.cpp
-  src/content/prefabs/prefab_parse_particle.cpp
-  src/content/prefabs/prefab_parse_light.cpp
-  src/content/prefabs/prefab_parse_beam.cpp
-  src/content/prefabs/prefab_parse_volume_sphere.cpp
-  src/content/prefabs/prefab_entry_handler.cpp
+  src/content/prefabs/component_serializer_registry.cpp
+  src/content/prefabs/prefab_resources.cpp
   src/content/prefabs/prefab_runtime.cpp
   src/content/prefabs/prefab_registry.cpp
-  src/content/prefabs/prefab_system.cpp
   src/features/visual/volumes/volume_sphere_runtime_module.cpp
   src/features/visual/volumes/volume_sphere_system.cpp
 )
+
+if (NOT KARMA_HEADLESS)
+  list(APPEND KARMA_SOURCES
+    src/features/ui/imgui/imgui_layer.cpp
+  )
+endif()
+
+if (KARMA_ENABLE_RMLUI)
+  list(APPEND KARMA_SOURCES
+    src/features/ui/rmlui/rmlui_layer.cpp
+  )
+endif()
 
 if (KARMA_ENABLE_NAVIGATION)
   list(APPEND KARMA_SOURCES
@@ -63,7 +70,7 @@ if (KARMA_BUILD_DEBUG_UI)
   )
 endif()
 
-if (KARMA_BUILD_DEBUG_UI AND DEFINED IMGUI_SOURCES)
+if (NOT KARMA_HEADLESS AND DEFINED IMGUI_SOURCES)
   list(APPEND KARMA_SOURCES
     ${IMGUI_SOURCES}
   )
@@ -90,7 +97,6 @@ if (KARMA_RENDER_BACKEND_DILIGENT)
     src/rendering/renderer/backends/diligent/resources/meshes.cpp
     src/rendering/renderer/backends/diligent/resources/render_targets.cpp
     src/rendering/renderer/backends/diligent/resources/textures.cpp
-    src/rendering/renderer/backends/diligent/stb_image.cpp
   )
 endif()
 
@@ -200,11 +206,15 @@ target_link_libraries(karma
     ${KARMA_EXTRA_LINK_LIBS}
 )
 
-if (KARMA_BUILD_DEBUG_UI)
+if (NOT KARMA_HEADLESS)
   if (KARMA_IMGUI_TARGET)
-    target_link_libraries(karma PRIVATE ${KARMA_IMGUI_TARGET})
+    target_link_libraries(karma PUBLIC ${KARMA_IMGUI_TARGET})
   endif()
   if (imgui_SOURCE_DIR)
-    target_include_directories(karma PRIVATE ${imgui_SOURCE_DIR})
+    target_include_directories(karma PUBLIC ${imgui_SOURCE_DIR})
   endif()
+endif()
+
+if (KARMA_ENABLE_RMLUI)
+  target_link_libraries(karma PUBLIC ${KARMA_RMLUI_TARGET})
 endif()

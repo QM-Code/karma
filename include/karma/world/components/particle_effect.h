@@ -12,6 +12,7 @@ struct ParticleEffectComponent : ecs::ComponentTag {
   bool auto_apply = true;
   bool preserve_enabled = true;
   bool preserve_playing = true;
+  bool preserve_start_delay = false;
   uint32_t restart_count = 0;
   uint64_t applied_version = 0;
   uint64_t applied_override_hash = 0;

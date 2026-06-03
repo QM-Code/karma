@@ -45,12 +45,13 @@ The engine already has several pieces that make generation practical:
 - Texture aliases decouple emitter files from runtime texture IDs.
 - `ParticleEffectOverrideComponent` supports safe variation without duplicating
   shared emitter files.
-- `.kprefab` composition is separate from emitter behavior, which is the right
-  model for layered effects.
+- `prefab.json` composition is separate from emitter behavior, which is the
+  right model for layered effects.
 
 The best current generation target is a single `.kpeffect` file for one emitter
-layer. The next best target is a small prefab package containing several
-generated `.kpeffect` layers plus a `.kprefab` composition file.
+layer. The next best target is a prefab directory containing several generated
+`.kpeffect` layers, a `prefab.json` composition file, and a
+`prefab.resources.json` sidecar for texture/effect registration.
 
 ## Current Blockers
 
@@ -100,7 +101,7 @@ The generation pipeline should be:
 3. Emit a constrained intermediate JSON description.
 4. Map the JSON through presets and safe field ranges into `.kpeffect`.
 5. Validate and format the generated file.
-6. Optionally generate a `.kprefab` when the effect needs multiple layers.
+6. Optionally generate a prefab directory when the effect needs multiple layers.
 7. Run a preview scene and capture visual/performance feedback.
 8. Iterate the JSON, not raw emitter fields, when the result is wrong.
 
@@ -166,13 +167,13 @@ Keep the existing authoring split:
 
 - `.kpeffect`: one emitter layer, simulation tuning, renderer particle state,
   atlas metadata, texture alias, color/size/lifetime/motion.
-- `.kprefab`: composition of multiple layers, transforms, playback defaults,
-  high-level parameter bindings.
-- package/registration code: generated textures, alias registration, effect
-  file registration, cleanup, and staged controller behavior.
+- `prefab.json`: composition of multiple layers, transforms, playback defaults,
+  and high-level component overrides.
+- `prefab.resources.json`: texture alias registration, effect file
+  registration, and prefab-local resource cleanup.
 
-Do not put full emitter authoring into `.kprefab`. If generation needs a
-multi-layer effect, generate multiple `.kpeffect` files and a small `.kprefab`
+Do not put full emitter authoring into `prefab.json`. If generation needs a
+multi-layer effect, generate multiple `.kpeffect` files and a small prefab JSON
 that composes them.
 
 ## Agent Workflow Target
@@ -184,7 +185,7 @@ The eventual agent workflow should look like this:
    layering.
 3. Agent chooses one or more presets.
 4. Agent generates intermediate JSON.
-5. Tool converts JSON to `.kpeffect` and optional `.kprefab`.
+5. Tool converts JSON to `.kpeffect` and optional prefab JSON.
 6. Validator and formatter run automatically.
 7. Preview scene runs and captures stats/screenshots.
 8. Agent adjusts the JSON/preset parameters until the effect is close.

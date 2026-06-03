@@ -151,8 +151,62 @@ that owns its UI system and submits draw data into `UIContext` each frame:
 - `onEvent(...)` for input
 - `onFrame(...)` for timing + draw list submission
 - `UIContext::createTextureRGBA8(...)` for UI textures
+- `UIContext::loadTextureRGBA8FromPng(...)` for PNG UI textures owned by the
+  UI context and destroyed automatically when the UI context shuts down
 
 The engine renders your UI draw lists on top of the 3D frame.
+
+For ImGui, Karma provides the adapter layer and you provide only the ImGui
+content:
+
+```cpp
+#include "karma/features/ui/imgui/imgui_layer.h"
+#include <imgui.h>
+
+struct ToolsUi {
+  karma::app::UITexture logo;
+
+  void draw(karma::app::UIContext& ctx) {
+    if (!logo) {
+      logo = ctx.loadTextureRGBA8FromPng("assets/logo.png");
+    }
+
+    ImGui::Begin("Tools");
+    ImGui::TextUnformatted("Hello from ImGui");
+    if (logo) {
+      ImGui::Image(karma::imgui::toTextureId(logo.handle),
+                   ImVec2(static_cast<float>(logo.width),
+                          static_cast<float>(logo.height)));
+    }
+    ImGui::End();
+  }
+};
+
+auto tools = std::make_shared<ToolsUi>();
+engine.setUi(karma::imgui::createUiLayer([tools](karma::app::UIContext& ctx) {
+  tools->draw(ctx);
+}));
+```
+
+Provider adapters live under `karma/features/ui/<provider>`. Keep code that
+talks to ImGui, RmlUi, or another UI library in that adapter; keep engine
+composition on the generic `UiLayer` contract.
+
+RmlUi follows the same pattern. Karma owns the RmlUi render/system/file bridge,
+and app code only initializes documents when the RmlUi context is ready:
+
+```cpp
+#include "karma/features/ui/rmlui/rmlui_layer.h"
+#include <RmlUi/Core.h>
+
+engine.setUi(karma::rmlui::createUiLayer([](Rml::Context& context) {
+  Rml::ElementDocument* document =
+      context.LoadDocumentFromMemory("<rml><body><div>Hello</div></body></rml>");
+  if (document) {
+    document->Show();
+  }
+}));
+```
 
 ## Particle Effects
 
@@ -166,28 +220,18 @@ For the intended registration/binding/restart workflow, see
 ## Prefabs
 
 Layered gameplay objects that need multiple ECS entities can be authored as
-prefabs and instantiated either directly with `prefabs::instantiatePrefab(...)`
-or through `prefabs::PrefabRegistry` when the prefab also needs one-time
-runtime setup such as generated textures or particle registrations.
+JSON prefabs. A prefab stores one root entity, its `scene::Scene` children, and
+component payloads keyed by real component type names such as
+`TransformComponent`, `MeshComponent`, and `ParticleEffectComponent`.
 
-The core prefab runtime supports:
+Instantiate directly with `prefabs::instantiatePrefab(world, scene, path, desc)`.
+If the path is a directory, Karma loads `prefab.json` from that directory. When
+the directory also contains `prefab.resources.json`, Karma loads prefab-local
+texture aliases and particle effect registrations before creating entities.
 
-- particle layers
-- mesh shells
-- lights
-
-Optional runtime modules can extend prefab instantiation with extra entry
-handlers. The engine currently ships:
-
-- `beams::BeamPathRuntimeModule` for beam-path entities
-- `volumes::VolumeSphereRuntimeModule` for analytic volume spheres
-
-If a prefab uses module-backed entries such as `beam` or `volume_sphere`,
-register the matching runtime module with `EngineApp` before calling
-`start(...)`.
-
-Prefabs can be loaded from either a `.kprefab` file or a directory containing
-`prefab.kprefab`.
+Runtime-only renderer and particle IDs are not persisted. Prefabs save stable
+keys such as mesh, material, texture, and particle effect keys; the runtime
+systems resolve those keys after load.
 
 For the file format and runtime helper API, see [EFFECT_PREFABS.md](EFFECT_PREFABS.md).
 

@@ -1,6 +1,4 @@
 #include "demo_asset_paths.h"
-#include "explosion_prefab_package.h"
-#include "energy_orb_prefab_package.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -10,6 +8,7 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -25,16 +24,30 @@ struct LookAngles {
   float pitch = 0.0f;
 };
 
-struct ColorVariant {
+struct GalleryVariant {
   const char* name = "";
-  math::Color color{};
+  const char* beam_prefab = "";
+  const char* wave_prefab = "";
+  math::Color orb_accent{};
 };
 
-constexpr std::array<ColorVariant, 4> kColorVariants{{
-    {"Red", {1.00f, 0.20f, 0.20f, 1.0f}},
-    {"Blue", {0.24f, 0.56f, 1.00f, 1.0f}},
-    {"Green", {0.20f, 1.00f, 0.36f, 1.0f}},
-    {"Purple", {0.78f, 0.34f, 1.00f, 1.0f}},
+constexpr std::array<GalleryVariant, 4> kGalleryVariants{{
+    {"Red",
+     "prefabs/gallery_beam_red",
+     "prefabs/gallery_wave_red",
+     {1.00f, 0.20f, 0.20f, 1.0f}},
+    {"Blue",
+     "prefabs/gallery_beam_blue",
+     "prefabs/gallery_wave_blue",
+     {0.24f, 0.56f, 1.00f, 1.0f}},
+    {"Green",
+     "prefabs/gallery_beam_green",
+     "prefabs/gallery_wave_green",
+     {0.20f, 1.00f, 0.36f, 1.0f}},
+    {"Purple",
+     "prefabs/gallery_beam_purple",
+     "prefabs/gallery_wave_purple",
+     {0.78f, 0.34f, 1.00f, 1.0f}},
 }};
 
 constexpr std::array<float, 4> kColumnX{{-18.0f, -6.0f, 6.0f, 18.0f}};
@@ -44,15 +57,20 @@ constexpr float kOrbRowZ = 0.0f;
 constexpr float kWaveRowZ = 12.0f;
 constexpr float kExplosionRowZ = 25.0f;
 constexpr float kBeamScale = 0.48f;
-constexpr float kWaveRadius = 2.4f;
 constexpr float kExplosionReplayPeriod = 3.6f;
 constexpr float kPerfLogPeriod = 0.1f;
 constexpr float kExplosionVisualWindow = 2.4f;
 
 struct ExplosionGalleryItem {
-  ExplosionPrefabController controller{};
+  math::Vec3 position{};
+  std::string name;
   float next_trigger_time = 0.0f;
   float last_trigger_time = -1000.0f;
+};
+
+struct ActiveExplosionInstance {
+  ecs::Entity root{};
+  float destroy_time = 0.0f;
 };
 
 components::TransformComponent makeTransform(const math::Vec3& position) {
@@ -70,6 +88,55 @@ components::TransformComponent makeScaledTransform(const math::Vec3& position, f
 
 math::Vec3 toMath(const glm::vec3& value) {
   return {value.x, value.y, value.z};
+}
+
+math::Color scaleColor(const math::Color& color, float r, float g, float b, float a) {
+  return {color.r * r, color.g * g, color.b * b, color.a * a};
+}
+
+math::Color mixColor(const math::Color& a, const math::Color& b, float t) {
+  const float clamped = std::clamp(t, 0.0f, 1.0f);
+  return {
+      a.r + (b.r - a.r) * clamped,
+      a.g + (b.g - a.g) * clamped,
+      a.b + (b.b - a.b) * clamped,
+      a.a + (b.a - a.a) * clamped,
+  };
+}
+
+void applyOrbAccent(ecs::World& world,
+                    const prefabs::PrefabInstance& instance,
+                    const math::Color& color) {
+  auto setEndColor = [&](std::string_view name, math::Color end_color) {
+    const ecs::Entity entity = instance.find(name);
+    if (world.isAlive(entity) &&
+        world.has<components::ParticleEffectOverrideComponent>(entity)) {
+      world.get<components::ParticleEffectOverrideComponent>(entity).end_color = end_color;
+    }
+  };
+  auto setStartAndEndColor =
+      [&](std::string_view name, math::Color start_color, math::Color end_color) {
+        const ecs::Entity entity = instance.find(name);
+        if (world.isAlive(entity) &&
+            world.has<components::ParticleEffectOverrideComponent>(entity)) {
+          auto& effect_override =
+              world.get<components::ParticleEffectOverrideComponent>(entity);
+          effect_override.start_color = start_color;
+          effect_override.end_color = end_color;
+        }
+      };
+
+  setEndColor("core", scaleColor(color, 0.85f, 0.92f, 0.85f, 0.0f));
+  setEndColor("arcs", scaleColor(color, 0.92f, 0.98f, 0.92f, 0.0f));
+  setStartAndEndColor("halo",
+                      scaleColor(color, 0.28f, 0.48f, 0.28f, 0.08f),
+                      scaleColor(color, 0.12f, 0.22f, 0.12f, 0.0f));
+
+  const ecs::Entity light_entity = instance.find("glow");
+  if (world.isAlive(light_entity) && world.has<components::LightComponent>(light_entity)) {
+    world.get<components::LightComponent>(light_entity).color =
+        mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.34f);
+  }
 }
 
 LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
@@ -153,9 +220,7 @@ class PrefabGalleryExample final : public app::GameInterface {
     accumulatePerfSample(dt);
 
     if (!world->isAlive(camera_entity_)) {
-      for (auto& explosion : explosions_) {
-        updateExplosionPrefab(*world, explosion.controller, time_);
-      }
+      cleanupExpiredExplosions();
       maybeLogPerfStats();
       return;
     }
@@ -197,14 +262,15 @@ class PrefabGalleryExample final : public app::GameInterface {
 
     for (auto& explosion : explosions_) {
       if (time_ >= explosion.next_trigger_time) {
-        triggerExplosionPrefab(*world, explosion.controller, time_);
-        explosion.last_trigger_time = time_;
+        if (spawnExplosion(explosion)) {
+          explosion.last_trigger_time = time_;
+        }
         do {
           explosion.next_trigger_time += kExplosionReplayPeriod;
         } while (time_ >= explosion.next_trigger_time);
       }
-      updateExplosionPrefab(*world, explosion.controller, time_);
     }
+    cleanupExpiredExplosions();
 
     maybeLogPerfStats();
   }
@@ -237,17 +303,22 @@ class PrefabGalleryExample final : public app::GameInterface {
       return;
     }
 
-    std::size_t active_explosion_visuals = 0u;
-    std::size_t active_explosion_lights = 0u;
-    std::size_t pending_restarts = 0u;
+    std::size_t recently_triggered_explosions = 0u;
     for (const auto& explosion : explosions_) {
       if (time_ - explosion.last_trigger_time <= kExplosionVisualWindow) {
-        active_explosion_visuals += 1u;
+        recently_triggered_explosions += 1u;
       }
-      if (explosion.controller.light_active) {
-        active_explosion_lights += 1u;
+    }
+    const std::size_t active_explosion_visuals = active_explosions_.size();
+    std::size_t active_explosion_lights = 0u;
+    if (world != nullptr) {
+      for (ecs::Entity entity :
+           world->view<components::LightPulseComponent, components::LightComponent>()) {
+        const auto& pulse = world->get<components::LightPulseComponent>(entity);
+        if (pulse.active) {
+          active_explosion_lights += 1u;
+        }
       }
-      pending_restarts += explosion.controller.scheduled_restarts.size();
     }
 
     int fb_width = 0;
@@ -261,14 +332,14 @@ class PrefabGalleryExample final : public app::GameInterface {
     const float average_dt = perf_frame_time_sum_ / static_cast<float>(perf_frame_count_);
     const float average_fps = average_dt > 1.0e-6f ? 1.0f / average_dt : 0.0f;
     spdlog::info(
-        "Gallery perf: t={:.2f}s fps={:.1f} avg_ms={:.2f} worst_ms={:.2f} active_visuals={} active_lights={} pending_restarts={} framebuffer={}x{} local_lights={} cpu_fallback={} fp_active={}",
+        "Gallery perf: t={:.2f}s fps={:.1f} avg_ms={:.2f} worst_ms={:.2f} active_visuals={} recent_triggers={} active_lights={} framebuffer={}x{} local_lights={} cpu_fallback={} fp_active={}",
         time_,
         average_fps,
         average_dt * 1000.0f,
         perf_frame_time_max_ * 1000.0f,
         active_explosion_visuals,
+        recently_triggered_explosions,
         active_explosion_lights,
-        pending_restarts,
         fb_width,
         fb_height,
         static_cast<unsigned int>(stats.local_light_count),
@@ -333,116 +404,97 @@ class PrefabGalleryExample final : public app::GameInterface {
   }
 
   void spawnPrefabs() {
-    if (prefab_registry == nullptr) {
-      spdlog::error("Prefab gallery failed to register the orb package");
-      spdlog::error("Prefab gallery failed to register the explosion package");
-    } else {
-      {
-        ScopedStartupTimer timer("Prefab gallery orb package registration");
-        if (!registerEnergyOrbPrefabPackage(*prefab_registry)) {
-          spdlog::error("Prefab gallery failed to register the orb package");
-        }
-      }
-      {
-        ScopedStartupTimer timer("Prefab gallery explosion package registration");
-        if (!registerExplosionPrefabPackage(*prefab_registry)) {
-          spdlog::error("Prefab gallery failed to register the explosion package");
-        }
-      }
-    }
-
-    for (size_t i = 0; i < kColorVariants.size(); ++i) {
-      const auto& variant = kColorVariants[i];
+    for (size_t i = 0; i < kGalleryVariants.size(); ++i) {
+      const auto& variant = kGalleryVariants[i];
       const float x = kColumnX[i];
 
       const auto beam = prefabs::instantiatePrefab(
           *world,
-          graphics,
-          resolveExampleAssetPath("prefabs/beam"),
+          *scene,
+          resolveExampleAssetPath(variant.beam_prefab),
           prefabs::PrefabInstantiateDesc{
-              .name = std::string(variant.name) + " Beam",
-              .transform = makeScaledTransform({x, 0.0f, kBeamRowZ}, kBeamScale),
-              .param_overrides = {{"glow", variant.color}},
+              .root_transform = makeScaledTransform({x, 0.0f, kBeamRowZ}, kBeamScale),
+              .name_override = std::string(variant.name) + " Beam",
           });
       if (!beam.has_value()) {
         spdlog::error("Prefab gallery failed to instantiate {} beam", variant.name);
-      } else {
-        const ecs::Entity beam_entity = beam->find("beam");
-        if (beam_entity.isValid() && world->has<components::BeamPathComponent>(beam_entity)) {
-          auto& beam_component = world->get<components::BeamPathComponent>(beam_entity);
-          // Keep the gallery on the lighter local-light path. Four authored beams
-          // with along-path helper lights can otherwise push this showcase scene
-          // into the heavier lighting path on some drivers.
-          beam_component.light_count = 0u;
-          beam_component.light_spacing = 0.0f;
-          beam_component.light_intensity = 0.0f;
-        }
       }
 
-      if (prefab_registry != nullptr) {
-        const auto orb = prefab_registry->instantiate(
-            *world,
-            kEnergyOrbPrefabKey,
-            prefabs::PrefabInstantiateDesc{
-                .name = std::string(variant.name) + " Orb",
-                .transform = makeTransform({x, 1.85f, kOrbRowZ}),
-                .param_overrides = {{"accent", variant.color}},
-            });
-        if (!orb.has_value()) {
-          spdlog::error("Prefab gallery failed to instantiate {} orb", variant.name);
-        }
+      const auto orb = prefabs::instantiatePrefab(
+          *world,
+          *scene,
+          resolveExampleAssetPath("prefabs/energy_orb"),
+          prefabs::PrefabInstantiateDesc{
+              .root_transform = makeTransform({x, 1.85f, kOrbRowZ}),
+              .name_override = std::string(variant.name) + " Orb",
+          });
+      if (!orb.has_value()) {
+        spdlog::error("Prefab gallery failed to instantiate {} orb", variant.name);
+      } else {
+        applyOrbAccent(*world, *orb, variant.orb_accent);
       }
 
       const auto wave = prefabs::instantiatePrefab(
           *world,
-          graphics,
-          resolveExampleAssetPath("prefabs/wave"),
+          *scene,
+          resolveExampleAssetPath(variant.wave_prefab),
           prefabs::PrefabInstantiateDesc{
-              .name = std::string(variant.name) + " Wave",
-              .transform = makeTransform({x, 2.2f, kWaveRowZ}),
-              .param_overrides = {
-                  {"color", variant.color},
-                  {"radius", kWaveRadius},
-                  {"opacity", 0.3f},
-                  {"light_intensity", 82.0f},
-                  {"light_range", 13.0f},
-              },
+              .root_transform = makeTransform({x, 2.2f, kWaveRowZ}),
+              .name_override = std::string(variant.name) + " Wave",
           });
       if (!wave.has_value()) {
         spdlog::error("Prefab gallery failed to instantiate {} wave", variant.name);
       }
     }
 
-    if (prefab_registry == nullptr) {
-      return;
-    }
-
     explosions_.clear();
-    explosions_.reserve(kColorVariants.size());
-    for (size_t i = 0; i < kColorVariants.size(); ++i) {
-      const auto controller = instantiateExplosionPrefabController(
-          *world,
-          *prefab_registry,
-          prefabs::PrefabInstantiateDesc{
-              .name = std::string(kColorVariants[i].name) + " Explosion",
-              .transform = makeTransform({kExplosionColumnX[i], 0.0f, kExplosionRowZ}),
-          });
-      if (!controller.has_value()) {
-        spdlog::error("Prefab gallery failed to instantiate {} explosion",
-                      kColorVariants[i].name);
-        continue;
-      }
+    explosions_.reserve(kGalleryVariants.size());
+    for (size_t i = 0; i < kGalleryVariants.size(); ++i) {
       explosions_.push_back(ExplosionGalleryItem{
-          .controller = *controller,
+          .position = {kExplosionColumnX[i], 0.0f, kExplosionRowZ},
+          .name = std::string(kGalleryVariants[i].name) + " Explosion",
           .next_trigger_time = 0.9f + static_cast<float>(i) * 0.65f,
           .last_trigger_time = -1000.0f,
       });
     }
   }
 
+  bool spawnExplosion(const ExplosionGalleryItem& explosion) {
+    const auto instance = prefabs::instantiatePrefab(
+        *world,
+        *scene,
+        resolveExampleAssetPath("prefabs/explosion"),
+        prefabs::PrefabInstantiateDesc{
+            .root_transform = makeTransform(explosion.position),
+            .name_override = explosion.name,
+        });
+    if (!instance.has_value()) {
+      spdlog::error("Prefab gallery failed to instantiate {}", explosion.name);
+      return false;
+    }
+
+    active_explosions_.push_back(ActiveExplosionInstance{
+        .root = instance->root,
+        .destroy_time = time_ + kExplosionVisualWindow,
+    });
+    return true;
+  }
+
+  void cleanupExpiredExplosions() {
+    for (auto it = active_explosions_.begin(); it != active_explosions_.end();) {
+      if (time_ < it->destroy_time) {
+        ++it;
+        continue;
+      }
+      prefabs::destroyPrefab(*world, *scene, it->root);
+      it = active_explosions_.erase(it);
+    }
+  }
+
   std::string world_mesh_;
   ecs::Entity camera_entity_{};
   std::vector<ExplosionGalleryItem> explosions_{};
+  std::vector<ActiveExplosionInstance> active_explosions_{};
   bool log_perf_stats_ = false;
   bool first_update_logged_ = false;
   float time_ = 0.0f;

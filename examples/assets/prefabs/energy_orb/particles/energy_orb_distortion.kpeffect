@@ -1,0 +1,46 @@
+# Distortion shell that gives the energy orb a visible refractive shimmer.
+layer = 0
+depth_test = true
+blend_mode = distortion
+alignment = billboard
+use_soft_mask = false
+soft_particle_distance = 1.2
+distortion_strength = 30.0
+texture = orb_distortion_atlas
+
+enabled = true
+playing = true
+loop = true
+emit_burst_on_start = true
+local_space = true
+
+atlas_columns = 6
+atlas_rows = 1
+atlas_frame_count = 6
+animate_over_lifetime = true
+random_start_frame = false
+
+max_particles = 3
+burst_count = 1
+seed = 5527
+spawn_rate = 0.55
+duration = 0.0
+particle_lifetime_min = 1.95
+particle_lifetime_max = 2.60
+start_size_min = 7.40
+start_size_max = 7.90
+end_size_min = 7.90
+end_size_max = 8.40
+size_curve_exponent = 0.80
+alpha_curve_exponent = 1.0
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -0.02
+angular_velocity_max = 0.02
+spawn_box_extents = 0.0, 0.0, 0.0
+velocity_min = 0.0, 0.0, 0.0
+velocity_max = 0.0, 0.0, 0.0
+acceleration = 0.0, 0.0, 0.0
+drag = 5.0
+start_color = 1.0, 1.0, 1.0, 0.92
+end_color = 1.0, 1.0, 1.0, 0.0

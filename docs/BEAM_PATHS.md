@@ -60,16 +60,35 @@ karma::beams::createBeamPathEntity(
 To update an existing beam, call `setBeamPathPoints(...)`,
 `setBeamPathColors(...)`, or `setBeamPathVisible(...)`.
 
-Beam paths can also be authored inside a `.kprefab` through a `[beam name]`
-section, then driven at runtime by looking up the named member and calling
-`setBeamPathPoints(...)` or `setBeamPathColors(...)`.
+Beam paths can also be authored as JSON prefabs by saving an entity subtree with
+a real `BeamPathComponent` on one of its entities. The prefab component payload
+uses the same field names as the ECS component:
+
+```json
+{
+  "components": {
+    "BeamPathComponent": {
+      "points": [[-6, 2, -2], [0, 3, 0], [5, 2, 1]],
+      "core_color": [1, 1, 1, 1],
+      "glow_color": [1, 0.18, 0.14, 1],
+      "core_radius": 0.21,
+      "glow_radius": 0.56,
+      "visible": true
+    }
+  }
+}
+```
+
+Instantiate authored beam prefabs with `prefabs::instantiatePrefab(...)`. Use
+runtime setters only for gameplay-driven variation after load, or save a
+separate JSON prefab for each authored variant.
 
 ## Runtime
 
 Register
 [BeamPathRuntimeModule](/home/quinn/Documents/karma/include/karma/features/visual/beams/beam_path_runtime_module.h)
-with `EngineApp` before `start(...)` to enable beam rendering and `[beam]`
-prefab sections:
+with `EngineApp` before `start(...)` to enable rendering for entities with
+`BeamPathComponent`:
 
 ```cpp
 engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
@@ -87,5 +106,5 @@ and builds and updates the render data automatically:
 
 The current end-to-end sample is
 [laser_example.cpp](/home/irie/Documents/karma/examples/laser_example.cpp).
-For the minimal prefab-only path, see
+For the fixed-camera minimal prefab scene, see
 [laser_prefab_example.cpp](/home/irie/Documents/karma/examples/laser_prefab_example.cpp).

@@ -2,11 +2,8 @@
 #include "karma/karma.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <memory>
-#include <optional>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -16,11 +13,6 @@
 namespace karma::demo {
 
 namespace {
-
-constexpr std::size_t kLaserPointCount = 6;
-constexpr std::uint32_t kPointSeed = 1337u;
-constexpr math::Color kBeamCoreColor{1.0f, 1.0f, 1.0f, 1.0f};
-constexpr math::Color kBeamGlowColor{1.0f, 0.18f, 0.14f, 1.0f};
 
 struct SceneBounds {
   glm::vec3 min{0.0f};
@@ -60,35 +52,12 @@ LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   };
 }
 
-std::array<math::Vec3, kLaserPointCount> buildSeededPoints() {
-  std::mt19937 rng(kPointSeed);
-  std::uniform_real_distribution<float> x_jitter(-0.75f, 0.75f);
-  std::uniform_real_distribution<float> y_dist(1.4f, 4.6f);
-  std::uniform_real_distribution<float> z_dist(-5.0f, 5.0f);
-
-  std::array<math::Vec3, kLaserPointCount> points{};
-  for (std::size_t i = 0; i < points.size(); ++i) {
-    const float x = -8.5f + static_cast<float>(i) * 3.3f + x_jitter(rng);
-    points[i] = {
-        x,
-        y_dist(rng),
-        z_dist(rng),
-    };
-  }
-  return points;
-}
-
 SceneBounds computePointBounds(const std::vector<math::Vec3>& points) {
   SceneBounds bounds{};
   for (const math::Vec3& point : points) {
     expandBounds(bounds, toGlm(point));
   }
   return bounds;
-}
-
-std::vector<math::Vec3> makeBeamPoints() {
-  const std::array<math::Vec3, kLaserPointCount> seeded = buildSeededPoints();
-  return {seeded.begin(), seeded.end()};
 }
 
 }  // namespace
@@ -104,12 +73,11 @@ class LaserExample final : public app::GameInterface {
 
     world_mesh_ = resolveExampleAssetPath("world.glb").string();
     environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
-    beam_points_ = makeBeamPoints();
 
     spawnWorld();
     spawnLighting();
-    spawnCamera();
     spawnBeam();
+    spawnCamera();
   }
 
   void onFixedUpdate(float dt) override {
@@ -192,7 +160,12 @@ class LaserExample final : public app::GameInterface {
   }
 
   void spawnCamera() {
-    const SceneBounds bounds = computePointBounds(beam_points_);
+    SceneBounds bounds{};
+    if (world->isAlive(beam_entity_) &&
+        world->has<components::BeamPathComponent>(beam_entity_)) {
+      const auto& beam_component = world->get<components::BeamPathComponent>(beam_entity_);
+      bounds = computePointBounds(beam_component.points);
+    }
     const glm::vec3 center = bounds.valid ? (bounds.min + bounds.max) * 0.5f : glm::vec3(0.0f);
     const glm::vec3 extents =
         bounds.valid ? (bounds.max - bounds.min) * 0.5f : glm::vec3(2.0f, 2.0f, 2.0f);
@@ -222,10 +195,10 @@ class LaserExample final : public app::GameInterface {
   void spawnBeam() {
     const auto beam = prefabs::instantiatePrefab(
         *world,
-        graphics,
+        *scene,
         resolveExampleAssetPath("prefabs/beam"),
         prefabs::PrefabInstantiateDesc{
-            .name = "Laser Path",
+            .name_override = "Laser Path",
         });
     if (!beam.has_value()) {
       spdlog::error("Laser example failed to instantiate beam prefab");
@@ -237,12 +210,8 @@ class LaserExample final : public app::GameInterface {
       spdlog::error("Laser example beam prefab is missing the 'beam' member");
       return;
     }
-
-    beams::setBeamPathPoints(*world, beam_entity_, beam_points_);
-    beams::setBeamPathColors(*world, beam_entity_, kBeamCoreColor, kBeamGlowColor);
   }
 
-  std::vector<math::Vec3> beam_points_;
   std::string world_mesh_;
   std::string environment_map_;
   ecs::Entity camera_entity_{};

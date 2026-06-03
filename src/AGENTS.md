@@ -17,3 +17,7 @@ Do not introduce implementation-only code at old flat paths such as:
 Keep implementation helpers close to the subsystem that owns them. If a helper
 is needed across layers, promote a small public abstraction instead of including
 source-private headers from another layer.
+
+UI provider integrations belong under `src/features/ui/<provider>`. Keep
+`runtime/app` provider-agnostic and expose adapters as factories returning
+`app::UiLayer`.

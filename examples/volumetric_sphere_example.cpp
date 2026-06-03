@@ -143,17 +143,16 @@ class VolumetricSphereExample final : public app::GameInterface {
   void spawnVolumetricSphere() {
     const auto prefab = prefabs::instantiatePrefab(
         *world,
-        graphics,
+        *scene,
         resolveExampleAssetPath("prefabs/volumetric_sphere"),
         prefabs::PrefabInstantiateDesc{
-            .name = "Volumetric Sphere",
-            .transform = makeTransform(kVolumeSphereCenter),
+            .root_transform = makeTransform(kVolumeSphereCenter),
+            .name_override = "Volumetric Sphere",
         });
     if (!prefab.has_value()) {
       spdlog::error("Volumetric sphere example failed to instantiate prefab");
       return;
     }
-    sphere_root_ = prefab->root;
   }
 
   void spawnCamera() {
@@ -184,7 +183,6 @@ class VolumetricSphereExample final : public app::GameInterface {
 
   std::string world_mesh_;
   std::string environment_map_;
-  ecs::Entity sphere_root_{};
   ecs::Entity camera_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;

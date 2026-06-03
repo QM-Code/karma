@@ -1,309 +1,99 @@
 # Karma Prefabs
 
-Karma prefabs are file-backed ECS subtrees. A prefab instantiates one root
-entity plus any number of child entities under it, and the engine keeps the
-children synced to the root transform automatically.
+Karma prefabs are JSON-backed ECS subtrees. A prefab stores a root entity, its
+`scene::Scene` children, and a map of component payloads for each saved entity.
 
-The core prefab runtime supports these authored entry types:
+Component map keys use the real component struct names, for example:
 
-- `mesh`
-- `particle`
-- `light`
+- `TagComponent`
+- `TransformComponent`
+- `LocalTransformComponent`
+- `MeshComponent`
+- `LightComponent`
+- `ParticleEffectComponent`
+- `ParticleEmitterComponent`
+- `BeamPathComponent`
+- `VolumeSphereComponent`
 
-Optional prefab entry handlers can extend that set. The engine currently ships
-opt-in handlers for:
+Do not invent shortened schema names unless the engine has a matching component
+type. This keeps prefab files honest snapshots of engine entities.
 
-- `beam`
-- `volume_sphere`
+## Format
 
-The core pieces are:
+Directory prefabs are loaded from `prefab.json`:
 
-- `prefabs::loadPrefab(...)`
-- `prefabs::instantiatePrefab(...)`
-- `prefabs::PrefabRegistry`
-- `prefabs::setPrefabPlayback(...)`
-- `prefabs::restartPrefab(...)`
-- `prefabs::PrefabSystem` (engine-owned child transform syncing)
+```json
+{
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Crate",
+      "parent": null,
+      "components": {
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "MeshComponent": {
+          "mesh_key": "assets/crate.glb",
+          "material_key": "crate"
+        }
+      }
+    }
+  ]
+}
+```
 
-## What It Solves
+Runtime handles such as `MeshId`, `MaterialId`, `TextureId`, ownership flags,
+and particle applied-cache fields are not persisted. Save stable keys and let
+the renderer or particle systems resolve them.
 
-Use a prefab when one gameplay object is really a bundle of ECS entities:
-
-- a mesh shell plus one or more lights
-- a layered particle effect
-- a reusable beam setup
-- an analytic volume sphere with helper lights
-
-Instead of building that subtree in C++, author it once in a prefab manifest
-and instantiate it with one call.
-
-## Canonical Workflow
-
-1. Author `prefab.kprefab` in a directory, or author a standalone `.kprefab` file.
-2. If it uses optional entry types, register the matching runtime module before
-   `EngineApp::start(...)`.
-3. Instantiate it directly from a file or directory path.
-4. Optionally pass typed parameter overrides at instantiate time.
-5. Move, scale, or destroy the prefab by operating on its root entity.
-6. If the prefab also needs one-time runtime setup, register it in a `PrefabRegistry`.
-
-## Direct Instantiation
-
-The canonical direct API is:
+## API
 
 ```cpp
 #include "karma/content/prefabs/prefab.h"
 
+prefabs::PrefabInstantiateDesc desc{};
+desc.root_transform.setPosition({0.0f, 2.0f, 0.0f});
+desc.name_override = "Shield";
+
 const auto instance = prefabs::instantiatePrefab(
     *world,
-    graphics,
+    *scene,
     "examples/assets/prefabs/volumetric_sphere",
-    prefabs::PrefabInstantiateDesc{
-        .name = "Shield",
-        .transform = transform,
-        .param_overrides = {
-            {"color", math::Color{0.18f, 0.82f, 1.0f, 1.0f}},
-            {"radius", 4.2f},
-            {"opacity", 0.5f},
-        },
-    });
+    desc);
 ```
 
-That creates:
+`PrefabInstance` returns the root entity, root scene node, all created entities,
+and lookup maps by saved node name and id.
 
-- one root ECS entity
-- one child ECS entity per prefab entry
-- automatic root-to-child transform syncing every frame
+Use `prefabs::destroyPrefab(world, scene, instance.root)` to remove a loaded
+subtree. Use `prefabs::savePrefab(...)` to write an entity subtree back to JSON.
 
-If the path is a directory, Karma loads `prefab.kprefab` from that directory.
+## Resource Sidecars
 
-Direct instantiation only covers the entry handlers currently registered with
-the engine. `mesh`, `particle`, and `light` are always available. `beam` and
-`volume_sphere` require their matching runtime modules.
+Use `prefab.resources.json` beside `prefab.json` when a prefab needs texture
+aliases or particle effect registration before its entities are created. The
+runtime loads the sidecar automatically when the prefab directory is passed to
+`prefabs::instantiatePrefab(...)`:
 
-For a minimal end-to-end example, see
-[../examples/volumetric_sphere_example.cpp](../examples/volumetric_sphere_example.cpp),
-which instantiates
-[../examples/assets/prefabs/volumetric_sphere/prefab.kprefab](../examples/assets/prefabs/volumetric_sphere/prefab.kprefab)
-by passing the prefab directory path directly.
-
-## Optional Runtime Modules
-
-Beam and analytic volume-sphere prefabs are provided through opt-in runtime
-modules:
-
-```cpp
-#include <memory>
-#include "karma/karma.h"
-
-karma::app::EngineApp engine;
-engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
-engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeSphereRuntimeModule>());
-engine.start(game, config);
+```json
+{
+  "version": 1,
+  "textures": [
+    { "key": "orb_core_atlas", "path": "textures/orb_core_atlas.png" }
+  ],
+  "particle_effects": [
+    { "key": "energy_orb_core", "path": "particles/energy_orb_core.kpeffect" }
+  ]
+}
 ```
 
-Those modules install both their runtime update logic and their prefab entry
-handlers.
+The paths are relative to the prefab directory. Sidecar resources are cached by
+prefab directory and released when the app clears the prefab resource context.
 
-## Registry Packages
-
-Use `PrefabRegistry` when a prefab also needs one-time runtime setup, for
-example:
-
-- generated textures
-- particle effect registrations
-- material registrations
-
-The registry owns those prepare/cleanup callbacks and can instantiate by key
-instead of file path:
-
-```cpp
-prefab_registry->registerPrefab(
-    "energy_orb",
-    prefabs::RegisteredPrefabDesc{
-        .prefab_path = "examples/assets/prefabs/energy_orb",
-        .prepare = prepare_callback,
-        .cleanup = cleanup_callback,
-    });
-
-const auto orb = prefab_registry->instantiate(
-    *world,
-    "energy_orb",
-    prefabs::PrefabInstantiateDesc{
-        .name = "Orb",
-        .transform = transform,
-        .param_overrides = {
-            {"accent", math::Color{0.18f, 1.0f, 0.28f, 1.0f}},
-        },
-    });
-```
-
-The orb sample is the reference implementation for that path:
-[../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp).
-
-The reusable staged explosion is the reference implementation for a one-shot
-layered effect package that also needs generated atlases, EXR-backed flipbooks,
-typed controller helpers, and explicit cleanup:
-[EXPLOSION_PREFAB.md](EXPLOSION_PREFAB.md).
-
-## Runtime Control
-
-```cpp
-prefabs::setPrefabPlayback(*world, instance->root, false);
-prefabs::restartPrefab(*world, instance->root);
-```
-
-`setPrefabPlayback(...)` currently handles:
-
-- mesh visibility
-- particle enabled/playing state
-- light intensity/range
-- beam visibility
-- volume sphere visibility
-
-## File Format
-
-The format is line-oriented like `.kpeffect`.
-
-Supported sections:
-
-- `[prefab]`
-- `[param name]`
-- `[mesh name]`
-- `[particle name]`
-- `[light name]`
-- `[beam name]`
-- `[volume_sphere name]`
-
-`beam` and `volume_sphere` sections only instantiate when their matching
-runtime modules have registered handlers.
-
-Comments start with `#`.
-
-Example:
-
-```ini
-[prefab]
-name = Volumetric Sphere
-
-[param color]
-type = color
-default = 0.18, 0.82, 1.0, 1.0
-
-[param radius]
-type = float
-default = 4.2
-
-[volume_sphere body]
-color_param = color
-radius_param = radius
-center_opacity = 0.5
-distortion_strength = 1.4
-
-[light glow]
-type = point
-color_param = color
-intensity = 180.0
-range = 52.0
-casts_shadows = false
-```
-
-## Parameters
-
-Prefab parameters are typed. Supported parameter types are:
-
-- `bool`
-- `float`
-- `vec3`
-- `color`
-- `string`
-
-Fields bind to parameters through the usual `*_param` pattern. Color bindings
-also support `*_scale`, `*_mix`, and `*_mix_factor`. Float bindings support
-`*_scale` and `*_bias`.
-
-Examples:
-
-- `material.base_color_param = accent`
-- `range_param = light_range`
-- `radius_param = radius`
-
-Instantiation uses typed `param_overrides` only. Color overrides are just
-regular prefab parameters of type `color`.
-
-## Supported Entry Fields
-
-Shared transform fields on `mesh`, `particle`, `light`, `beam`, and
-`volume_sphere` entries:
-
-- `position`
-- `rotation_deg`
-- `scale`
-- `uniform_scale`
-
-Mesh fields:
-
-- `mesh`
-- `visible`
-- `shadow_visible`
-- `material.*`
-
-Particle fields:
-
-- `effect`
-- `enabled`
-- `playing`
-- `auto_apply`
-- `preserve_enabled`
-- `preserve_playing`
-- `override.*`
-
-Light fields:
-
-- `type`
-- `color*`
-- `intensity*`
-- `range*`
-- `casts_shadows`
-- `inner_cone_degrees`
-- `outer_cone_degrees`
-- `shadow_extent`
-
-Beam fields:
-
-- `points`
-- `core_color*`
-- `glow_color*`
-- `core_radius`
-- `glow_radius`
-- `core_intensity`
-- `glow_intensity`
-- `endpoint_core_size`
-- `endpoint_glow_size`
-- `light_count`
-- `light_intensity`
-- `light_range`
-- `light_spacing`
-- `electric_*`
-- `distortion_*`
-- `layer`
-- `visible`
-- `depth_test`
-- `closed_loop`
-- `world_space`
-- `endpoint_flares`
-
-Volume sphere fields:
-
-- `color*`
-- `emissive_color*`
-- `radius*`
-- `center_opacity*`
-- `distortion_strength*`
-- `noise_strength*`
-- `overlay_depth*`
-- `visible`
-- `scale_with_transform`
-
-`*` means the field accepts the typed binding form, such as `*_param`,
-`*_scale`, or `*_bias`.
+Variants should be separate JSON prefab files or post-instantiation component
+edits in C++. The old prefab parameter binding syntax is removed.

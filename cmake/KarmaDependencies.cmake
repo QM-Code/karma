@@ -49,7 +49,7 @@ if (NOT KARMA_HEADLESS)
   endif()
 endif()
 
-if (KARMA_BUILD_RMLUI_DEMO)
+if (KARMA_ENABLE_RMLUI)
   find_package(RmlUi CONFIG QUIET)
   if (TARGET RmlUi::Core)
     set(KARMA_RMLUI_TARGET RmlUi::Core)
@@ -79,7 +79,10 @@ if (KARMA_BUILD_RMLUI_DEMO)
       set(KARMA_RMLUI_TARGET "")
     endif()
   else()
-    message(FATAL_ERROR "KARMA_BUILD_RMLUI_DEMO=ON but RmlUi not found. Provide RmlUi or enable KARMA_FETCH_DEPS.")
+    message(FATAL_ERROR "KARMA_ENABLE_RMLUI=ON but RmlUi not found. Provide RmlUi or enable KARMA_FETCH_DEPS.")
+  endif()
+  if (NOT KARMA_RMLUI_TARGET)
+    message(FATAL_ERROR "KARMA_ENABLE_RMLUI=ON but no usable RmlUi target was found.")
   endif()
 endif()
 
@@ -98,6 +101,21 @@ if (NOT TARGET spdlog::spdlog AND KARMA_FETCH_DEPS)
 endif()
 if (TARGET spdlog::spdlog)
   list(APPEND KARMA_EXTRA_LINK_LIBS spdlog::spdlog)
+endif()
+
+find_package(nlohmann_json CONFIG QUIET)
+if (NOT TARGET nlohmann_json::nlohmann_json AND KARMA_FETCH_DEPS)
+  FetchContent_Declare(
+    nlohmann_json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_MakeAvailable(nlohmann_json)
+endif()
+if (TARGET nlohmann_json::nlohmann_json)
+  list(APPEND KARMA_EXTRA_LINK_LIBS nlohmann_json::nlohmann_json)
+else()
+  message(FATAL_ERROR "nlohmann_json is required but not found. Provide nlohmann_json or enable KARMA_FETCH_DEPS.")
 endif()
 
 if (KARMA_AUDIO_BACKEND_MINIAUDIO AND KARMA_FETCH_DEPS)

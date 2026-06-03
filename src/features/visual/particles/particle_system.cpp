@@ -531,6 +531,9 @@ uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
       if (effect.preserve_playing) {
         emitter.playing = existing.playing;
       }
+      if (effect.preserve_start_delay) {
+        emitter.start_delay = existing.start_delay;
+      }
     }
 
     if (effect_override != nullptr) {
@@ -550,10 +553,6 @@ uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
 }
 
 void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alpha) {
-  if (device_ == nullptr) {
-    return;
-  }
-
   renderer::ParticlePassStats frame_stats{};
   const auto sync_start = core::SteadyClock::now();
   frame_stats.effect_binding_updates = syncEffectBindings(world);
@@ -751,6 +750,20 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     };
 
     if (emitter.enabled && emitter.playing) {
+      float emission_dt = emitter_dt;
+      const float start_delay = std::max(emitter.start_delay, 0.0f);
+      if (start_delay > 0.0f && state.start_delay_elapsed < start_delay) {
+        const float previous_delay_elapsed = state.start_delay_elapsed;
+        state.start_delay_elapsed = std::min(start_delay, state.start_delay_elapsed + emitter_dt);
+        emission_dt =
+            std::max(previous_delay_elapsed + emitter_dt - start_delay, 0.0f);
+      }
+      if (start_delay > 0.0f && state.start_delay_elapsed < start_delay) {
+        frame_stats.simulation_ms +=
+            core::elapsedMilliseconds(simulation_start, core::SteadyClock::now());
+        return;
+      }
+
       if (emitter.emit_burst_on_start && emitter.burst_count > 0 && !state.burst_emitted) {
         const uint32_t live_particles =
             static_cast<uint32_t>(std::min(state.particles.size(),
@@ -767,7 +780,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       const bool continuous_spawn =
           emitter.loop || (emitter.duration > 0.0f && state.elapsed < emitter.duration);
       if (continuous_spawn && emitter.spawn_rate > 0.0f) {
-        state.spawn_accumulator += emitter.spawn_rate * emitter_dt;
+        state.spawn_accumulator += emitter.spawn_rate * emission_dt;
         const uint32_t spawn_count = static_cast<uint32_t>(std::floor(state.spawn_accumulator));
         state.spawn_accumulator -= static_cast<float>(spawn_count);
         const uint32_t live_particles =
@@ -782,7 +795,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       }
 
       if (!emitter.loop && emitter.duration > 0.0f) {
-        state.elapsed += emitter_dt;
+        state.elapsed += emission_dt;
       }
     }
 
@@ -901,13 +914,25 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     addCount(frame_stats.packed_particles, batch.particles.size());
 
     if (!batch.particles.empty()) {
-      device_->submitPackedParticles(std::move(batch));
+      if (device_ != nullptr) {
+        device_->submitPackedParticles(std::move(batch));
+      }
       addCount(frame_stats.submitted_emitters, 1u);
     }
     frame_stats.packing_ms += core::elapsedMilliseconds(packing_start, core::SteadyClock::now());
   });
 
-  device_->setParticleSystemStats(frame_stats);
+  if (device_ != nullptr) {
+    device_->setParticleSystemStats(frame_stats);
+  }
+}
+
+std::size_t ParticleSystem::liveParticleCount(ecs::Entity entity) const {
+  const auto it = emitters_.find(entityKey(entity));
+  if (it == emitters_.end()) {
+    return 0u;
+  }
+  return it->second.particles.size();
 }
 
 }  // namespace karma::particles

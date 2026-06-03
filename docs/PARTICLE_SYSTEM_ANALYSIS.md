@@ -34,8 +34,9 @@ The particle system is split across four layers:
 Authored content lives under:
 
 - `examples/assets/particles/*.kpeffect`
-- `examples/assets/prefabs/*/prefab.kprefab`
-- example package code such as `examples/explosion_prefab_package.cpp`
+- `examples/assets/prefabs/*/prefab.json`
+- prefab resource sidecars such as
+  `examples/assets/prefabs/explosion/prefab.resources.json`
 
 The system flow is:
 
@@ -84,10 +85,11 @@ tracks binding sync, simulation, packing, additive grouping, alpha/distortion
 sorting, draw submission, submitted particles, and invalid depth counts. This is
 the right basis for measurement-driven optimization.
 
-The prefab integration is useful. Particle entries in `.kprefab` files support
-effect keys, playback state, transform, and overrides. This lets large effects
-such as explosions be authored as layered ECS bundles instead of hardcoded
-entity construction.
+The prefab integration is useful. Particle entities in `prefab.json` files
+support effect keys, playback state, transform, and overrides. Resource
+sidecars register the texture aliases and effect files needed before entity
+creation. This lets large effects such as explosions be authored as layered ECS
+bundles instead of hardcoded entity construction.
 
 ## Architecture Assessment
 
@@ -198,10 +200,10 @@ The strongest extension point is `ParticleEffectOverrideComponent`. It gives
 gameplay and prefabs a safe way to vary common behavior without mutating shared
 assets.
 
-The weakest extension point is the file format. `.kpeffect` and `.kprefab`
-parsers are strict and explicit, which is good for validation, but every new
-field requires code edits in multiple places. Before the format grows much
-more, add validation tests and consider versioned schemas.
+The weakest extension point is the file format. `.kpeffect`, `prefab.json`,
+and `prefab.resources.json` parsers are strict and explicit, which is good for
+validation, but every new field requires serializer coverage. Before the format
+grows much more, add validation tests and consider versioned schemas.
 
 ## Architecture Concerns
 
@@ -357,15 +359,14 @@ so they use the same binding path as game-authored entities.
 
 The prefab architecture is intentionally composition-oriented:
 
-- `[prefab]` names the bundle.
-- `[param name]` declares typed authoring parameters.
-- `[mesh name]`, `[particle name]`, and `[light name]` create core child
-  entities.
-- Optional sections such as `[beam name]` and `[volume_sphere name]` route
-  through runtime-module entry handlers.
-- `PrefabInstanceComponent` tracks the root and members.
-- `PrefabMemberComponent` stores each member's local transform and playback
-  metadata.
+- `prefab.json` names the bundle and stores a root node plus child nodes.
+- Each node carries serialized ECS component payloads keyed by component type
+  name.
+- Mesh, particle, light, beam, and volume entities all use the same component
+  serialization path.
+- Runtime modules own ongoing behavior for specialized features such as beams
+  and volume spheres.
+- `PrefabInstance` returns the root, created entities, and name/id lookup maps.
 
 This is a good model for particle effects because most substantial effects are
 not one emitter. They are bundles: mesh shell, core particles, smoke particles,
@@ -374,23 +375,22 @@ volumes.
 
 What works well:
 
-- prefab entries separate effect composition from C++ control code
+- prefab nodes separate effect composition from C++ control code
 - root/member naming makes layered effects easier to inspect
-- `setPrefabPlayback(...)` and `restartPrefab(...)` provide coarse control over
-  the whole bundle
-- package callbacks cover generated textures and effect registration that a
-  plain `.kprefab` cannot express
+- gameplay can keep `PrefabInstance` handles to toggle/restart selected child
+  entities
+- prefab resource sidecars cover texture aliases and effect registration that a
+  plain entity JSON file cannot express
 
 The explosion prefab is the clearest reference. The manifest layers multiple
-one-shot particle children plus a point light. The package code builds or loads
-atlases, registers texture aliases, registers effect files, and exposes typed
-controller helpers for trigger/update/destroy.
+one-shot particle children plus a point light. Its resource sidecar registers
+atlas textures and effect files, while generic serialized components handle
+emitter delays and the point-light pulse.
 
 The energy orb prefab is the clearest looping/composite reference. It uses a
 mesh shell for the orb body, several local-space particle layers for core/arcs/
-halo/distortion, and a point light. Its `accent` parameter drives material and
-particle colors. That is the right use of prefab params: high-level art
-direction changes, not low-level emitter reauthoring.
+halo/distortion, and a point light. Gallery variants apply high-level color
+overrides after instantiation instead of reauthoring emitter files.
 
 ### Prefab Authoring Boundary
 
@@ -398,16 +398,16 @@ The clean boundary should be:
 
 - `.kpeffect`: emitter behavior, simulation tuning, atlas metadata, blend mode,
   texture alias, spawn shape, velocity, lifetime, size, and colors.
-- `.kprefab`: composition, child transforms, default playback state, high-level
+- `prefab.json`: composition, child transforms, default playback state, high-level
   typed params, and per-instance override scales/colors.
-- package C++: generated textures, external asset loading, effect registration,
-  texture alias registration, staged controllers, and cleanup.
+- `prefab.resources.json`: texture alias registration, effect registration, and
+  prefab-local resource cleanup.
 
 When that boundary is followed, assets remain reusable. For example, the same
 `energy_orb_core` effect can be scaled and recolored in a prefab without
 copying the emitter file.
 
-When that boundary is blurred, maintenance gets harder. If `.kprefab` starts
+When that boundary is blurred, maintenance gets harder. If `prefab.json` starts
 growing raw emitter fields, it becomes a second particle format. If C++ starts
 hardcoding per-layer emitter tuning, hot reload and authoring iteration get
 worse.
@@ -456,37 +456,33 @@ Poor particle prefab params:
 - raw shader/surface mode
 - arbitrary velocity vectors unless there is a strong authored use case
 
-### Package Pattern
+### Prefab Resource Pattern
 
-The current package pattern is necessary for effects that cannot be represented
-as data-only prefabs. The explosion package is a valid example because it needs
-generated atlases, EXR fallback logic, texture alias registration, effect file
-registration, controller helpers, and cleanup.
+The current prefab resource sidecar pattern handles effects that need resources
+before entity creation. The explosion and energy orb prefabs use it to register
+committed atlas textures and effect files before loading their component data.
 
-What is missing is scoped ownership. Package code manually registers and
-unregisters each effect and texture alias. That is easy to get wrong when a
-package grows. The next architectural improvement for packages should be a
-registration handle or package scope in `ParticleLibrary` and `PrefabRegistry`.
+Scoped ownership now lives in the prefab resource context/cache. Resources are
+cached by prefab directory and cleaned up when the app clears the context.
 
 Issues in the current prefab path:
 
-- package registration and cleanup are manual and easy to drift
-- particle prefab fields are split between `.kprefab` and `.kpeffect`, so the
+- particle prefab fields are split between `prefab.json` and `.kpeffect`, so the
   author has to know which file owns which concern
 - root playback maps particles to both enabled and playing, which is simple but
   may not fit paused-but-visible effects later
-- restart is all-or-nothing at the prefab level unless controllers keep child
-  entity IDs and stagger restarts manually
+- restart is all-or-nothing at the prefab level unless gameplay keeps child
+  entity IDs or uses serialized `ParticleEmitterComponent.start_delay`
 - prefab particle overrides are scalar/color focused and do not expose texture
   alias binding directly in the parser today
 
 Recommended prefab direction:
 
 - keep `.kpeffect` as the emitter definition source of truth
-- keep `.kprefab` as composition, transform, parameter, and playback state
-- add scoped package cleanup handles before adding more package types
-- document staged-controller patterns for effects that need timed child
-  restarts
+- keep `prefab.json` as composition, transform, parameter, and playback state
+- keep `prefab.resources.json` as texture/effect registration and cleanup data
+- document `start_delay` and light-pulse patterns for effects that need timed
+  child playback
 - add focused particle prefab validation so missing effect keys, missing texture
   aliases, and unintended high particle counts are caught before runtime
 
@@ -561,10 +557,10 @@ Initial diagnostic finding:
   `EmitterState` and immutable emitter snapshots.
 - Preserve deterministic seeds per emitter where possible.
 
-### P2: Asset And Package Hygiene
+### P2: Asset And Prefab Hygiene
 
-- Add a package registration handle for effect aliases and effect files.
-- Add validation tooling for `.kpeffect` files and `.kprefab` particle entries.
+- Add validation tooling for `.kpeffect`, `prefab.json`, and
+  `prefab.resources.json` entries.
 - Add docs explaining local-space vs world-space expectations for common effect
   categories.
 
@@ -596,8 +592,9 @@ Initial diagnostic finding:
 - `include/karma/world/components/particle_effect_override.h`
 - `src/rendering/renderer/backends/diligent/passes/particle_draw.cpp`
 - `src/rendering/renderer/backends/diligent/passes/particles.cpp`
-- `src/content/prefabs/prefab_parse_particle.cpp`
 - `src/content/prefabs/prefab_runtime.cpp`
-- `examples/explosion_prefab_package.cpp`
+- `src/content/prefabs/prefab_resources.cpp`
+- `src/content/prefabs/component_serializer_registry.cpp`
 - `examples/assets/particles/*.kpeffect`
-- `examples/assets/prefabs/*/prefab.kprefab`
+- `examples/assets/prefabs/*/prefab.json`
+- `examples/assets/prefabs/*/prefab.resources.json`

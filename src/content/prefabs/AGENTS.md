@@ -1,16 +1,13 @@
 # Prefab Runtime Notes
 
-This directory owns prefab parsing, instantiation, playback, restart, and
+This directory owns JSON prefab serialization, instantiation, destruction, and
 package registration.
 
 Particle-specific guidance:
 
-- Particle entries should continue routing through `particles::createEffectEntity(...)`.
-- Keep particle prefab fields aligned with `ParticleEffectBindingDesc` and
-  `ParticleEffectOverrideComponent`.
-- Do not duplicate full `.kpeffect` emitter authoring inside `.kprefab`.
-- If adding particle parameter bindings, prefer small override-scale fields
-  before exposing raw emitter fields.
+- Particle prefab nodes should serialize `ParticleEffectComponent`,
+  `ParticleEmitterComponent`, and `ParticleEffectOverrideComponent` data.
+- Do not duplicate full `.kpeffect` emitter authoring inside `prefab.json`.
 - Keep package cleanup explicit until a scoped registration handle exists.
 
 Relevant docs:

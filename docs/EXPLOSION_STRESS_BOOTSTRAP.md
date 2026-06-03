@@ -28,7 +28,8 @@ in ECS even after the visible explosion was finished.
 Current state:
 
 - generic prefab destruction exists via `prefabs::destroyPrefab(...)`
-- explosions have a wrapper helper via `destroyExplosionPrefabController(...)`
+- explosion stress tracks active prefab roots and destroys them after their
+  visual window
 - prefab particle and light members receive `VisibilityComponent`
 - explosion lights hide correctly when off
 - invisible or zero-intensity/range non-directional lights are skipped by scene extraction
@@ -37,8 +38,7 @@ Primary files:
 
 - [`../include/karma/content/prefabs/prefab.h`](../include/karma/content/prefabs/prefab.h)
 - [`../src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
-- [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
-- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
+- [`../src/content/prefabs/prefab_resources.cpp`](../src/content/prefabs/prefab_resources.cpp)
 - [`../src/rendering/renderer/render_system.cpp`](../src/rendering/renderer/render_system.cpp)
 
 ### 2. Particle system instrumentation
@@ -126,15 +126,15 @@ Current state:
 
 - shock ring depth-testing is enabled
 - smoke tinting is darker than the earlier defaults
-- core and smoke flipbooks use generated procedural atlases by default
+- core and smoke flipbooks use committed prefab-local procedural atlases
 - opt-in EXR flipbook metadata targets `400x400` atlas frames
-- either EXR path falls back to a procedural atlas if it fails
-- the package exposes flipbook source debug info and the stress sample logs it
+- EXR source folders are reference assets, not runtime dependencies
 
 Primary files:
 
-- [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
-- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
+- [`../examples/assets/prefabs/explosion/prefab.json`](../examples/assets/prefabs/explosion/prefab.json)
+- [`../examples/assets/prefabs/explosion/prefab.resources.json`](../examples/assets/prefabs/explosion/prefab.resources.json)
+- [`../examples/assets/prefabs/explosion/textures/`](../examples/assets/prefabs/explosion/textures/)
 - [`../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect)
 - [`../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect)
 - [`../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect)
@@ -180,7 +180,8 @@ Primary files:
 Most useful files if this area regresses again:
 
 - [`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp)
-- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
+- [`../examples/assets/prefabs/explosion/prefab.json`](../examples/assets/prefabs/explosion/prefab.json)
+- [`../examples/assets/prefabs/explosion/prefab.resources.json`](../examples/assets/prefabs/explosion/prefab.resources.json)
 - [`../src/features/visual/particles/particle_system.cpp`](../src/features/visual/particles/particle_system.cpp)
 - [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
 - [`../src/rendering/renderer/backends/diligent/passes/frame.cpp`](../src/rendering/renderer/backends/diligent/passes/frame.cpp)

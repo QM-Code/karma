@@ -75,10 +75,10 @@ class LaserPrefabExample final : public app::GameInterface {
   void spawnBeam() {
     prefabs::instantiatePrefab(
         *world,
-        graphics,
+        *scene,
         resolveExampleAssetPath("prefabs/beam"),
         prefabs::PrefabInstantiateDesc{
-            .name = "Prefab Laser",
+            .name_override = "Prefab Laser",
         });
   }
 

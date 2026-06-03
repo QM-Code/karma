@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,7 @@ class ParticleSystem {
       : device_(device), library_(library) {}
 
   void update(ecs::World& world, float dt, float interpolation_alpha);
+  std::size_t liveParticleCount(ecs::Entity entity) const;
 
  private:
   uint32_t syncEffectBindings(ecs::World& world);
@@ -46,6 +48,7 @@ class ParticleSystem {
     std::vector<Particle> particles;
     float spawn_accumulator = 0.0f;
     float elapsed = 0.0f;
+    float start_delay_elapsed = 0.0f;
     uint32_t rng_state = 1u;
     uint32_t max_particles = 0u;
     bool burst_emitted = false;

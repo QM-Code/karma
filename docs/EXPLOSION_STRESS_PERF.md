@@ -11,7 +11,7 @@ The sample exists to answer two questions:
 2. which particle, lighting, and render-pass costs dominate when explosions are replayed in succession?
 
 It is intentionally not a "pretty demo first" sample. It is a repeatable perf
-probe for the reusable explosion prefab package.
+probe for the direct-load explosion prefab.
 
 ## How To Run It
 
@@ -100,21 +100,21 @@ Source:
 
 - [`../examples/assets/prefabs/explosion/particles/explosion_debris.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_debris.kpeffect)
 
-## Current Visual Package State
+## Current Visual State
 
-The shared explosion prefab package now has the following presentation/runtime
-state:
+The shared explosion prefab now has the following presentation/runtime state:
 
 - the shock ring depth-tests correctly
 - the main smoke layers are darker than the earlier defaults
-- core and smoke flipbooks use generated procedural atlases by default
+- core and smoke flipbooks use committed prefab-local procedural atlases
 - opt-in EXR flipbook metadata targets `400x400` atlas frames
-- either EXR path falls back to a procedural atlas if it fails
+- EXR source folders are reference assets, not runtime dependencies
 
 Primary files:
 
-- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
-- [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
+- [`../examples/assets/prefabs/explosion/prefab.json`](../examples/assets/prefabs/explosion/prefab.json)
+- [`../examples/assets/prefabs/explosion/prefab.resources.json`](../examples/assets/prefabs/explosion/prefab.resources.json)
+- [`../examples/assets/prefabs/explosion/textures/`](../examples/assets/prefabs/explosion/textures/)
 - [`../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect)
 - [`../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect)
 - [`../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_shock_ring.kpeffect)
@@ -133,7 +133,7 @@ Primary files:
 
 - [`../include/karma/content/prefabs/prefab.h`](../include/karma/content/prefabs/prefab.h)
 - [`../src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
-- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
+- [`../src/content/prefabs/prefab_resources.cpp`](../src/content/prefabs/prefab_resources.cpp)
 - [`../src/rendering/renderer/render_system.cpp`](../src/rendering/renderer/render_system.cpp)
 
 ### Particle simulation / submission
@@ -170,16 +170,8 @@ particle changes across examples because it is emitted after final render
 submission and includes simulation, packing, sorting, grouping, scene-copy, and
 draw-submission fields in one place.
 
-The startup path also prints flipbook-source lines:
-
-- `Explosion prefab package flipbooks: core=... smoke=...`
-- `Explosion stress flipbooks: core=... smoke=...`
-
-Possible source values:
-
-- `exr_sequence`
-- `procedural_atlas`
-- `unknown`
+The explosion stress startup path now relies on committed prefab-local
+flipbook atlases, so there is no runtime flipbook-source selection to log.
 
 Key fields:
 

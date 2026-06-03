@@ -14,7 +14,8 @@ and dependency direction clear before reading implementation details.
 - `media`: audio-facing APIs, audio systems, and audio backends.
 - `content`: asset loading, importers, geometry, prefabs, and content runtime.
 - `platform`: window and network infrastructure edges.
-- `features`: optional feature modules built from lower-level systems.
+- `features`: optional feature modules and provider adapters built from
+  lower-level systems.
 - `runtime`: application composition, input, UI context, and debug overlays.
 
 ## Dependency Direction
@@ -50,6 +51,9 @@ Rules:
 - ECS components belong in `world/components`, even when a subsystem consumes
   them.
 - Visual feature modules belong in `features/visual`, not renderer internals.
+- UI provider adapters belong in `features/ui/<provider>`. The shared engine
+  contract is `runtime/app/UiLayer`; provider-specific setup belongs behind a
+  factory such as `karma::imgui::createUiLayer(...)`.
 
 ## Public API Rules
 

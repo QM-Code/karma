@@ -7,7 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "karma/content/prefabs/prefab_runtime.h"
+#include "karma/content/prefabs/prefab.h"
 
 namespace karma::renderer {
 class GraphicsDevice;
@@ -54,6 +54,7 @@ class PrefabRegistry {
 
   std::optional<PrefabInstance> instantiate(
       ecs::World& world,
+      scene::Scene& scene,
       std::string_view key,
       const PrefabInstantiateDesc& desc = {});
 
@@ -71,16 +72,18 @@ class PrefabRegistry {
 
 std::optional<PrefabInstance> instantiateRegisteredPrefab(
     ecs::World& world,
+    scene::Scene& scene,
     PrefabRegistry& registry,
     std::string_view key,
     const PrefabInstantiateDesc& desc = {});
 
 inline std::optional<PrefabInstance> instantiatePrefab(
     ecs::World& world,
+    scene::Scene& scene,
     PrefabRegistry& registry,
     std::string_view key,
     const PrefabInstantiateDesc& desc = {}) {
-  return registry.instantiate(world, key, desc);
+  return registry.instantiate(world, scene, key, desc);
 }
 
 }  // namespace karma::prefabs

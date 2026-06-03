@@ -10,21 +10,21 @@ The target split is:
 
 - core engine owns reusable primitives and extension seams
 - optional modules own higher-level effect behaviors
-- examples own authored looks, generated textures, effect registrations, and
-  prefab packages
+- examples own authored looks, prefab data, prefab resource sidecars, and
+  optional runtime modules
 
 ## Current State
 
 ### Clean Enough Today
 
-- Explosion is mostly example-layer code.
-  - asset prep and effect registration live in `examples/explosion_prefab_package.cpp`
-  - controller logic also lives in `examples/`
+- Explosion is authored as an example-layer direct-load prefab.
+  - asset prep and effect registration live in `examples/assets/prefabs/explosion`
+  - serialized emitter delays and light pulse data replace the old controller
   - core engine is mainly providing prefabs, particles, lights, and rendering
 
-- Orb prefab packaging is mostly example-layer code.
-  - generated atlases and particle registrations live in
-    `examples/energy_orb_prefab_package.cpp`
+- Orb prefab packaging is example-layer data.
+  - atlas textures and particle registrations live in
+    `examples/assets/prefabs/energy_orb`
   - prefab authoring is data-driven
 
 ### Not Clean Today
@@ -48,9 +48,9 @@ Core engine should provide:
 - mesh and light rendering
 - generic material creation and parameter binding
 - particle library and particle simulation/render submission
-- prefab loading, prefab instantiation, prefab package prepare/cleanup
+- prefab loading, direct prefab instantiation, component serialization, and
+  prefab resource sidecars
 - extension points for runtime effect modules
-- extension points for prefab entry handlers
 - extension points for custom material or shader pipelines
 
 ### Optional Engine Modules
@@ -68,7 +68,7 @@ Candidates:
 
 Examples should own:
 
-- effect package registration
+- prefab resource manifests
 - generated or imported textures
 - effect authoring files
 - prefab manifests
@@ -97,20 +97,20 @@ Success criteria:
   member fields and update calls
 - examples still work after explicitly registering the required modules
 
-### Phase 2: Prefab Handler Modularization
+### Phase 2: Prefab Serialization Simplification
 
 Goal:
 
-- stop prefab instantiation from hardcoding beam and volume-sphere entity
-  creation logic
+- stop prefab instantiation from hardcoding effect-specific entity creation
+  logic
 
 Changes:
 
-- add a prefab entry handler registry
-- route prefab entry instantiation through registered handlers
-- keep `mesh`, `particle`, and `light` as core handlers
-- move `beam` and `volume_sphere` handlers out of the core prefab runtime path
-  and into optional registration
+- serialize concrete ECS components in `prefab.json`
+- keep runtime behavior in optional runtime modules where needed
+- load texture aliases and particle effects through `prefab.resources.json`
+- instantiate beam, particle, light, mesh, and volume prefabs through the same
+  entity/component loader
 
 Success criteria:
 

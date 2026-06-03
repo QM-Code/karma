@@ -15,18 +15,28 @@ Primary file:
 
 - [`../examples/prefab_gallery_example.cpp`](../examples/prefab_gallery_example.cpp)
 
-Explosion package files:
+Explosion prefab files:
 
-- [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
-- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
-- [`../examples/assets/prefabs/explosion/prefab.kprefab`](../examples/assets/prefabs/explosion/prefab.kprefab)
+- [`../examples/assets/prefabs/explosion/prefab.json`](../examples/assets/prefabs/explosion/prefab.json)
+- [`../examples/assets/prefabs/explosion/prefab.resources.json`](../examples/assets/prefabs/explosion/prefab.resources.json)
 - [`../examples/assets/prefabs/explosion/particles/`](../examples/assets/prefabs/explosion/particles/)
-- [`../examples/assets/prefabs/explosion/source/`](../examples/assets/prefabs/explosion/source/)
+- [`../examples/assets/prefabs/explosion/textures/`](../examples/assets/prefabs/explosion/textures/)
 
 Wave / volume files:
 
-- [`../examples/assets/prefabs/wave/prefab.kprefab`](../examples/assets/prefabs/wave/prefab.kprefab)
-- [`../src/features/visual/volumes/volume_sphere_system.cpp`](../src/features/visual/volumes/volume_sphere_system.cpp)
+- [`../examples/assets/prefabs/wave/prefab.json`](../examples/assets/prefabs/wave/prefab.json)
+- [`../examples/assets/prefabs/gallery_wave_red/prefab.json`](../examples/assets/prefabs/gallery_wave_red/prefab.json)
+- [`../examples/assets/prefabs/gallery_wave_blue/prefab.json`](../examples/assets/prefabs/gallery_wave_blue/prefab.json)
+- [`../examples/assets/prefabs/gallery_wave_green/prefab.json`](../examples/assets/prefabs/gallery_wave_green/prefab.json)
+- [`../examples/assets/prefabs/gallery_wave_purple/prefab.json`](../examples/assets/prefabs/gallery_wave_purple/prefab.json)
+- [`../src/features/visual/volumes/volume_sphere_runtime_module.cpp`](../src/features/visual/volumes/volume_sphere_runtime_module.cpp)
+
+Beam gallery variant files:
+
+- [`../examples/assets/prefabs/gallery_beam_red/prefab.json`](../examples/assets/prefabs/gallery_beam_red/prefab.json)
+- [`../examples/assets/prefabs/gallery_beam_blue/prefab.json`](../examples/assets/prefabs/gallery_beam_blue/prefab.json)
+- [`../examples/assets/prefabs/gallery_beam_green/prefab.json`](../examples/assets/prefabs/gallery_beam_green/prefab.json)
+- [`../examples/assets/prefabs/gallery_beam_purple/prefab.json`](../examples/assets/prefabs/gallery_beam_purple/prefab.json)
 
 Renderer-side composition files:
 

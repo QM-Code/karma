@@ -1,5 +1,4 @@
 #include "demo_asset_paths.h"
-#include "explosion_prefab_package.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -32,6 +31,52 @@ constexpr int kExplosionFlipbookSpacing = 4;
 constexpr int kFastCoreExplosionFlipbookFrameSize = 128;
 constexpr int kFastCoreExplosionFlipbookBorder = 2;
 constexpr int kFastCoreExplosionFlipbookSpacing = 2;
+inline constexpr std::string_view kExplosionPackageAssetRoot = "prefabs/explosion";
+inline constexpr std::string_view kExplosionEffectFlash = "prefabs/explosion/flash";
+inline constexpr std::string_view kExplosionEffectFireball =
+    "prefabs/explosion/fireball";
+inline constexpr std::string_view kExplosionEffectSmoke = "prefabs/explosion/smoke";
+inline constexpr std::string_view kExplosionEffectHeat = "prefabs/explosion/heat";
+inline constexpr std::string_view kExplosionEffectShockRing =
+    "prefabs/explosion/shock_ring";
+inline constexpr std::string_view kExplosionEffectDustRing =
+    "prefabs/explosion/dust_ring";
+inline constexpr std::string_view kExplosionEffectScorch = "prefabs/explosion/scorch";
+inline constexpr std::string_view kExplosionEffectDebris = "prefabs/explosion/debris";
+inline constexpr std::string_view kExplosionEffectEmbers = "prefabs/explosion/embers";
+inline constexpr std::string_view kExplosionEffectCoreFlipbook =
+    "prefabs/explosion/core_flipbook";
+inline constexpr std::string_view kExplosionEffectSmokeFlipbook =
+    "prefabs/explosion/smoke_flipbook";
+inline constexpr std::string_view kExplosionTextureSpark =
+    "prefabs/explosion/spark_atlas";
+inline constexpr std::string_view kExplosionTextureGlow =
+    "prefabs/explosion/glow_atlas";
+inline constexpr std::string_view kExplosionTextureSmoke =
+    "prefabs/explosion/smoke_atlas";
+inline constexpr std::string_view kExplosionTextureHeat =
+    "prefabs/explosion/heat_atlas";
+inline constexpr std::string_view kExplosionTextureDustRing =
+    "prefabs/explosion/dust_ring_atlas";
+inline constexpr std::string_view kExplosionTextureShockRing =
+    "prefabs/explosion/shock_ring_atlas";
+inline constexpr std::string_view kExplosionTextureScorch =
+    "prefabs/explosion/scorch_atlas";
+inline constexpr std::string_view kExplosionTextureDebris =
+    "prefabs/explosion/debris_atlas";
+inline constexpr std::string_view kExplosionTextureCoreFlipbook =
+    "prefabs/explosion/explosion00_flipbook";
+inline constexpr std::string_view kExplosionTextureSmokeFlipbook =
+    "prefabs/explosion/explosion01_smoke_flipbook";
+
+std::filesystem::path explosionPackageAssetPath(std::string_view relative_path) {
+  std::filesystem::path path =
+      resolveExampleAssetPath(std::string(kExplosionPackageAssetRoot));
+  if (!relative_path.empty()) {
+    path /= std::filesystem::path(std::string(relative_path));
+  }
+  return path;
+}
 
 float scaleExplosionValue(float value) {
   return value * kExplosionVisualScale;
@@ -622,23 +667,11 @@ class ParticleExample final : public app::GameInterface {
         resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
     const int atlas_frame_size = 64;
     const int atlas_frames = 4;
-    const ExplosionFlipbookSourceMode flipbook_source_mode =
-        parseExplosionFlipbookSourceMode();
-    const bool rebuild_flipbook_cache = explosionFlipbookRebuildRequested();
-    const bool use_fast_flipbook_effects =
-        flipbook_source_mode == ExplosionFlipbookSourceMode::Fast;
-    const int fallback_frame_size =
-        use_fast_flipbook_effects ? kFastCoreExplosionFlipbookFrameSize
-                                  : kExplosionFlipbookFrameSize;
-    const int fallback_border =
-        use_fast_flipbook_effects ? kFastCoreExplosionFlipbookBorder
-                                  : kExplosionFlipbookBorder;
-    const int fallback_spacing =
-        use_fast_flipbook_effects ? kFastCoreExplosionFlipbookSpacing
-                                  : kExplosionFlipbookSpacing;
-    spdlog::info("Particle example flipbook mode={} rebuild_cache={}",
-                 explosionFlipbookSourceModeName(flipbook_source_mode),
-                 rebuild_flipbook_cache);
+    const bool use_fast_flipbook_effects = true;
+    const int fallback_frame_size = kFastCoreExplosionFlipbookFrameSize;
+    const int fallback_border = kFastCoreExplosionFlipbookBorder;
+    const int fallback_spacing = kFastCoreExplosionFlipbookSpacing;
+    spdlog::info("Particle example using fast procedural explosion flipbook");
 
     const std::vector<std::uint8_t> spark_atlas = buildSparkAtlas(atlas_frame_size, atlas_frames);
     spark_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
@@ -660,37 +693,12 @@ class ParticleExample final : public app::GameInterface {
                                                  atlas_frame_size,
                                                  heat_atlas.data());
 
-    if (flipbook_source_mode != ExplosionFlipbookSourceMode::Fast) {
-      explosion_flipbook_texture_ =
-          buildExplosionPackageFireExrFlipbook(*graphics, rebuild_flipbook_cache);
-      if (explosion_flipbook_texture_ != renderer::kInvalidTexture) {
-        spdlog::info("Particle example loaded Explosion00 fire atlas from package EXR source");
-      }
-    }
-    if (explosion_flipbook_texture_ == renderer::kInvalidTexture) {
-      if (flipbook_source_mode != ExplosionFlipbookSourceMode::Fast) {
-        spdlog::warn(
-            "Package Explosion00 EXR atlas unavailable; falling back to procedural atlas");
-      }
-      explosion_flipbook_texture_ =
-          buildProceduralExplosionCoreFlipbook(*graphics,
-                                               fallback_frame_size,
-                                               fallback_border,
-                                               fallback_spacing);
-    }
-    if (flipbook_source_mode != ExplosionFlipbookSourceMode::Fast) {
-      explosion_smoke_flipbook_texture_ =
-          buildExplosionPackageSmokeExrFlipbook(*graphics, rebuild_flipbook_cache);
-      if (explosion_smoke_flipbook_texture_ == renderer::kInvalidTexture) {
-        spdlog::warn(
-            "Package Explosion01 smoke EXR atlas unavailable; using existing procedural smoke only");
-      } else {
-        spdlog::info("Particle example loaded Explosion01 smoke atlas from package EXR source");
-      }
-    } else {
-      spdlog::info(
-          "Particle example fast flipbook mode skips Explosion01 smoke EXR sequence");
-    }
+    explosion_flipbook_texture_ =
+        buildProceduralExplosionCoreFlipbook(*graphics,
+                                             fallback_frame_size,
+                                             fallback_border,
+                                             fallback_spacing);
+    spdlog::info("Particle example fast mode skips Explosion01 smoke flipbook");
 
     const std::vector<std::uint8_t> dust_ring_atlas =
         buildDustRingAtlas(atlas_frame_size, atlas_frames);

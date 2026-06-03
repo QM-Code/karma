@@ -1,5 +1,4 @@
 #include "demo_asset_paths.h"
-#include "energy_orb_prefab_package.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -18,6 +17,33 @@ components::TransformComponent makeTransform(const math::Vec3& position) {
   components::TransformComponent transform{};
   transform.setPosition(position);
   return transform;
+}
+
+void setPrefabInstancePlayback(ecs::World& world,
+                               const prefabs::PrefabInstance& instance,
+                               bool enabled) {
+  for (const ecs::Entity entity : instance.entities) {
+    if (!world.isAlive(entity)) {
+      continue;
+    }
+    if (world.has<components::ParticleEmitterComponent>(entity)) {
+      particles::setEffectPlayback(world, entity, enabled, enabled);
+    }
+    if (world.has<components::MeshComponent>(entity)) {
+      world.get<components::MeshComponent>(entity).visible = enabled;
+    }
+    if (world.has<components::VisibilityComponent>(entity)) {
+      world.get<components::VisibilityComponent>(entity).visible = enabled;
+    }
+  }
+}
+
+void restartInstanceParticleEffects(ecs::World& world, const prefabs::PrefabInstance& instance) {
+  for (const ecs::Entity entity : instance.entities) {
+    if (world.isAlive(entity)) {
+      particles::restartEffect(world, entity);
+    }
+  }
 }
 
 }  // namespace
@@ -39,23 +65,19 @@ class EnergyOrbExample final : public app::GameInterface {
     spawnWorld();
     spawnLighting();
 
-    if (prefab_registry == nullptr ||
-        !registerEnergyOrbPrefabPackage(*prefab_registry)) {
-      spdlog::error("Energy orb example failed to register the orb prefab package");
+    const auto orb = prefabs::instantiatePrefab(
+        *world,
+        *scene,
+        resolveExampleAssetPath("prefabs/energy_orb"),
+        prefabs::PrefabInstantiateDesc{
+            .root_transform = makeTransform(kOrbBasePosition),
+            .name_override = "Energy Orb",
+        });
+    if (orb.has_value()) {
+      orb_instance_ = *orb;
+      orb_root_entity_ = orb_instance_.root;
     } else {
-      const auto orb = prefab_registry->instantiate(
-          *world,
-          kEnergyOrbPrefabKey,
-          prefabs::PrefabInstantiateDesc{
-              .name = "Energy Orb",
-              .transform = makeTransform(kOrbBasePosition),
-              .param_overrides = {{"accent", kOrbAccentColor}},
-          });
-      if (orb.has_value()) {
-        orb_root_entity_ = orb->root;
-      } else {
-        spdlog::error("Energy orb example failed to instantiate the orb prefab");
-      }
+      spdlog::error("Energy orb example failed to instantiate the orb prefab");
     }
 
     spawnCamera();
@@ -104,13 +126,13 @@ class EnergyOrbExample final : public app::GameInterface {
 
     if (input->actionPressed("toggle_orb")) {
       orb_enabled_ = !orb_enabled_;
-      prefabs::setPrefabPlayback(*world, orb_root_entity_, orb_enabled_);
+      setPrefabInstancePlayback(*world, orb_instance_, orb_enabled_);
     }
 
     if (input->actionPressed("restart_orb")) {
-      prefabs::restartPrefab(*world, orb_root_entity_);
+      restartInstanceParticleEffects(*world, orb_instance_);
       orb_enabled_ = true;
-      prefabs::setPrefabPlayback(*world, orb_root_entity_, true);
+      setPrefabInstancePlayback(*world, orb_instance_, true);
     }
 
     if (world->isAlive(orb_root_entity_) &&
@@ -185,6 +207,7 @@ class EnergyOrbExample final : public app::GameInterface {
 
   std::string world_mesh_;
   std::string environment_map_;
+  prefabs::PrefabInstance orb_instance_{};
   ecs::Entity orb_root_entity_{};
   ecs::Entity camera_entity_{};
   bool orb_enabled_ = true;

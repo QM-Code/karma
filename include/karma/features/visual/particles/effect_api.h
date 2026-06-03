@@ -21,6 +21,7 @@ struct ParticleEffectBindingDesc {
   bool auto_apply = true;
   bool preserve_enabled = true;
   bool preserve_playing = true;
+  bool preserve_start_delay = false;
   std::optional<components::ParticleEffectOverrideComponent> effect_override;
 };
 
@@ -33,6 +34,7 @@ struct ParticleEffectEntityDesc {
   bool auto_apply = true;
   bool preserve_enabled = true;
   bool preserve_playing = true;
+  bool preserve_start_delay = false;
   std::optional<components::ParticleEffectOverrideComponent> effect_override;
 };
 
@@ -58,6 +60,7 @@ inline bool bindEffect(ecs::World& world,
                         .auto_apply = desc.auto_apply,
                         .preserve_enabled = desc.preserve_enabled,
                         .preserve_playing = desc.preserve_playing,
+                        .preserve_start_delay = desc.preserve_start_delay,
                     });
   if (desc.effect_override.has_value()) {
     world.add(entity, *desc.effect_override);
@@ -81,6 +84,7 @@ inline ecs::Entity createEffectEntity(ecs::World& world,
                  .auto_apply = desc.auto_apply,
                  .preserve_enabled = desc.preserve_enabled,
                  .preserve_playing = desc.preserve_playing,
+                 .preserve_start_delay = desc.preserve_start_delay,
                  .effect_override = desc.effect_override,
              });
   return entity;

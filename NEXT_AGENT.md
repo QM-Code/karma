@@ -1,6 +1,6 @@
 # Next Agent Bootstrap
 
-This repo is in a fast-moving state. Prefer behavior-preserving refactors first, then tighten architecture once the split points are proven. Do not revert unrelated dirty worktree changes.
+This repo is in a fast-moving state. Prefer behavior-preserving refactors first, then tighten architecture once the split points are proven. Check the worktree before editing and do not revert unrelated user changes.
 
 ## Start Here
 
@@ -31,9 +31,9 @@ Read these first:
 - [docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md](docs/LOCAL_LIGHT_SHADOW_BOOTSTRAP.md)
 - [docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md](docs/LOCAL_LIGHT_PROBE_BOOTSTRAP.md)
 
-## Worktree Warning
+## Worktree Caution
 
-The worktree is intentionally dirty. Do not assume unrelated modified files are safe to revert.
+Do not assume unrelated modified files are safe to revert.
 
 High-signal areas right now:
 
@@ -42,15 +42,17 @@ High-signal areas right now:
 - [`src/rendering/renderer/backends/diligent/passes/`](src/rendering/renderer/backends/diligent/passes)
 - [`src/rendering/renderer/backends/diligent/resources/`](src/rendering/renderer/backends/diligent/resources)
 - [`src/rendering/renderer/render_system.cpp`](src/rendering/renderer/render_system.cpp)
-- [`src/features/visual/particles/`](src/particles)
+- [`src/features/visual/particles/`](src/features/visual/particles)
 - [`src/features/visual/beams/beam_path_system.cpp`](src/features/visual/beams/beam_path_system.cpp)
 - [`src/features/visual/beams/beam_path_runtime_module.cpp`](src/features/visual/beams/beam_path_runtime_module.cpp)
 - [`src/features/visual/volumes/volume_sphere_system.cpp`](src/features/visual/volumes/volume_sphere_system.cpp)
 - [`src/features/visual/volumes/volume_sphere_runtime_module.cpp`](src/features/visual/volumes/volume_sphere_runtime_module.cpp)
 - [`src/content/prefabs/prefab_runtime.cpp`](src/content/prefabs/prefab_runtime.cpp)
-- [`src/content/prefabs/prefab_entry_handler.cpp`](src/content/prefabs/prefab_entry_handler.cpp)
+- [`src/content/prefabs/prefab_resources.cpp`](src/content/prefabs/prefab_resources.cpp)
+- [`src/content/prefabs/component_serializer_registry.cpp`](src/content/prefabs/component_serializer_registry.cpp)
 - [`include/karma/runtime/app/runtime_module.h`](include/karma/runtime/app/runtime_module.h)
-- [`include/karma/content/prefabs/prefab_entry_handler.h`](include/karma/content/prefabs/prefab_entry_handler.h)
+- [`include/karma/content/prefabs/prefab_resource_context.h`](include/karma/content/prefabs/prefab_resource_context.h)
+- [`include/karma/content/prefabs/component_serializer_registry.h`](include/karma/content/prefabs/component_serializer_registry.h)
 - [`src/simulation/physics/`](src/physics)
 - [`src/simulation/collision/`](src/collision)
 - [`src/simulation/animation/`](src/animation)

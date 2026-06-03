@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Beam",
+      "parent": null,
+      "components": {
+        "TagComponent": { "name": "Beam" },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        }
+      }
+    },
+    {
+      "id": 1,
+      "name": "beam",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "beam" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "BeamPathComponent": {
+          "points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "core_color": [1, 1, 1, 1],
+          "glow_color": [1, 0.18, 0.14, 1],
+          "core_radius": 0.21,
+          "glow_radius": 0.56,
+          "core_intensity": 2.4,
+          "glow_intensity": 1.45,
+          "endpoint_core_size": 0.42,
+          "endpoint_glow_size": 1.12,
+          "light_count": 0,
+          "light_intensity": 1.2,
+          "light_range": 5.2,
+          "light_spacing": 1,
+          "electric_intensity": 0.9,
+          "electric_size": 0.16,
+          "electric_spacing": 0.28,
+          "electric_jitter_radius": 0.15,
+          "electric_speed": 2,
+          "distortion_intensity": 0.82,
+          "distortion_size": 1.28,
+          "distortion_spacing": 0.18,
+          "distortion_jitter_radius": 0.08,
+          "distortion_strength": 18,
+          "distortion_soft_particle_distance": 0.72,
+          "distortion_speed": 1.85,
+          "layer": 0,
+          "visible": true,
+          "depth_test": true,
+          "closed_loop": false,
+          "world_space": false,
+          "endpoint_flares": true
+        }
+      }
+    }
+  ]
+}

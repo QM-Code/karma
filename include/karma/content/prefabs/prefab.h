@@ -3,129 +3,80 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <variant>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
-#include "karma/world/components/beam_path.h"
-#include "karma/world/components/light.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/particle_effect_override.h"
-#include "karma/world/components/prefab_instance.h"
+#include <nlohmann/json.hpp>
+
 #include "karma/world/components/transform.h"
-#include "karma/world/components/volume_sphere.h"
-#include "karma/rendering/renderer/material.h"
+#include "karma/world/ecs/entity.h"
+#include "karma/world/ecs/world.h"
+#include "karma/world/scene/node.h"
+#include "karma/world/scene/scene.h"
 
 namespace karma::prefabs {
 
-using PrefabParamValue = std::variant<bool, float, math::Vec3, math::Color, std::string>;
-
-struct PrefabParameter {
-  enum class Type : uint8_t {
-    Bool = 0,
-    Float = 1,
-    Vec3 = 2,
-    Color = 3,
-    String = 4,
-  };
-
+struct PrefabNode {
+  uint32_t id = 0;
   std::string name;
-  Type type = Type::Color;
-  PrefabParamValue default_value{math::Color{1.0f, 1.0f, 1.0f, 1.0f}};
+  std::optional<size_t> parent;
+  nlohmann::json components = nlohmann::json::object();
 };
 
-struct PrefabColorBinding {
-  bool enabled = false;
-  std::optional<math::Color> value;
-  std::string param;
-  math::Color scale{1.0f, 1.0f, 1.0f, 1.0f};
-  std::optional<math::Color> mix_color;
-  float mix_factor = 0.0f;
+struct PrefabDocument {
+  uint32_t version = 1;
+  size_t root = 0;
+  std::vector<PrefabNode> nodes;
 };
 
-struct PrefabFloatBinding {
-  bool enabled = false;
-  std::optional<float> value;
-  std::string param;
-  float scale = 1.0f;
-  float bias = 0.0f;
+struct PrefabSaveOptions {
+  bool include_children = true;
 };
 
-struct PrefabMaterialDesc {
-  renderer::MaterialDesc material{};
-  PrefabColorBinding base_color_binding{};
-  PrefabColorBinding emissive_color_binding{};
+struct PrefabInstantiateDesc {
+  components::TransformComponent root_transform{};
+  std::string name_override;
 };
 
-struct PrefabMeshDesc {
-  std::filesystem::path mesh_path;
-  bool visible = true;
-  bool shadow_visible = true;
-  PrefabMaterialDesc material{};
+struct PrefabInstance {
+  ecs::Entity root{};
+  scene::NodeId root_scene_node = scene::Node::kInvalidId;
+  std::vector<ecs::Entity> entities;
+  std::unordered_map<std::string, ecs::Entity> named_entities;
+  std::unordered_map<uint32_t, ecs::Entity> entities_by_id;
+
+  bool valid() const { return root.isValid(); }
+
+  ecs::Entity find(std::string_view name) const {
+    const auto it = named_entities.find(std::string(name));
+    if (it == named_entities.end()) {
+      return {};
+    }
+    return it->second;
+  }
+
+  ecs::Entity find(uint32_t saved_node_id) const {
+    const auto it = entities_by_id.find(saved_node_id);
+    if (it == entities_by_id.end()) {
+      return {};
+    }
+    return it->second;
+  }
 };
 
-struct PrefabParticleDesc {
-  std::string effect_key;
-  bool enabled = true;
-  bool playing = true;
-  bool auto_apply = true;
-  bool preserve_enabled = true;
-  bool preserve_playing = true;
-  components::ParticleEffectOverrideComponent effect_override{};
-  PrefabColorBinding start_color_binding{};
-  PrefabColorBinding end_color_binding{};
-};
+bool savePrefab(const ecs::World& world,
+                const scene::Scene& scene,
+                ecs::Entity root,
+                const std::filesystem::path& path,
+                const PrefabSaveOptions& options = {});
 
-struct PrefabLightDesc {
-  components::LightComponent light{};
-  PrefabColorBinding color_binding{};
-  PrefabFloatBinding intensity_binding{};
-  PrefabFloatBinding range_binding{};
-};
+std::optional<PrefabInstance> instantiatePrefab(
+    ecs::World& world,
+    scene::Scene& scene,
+    const std::filesystem::path& path,
+    const PrefabInstantiateDesc& desc = {});
 
-struct PrefabBeamDesc {
-  components::BeamPathComponent beam{};
-  PrefabColorBinding core_color_binding{};
-  PrefabColorBinding glow_color_binding{};
-};
-
-struct PrefabVolumeSphereDesc {
-  components::VolumeSphereComponent volume{};
-  PrefabColorBinding color_binding{};
-  PrefabColorBinding emissive_color_binding{};
-  PrefabFloatBinding radius_binding{};
-  PrefabFloatBinding center_opacity_binding{};
-  PrefabFloatBinding distortion_strength_binding{};
-  PrefabFloatBinding noise_strength_binding{};
-  PrefabFloatBinding overlay_depth_binding{};
-};
-
-struct PrefabEntry {
-  enum class Type : uint8_t {
-    Mesh = 0,
-    Particle = 1,
-    Light = 2,
-    Beam = 3,
-    VolumeSphere = 4,
-  };
-
-  Type type = Type::Mesh;
-  std::string name;
-  components::TransformComponent local_transform{};
-  PrefabMeshDesc mesh{};
-  PrefabParticleDesc particle{};
-  PrefabLightDesc light{};
-  PrefabBeamDesc beam{};
-  PrefabVolumeSphereDesc volume_sphere{};
-};
-
-struct Prefab {
-  std::string name;
-  std::filesystem::path source_path;
-  std::vector<PrefabParameter> parameters;
-  std::vector<PrefabEntry> entries;
-};
-
-bool loadPrefab(const std::filesystem::path& path, Prefab& out_prefab);
-std::optional<Prefab> loadPrefab(const std::filesystem::path& path);
+bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root);
 
 }  // namespace karma::prefabs

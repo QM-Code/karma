@@ -1,0 +1,48 @@
+# Bright additive plasma core for the energy orb.
+layer = 0
+depth_test = true
+blend_mode = additive
+alignment = billboard
+use_soft_mask = false
+texture = orb_core_atlas
+
+enabled = true
+playing = true
+loop = true
+emit_burst_on_start = true
+local_space = true
+
+atlas_columns = 6
+atlas_rows = 1
+atlas_frame_count = 6
+animate_over_lifetime = true
+random_start_frame = true
+
+max_particles = 216
+burst_count = 72
+seed = 5203
+spawn_rate = 69.0
+duration = 0.0
+particle_lifetime_min = 1.24
+particle_lifetime_max = 2.68
+start_size_min = 1.70
+start_size_max = 2.60
+end_size_min = 0.82
+end_size_max = 1.65
+size_curve_exponent = 0.62
+alpha_curve_exponent = 0.78
+initial_rotation_min = 0.0
+initial_rotation_max = 6.2831853
+angular_velocity_min = -0.30
+angular_velocity_max = 0.30
+spawn_shape = sphere
+spawn_radius_min = 0.944
+spawn_radius_max = 1.264
+radial_speed_min = 0.0
+radial_speed_max = 0.005
+velocity_min = -0.005, -0.004, -0.005
+velocity_max = 0.005, 0.006, 0.005
+acceleration = 0.0, 0.0, 0.0
+drag = 3.55
+start_color = 1.0, 0.98, 0.94, 0.96
+end_color = 0.42, 0.78, 1.0, 0.0

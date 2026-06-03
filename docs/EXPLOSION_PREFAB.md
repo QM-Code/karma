@@ -1,36 +1,26 @@
 # Explosion Prefab
 
-This is the reusable staged-explosion prefab package used by the stress sample
-and prefab gallery.
+The explosion is a direct-load prefab under
+`examples/assets/prefabs/explosion/`.
 
 Primary sources:
 
-- [`../examples/explosion_prefab_package.h`](../examples/explosion_prefab_package.h)
-- [`../examples/explosion_prefab_package.cpp`](../examples/explosion_prefab_package.cpp)
-- [`../examples/assets/prefabs/explosion/prefab.kprefab`](../examples/assets/prefabs/explosion/prefab.kprefab)
+- [`../examples/assets/prefabs/explosion/prefab.json`](../examples/assets/prefabs/explosion/prefab.json)
+- [`../examples/assets/prefabs/explosion/prefab.resources.json`](../examples/assets/prefabs/explosion/prefab.resources.json)
 - [`../examples/assets/prefabs/explosion/particles/`](../examples/assets/prefabs/explosion/particles/)
-- [`../examples/assets/prefabs/explosion/source/`](../examples/assets/prefabs/explosion/source/)
+- [`../examples/assets/prefabs/explosion/textures/`](../examples/assets/prefabs/explosion/textures/)
 
 ## What It Provides
 
-The package registers the prefab key `explosion` and handles the runtime setup
-that a plain `.kprefab` file cannot do by itself:
+`prefab.resources.json` registers the prefab-owned texture aliases and particle
+effect files the first time the prefab directory is instantiated. The sidecar
+uses paths relative to the prefab directory.
 
-- generated procedural atlases for flash / fireball / smoke / heat / rings / debris
-- EXR-backed flipbook atlases for the core fire and late smoke passes
-- package-scoped particle effect registration
-- shared EXR cache / load helpers used by both prefab and particle examples
-- typed controller helpers for trigger / update / cleanup
+`prefab.json` owns the entity hierarchy, particle effect bindings, child
+emitter `start_delay` values, and the point-light pulse data. No explosion
+package or explosion-specific controller is required.
 
-The explosion prefab is self-contained under
-`examples/assets/prefabs/explosion/`. The `.kprefab` file references
-package-scoped particle keys such as `prefabs/explosion/core_flipbook`, the
-effect files live in `particles/`, and the EXR validation sequences live in
-`source/`. The package registers its own `prefabs/explosion/...` texture
-aliases, so explosion effects do not depend on the global particle demo alias
-namespace.
-
-The prefab itself is a layered one-shot bundle:
+The prefab is a layered one-shot bundle:
 
 - flash
 - fireball
@@ -43,94 +33,61 @@ The prefab itself is a layered one-shot bundle:
 - dust ring
 - smoke plume
 - scorch mark
-- point light
+- point-light pulse
 
 ## Canonical Usage
 
-Register once:
+Instantiate directly:
 
 ```cpp
-#include "explosion_prefab_package.h"
-
-if (!registerExplosionPrefabPackage(*prefab_registry)) {
-  return false;
-}
-```
-
-Instantiate a controller:
-
-```cpp
-const auto explosion = instantiateExplosionPrefabController(
+const auto explosion = prefabs::instantiatePrefab(
     *world,
-    *prefab_registry,
+    *scene,
+    resolveExampleAssetPath("prefabs/explosion"),
     prefabs::PrefabInstantiateDesc{
-        .name = "Explosion",
-        .transform = transform,
+        .root_transform = transform,
+        .name_override = "Explosion",
     });
 ```
 
-Drive it:
+For repeated explosions, instantiate a fresh prefab on each trigger and destroy
+the root after the effect window:
 
 ```cpp
-triggerExplosionPrefab(*world, *explosion, time_seconds);
-updateExplosionPrefab(*world, *explosion, time_seconds);
+prefabs::destroyPrefab(*world, *scene, explosion->root);
 ```
 
-Destroy it when the controller is no longer needed:
+The runtime `EngineApp` binds the prefab resource context so direct loads can
+upload sidecar textures and register sidecar particle effect files.
 
-```cpp
-destroyExplosionPrefabController(*world, *explosion);
-```
+## Runtime Timing
 
-That destroy step matters. The prefab package now has explicit teardown, and
-that is the supported way to avoid stale prefab roots, emitters, and lights.
+Particle staging is generic:
 
-## Current Visual / Runtime State
+- `ParticleEmitterComponent::start_delay` delays one-shot emission.
+- `ParticleEffectComponent::preserve_start_delay` keeps prefab-authored delays
+  when a named `.kpeffect` template is applied.
+- `LightPulseComponent` fades point-light intensity/range and hides the light
+  after its duration.
 
-The current package is not the original baseline package anymore.
+The old controller timings are now serialized in `prefab.json`:
 
-Current state:
+- immediate: flash
+- `0.01s`: core flipbook
+- `0.03s`: fireball
+- `0.04s`: heat, shock ring
+- `0.05s`: embers, debris, dust ring
+- `0.12s`: scorch
+- `0.22s`: smoke flipbook
+- `0.24s`: smoke
+- `0.64s`: light pulse duration
 
-- the shock ring depth-tests correctly
-- the smoke layers are darker than the earlier authored defaults
-- core and smoke flipbooks use generated procedural atlases by default
-- opt-in EXR flipbook metadata is authored for `400x400` atlas frames
-- if either EXR path fails, the package falls back to a procedural atlas
+## Assets
 
-Debugging helpers:
-
-- `getExplosionPrefabPackageDebugInfo()`
-- `explosionFlipbookTextureSourceName(...)`
-
-The stress sample also logs:
-
-- `Explosion prefab package flipbooks: core=... smoke=...`
-- `Explosion stress flipbooks: core=... smoke=...`
-
-Possible source values:
-
-- `exr_sequence`
-- `procedural_atlas`
-- `unknown`
-
-Flipbook startup controls:
-
-- `KARMA_EXPLOSION_FLIPBOOK_SOURCE=fast` uses generated procedural atlases and is the default.
-- `KARMA_EXPLOSION_FLIPBOOK_SOURCE=exr` loads or builds the EXR-derived atlases.
-- `KARMA_EXPLOSION_FLIPBOOK_SOURCE=auto` uses a valid generated cache, or builds it if missing.
-- `KARMA_EXPLOSION_FLIPBOOK_REBUILD=1` forces EXR cache regeneration.
-
-## Stress-Tuned Content Note
-
-The shared explosion assets currently carry heavier ember and debris counts
-because the prefab has been used as a stress harness:
-
-- embers: `burst_count = 504`, `max_particles = 576`
-- debris: `burst_count = 36`, `max_particles = 48`
-
-That is useful for renderer/perf validation, but it is intentionally aggressive.
-If you want a gameplay-facing version, reduce those authored counts rather than
-changing the controller API.
+Committed PNG atlases live under `textures/`. Core and smoke flipbooks use the
+fast procedural visual defaults baked into PNG assets. EXR source folders may
+remain as reference material, but they are no longer runtime dependencies for
+the explosion prefab.
 
 ## Reference Examples
 
@@ -139,8 +96,10 @@ changing the controller API.
 
 ## Validation
 
-The package is currently validated by building:
+Current validation targets:
 
 ```bash
-cmake --build build-local --target karma_explosion_stress_example karma_prefab_gallery_example karma_particle_example -j2
+cmake --build build --target karma_prefab_tests karma_prefab_gallery_example karma_explosion_stress_example karma_particle_example -j2
+./build/karma_prefab_tests
+ctest --test-dir build --output-on-failure -R 'karma_prefab_tests|karma_animation_tests'
 ```

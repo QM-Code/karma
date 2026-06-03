@@ -1,19 +1,28 @@
-#include "karma/content/prefabs/prefab_runtime.h"
-#include "karma/content/prefabs/prefab_entry_handler.h"
+#include "karma/content/prefabs/prefab.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <optional>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
-#include "karma/world/components/particle_emitter.h"
-#include "karma/world/components/visibility.h"
+#include <spdlog/spdlog.h>
+
+#include "karma/content/prefabs/component_serializer_registry.h"
+#include "karma/content/prefabs/prefab_resource_context.h"
 #include "karma/core/math/quat.h"
-#include "karma/features/visual/particles/effect_api.h"
-#include "karma/rendering/renderer/device.h"
+#include "karma/world/components/tag.h"
+#include "karma/world/scene/transform_hierarchy.h"
 
 namespace karma::prefabs {
 
 namespace {
+
+using Json = nlohmann::json;
 
 math::Vec3 multiplyVec3(const math::Vec3& a, const math::Vec3& b) {
   return {a.x * b.x, a.y * b.y, a.z * b.z};
@@ -24,411 +33,560 @@ math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b) {
 }
 
 components::TransformComponent composeTransform(
-    const components::TransformComponent& root,
+    const components::TransformComponent& parent,
     const components::TransformComponent& local) {
-  components::TransformComponent world_transform{};
-  const math::Vec3 scaled_local = multiplyVec3(local.getPosition(), root.getScale());
-  const math::Vec3 rotated_local = math::rotateVec(root.getRotation(), scaled_local);
-  world_transform.setPosition(addVec3(root.getPosition(), rotated_local));
-  world_transform.setRotation(math::mul(root.getRotation(), local.getRotation()));
-  world_transform.setScale(multiplyVec3(root.getScale(), local.getScale()));
-  return world_transform;
+  components::TransformComponent transform{};
+  const math::Vec3 scaled_local = multiplyVec3(local.getPosition(), parent.getScale());
+  const math::Vec3 rotated_local = math::rotateVec(parent.getRotation(), scaled_local);
+  transform.setPosition(addVec3(parent.getPosition(), rotated_local));
+  transform.setRotation(math::mul(parent.getRotation(), local.getRotation()));
+  transform.setScale(multiplyVec3(parent.getScale(), local.getScale()));
+  return transform;
 }
 
-math::Color lerpColor(const math::Color& a, const math::Color& b, float t) {
-  const float s = std::clamp(t, 0.0f, 1.0f);
-  return {
-      a.r + (b.r - a.r) * s,
-      a.g + (b.g - a.g) * s,
-      a.b + (b.b - a.b) * s,
-      a.a + (b.a - a.a) * s,
+components::TransformComponent toTransform(
+    const components::LocalTransformComponent& local) {
+  return components::TransformComponent{local.position, local.rotation, local.scale};
+}
+
+components::LocalTransformComponent toLocalTransform(
+    const components::TransformComponent& transform) {
+  return components::LocalTransformComponent{
+      transform.getPosition(),
+      transform.getRotation(),
+      transform.getScale(),
   };
 }
 
-math::Color multiplyColor(const math::Color& a, const math::Color& b) {
-  return {a.r * b.r, a.g * b.g, a.b * b.b, a.a * b.a};
+std::filesystem::path resolvePrefabPath(const std::filesystem::path& path) {
+  std::error_code ec;
+  if (std::filesystem::is_directory(path, ec)) {
+    return path / "prefab.json";
+  }
+  if (path.extension().empty()) {
+    return path / "prefab.json";
+  }
+  return path;
 }
 
-bool tryGetParamColor(const std::unordered_map<std::string, PrefabParamValue>& params,
-                      std::string_view name,
-                      math::Color& out_color) {
-  const auto it = params.find(std::string(name));
-  if (it == params.end()) {
+bool readRequiredUint32(const Json& object,
+                        std::string_view key,
+                        uint32_t& out_value,
+                        const std::filesystem::path& path) {
+  const auto it = object.find(key);
+  if (it == object.end() || (!it->is_number_unsigned() && !it->is_number_integer())) {
+    spdlog::error("Prefab '{}' is missing numeric '{}' field", path.string(), key);
     return false;
   }
-  if (const auto* color = std::get_if<math::Color>(&it->second)) {
-    out_color = *color;
-    return true;
-  }
-  if (const auto* vec = std::get_if<math::Vec3>(&it->second)) {
-    out_color = {vec->x, vec->y, vec->z, 1.0f};
-    return true;
-  }
-  return false;
-}
-
-bool tryGetParamFloat(const std::unordered_map<std::string, PrefabParamValue>& params,
-                      std::string_view name,
-                      float& out_value) {
-  const auto it = params.find(std::string(name));
-  if (it == params.end()) {
+  const int64_t value = it->get<int64_t>();
+  if (value < 0 || value > static_cast<int64_t>(UINT32_MAX)) {
+    spdlog::error("Prefab '{}' has out-of-range '{}' field", path.string(), key);
     return false;
   }
-  if (const auto* value = std::get_if<float>(&it->second)) {
-    out_value = *value;
-    return true;
-  }
-  return false;
+  out_value = static_cast<uint32_t>(value);
+  return true;
 }
 
-math::Color resolveColorBinding(
-    const PrefabColorBinding& binding,
-    const std::unordered_map<std::string, PrefabParamValue>& params,
-    const math::Color& fallback) {
-  math::Color color = binding.value.value_or(fallback);
-  if (!binding.param.empty()) {
-    math::Color param_color{};
-    if (tryGetParamColor(params, binding.param, param_color)) {
-      color = param_color;
-    }
+bool readRequiredSize(const Json& object,
+                      std::string_view key,
+                      size_t& out_value,
+                      const std::filesystem::path& path) {
+  const auto it = object.find(key);
+  if (it == object.end() || (!it->is_number_unsigned() && !it->is_number_integer())) {
+    spdlog::error("Prefab '{}' is missing numeric '{}' field", path.string(), key);
+    return false;
   }
-  color = multiplyColor(color, binding.scale);
-  if (binding.mix_color.has_value() && binding.mix_factor > 0.0f) {
-    color = lerpColor(color, *binding.mix_color, binding.mix_factor);
+  const int64_t value = it->get<int64_t>();
+  if (value < 0) {
+    spdlog::error("Prefab '{}' has negative '{}' field", path.string(), key);
+    return false;
   }
-  return color;
+  out_value = static_cast<size_t>(value);
+  return true;
 }
 
-float resolveFloatBinding(const PrefabFloatBinding& binding,
-                          const std::unordered_map<std::string, PrefabParamValue>& params,
-                          float fallback) {
-  float value = binding.value.value_or(fallback);
-  if (!binding.param.empty()) {
-    float param_value = 0.0f;
-    if (tryGetParamFloat(params, binding.param, param_value)) {
-      value = param_value;
-    }
+bool readRequiredString(const Json& object,
+                        std::string_view key,
+                        std::string& out_value,
+                        const std::filesystem::path& path) {
+  const auto it = object.find(key);
+  if (it == object.end() || !it->is_string()) {
+    spdlog::error("Prefab '{}' is missing string '{}' field", path.string(), key);
+    return false;
   }
-  return value * binding.scale + binding.bias;
+  out_value = it->get<std::string>();
+  return true;
 }
 
-std::unordered_map<std::string, PrefabParamValue> resolveParameters(
-    const Prefab& prefab,
-    const PrefabInstantiateDesc& desc) {
-  std::unordered_map<std::string, PrefabParamValue> resolved;
-  resolved.reserve(prefab.parameters.size() + desc.param_overrides.size());
-
-  for (const auto& param : prefab.parameters) {
-    resolved[param.name] = param.default_value;
+bool validateParents(const PrefabDocument& document,
+                     const std::filesystem::path& path) {
+  if (document.nodes.empty()) {
+    spdlog::error("Prefab '{}' contains no nodes", path.string());
+    return false;
   }
-  for (const auto& override : desc.param_overrides) {
-    resolved[override.name] = override.value;
+  if (document.root >= document.nodes.size()) {
+    spdlog::error("Prefab '{}' root index is out of range", path.string());
+    return false;
   }
-  return resolved;
-}
-
-ecs::Entity createMeshEntity(
-    ecs::World& world,
-    renderer::GraphicsDevice* graphics,
-    const PrefabEntry& entry,
-    const std::string& entity_name,
-    const components::TransformComponent& world_transform,
-    const std::unordered_map<std::string, PrefabParamValue>& resolved_params) {
-  ecs::Entity entity = world.createEntity();
-  if (!entity_name.empty()) {
-    world.setName(entity, entity_name);
-  }
-  world.add(entity, world_transform);
-
-  renderer::MaterialId material_id = renderer::kInvalidMaterial;
-  if (graphics != nullptr) {
-    renderer::MaterialDesc material_desc = entry.mesh.material.material;
-    if (entry.mesh.material.base_color_binding.enabled) {
-      material_desc.base_color = resolveColorBinding(entry.mesh.material.base_color_binding,
-                                                     resolved_params,
-                                                     material_desc.base_color);
-    }
-    if (entry.mesh.material.emissive_color_binding.enabled) {
-      material_desc.emissive_color =
-          resolveColorBinding(entry.mesh.material.emissive_color_binding,
-                              resolved_params,
-                              material_desc.emissive_color);
-    }
-    material_id = graphics->createMaterial(material_desc);
-  }
-
-  world.add(entity,
-            components::MeshComponent{
-                .mesh_key = entry.mesh.mesh_path.string(),
-                .material_id = material_id,
-                .owns_material_id = material_id != renderer::kInvalidMaterial,
-                .visible = entry.mesh.visible,
-                .shadow_visible = entry.mesh.shadow_visible,
-            });
-  return entity;
-}
-
-ecs::Entity createParticleEntity(
-    ecs::World& world,
-    const PrefabEntry& entry,
-    const std::string& entity_name,
-    const components::TransformComponent& world_transform,
-    const std::unordered_map<std::string, PrefabParamValue>& resolved_params) {
-  std::optional<components::ParticleEffectOverrideComponent> effect_override =
-      entry.particle.effect_override;
-  if (entry.particle.start_color_binding.enabled) {
-    effect_override->start_color =
-        resolveColorBinding(entry.particle.start_color_binding,
-                            resolved_params,
-                            effect_override->start_color.value_or(math::Color{}));
-  }
-  if (entry.particle.end_color_binding.enabled) {
-    effect_override->end_color =
-        resolveColorBinding(entry.particle.end_color_binding,
-                            resolved_params,
-                            effect_override->end_color.value_or(math::Color{}));
-  }
-
-  const ecs::Entity entity = particles::createEffectEntity(
-      world,
-      particles::ParticleEffectEntityDesc{
-          .name = entity_name,
-          .effect_key = entry.particle.effect_key,
-          .transform = world_transform,
-          .enabled = entry.particle.enabled,
-          .playing = entry.particle.playing,
-          .auto_apply = entry.particle.auto_apply,
-          .preserve_enabled = entry.particle.preserve_enabled,
-          .preserve_playing = entry.particle.preserve_playing,
-          .effect_override = effect_override,
-      });
-  world.add(entity, components::VisibilityComponent{.visible = entry.particle.enabled});
-  return entity;
-}
-
-ecs::Entity createLightEntity(
-    ecs::World& world,
-    const PrefabEntry& entry,
-    const std::string& entity_name,
-    const components::TransformComponent& world_transform,
-    const std::unordered_map<std::string, PrefabParamValue>& resolved_params) {
-  ecs::Entity entity = world.createEntity();
-  if (!entity_name.empty()) {
-    world.setName(entity, entity_name);
-  }
-  world.add(entity, world_transform);
-
-  components::LightComponent light = entry.light.light;
-  if (entry.light.color_binding.enabled) {
-    light.color = resolveColorBinding(entry.light.color_binding, resolved_params, light.color);
-  }
-  if (entry.light.intensity_binding.enabled) {
-    light.intensity =
-        resolveFloatBinding(entry.light.intensity_binding, resolved_params, light.intensity);
-  }
-  if (entry.light.range_binding.enabled) {
-    light.range = resolveFloatBinding(entry.light.range_binding, resolved_params, light.range);
-  }
-  world.add(entity, light);
-  world.add(entity, components::VisibilityComponent{});
-  return entity;
-}
-
-}  // namespace
-
-std::optional<PrefabInstance> instantiatePrefab(
-    ecs::World& world,
-    renderer::GraphicsDevice* graphics,
-    const Prefab& prefab,
-    const PrefabInstantiateDesc& desc) {
-  ecs::Entity root = world.createEntity();
-  const std::string root_name = !desc.name.empty() ? desc.name : prefab.name;
-  if (!root_name.empty()) {
-    world.setName(root, root_name);
-  }
-  world.add(root, desc.transform);
-
-  const auto resolved_params = resolveParameters(prefab, desc);
-
-  components::PrefabInstanceComponent instance_component{};
-  instance_component.prefab_name = prefab.name;
-  instance_component.enabled = true;
-
-  PrefabInstance instance{};
-  instance.root = root;
-
-  for (const auto& entry : prefab.entries) {
-    const std::string entity_name = !root_name.empty() ? root_name + "/" + entry.name : entry.name;
-    const components::TransformComponent world_transform =
-        composeTransform(desc.transform, entry.local_transform);
-
-    ecs::Entity member{};
-    bool missing_handler = false;
-    switch (entry.type) {
-      case PrefabEntry::Type::Mesh:
-        member = createMeshEntity(
-            world, graphics, entry, entity_name, world_transform, resolved_params);
-        break;
-      case PrefabEntry::Type::Particle:
-        member = createParticleEntity(world, entry, entity_name, world_transform, resolved_params);
-        break;
-      case PrefabEntry::Type::Light:
-        member = createLightEntity(world, entry, entity_name, world_transform, resolved_params);
-        break;
-      case PrefabEntry::Type::Beam:
-      case PrefabEntry::Type::VolumeSphere:
-        member = instantiatePrefabEntry(PrefabEntryHandlerContext{
-            .world = world,
-            .graphics = graphics,
-            .entry = entry,
-            .entity_name = entity_name,
-            .world_transform = world_transform,
-            .resolved_params = resolved_params,
-        });
-        missing_handler = !member.isValid();
-        break;
-    }
-
-    if (!member.isValid()) {
-      if (missing_handler) {
-        world.destroyEntity(root);
-        for (const ecs::Entity created_member : instance.members) {
-          if (world.isAlive(created_member)) {
-            world.destroyEntity(created_member);
-          }
-        }
-        return std::nullopt;
-      }
-      continue;
-    }
-
-    components::PrefabMemberComponent member_component{};
-    member_component.root = root;
-    member_component.name = entry.name;
-    member_component.local_transform = entry.local_transform;
-    switch (entry.type) {
-      case PrefabEntry::Type::Mesh:
-        member_component.kind = components::PrefabMemberKind::Mesh;
-        member_component.mesh_visible = entry.mesh.visible;
-        break;
-      case PrefabEntry::Type::Particle:
-        member_component.kind = components::PrefabMemberKind::Particle;
-        break;
-      case PrefabEntry::Type::Light: {
-        member_component.kind = components::PrefabMemberKind::Light;
-        components::LightComponent light = entry.light.light;
-        if (entry.light.intensity_binding.enabled) {
-          light.intensity =
-              resolveFloatBinding(entry.light.intensity_binding, resolved_params, light.intensity);
-        }
-        if (entry.light.range_binding.enabled) {
-          light.range = resolveFloatBinding(entry.light.range_binding, resolved_params, light.range);
-        }
-        member_component.light_intensity = light.intensity;
-        member_component.light_range = light.range;
-        break;
-      }
-      case PrefabEntry::Type::Beam:
-        member_component.kind = components::PrefabMemberKind::Beam;
-        member_component.beam_visible = entry.beam.beam.visible;
-        break;
-      case PrefabEntry::Type::VolumeSphere:
-        member_component.kind = components::PrefabMemberKind::VolumeSphere;
-        member_component.volume_sphere_visible = entry.volume_sphere.volume.visible;
-        break;
-    }
-    world.add(member, std::move(member_component));
-
-    instance_component.members.push_back(member);
-    instance.members.push_back(member);
-    instance.named_members[entry.name] = member;
-  }
-
-  world.add(root, std::move(instance_component));
-  return instance;
-}
-
-std::optional<PrefabInstance> instantiatePrefab(
-    ecs::World& world,
-    renderer::GraphicsDevice* graphics,
-    const std::filesystem::path& path,
-    const PrefabInstantiateDesc& desc) {
-  std::optional<Prefab> prefab = loadPrefab(path);
-  if (!prefab.has_value()) {
-    return std::nullopt;
-  }
-  return instantiatePrefab(world, graphics, *prefab, desc);
-}
-
-bool setPrefabPlayback(ecs::World& world, ecs::Entity root, bool enabled) {
-  if (!world.isAlive(root) || !world.has<components::PrefabInstanceComponent>(root)) {
+  if (document.nodes[document.root].parent.has_value()) {
+    spdlog::error("Prefab '{}' root node must not have a parent", path.string());
     return false;
   }
 
-  auto& instance = world.get<components::PrefabInstanceComponent>(root);
-  instance.enabled = enabled;
-
-  for (const ecs::Entity member : instance.members) {
-    if (!world.isAlive(member)) {
-      continue;
+  for (size_t index = 0; index < document.nodes.size(); ++index) {
+    const auto parent = document.nodes[index].parent;
+    if (parent.has_value() && *parent >= document.nodes.size()) {
+      spdlog::error("Prefab '{}' node {} parent index is out of range",
+                    path.string(),
+                    index);
+      return false;
     }
 
-    if (world.has<components::PrefabMemberComponent>(member)) {
-      const auto& prefab_member = world.get<components::PrefabMemberComponent>(member);
-      if (prefab_member.kind == components::PrefabMemberKind::Mesh &&
-          world.has<components::MeshComponent>(member)) {
-        world.get<components::MeshComponent>(member).visible =
-            enabled && prefab_member.mesh_visible;
-      } else if (prefab_member.kind == components::PrefabMemberKind::Beam &&
-                 world.has<components::BeamPathComponent>(member)) {
-        world.get<components::BeamPathComponent>(member).visible =
-            enabled && prefab_member.beam_visible;
-      } else if (prefab_member.kind == components::PrefabMemberKind::Light &&
-                 world.has<components::LightComponent>(member)) {
-        auto& light = world.get<components::LightComponent>(member);
-        light.intensity = enabled ? prefab_member.light_intensity : 0.0f;
-        light.range = enabled ? prefab_member.light_range : 0.0f;
-      } else if (prefab_member.kind == components::PrefabMemberKind::VolumeSphere &&
-                 world.has<components::VolumeSphereComponent>(member)) {
-        world.get<components::VolumeSphereComponent>(member).visible =
-            enabled && prefab_member.volume_sphere_visible;
+    std::vector<bool> visited(document.nodes.size(), false);
+    size_t cursor = index;
+    while (document.nodes[cursor].parent.has_value()) {
+      if (visited[cursor]) {
+        spdlog::error("Prefab '{}' contains a parent cycle at node {}",
+                      path.string(),
+                      index);
+        return false;
       }
-    }
-
-    if (world.has<components::ParticleEmitterComponent>(member)) {
-      particles::setEffectPlayback(world, member, enabled, enabled);
+      visited[cursor] = true;
+      cursor = *document.nodes[cursor].parent;
     }
   }
 
   return true;
 }
 
-bool restartPrefab(ecs::World& world, ecs::Entity root) {
-  if (!world.isAlive(root) || !world.has<components::PrefabInstanceComponent>(root)) {
-    return false;
+std::optional<PrefabDocument> parseDocument(const Json& json,
+                                            const std::filesystem::path& path) {
+  if (!json.is_object()) {
+    spdlog::error("Prefab '{}' root JSON value must be an object", path.string());
+    return std::nullopt;
   }
 
-  auto& instance = world.get<components::PrefabInstanceComponent>(root);
-  bool restarted_any = false;
-  for (const ecs::Entity member : instance.members) {
-    restarted_any = particles::restartEffect(world, member) || restarted_any;
+  PrefabDocument document{};
+  if (!readRequiredUint32(json, "version", document.version, path)) {
+    return std::nullopt;
   }
-  return restarted_any;
+  if (document.version != 1u) {
+    spdlog::error("Prefab '{}' has unsupported version {}", path.string(), document.version);
+    return std::nullopt;
+  }
+  if (!readRequiredSize(json, "root", document.root, path)) {
+    return std::nullopt;
+  }
+
+  const auto nodes_it = json.find("nodes");
+  if (nodes_it == json.end() || !nodes_it->is_array()) {
+    spdlog::error("Prefab '{}' is missing array 'nodes' field", path.string());
+    return std::nullopt;
+  }
+
+  std::unordered_set<uint32_t> ids;
+  document.nodes.reserve(nodes_it->size());
+  for (size_t index = 0; index < nodes_it->size(); ++index) {
+    const Json& node_json = (*nodes_it)[index];
+    if (!node_json.is_object()) {
+      spdlog::error("Prefab '{}' node {} must be an object", path.string(), index);
+      return std::nullopt;
+    }
+
+    PrefabNode node{};
+    if (!readRequiredUint32(node_json, "id", node.id, path) ||
+        !readRequiredString(node_json, "name", node.name, path)) {
+      return std::nullopt;
+    }
+    if (!ids.insert(node.id).second) {
+      spdlog::error("Prefab '{}' contains duplicate node id {}", path.string(), node.id);
+      return std::nullopt;
+    }
+
+    const auto parent_it = node_json.find("parent");
+    if (parent_it == node_json.end()) {
+      spdlog::error("Prefab '{}' node {} is missing 'parent' field", path.string(), index);
+      return std::nullopt;
+    }
+    if (parent_it->is_null()) {
+      node.parent.reset();
+    } else if (parent_it->is_number_unsigned() || parent_it->is_number_integer()) {
+      const int64_t parent = parent_it->get<int64_t>();
+      if (parent < 0) {
+        spdlog::error("Prefab '{}' node {} has negative parent index",
+                      path.string(),
+                      index);
+        return std::nullopt;
+      }
+      node.parent = static_cast<size_t>(parent);
+    } else {
+      spdlog::error("Prefab '{}' node {} parent must be null or numeric",
+                    path.string(),
+                    index);
+      return std::nullopt;
+    }
+
+    const auto components_it = node_json.find("components");
+    if (components_it == node_json.end() || !components_it->is_object()) {
+      spdlog::error("Prefab '{}' node {} is missing object 'components' field",
+                    path.string(),
+                    index);
+      return std::nullopt;
+    }
+    node.components = *components_it;
+    document.nodes.push_back(std::move(node));
+  }
+
+  if (!validateParents(document, path)) {
+    return std::nullopt;
+  }
+  return document;
 }
 
-bool destroyPrefab(ecs::World& world, ecs::Entity root) {
-  if (!world.isAlive(root) || !world.has<components::PrefabInstanceComponent>(root)) {
+std::optional<PrefabDocument> loadDocument(const std::filesystem::path& input_path) {
+  const std::filesystem::path path = resolvePrefabPath(input_path);
+  std::ifstream stream(path);
+  if (!stream) {
+    spdlog::error("Failed to open prefab '{}'", path.string());
+    return std::nullopt;
+  }
+
+  Json json;
+  try {
+    stream >> json;
+  } catch (const std::exception& e) {
+    spdlog::error("Failed to parse prefab '{}': {}", path.string(), e.what());
+    return std::nullopt;
+  }
+
+  return parseDocument(json, path);
+}
+
+Json toJson(const PrefabDocument& document) {
+  Json nodes = Json::array();
+  for (const PrefabNode& node : document.nodes) {
+    nodes.push_back(Json{
+        {"id", node.id},
+        {"name", node.name},
+        {"parent", node.parent.has_value() ? Json(*node.parent) : Json(nullptr)},
+        {"components", node.components},
+    });
+  }
+  return Json{
+      {"version", document.version},
+      {"root", document.root},
+      {"nodes", std::move(nodes)},
+  };
+}
+
+std::string entityName(const ecs::World& world, ecs::Entity entity) {
+  if (!world.isAlive(entity) || !world.has<components::TagComponent>(entity)) {
+    return {};
+  }
+  return world.get<components::TagComponent>(entity).name;
+}
+
+void collectSubtree(const ecs::World& world,
+                    const scene::Scene& scene,
+                    scene::NodeId node_id,
+                    std::vector<scene::NodeId>& out_nodes) {
+  if (!scene.isAlive(node_id)) {
+    return;
+  }
+  const scene::Node& node = scene.get(node_id);
+  if (!node.entity.isValid() || !world.isAlive(node.entity)) {
+    return;
+  }
+  out_nodes.push_back(node_id);
+  for (const scene::NodeId child : node.children) {
+    collectSubtree(world, scene, child, out_nodes);
+  }
+}
+
+PrefabDocument buildDocument(const ecs::World& world,
+                             const scene::Scene& scene,
+                             ecs::Entity root,
+                             const PrefabSaveOptions& options) {
+  ensureBuiltinComponentSerializers();
+  const ComponentSerializerRegistry& registry = componentSerializerRegistry();
+
+  std::vector<scene::NodeId> scene_nodes;
+  const scene::NodeId root_node = scene.findNode(root);
+  if (options.include_children && scene.isAlive(root_node)) {
+    collectSubtree(world, scene, root_node, scene_nodes);
+  } else if (scene.isAlive(root_node)) {
+    scene_nodes.push_back(root_node);
+  }
+
+  PrefabDocument document{};
+  document.root = 0;
+
+  std::unordered_map<scene::NodeId, size_t> index_by_node;
+  if (!scene_nodes.empty()) {
+    document.nodes.reserve(scene_nodes.size());
+    for (size_t index = 0; index < scene_nodes.size(); ++index) {
+      index_by_node[scene_nodes[index]] = index;
+    }
+    for (size_t index = 0; index < scene_nodes.size(); ++index) {
+      const scene::Node& scene_node = scene.get(scene_nodes[index]);
+      PrefabNode prefab_node{};
+      prefab_node.id = static_cast<uint32_t>(index);
+      prefab_node.name = entityName(world, scene_node.entity);
+      if (scene.isAlive(scene_node.parent)) {
+        const auto parent_it = index_by_node.find(scene_node.parent);
+        if (parent_it != index_by_node.end()) {
+          prefab_node.parent = parent_it->second;
+        }
+      }
+
+      prefab_node.components = Json::object();
+      for (const ComponentSerializer& serializer : registry.serializers()) {
+        if (!serializer.has(world, scene_node.entity)) {
+          continue;
+        }
+        prefab_node.components[serializer.type_name] =
+            serializer.serialize(world, scene_node.entity);
+      }
+      document.nodes.push_back(std::move(prefab_node));
+    }
+    return document;
+  }
+
+  PrefabNode prefab_node{};
+  prefab_node.id = 0u;
+  prefab_node.name = entityName(world, root);
+  prefab_node.components = Json::object();
+  for (const ComponentSerializer& serializer : registry.serializers()) {
+    if (!serializer.has(world, root)) {
+      continue;
+    }
+    prefab_node.components[serializer.type_name] = serializer.serialize(world, root);
+  }
+  document.nodes.push_back(std::move(prefab_node));
+  return document;
+}
+
+void destroyCreated(ecs::World& world,
+                    scene::Scene& scene,
+                    const std::vector<ecs::Entity>& entities,
+                    const std::vector<scene::NodeId>& nodes) {
+  for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+    if (scene.isAlive(*it)) {
+      scene.destroyNode(*it);
+    }
+  }
+  for (const ecs::Entity entity : entities) {
+    if (world.isAlive(entity)) {
+      world.destroyEntity(entity);
+    }
+  }
+}
+
+bool deserializeComponents(ecs::World& world,
+                           ecs::Entity entity,
+                           const PrefabNode& node,
+                           const std::filesystem::path& path) {
+  ComponentSerializerRegistry& registry = componentSerializerRegistry();
+  for (auto it = node.components.begin(); it != node.components.end(); ++it) {
+    const std::string type_name = it.key();
+    const ComponentSerializer* serializer = registry.find(type_name);
+    if (serializer == nullptr) {
+      spdlog::warn("Prefab '{}' node '{}' has unknown component '{}'; skipping",
+                   path.string(),
+                   node.name,
+                   type_name);
+      continue;
+    }
+    if (!serializer->deserialize(world, entity, it.value())) {
+      spdlog::error("Prefab '{}' node '{}' has invalid '{}' component payload",
+                    path.string(),
+                    node.name,
+                    type_name);
+      return false;
+    }
+  }
+  return true;
+}
+
+void applyRootTransform(ecs::World& world,
+                        ecs::Entity root,
+                        const components::TransformComponent& root_transform) {
+  components::TransformComponent saved{};
+  if (world.has<components::TransformComponent>(root)) {
+    saved = world.get<components::TransformComponent>(root);
+  } else if (world.has<components::LocalTransformComponent>(root)) {
+    saved = toTransform(world.get<components::LocalTransformComponent>(root));
+  }
+
+  const components::TransformComponent final_transform =
+      composeTransform(root_transform, saved);
+  world.add(root, final_transform);
+  if (world.has<components::LocalTransformComponent>(root)) {
+    world.add(root, toLocalTransform(final_transform));
+  }
+}
+
+void ensureTransformsForHierarchy(ecs::World& world, ecs::Entity entity) {
+  if (!world.has<components::TransformComponent>(entity) &&
+      world.has<components::LocalTransformComponent>(entity)) {
+    world.add(entity, toTransform(world.get<components::LocalTransformComponent>(entity)));
+  }
+}
+
+void collectSubtreeNodes(const scene::Scene& scene,
+                         scene::NodeId root,
+                         std::vector<scene::NodeId>& out_nodes) {
+  if (!scene.isAlive(root)) {
+    return;
+  }
+  out_nodes.push_back(root);
+  const scene::Node& node = scene.get(root);
+  for (const scene::NodeId child : node.children) {
+    collectSubtreeNodes(scene, child, out_nodes);
+  }
+}
+
+}  // namespace
+
+bool savePrefab(const ecs::World& world,
+                const scene::Scene& scene,
+                ecs::Entity root,
+                const std::filesystem::path& input_path,
+                const PrefabSaveOptions& options) {
+  if (!world.isAlive(root)) {
+    spdlog::error("Cannot save prefab: root entity is not alive");
     return false;
   }
 
-  const auto members = world.get<components::PrefabInstanceComponent>(root).members;
-  for (const ecs::Entity member : members) {
-    if (world.isAlive(member)) {
-      world.destroyEntity(member);
+  const PrefabDocument document = buildDocument(world, scene, root, options);
+  if (document.nodes.empty()) {
+    spdlog::error("Cannot save prefab: no serializable nodes found");
+    return false;
+  }
+
+  const std::filesystem::path path = resolvePrefabPath(input_path);
+  std::error_code ec;
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+      spdlog::error("Failed to create prefab directory '{}': {}",
+                    path.parent_path().string(),
+                    ec.message());
+      return false;
     }
   }
 
-  world.destroyEntity(root);
+  std::ofstream stream(path);
+  if (!stream) {
+    spdlog::error("Failed to open prefab '{}' for writing", path.string());
+    return false;
+  }
+  stream << toJson(document).dump(2) << '\n';
+  return static_cast<bool>(stream);
+}
+
+std::optional<PrefabInstance> instantiatePrefab(
+    ecs::World& world,
+    scene::Scene& scene,
+    const std::filesystem::path& input_path,
+    const PrefabInstantiateDesc& desc) {
+  ensureBuiltinComponentSerializers();
+  const std::filesystem::path path = resolvePrefabPath(input_path);
+  std::optional<PrefabDocument> document = loadDocument(path);
+  if (!document.has_value()) {
+    return std::nullopt;
+  }
+  if (!ensurePrefabResourcesLoaded(path)) {
+    return std::nullopt;
+  }
+
+  PrefabInstance instance{};
+  std::vector<ecs::Entity> created_entities;
+  std::vector<scene::NodeId> created_nodes;
+  created_entities.reserve(document->nodes.size());
+  created_nodes.reserve(document->nodes.size());
+
+  for (size_t index = 0; index < document->nodes.size(); ++index) {
+    ecs::Entity entity = world.createEntity();
+    scene::NodeId scene_node = scene.createNode(entity);
+    created_entities.push_back(entity);
+    created_nodes.push_back(scene_node);
+    instance.entities.push_back(entity);
+    instance.entities_by_id[document->nodes[index].id] = entity;
+    if (!document->nodes[index].name.empty()) {
+      instance.named_entities[document->nodes[index].name] = entity;
+    }
+  }
+
+  for (size_t index = 0; index < document->nodes.size(); ++index) {
+    if (!deserializeComponents(world, created_entities[index], document->nodes[index], path)) {
+      destroyCreated(world, scene, created_entities, created_nodes);
+      return std::nullopt;
+    }
+    ensureTransformsForHierarchy(world, created_entities[index]);
+  }
+
+  for (size_t index = 0; index < document->nodes.size(); ++index) {
+    const PrefabNode& node = document->nodes[index];
+    const bool is_root = index == document->root;
+    const std::string final_name =
+        is_root && !desc.name_override.empty() ? desc.name_override : node.name;
+    if (!final_name.empty()) {
+      world.setName(created_entities[index], final_name);
+      if (is_root && final_name != node.name) {
+        instance.named_entities[final_name] = created_entities[index];
+      }
+    }
+  }
+
+  for (size_t index = 0; index < document->nodes.size(); ++index) {
+    const auto parent = document->nodes[index].parent;
+    if (!parent.has_value()) {
+      continue;
+    }
+    scene.reparent(created_nodes[index], created_nodes[*parent]);
+  }
+
+  instance.root = created_entities[document->root];
+  instance.root_scene_node = created_nodes[document->root];
+  applyRootTransform(world, instance.root, desc.root_transform);
+  scene::updateWorldTransforms(world, scene);
+  return instance;
+}
+
+bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root) {
+  if (!world.isAlive(root)) {
+    return false;
+  }
+
+  const scene::NodeId root_node = scene.findNode(root);
+  if (!scene.isAlive(root_node)) {
+    world.destroyEntity(root);
+    return true;
+  }
+
+  std::vector<scene::NodeId> nodes;
+  collectSubtreeNodes(scene, root_node, nodes);
+
+  std::vector<ecs::Entity> entities;
+  entities.reserve(nodes.size());
+  for (const scene::NodeId node_id : nodes) {
+    const scene::Node& node = scene.get(node_id);
+    if (node.entity.isValid()) {
+      entities.push_back(node.entity);
+    }
+  }
+
+  for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+    if (scene.isAlive(*it)) {
+      scene.destroyNode(*it);
+    }
+  }
+  for (const ecs::Entity entity : entities) {
+    if (world.isAlive(entity)) {
+      world.destroyEntity(entity);
+    }
+  }
   return true;
 }
 

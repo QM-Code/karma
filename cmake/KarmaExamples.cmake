@@ -3,13 +3,7 @@ if (NOT KARMA_HEADLESS)
     examples/main.cpp
   )
 
-  target_link_libraries(karma_example PRIVATE karma ${KARMA_IMGUI_TARGET})
-  if (imgui_SOURCE_DIR)
-    target_include_directories(karma_example PRIVATE ${imgui_SOURCE_DIR})
-  endif()
-  if (NOT KARMA_IMGUI_TARGET AND DEFINED IMGUI_SOURCES)
-    target_sources(karma_example PRIVATE ${IMGUI_SOURCES})
-  endif()
+  target_link_libraries(karma_example PRIVATE karma)
 
   if (KARMA_XXHASH_ARCHIVE AND CMAKE_AR AND CMAKE_C_COMPILER)
     set(KARMA_XXHASH_STAMP "${CMAKE_BINARY_DIR}/karma_xxhash.stamp")
@@ -28,13 +22,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_collision_events_example
     examples/collision_events_example.cpp
   )
-  target_link_libraries(karma_collision_events_example PRIVATE karma ${KARMA_IMGUI_TARGET})
-  if (imgui_SOURCE_DIR)
-    target_include_directories(karma_collision_events_example PRIVATE ${imgui_SOURCE_DIR})
-  endif()
-  if (NOT KARMA_IMGUI_TARGET AND DEFINED IMGUI_SOURCES)
-    target_sources(karma_collision_events_example PRIVATE ${IMGUI_SOURCES})
-  endif()
+  target_link_libraries(karma_collision_events_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_collision_events_example karma_fix_xxhash)
   endif()
@@ -73,7 +61,6 @@ if (NOT KARMA_HEADLESS)
 
   add_executable(karma_particle_example
     examples/particle_example.cpp
-    examples/explosion_prefab_package.cpp
   )
   target_link_libraries(karma_particle_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
@@ -82,7 +69,6 @@ if (NOT KARMA_HEADLESS)
 
   add_executable(karma_energy_orb_example
     examples/energy_orb_example.cpp
-    examples/energy_orb_prefab_package.cpp
   )
   target_link_libraries(karma_energy_orb_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
@@ -131,8 +117,6 @@ if (NOT KARMA_HEADLESS)
 
   add_executable(karma_prefab_gallery_example
     examples/prefab_gallery_example.cpp
-    examples/energy_orb_prefab_package.cpp
-    examples/explosion_prefab_package.cpp
   )
   target_link_libraries(karma_prefab_gallery_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
@@ -141,7 +125,6 @@ if (NOT KARMA_HEADLESS)
 
   add_executable(karma_explosion_stress_example
     examples/explosion_stress_example.cpp
-    examples/explosion_prefab_package.cpp
   )
   target_link_libraries(karma_explosion_stress_example PRIVATE karma)
   if (TARGET karma_fix_xxhash)
@@ -151,12 +134,8 @@ if (NOT KARMA_HEADLESS)
   if (KARMA_BUILD_IMGUI_DEMO)
     add_executable(karma_imgui_ui_demo
       examples/imgui_ui_demo.cpp
-      ${IMGUI_SOURCES}
     )
-    target_link_libraries(karma_imgui_ui_demo PRIVATE karma ${KARMA_IMGUI_TARGET})
-    if (imgui_SOURCE_DIR)
-      target_include_directories(karma_imgui_ui_demo PRIVATE ${imgui_SOURCE_DIR})
-    endif()
+    target_link_libraries(karma_imgui_ui_demo PRIVATE karma)
     if (TARGET karma_fix_xxhash)
       add_dependencies(karma_imgui_ui_demo karma_fix_xxhash)
     endif()
@@ -166,7 +145,7 @@ if (NOT KARMA_HEADLESS)
     add_executable(karma_rmlui_ui_demo
       examples/rmlui_ui_demo.cpp
     )
-    target_link_libraries(karma_rmlui_ui_demo PRIVATE karma ${KARMA_RMLUI_TARGET})
+    target_link_libraries(karma_rmlui_ui_demo PRIVATE karma)
     if (TARGET karma_fix_xxhash)
       add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
     endif()

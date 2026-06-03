@@ -48,6 +48,7 @@ struct ParticleEmitterComponent : ecs::ComponentTag {
   uint32_t burst_count = 0;
   uint32_t seed = 0;
   float time_scale = 1.0f;
+  float start_delay = 0.0f;
   float duration = 0.0f;
   float spawn_rate = 32.0f;
   float particle_lifetime_min = 0.65f;

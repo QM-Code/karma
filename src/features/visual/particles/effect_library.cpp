@@ -300,6 +300,9 @@ bool applyEffectField(ParticleEffectDesc& desc,
   if (key == "time_scale") {
     return parseNumber(raw_value, emitter.time_scale);
   }
+  if (key == "start_delay") {
+    return parseNumber(raw_value, emitter.start_delay);
+  }
   if (key == "duration") {
     return parseNumber(raw_value, emitter.duration);
   }

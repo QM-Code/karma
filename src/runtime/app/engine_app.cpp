@@ -12,6 +12,7 @@
 #if defined(KARMA_ENABLE_NAVIGATION)
 #include "karma/simulation/navigation/navigation_system.h"
 #endif
+#include "karma/content/prefabs/prefab_resource_context.h"
 #include "karma/runtime/debug/debug_overlay.h"
 #include "karma/core/time.h"
 #include "karma/world/scene/transform_hierarchy.h"
@@ -113,7 +114,6 @@ void EngineApp::initSubsystems() {
   }
 
   input_.setWindow(window_.get());
-  prefab_system_ = std::make_unique<prefabs::PrefabSystem>();
   prefab_registry_ = std::make_unique<prefabs::PrefabRegistry>();
 
   if (window_) {
@@ -157,13 +157,11 @@ void EngineApp::warmUpRenderer() {
   frame.height = fb_height;
   frame.delta_time = 0.0f;
   graphics_->beginFrame(frame);
-  if (prefab_system_) {
-    prefab_system_->update(world_, 0.0f, 1.0f);
-  }
   animation_system_.update(world_, scene_, 0.0f);
   scene::updateWorldTransforms(world_, scene_);
   cpu_skinning_system_.update(world_, *graphics_);
   if (particle_system_) {
+    light_pulse_system_.update(world_, 0.0f);
     particle_system_->update(world_, 0.0f, 1.0f);
   }
   for (auto& module : runtime_modules_) {
@@ -183,16 +181,16 @@ void EngineApp::shutdownSubsystems() {
     user_ui_->onShutdown();
     user_ui_.reset();
   }
+  user_ui_context_.reset();
 #if defined(KARMA_DEBUG_UI)
   if (debug_ui_) {
     debug_ui_->onShutdown();
     debug_ui_.reset();
   }
-  debug_ui_context_ = {};
+  debug_ui_context_.reset();
 #endif
-  user_ui_context_ = {};
   render_system_.reset();
-  prefab_system_.reset();
+  prefabs::clearPrefabResourceContext();
   if (prefab_registry_) {
     prefab_registry_->shutdown();
     prefab_registry_->clearContext();
@@ -212,6 +210,7 @@ void EngineApp::shutdownSubsystems() {
 void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
   if (user_ui_) {
     user_ui_->onShutdown();
+    user_ui_context_.reset();
   }
   user_ui_ = std::move(ui);
 }
@@ -284,6 +283,10 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
         .particle_effects = &particle_effects_,
     });
   }
+  prefabs::bindPrefabResourceContext(prefabs::PrefabResourceContext{
+      .graphics = graphics_.get(),
+      .particle_effects = &particle_effects_,
+  });
   for (auto& module : runtime_modules_) {
     if (module) {
       module->onAttach(makeRuntimeModuleContext());
@@ -418,11 +421,9 @@ void EngineApp::tick() {
   const double game_update_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
-  if (prefab_system_) {
-    prefab_system_->update(world_, frame_dt, render_alpha);
-  }
+  light_pulse_system_.update(world_, frame_dt);
   section_end = core::SteadyClock::now();
-  const double prefab_ms = core::elapsedMilliseconds(section_start, section_end);
+  const double light_pulse_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   syncSceneEntities();
@@ -568,8 +569,8 @@ void EngineApp::tick() {
        tick_total_ms >= static_cast<double>(frame_diag_threshold_ms_))) {
     spdlog::info(
         "Engine frame diag: raw_dt={:.3f}ms clamped_dt={:.3f}ms tick={:.3f}ms "
-        "events={:.3f} fixed={:.3f}({}) game={:.3f} prefab={:.3f} sync_scene={:.3f} "
-        "animation={:.3f} scene_xform={:.3f} skinning={:.3f} audio={:.3f} "
+        "events={:.3f} fixed={:.3f}({}) game={:.3f} light_pulse={:.3f} "
+        "sync_scene={:.3f} animation={:.3f} scene_xform={:.3f} skinning={:.3f} audio={:.3f} "
         "fb={:.3f} ui_frame={:.3f} begin={:.3f} particles={:.3f} modules={:.3f} "
         "render_system={:.3f} render_layer={:.3f} render_ui={:.3f} end_frame={:.3f} "
         "swap={:.3f} alpha={:.3f} accumulator={:.3f}",
@@ -580,7 +581,7 @@ void EngineApp::tick() {
         fixed_ms,
         fixed_steps,
         game_update_ms,
-        prefab_ms,
+        light_pulse_ms,
         sync_scene_ms,
         animation_ms,
         scene_transforms_ms,

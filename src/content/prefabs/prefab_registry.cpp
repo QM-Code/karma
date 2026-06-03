@@ -92,6 +92,7 @@ void PrefabRegistry::shutdown() {
 
 std::optional<PrefabInstance> PrefabRegistry::instantiate(
     ecs::World& world,
+    scene::Scene& scene,
     std::string_view key,
     const PrefabInstantiateDesc& desc) {
   auto it = entries_.find(std::string(key));
@@ -104,7 +105,7 @@ std::optional<PrefabInstance> PrefabRegistry::instantiate(
     return std::nullopt;
   }
 
-  return instantiatePrefab(world, context_.graphics, it->second.desc.prefab_path, desc);
+  return instantiatePrefab(world, scene, it->second.desc.prefab_path, desc);
 }
 
 void PrefabRegistry::cleanupEntry(Entry& entry) {
@@ -119,10 +120,11 @@ void PrefabRegistry::cleanupEntry(Entry& entry) {
 
 std::optional<PrefabInstance> instantiateRegisteredPrefab(
     ecs::World& world,
+    scene::Scene& scene,
     PrefabRegistry& registry,
     std::string_view key,
     const PrefabInstantiateDesc& desc) {
-  return registry.instantiate(world, key, desc);
+  return registry.instantiate(world, scene, key, desc);
 }
 
 }  // namespace karma::prefabs

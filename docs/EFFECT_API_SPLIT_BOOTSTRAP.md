@@ -72,27 +72,28 @@ Primary files:
 - [`../examples/volumetric_sphere_prefab_example.cpp`](../examples/volumetric_sphere_prefab_example.cpp)
 - [`../examples/prefab_gallery_example.cpp`](../examples/prefab_gallery_example.cpp)
 
-### 3. Prefab entry handler seam
+### 3. Prefab serializer seam
 
-Prefab instantiation no longer directly calls beam- and volume-specific helper
-functions in the core runtime path.
+Prefab instantiation now loads serialized ECS component payloads instead of
+dispatching through effect-specific entry helpers in the core runtime path.
 
 Current state:
 
-- a global prefab-entry handler registry exists
-- `beam` and `volume_sphere` instantiation route through that registry
-- the beam and volume runtime modules register and unregister their handlers on
-  attach/detach
-- if a prefab uses a module-backed entry type and no handler is registered,
-  `instantiatePrefab(...)` fails cleanly with `std::nullopt`
-- `mesh`, `particle`, and `light` still instantiate through the core switch
-  path
+- concrete components are serialized in `prefab.json`
+- serializers live in the component serializer registry
+- beam and volume runtime modules own runtime systems and warmup behavior, not
+  prefab entity construction
+- if a prefab references unsupported component payloads, known invalid payloads
+  fail cleanly and unknown components are skipped with a warning
+- particle-heavy prefabs can declare texture/effect resources in
+  `prefab.resources.json`
 
 Primary files:
 
-- [`../include/karma/content/prefabs/prefab_entry_handler.h`](../include/karma/content/prefabs/prefab_entry_handler.h)
-- [`../src/content/prefabs/prefab_entry_handler.cpp`](../src/content/prefabs/prefab_entry_handler.cpp)
+- [`../include/karma/content/prefabs/component_serializer_registry.h`](../include/karma/content/prefabs/component_serializer_registry.h)
+- [`../src/content/prefabs/component_serializer_registry.cpp`](../src/content/prefabs/component_serializer_registry.cpp)
 - [`../src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
+- [`../src/content/prefabs/prefab_resources.cpp`](../src/content/prefabs/prefab_resources.cpp)
 - [`../src/features/visual/beams/beam_path_runtime_module.cpp`](../src/features/visual/beams/beam_path_runtime_module.cpp)
 - [`../src/features/visual/volumes/volume_sphere_runtime_module.cpp`](../src/features/visual/volumes/volume_sphere_runtime_module.cpp)
 
@@ -142,11 +143,10 @@ model.
 
 Implications:
 
-- handlers must be unregistered on module detach
 - multiple engine instances in one process need careful thought
 - future tests or tools that spin up and tear down engine state repeatedly may
-  prefer handler ownership on `EngineApp`, `PrefabRegistry`, or another scoped
-  runtime object instead of a free global map
+  prefer serializer or prefab-resource ownership on `EngineApp`, `PrefabRegistry`,
+  or another scoped runtime object instead of process-wide static state
 
 ### This is runtime decoupling, not full prefab-plugin decoupling
 
@@ -229,7 +229,7 @@ If continuing this track, the best next moves are:
 3. if the engine should fully standardize on one prefab instantiation path,
    consider moving `mesh`, `particle`, and `light` behind registered handlers
    too
-4. if testability or multi-runtime behavior matters, move prefab-entry handler
-   ownership off the current global static registry
+4. if testability or multi-runtime behavior matters, keep pushing resource and
+   serializer ownership toward scoped runtime objects
 5. only after those seams exist, revisit whether beam/volume should stay under
    `karma.h` or live in narrower optional headers only

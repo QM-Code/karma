@@ -87,11 +87,11 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
   void spawnSphere() {
     const auto instance = prefabs::instantiatePrefab(
         *world,
-        graphics,
+        *scene,
         resolveExampleAssetPath("prefabs/volumetric_sphere"),
         prefabs::PrefabInstantiateDesc{
-            .name = "Prefab Volumetric Sphere",
-            .transform = makeTransform(kSpherePosition),
+            .root_transform = makeTransform(kSpherePosition),
+            .name_override = "Prefab Volumetric Sphere",
         });
     if (!instance.has_value()) {
       spdlog::error("Volumetric sphere prefab example failed to instantiate the prefab");

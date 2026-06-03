@@ -17,9 +17,9 @@
 #include "karma/media/audio/audio.h"
 #include "karma/media/audio/audio_system.h"
 #include "karma/platform/window/window.h"
+#include "karma/features/visual/lights/light_pulse_system.h"
 #include "karma/features/visual/particles/effect_library.h"
 #include "karma/features/visual/particles/particle_system.h"
-#include "karma/content/prefabs/prefab_system.h"
 #include "karma/content/prefabs/prefab_registry.h"
 #include "karma/runtime/app/ui_context.h"
 #include "karma/simulation/physics/physics_world.hpp"
@@ -102,11 +102,11 @@ class EngineApp {
   input::InputSystem input_;
   std::unique_ptr<renderer::GraphicsDevice> graphics_;
   std::unique_ptr<renderer::RenderSystem> render_system_;
-  std::unique_ptr<prefabs::PrefabSystem> prefab_system_;
   std::unique_ptr<prefabs::PrefabRegistry> prefab_registry_;
   std::unique_ptr<particles::ParticleSystem> particle_system_;
   animation::AnimationSystem animation_system_;
   animation::CpuSkinningSystem cpu_skinning_system_;
+  visual::LightPulseSystem light_pulse_system_;
   audio::Audio audio_;
   std::unique_ptr<audio::AudioSystem> audio_system_;
   physics::World physics_;

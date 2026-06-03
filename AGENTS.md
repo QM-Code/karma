@@ -19,6 +19,8 @@ Dependency direction:
 
 - Foundational layers must not include higher-level orchestration layers.
 - `runtime` wires subsystems together.
+- UI provider bridges belong under `features/ui/<provider>` and should expose
+  factories that return `runtime/app/UiLayer`.
 - Backends stay under their owning subsystem.
 - Public include paths must use layered `karma/...` paths.
 - Do not add forwarding headers for old public include paths.

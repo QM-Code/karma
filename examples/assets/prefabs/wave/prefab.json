@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Wave",
+      "parent": null,
+      "components": {
+        "TagComponent": { "name": "Wave" },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        }
+      }
+    },
+    {
+      "id": 1,
+      "name": "body",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "body" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "VolumeSphereComponent": {
+          "color": [0.18, 0.82, 1, 1],
+          "emissive_color": [0.432, 1.968, 2.4, 1],
+          "radius": 2.2,
+          "center_opacity": 0.3,
+          "distortion_strength": 1.8,
+          "noise_strength": 1,
+          "overlay_depth": 0.12,
+          "visible": true,
+          "scale_with_transform": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "glow",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "glow" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [0.3276, 0.8524, 1, 1],
+          "intensity": 90,
+          "range": 14,
+          "inner_cone_degrees": 15,
+          "outer_cone_degrees": 30,
+          "casts_shadows": false,
+          "shadow_extent": 0
+        },
+        "VisibilityComponent": {
+          "visible": true,
+          "render_layer_mask": 4294967295,
+          "collision_layer_mask": 4294967295
+        }
+      }
+    }
+  ]
+}

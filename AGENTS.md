@@ -1,6 +1,7 @@
 # Agent Instructions
 
 Before adding or moving engine modules, read `docs/ARCHITECTURE.md`.
+Before changing the runtime debug editor, read `docs/DEBUG_EDITOR.md`.
 
 Do not add new top-level engine subsystems under `src/` or `include/karma/`.
 Use the layered hierarchy:

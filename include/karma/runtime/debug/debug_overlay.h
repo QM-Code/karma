@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include "karma/runtime/app/ui_context.h"
 #include "karma/world/scene/node.h"
@@ -56,6 +57,16 @@ class DebugOverlayLayer final : public app::UiLayer {
   void onShutdown() override;
 
  private:
+  void drawDebugWindow(float frame_ms, float framerate);
+  void drawSceneTab();
+  void drawSceneHierarchyPane();
+  void drawSelectedInspectorPane();
+  void drawSelectedSummary(const scene::Node& node);
+  void drawComponentInspector(const scene::Node& node);
+  void drawRendererTab();
+  void drawPerformanceTab(float frame_ms, float framerate);
+  void resetFramePacingStats();
+
   ecs::World* world_ = nullptr;
   scene::Scene* scene_ = nullptr;
   systems::SystemGraph* systems_ = nullptr;
@@ -64,6 +75,7 @@ class DebugOverlayLayer final : public app::UiLayer {
   app::UITextureHandle font_texture_ = 0;
   app::UIContext* pending_ctx_ = nullptr;
   scene::NodeId selected_node_ = scene::Node::kInvalidId;
+  std::string hierarchy_filter_;
   int shadow_map_size_ = 2048;
   float shadow_bias_ = 0.0006f;
   int shadow_pcf_radius_ = 0;

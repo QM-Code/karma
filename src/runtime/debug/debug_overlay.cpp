@@ -1,8 +1,12 @@
 #include "karma/runtime/debug/debug_overlay.h"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <string>
+#include <string_view>
 
 #include <imgui.h>
 
@@ -205,12 +209,15 @@ bool editEnumCombo(const char* label, int& value, const char* const* items, int 
 }
 
 bool editBool(const char* label, bool& v) {
-  int temp = v ? 1 : 0;
-  if (editInt(label, temp)) {
-    v = temp != 0;
-    return true;
+  ImGui::PushID(&v);
+  const bool changed = ImGui::Button(v ? "On" : "Off", ImVec2(48.0f, 0.0f));
+  ImGui::PopID();
+  ImGui::SameLine();
+  ImGui::TextUnformatted(label);
+  if (changed) {
+    v = !v;
   }
-  return false;
+  return changed;
 }
 
 int inputTextCallback(ImGuiInputTextCallbackData* data) {
@@ -231,38 +238,109 @@ bool inputTextString(const char* label, std::string& value) {
   return ImGui::IsItemDeactivatedAfterEdit();
 }
 
-void drawNode(const scene::Scene& scene,
-              ecs::World* world,
-              scene::NodeId id,
-              scene::NodeId& selected) {
-  if (!scene.isAlive(id)) {
-    return;
-  }
-  const auto& node = scene.get(id);
-  const bool has_children = !node.children.empty();
-  ImGuiTreeNodeFlags flags =
-      (has_children ? ImGuiTreeNodeFlags_OpenOnArrow : ImGuiTreeNodeFlags_Leaf) |
-      (selected == id ? ImGuiTreeNodeFlags_Selected : 0);
-  const char* label = "Entity";
+std::string nodeDisplayName(const scene::Node& node, ecs::World* world) {
   if (world && node.entity.isValid() && world->has<components::TagComponent>(node.entity)) {
     const auto& tag = world->get<components::TagComponent>(node.entity);
     if (!tag.name.empty()) {
-      label = tag.name.c_str();
+      return tag.name;
     }
   }
+  return "Entity";
+}
+
+std::string lowerCopy(std::string_view value) {
+  std::string lowered(value);
+  std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return lowered;
+}
+
+std::string nodeSearchText(const scene::Node& node, ecs::World* world) {
+  std::string text = nodeDisplayName(node, world);
+  text += " node ";
+  text += std::to_string(node.id);
+  if (node.entity.isValid()) {
+    text += " entity ";
+    text += std::to_string(node.entity.index);
+    text += ":";
+    text += std::to_string(node.entity.generation);
+  }
+  return text;
+}
+
+bool nodeMatchesFilter(const scene::Node& node,
+                       ecs::World* world,
+                       std::string_view filter_lower) {
+  if (filter_lower.empty()) {
+    return true;
+  }
+  const std::string search_text = lowerCopy(nodeSearchText(node, world));
+  return search_text.find(filter_lower) != std::string::npos;
+}
+
+bool nodeHasFilterMatch(const scene::Scene& scene,
+                        ecs::World* world,
+                        scene::NodeId id,
+                        std::string_view filter_lower) {
+  if (!scene.isAlive(id)) {
+    return false;
+  }
+  const auto& node = scene.get(id);
+  if (nodeMatchesFilter(node, world, filter_lower)) {
+    return true;
+  }
+  for (scene::NodeId child : node.children) {
+    if (nodeHasFilterMatch(scene, world, child, filter_lower)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool drawNode(const scene::Scene& scene,
+              ecs::World* world,
+              scene::NodeId id,
+              scene::NodeId& selected,
+              std::string_view filter_lower) {
+  if (!scene.isAlive(id)) {
+    return false;
+  }
+  const auto& node = scene.get(id);
+  const bool filter_active = !filter_lower.empty();
+  if (filter_active && !nodeHasFilterMatch(scene, world, id, filter_lower)) {
+    return false;
+  }
+
+  bool has_visible_children = false;
+  for (scene::NodeId child : node.children) {
+    if (!filter_active || nodeHasFilterMatch(scene, world, child, filter_lower)) {
+      has_visible_children = true;
+      break;
+    }
+  }
+
+  ImGuiTreeNodeFlags flags =
+      (has_visible_children ? ImGuiTreeNodeFlags_OpenOnArrow : ImGuiTreeNodeFlags_Leaf) |
+      (selected == id ? ImGuiTreeNodeFlags_Selected : 0);
+  if (filter_active && has_visible_children) {
+    flags |= ImGuiTreeNodeFlags_DefaultOpen;
+  }
+  const std::string label = nodeDisplayName(node, world);
   const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(id)),
                                       flags,
                                       "%s",
-                                      label);
+                                      label.c_str());
   if (ImGui::IsItemClicked()) {
     selected = id;
   }
   if (open) {
     for (scene::NodeId child : node.children) {
-      drawNode(scene, world, child, selected);
+      drawNode(scene, world, child, selected, filter_lower);
     }
     ImGui::TreePop();
   }
+  return true;
 }
 }  // namespace
 
@@ -398,364 +476,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
   }
 
   ImGui::NewFrame();
-  ImGui::Begin("Karma Debug");
-
-  if (ImGui::CollapsingHeader("Frame Pacing", ImGuiTreeNodeFlags_DefaultOpen)) {
-    std::array<float, kFrameHistorySize> plot_values{};
-    float average_ms = 0.0f;
-    float max_recent_ms = 0.0f;
-    for (size_t i = 0; i < frame_time_history_count_; ++i) {
-      const size_t src_index =
-          (frame_time_history_cursor_ + kFrameHistorySize - frame_time_history_count_ + i) %
-          kFrameHistorySize;
-      const float sample_ms = frame_time_history_ms_[src_index];
-      plot_values[i] = sample_ms;
-      average_ms += sample_ms;
-      max_recent_ms = std::max(max_recent_ms, sample_ms);
-    }
-    if (frame_time_history_count_ > 0) {
-      average_ms /= static_cast<float>(frame_time_history_count_);
-    }
-    ImGui::Text("Current: %.2f ms (%.1f FPS)", frame_ms, io.Framerate);
-    ImGui::Text("Recent Avg: %.2f ms", average_ms);
-    ImGui::Text("Recent Max: %.2f ms", max_recent_ms);
-    ImGui::Text("Worst: %.2f ms", worst_frame_ms_);
-    ImGui::Text("Hitches >= %.1f ms: %llu", hitch_threshold_ms_,
-                static_cast<unsigned long long>(hitch_count_));
-    if (frame_time_history_count_ > 0) {
-      ImGui::PlotLines("Frametime (ms)",
-                       plot_values.data(),
-                       static_cast<int>(frame_time_history_count_),
-                       0,
-                       nullptr,
-                       0.0f,
-                       std::max(40.0f, max_recent_ms * 1.1f),
-                       ImVec2(0.0f, 80.0f));
-    }
-  }
-
-  if (graphics_ && ImGui::CollapsingHeader("Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
-    if (ImGui::CollapsingHeader("Shadows", ImGuiTreeNodeFlags_DefaultOpen)) {
-      bool shadow_changed = false;
-      shadow_changed |= editInt("Map Size", shadow_map_size_);
-      shadow_changed |= editFloat("Bias", shadow_bias_, "%.6f");
-      shadow_changed |= editInt("PCF Radius", shadow_pcf_radius_);
-      shadow_changed |= editInt("Raster Depth Bias", shadow_raster_depth_bias_);
-      shadow_changed |= editFloat("Raster Slope Bias", shadow_raster_slope_bias_, "%.3f");
-      shadow_changed |=
-          editFloat("Receiver Bias Scale", shadow_receiver_bias_scale_, "%.3f");
-      shadow_changed |= editFloat("Normal Bias Scale", shadow_normal_bias_scale_, "%.3f");
-      if (shadow_changed) {
-        shadow_map_size_ = std::max(256, shadow_map_size_);
-        shadow_pcf_radius_ = std::clamp(shadow_pcf_radius_, 0, 4);
-        shadow_receiver_bias_scale_ = std::max(0.0f, shadow_receiver_bias_scale_);
-        shadow_normal_bias_scale_ = std::max(0.0f, shadow_normal_bias_scale_);
-        graphics_->setShadowSettings(shadow_bias_,
-                                     shadow_map_size_,
-                                     shadow_pcf_radius_,
-                                     shadow_raster_depth_bias_,
-                                     shadow_raster_slope_bias_,
-                                     shadow_receiver_bias_scale_,
-                                     shadow_normal_bias_scale_);
-      }
-      bool point_shadow_changed = false;
-      point_shadow_changed |= editFloat("Point Const Bias", point_shadow_constant_bias_, "%.6f");
-      point_shadow_changed |=
-          editFloat("Point Slope Bias Scale", point_shadow_slope_bias_scale_, "%.3f");
-      point_shadow_changed |=
-          editFloat("Point Normal Bias Scale", point_shadow_normal_bias_scale_, "%.3f");
-      point_shadow_changed |=
-          editFloat("Point Receiver Bias Scale", point_shadow_receiver_bias_scale_, "%.3f");
-      if (point_shadow_changed) {
-        point_shadow_constant_bias_ = std::max(0.0f, point_shadow_constant_bias_);
-        point_shadow_slope_bias_scale_ = std::max(0.0f, point_shadow_slope_bias_scale_);
-        point_shadow_normal_bias_scale_ = std::max(0.0f, point_shadow_normal_bias_scale_);
-        point_shadow_receiver_bias_scale_ = std::max(0.0f, point_shadow_receiver_bias_scale_);
-        graphics_->setPointShadowSettings(point_shadow_constant_bias_,
-                                          point_shadow_slope_bias_scale_,
-                                          point_shadow_normal_bias_scale_,
-                                          point_shadow_receiver_bias_scale_);
-      }
-    }
-    if (ImGui::CollapsingHeader("Local Lights (Forward+)", ImGuiTreeNodeFlags_DefaultOpen)) {
-      bool fp_changed = false;
-      fp_changed |= editInt("Tile Size", forward_plus_tile_size_);
-      fp_changed |= editInt("Max Lights / Tile", forward_plus_max_lights_per_tile_);
-      fp_changed |= editInt("Max Local Lights", forward_plus_max_local_lights_);
-      if (fp_changed) {
-        forward_plus_tile_size_ = std::clamp(forward_plus_tile_size_, 4, 64);
-        forward_plus_max_lights_per_tile_ =
-            std::clamp(forward_plus_max_lights_per_tile_, 8, 2048);
-        forward_plus_max_local_lights_ =
-            std::clamp(forward_plus_max_local_lights_, 1, 65536);
-        graphics_->setForwardPlusSettings(forward_plus_tile_size_,
-                                          forward_plus_max_lights_per_tile_,
-                                          forward_plus_max_local_lights_);
-      }
-      bool local_changed = false;
-      local_changed |= editFloat("InvSq Softening", local_light_distance_damping_, "%.3f");
-      local_changed |=
-          editFloat("Range Falloff Exponent", local_light_range_falloff_exponent_, "%.3f");
-      local_changed |= editBool("AO Affects Local Lights", ao_affects_local_lights_);
-      local_changed |= editFloat("Dir Shadow Lift", local_light_directional_shadow_lift_strength_, "%.3f");
-      if (local_changed) {
-        local_light_distance_damping_ = std::max(0.0f, local_light_distance_damping_);
-        local_light_range_falloff_exponent_ =
-            std::max(0.1f, local_light_range_falloff_exponent_);
-        local_light_directional_shadow_lift_strength_ =
-            std::max(0.0f, local_light_directional_shadow_lift_strength_);
-        graphics_->setLocalLightingSettings(local_light_distance_damping_,
-                                            local_light_range_falloff_exponent_,
-                                            ao_affects_local_lights_,
-                                            local_light_directional_shadow_lift_strength_);
-      }
-      bool exposure_changed = editFloat("Exposure", lighting_exposure_, "%.3f");
-      if (exposure_changed) {
-        lighting_exposure_ = std::max(0.01f, lighting_exposure_);
-        graphics_->setExposure(lighting_exposure_);
-      }
-      const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
-      ImGui::Text("Active: %s", stats.active ? "yes" : "no");
-      ImGui::Text("CPU Fallback: %s", stats.cpu_fallback ? "yes" : "no");
-      ImGui::Text("Local Lights: %u", static_cast<unsigned int>(stats.local_light_count));
-      ImGui::Text("Tiles: %u x %u", static_cast<unsigned int>(stats.tiles_x),
-                  static_cast<unsigned int>(stats.tiles_y));
-      ImGui::Text("Tile Size: %u", static_cast<unsigned int>(stats.tile_size));
-      ImGui::Text("Max Lights / Tile: %u",
-                  static_cast<unsigned int>(stats.max_lights_per_tile));
-      ImGui::Text("Max Local Lights: %u",
-                  static_cast<unsigned int>(stats.max_local_lights));
-      if (stats.overflow_risk) {
-        ImGui::Text("Warning: local light density may exceed per-tile capacity.");
-      }
-    }
-  }
-
-  if (scene_) {
-    if (ImGui::CollapsingHeader("Hierarchy", ImGuiTreeNodeFlags_DefaultOpen)) {
-      const auto& nodes = scene_->nodes();
-      for (scene::NodeId id = 0; id < nodes.size(); ++id) {
-        if (!scene_->isAlive(id)) {
-          continue;
-        }
-        if (nodes[id].parent != scene::Node::kInvalidId) {
-          continue;
-        }
-        drawNode(*scene_, world_, id, selected_node_);
-      }
-    }
-  }
-
-  if (scene_ && world_ && selected_node_ != scene::Node::kInvalidId &&
-      scene_->isAlive(selected_node_)) {
-    const auto& node = scene_->get(selected_node_);
-    if (node.entity.isValid()) {
-      ImGui::Separator();
-      ImGui::Text("Components");
-      if (world_->has<components::TransformComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-          const auto& c = world_->get<components::TransformComponent>(node.entity);
-          math::Vec3 pos = c.getPosition();
-          if (editVec3("Position", pos)) {
-            world_->get<components::TransformComponent>(node.entity).setPosition(pos);
-          }
-          math::Quat rot = c.getRotation();
-          if (editQuat("Rotation (Quat)", rot)) {
-            world_->get<components::TransformComponent>(node.entity).setRotation(rot);
-          }
-          math::Vec3 euler = quatToEulerDegrees(c.getRotation());
-          if (editVec3("Rotation (Euler)", euler)) {
-            world_->get<components::TransformComponent>(node.entity)
-                .setRotation(eulerDegreesToQuat(euler));
-          }
-          math::Vec3 scale = c.getScale();
-          if (editVec3("Scale", scale)) {
-            world_->get<components::TransformComponent>(node.entity).setScale(scale);
-          }
-        }
-      }
-      if (world_->has<components::TagComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Tag")) {
-          const auto& c = world_->get<components::TagComponent>(node.entity);
-          std::string name = c.name;
-          if (inputTextString("Name", name)) {
-            world_->get<components::TagComponent>(node.entity).name = std::move(name);
-          }
-        }
-      }
-      if (world_->has<components::MeshComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Mesh")) {
-          auto& c = world_->get<components::MeshComponent>(node.entity);
-          std::string mesh_key = c.mesh_key;
-          std::string material_key = c.material_key;
-          std::string texture_key = c.texture_key;
-          if (inputTextString("Mesh", mesh_key)) {
-            c.mesh_key = std::move(mesh_key);
-          }
-          if (inputTextString("Material", material_key)) {
-            c.material_key = std::move(material_key);
-          }
-          if (inputTextString("Texture", texture_key)) {
-            c.texture_key = std::move(texture_key);
-          }
-          ImGui::Checkbox("Visible", &c.visible);
-        }
-      }
-      if (world_->has<components::EnvironmentComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Environment")) {
-          auto& c = world_->get<components::EnvironmentComponent>(node.entity);
-          std::string map = c.environment_map;
-          if (inputTextString("Map", map)) {
-            c.environment_map = std::move(map);
-          }
-          editFloat("Intensity", c.intensity);
-          editBool("Draw Skybox", c.draw_skybox);
-          editBool("Enabled", c.enabled);
-        }
-      }
-      if (world_->has<components::LightComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Light")) {
-          auto& c = world_->get<components::LightComponent>(node.entity);
-          int type = static_cast<int>(c.type);
-          const char* types[] = {"Directional", "Point", "Spot"};
-          if (editEnumCombo("Type", type, types, 3)) {
-            if (type < 0) type = 0;
-            if (type > 2) type = 2;
-            c.type = static_cast<components::LightComponent::Type>(type);
-          }
-          editColor("Color", c.color);
-          editFloat("Intensity", c.intensity);
-          editFloat("Range", c.range);
-          editFloat("Inner Cone", c.inner_cone_degrees);
-          editFloat("Outer Cone", c.outer_cone_degrees);
-          editBool("Casts Shadows", c.casts_shadows);
-          editFloat("Shadow Extent", c.shadow_extent);
-        }
-      }
-      if (world_->has<components::CameraComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Camera")) {
-          auto& c = world_->get<components::CameraComponent>(node.entity);
-          editFloat("FOV Y", c.fov_y_degrees);
-          editFloat("Near", c.near_clip);
-          editFloat("Far", c.far_clip);
-          editBool("Primary", c.is_primary);
-          editBool("Render Shadows", c.render_shadows);
-          editBool("Render To Texture", c.render_to_texture);
-          std::string target = c.render_target_key;
-          if (inputTextString("Render Target", target)) {
-            c.render_target_key = std::move(target);
-          }
-        }
-      }
-      if (world_->has<components::RigidbodyComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Rigidbody")) {
-          auto& c = world_->get<components::RigidbodyComponent>(node.entity);
-          editFloat("Mass", c.mass);
-          editVec3("Velocity", c.velocity);
-          editVec3("Angular Velocity", c.angular_velocity);
-          ImGui::Checkbox("Kinematic", &c.is_kinematic);
-          ImGui::Checkbox("Use Gravity", &c.use_gravity);
-          ImGui::Checkbox("Trigger", &c.is_trigger);
-          if (!world_->has<components::TransformComponent>(node.entity)) {
-            ImGui::Text("Position: (no Transform)");
-          }
-        }
-      }
-      if (world_->has<components::BoxColliderComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("BoxCollider")) {
-          auto& c = world_->get<components::BoxColliderComponent>(node.entity);
-          editVec3("Center", c.center);
-          editVec3("Half Extents", c.half_extents);
-          editBool("Trigger", c.is_trigger);
-          ImGui::Checkbox("Debug Draw", &c.debug_draw);
-        }
-      }
-      if (world_->has<components::SphereColliderComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("SphereCollider")) {
-          auto& c = world_->get<components::SphereColliderComponent>(node.entity);
-          editVec3("Center", c.center);
-          editFloat("Radius", c.radius);
-          editBool("Trigger", c.is_trigger);
-          ImGui::Checkbox("Debug Draw", &c.debug_draw);
-        }
-      }
-      if (world_->has<components::CapsuleColliderComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("CapsuleCollider")) {
-          auto& c = world_->get<components::CapsuleColliderComponent>(node.entity);
-          editVec3("Center", c.center);
-          editFloat("Radius", c.radius);
-          editFloat("Height", c.height);
-          editBool("Trigger", c.is_trigger);
-          ImGui::Checkbox("Debug Draw", &c.debug_draw);
-        }
-      }
-      if (world_->has<components::MeshColliderComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("MeshCollider")) {
-          auto& c = world_->get<components::MeshColliderComponent>(node.entity);
-          editBool("Trigger", c.is_trigger);
-          ImGui::Checkbox("Debug Draw", &c.debug_draw);
-        }
-      }
-      if (world_->has<components::PlayerControllerComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("PlayerController")) {
-          auto& c = world_->get<components::PlayerControllerComponent>(node.entity);
-          editBool("Enabled", c.enabled);
-          math::Vec3 desired = c.desiredVelocity();
-          if (editVec3("Desired Velocity", desired)) {
-            c.setDesiredVelocity(desired);
-          }
-          math::Vec3 add = c.addVelocity();
-          if (editVec3("Add Velocity", add)) {
-            c.setAddVelocity(add);
-          }
-        }
-      }
-      if (world_->has<components::AudioListenerComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("AudioListener")) {
-          ImGui::Text("Active");
-        }
-      }
-      if (world_->has<components::AudioSourceComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("AudioSource")) {
-          auto& c = world_->get<components::AudioSourceComponent>(node.entity);
-          std::string clip = c.clip_key;
-          if (inputTextString("Clip", clip)) {
-            c.clip_key = std::move(clip);
-          }
-          editFloat("Gain", c.gain);
-          editFloat("Pitch", c.pitch);
-          editFloat("Min Distance", c.min_distance);
-          editFloat("Max Distance", c.max_distance);
-          editBool("Looping", c.looping);
-          editBool("Play On Start", c.play_on_start);
-          editBool("Spatialized", c.spatialized);
-          editInt("Max Instances", c.max_instances);
-        }
-      }
-      if (world_->has<components::ScriptComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Script")) {
-          auto& c = world_->get<components::ScriptComponent>(node.entity);
-          std::string key = c.script_key;
-          if (inputTextString("Key", key)) {
-            c.script_key = std::move(key);
-          }
-          editBool("Enabled", c.enabled);
-        }
-      }
-      if (world_->has<components::VisibilityComponent>(node.entity)) {
-        if (ImGui::CollapsingHeader("Visibility")) {
-          auto& c = world_->get<components::VisibilityComponent>(node.entity);
-          editBool("Visible", c.visible);
-          ImGui::InputScalar("Render Mask", ImGuiDataType_U32, &c.render_layer_mask,
-                             nullptr, nullptr, "%08X");
-          ImGui::InputScalar("Collision Mask", ImGuiDataType_U32, &c.collision_layer_mask,
-                             nullptr, nullptr, "%08X");
-        }
-      }
-    }
-  }
-
-  ImGui::End();
+  drawDebugWindow(frame_ms, io.Framerate);
   ImGui::Render();
 
   const ImDrawData* draw_data = ImGui::GetDrawData();
@@ -817,6 +538,536 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
     }
     global_vtx_offset += cmd_list->VtxBuffer.Size;
   }
+}
+
+void DebugOverlayLayer::drawDebugWindow(float frame_ms, float framerate) {
+  if (ImGui::Begin("Karma Debug")) {
+    if (ImGui::BeginTabBar("KarmaDebugTabs")) {
+      if (ImGui::BeginTabItem("Scene")) {
+        drawSceneTab();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem("Renderer")) {
+        drawRendererTab();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem("Performance")) {
+        drawPerformanceTab(frame_ms, framerate);
+        ImGui::EndTabItem();
+      }
+      ImGui::EndTabBar();
+    }
+  }
+  ImGui::End();
+}
+
+void DebugOverlayLayer::drawSceneTab() {
+  if (!scene_) {
+    ImGui::TextDisabled("No scene.");
+    return;
+  }
+
+  const float available_width = ImGui::GetContentRegionAvail().x;
+  const float hierarchy_width = std::clamp(available_width * 0.34f, 220.0f, 360.0f);
+
+  ImGui::BeginChild("SceneHierarchyPane", ImVec2(hierarchy_width, 0.0f), true);
+  drawSceneHierarchyPane();
+  ImGui::EndChild();
+
+  ImGui::SameLine();
+
+  ImGui::BeginChild("SceneInspectorPane", ImVec2(0.0f, 0.0f), true);
+  drawSelectedInspectorPane();
+  ImGui::EndChild();
+}
+
+void DebugOverlayLayer::drawSceneHierarchyPane() {
+  ImGui::TextUnformatted("Hierarchy");
+
+  std::array<char, 128> filter_buffer{};
+  const size_t copy_count = std::min(hierarchy_filter_.size(), filter_buffer.size() - 1);
+  std::copy_n(hierarchy_filter_.c_str(), copy_count, filter_buffer.data());
+
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float clear_width =
+      ImGui::CalcTextSize("Clear").x + style.FramePadding.x * 2.0f;
+  const float input_width =
+      std::max(80.0f, ImGui::GetContentRegionAvail().x - clear_width - style.ItemSpacing.x);
+  ImGui::SetNextItemWidth(input_width);
+  if (ImGui::InputTextWithHint("##HierarchyFilter",
+                               "Search hierarchy",
+                               filter_buffer.data(),
+                               filter_buffer.size())) {
+    hierarchy_filter_ = filter_buffer.data();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Clear")) {
+    hierarchy_filter_.clear();
+  }
+
+  ImGui::Separator();
+
+  if (selected_node_ != scene::Node::kInvalidId && !scene_->isAlive(selected_node_)) {
+    selected_node_ = scene::Node::kInvalidId;
+  }
+
+  const std::string filter_lower = lowerCopy(hierarchy_filter_);
+  bool drew_any_node = false;
+  const auto& nodes = scene_->nodes();
+  for (scene::NodeId id = 0; id < nodes.size(); ++id) {
+    if (!scene_->isAlive(id)) {
+      continue;
+    }
+    if (nodes[id].parent != scene::Node::kInvalidId) {
+      continue;
+    }
+    drew_any_node |= drawNode(*scene_, world_, id, selected_node_, filter_lower);
+  }
+
+  if (!drew_any_node) {
+    ImGui::TextDisabled(filter_lower.empty() ? "No scene nodes." : "No matching nodes.");
+  }
+}
+
+void DebugOverlayLayer::drawSelectedInspectorPane() {
+  ImGui::TextUnformatted("Inspector");
+
+  if (!scene_) {
+    ImGui::TextDisabled("No scene.");
+    return;
+  }
+  if (selected_node_ == scene::Node::kInvalidId || !scene_->isAlive(selected_node_)) {
+    ImGui::TextDisabled("No node selected.");
+    return;
+  }
+
+  const auto& node = scene_->get(selected_node_);
+  drawSelectedSummary(node);
+
+  if (!world_) {
+    ImGui::Separator();
+    ImGui::TextDisabled("No ECS world.");
+    return;
+  }
+  if (!node.entity.isValid()) {
+    ImGui::Separator();
+    ImGui::TextDisabled("Selected node has no entity.");
+    return;
+  }
+
+  ImGui::Separator();
+  ImGui::Text("Components");
+  drawComponentInspector(node);
+}
+
+void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
+  const std::string name = nodeDisplayName(node, world_);
+  ImGui::Text("Selected: %s", name.c_str());
+  ImGui::Text("Node: %u", static_cast<unsigned int>(node.id));
+  if (node.entity.isValid()) {
+    ImGui::Text("Entity: %u:%u",
+                static_cast<unsigned int>(node.entity.index),
+                static_cast<unsigned int>(node.entity.generation));
+  } else {
+    ImGui::TextUnformatted("Entity: (none)");
+  }
+  if (node.parent != scene::Node::kInvalidId) {
+    ImGui::Text("Parent: %u", static_cast<unsigned int>(node.parent));
+  } else {
+    ImGui::TextUnformatted("Parent: (root)");
+  }
+  ImGui::Text("Children: %zu", node.children.size());
+
+  if (!world_ || !node.entity.isValid()) {
+    return;
+  }
+
+  std::string components;
+  auto append_component = [&components](const char* label) {
+    if (!components.empty()) {
+      components += ", ";
+    }
+    components += label;
+  };
+  if (world_->has<components::TransformComponent>(node.entity)) append_component("Transform");
+  if (world_->has<components::TagComponent>(node.entity)) append_component("Tag");
+  if (world_->has<components::MeshComponent>(node.entity)) append_component("Mesh");
+  if (world_->has<components::EnvironmentComponent>(node.entity)) append_component("Environment");
+  if (world_->has<components::LightComponent>(node.entity)) append_component("Light");
+  if (world_->has<components::CameraComponent>(node.entity)) append_component("Camera");
+  if (world_->has<components::RigidbodyComponent>(node.entity)) append_component("Rigidbody");
+  if (world_->has<components::BoxColliderComponent>(node.entity)) append_component("BoxCollider");
+  if (world_->has<components::SphereColliderComponent>(node.entity)) append_component("SphereCollider");
+  if (world_->has<components::CapsuleColliderComponent>(node.entity)) append_component("CapsuleCollider");
+  if (world_->has<components::MeshColliderComponent>(node.entity)) append_component("MeshCollider");
+  if (world_->has<components::PlayerControllerComponent>(node.entity)) append_component("PlayerController");
+  if (world_->has<components::AudioListenerComponent>(node.entity)) append_component("AudioListener");
+  if (world_->has<components::AudioSourceComponent>(node.entity)) append_component("AudioSource");
+  if (world_->has<components::ScriptComponent>(node.entity)) append_component("Script");
+  if (world_->has<components::VisibilityComponent>(node.entity)) append_component("Visibility");
+
+  if (components.empty()) {
+    components = "None";
+  }
+  ImGui::TextWrapped("Component Summary: %s", components.c_str());
+}
+
+void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
+  if (!world_ || !node.entity.isValid()) {
+    return;
+  }
+
+  if (world_->has<components::TransformComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+      const auto& c = world_->get<components::TransformComponent>(node.entity);
+      math::Vec3 pos = c.getPosition();
+      if (editVec3("Position", pos)) {
+        world_->get<components::TransformComponent>(node.entity).setPosition(pos);
+      }
+      math::Quat rot = c.getRotation();
+      if (editQuat("Rotation (Quat)", rot)) {
+        world_->get<components::TransformComponent>(node.entity).setRotation(rot);
+      }
+      math::Vec3 euler = quatToEulerDegrees(c.getRotation());
+      if (editVec3("Rotation (Euler)", euler)) {
+        world_->get<components::TransformComponent>(node.entity)
+            .setRotation(eulerDegreesToQuat(euler));
+      }
+      math::Vec3 scale = c.getScale();
+      if (editVec3("Scale", scale)) {
+        world_->get<components::TransformComponent>(node.entity).setScale(scale);
+      }
+    }
+  }
+  if (world_->has<components::TagComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Tag")) {
+      const auto& c = world_->get<components::TagComponent>(node.entity);
+      std::string name = c.name;
+      if (inputTextString("Name", name)) {
+        world_->get<components::TagComponent>(node.entity).name = std::move(name);
+      }
+    }
+  }
+  if (world_->has<components::MeshComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Mesh")) {
+      auto& c = world_->get<components::MeshComponent>(node.entity);
+      std::string mesh_key = c.mesh_key;
+      std::string material_key = c.material_key;
+      std::string texture_key = c.texture_key;
+      if (inputTextString("Mesh", mesh_key)) {
+        c.mesh_key = std::move(mesh_key);
+      }
+      if (inputTextString("Material", material_key)) {
+        c.material_key = std::move(material_key);
+      }
+      if (inputTextString("Texture", texture_key)) {
+        c.texture_key = std::move(texture_key);
+      }
+      editBool("Visible", c.visible);
+    }
+  }
+  if (world_->has<components::EnvironmentComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Environment")) {
+      auto& c = world_->get<components::EnvironmentComponent>(node.entity);
+      std::string map = c.environment_map;
+      if (inputTextString("Map", map)) {
+        c.environment_map = std::move(map);
+      }
+      editFloat("Intensity", c.intensity);
+      editBool("Draw Skybox", c.draw_skybox);
+      editBool("Enabled", c.enabled);
+    }
+  }
+  if (world_->has<components::LightComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Light")) {
+      auto& c = world_->get<components::LightComponent>(node.entity);
+      int type = static_cast<int>(c.type);
+      const char* types[] = {"Directional", "Point", "Spot"};
+      if (editEnumCombo("Type", type, types, 3)) {
+        if (type < 0) type = 0;
+        if (type > 2) type = 2;
+        c.type = static_cast<components::LightComponent::Type>(type);
+      }
+      editColor("Color", c.color);
+      editFloat("Intensity", c.intensity);
+      editFloat("Range", c.range);
+      editFloat("Inner Cone", c.inner_cone_degrees);
+      editFloat("Outer Cone", c.outer_cone_degrees);
+      editBool("Casts Shadows", c.casts_shadows);
+      editFloat("Shadow Extent", c.shadow_extent);
+    }
+  }
+  if (world_->has<components::CameraComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Camera")) {
+      auto& c = world_->get<components::CameraComponent>(node.entity);
+      editFloat("FOV Y", c.fov_y_degrees);
+      editFloat("Near", c.near_clip);
+      editFloat("Far", c.far_clip);
+      editBool("Primary", c.is_primary);
+      editBool("Render Shadows", c.render_shadows);
+      editBool("Render To Texture", c.render_to_texture);
+      std::string target = c.render_target_key;
+      if (inputTextString("Render Target", target)) {
+        c.render_target_key = std::move(target);
+      }
+    }
+  }
+  if (world_->has<components::RigidbodyComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Rigidbody")) {
+      auto& c = world_->get<components::RigidbodyComponent>(node.entity);
+      editFloat("Mass", c.mass);
+      editVec3("Velocity", c.velocity);
+      editVec3("Angular Velocity", c.angular_velocity);
+      editBool("Kinematic", c.is_kinematic);
+      editBool("Use Gravity", c.use_gravity);
+      editBool("Trigger", c.is_trigger);
+      if (!world_->has<components::TransformComponent>(node.entity)) {
+        ImGui::Text("Position: (no Transform)");
+      }
+    }
+  }
+  if (world_->has<components::BoxColliderComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("BoxCollider")) {
+      auto& c = world_->get<components::BoxColliderComponent>(node.entity);
+      editVec3("Center", c.center);
+      editVec3("Half Extents", c.half_extents);
+      editBool("Trigger", c.is_trigger);
+      editBool("Debug Draw", c.debug_draw);
+    }
+  }
+  if (world_->has<components::SphereColliderComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("SphereCollider")) {
+      auto& c = world_->get<components::SphereColliderComponent>(node.entity);
+      editVec3("Center", c.center);
+      editFloat("Radius", c.radius);
+      editBool("Trigger", c.is_trigger);
+      editBool("Debug Draw", c.debug_draw);
+    }
+  }
+  if (world_->has<components::CapsuleColliderComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("CapsuleCollider")) {
+      auto& c = world_->get<components::CapsuleColliderComponent>(node.entity);
+      editVec3("Center", c.center);
+      editFloat("Radius", c.radius);
+      editFloat("Height", c.height);
+      editBool("Trigger", c.is_trigger);
+      editBool("Debug Draw", c.debug_draw);
+    }
+  }
+  if (world_->has<components::MeshColliderComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("MeshCollider")) {
+      auto& c = world_->get<components::MeshColliderComponent>(node.entity);
+      editBool("Trigger", c.is_trigger);
+      editBool("Debug Draw", c.debug_draw);
+    }
+  }
+  if (world_->has<components::PlayerControllerComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("PlayerController")) {
+      auto& c = world_->get<components::PlayerControllerComponent>(node.entity);
+      editBool("Enabled", c.enabled);
+      math::Vec3 desired = c.desiredVelocity();
+      if (editVec3("Desired Velocity", desired)) {
+        c.setDesiredVelocity(desired);
+      }
+      math::Vec3 add = c.addVelocity();
+      if (editVec3("Add Velocity", add)) {
+        c.setAddVelocity(add);
+      }
+    }
+  }
+  if (world_->has<components::AudioListenerComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("AudioListener")) {
+      ImGui::Text("Active");
+    }
+  }
+  if (world_->has<components::AudioSourceComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("AudioSource")) {
+      auto& c = world_->get<components::AudioSourceComponent>(node.entity);
+      std::string clip = c.clip_key;
+      if (inputTextString("Clip", clip)) {
+        c.clip_key = std::move(clip);
+      }
+      editFloat("Gain", c.gain);
+      editFloat("Pitch", c.pitch);
+      editFloat("Min Distance", c.min_distance);
+      editFloat("Max Distance", c.max_distance);
+      editBool("Looping", c.looping);
+      editBool("Play On Start", c.play_on_start);
+      editBool("Spatialized", c.spatialized);
+      editInt("Max Instances", c.max_instances);
+    }
+  }
+  if (world_->has<components::ScriptComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Script")) {
+      auto& c = world_->get<components::ScriptComponent>(node.entity);
+      std::string key = c.script_key;
+      if (inputTextString("Key", key)) {
+        c.script_key = std::move(key);
+      }
+      editBool("Enabled", c.enabled);
+    }
+  }
+  if (world_->has<components::VisibilityComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Visibility")) {
+      auto& c = world_->get<components::VisibilityComponent>(node.entity);
+      editBool("Visible", c.visible);
+      ImGui::InputScalar("Render Mask", ImGuiDataType_U32, &c.render_layer_mask,
+                         nullptr, nullptr, "%08X");
+      ImGui::InputScalar("Collision Mask", ImGuiDataType_U32, &c.collision_layer_mask,
+                         nullptr, nullptr, "%08X");
+    }
+  }
+}
+
+void DebugOverlayLayer::drawRendererTab() {
+  if (!graphics_) {
+    ImGui::TextDisabled("No graphics device.");
+    return;
+  }
+
+  if (ImGui::CollapsingHeader("Shadows", ImGuiTreeNodeFlags_DefaultOpen)) {
+    bool shadow_changed = false;
+    shadow_changed |= editInt("Map Size", shadow_map_size_);
+    shadow_changed |= editFloat("Bias", shadow_bias_, "%.6f");
+    shadow_changed |= editInt("PCF Radius", shadow_pcf_radius_);
+    shadow_changed |= editInt("Raster Depth Bias", shadow_raster_depth_bias_);
+    shadow_changed |= editFloat("Raster Slope Bias", shadow_raster_slope_bias_, "%.3f");
+    shadow_changed |= editFloat("Receiver Bias Scale", shadow_receiver_bias_scale_, "%.3f");
+    shadow_changed |= editFloat("Normal Bias Scale", shadow_normal_bias_scale_, "%.3f");
+    if (shadow_changed) {
+      shadow_map_size_ = std::max(256, shadow_map_size_);
+      shadow_pcf_radius_ = std::clamp(shadow_pcf_radius_, 0, 4);
+      shadow_receiver_bias_scale_ = std::max(0.0f, shadow_receiver_bias_scale_);
+      shadow_normal_bias_scale_ = std::max(0.0f, shadow_normal_bias_scale_);
+      graphics_->setShadowSettings(shadow_bias_,
+                                   shadow_map_size_,
+                                   shadow_pcf_radius_,
+                                   shadow_raster_depth_bias_,
+                                   shadow_raster_slope_bias_,
+                                   shadow_receiver_bias_scale_,
+                                   shadow_normal_bias_scale_);
+    }
+    bool point_shadow_changed = false;
+    point_shadow_changed |= editFloat("Point Const Bias", point_shadow_constant_bias_, "%.6f");
+    point_shadow_changed |=
+        editFloat("Point Slope Bias Scale", point_shadow_slope_bias_scale_, "%.3f");
+    point_shadow_changed |=
+        editFloat("Point Normal Bias Scale", point_shadow_normal_bias_scale_, "%.3f");
+    point_shadow_changed |=
+        editFloat("Point Receiver Bias Scale", point_shadow_receiver_bias_scale_, "%.3f");
+    if (point_shadow_changed) {
+      point_shadow_constant_bias_ = std::max(0.0f, point_shadow_constant_bias_);
+      point_shadow_slope_bias_scale_ = std::max(0.0f, point_shadow_slope_bias_scale_);
+      point_shadow_normal_bias_scale_ = std::max(0.0f, point_shadow_normal_bias_scale_);
+      point_shadow_receiver_bias_scale_ = std::max(0.0f, point_shadow_receiver_bias_scale_);
+      graphics_->setPointShadowSettings(point_shadow_constant_bias_,
+                                        point_shadow_slope_bias_scale_,
+                                        point_shadow_normal_bias_scale_,
+                                        point_shadow_receiver_bias_scale_);
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Local Lights (Forward+)", ImGuiTreeNodeFlags_DefaultOpen)) {
+    bool fp_changed = false;
+    fp_changed |= editInt("Tile Size", forward_plus_tile_size_);
+    fp_changed |= editInt("Max Lights / Tile", forward_plus_max_lights_per_tile_);
+    fp_changed |= editInt("Max Local Lights", forward_plus_max_local_lights_);
+    if (fp_changed) {
+      forward_plus_tile_size_ = std::clamp(forward_plus_tile_size_, 4, 64);
+      forward_plus_max_lights_per_tile_ =
+          std::clamp(forward_plus_max_lights_per_tile_, 8, 2048);
+      forward_plus_max_local_lights_ =
+          std::clamp(forward_plus_max_local_lights_, 1, 65536);
+      graphics_->setForwardPlusSettings(forward_plus_tile_size_,
+                                        forward_plus_max_lights_per_tile_,
+                                        forward_plus_max_local_lights_);
+    }
+    bool local_changed = false;
+    local_changed |= editFloat("InvSq Softening", local_light_distance_damping_, "%.3f");
+    local_changed |=
+        editFloat("Range Falloff Exponent", local_light_range_falloff_exponent_, "%.3f");
+    local_changed |= editBool("AO Affects Local Lights", ao_affects_local_lights_);
+    local_changed |=
+        editFloat("Dir Shadow Lift", local_light_directional_shadow_lift_strength_, "%.3f");
+    if (local_changed) {
+      local_light_distance_damping_ = std::max(0.0f, local_light_distance_damping_);
+      local_light_range_falloff_exponent_ =
+          std::max(0.1f, local_light_range_falloff_exponent_);
+      local_light_directional_shadow_lift_strength_ =
+          std::max(0.0f, local_light_directional_shadow_lift_strength_);
+      graphics_->setLocalLightingSettings(local_light_distance_damping_,
+                                          local_light_range_falloff_exponent_,
+                                          ao_affects_local_lights_,
+                                          local_light_directional_shadow_lift_strength_);
+    }
+    bool exposure_changed = editFloat("Exposure", lighting_exposure_, "%.3f");
+    if (exposure_changed) {
+      lighting_exposure_ = std::max(0.01f, lighting_exposure_);
+      graphics_->setExposure(lighting_exposure_);
+    }
+    const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
+    ImGui::Text("Active: %s", stats.active ? "yes" : "no");
+    ImGui::Text("CPU Fallback: %s", stats.cpu_fallback ? "yes" : "no");
+    ImGui::Text("Local Lights: %u", static_cast<unsigned int>(stats.local_light_count));
+    ImGui::Text("Tiles: %u x %u", static_cast<unsigned int>(stats.tiles_x),
+                static_cast<unsigned int>(stats.tiles_y));
+    ImGui::Text("Tile Size: %u", static_cast<unsigned int>(stats.tile_size));
+    ImGui::Text("Max Lights / Tile: %u",
+                static_cast<unsigned int>(stats.max_lights_per_tile));
+    ImGui::Text("Max Local Lights: %u",
+                static_cast<unsigned int>(stats.max_local_lights));
+    if (stats.overflow_risk) {
+      ImGui::Text("Warning: local light density may exceed per-tile capacity.");
+    }
+  }
+}
+
+void DebugOverlayLayer::drawPerformanceTab(float frame_ms, float framerate) {
+  if (ImGui::CollapsingHeader("Frame Pacing", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::Button("Reset")) {
+      resetFramePacingStats();
+    }
+
+    std::array<float, kFrameHistorySize> plot_values{};
+    float average_ms = 0.0f;
+    float max_recent_ms = 0.0f;
+    for (size_t i = 0; i < frame_time_history_count_; ++i) {
+      const size_t src_index =
+          (frame_time_history_cursor_ + kFrameHistorySize - frame_time_history_count_ + i) %
+          kFrameHistorySize;
+      const float sample_ms = frame_time_history_ms_[src_index];
+      plot_values[i] = sample_ms;
+      average_ms += sample_ms;
+      max_recent_ms = std::max(max_recent_ms, sample_ms);
+    }
+    if (frame_time_history_count_ > 0) {
+      average_ms /= static_cast<float>(frame_time_history_count_);
+    }
+    ImGui::Text("Current: %.2f ms (%.1f FPS)", frame_ms, framerate);
+    ImGui::Text("Recent Avg: %.2f ms", average_ms);
+    ImGui::Text("Recent Max: %.2f ms", max_recent_ms);
+    ImGui::Text("Worst: %.2f ms", worst_frame_ms_);
+    ImGui::Text("Hitches >= %.1f ms: %llu", hitch_threshold_ms_,
+                static_cast<unsigned long long>(hitch_count_));
+    if (frame_time_history_count_ > 0) {
+      ImGui::PlotLines("Frametime (ms)",
+                       plot_values.data(),
+                       static_cast<int>(frame_time_history_count_),
+                       0,
+                       nullptr,
+                       0.0f,
+                       std::max(40.0f, max_recent_ms * 1.1f),
+                       ImVec2(0.0f, 80.0f));
+    }
+  }
+}
+
+void DebugOverlayLayer::resetFramePacingStats() {
+  frame_time_history_ms_.fill(0.0f);
+  frame_time_history_cursor_ = 0;
+  frame_time_history_count_ = 0;
+  hitch_count_ = 0;
+  worst_frame_ms_ = 0.0f;
 }
 
 void DebugOverlayLayer::onShutdown() {

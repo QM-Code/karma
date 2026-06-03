@@ -350,7 +350,7 @@ void EngineApp::tick() {
         std::max(0.0f, envFloat(std::getenv("KARMA_ENGINE_FRAME_DIAG_THRESHOLD_MS"),
                                 frame_diag_threshold_ms_));
     if (frame_diag_enabled_) {
-      spdlog::info("KARMA_ENGINE_FRAME_DIAG enabled; logging frames >= {:.2f} ms",
+      spdlog::info("KARMA_ENGINE_FRAME_DIAG enabled; format=events_v2 logging frames >= {:.2f} ms",
                    frame_diag_threshold_ms_);
     }
   }
@@ -366,8 +366,45 @@ void EngineApp::tick() {
   accumulator_ += frame_dt;
 
   auto section_start = core::SteadyClock::now();
+  double poll_events_ms = 0.0;
+  double ui_events_ms = 0.0;
+  double input_update_ms = 0.0;
+  double clear_events_ms = 0.0;
+  double should_close_ms = 0.0;
+  size_t event_count = 0;
+  size_t mouse_button_events = 0;
+  size_t mouse_move_events = 0;
+  size_t window_focus_events = 0;
+  size_t window_resize_events = 0;
   if (window_) {
+    auto event_section_start = section_start;
     window_->pollEvents();
+    auto event_section_end = core::SteadyClock::now();
+    poll_events_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
+
+    const auto& events = window_->events();
+    event_count = events.size();
+    for (const auto& event : events) {
+      switch (event.type) {
+        case platform::EventType::MouseButtonDown:
+        case platform::EventType::MouseButtonUp:
+          ++mouse_button_events;
+          break;
+        case platform::EventType::MouseMove:
+          ++mouse_move_events;
+          break;
+        case platform::EventType::WindowFocus:
+          ++window_focus_events;
+          break;
+        case platform::EventType::WindowResize:
+          ++window_resize_events;
+          break;
+        default:
+          break;
+      }
+    }
+
+    event_section_start = event_section_end;
     for (const auto& event : window_->events()) {
       if (user_ui_) {
         user_ui_->onEvent(event);
@@ -378,11 +415,25 @@ void EngineApp::tick() {
       }
 #endif
     }
-    input_.update(window_->events());
+    event_section_end = core::SteadyClock::now();
+    ui_events_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
+
+    event_section_start = event_section_end;
+    input_.update(events);
+    event_section_end = core::SteadyClock::now();
+    input_update_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
+
+    event_section_start = event_section_end;
     window_->clearEvents();
+    event_section_end = core::SteadyClock::now();
+    clear_events_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
+
+    event_section_start = event_section_end;
     if (window_->shouldClose()) {
       requestStop();
     }
+    event_section_end = core::SteadyClock::now();
+    should_close_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
   }
   auto section_end = core::SteadyClock::now();
   const double events_ms = core::elapsedMilliseconds(section_start, section_end);
@@ -569,7 +620,9 @@ void EngineApp::tick() {
        tick_total_ms >= static_cast<double>(frame_diag_threshold_ms_))) {
     spdlog::info(
         "Engine frame diag: raw_dt={:.3f}ms clamped_dt={:.3f}ms tick={:.3f}ms "
-        "events={:.3f} fixed={:.3f}({}) game={:.3f} light_pulse={:.3f} "
+        "events={:.3f}[poll={:.3f} ui={:.3f} input={:.3f} clear={:.3f} close={:.3f} "
+        "count={} mb={} mm={} focus={} resize={}] "
+        "fixed={:.3f}({}) game={:.3f} light_pulse={:.3f} "
         "sync_scene={:.3f} animation={:.3f} scene_xform={:.3f} skinning={:.3f} audio={:.3f} "
         "fb={:.3f} ui_frame={:.3f} begin={:.3f} particles={:.3f} modules={:.3f} "
         "render_system={:.3f} render_layer={:.3f} render_ui={:.3f} end_frame={:.3f} "
@@ -578,6 +631,16 @@ void EngineApp::tick() {
         static_cast<double>(frame_dt) * 1000.0,
         tick_total_ms,
         events_ms,
+        poll_events_ms,
+        ui_events_ms,
+        input_update_ms,
+        clear_events_ms,
+        should_close_ms,
+        event_count,
+        mouse_button_events,
+        mouse_move_events,
+        window_focus_events,
+        window_resize_events,
         fixed_ms,
         fixed_steps,
         game_update_ms,

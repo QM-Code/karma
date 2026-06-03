@@ -8,6 +8,8 @@
 
 #include <algorithm>
 
+#include <spdlog/spdlog.h>
+
 namespace karma::renderer_backend {
 
 void DiligentBackend::setCamera(const renderer::CameraData& camera) {
@@ -124,6 +126,14 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
 
 void DiligentBackend::setVsync(bool enabled) {
   vsync_enabled_ = enabled;
+  if (vsync_enabled_) {
+    spdlog::info(
+        "Diligent Vulkan present policy: vsync FIFO/FIFO_RELAXED pacing enabled");
+  } else {
+    spdlog::info(
+        "Diligent Vulkan present policy: low-latency fallback enabled "
+        "(MAILBOX -> IMMEDIATE -> FIFO)");
+  }
 }
 
 void DiligentBackend::setAnisotropy(bool enabled, int level) {

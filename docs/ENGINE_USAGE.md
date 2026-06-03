@@ -78,6 +78,43 @@ Typical crash or hang triage run:
 KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/karma_laser_example
 ```
 
+For frame pacing and input-latency triage, enable engine frame diagnostics:
+
+```bash
+KARMA_ENGINE_FRAME_DIAG=1 \
+KARMA_ENGINE_FRAME_DIAG_THRESHOLD_MS=18 \
+./build/karma_navmesh_example
+```
+
+The frame log splits event handling into poll, UI dispatch, input update, event
+clearing, and close checks. It also reports input event counts for mouse button,
+mouse move, focus, and resize events. Use the `fb` bucket to spot framebuffer
+size/query stalls and `end_frame` to spot renderer present or acquire stalls.
+
+## Present Mode Policy
+Karma defaults to the low-latency present path for the Diligent Vulkan backend.
+The default `EngineConfig::vsync` value is `false`, which calls Diligent
+`Present(0)`. Diligent then chooses the first available mode in this order:
+
+1. `VK_PRESENT_MODE_MAILBOX_KHR`
+2. `VK_PRESENT_MODE_IMMEDIATE_KHR`
+3. `VK_PRESENT_MODE_FIFO_KHR`
+
+This avoids FIFO/FIFO_RELAXED stalls observed on some Linux Vulkan surfaces, where
+`vkQueuePresentKHR` can block for multiple refresh intervals after input. If
+mailbox is not supported, the backend may use immediate mode; that removes the
+stall at the cost of possible tearing unless the app caps frame rate elsewhere.
+
+Set `config.vsync = true` or use `KARMA_ENGINE_VSYNC=1` to opt into
+FIFO/FIFO_RELAXED vblank pacing:
+
+```bash
+KARMA_ENGINE_VSYNC=1 ./build/karma_navmesh_example
+```
+
+Use this when tear-free pacing is more important than input latency, or when the
+target driver/compositor does not exhibit FIFO present stalls.
+
 Local-light / point-shadow sanity check:
 
 ```bash

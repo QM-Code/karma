@@ -277,6 +277,7 @@ public:
         glfwMakeContextCurrent(window);
 #endif
         glfwSetWindowUserPointer(window, this);
+        refreshCachedWindowState();
 
         setupCallbacks();
     }
@@ -360,6 +361,7 @@ public:
             glfwSetWindowMonitor(window, nullptr, windowedX, windowedY, windowedW, windowedH, 0);
             fullscreen = false;
         }
+        refreshCachedWindowState();
     }
 
     bool isFullscreen() const override {
@@ -367,21 +369,12 @@ public:
     }
 
     void getFramebufferSize(int &width, int &height) const override {
-        if (!window) {
-            width = 0;
-            height = 0;
-            return;
-        }
-        glfwGetFramebufferSize(window, &width, &height);
+        width = framebufferW;
+        height = framebufferH;
     }
 
     float getContentScale() const override {
-        if (!window) {
-            return 1.0f;
-        }
-        float xscale = 1.0f;
-        glfwGetWindowContentScale(window, &xscale, nullptr);
-        return xscale;
+        return contentScale;
     }
 
     bool isKeyDown(Key key) const override {
@@ -443,6 +436,42 @@ private:
     int windowedY = 0;
     int windowedW = 1280;
     int windowedH = 720;
+    int windowW = 1280;
+    int windowH = 720;
+    int framebufferW = 0;
+    int framebufferH = 0;
+    float contentScale = 1.0f;
+    double cursorX = 0.0;
+    double cursorY = 0.0;
+
+    void refreshCachedWindowState() {
+        if (!window) {
+            windowW = 0;
+            windowH = 0;
+            framebufferW = 0;
+            framebufferH = 0;
+            contentScale = 1.0f;
+            cursorX = 0.0;
+            cursorY = 0.0;
+            return;
+        }
+        glfwGetWindowSize(window, &windowW, &windowH);
+        glfwGetFramebufferSize(window, &framebufferW, &framebufferH);
+        float xscale = 1.0f;
+        glfwGetWindowContentScale(window, &xscale, nullptr);
+        contentScale = xscale;
+        glfwGetCursorPos(window, &cursorX, &cursorY);
+    }
+
+    double framebufferScaleX() const {
+        return (windowW > 0) ? static_cast<double>(framebufferW) / static_cast<double>(windowW)
+                             : 1.0;
+    }
+
+    double framebufferScaleY() const {
+        return (windowH > 0) ? static_cast<double>(framebufferH) / static_cast<double>(windowH)
+                             : 1.0;
+    }
 
     void setupCallbacks() {
         glfwSetKeyCallback(window, [](GLFWwindow *w, int key, int, int action, int mods) {
@@ -483,19 +512,8 @@ private:
             ev.mouseButton = toMouseButton(button);
             ev.mods = toModifiers(mods);
             ev.type = (action == GLFW_PRESS) ? EventType::MouseButtonDown : EventType::MouseButtonUp;
-            double xpos = 0.0;
-            double ypos = 0.0;
-            int winW = 0;
-            int winH = 0;
-            int fbW = 0;
-            int fbH = 0;
-            glfwGetCursorPos(w, &xpos, &ypos);
-            glfwGetWindowSize(w, &winW, &winH);
-            glfwGetFramebufferSize(w, &fbW, &fbH);
-            const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
-            const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
-            ev.x = xpos * scaleX;
-            ev.y = ypos * scaleY;
+            ev.x = self->cursorX * self->framebufferScaleX();
+            ev.y = self->cursorY * self->framebufferScaleY();
             self->eventsBuffer.push_back(ev);
         });
 
@@ -506,16 +524,10 @@ private:
             }
             Event ev;
             ev.type = EventType::MouseMove;
-            int winW = 0;
-            int winH = 0;
-            int fbW = 0;
-            int fbH = 0;
-            glfwGetWindowSize(w, &winW, &winH);
-            glfwGetFramebufferSize(w, &fbW, &fbH);
-            const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
-            const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
-            ev.x = xpos * scaleX;
-            ev.y = ypos * scaleY;
+            self->cursorX = xpos;
+            self->cursorY = ypos;
+            ev.x = xpos * self->framebufferScaleX();
+            ev.y = ypos * self->framebufferScaleY();
             self->eventsBuffer.push_back(ev);
         });
 
@@ -552,16 +564,35 @@ private:
             self->eventsBuffer.push_back(ev);
         });
 
+        glfwSetWindowSizeCallback(window, [](GLFWwindow *w, int width, int height) {
+            auto *self = static_cast<WindowGlfw *>(glfwGetWindowUserPointer(w));
+            if (!self) {
+                return;
+            }
+            self->windowW = width;
+            self->windowH = height;
+        });
+
         glfwSetFramebufferSizeCallback(window, [](GLFWwindow *w, int width, int height) {
             auto *self = static_cast<WindowGlfw *>(glfwGetWindowUserPointer(w));
             if (!self) {
                 return;
             }
+            self->framebufferW = width;
+            self->framebufferH = height;
             Event ev;
             ev.type = EventType::WindowResize;
             ev.width = width;
             ev.height = height;
             self->eventsBuffer.push_back(ev);
+        });
+
+        glfwSetWindowContentScaleCallback(window, [](GLFWwindow *w, float xscale, float) {
+            auto *self = static_cast<WindowGlfw *>(glfwGetWindowUserPointer(w));
+            if (!self) {
+                return;
+            }
+            self->contentScale = xscale;
         });
     }
 };

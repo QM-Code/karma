@@ -40,7 +40,10 @@ struct EngineConfig {
   platform::WindowConfig window{};
   float fixed_dt = 1.0f / 60.0f;
   float max_frame_dt = 0.25f;
-  bool vsync = true;
+  // Default to the low-latency present path. In the Diligent Vulkan backend this uses
+  // Present(0), where Diligent prefers MAILBOX, then IMMEDIATE, then FIFO if neither
+  // low-latency mode is supported. Set true to force FIFO/FIFO_RELAXED vblank pacing.
+  bool vsync = false;
   bool fullscreen = false;
   bool cursor_visible = true;
   std::filesystem::path environment_map;

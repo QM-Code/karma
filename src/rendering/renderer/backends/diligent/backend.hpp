@@ -217,8 +217,10 @@ class DiligentBackend final : public Backend {
     renderer::MaterialId material = renderer::kInvalidMaterial;
     renderer::MaterialSetId material_set = renderer::kInvalidMaterialSet;
     glm::mat4 transform{1.0f};
+    std::vector<glm::mat4> skinning_palette;
     bool visible = true;
     bool shadow_visible = true;
+    bool skinning_enabled = false;
     bool transform_changed = true;
   };
 
@@ -228,13 +230,15 @@ class DiligentBackend final : public Backend {
     Diligent::Uint32 index_offset = 0;
     Diligent::Uint32 index_count = 0;
     bool indexed = false;
+    bool skinned = false;
 
     bool operator==(const ForwardBatchKey& other) const {
       return mesh == other.mesh &&
              material == other.material &&
              index_offset == other.index_offset &&
              index_count == other.index_count &&
-             indexed == other.indexed;
+             indexed == other.indexed &&
+             skinned == other.skinned;
     }
   };
 
@@ -246,11 +250,19 @@ class DiligentBackend final : public Backend {
   struct TransparentForwardDraw {
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
+    std::vector<glm::mat4> skinning_palette;
     float depth = 0.0f;
+  };
+
+  struct SkinnedForwardDraw {
+    ForwardBatchKey key{};
+    glm::mat4 transform{1.0f};
+    std::vector<glm::mat4> skinning_palette;
   };
 
   struct ForwardLayerState {
     std::vector<ForwardBatch> opaque_batches;
+    std::vector<SkinnedForwardDraw> skinned_opaque_draws;
     std::vector<TransparentForwardDraw> transparent_draws;
     std::vector<TransparentForwardDraw> pre_particle_scene_sample_draws;
     std::vector<TransparentForwardDraw> post_particle_draws;
@@ -377,7 +389,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path render_state_cache_path_;
   bool shader_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 3;
+  std::uint32_t shader_cache_version_ = 7;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
@@ -401,6 +413,7 @@ class DiligentBackend final : public Backend {
       additive_double_sided_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shadow_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> constants_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> skinning_constants_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_color_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_data_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> shadow_sampler_;

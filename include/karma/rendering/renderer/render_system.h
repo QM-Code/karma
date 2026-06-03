@@ -7,6 +7,7 @@
 #include <glm/vec3.hpp>
 
 #include "karma/world/components/mesh.h"
+#include "karma/world/components/skinned_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
 #include "karma/world/ecs/world.h"

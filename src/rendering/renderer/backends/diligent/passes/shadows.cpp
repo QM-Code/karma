@@ -54,12 +54,14 @@ struct ShadowBatchKey {
   Diligent::Uint32 index_offset = 0;
   Diligent::Uint32 index_count = 0;
   bool indexed = false;
+  bool skinned = false;
 
   bool operator==(const ShadowBatchKey& other) const {
     return mesh == other.mesh &&
            index_offset == other.index_offset &&
            index_count == other.index_count &&
-           indexed == other.indexed;
+           indexed == other.indexed &&
+           skinned == other.skinned;
   }
 };
 
@@ -69,6 +71,7 @@ struct ShadowBatchKeyHash {
     h ^= static_cast<size_t>(key.index_offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.index_count) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.indexed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= static_cast<size_t>(key.skinned ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
   }
 };
@@ -79,11 +82,43 @@ struct ShadowBatch {
   std::vector<glm::vec4> bounds_spheres;
 };
 
+struct SkinnedShadowDraw {
+  ShadowBatchKey key{};
+  InstanceTransformData transform{};
+  glm::vec4 bounds_sphere{0.0f};
+  std::vector<glm::mat4> skinning_palette;
+};
+
 #if defined(NDEBUG)
 constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_NONE;
 #else
 constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
 #endif
+
+bool updateSkinningConstants(Diligent::IDeviceContext* context,
+                             Diligent::IBuffer* buffer,
+                             const std::vector<glm::mat4>& palette) {
+  if (context == nullptr || buffer == nullptr) {
+    return false;
+  }
+
+  SkinningConstants constants{};
+  const size_t count = std::min<size_t>(palette.size(), 128u);
+  constants.params[0] = count > 0 ? 1.0f : 0.0f;
+  constants.params[1] = static_cast<float>(count);
+  for (size_t i = 0; i < count; ++i) {
+    copyMat4(constants.matrices[i], palette[i]);
+  }
+
+  Diligent::MapHelper<SkinningConstants> mapped(
+      context, buffer, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+  auto* mapped_constants = getMappedData(mapped);
+  if (mapped_constants == nullptr) {
+    return false;
+  }
+  *mapped_constants = constants;
+  return true;
+}
 
 glm::mat4 buildLightView(const renderer::DirectionalLightData& light) {
   glm::vec3 dir = light.direction;
@@ -377,6 +412,18 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
                                         cached_shadow_light_direction_,
                                         directional_shadow_angle_threshold_deg_);
   }
+  if (!directional_shadow_needs_update) {
+    for (const auto& entry : instances_) {
+      const auto& instance = entry.second;
+      if (instance.layer == layer &&
+          instance.shadow_visible &&
+          instance.skinning_enabled &&
+          !instance.skinning_palette.empty()) {
+        directional_shadow_needs_update = true;
+        break;
+      }
+    }
+  }
   if (!directional_shadow_needs_update && directional_shadow_cache_valid_) {
     out_state.cascade_splits = cached_cascade_splits_;
   } else {
@@ -485,6 +532,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
     ib_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     ib_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     ib_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(InstanceTransformData));
+    instance_vb_.Release();
     device_->CreateBuffer(ib_desc, nullptr, &instance_vb_);
     if (!instance_vb_) {
       return false;
@@ -678,15 +726,28 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       can_render_point_shadows && point_shadow_face_update_count > 0;
 
   thread_local std::vector<ShadowBatch> shadow_batches;
+  thread_local std::vector<SkinnedShadowDraw> skinned_shadow_draws;
   thread_local std::unordered_map<ShadowBatchKey, size_t, ShadowBatchKeyHash> shadow_batch_lookup;
   shadow_batches.clear();
+  skinned_shadow_draws.clear();
   shadow_batch_lookup.clear();
   if (render_directional_shadows || render_point_shadows) {
     shadow_batches.reserve(instances_.size());
+    skinned_shadow_draws.reserve(instances_.size() / 4 + 1);
     shadow_batch_lookup.reserve(instances_.size());
     auto append_shadow_batch = [&](const ShadowBatchKey& key,
                                    const glm::mat4& transform,
-                                   const glm::vec4& bounds_sphere) {
+                                   const glm::vec4& bounds_sphere,
+                                   const std::vector<glm::mat4>& skinning_palette) {
+      if (key.skinned) {
+        skinned_shadow_draws.push_back(SkinnedShadowDraw{
+            .key = key,
+            .transform = packInstanceTransform(transform),
+            .bounds_sphere = bounds_sphere,
+            .skinning_palette = skinning_palette,
+        });
+        return;
+      }
       auto it = shadow_batch_lookup.find(key);
       if (it == shadow_batch_lookup.end()) {
         const size_t idx = shadow_batches.size();
@@ -722,8 +783,12 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
               .index_offset = submesh.index_offset,
               .index_count = submesh.index_count,
               .indexed = indexed_mesh && submesh.index_count > 0,
+              .skinned = instance.skinning_enabled,
           };
-          append_shadow_batch(key, instance.transform, world_bounds_sphere);
+          append_shadow_batch(key,
+                              instance.transform,
+                              world_bounds_sphere,
+                              instance.skinning_palette);
         }
       } else {
         const ShadowBatchKey key{
@@ -731,8 +796,12 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
             .index_offset = 0,
             .index_count = mesh.index_count,
             .indexed = indexed_mesh,
+            .skinned = instance.skinning_enabled,
         };
-        append_shadow_batch(key, instance.transform, world_bounds_sphere);
+        append_shadow_batch(key,
+                            instance.transform,
+                            world_bounds_sphere,
+                            instance.skinning_palette);
       }
     }
     std::sort(shadow_batches.begin(),
@@ -766,6 +835,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       }
       *mapped_constants = pass_constants;
     }
+    updateSkinningConstants(context_, skinning_constants_, {});
     for (const auto& batch : shadow_batches) {
       if (batch.transforms.empty()) {
         continue;
@@ -842,6 +912,76 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
         Diligent::DrawAttribs draw_attrs{};
         draw_attrs.NumVertices = mesh.vertex_count;
         draw_attrs.NumInstances = static_cast<Diligent::Uint32>(filtered_shadow_transforms.size());
+        draw_attrs.Flags = kHotPathDrawFlags;
+        context_->Draw(draw_attrs);
+      }
+    }
+
+    for (const auto& draw : skinned_shadow_draws) {
+      if (!sphere_visible(draw.bounds_sphere)) {
+        continue;
+      }
+      auto mesh_it = meshes_.find(draw.key.mesh);
+      if (mesh_it == meshes_.end()) {
+        continue;
+      }
+      const auto& mesh = mesh_it->second;
+      if (!mesh.vertex_buffer) {
+        continue;
+      }
+      if (!updateSkinningConstants(context_, skinning_constants_, draw.skinning_palette)) {
+        continue;
+      }
+      if (!ensure_instance_buffer(1)) {
+        continue;
+      }
+      {
+        Diligent::MapHelper<InstanceTransformData> instance_map(
+            context_, instance_vb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+        auto* mapped_instances = getMappedData(instance_map);
+        if (mapped_instances == nullptr) {
+          continue;
+        }
+        *mapped_instances = draw.transform;
+      }
+
+      Diligent::IBuffer* mesh_vb = mesh.vertex_buffer.RawPtr();
+      Diligent::IBuffer* instance_vb = instance_vb_.RawPtr();
+      if (mesh_vb != bound_mesh_vb || instance_vb != bound_instance_vb) {
+        Diligent::IBuffer* vbs[] = {mesh.vertex_buffer, instance_vb_};
+        Diligent::Uint64 offsets[] = {0, 0};
+        context_->SetVertexBuffers(0,
+                                   2,
+                                   vbs,
+                                   offsets,
+                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+                                   Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+        bound_mesh_vb = mesh_vb;
+        bound_instance_vb = instance_vb;
+      }
+
+      if (draw.key.indexed) {
+        if (!is_valid_indexed_draw(mesh, draw.key.index_offset, draw.key.index_count)) {
+          continue;
+        }
+        Diligent::IBuffer* index_buffer = mesh.index_buffer.RawPtr();
+        if (index_buffer != bound_index_buffer) {
+          context_->SetIndexBuffer(mesh.index_buffer,
+                                   0,
+                                   Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+          bound_index_buffer = index_buffer;
+        }
+        Diligent::DrawIndexedAttribs indexed{};
+        indexed.IndexType = Diligent::VT_UINT32;
+        indexed.NumIndices = draw.key.index_count;
+        indexed.FirstIndexLocation = draw.key.index_offset;
+        indexed.NumInstances = 1;
+        indexed.Flags = kHotPathDrawFlags;
+        context_->DrawIndexed(indexed);
+      } else {
+        Diligent::DrawAttribs draw_attrs{};
+        draw_attrs.NumVertices = mesh.vertex_count;
+        draw_attrs.NumInstances = 1;
         draw_attrs.Flags = kHotPathDrawFlags;
         context_->Draw(draw_attrs);
       }

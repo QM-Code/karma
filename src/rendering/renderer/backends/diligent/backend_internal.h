@@ -71,6 +71,11 @@ struct DrawConstants {
   float material_params2[4];
 };
 
+struct SkinningConstants {
+  float params[4];
+  float matrices[128][16];
+};
+
 struct ForwardPlusComputeConstants {
   float view_proj[16];
   float forward_plus_params[4];

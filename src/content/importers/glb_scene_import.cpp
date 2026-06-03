@@ -2,16 +2,23 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
-#include "karma/world/components/animation_player.h"
+#include "gltf_document.h"
+#include "glb_scene_animation_import.h"
+#include "glb_scene_mesh_import.h"
+#include "glb_scene_skinning.h"
+#include "karma/world/components/animator.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/skinned_mesh.h"
 #include "karma/world/components/tag.h"
@@ -21,6 +28,7 @@
 namespace karma::scene {
 
 namespace {
+
 math::Vec3 toVec3(const aiVector3D& v) {
   return {v.x, v.y, v.z};
 }
@@ -29,51 +37,8 @@ math::Quat toQuat(const aiQuaternion& q) {
   return {q.x, q.y, q.z, q.w};
 }
 
-glm::mat4 toGlm(const aiMatrix4x4& m) {
-  return glm::mat4{
-      m.a1, m.b1, m.c1, m.d1,
-      m.a2, m.b2, m.c2, m.d2,
-      m.a3, m.b3, m.c3, m.d3,
-      m.a4, m.b4, m.c4, m.d4,
-  };
-}
-
 std::string safeName(std::string_view base, std::string_view fallback) {
   return base.empty() ? std::string(fallback) : std::string(base);
-}
-
-void addInfluence(components::VertexSkinInfluence& influence, uint32_t joint, float weight) {
-  if (weight <= 0.0f) {
-    return;
-  }
-
-  for (int i = 0; i < 4; ++i) {
-    if (influence.weights[i] <= 0.0f) {
-      influence.joints[i] = joint;
-      influence.weights[i] = weight;
-      return;
-    }
-  }
-
-  int weakest = 0;
-  for (int i = 1; i < 4; ++i) {
-    if (influence.weights[i] < influence.weights[weakest]) {
-      weakest = i;
-    }
-  }
-  if (weight > influence.weights[weakest]) {
-    influence.joints[weakest] = joint;
-    influence.weights[weakest] = weight;
-  }
-}
-
-void normalizeInfluence(components::VertexSkinInfluence& influence) {
-  const float sum =
-      influence.weights.x + influence.weights.y + influence.weights.z + influence.weights.w;
-  if (sum <= 0.0f) {
-    return;
-  }
-  influence.weights /= sum;
 }
 
 renderer::MeshData buildMeshData(const aiMesh& mesh) {
@@ -320,132 +285,6 @@ uint32_t loadNodePrefab(const aiScene& scene,
   return node_index;
 }
 
-void populatePrimitiveSkinning(const aiScene& scene,
-                               const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
-                               GlbScenePrefab& prefab) {
-  for (GlbScenePrefabNode& node : prefab.nodes) {
-    for (GlbScenePrefabPrimitive& primitive : node.primitives) {
-      if (primitive.source_mesh_index >= scene.mNumMeshes ||
-          scene.mMeshes[primitive.source_mesh_index] == nullptr) {
-        continue;
-      }
-      const aiMesh& mesh = *scene.mMeshes[primitive.source_mesh_index];
-      if (!mesh.HasBones() || primitive.mesh.vertices.empty()) {
-        continue;
-      }
-
-      primitive.vertex_influences.assign(primitive.mesh.vertices.size(),
-                                         components::VertexSkinInfluence{});
-      primitive.joint_node_indices.clear();
-      primitive.inverse_bind_matrices.clear();
-      primitive.joint_node_indices.reserve(mesh.mNumBones);
-      primitive.inverse_bind_matrices.reserve(mesh.mNumBones);
-
-      for (unsigned int bone_index = 0; bone_index < mesh.mNumBones; ++bone_index) {
-        const aiBone* bone = mesh.mBones[bone_index];
-        if (bone == nullptr) {
-          continue;
-        }
-        const auto node_it = node_indices_by_name.find(bone->mName.C_Str());
-        if (node_it == node_indices_by_name.end()) {
-          continue;
-        }
-
-        const uint32_t joint_index = static_cast<uint32_t>(primitive.joint_node_indices.size());
-        primitive.joint_node_indices.push_back(node_it->second);
-        primitive.inverse_bind_matrices.push_back(toGlm(bone->mOffsetMatrix));
-
-        for (unsigned int weight_index = 0; weight_index < bone->mNumWeights; ++weight_index) {
-          const aiVertexWeight& weight = bone->mWeights[weight_index];
-          if (weight.mVertexId >= primitive.vertex_influences.size()) {
-            continue;
-          }
-          addInfluence(primitive.vertex_influences[weight.mVertexId],
-                       joint_index,
-                       weight.mWeight);
-        }
-      }
-
-      for (auto& influence : primitive.vertex_influences) {
-        normalizeInfluence(influence);
-      }
-      if (primitive.joint_node_indices.empty()) {
-        primitive.vertex_influences.clear();
-        primitive.inverse_bind_matrices.clear();
-      }
-    }
-  }
-}
-
-std::vector<animation::AnimationClip> loadAnimationClips(
-    const aiScene& scene,
-    const std::unordered_map<std::string, uint32_t>& node_indices_by_name) {
-  std::vector<animation::AnimationClip> clips;
-  clips.reserve(scene.mNumAnimations);
-
-  for (unsigned int animation_index = 0; animation_index < scene.mNumAnimations; ++animation_index) {
-    const aiAnimation* source = scene.mAnimations[animation_index];
-    if (source == nullptr) {
-      continue;
-    }
-
-    const double ticks_per_second =
-        source->mTicksPerSecond > 0.0 ? source->mTicksPerSecond : 1.0;
-    animation::AnimationClip clip{};
-    clip.name = safeName(source->mName.C_Str(), "Animation " + std::to_string(animation_index));
-    clip.ticks_per_second = static_cast<float>(ticks_per_second);
-    clip.duration_seconds = static_cast<float>(source->mDuration / ticks_per_second);
-    clip.channels.reserve(source->mNumChannels);
-
-    for (unsigned int channel_index = 0; channel_index < source->mNumChannels; ++channel_index) {
-      const aiNodeAnim* source_channel = source->mChannels[channel_index];
-      if (source_channel == nullptr) {
-        continue;
-      }
-      const auto node_it = node_indices_by_name.find(source_channel->mNodeName.C_Str());
-      if (node_it == node_indices_by_name.end()) {
-        continue;
-      }
-
-      animation::AnimationChannel channel{};
-      channel.target_node_index = node_it->second;
-      channel.position_keys.reserve(source_channel->mNumPositionKeys);
-      channel.rotation_keys.reserve(source_channel->mNumRotationKeys);
-      channel.scale_keys.reserve(source_channel->mNumScalingKeys);
-
-      for (unsigned int key_index = 0; key_index < source_channel->mNumPositionKeys; ++key_index) {
-        const aiVectorKey& key = source_channel->mPositionKeys[key_index];
-        channel.position_keys.push_back(animation::Vec3Keyframe{
-            .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
-            .value = toVec3(key.mValue),
-        });
-      }
-      for (unsigned int key_index = 0; key_index < source_channel->mNumRotationKeys; ++key_index) {
-        const aiQuatKey& key = source_channel->mRotationKeys[key_index];
-        channel.rotation_keys.push_back(animation::QuatKeyframe{
-            .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
-            .value = toQuat(key.mValue),
-        });
-      }
-      for (unsigned int key_index = 0; key_index < source_channel->mNumScalingKeys; ++key_index) {
-        const aiVectorKey& key = source_channel->mScalingKeys[key_index];
-        channel.scale_keys.push_back(animation::Vec3Keyframe{
-            .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
-            .value = toVec3(key.mValue),
-        });
-      }
-
-      clip.channels.push_back(std::move(channel));
-    }
-
-    if (!clip.channels.empty()) {
-      clips.push_back(std::move(clip));
-    }
-  }
-
-  return clips;
-}
-
 std::string nodeDisplayName(const GlbScenePrefabNode& node, uint32_t index) {
   if (!node.name.empty()) {
     return node.name;
@@ -473,8 +312,7 @@ GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
   const aiScene* scene = importer.ReadFile(path.string(),
                                            aiProcess_Triangulate |
                                            aiProcess_GenNormals |
-                                           aiProcess_CalcTangentSpace |
-                                           aiProcess_JoinIdenticalVertices);
+                                           aiProcess_CalcTangentSpace);
   if (scene == nullptr || scene->mRootNode == nullptr) {
     return prefab;
   }
@@ -498,8 +336,14 @@ GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
                                     options,
                                     prefab,
                                     node_indices_by_name);
+  const GltfDocument gltf = loadGltfDocument(path);
+  populateGltfMeshData(gltf, node_indices_by_name, prefab);
+  populateGltfSkins(gltf, node_indices_by_name, prefab);
   populatePrimitiveSkinning(*scene, node_indices_by_name, prefab);
-  prefab.animations = loadAnimationClips(*scene, node_indices_by_name);
+  prefab.animations = loadGltfAnimationClips(gltf, node_indices_by_name, prefab);
+  if (prefab.animations.empty()) {
+    prefab.animations = loadAnimationClips(*scene, node_indices_by_name);
+  }
   return prefab;
 }
 
@@ -521,6 +365,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     const GlbScenePrefabPrimitive* primitive = nullptr;
   };
   std::vector<PendingSkin> pending_skins;
+  ecs::Entity skin_render_transform_entity{};
 
   auto attach_pending_skins = [&]() {
     for (const PendingSkin& pending : pending_skins) {
@@ -543,6 +388,11 @@ GlbSceneImportResult instantiateGlbScenePrefab(
                                     .vertex_influences = pending.primitive->vertex_influences,
                                     .joint_entities = std::move(joint_entities),
                                     .inverse_bind_matrices = pending.primitive->inverse_bind_matrices,
+                                    .render_transform_entity = skin_render_transform_entity,
+                                    .skin_index = pending.primitive->skin_index,
+                                    .skinning_path = components::SkinningPath::Gpu,
+                                    .diagnostic = "Waiting for first skinning palette update",
+                                    .override_render_transform = true,
                                     .enabled = true});
     }
   };
@@ -625,14 +475,17 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     world.add(root_entity, components::LocalTransformComponent{});
     const scene::NodeId root_node = scene.createNode(root_entity);
     result.entities.push_back(root_entity);
+    skin_render_transform_entity = root_entity;
     instantiate_node(prefab.root_node, root_node);
     result.root_entity = root_entity;
     result.root_node = root_node;
     attach_pending_skins();
     if (!prefab.animations.empty()) {
-      world.add(root_entity, components::AnimationPlayerComponent{
+      world.add(root_entity, components::AnimatorComponent{
                                  .clips = prefab.animations,
                                  .node_entities_by_index = result.node_entities_by_index,
+                                 .skeletons = prefab.skeletons,
+                                 .skins = prefab.skins,
                                  .current_clip_index = 0,
                                  .time_seconds = 0.0f,
                                  .speed = 1.0f,
@@ -646,11 +499,14 @@ GlbSceneImportResult instantiateGlbScenePrefab(
   const auto [root_entity, root_node] = instantiate_node(prefab.root_node, scene::Node::kInvalidId);
   result.root_entity = root_entity;
   result.root_node = root_node;
+  skin_render_transform_entity = root_entity;
   attach_pending_skins();
   if (!prefab.animations.empty()) {
-    world.add(root_entity, components::AnimationPlayerComponent{
+    world.add(root_entity, components::AnimatorComponent{
                                .clips = prefab.animations,
                                .node_entities_by_index = result.node_entities_by_index,
+                               .skeletons = prefab.skeletons,
+                               .skins = prefab.skins,
                                .current_clip_index = 0,
                                .time_seconds = 0.0f,
                                .speed = 1.0f,

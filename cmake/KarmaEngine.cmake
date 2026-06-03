@@ -5,9 +5,15 @@ set(KARMA_SOURCES
   src/simulation/animation/animation_clip.cpp
   src/simulation/animation/animation_system.cpp
   src/simulation/animation/cpu_skinning_system.cpp
+  src/simulation/animation/pose.cpp
+  src/world/components/animator.cpp
   src/world/components/animation_player.cpp
   src/world/components/transform.cpp
   src/world/ecs/collider_queries.cpp
+  src/content/importers/gltf_document.cpp
+  src/content/importers/glb_scene_animation_import.cpp
+  src/content/importers/glb_scene_mesh_import.cpp
+  src/content/importers/glb_scene_skinning.cpp
   src/content/importers/glb_scene_import.cpp
   src/world/scene/transform_hierarchy.cpp
   src/media/audio/audio.cpp

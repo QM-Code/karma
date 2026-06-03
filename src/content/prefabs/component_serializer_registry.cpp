@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "karma/world/components/beam_path.h"
+#include "karma/world/components/animator.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/light_pulse.h"
@@ -180,6 +181,108 @@ bool readLightType(const Json& object, components::LightComponent::Type& out) {
     return true;
   }
   return false;
+}
+
+std::string rootMotionModeName(components::RootMotionMode mode) {
+  switch (mode) {
+    case components::RootMotionMode::Disabled:
+      return "disabled";
+    case components::RootMotionMode::ApplyToLocalTransform:
+      return "apply_to_local_transform";
+    case components::RootMotionMode::ExposeDelta:
+      return "expose_delta";
+  }
+  return "disabled";
+}
+
+bool readRootMotionMode(const Json& object, components::RootMotionMode& out) {
+  const auto it = object.find("root_motion_mode");
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "disabled") {
+    out = components::RootMotionMode::Disabled;
+    return true;
+  }
+  if (value == "apply_to_local_transform") {
+    out = components::RootMotionMode::ApplyToLocalTransform;
+    return true;
+  }
+  if (value == "expose_delta") {
+    out = components::RootMotionMode::ExposeDelta;
+    return true;
+  }
+  return false;
+}
+
+std::string animatorParameterTypeName(components::AnimatorParameterType type) {
+  switch (type) {
+    case components::AnimatorParameterType::Bool:
+      return "bool";
+    case components::AnimatorParameterType::Int:
+      return "int";
+    case components::AnimatorParameterType::Float:
+      return "float";
+    case components::AnimatorParameterType::Trigger:
+      return "trigger";
+  }
+  return "float";
+}
+
+std::optional<components::AnimatorParameterType> parseAnimatorParameterType(std::string_view value) {
+  if (value == "bool") return components::AnimatorParameterType::Bool;
+  if (value == "int") return components::AnimatorParameterType::Int;
+  if (value == "float") return components::AnimatorParameterType::Float;
+  if (value == "trigger") return components::AnimatorParameterType::Trigger;
+  return std::nullopt;
+}
+
+std::string animatorConditionOpName(components::AnimatorConditionOp op) {
+  switch (op) {
+    case components::AnimatorConditionOp::If:
+      return "if";
+    case components::AnimatorConditionOp::IfNot:
+      return "if_not";
+    case components::AnimatorConditionOp::Equals:
+      return "equals";
+    case components::AnimatorConditionOp::NotEquals:
+      return "not_equals";
+    case components::AnimatorConditionOp::Greater:
+      return "greater";
+    case components::AnimatorConditionOp::GreaterOrEqual:
+      return "greater_or_equal";
+    case components::AnimatorConditionOp::Less:
+      return "less";
+    case components::AnimatorConditionOp::LessOrEqual:
+      return "less_or_equal";
+  }
+  return "if";
+}
+
+std::optional<components::AnimatorConditionOp> parseAnimatorConditionOp(std::string_view value) {
+  if (value == "if") return components::AnimatorConditionOp::If;
+  if (value == "if_not") return components::AnimatorConditionOp::IfNot;
+  if (value == "equals") return components::AnimatorConditionOp::Equals;
+  if (value == "not_equals") return components::AnimatorConditionOp::NotEquals;
+  if (value == "greater") return components::AnimatorConditionOp::Greater;
+  if (value == "greater_or_equal") return components::AnimatorConditionOp::GreaterOrEqual;
+  if (value == "less") return components::AnimatorConditionOp::Less;
+  if (value == "less_or_equal") return components::AnimatorConditionOp::LessOrEqual;
+  return std::nullopt;
+}
+
+std::string animatorMotionTypeName(components::AnimatorMotionType type) {
+  return type == components::AnimatorMotionType::BlendTree1D ? "blend_tree_1d" : "clip";
+}
+
+std::optional<components::AnimatorMotionType> parseAnimatorMotionType(std::string_view value) {
+  if (value == "clip") return components::AnimatorMotionType::Clip;
+  if (value == "blend_tree_1d") return components::AnimatorMotionType::BlendTree1D;
+  return std::nullopt;
 }
 
 std::string spawnShapeName(components::ParticleSpawnShape shape) {
@@ -415,6 +518,252 @@ std::optional<components::MeshComponent> deserializeMesh(const Json& json) {
       !readBool(json, "shadow_visible", component.shadow_visible)) {
     return std::nullopt;
   }
+  return component;
+}
+
+Json serializeAnimator(const components::AnimatorComponent& component) {
+  Json clip_refs = Json::array();
+  for (const auto& clip : component.clips) {
+    clip_refs.push_back(Json{{"name", clip.name}});
+  }
+
+  Json parameters = Json::array();
+  for (const auto& parameter : component.state_machine.parameters) {
+    parameters.push_back(Json{
+        {"name", parameter.name},
+        {"type", animatorParameterTypeName(parameter.type)},
+        {"bool_value", parameter.bool_value},
+        {"int_value", parameter.int_value},
+        {"float_value", parameter.float_value},
+      });
+  }
+
+  Json states = Json::array();
+  for (const auto& state : component.state_machine.states) {
+    Json transitions = Json::array();
+    for (const auto& transition : state.transitions) {
+      Json conditions = Json::array();
+      for (const auto& condition : transition.conditions) {
+        conditions.push_back(Json{
+            {"parameter", condition.parameter},
+            {"op", animatorConditionOpName(condition.op)},
+            {"bool_value", condition.bool_value},
+            {"int_value", condition.int_value},
+            {"float_value", condition.float_value},
+        });
+      }
+      transitions.push_back(Json{
+          {"to_state_index", transition.to_state_index},
+          {"duration_seconds", transition.duration_seconds},
+          {"has_exit_time", transition.has_exit_time},
+          {"exit_time_normalized", transition.exit_time_normalized},
+          {"conditions", std::move(conditions)},
+      });
+    }
+
+    Json children = Json::array();
+    for (const auto& child : state.blend_tree.children) {
+      children.push_back(Json{
+          {"clip_index", child.clip_index},
+          {"threshold", child.threshold},
+          {"speed", child.speed},
+      });
+    }
+
+    states.push_back(Json{
+        {"name", state.name},
+        {"motion_type", animatorMotionTypeName(state.motion_type)},
+        {"clip_index", state.clip_index},
+        {"speed", state.speed},
+        {"loop", state.loop},
+        {"blend_tree", Json{
+            {"parameter", state.blend_tree.parameter},
+            {"children", std::move(children)},
+        }},
+        {"transitions", std::move(transitions)},
+    });
+  }
+
+  return Json{
+      {"clip_references", std::move(clip_refs)},
+      {"current_clip_index", component.current_clip_index},
+      {"time_seconds", component.time_seconds},
+      {"speed", component.speed},
+      {"loop", component.loop},
+      {"playing", component.playing},
+      {"root_motion_mode", rootMotionModeName(component.root_motion_mode)},
+      {"root_motion_node_index", component.root_motion_node_index},
+      {"state_machine", Json{
+          {"entry_state_index", component.state_machine.entry_state_index},
+          {"parameters", std::move(parameters)},
+          {"states", std::move(states)},
+      }},
+  };
+}
+
+std::optional<components::AnimatorComponent> deserializeAnimator(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::AnimatorComponent component{};
+  uint32_t current_clip_index = 0;
+  if (!readUint32(json, "current_clip_index", current_clip_index) ||
+      !readFloat(json, "time_seconds", component.time_seconds) ||
+      !readFloat(json, "speed", component.speed) ||
+      !readBool(json, "loop", component.loop) ||
+      !readBool(json, "playing", component.playing) ||
+      !readRootMotionMode(json, component.root_motion_mode) ||
+      !readUint32(json, "root_motion_node_index", component.root_motion_node_index)) {
+    return std::nullopt;
+  }
+  component.current_clip_index = current_clip_index;
+
+  if (const auto clips_it = json.find("clip_references");
+      clips_it != json.end() && clips_it->is_array()) {
+    for (const Json& clip_json : *clips_it) {
+      if (!clip_json.is_object()) {
+        return std::nullopt;
+      }
+      animation::AnimationClip clip{};
+      if (!readString(clip_json, "name", clip.name)) {
+        return std::nullopt;
+      }
+      component.clips.push_back(std::move(clip));
+    }
+  }
+
+  const auto sm_it = json.find("state_machine");
+  if (sm_it == json.end()) {
+    return component;
+  }
+  if (!sm_it->is_object()) {
+    return std::nullopt;
+  }
+  uint32_t entry_state_index = 0;
+  if (!readUint32(*sm_it, "entry_state_index", entry_state_index)) {
+    return std::nullopt;
+  }
+  component.state_machine.entry_state_index = entry_state_index;
+
+  if (const auto params_it = sm_it->find("parameters");
+      params_it != sm_it->end() && params_it->is_array()) {
+    for (const Json& param_json : *params_it) {
+      if (!param_json.is_object()) {
+        return std::nullopt;
+      }
+      std::string type_name;
+      components::AnimatorParameter parameter{};
+      if (!readString(param_json, "name", parameter.name) ||
+          !readString(param_json, "type", type_name)) {
+        return std::nullopt;
+      }
+      const auto type = parseAnimatorParameterType(type_name);
+      if (!type) {
+        return std::nullopt;
+      }
+      parameter.type = *type;
+      if (!readBool(param_json, "bool_value", parameter.bool_value) ||
+          !readFloat(param_json, "float_value", parameter.float_value)) {
+        return std::nullopt;
+      }
+      if (const auto int_it = param_json.find("int_value"); int_it != param_json.end()) {
+        if (!int_it->is_number_integer()) {
+          return std::nullopt;
+        }
+        parameter.int_value = int_it->get<int>();
+      }
+      component.state_machine.parameters.push_back(std::move(parameter));
+    }
+  }
+
+  if (const auto states_it = sm_it->find("states");
+      states_it != sm_it->end() && states_it->is_array()) {
+    for (const Json& state_json : *states_it) {
+      if (!state_json.is_object()) {
+        return std::nullopt;
+      }
+      components::AnimatorState state{};
+      std::string motion_type;
+      uint32_t clip_index = animation::kInvalidAnimationIndex;
+      if (!readString(state_json, "name", state.name) ||
+          !readString(state_json, "motion_type", motion_type) ||
+          !readUint32(state_json, "clip_index", clip_index) ||
+          !readFloat(state_json, "speed", state.speed) ||
+          !readBool(state_json, "loop", state.loop)) {
+        return std::nullopt;
+      }
+      const auto parsed_motion_type = parseAnimatorMotionType(motion_type);
+      if (!parsed_motion_type) {
+        return std::nullopt;
+      }
+      state.motion_type = *parsed_motion_type;
+      state.clip_index = clip_index;
+
+      if (const auto blend_it = state_json.find("blend_tree");
+          blend_it != state_json.end() && blend_it->is_object()) {
+        if (!readString(*blend_it, "parameter", state.blend_tree.parameter)) {
+          return std::nullopt;
+        }
+        if (const auto children_it = blend_it->find("children");
+            children_it != blend_it->end() && children_it->is_array()) {
+          for (const Json& child_json : *children_it) {
+            components::AnimatorBlendTree1DChild child{};
+            uint32_t child_clip = animation::kInvalidAnimationIndex;
+            if (!readUint32(child_json, "clip_index", child_clip) ||
+                !readFloat(child_json, "threshold", child.threshold) ||
+                !readFloat(child_json, "speed", child.speed)) {
+              return std::nullopt;
+            }
+            child.clip_index = child_clip;
+            state.blend_tree.children.push_back(child);
+          }
+        }
+      }
+
+      if (const auto transitions_it = state_json.find("transitions");
+          transitions_it != state_json.end() && transitions_it->is_array()) {
+        for (const Json& transition_json : *transitions_it) {
+          components::AnimatorTransition transition{};
+          if (!readUint32(transition_json, "to_state_index", transition.to_state_index) ||
+              !readFloat(transition_json, "duration_seconds", transition.duration_seconds) ||
+              !readBool(transition_json, "has_exit_time", transition.has_exit_time) ||
+              !readFloat(transition_json, "exit_time_normalized",
+                         transition.exit_time_normalized)) {
+            return std::nullopt;
+          }
+          if (const auto conditions_it = transition_json.find("conditions");
+              conditions_it != transition_json.end() && conditions_it->is_array()) {
+            for (const Json& condition_json : *conditions_it) {
+              components::AnimatorCondition condition{};
+              std::string op_name;
+              if (!readString(condition_json, "parameter", condition.parameter) ||
+                  !readString(condition_json, "op", op_name) ||
+                  !readBool(condition_json, "bool_value", condition.bool_value) ||
+                  !readFloat(condition_json, "float_value", condition.float_value)) {
+                return std::nullopt;
+              }
+              const auto op = parseAnimatorConditionOp(op_name);
+              if (!op) {
+                return std::nullopt;
+              }
+              condition.op = *op;
+              if (const auto int_it = condition_json.find("int_value");
+                  int_it != condition_json.end()) {
+                if (!int_it->is_number_integer()) {
+                  return std::nullopt;
+                }
+                condition.int_value = int_it->get<int>();
+              }
+              transition.conditions.push_back(std::move(condition));
+            }
+          }
+          state.transitions.push_back(std::move(transition));
+        }
+      }
+      component.state_machine.states.push_back(std::move(state));
+    }
+  }
+
   return component;
 }
 
@@ -1030,6 +1379,8 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "LocalTransformComponent", serializeLocalTransform, deserializeLocalTransform);
   registerComponent<components::MeshComponent>(
       registry, "MeshComponent", serializeMesh, deserializeMesh);
+  registerComponent<components::AnimatorComponent>(
+      registry, "AnimatorComponent", serializeAnimator, deserializeAnimator);
   registerComponent<components::LightComponent>(
       registry, "LightComponent", serializeLight, deserializeLight);
   registerComponent<components::LightPulseComponent>(

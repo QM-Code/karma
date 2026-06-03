@@ -1,9 +1,10 @@
 # GLB Animation Bootstrap
 
 This document describes the current GLB animation/skinning state after the first
-node-animation and skeletal-animation passes. The implementation is intentionally
-small and conservative: rendering still consumes final world `TransformComponent`
-values, and skeletal deformation is CPU-side for now.
+node-animation, skeletal-animation, and animator-runtime passes. Rendering still
+consumes final world `TransformComponent` values. Skeletal deformation remains
+CPU-side fallback; renderer-facing joint/weight data exists, but GPU skinning is
+not wired through Diligent draw passes yet.
 
 ## Current Runtime Shape
 
@@ -44,17 +45,27 @@ pose used by imported GLB node animation and hierarchy composition.
 
 - GLB node/object transform animation:
   - translation, rotation, scale channels
-  - linear interpolation for translation/scale
+  - step, linear, and cubic-spline interpolation for imported GLB samplers
   - normalized slerp for rotation
   - looped playback
-  - autoplay on imported root when clips exist, controlled by
+  - autoplay on imported root when clips exist through `AnimatorComponent`,
+    controlled by
     `GlbSceneInstantiateOptions::autoplay_animations`
+- Animator runtime:
+  - direct clip playback and crossfade
+  - clip states and 1D float blend trees
+  - transition conditions, exit time, transition duration, and triggers
+  - bool, int, float, and trigger parameters
+  - runtime animation event queue
+  - root-motion delta extraction with disabled/apply/expose modes
 - Scene hierarchy composition:
   - imported nodes get local and world transforms
   - primitive render entities are children with identity local transforms
   - renderer remains unaware of animation clips
 - Basic skeletal deformation:
-  - Assimp bone data is imported from skinned GLB meshes
+  - explicit GLB skin/skeleton metadata is imported from the GLB JSON/BIN chunk
+    when available
+  - Assimp bone data is still used for mesh vertex weights
   - vertex influences keep up to 4 weights per vertex
   - inverse bind matrices and joint node references are stored in
     `SkinnedMeshComponent`
@@ -65,13 +76,14 @@ pose used by imported GLB node animation and hierarchy composition.
 
 ## Non-Goals / Limitations
 
-- No GPU skinning yet.
-- No shader joint matrices, bone textures, or palette buffers.
+- No GPU skinning execution yet.
+- No shader joint matrices, bone textures, or palette buffers are bound in
+  forward, transparent, depth prepass, or shadow passes.
 - No retargeting between different skeletons.
-- No animation blending or state machine.
-- No root-motion extraction.
-- No morph targets.
-- No explicit glTF `skin` object mapping beyond Assimp `aiMesh::mBones`.
+- Morph-weight tracks import and morph target delta storage exists on
+  `renderer::MeshData`, but morph deformation is not applied yet.
+- Sparse accessors and external `.bin` buffers are not handled by the explicit
+  GLB metadata reader.
 - CPU skinning rebuilds immutable Diligent mesh buffers through `updateMesh`.
   This is fine for a first pass and poor for many characters or high-poly rigs.
 - `MeshComponent.mesh_key = "model.glb"` still follows the flat mesh loader path
@@ -81,10 +93,12 @@ pose used by imported GLB node animation and hierarchy composition.
 
 - `scene::loadGlbScenePrefab(...)` now returns:
   - `GlbScenePrefab::animations`
+  - `GlbScenePrefab::skeletons`
+  - `GlbScenePrefab::skins`
   - skinned primitive data when present
 - `scene::instantiateGlbScenePrefab(...)` now:
   - creates local and world transforms for imported nodes/primitives
-  - attaches `AnimationPlayerComponent` to imported root when clips exist
+  - attaches `AnimatorComponent` to imported root when clips exist
   - attaches `SkinnedMeshComponent` to skinned primitive entities
 - Animation player helpers:
   - `setAnimationClip(player, index, reset_time)`
@@ -126,13 +140,11 @@ visual skeletal test.
 1. Add a windowed skeletal visual sample with a tiny generated or checked-in GLB.
 2. Validate real authored skinned GLBs from Blender, especially joint naming and
    inverse bind matrix conventions.
-3. Decide whether to keep CPU skinning as a debug/fallback path or move directly
-   to GPU skinning.
-4. If moving to GPU skinning, add joint/weight vertex attributes, joint palette
+3. If moving to GPU skinning, add joint palette
    upload, shader deformation, and matching shadow-pass support together.
-5. Preserve the current flat mesh loader behavior unless the user explicitly
+4. Preserve the current flat mesh loader behavior unless the user explicitly
    wants `MeshComponent.mesh_key` to use scene import.
-6. Add compatibility tests around imported static GLB scenes to catch hierarchy
+5. Add compatibility tests around imported static GLB scenes to catch hierarchy
    regressions.
 
 ## Known Watch Points

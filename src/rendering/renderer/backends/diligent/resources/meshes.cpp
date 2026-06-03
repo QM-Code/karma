@@ -44,7 +44,7 @@ void DiligentBackend::uploadMeshBuffers(const renderer::MeshData& mesh, MeshReco
 
   if (device_ && !mesh.vertices.empty()) {
     const auto interleaved = buildInterleavedVertices(mesh);
-    constexpr Diligent::Uint32 kVertexStride = static_cast<Diligent::Uint32>(12 * sizeof(float));
+    constexpr Diligent::Uint32 kVertexStride = static_cast<Diligent::Uint32>(20 * sizeof(float));
     Diligent::BufferDesc vb_desc{};
     vb_desc.Name = "Karma VB";
     vb_desc.Usage = Diligent::USAGE_IMMUTABLE;

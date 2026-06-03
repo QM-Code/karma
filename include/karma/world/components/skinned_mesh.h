@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <string>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -9,6 +11,14 @@
 #include "karma/rendering/renderer/mesh_data.h"
 
 namespace karma::components {
+
+enum class SkinningPath {
+  Cpu,
+  Gpu,
+  GpuUnavailableCpuFallback,
+};
+
+constexpr uint32_t kMaxSkinningJointsPerDraw = 128;
 
 struct VertexSkinInfluence {
   glm::uvec4 joints{0u, 0u, 0u, 0u};
@@ -21,6 +31,14 @@ struct SkinnedMeshComponent : ecs::ComponentTag {
   std::vector<VertexSkinInfluence> vertex_influences;
   std::vector<ecs::Entity> joint_entities;
   std::vector<glm::mat4> inverse_bind_matrices;
+  std::vector<glm::mat4> joint_palette;
+  ecs::Entity render_transform_entity{};
+  uint32_t skin_index = 0;
+  SkinningPath skinning_path = SkinningPath::GpuUnavailableCpuFallback;
+  std::string diagnostic;
+  bool palette_valid = false;
+  bool override_render_transform = false;
+  bool renderer_mesh_is_bind_pose = true;
   bool enabled = true;
 };
 

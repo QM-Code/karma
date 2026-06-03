@@ -105,6 +105,31 @@ constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_NONE;
 constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
 #endif
 
+bool updateSkinningConstants(Diligent::IDeviceContext* context,
+                             Diligent::IBuffer* buffer,
+                             const std::vector<glm::mat4>& palette) {
+  if (context == nullptr || buffer == nullptr) {
+    return false;
+  }
+
+  SkinningConstants constants{};
+  const size_t count = std::min<size_t>(palette.size(), 128u);
+  constants.params[0] = count > 0 ? 1.0f : 0.0f;
+  constants.params[1] = static_cast<float>(count);
+  for (size_t i = 0; i < count; ++i) {
+    copyMat4(constants.matrices[i], palette[i]);
+  }
+
+  Diligent::MapHelper<SkinningConstants> mapped(
+      context, buffer, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+  auto* mapped_constants = getMappedData(mapped);
+  if (mapped_constants == nullptr) {
+    return false;
+  }
+  *mapped_constants = constants;
+  return true;
+}
+
 }  // namespace
 
 void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
@@ -121,15 +146,18 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
       h ^= static_cast<size_t>(key.index_offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
       h ^= static_cast<size_t>(key.index_count) + 0x9e3779b9 + (h << 6) + (h >> 2);
       h ^= static_cast<size_t>(key.indexed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
+      h ^= static_cast<size_t>(key.skinned ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
       return h;
     }
   };
 
   out_state.opaque_batches.clear();
+  out_state.skinned_opaque_draws.clear();
   out_state.transparent_draws.clear();
   out_state.pre_particle_scene_sample_draws.clear();
   out_state.post_particle_draws.clear();
   out_state.opaque_batches.reserve(instances_.size());
+  out_state.skinned_opaque_draws.reserve(instances_.size() / 4 + 1);
   out_state.transparent_draws.reserve(instances_.size());
   out_state.pre_particle_scene_sample_draws.reserve(instances_.size() / 4 + 1);
   out_state.post_particle_draws.reserve(instances_.size() / 4 + 1);
@@ -138,7 +166,17 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
   std::unordered_map<ForwardBatchKey, size_t, ForwardBatchKeyHash> opaque_batch_lookup;
   opaque_batch_lookup.reserve(instances_.size());
 
-  auto append_opaque_forward_batch = [&](const ForwardBatchKey& key, const glm::mat4& transform) {
+  auto append_opaque_forward_batch = [&](const ForwardBatchKey& key,
+                                         const glm::mat4& transform,
+                                         const std::vector<glm::mat4>& skinning_palette) {
+    if (key.skinned) {
+      out_state.skinned_opaque_draws.push_back(SkinnedForwardDraw{
+          .key = key,
+          .transform = transform,
+          .skinning_palette = skinning_palette,
+      });
+      return;
+    }
     auto it = opaque_batch_lookup.find(key);
     if (it == opaque_batch_lookup.end()) {
       const size_t idx = out_state.opaque_batches.size();
@@ -250,6 +288,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
             .index_offset = submesh.index_offset,
             .index_count = submesh.index_count,
             .indexed = indexed_mesh && submesh.index_count > 0,
+            .skinned = instance.skinning_enabled,
         };
         const MaterialRecord* mat = lookup_material(mat_id);
         const bool transparent = (mat && mat->desc.transparent) || mesh.base_color.a < 0.999f;
@@ -262,10 +301,11 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           target_draws.push_back(TransparentForwardDraw{
               .key = key,
               .transform = instance.transform,
+              .skinning_palette = instance.skinning_palette,
               .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
           });
         } else {
-          append_opaque_forward_batch(key, instance.transform);
+          append_opaque_forward_batch(key, instance.transform, instance.skinning_palette);
         }
       }
     } else {
@@ -277,6 +317,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           .index_offset = 0,
           .index_count = mesh.index_count,
           .indexed = indexed_mesh,
+          .skinned = instance.skinning_enabled,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
       const bool transparent = (mat && mat->desc.transparent) || mesh.base_color.a < 0.999f;
@@ -289,10 +330,11 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         target_draws.push_back(TransparentForwardDraw{
             .key = key,
             .transform = instance.transform,
+            .skinning_palette = instance.skinning_palette,
             .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
         });
       } else {
-        append_opaque_forward_batch(key, instance.transform);
+        append_opaque_forward_batch(key, instance.transform, instance.skinning_palette);
       }
     }
   }
@@ -381,6 +423,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     ib_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     ib_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     ib_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(InstanceTransformData));
+    instance_vb_.Release();
     device_->CreateBuffer(ib_desc, nullptr, &instance_vb_);
     if (!instance_vb_) {
       return false;
@@ -626,6 +669,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     Diligent::IBuffer* depth_bound_instance_vb = nullptr;
     Diligent::IBuffer* depth_bound_index_buffer = nullptr;
     if (depth_prepass_ready) {
+      updateSkinningConstants(context_, skinning_constants_, {});
       for (const auto& batch : state.opaque_batches) {
         if (batch.transforms.empty()) {
           continue;
@@ -648,6 +692,31 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                            batch.key,
                            static_cast<Diligent::Uint32>(packed_transforms.size()),
                            depth_bound_index_buffer);
+      }
+      for (const auto& draw : state.skinned_opaque_draws) {
+        auto mesh_it = meshes_.find(draw.key.mesh);
+        if (mesh_it == meshes_.end()) {
+          continue;
+        }
+        const auto& mesh = mesh_it->second;
+        if (!mesh.vertex_buffer) {
+          continue;
+        }
+        if (!updateSkinningConstants(context_, skinning_constants_, draw.skinning_palette)) {
+          continue;
+        }
+        InstanceTransformData packed_transform{};
+        const float* ptr = glm::value_ptr(draw.transform);
+        std::memcpy(packed_transform.col0, ptr, sizeof(packed_transform.col0));
+        std::memcpy(packed_transform.col1, ptr + 4, sizeof(packed_transform.col1));
+        std::memcpy(packed_transform.col2, ptr + 8, sizeof(packed_transform.col2));
+        std::memcpy(packed_transform.col3, ptr + 12, sizeof(packed_transform.col3));
+        std::vector<InstanceTransformData> single_transform{packed_transform};
+        if (!bind_forward_geometry(
+                mesh, single_transform, depth_bound_mesh_vb, depth_bound_instance_vb)) {
+          continue;
+        }
+        draw_forward_batch(mesh, draw.key, 1, depth_bound_index_buffer);
       }
     }
 
@@ -682,6 +751,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                     Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     bound_forward_srb = camera_override_srb_;
   }
+  updateSkinningConstants(context_, skinning_constants_, {});
 
   for (const auto& batch : state.opaque_batches) {
     if (batch.transforms.empty()) {
@@ -726,6 +796,55 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
   }
 
+  for (const auto& draw : state.skinned_opaque_draws) {
+    auto mesh_it = meshes_.find(draw.key.mesh);
+    if (mesh_it == meshes_.end()) {
+      continue;
+    }
+    const auto& mesh = mesh_it->second;
+    if (!mesh.vertex_buffer) {
+      continue;
+    }
+
+    const MaterialRecord* mat = lookup_material(draw.key.material);
+    if (!update_forward_material_constants(draw.key.material,
+                                           draw.key.mesh,
+                                           mesh,
+                                           mat,
+                                           last_constants_material,
+                                           last_constants_mesh)) {
+      continue;
+    }
+
+    if (!use_custom_shader_override) {
+      Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat);
+      if (srb && srb != bound_forward_srb) {
+        context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        bound_forward_srb = srb;
+      }
+    }
+
+    if (!updateSkinningConstants(context_, skinning_constants_, draw.skinning_palette)) {
+      continue;
+    }
+
+    InstanceTransformData packed_transform{};
+    const float* ptr = glm::value_ptr(draw.transform);
+    std::memcpy(packed_transform.col0, ptr, sizeof(packed_transform.col0));
+    std::memcpy(packed_transform.col1, ptr + 4, sizeof(packed_transform.col1));
+    std::memcpy(packed_transform.col2, ptr + 8, sizeof(packed_transform.col2));
+    std::memcpy(packed_transform.col3, ptr + 12, sizeof(packed_transform.col3));
+    if (!bind_forward_geometry(mesh,
+                               std::vector<InstanceTransformData>{packed_transform},
+                               bound_mesh_vb,
+                               bound_instance_vb)) {
+      continue;
+    }
+    if (draw_forward_batch(mesh, draw.key, 1, bound_index_buffer)) {
+      draw_count += 1;
+    }
+  }
+
   return draw_count;
 }
 
@@ -761,6 +880,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     ib_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     ib_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     ib_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(InstanceTransformData));
+    instance_vb_.Release();
     device_->CreateBuffer(ib_desc, nullptr, &instance_vb_);
     if (!instance_vb_) {
       return false;
@@ -1045,6 +1165,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   renderer::MaterialId last_constants_material = renderer::kInvalidMaterial;
   renderer::MeshId last_constants_mesh = renderer::kInvalidMesh;
   Diligent::Uint32 draw_count = 0;
+  const std::vector<glm::mat4> empty_skinning_palette;
 
   for (const auto& draw : draws) {
     auto mesh_it = meshes_.find(draw.key.mesh);
@@ -1106,6 +1227,13 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     if (srb && srb != bound_forward_srb) {
       context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
       bound_forward_srb = srb;
+    }
+
+    if (!updateSkinningConstants(context_,
+                                 skinning_constants_,
+                                 draw.key.skinned ? draw.skinning_palette
+                                                  : empty_skinning_palette)) {
+      continue;
     }
 
     InstanceTransformData packed_transform{};

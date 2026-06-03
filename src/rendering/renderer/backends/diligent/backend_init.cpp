@@ -130,6 +130,12 @@ cbuffer Constants
     float4 g_MaterialParams2;
 };
 
+cbuffer SkinningConstants
+{
+    float4 g_SkinningParams;
+    float4x4 g_SkinMatrices[128];
+};
+
 struct VSInput
 {
     float3 Pos : ATTRIB0;
@@ -140,6 +146,8 @@ struct VSInput
     float4 ModelCol1 : ATTRIB5;
     float4 ModelCol2 : ATTRIB6;
     float4 ModelCol3 : ATTRIB7;
+    float4 JointIndices : ATTRIB8;
+    float4 JointWeights : ATTRIB9;
 };
 
 struct VSOutput
@@ -150,9 +158,26 @@ struct VSOutput
 VSOutput main(VSInput input)
 {
     VSOutput output;
-    float4 world_pos = input.ModelCol0 * input.Pos.x +
-                       input.ModelCol1 * input.Pos.y +
-                       input.ModelCol2 * input.Pos.z +
+    float3 local_pos = input.Pos;
+    if (g_SkinningParams.x > 0.5)
+    {
+        uint4 joints = (uint4)round(input.JointIndices);
+        float4 weights = input.JointWeights;
+        float weight_sum = weights.x + weights.y + weights.z + weights.w;
+        if (weight_sum > 1.0e-5)
+        {
+            float4 bind_pos = float4(input.Pos, 1.0);
+            float4 skinned_pos =
+                mul(g_SkinMatrices[min(joints.x, 127u)], bind_pos) * weights.x +
+                mul(g_SkinMatrices[min(joints.y, 127u)], bind_pos) * weights.y +
+                mul(g_SkinMatrices[min(joints.z, 127u)], bind_pos) * weights.z +
+                mul(g_SkinMatrices[min(joints.w, 127u)], bind_pos) * weights.w;
+            local_pos = skinned_pos.xyz / max(skinned_pos.w, 1.0e-5);
+        }
+    }
+    float4 world_pos = input.ModelCol0 * local_pos.x +
+                       input.ModelCol1 * local_pos.y +
+                       input.ModelCol2 * local_pos.z +
                        input.ModelCol3;
     output.Pos = mul(g_MVP, world_pos);
     return output;
@@ -364,6 +389,8 @@ void DiligentBackend::recreateShadowPipeline() {
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{8, 0, 4, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{9, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
                               0u,
                               kInstanceStride,
@@ -386,7 +413,9 @@ void DiligentBackend::recreateShadowPipeline() {
       static_cast<Diligent::Uint32>(sizeof(layout_elems) / sizeof(layout_elems[0]));
 
   Diligent::ShaderResourceVariableDesc shadow_vars[] = {
-      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_VERTEX, "SkinningConstants",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
   };
   shadow_pso.PSODesc.ResourceLayout.Variables = shadow_vars;
   shadow_pso.PSODesc.ResourceLayout.NumVariables =
@@ -401,6 +430,12 @@ void DiligentBackend::recreateShadowPipeline() {
     if (auto* variable =
             shadow_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
       variable->Set(constants_);
+    }
+  }
+  if (skinning_constants_) {
+    if (auto* variable = shadow_pipeline_state_->GetStaticVariableByName(
+            Diligent::SHADER_TYPE_VERTEX, "SkinningConstants")) {
+      variable->Set(skinning_constants_);
     }
   }
   shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
@@ -528,6 +563,12 @@ cbuffer Constants
     float4 g_MaterialParams2;
 };
 
+cbuffer SkinningConstants
+{
+    float4 g_SkinningParams;
+    float4x4 g_SkinMatrices[128];
+};
+
 struct VSInput
 {
     float3 Pos : ATTRIB0;
@@ -538,6 +579,8 @@ struct VSInput
     float4 ModelCol1 : ATTRIB5;
     float4 ModelCol2 : ATTRIB6;
     float4 ModelCol3 : ATTRIB7;
+    float4 JointIndices : ATTRIB8;
+    float4 JointWeights : ATTRIB9;
 };
 
 struct VSOutput
@@ -552,15 +595,44 @@ struct VSOutput
 VSOutput main(VSInput input)
 {
     VSOutput output;
-    float4 world_pos = input.ModelCol0 * input.Pos.x +
-                       input.ModelCol1 * input.Pos.y +
-                       input.ModelCol2 * input.Pos.z +
+    float3 local_pos = input.Pos;
+    float3 local_normal = input.Normal;
+    float3 local_tangent = input.Tangent.xyz;
+    if (g_SkinningParams.x > 0.5)
+    {
+        uint4 joints = (uint4)round(input.JointIndices);
+        float4 weights = input.JointWeights;
+        float weight_sum = weights.x + weights.y + weights.z + weights.w;
+        if (weight_sum > 1.0e-5)
+        {
+            float4 bind_pos = float4(input.Pos, 1.0);
+            float4 skinned_pos =
+                mul(g_SkinMatrices[min(joints.x, 127u)], bind_pos) * weights.x +
+                mul(g_SkinMatrices[min(joints.y, 127u)], bind_pos) * weights.y +
+                mul(g_SkinMatrices[min(joints.z, 127u)], bind_pos) * weights.z +
+                mul(g_SkinMatrices[min(joints.w, 127u)], bind_pos) * weights.w;
+            local_pos = skinned_pos.xyz / max(skinned_pos.w, 1.0e-5);
+            local_normal =
+                mul((float3x3)g_SkinMatrices[min(joints.x, 127u)], input.Normal) * weights.x +
+                mul((float3x3)g_SkinMatrices[min(joints.y, 127u)], input.Normal) * weights.y +
+                mul((float3x3)g_SkinMatrices[min(joints.z, 127u)], input.Normal) * weights.z +
+                mul((float3x3)g_SkinMatrices[min(joints.w, 127u)], input.Normal) * weights.w;
+            local_tangent =
+                mul((float3x3)g_SkinMatrices[min(joints.x, 127u)], input.Tangent.xyz) * weights.x +
+                mul((float3x3)g_SkinMatrices[min(joints.y, 127u)], input.Tangent.xyz) * weights.y +
+                mul((float3x3)g_SkinMatrices[min(joints.z, 127u)], input.Tangent.xyz) * weights.z +
+                mul((float3x3)g_SkinMatrices[min(joints.w, 127u)], input.Tangent.xyz) * weights.w;
+        }
+    }
+    float4 world_pos = input.ModelCol0 * local_pos.x +
+                       input.ModelCol1 * local_pos.y +
+                       input.ModelCol2 * local_pos.z +
                        input.ModelCol3;
     output.Pos = mul(g_MVP, world_pos);
     output.WorldPos = world_pos.xyz;
-    output.Normal = normalize(input.ModelCol0.xyz * input.Normal.x +
-                              input.ModelCol1.xyz * input.Normal.y +
-                              input.ModelCol2.xyz * input.Normal.z);
+    output.Normal = normalize(input.ModelCol0.xyz * local_normal.x +
+                              input.ModelCol1.xyz * local_normal.y +
+                              input.ModelCol2.xyz * local_normal.z);
     output.UV = input.UV;
     output.Tangent = input.Tangent;
     return output;
@@ -1858,6 +1930,8 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{8, 0, 4, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{9, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
                               0u,
                               kInstanceStride,
@@ -1881,6 +1955,8 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
 
   Diligent::ShaderResourceVariableDesc vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_VERTEX, "SkinningConstants",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
@@ -1916,7 +1992,9 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   depth_graphics.DepthStencilDesc.DepthWriteEnable = true;
   depth_graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
   Diligent::ShaderResourceVariableDesc depth_prepass_vars[] = {
-      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_VERTEX, "SkinningConstants",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
   };
   depth_prepass_ci.PSODesc.ResourceLayout.Variables = depth_prepass_vars;
   depth_prepass_ci.PSODesc.ResourceLayout.NumVariables =
@@ -2012,6 +2090,14 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   cb_desc.Size = sizeof(DrawConstants);
   device_->CreateBuffer(cb_desc, nullptr, &constants_);
 
+  Diligent::BufferDesc skin_cb_desc{};
+  skin_cb_desc.Name = "Karma Skinning Constants";
+  skin_cb_desc.Usage = Diligent::USAGE_DYNAMIC;
+  skin_cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
+  skin_cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+  skin_cb_desc.Size = sizeof(SkinningConstants);
+  device_->CreateBuffer(skin_cb_desc, nullptr, &skinning_constants_);
+
   Diligent::BufferDesc camera_override_cb_desc{};
   camera_override_cb_desc.Name = "Karma Camera Override User Constants";
   camera_override_cb_desc.Usage = Diligent::USAGE_DYNAMIC;
@@ -2037,6 +2123,13 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         variable->Set(constants_);
         pipeline_bound = true;
       }
+      if (skinning_constants_) {
+        if (auto* variable = pso->GetStaticVariableByName(
+                Diligent::SHADER_TYPE_VERTEX, "SkinningConstants")) {
+          variable->Set(skinning_constants_);
+          pipeline_bound = true;
+        }
+      }
       return pipeline_bound;
     };
     bound = bind_constants_to_pipeline(pipeline_state_.RawPtr()) || bound;
@@ -2055,6 +2148,13 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
               Diligent::SHADER_TYPE_VERTEX, "Constants")) {
         variable->Set(constants_);
         depth_prepass_constants_bound = true;
+      }
+      if (skinning_constants_) {
+        if (auto* variable = depth_prepass_pipeline_state_->GetStaticVariableByName(
+                Diligent::SHADER_TYPE_VERTEX, "SkinningConstants")) {
+          variable->Set(skinning_constants_);
+          depth_prepass_constants_bound = true;
+        }
       }
       if (!depth_prepass_constants_bound) {
         depth_prepass_pipeline_state_.Release();

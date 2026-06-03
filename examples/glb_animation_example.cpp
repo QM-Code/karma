@@ -1,121 +1,90 @@
+#include "demo_asset_paths.h"
 #include "karma/karma.h"
 
-#include <cstdint>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
+#include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
 namespace karma::demo {
 
 namespace {
 
-void appendU16(std::vector<std::uint8_t>& data, std::uint16_t value) {
-  data.push_back(static_cast<std::uint8_t>(value & 0xFFu));
-  data.push_back(static_cast<std::uint8_t>((value >> 8u) & 0xFFu));
+glm::vec3 toGlm(const math::Vec3& v) {
+  return {v.x, v.y, v.z};
 }
 
-void appendU32(std::vector<std::uint8_t>& data, std::uint32_t value) {
-  data.push_back(static_cast<std::uint8_t>(value & 0xFFu));
-  data.push_back(static_cast<std::uint8_t>((value >> 8u) & 0xFFu));
-  data.push_back(static_cast<std::uint8_t>((value >> 16u) & 0xFFu));
-  data.push_back(static_cast<std::uint8_t>((value >> 24u) & 0xFFu));
+glm::quat toGlm(const math::Quat& q) {
+  return {q.w, q.x, q.y, q.z};
 }
 
-void appendFloat(std::vector<std::uint8_t>& data, float value) {
-  const auto* bytes = reinterpret_cast<const std::uint8_t*>(&value);
-  data.insert(data.end(), bytes, bytes + sizeof(float));
-}
+struct SceneBounds {
+  glm::vec3 min{0.0f};
+  glm::vec3 max{0.0f};
+  bool valid = false;
+};
 
-void align4(std::vector<std::uint8_t>& data) {
-  while ((data.size() % 4u) != 0u) {
-    data.push_back(0);
+struct LookAngles {
+  float yaw = 0.0f;
+  float pitch = 0.0f;
+};
+
+void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
+  if (!bounds.valid) {
+    bounds.min = point;
+    bounds.max = point;
+    bounds.valid = true;
+    return;
   }
+  bounds.min = glm::min(bounds.min, point);
+  bounds.max = glm::max(bounds.max, point);
 }
 
-bool writeAnimatedGlb(const std::filesystem::path& path) {
-  std::vector<std::uint8_t> bin;
+SceneBounds computePrefabBounds(const scene::GlbScenePrefab& prefab) {
+  SceneBounds geometry_bounds{};
+  SceneBounds fallback_bounds{};
 
-  const std::uint32_t position_offset = static_cast<std::uint32_t>(bin.size());
-  appendFloat(bin, -0.35f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 0.35f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 0.65f);
-  appendFloat(bin, 0.0f);
+  for (const auto& node : prefab.nodes) {
+    const glm::vec3 world_pos = toGlm(node.world_position);
+    expandBounds(fallback_bounds, world_pos);
 
-  const std::uint32_t index_offset = static_cast<std::uint32_t>(bin.size());
-  appendU16(bin, 0);
-  appendU16(bin, 1);
-  appendU16(bin, 2);
-  align4(bin);
-
-  const std::uint32_t time_offset = static_cast<std::uint32_t>(bin.size());
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 1.0f);
-
-  const std::uint32_t translation_offset = static_cast<std::uint32_t>(bin.size());
-  appendFloat(bin, -1.0f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 1.0f);
-  appendFloat(bin, 0.0f);
-  appendFloat(bin, 0.0f);
-  align4(bin);
-
-  const std::string json =
-      "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Karma\"},"
-      "\"scene\":0,"
-      "\"scenes\":[{\"nodes\":[0]}],"
-      "\"nodes\":[{\"name\":\"Root\",\"children\":[1]},"
-      "{\"name\":\"AnimatedNode\",\"mesh\":0,\"translation\":[-1,0,0]}],"
-      "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1,\"mode\":4}]}],"
-      "\"buffers\":[{\"byteLength\":" + std::to_string(bin.size()) + "}],"
-      "\"bufferViews\":["
-      "{\"buffer\":0,\"byteOffset\":" + std::to_string(position_offset) + ",\"byteLength\":36,\"target\":34962},"
-      "{\"buffer\":0,\"byteOffset\":" + std::to_string(index_offset) + ",\"byteLength\":6,\"target\":34963},"
-      "{\"buffer\":0,\"byteOffset\":" + std::to_string(time_offset) + ",\"byteLength\":8},"
-      "{\"buffer\":0,\"byteOffset\":" + std::to_string(translation_offset) + ",\"byteLength\":24}],"
-      "\"accessors\":["
-      "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
-      "\"min\":[-0.35,0,0],\"max\":[0.35,0.65,0]},"
-      "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"},"
-      "{\"bufferView\":2,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0],\"max\":[1]},"
-      "{\"bufferView\":3,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}],"
-      "\"animations\":[{\"name\":\"Slide\","
-      "\"samplers\":[{\"input\":2,\"output\":3,\"interpolation\":\"LINEAR\"}],"
-      "\"channels\":[{\"sampler\":0,\"target\":{\"node\":1,\"path\":\"translation\"}}]}]}";
-
-  std::vector<std::uint8_t> json_chunk(json.begin(), json.end());
-  while ((json_chunk.size() % 4u) != 0u) {
-    json_chunk.push_back(' ');
+    const glm::vec3 world_scale = toGlm(node.world_scale);
+    const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
+    for (const auto& primitive : node.primitives) {
+      for (const glm::vec3& vertex : primitive.mesh.vertices) {
+        if (primitive.skinned()) {
+          expandBounds(geometry_bounds, vertex);
+        } else {
+          expandBounds(geometry_bounds, world_pos + rotation * (vertex * world_scale));
+        }
+      }
+    }
   }
 
-  std::vector<std::uint8_t> glb;
-  const std::uint32_t total_length =
-      12u + 8u + static_cast<std::uint32_t>(json_chunk.size()) +
-      8u + static_cast<std::uint32_t>(bin.size());
-  appendU32(glb, 0x46546C67u);
-  appendU32(glb, 2u);
-  appendU32(glb, total_length);
-  appendU32(glb, static_cast<std::uint32_t>(json_chunk.size()));
-  appendU32(glb, 0x4E4F534Au);
-  glb.insert(glb.end(), json_chunk.begin(), json_chunk.end());
-  appendU32(glb, static_cast<std::uint32_t>(bin.size()));
-  appendU32(glb, 0x004E4942u);
-  glb.insert(glb.end(), bin.begin(), bin.end());
+  return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
+}
 
-  std::ofstream out(path, std::ios::binary);
-  if (!out) {
-    return false;
+LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
+  const glm::vec3 direction = glm::normalize(target - eye);
+  if (!std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(direction.z)) {
+    return {};
   }
-  out.write(reinterpret_cast<const char*>(glb.data()), static_cast<std::streamsize>(glb.size()));
-  return out.good();
+  return LookAngles{
+      .yaw = std::atan2(-direction.x, -direction.z),
+      .pitch = std::asin(std::clamp(direction.y, -1.0f, 1.0f)),
+  };
+}
+
+bool envFlagEnabled(const char* name) {
+  if (const char* value = std::getenv(name)) {
+    return value[0] != '\0' && std::string(value) != "0";
+  }
+  return false;
 }
 
 }  // namespace
@@ -123,45 +92,77 @@ bool writeAnimatedGlb(const std::filesystem::path& path) {
 class GlbAnimationExample final : public app::GameInterface {
  public:
   void onStart() override {
-    const std::filesystem::path glb_path =
-        std::filesystem::temp_directory_path() / "karma_animated_node.glb";
-    if (!writeAnimatedGlb(glb_path)) {
-      spdlog::error("Failed to write animated GLB to {}", glb_path.string());
+    input->bindKey("toggle_skinning_path", platform::Key::G, input::Trigger::Pressed);
+
+    const std::filesystem::path model_path =
+        resolveExamplePath("examples/assets/animation_model/source/walking.glb");
+
+    const scene::GlbScenePrefab prefab = scene::loadGlbScenePrefab(
+        model_path,
+        scene::GlbSceneLoadOptions{
+            .import_meshes = true,
+            .import_lights = false,
+        });
+    if (!prefab.valid()) {
+      spdlog::error("Failed to load animation model from {}", model_path.string());
+      spawnCamera(SceneBounds{});
       return;
     }
 
-    const scene::GlbSceneImportResult imported = scene::importGlbScene(
+    spdlog::info("Loaded animation model '{}': {} nodes, {} clips, {} skeletons, {} skins",
+                 model_path.string(),
+                 prefab.nodes.size(),
+                 prefab.animations.size(),
+                 prefab.skeletons.size(),
+                 prefab.skins.size());
+    for (const auto& clip : prefab.animations) {
+      spdlog::info("Animation clip '{}': {:.3f}s, {} transform channels, {} morph tracks",
+                   clip.name,
+                   clip.duration_seconds,
+                   clip.channels.size(),
+                   clip.morph_target_tracks.size());
+    }
+    for (const auto& diagnostic : prefab.diagnostics) {
+      spdlog::warn("Animation model import diagnostic: {}", diagnostic);
+    }
+    if (!prefab.skins.empty()) {
+      spdlog::info("Skin '{}': {} joints",
+                   prefab.skins.front().name,
+                   prefab.skins.front().joint_node_indices.size());
+    }
+
+    bounds_ = computePrefabBounds(prefab);
+    const scene::GlbSceneImportResult imported = scene::instantiateGlbScenePrefab(
         *world,
         *scene,
         *graphics,
-        glb_path,
-        scene::GlbSceneImportOptions{
-            .load = {.import_meshes = true, .import_lights = false},
-            .instantiate = {.create_synthetic_root = false, .autoplay_animations = true},
+        prefab,
+        scene::GlbSceneInstantiateOptions{
+            .create_synthetic_root = false,
+            .autoplay_animations = true,
         });
     if (!imported.valid()) {
-      spdlog::error("Failed to import animated GLB from {}", glb_path.string());
+      spdlog::error("Failed to instantiate animation model from {}", model_path.string());
+    } else {
+      imported_root_ = imported.root_entity;
+      imported_entities_ = imported.entities;
+      use_gpu_skinning_ = !envFlagEnabled("KARMA_ANIMATION_CPU_SKINNING");
+      setImportedSkinningPath(use_gpu_skinning_ ? components::SkinningPath::Gpu
+                                                : components::SkinningPath::Cpu);
+      if (world->has<components::AnimatorComponent>(imported_root_)) {
+        auto& animator = world->get<components::AnimatorComponent>(imported_root_);
+        animator.loop = true;
+        animator.playing = true;
+        if (!animator.clips.empty()) {
+          components::setAnimatorClip(animator, 0, true);
+        }
+      }
     }
 
-    const auto camera = world->createEntity();
-    world->setName(camera, "Camera");
-    components::TransformComponent camera_transform{{0.0f, 0.7f, 3.0f}};
-    camera_transform.setRotation(math::fromYawPitch(0.0f, -0.15f));
-    world->add(camera, camera_transform);
-    world->add(camera, components::CameraComponent{
-                          .near_clip = 0.05f,
-                          .far_clip = 50.0f,
-                          .is_primary = true});
-
-    const auto light = world->createEntity();
-    world->setName(light, "Sun");
-    components::TransformComponent light_transform{};
-    light_transform.setRotation(math::fromYawPitch(-0.45f, -0.7f));
-    world->add(light, light_transform);
-    world->add(light, components::LightComponent{
-                          .type = components::LightComponent::Type::Directional,
-                          .color = {1.0f, 0.96f, 0.9f, 1.0f},
-                          .intensity = 1.0f});
+    spawnGround(bounds_);
+    spawnLights();
+    spawnCamera(bounds_);
+    spawnEnvironment();
   }
 
   void onFixedUpdate(float dt) override {
@@ -170,9 +171,117 @@ class GlbAnimationExample final : public app::GameInterface {
 
   void onUpdate(float dt) override {
     (void)dt;
+    if (input != nullptr && input->actionPressed("toggle_skinning_path")) {
+      use_gpu_skinning_ = !use_gpu_skinning_;
+      setImportedSkinningPath(use_gpu_skinning_ ? components::SkinningPath::Gpu
+                                                : components::SkinningPath::Cpu);
+    }
   }
 
   void onShutdown() override {}
+
+ private:
+  void spawnGround(const SceneBounds& bounds) {
+    const glm::vec3 center = bounds.valid ? (bounds.min + bounds.max) * 0.5f
+                                          : glm::vec3(0.0f, 0.0f, 0.0f);
+    const float radius = bounds.valid ? std::max(glm::length((bounds.max - bounds.min) * 0.5f), 1.0f)
+                                      : 1.5f;
+    const float floor_y = bounds.valid ? bounds.min.y - 0.015f : -0.015f;
+    const glm::vec3 half_extents{std::max(2.4f, radius * 2.2f), 0.015f,
+                                 std::max(2.4f, radius * 2.2f)};
+
+    const renderer::MeshId mesh = graphics->createMesh(runtime::makeBoxMesh(half_extents));
+    const renderer::MaterialId material = runtime::createMaterial(
+        graphics,
+        math::Color{0.16f, 0.18f, 0.18f, 1.0f},
+        false,
+        0.82f,
+        0.0f);
+    runtime::spawnMesh(*world,
+                       "Animation Model Ground",
+                       mesh,
+                       material,
+                       {center.x, floor_y, center.z},
+                       true);
+  }
+
+  void spawnLights() {
+    const auto sun = world->createEntity();
+    world->setName(sun, "Key Light");
+    components::TransformComponent sun_transform{};
+    sun_transform.setRotation(math::fromYawPitch(-0.55f, -0.78f));
+    world->add(sun, sun_transform);
+    world->add(sun, components::LightComponent{
+                        .type = components::LightComponent::Type::Directional,
+                        .color = {1.0f, 0.96f, 0.9f, 1.0f},
+                        .intensity = 1.35f,
+                        .casts_shadows = true,
+                        .shadow_extent = 6.0f});
+
+    const auto fill = world->createEntity();
+    world->setName(fill, "Fill Light");
+    components::TransformComponent fill_transform{{-1.8f, 1.7f, 2.1f}};
+    world->add(fill, fill_transform);
+    world->add(fill, components::LightComponent{
+                         .type = components::LightComponent::Type::Point,
+                         .color = {0.55f, 0.7f, 1.0f, 1.0f},
+                         .intensity = 1.8f,
+                         .range = 4.0f,
+                         .casts_shadows = false});
+  }
+
+  void spawnCamera(const SceneBounds& bounds) {
+    const glm::vec3 center = bounds.valid ? (bounds.min + bounds.max) * 0.5f
+                                          : glm::vec3(0.0f, 0.7f, 0.0f);
+    const glm::vec3 extents = bounds.valid ? (bounds.max - bounds.min) * 0.5f
+                                           : glm::vec3(0.8f, 0.8f, 0.8f);
+    const float radius = std::max(1.0f, glm::length(extents));
+    const float camera_distance = std::max(2.2f, radius * 2.9f);
+    const glm::vec3 target = center;
+    const glm::vec3 view_direction = glm::normalize(glm::vec3{0.75f, 0.34f, 1.0f});
+
+    const glm::vec3 eye = target + view_direction * camera_distance;
+    const LookAngles look = lookAnglesToTarget(eye, target);
+
+    const auto camera_entity = world->createEntity();
+    world->setName(camera_entity, "Camera");
+    components::TransformComponent camera_transform{};
+    camera_transform.setPosition({eye.x, eye.y, eye.z});
+    camera_transform.setRotation(math::fromYawPitch(look.yaw, look.pitch));
+    world->add(camera_entity, camera_transform);
+    components::CameraComponent camera{};
+    camera.render_shadows = true;
+    camera.fov_y_degrees = 50.0f;
+    camera.near_clip = 0.04f;
+    camera.far_clip = 60.0f;
+    camera.is_primary = true;
+    world->add(camera_entity, camera);
+  }
+
+  void spawnEnvironment() {
+    const std::filesystem::path env_path = resolveExampleAssetPath("golden_gate_hills_4k.hdr");
+    runtime::spawnEnvironment(*world, "Environment", env_path.string(), 0.28f, false);
+  }
+
+  void setImportedSkinningPath(components::SkinningPath path) {
+    for (const ecs::Entity entity : imported_entities_) {
+      if (!world->isAlive(entity) || !world->has<components::SkinnedMeshComponent>(entity)) {
+        continue;
+      }
+      auto& skin = world->get<components::SkinnedMeshComponent>(entity);
+      skin.skinning_path = path;
+      skin.palette_valid = false;
+      skin.diagnostic = path == components::SkinningPath::Gpu ? "GPU skinning path"
+                                                              : "CPU skinning reference path";
+    }
+    spdlog::info("Animation model skinning path: {}",
+                 path == components::SkinningPath::Gpu ? "GPU" : "CPU");
+  }
+
+  ecs::Entity imported_root_{};
+  std::vector<ecs::Entity> imported_entities_;
+  SceneBounds bounds_{};
+  bool use_gpu_skinning_ = true;
 };
 
 }  // namespace karma::demo
@@ -182,9 +291,12 @@ int main() {
   karma::demo::GlbAnimationExample game;
 
   karma::app::EngineConfig config;
-  config.window.title = "Karma GLB Animation Example";
+  config.window.title = "Karma GLB Rigged Animation Example";
   config.window.samples = 1;
   config.cursor_visible = true;
+  config.enable_anisotropy = true;
+  config.anisotropy_level = 16;
+  config.generate_mipmaps = true;
 
   engine.start(game, config);
   while (engine.isRunning()) {

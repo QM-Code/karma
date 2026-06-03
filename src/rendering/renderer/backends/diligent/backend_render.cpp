@@ -1185,6 +1185,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
         vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
         vb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
         vb_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(LineVertex));
+        line_vb_.Release();
         device_->CreateBuffer(vb_desc, nullptr, &line_vb_);
         if (!line_vb_) {
           line_vb_size_ = 0;

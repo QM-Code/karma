@@ -7,6 +7,11 @@
 #include "karma/world/components/skinned_mesh.h"
 #include "karma/world/ecs/world.h"
 #include "karma/rendering/renderer/device.h"
+#include "karma/simulation/animation/pose.h"
+
+namespace karma::scene {
+class Scene;
+}
 
 namespace karma::animation {
 
@@ -14,9 +19,20 @@ renderer::MeshData skinMesh(const renderer::MeshData& bind_mesh,
                             const std::vector<components::VertexSkinInfluence>& influences,
                             const std::vector<glm::mat4>& skin_matrices);
 
+SkinningPalette buildSkinningPaletteFromWorld(
+    const components::SkinnedMeshComponent& skin,
+    const ecs::World& world,
+    const glm::mat4& mesh_world);
+
+SkinningPalette buildSkinningPaletteFromScene(
+    const components::SkinnedMeshComponent& skin,
+    const ecs::World& world,
+    const scene::Scene& scene,
+    const glm::mat4& mesh_world);
+
 class CpuSkinningSystem {
  public:
-  void update(ecs::World& world, renderer::GraphicsDevice& device);
+  void update(ecs::World& world, const scene::Scene& scene, renderer::GraphicsDevice& device);
 };
 
 }  // namespace karma::animation

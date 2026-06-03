@@ -276,6 +276,7 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
     desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::app::UIVertex));
+    ui_vb_.Release();
     device_->CreateBuffer(desc, nullptr, &ui_vb_);
   }
 
@@ -287,6 +288,7 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
     desc.BindFlags = Diligent::BIND_INDEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     desc.Size = static_cast<Diligent::Uint32>(ui_ib_size_ * sizeof(uint32_t));
+    ui_ib_.Release();
     device_->CreateBuffer(desc, nullptr, &ui_ib_);
   }
 

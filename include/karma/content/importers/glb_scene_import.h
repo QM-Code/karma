@@ -39,6 +39,7 @@ struct GlbScenePrefabPrimitive {
   renderer::MaterialDesc material;
   uint32_t source_material_index = kInvalidGlbSceneMaterial;
   uint32_t source_mesh_index = kInvalidGlbSceneNode;
+  uint32_t skin_index = animation::kInvalidAnimationIndex;
   std::vector<components::VertexSkinInfluence> vertex_influences;
   std::vector<uint32_t> joint_node_indices;
   std::vector<glm::mat4> inverse_bind_matrices;
@@ -66,7 +67,10 @@ struct GlbScenePrefab {
   std::filesystem::path source_path;
   uint32_t root_node = kInvalidGlbSceneNode;
   std::vector<GlbScenePrefabNode> nodes;
+  std::vector<animation::Skeleton> skeletons;
+  std::vector<animation::Skin> skins;
   std::vector<animation::AnimationClip> animations;
+  std::vector<std::string> diagnostics;
 
   bool valid() const {
     return root_node != kInvalidGlbSceneNode && root_node < nodes.size();

@@ -238,7 +238,9 @@ std::vector<float> buildInterleavedVertices(const renderer::MeshData& mesh) {
   const bool has_normals = mesh.normals.size() == mesh.vertices.size();
   const bool has_uvs = mesh.uvs.size() == mesh.vertices.size();
   const bool has_tangents = mesh.tangents.size() == mesh.vertices.size();
-  const size_t stride = 12;
+  const bool has_joint_indices = mesh.joint_indices.size() == mesh.vertices.size();
+  const bool has_joint_weights = mesh.joint_weights.size() == mesh.vertices.size();
+  const size_t stride = 20;
   std::vector<float> data;
   data.reserve(mesh.vertices.size() * stride);
   for (size_t i = 0; i < mesh.vertices.size(); ++i) {
@@ -258,6 +260,16 @@ std::vector<float> buildInterleavedVertices(const renderer::MeshData& mesh) {
     const glm::vec2 uv = has_uvs ? mesh.uvs[i] : glm::vec2(0.0f, 0.0f);
     data.push_back(uv.x);
     data.push_back(uv.y);
+    const glm::uvec4 joints = has_joint_indices ? mesh.joint_indices[i] : glm::uvec4(0u);
+    data.push_back(static_cast<float>(joints.x));
+    data.push_back(static_cast<float>(joints.y));
+    data.push_back(static_cast<float>(joints.z));
+    data.push_back(static_cast<float>(joints.w));
+    const glm::vec4 weights = has_joint_weights ? mesh.joint_weights[i] : glm::vec4(0.0f);
+    data.push_back(weights.x);
+    data.push_back(weights.y);
+    data.push_back(weights.z);
+    data.push_back(weights.w);
   }
   return data;
 }

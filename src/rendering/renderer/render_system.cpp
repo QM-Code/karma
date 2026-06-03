@@ -654,7 +654,22 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       }
     }
 
-    const glm::mat4 world_matrix = toTransform(transform, interpolation_alpha);
+    glm::mat4 world_matrix = toTransform(transform, interpolation_alpha);
+    const components::SkinnedMeshComponent* skinned_mesh = nullptr;
+    if (world.has<components::SkinnedMeshComponent>(entity)) {
+      const auto& skin = world.get<components::SkinnedMeshComponent>(entity);
+      skinned_mesh = &skin;
+      if (skin.override_render_transform) {
+        world_matrix = glm::mat4(1.0f);
+        if (skin.render_transform_entity.isValid() &&
+            world.isAlive(skin.render_transform_entity) &&
+            world.has<components::TransformComponent>(skin.render_transform_entity)) {
+          world_matrix =
+              toTransform(world.get<components::TransformComponent>(skin.render_transform_entity),
+                          interpolation_alpha);
+        }
+      }
+    }
     DrawItem item{};
     item.instance = static_cast<InstanceId>(key);
     item.mesh = it->second.mesh;
@@ -664,6 +679,14 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     item.layer = 0;
     item.visible = visible;
     item.shadow_visible = visible && mesh.shadow_visible;
+    if (skinned_mesh != nullptr &&
+        skinned_mesh->enabled &&
+        skinned_mesh->skinning_path == components::SkinningPath::Gpu &&
+        skinned_mesh->palette_valid &&
+        !skinned_mesh->joint_palette.empty()) {
+      item.skinning_enabled = true;
+      item.skinning_palette = skinned_mesh->joint_palette;
+    }
     device_.submit(item);
   });
 

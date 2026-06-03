@@ -159,7 +159,7 @@ void EngineApp::warmUpRenderer() {
   graphics_->beginFrame(frame);
   animation_system_.update(world_, scene_, 0.0f);
   scene::updateWorldTransforms(world_, scene_);
-  cpu_skinning_system_.update(world_, *graphics_);
+  cpu_skinning_system_.update(world_, scene_, *graphics_);
   if (particle_system_) {
     light_pulse_system_.update(world_, 0.0f);
     particle_system_->update(world_, 0.0f, 1.0f);
@@ -493,7 +493,7 @@ void EngineApp::tick() {
 
   section_start = section_end;
   if (graphics_) {
-    cpu_skinning_system_.update(world_, *graphics_);
+    cpu_skinning_system_.update(world_, scene_, *graphics_);
   }
   section_end = core::SteadyClock::now();
   const double skinning_ms = core::elapsedMilliseconds(section_start, section_end);

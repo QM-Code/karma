@@ -14,6 +14,7 @@
 #include "karma/world/components/tag.h"
 #include "karma/world/components/audio_listener.h"
 #include "karma/world/components/audio_source.h"
+#include "karma/world/components/animator.h"
 #include "karma/world/components/camera.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/environment.h"
@@ -23,6 +24,7 @@
 #include "karma/world/components/player_controller.h"
 #include "karma/world/components/rigidbody.h"
 #include "karma/world/components/script.h"
+#include "karma/world/components/skinned_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
 #include "karma/world/scene/scene.h"
@@ -164,6 +166,38 @@ const char* lightTypeName(components::LightComponent::Type type) {
     case components::LightComponent::Type::Spot: return "Spot";
     default: return "Unknown";
   }
+}
+
+const char* skinningPathName(components::SkinningPath path) {
+  switch (path) {
+    case components::SkinningPath::Cpu: return "CPU";
+    case components::SkinningPath::Gpu: return "GPU";
+    case components::SkinningPath::GpuUnavailableCpuFallback: return "CPU fallback";
+  }
+  return "Unknown";
+}
+
+const char* rendererMeshStateName(const components::SkinnedMeshComponent& skin) {
+  return skin.renderer_mesh_is_bind_pose ? "bind pose" : "CPU skinned";
+}
+
+const char* rootMotionModeName(components::RootMotionMode mode) {
+  switch (mode) {
+    case components::RootMotionMode::Disabled: return "Disabled";
+    case components::RootMotionMode::ApplyToLocalTransform: return "Apply to local";
+    case components::RootMotionMode::ExposeDelta: return "Expose delta";
+  }
+  return "Disabled";
+}
+
+const char* parameterTypeName(components::AnimatorParameterType type) {
+  switch (type) {
+    case components::AnimatorParameterType::Bool: return "Bool";
+    case components::AnimatorParameterType::Int: return "Int";
+    case components::AnimatorParameterType::Float: return "Float";
+    case components::AnimatorParameterType::Trigger: return "Trigger";
+  }
+  return "Unknown";
 }
 
 bool editVec3(const char* label, math::Vec3& v) {
@@ -690,8 +724,11 @@ void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
     components += label;
   };
   if (world_->has<components::TransformComponent>(node.entity)) append_component("Transform");
+  if (world_->has<components::LocalTransformComponent>(node.entity)) append_component("LocalTransform");
   if (world_->has<components::TagComponent>(node.entity)) append_component("Tag");
   if (world_->has<components::MeshComponent>(node.entity)) append_component("Mesh");
+  if (world_->has<components::AnimatorComponent>(node.entity)) append_component("Animator");
+  if (world_->has<components::SkinnedMeshComponent>(node.entity)) append_component("SkinnedMesh");
   if (world_->has<components::EnvironmentComponent>(node.entity)) append_component("Environment");
   if (world_->has<components::LightComponent>(node.entity)) append_component("Light");
   if (world_->has<components::CameraComponent>(node.entity)) append_component("Camera");
@@ -739,6 +776,18 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
       }
     }
   }
+  if (world_->has<components::LocalTransformComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Local Transform")) {
+      auto& c = world_->get<components::LocalTransformComponent>(node.entity);
+      editVec3("Local Position", c.position);
+      editQuat("Local Rotation (Quat)", c.rotation);
+      math::Vec3 euler = quatToEulerDegrees(c.rotation);
+      if (editVec3("Local Rotation (Euler)", euler)) {
+        c.rotation = eulerDegreesToQuat(euler);
+      }
+      editVec3("Local Scale", c.scale);
+    }
+  }
   if (world_->has<components::TagComponent>(node.entity)) {
     if (ImGui::CollapsingHeader("Tag")) {
       const auto& c = world_->get<components::TagComponent>(node.entity);
@@ -764,6 +813,178 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
         c.texture_key = std::move(texture_key);
       }
       editBool("Visible", c.visible);
+    }
+  }
+  if (world_->has<components::AnimatorComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Animator", ImGuiTreeNodeFlags_DefaultOpen)) {
+      auto& c = world_->get<components::AnimatorComponent>(node.entity);
+      ImGui::Text("Clips: %zu", c.clips.size());
+      if (!c.clips.empty()) {
+        const size_t current = std::min(c.current_clip_index, c.clips.size() - 1);
+        const std::string current_label =
+            c.clips[current].name.empty() ? ("Clip " + std::to_string(current))
+                                          : c.clips[current].name;
+        if (ImGui::BeginCombo("Clip", current_label.c_str())) {
+          for (size_t clip_index = 0; clip_index < c.clips.size(); ++clip_index) {
+            const std::string label =
+                c.clips[clip_index].name.empty() ? ("Clip " + std::to_string(clip_index))
+                                                 : c.clips[clip_index].name;
+            const bool selected = clip_index == c.current_clip_index;
+            if (ImGui::Selectable(label.c_str(), selected)) {
+              components::setAnimatorClip(c, clip_index, true);
+            }
+            if (selected) {
+              ImGui::SetItemDefaultFocus();
+            }
+          }
+          ImGui::EndCombo();
+        }
+      }
+      if (ImGui::Button("Play")) {
+        components::playAnimator(c);
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Pause")) {
+        components::pauseAnimator(c);
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Stop")) {
+        components::stopAnimator(c);
+      }
+      editFloat("Time", c.time_seconds);
+      editFloat("Speed", c.speed);
+      editBool("Loop", c.loop);
+      ImGui::Text("Playing: %s", c.playing ? "yes" : "no");
+      ImGui::Text("Blend: %s", c.blend_active ? "active" : "inactive");
+
+      int root_mode = static_cast<int>(c.root_motion_mode);
+      const char* root_modes[] = {"Disabled", "Apply to local", "Expose delta"};
+      if (editEnumCombo("Root Motion", root_mode, root_modes, 3)) {
+        root_mode = std::clamp(root_mode, 0, 2);
+        c.root_motion_mode = static_cast<components::RootMotionMode>(root_mode);
+      }
+      ImGui::Text("Root Motion Mode: %s", rootMotionModeName(c.root_motion_mode));
+      int root_node = static_cast<int>(
+          c.root_motion_node_index == animation::kInvalidAnimationIndex ? -1
+                                                                        : c.root_motion_node_index);
+      if (editInt("Root Motion Node", root_node)) {
+        c.root_motion_node_index =
+            root_node < 0 ? animation::kInvalidAnimationIndex : static_cast<uint32_t>(root_node);
+      }
+      if (c.root_motion_delta.position) {
+        const auto delta = *c.root_motion_delta.position;
+        ImGui::Text("Root Delta Pos: %.3f %.3f %.3f", delta.x, delta.y, delta.z);
+      }
+
+      if (!c.state_machine.states.empty()) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("State Machine");
+        ImGui::Text("Current State: %u", static_cast<unsigned int>(c.current_state_index));
+        if (c.current_state_index < c.state_machine.states.size()) {
+          ImGui::Text("Name: %s", c.state_machine.states[c.current_state_index].name.c_str());
+        }
+        ImGui::Text("State Time: %.3f", c.state_time_seconds);
+        if (c.transition.active) {
+          ImGui::Text("Transition: %u -> %u (%.3f / %.3f)",
+                      static_cast<unsigned int>(c.transition.from_state_index),
+                      static_cast<unsigned int>(c.transition.to_state_index),
+                      c.transition.elapsed_seconds,
+                      c.transition.duration_seconds);
+        } else {
+          ImGui::TextUnformatted("Transition: none");
+        }
+        for (auto& parameter : c.state_machine.parameters) {
+          ImGui::PushID(parameter.name.c_str());
+          ImGui::Text("%s (%s)", parameter.name.c_str(), parameterTypeName(parameter.type));
+          switch (parameter.type) {
+            case components::AnimatorParameterType::Bool:
+              editBool("Value", parameter.bool_value);
+              break;
+            case components::AnimatorParameterType::Int:
+              editInt("Value", parameter.int_value);
+              break;
+            case components::AnimatorParameterType::Float:
+              editFloat("Value", parameter.float_value);
+              break;
+            case components::AnimatorParameterType::Trigger:
+              if (ImGui::Button("Fire")) {
+                parameter.trigger_value = true;
+              }
+              ImGui::SameLine();
+              if (ImGui::Button("Reset")) {
+                parameter.trigger_value = false;
+              }
+              ImGui::SameLine();
+              ImGui::Text("Armed: %s", parameter.trigger_value ? "yes" : "no");
+              break;
+          }
+          ImGui::PopID();
+        }
+      }
+
+      if (!c.skeletons.empty() || !c.skins.empty()) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Rig");
+        ImGui::Text("Skeletons: %zu", c.skeletons.size());
+        for (size_t skeleton_index = 0; skeleton_index < c.skeletons.size(); ++skeleton_index) {
+          const auto& skeleton = c.skeletons[skeleton_index];
+          ImGui::Text("Skeleton %zu: %s (%zu joints)",
+                      skeleton_index,
+                      skeleton.name.c_str(),
+                      skeleton.joints.size());
+        }
+        ImGui::Text("Skins: %zu", c.skins.size());
+        for (size_t skin_index = 0; skin_index < c.skins.size(); ++skin_index) {
+          const auto& skin = c.skins[skin_index];
+          ImGui::Text("Skin %zu: %s (%zu joints)",
+                      skin_index,
+                      skin.name.c_str(),
+                      skin.joint_node_indices.size());
+        }
+      }
+
+      if (!c.event_queue.empty()) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Events");
+        for (const auto& event : c.event_queue) {
+          ImGui::Text("%s @ %.3f", event.name.c_str(), event.time_seconds);
+        }
+      }
+    }
+  }
+  if (world_->has<components::SkinnedMeshComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Skinned Mesh")) {
+      auto& c = world_->get<components::SkinnedMeshComponent>(node.entity);
+      editBool("Enabled", c.enabled);
+      int path = static_cast<int>(c.skinning_path);
+      const char* paths[] = {"CPU", "GPU", "CPU fallback"};
+      if (editEnumCombo("Skinning Path", path, paths, 3)) {
+        path = std::clamp(path, 0, 2);
+        c.skinning_path = static_cast<components::SkinningPath>(path);
+      }
+      const bool gpu_requested = c.skinning_path == components::SkinningPath::Gpu;
+      const bool palette_within_capacity =
+          c.joint_palette.size() <= components::kMaxSkinningJointsPerDraw;
+      const bool gpu_draw_ready =
+          c.enabled && gpu_requested && c.palette_valid && !c.joint_palette.empty() &&
+          palette_within_capacity;
+      ImGui::Text("Runtime: %s path, palette %s, GPU draw %s",
+                  skinningPathName(c.skinning_path),
+                  c.palette_valid ? "valid" : "invalid",
+                  gpu_draw_ready ? "ready" : "not ready");
+      ImGui::Text("Renderer Mesh: %s", rendererMeshStateName(c));
+      ImGui::Text("Skin Index: %u", static_cast<unsigned int>(c.skin_index));
+      ImGui::Text("Bind Vertices: %zu", c.bind_mesh.vertices.size());
+      ImGui::Text("Influences: %zu", c.vertex_influences.size());
+      ImGui::Text("Joints: %zu", c.joint_entities.size());
+      ImGui::Text("Palette: %s (%zu/%u matrices)",
+                  c.palette_valid ? "valid" : "invalid",
+                  c.joint_palette.size(),
+                  static_cast<unsigned int>(components::kMaxSkinningJointsPerDraw));
+      ImGui::Text("Inverse Bind Matrices: %zu", c.inverse_bind_matrices.size());
+      if (!c.diagnostic.empty()) {
+        ImGui::TextWrapped("Diagnostic: %s", c.diagnostic.c_str());
+      }
     }
   }
   if (world_->has<components::EnvironmentComponent>(node.entity)) {

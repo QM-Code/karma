@@ -1,6 +1,6 @@
 PROJECT_NAME           = "Karma Engine"
 PROJECT_BRIEF          = "C++20 ECS-driven 3D game engine"
-PROJECT_LOGO           = @KARMA_DOXYGEN_INPUT_DIR@/docs/logo.svg
+PROJECT_LOGO           = @KARMA_DOXYGEN_INPUT_DIR@/docs/logo.png
 OUTPUT_DIRECTORY       = @KARMA_DOXYGEN_OUTPUT_DIR@
 
 INPUT                  = @KARMA_DOXYGEN_INPUT_DIR@/include/karma \

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="Karma Engine logo" width="180">
+  <img src="docs/logo.png" alt="Karma Engine logo" width="180">
 </p>
 
 # Karma Engine

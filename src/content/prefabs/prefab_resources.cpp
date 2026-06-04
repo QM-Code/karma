@@ -1,5 +1,7 @@
 #include "karma/content/prefabs/prefab_resource_context.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -74,6 +76,14 @@ std::string cacheKey(const std::filesystem::path& directory) {
     absolute = directory;
   }
   return absolute.lexically_normal().string();
+}
+
+std::string lowercaseExtension(const std::filesystem::path& path) {
+  std::string extension = path.extension().string();
+  std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return extension;
 }
 
 bool readRequiredString(const Json& object,
@@ -225,7 +235,14 @@ bool loadResources(const std::filesystem::path& directory,
     const std::filesystem::path texture_path = directory / texture_entry.path;
     std::optional<content::Rgba8Image> image = content::loadRgba8Image(texture_path);
     if (!image.has_value() || !image->valid()) {
-      spdlog::error("Prefab texture '{}' failed to load", texture_path.string());
+      if (lowercaseExtension(texture_path) == ".exr") {
+        spdlog::error(
+            "Prefab texture '{}' references OpenEXR, but prefab resources currently upload "
+            "RGBA8 textures only",
+            texture_path.string());
+      } else {
+        spdlog::error("Prefab texture '{}' failed to load", texture_path.string());
+      }
       cleanupLoadedResources(loaded);
       return false;
     }

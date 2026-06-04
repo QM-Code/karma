@@ -104,16 +104,16 @@ math::Color mixColor(const math::Color& a, const math::Color& b, float t) {
   };
 }
 
+math::Color withAlpha(math::Color color, float alpha) {
+  color.a = alpha;
+  return color;
+}
+
 void applyOrbAccent(ecs::World& world,
+                    renderer::MaterialLibrary* materials,
                     const prefabs::PrefabInstance& instance,
-                    const math::Color& color) {
-  auto setEndColor = [&](std::string_view name, math::Color end_color) {
-    const ecs::Entity entity = instance.find(name);
-    if (world.isAlive(entity) &&
-        world.has<components::ParticleEffectOverrideComponent>(entity)) {
-      world.get<components::ParticleEffectOverrideComponent>(entity).end_color = end_color;
-    }
-  };
+                    const math::Color& color,
+                    std::string_view shell_material_key) {
   auto setStartAndEndColor =
       [&](std::string_view name, math::Color start_color, math::Color end_color) {
         const ecs::Entity entity = instance.find(name);
@@ -126,16 +126,31 @@ void applyOrbAccent(ecs::World& world,
         }
       };
 
-  setEndColor("core", scaleColor(color, 0.85f, 0.92f, 0.85f, 0.0f));
-  setEndColor("arcs", scaleColor(color, 0.92f, 0.98f, 0.92f, 0.0f));
+  setStartAndEndColor("core",
+                      withAlpha(mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.18f), 0.98f),
+                      scaleColor(color, 0.95f, 1.0f, 0.95f, 0.0f));
+  setStartAndEndColor("arcs",
+                      withAlpha(mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.08f), 1.0f),
+                      scaleColor(color, 1.0f, 1.0f, 1.0f, 0.0f));
   setStartAndEndColor("halo",
-                      scaleColor(color, 0.28f, 0.48f, 0.28f, 0.08f),
-                      scaleColor(color, 0.12f, 0.22f, 0.12f, 0.0f));
+                      scaleColor(color, 0.45f, 0.72f, 0.45f, 0.14f),
+                      scaleColor(color, 0.25f, 0.40f, 0.25f, 0.0f));
+
+  const ecs::Entity shell_entity = instance.find("shell");
+  if (!shell_material_key.empty() && materials != nullptr && world.isAlive(shell_entity) &&
+      world.has<components::MeshComponent>(shell_entity)) {
+    auto& shell_mesh = world.get<components::MeshComponent>(shell_entity);
+    const std::string material_key(shell_material_key);
+    const math::Color shell_tint =
+        withAlpha(mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.18f), 1.0f);
+    materials->registerFromMeshTint(material_key, shell_mesh.mesh_key, shell_tint);
+    shell_mesh.material_key = material_key;
+  }
 
   const ecs::Entity light_entity = instance.find("glow");
   if (world.isAlive(light_entity) && world.has<components::LightComponent>(light_entity)) {
     world.get<components::LightComponent>(light_entity).color =
-        mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.34f);
+        mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.22f);
   }
 }
 
@@ -431,7 +446,9 @@ class PrefabGalleryExample final : public app::GameInterface {
       if (!orb.has_value()) {
         spdlog::error("Prefab gallery failed to instantiate {} orb", variant.name);
       } else {
-        applyOrbAccent(*world, *orb, variant.orb_accent);
+        const std::string orb_material_key =
+            "gallery_orb_shell_" + std::string(variant.name);
+        applyOrbAccent(*world, materials, *orb, variant.orb_accent, orb_material_key);
       }
 
       const auto wave = prefabs::instantiatePrefab(

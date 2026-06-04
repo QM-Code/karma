@@ -214,6 +214,29 @@ Recent particle-side work already in the tree:
 - EXR source folders for the explosion are reference assets only, not runtime
   dependencies
 
+2026-06-03 prefab visual session notes:
+
+- explosion flipbooks use committed runtime PNG atlases baked from authored EXR
+  source sequences; OpenEXR files remain source assets and the runtime prefab
+  resource path still uploads `RGBA8`
+- the bake utility is
+  [examples/assets/prefabs/explosion/source/bake_exr_flipbooks.py](examples/assets/prefabs/explosion/source/bake_exr_flipbooks.py)
+- energy orb shells use a dedicated smooth transparent mesh at
+  [examples/assets/orb_shell.glb](examples/assets/orb_shell.glb)
+- prefab gallery orb variants tint the shell material and use more saturated
+  particle start/end colors so red, blue, green, and purple read clearly
+- wave and volumetric-sphere prefabs currently use `center_opacity = 0.62`
+- prefab tests use always-on `KARMA_REQUIRE` checks and validate sidecar texture
+  upload metadata, including the EXR-derived flipbook atlas sizes
+
+Validation for that pass:
+
+```bash
+cmake --build build --target karma_prefab_tests karma_prefab_gallery_example karma_energy_orb_example karma_wave_example karma_volumetric_sphere_prefab_example karma_explosion_stress_example -j2
+ctest --test-dir build -R karma_prefab_tests --output-on-failure
+git diff --check
+```
+
 If continuing there, start with:
 
 - [docs/PARTICLE_SYSTEM.md](docs/PARTICLE_SYSTEM.md)

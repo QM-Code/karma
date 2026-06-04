@@ -35,7 +35,7 @@
           "color": [0.2, 1, 0.36, 1],
           "emissive_color": [0.48, 2.4, 0.864, 1],
           "radius": 2.4,
-          "center_opacity": 0.3,
+          "center_opacity": 0.62,
           "distortion_strength": 1.8,
           "noise_strength": 1,
           "overlay_depth": 0.12,

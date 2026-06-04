@@ -84,10 +84,12 @@ The old controller timings are now serialized in `prefab.json`:
 
 ## Assets
 
-Committed PNG atlases live under `textures/`. Core and smoke flipbooks use the
-fast procedural visual defaults baked into PNG assets. EXR source folders may
-remain as reference material, but they are no longer runtime dependencies for
-the explosion prefab.
+Committed PNG atlases live under `textures/`. Core and smoke flipbooks use
+`*_exr.png` atlases baked from the authored EXR source sequences with 400px
+frames, 4px borders, and 4px spacing. The current prefab resource loader still
+uploads RGBA8 textures and does not decode OpenEXR directly, so EXR source
+content must be converted to a runtime atlas format before being referenced by
+`prefab.resources.json`.
 
 ## Reference Examples
 

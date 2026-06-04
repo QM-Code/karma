@@ -9,8 +9,8 @@
     { "key": "prefabs/explosion/shock_ring_atlas", "path": "textures/shock_ring_atlas.png" },
     { "key": "prefabs/explosion/scorch_atlas", "path": "textures/scorch_atlas.png" },
     { "key": "prefabs/explosion/debris_atlas", "path": "textures/debris_atlas.png" },
-    { "key": "prefabs/explosion/explosion00_flipbook", "path": "textures/explosion00_flipbook.png" },
-    { "key": "prefabs/explosion/explosion01_smoke_flipbook", "path": "textures/explosion01_smoke_flipbook.png" }
+    { "key": "prefabs/explosion/explosion00_flipbook", "path": "textures/explosion00_flipbook_exr.png" },
+    { "key": "prefabs/explosion/explosion01_smoke_flipbook", "path": "textures/explosion01_smoke_flipbook_exr.png" }
   ],
   "particle_effects": [
     { "key": "prefabs/explosion/flash", "path": "particles/explosion_flash.kpeffect" },
@@ -22,7 +22,7 @@
     { "key": "prefabs/explosion/scorch", "path": "particles/explosion_scorch.kpeffect" },
     { "key": "prefabs/explosion/debris", "path": "particles/explosion_debris.kpeffect" },
     { "key": "prefabs/explosion/embers", "path": "particles/explosion_embers.kpeffect" },
-    { "key": "prefabs/explosion/core_flipbook", "path": "particles/explosion_core_flipbook_fast.kpeffect" },
-    { "key": "prefabs/explosion/smoke_flipbook", "path": "particles/explosion_smoke_flipbook_fast.kpeffect" }
+    { "key": "prefabs/explosion/core_flipbook", "path": "particles/explosion_core_flipbook.kpeffect" },
+    { "key": "prefabs/explosion/smoke_flipbook", "path": "particles/explosion_smoke_flipbook.kpeffect" }
   ]
 }

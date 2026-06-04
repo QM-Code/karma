@@ -106,9 +106,10 @@ The shared explosion prefab now has the following presentation/runtime state:
 
 - the shock ring depth-tests correctly
 - the main smoke layers are darker than the earlier defaults
-- core and smoke flipbooks use committed prefab-local procedural atlases
-- opt-in EXR flipbook metadata targets `400x400` atlas frames
-- EXR source folders are reference assets, not runtime dependencies
+- core and smoke flipbooks use committed prefab-local PNG atlases baked from the
+  authored EXR source frames
+- EXR-derived flipbook metadata targets `400x400` atlas frames
+- EXR source folders remain source material, not direct runtime dependencies
 
 Primary files:
 
@@ -171,7 +172,8 @@ submission and includes simulation, packing, sorting, grouping, scene-copy, and
 draw-submission fields in one place.
 
 The explosion stress startup path now relies on committed prefab-local
-flipbook atlases, so there is no runtime flipbook-source selection to log.
+EXR-derived flipbook atlases, so there is no runtime flipbook-source selection
+to log.
 
 Key fields:
 

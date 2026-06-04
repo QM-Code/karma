@@ -24,15 +24,15 @@
         "LocalTransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
-          "scale": [1.3125, 1.3125, 1.3125]
+          "scale": [0.28875, 0.28875, 0.28875]
         },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
-          "scale": [1.3125, 1.3125, 1.3125]
+          "scale": [0.28875, 0.28875, 0.28875]
         },
         "MeshComponent": {
-          "mesh_key": "examples/assets/shot.glb",
+          "mesh_key": "examples/assets/orb_shell.glb",
           "material_key": "",
           "texture_key": "",
           "visible": true,
@@ -70,8 +70,8 @@
           "size_scale": 0.1875,
           "radius_scale": 0.1875,
           "velocity_scale": 0.1875,
-          "start_color": [1, 1, 1, 0.98],
-          "end_color": [0.153, 0.92, 0.238, 0]
+          "start_color": [0.3276, 1, 0.4096, 0.98],
+          "end_color": [0.171, 1, 0.266, 0]
         },
         "VisibilityComponent": {
           "visible": true,
@@ -110,8 +110,8 @@
           "size_scale": 0.1875,
           "radius_scale": 0.1875,
           "velocity_scale": 0.1875,
-          "start_color": [1, 1, 1, 1],
-          "end_color": [0.1656, 0.98, 0.2576, 0]
+          "start_color": [0.2456, 1, 0.3376, 1],
+          "end_color": [0.18, 1, 0.28, 0]
         },
         "VisibilityComponent": {
           "visible": true,
@@ -150,8 +150,8 @@
           "size_scale": 0.1875,
           "radius_scale": 0.1875,
           "velocity_scale": 0.1875,
-          "start_color": [0.0504, 0.48, 0.0784, 0.08],
-          "end_color": [0.0216, 0.22, 0.0336, 0]
+          "start_color": [0.081, 0.72, 0.126, 0.14],
+          "end_color": [0.045, 0.4, 0.07, 0]
         },
         "VisibilityComponent": {
           "visible": true,

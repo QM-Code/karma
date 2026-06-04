@@ -35,13 +35,43 @@ cmake -B build \
   -DKARMA_BUILD_RMLUI_DEMO=ON
 ```
 
-Headless build (no window or renderer backends, graphics demos disabled):
+### Headless Builds
+
+Headless builds compile the engine without window or renderer backends and
+disable graphics demos:
 
 ```bash
-cmake -B build \
+cmake -B build-headless \
   -DKARMA_HEADLESS=ON
-cmake --build build --target karma_network_demo
+cmake --build build-headless --target karma_network_demo
 ```
+
+This profile is build-supported for non-visual programs such as network/server
+targets, simulation or gameplay tests, and tools that do not need a GPU. In this
+mode `platform::CreateWindow` returns `nullptr`, and `EngineApp` skips
+`GraphicsDevice`, `RenderSystem`, and renderer-backed particle-system creation.
+Game code and runtime modules should treat `GameInterface::graphics` and
+`RuntimeModuleContext::graphics` as optional.
+
+Headless is not a full graphical-runtime equivalent. Renderer-facing APIs remain
+available to keep public types and components usable, but without a backend they
+no-op or return invalid handles. Graphics examples and the rendered navmesh
+example are not built.
+
+Headless is also not a minimal dependency preset. Content import, audio,
+physics, navigation, and networking remain controlled by their own options, so a
+default headless build can still build dependencies such as Assimp, miniaudio,
+Jolt, Recast/Detour, and ENet. Disable unused subsystems explicitly where the
+current backend factories support it, for example:
+
+```bash
+cmake -B build-headless \
+  -DKARMA_HEADLESS=ON \
+  -DKARMA_ENABLE_NAVIGATION=OFF
+```
+
+The current audio layer still requires one audio backend. Leave miniaudio
+enabled or select SDL audio rather than disabling both audio backends.
 
 ## Core Helpers
 Karma's foundational math and timing helpers live under `karma/core`.

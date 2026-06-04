@@ -56,6 +56,18 @@ cmake -S . -B build-headless -DKARMA_HEADLESS=ON
 cmake --build build-headless --target karma_network_demo --parallel
 ```
 
+`KARMA_HEADLESS` is a build-supported non-visual profile, not a full
+replacement for the graphical runtime. It disables window and render backends,
+debug UI, UI demos/adapters, graphics examples, and the rendered navmesh
+example. It is intended for network/server targets, simulation/gameplay logic,
+and tests that do not need a window or GPU. Runtime code should treat graphics
+handles as optional in this mode; renderer-facing APIs either no-op or return
+invalid handles when no backend exists.
+
+Headless is also not a minimal dependency preset by itself. Content import,
+audio, physics, navigation, and networking stay enabled by default unless their
+own CMake options are disabled.
+
 ## Major Features
 
 - ECS runtime with fixed-step updates, per-frame systems, scene graph transforms,
@@ -104,7 +116,9 @@ Common CMake switches:
 
 - `KARMA_FETCH_DEPS`: fetch missing third-party dependencies with CMake
   `FetchContent`.
-- `KARMA_HEADLESS`: disable window/render backends and graphics demos.
+- `KARMA_HEADLESS`: build-supported non-visual profile; disables window/render
+  backends and graphics demos, but leaves other optional subsystems controlled
+  by their own switches.
 - `KARMA_RENDER_BACKEND_DILIGENT`: enable the Diligent renderer.
 - `KARMA_WINDOW_BACKEND_GLFW` / `KARMA_WINDOW_BACKEND_SDL`: select one window
   backend.

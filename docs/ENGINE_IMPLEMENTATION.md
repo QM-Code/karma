@@ -31,6 +31,11 @@ Karma is a C++20 client/server 3D game engine with a layered architecture and a 
 ## Optional Dependencies
 Optional dependencies are controlled via CMake (window/audio/physics/network backends). When `KARMA_FETCH_DEPS=ON`,
 missing dependencies are fetched automatically. The ImGui demo is optional via `KARMA_BUILD_IMGUI_DEMO`.
+`KARMA_HEADLESS=ON` is a supported non-visual build profile: it disables
+window/render backends, debug UI, UI demos/adapters, graphics examples, and the
+rendered navmesh example. It does not disable content import, audio, physics,
+navigation, or networking by itself; those remain controlled by their individual
+CMake switches.
 
 ## Build System Highlights
 - Uses `FetchContent` for dependencies when `KARMA_FETCH_DEPS=ON`.

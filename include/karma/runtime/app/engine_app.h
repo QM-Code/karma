@@ -5,8 +5,10 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <vector>
 
+#include "karma/core/math/types.h"
 #include "karma/runtime/app/game_interface.h"
 #include "karma/runtime/app/runtime_module.h"
 #include "karma/core/time.h"
@@ -42,7 +44,18 @@ namespace karma::app {
 /// can expose some renderer fields for live tuning, but this struct is the
 /// canonical startup configuration.
 struct EngineConfig {
+  struct LoadingSplashConfig {
+    bool enabled = false;
+    bool async_start = true;
+    int target_fps = 30;
+    std::filesystem::path image_path;
+    math::Color background{0.0f, 0.0f, 0.0f, 1.0f};
+    math::Color accent{0.24f, 0.56f, 1.0f, 1.0f};
+    math::Color foreground{1.0f, 1.0f, 1.0f, 1.0f};
+  };
+
   platform::WindowConfig window{};
+  LoadingSplashConfig loading_splash{};
   float fixed_dt = 1.0f / 60.0f;
   float max_frame_dt = 0.25f;
   // Default to the low-latency present path. In the Diligent Vulkan backend this uses
@@ -119,6 +132,9 @@ class EngineApp {
   void initSubsystems();
   void shutdownSubsystems();
   void syncSceneEntities();
+  bool ensureLoadingSplashTexture();
+  void releaseLoadingSplashTexture();
+  bool renderLoadingSplash(float progress);
   void warmUpRenderer();
   RuntimeModuleContext makeRuntimeModuleContext();
 #if defined(KARMA_DEBUG_UI)
@@ -141,6 +157,10 @@ class EngineApp {
   scene::Scene scene_;
   renderer::MaterialLibrary materials_;
   particles::ParticleLibrary particle_effects_;
+  renderer::TextureId loading_splash_texture_ = renderer::kInvalidTexture;
+  int loading_splash_texture_width_ = 0;
+  int loading_splash_texture_height_ = 0;
+  std::mutex loading_splash_graphics_mutex_;
   systems::SystemGraph systems_;
   std::vector<std::unique_ptr<RuntimeModule>> runtime_modules_;
   EngineConfig config_{};

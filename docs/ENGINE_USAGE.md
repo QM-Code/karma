@@ -119,6 +119,29 @@ KARMA_ENGINE_VSYNC=1 ./build/karma_navmesh_example
 Use this when tear-free pacing is more important than input latency, or when the
 target driver/compositor does not exhibit FIFO present stalls.
 
+## Loading Splash
+Apps with expensive startup can opt into a lightweight engine-owned loading
+splash:
+
+```cpp
+karma::app::EngineConfig config;
+config.loading_splash.enabled = true;
+config.loading_splash.image_path = "docs/logo.png";
+config.loading_splash.async_start = true;
+config.loading_splash.target_fps = 30;
+config.loading_splash.accent = {0.24f, 0.56f, 1.0f, 1.0f};
+```
+
+The splash is off by default. When enabled, `EngineApp` presents a simple
+provider-neutral UI frame as soon as the window and renderer are available. Set
+`image_path` to a PNG asset, such as the repo logo at `docs/logo.png`.
+
+By default, splash-enabled apps also run `GameInterface::onStart()` on a worker
+thread while the main thread keeps presenting the splash at `target_fps`.
+Prefab sidecar texture uploads are serialized against splash rendering. Apps
+that perform custom direct renderer work inside `onStart()` can set
+`async_start = false` or move those renderer calls into the first normal frame.
+
 Local-light / point-shadow sanity check:
 
 ```bash

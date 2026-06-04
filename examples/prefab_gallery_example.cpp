@@ -538,6 +538,8 @@ int main() {
   karma::app::EngineConfig config;
   config.window.title = "Karma Prefab Gallery Example";
   config.window.samples = 1;
+  config.loading_splash.enabled = true;
+  config.loading_splash.image_path = karma::demo::resolveExamplePath("docs/logo.png");
   config.cursor_visible = true;
   config.enable_anisotropy = true;
   config.anisotropy_level = 8;

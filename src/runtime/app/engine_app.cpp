@@ -1,9 +1,12 @@
 #include "karma/runtime/app/engine_app.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <thread>
 #include <string>
 
 #include <spdlog/spdlog.h>
@@ -16,6 +19,8 @@
 #include "karma/runtime/debug/debug_overlay.h"
 #include "karma/core/time.h"
 #include "karma/world/scene/transform_hierarchy.h"
+
+#include "../../../third_party/stb_image.h"
 
 namespace karma::app {
 namespace {
@@ -40,6 +45,72 @@ float envFloat(const char* value, float fallback) {
   } catch (const std::exception&) {
     return fallback;
   }
+}
+
+uint32_t packUiColor(math::Color color) {
+  auto pack_channel = [](float value) {
+    return static_cast<uint32_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+  };
+  const uint32_t r = pack_channel(color.r);
+  const uint32_t g = pack_channel(color.g);
+  const uint32_t b = pack_channel(color.b);
+  const uint32_t a = pack_channel(color.a);
+  return r | (g << 8u) | (b << 16u) | (a << 24u);
+}
+
+math::Color scaledColor(math::Color color, float scale, float alpha) {
+  color.r *= scale;
+  color.g *= scale;
+  color.b *= scale;
+  color.a *= alpha;
+  return color;
+}
+
+void addUiQuad(UIDrawData& out,
+               float x,
+               float y,
+               float w,
+               float h,
+               const math::Color& color) {
+  if (w <= 0.0f || h <= 0.0f) {
+    return;
+  }
+  const uint32_t rgba = packUiColor(color);
+  const uint32_t base = static_cast<uint32_t>(out.vertices.size());
+  out.vertices.push_back(UIVertex{.x = x, .y = y, .rgba = rgba});
+  out.vertices.push_back(UIVertex{.x = x + w, .y = y, .rgba = rgba});
+  out.vertices.push_back(UIVertex{.x = x + w, .y = y + h, .rgba = rgba});
+  out.vertices.push_back(UIVertex{.x = x, .y = y + h, .rgba = rgba});
+  out.indices.push_back(base);
+  out.indices.push_back(base + 1u);
+  out.indices.push_back(base + 2u);
+  out.indices.push_back(base);
+  out.indices.push_back(base + 2u);
+  out.indices.push_back(base + 3u);
+}
+
+void addUiTexturedQuad(UIDrawData& out,
+                       float x,
+                       float y,
+                       float w,
+                       float h,
+                       UITextureHandle texture,
+                       const math::Color& color) {
+  if (w <= 0.0f || h <= 0.0f || texture == 0) {
+    return;
+  }
+  const uint32_t rgba = packUiColor(color);
+  const uint32_t base = static_cast<uint32_t>(out.vertices.size());
+  out.vertices.push_back(UIVertex{.x = x, .y = y, .u = 0.0f, .v = 0.0f, .rgba = rgba});
+  out.vertices.push_back(UIVertex{.x = x + w, .y = y, .u = 1.0f, .v = 0.0f, .rgba = rgba});
+  out.vertices.push_back(UIVertex{.x = x + w, .y = y + h, .u = 1.0f, .v = 1.0f, .rgba = rgba});
+  out.vertices.push_back(UIVertex{.x = x, .y = y + h, .u = 0.0f, .v = 1.0f, .rgba = rgba});
+  out.indices.push_back(base);
+  out.indices.push_back(base + 1u);
+  out.indices.push_back(base + 2u);
+  out.indices.push_back(base);
+  out.indices.push_back(base + 2u);
+  out.indices.push_back(base + 3u);
 }
 
 }  // namespace
@@ -252,6 +323,7 @@ void EngineApp::shutdownSubsystems() {
       module->onDetach();
     }
   }
+  releaseLoadingSplashTexture();
   graphics_.reset();
   window_.reset();
   running_ = false;
@@ -270,6 +342,152 @@ void EngineApp::setCursorVisible(bool visible) {
     window_->setCursorVisible(visible);
   }
   config_.cursor_visible = visible;
+}
+
+bool EngineApp::ensureLoadingSplashTexture() {
+  if (loading_splash_texture_ != renderer::kInvalidTexture) {
+    return true;
+  }
+  if (!graphics_ || config_.loading_splash.image_path.empty()) {
+    return false;
+  }
+
+  int width = 0;
+  int height = 0;
+  int comp = 0;
+  unsigned char* pixels =
+      stbi_load(config_.loading_splash.image_path.string().c_str(), &width, &height, &comp, 4);
+  if (!pixels || width <= 0 || height <= 0) {
+    if (pixels) {
+      stbi_image_free(pixels);
+    }
+    spdlog::warn("Loading splash image '{}' could not be loaded",
+                 config_.loading_splash.image_path.string());
+    return false;
+  }
+
+  const renderer::TextureId texture = graphics_->createTextureRGBA8(width, height, pixels);
+  stbi_image_free(pixels);
+  if (texture == renderer::kInvalidTexture) {
+    spdlog::warn("Loading splash image '{}' could not be uploaded",
+                 config_.loading_splash.image_path.string());
+    return false;
+  }
+
+  loading_splash_texture_ = texture;
+  loading_splash_texture_width_ = width;
+  loading_splash_texture_height_ = height;
+  return true;
+}
+
+void EngineApp::releaseLoadingSplashTexture() {
+  std::lock_guard<std::mutex> lock(loading_splash_graphics_mutex_);
+  if (graphics_ && loading_splash_texture_ != renderer::kInvalidTexture) {
+    graphics_->destroyTexture(loading_splash_texture_);
+  }
+  loading_splash_texture_ = renderer::kInvalidTexture;
+  loading_splash_texture_width_ = 0;
+  loading_splash_texture_height_ = 0;
+}
+
+bool EngineApp::renderLoadingSplash(float progress) {
+  if (!config_.loading_splash.enabled || !window_ || !graphics_) {
+    return true;
+  }
+
+  window_->pollEvents();
+  const bool close_requested = window_->shouldClose();
+  window_->clearEvents();
+  if (close_requested) {
+    return false;
+  }
+
+  int fb_width = 0;
+  int fb_height = 0;
+  window_->getFramebufferSize(fb_width, fb_height);
+  if (fb_width <= 0 || fb_height <= 0) {
+    return true;
+  }
+
+  std::lock_guard<std::mutex> lock(loading_splash_graphics_mutex_);
+  const auto& splash = config_.loading_splash;
+  const float width = static_cast<float>(fb_width);
+  const float height = static_cast<float>(fb_height);
+  const float clamped_progress = std::clamp(progress, 0.0f, 1.0f);
+  const bool has_splash_image = ensureLoadingSplashTexture();
+  const float unit = std::clamp(height / 160.0f, 3.0f, 7.0f);
+  const float center_x = width * 0.5f;
+  const float image_max_w = width * 0.48f;
+  const float image_max_h = height * 0.56f;
+  const float image_aspect =
+      loading_splash_texture_height_ > 0
+          ? static_cast<float>(loading_splash_texture_width_) /
+                static_cast<float>(loading_splash_texture_height_)
+          : 1.0f;
+  float image_w = image_max_w;
+  float image_h = image_w / std::max(image_aspect, 0.01f);
+  if (image_h > image_max_h) {
+    image_h = image_max_h;
+    image_w = image_h * image_aspect;
+  }
+  const float image_x = center_x - image_w * 0.5f;
+  const float image_y = height * 0.45f - image_h * 0.5f;
+  const float bar_w = std::min(std::max(width * 0.26f, unit * 34.0f), image_w);
+  const float bar_h = std::max(3.0f, unit * 0.65f);
+  const float bar_x = center_x - bar_w * 0.5f;
+  const float bar_y = std::min(height - unit * 10.0f, image_y + image_h + unit * 5.5f);
+
+  UIDrawData draw_data;
+  uint32_t command_index_offset = 0;
+  auto append_command = [&](UITextureHandle texture) {
+    const uint32_t index_count =
+        static_cast<uint32_t>(draw_data.indices.size()) - command_index_offset;
+    if (index_count == 0u) {
+      return;
+    }
+    UIDrawCmd cmd{};
+    cmd.index_offset = command_index_offset;
+    cmd.index_count = index_count;
+    cmd.texture = texture;
+    draw_data.commands.push_back(cmd);
+    command_index_offset += index_count;
+  };
+
+  addUiQuad(draw_data, 0.0f, 0.0f, width, height, splash.background);
+  append_command(0);
+
+  const math::Color accent_soft = scaledColor(splash.accent, 0.18f, 1.0f);
+  if (has_splash_image) {
+    addUiTexturedQuad(draw_data,
+                      image_x,
+                      image_y,
+                      image_w,
+                      image_h,
+                      static_cast<UITextureHandle>(loading_splash_texture_),
+                      splash.foreground);
+    append_command(static_cast<UITextureHandle>(loading_splash_texture_));
+  }
+
+  addUiQuad(draw_data, bar_x, bar_y, bar_w, bar_h, accent_soft);
+  addUiQuad(draw_data,
+            bar_x,
+            bar_y,
+            std::max(bar_h, bar_w * clamped_progress),
+            bar_h,
+            splash.accent);
+  append_command(0);
+
+  renderer::FrameInfo frame{};
+  frame.width = fb_width;
+  frame.height = fb_height;
+  frame.delta_time = 0.0f;
+  graphics_->beginFrame(frame);
+  graphics_->renderUi(draw_data);
+  graphics_->endFrame();
+#if !defined(BZ3_RENDER_BACKEND_DILIGENT)
+  window_->swapBuffers();
+#endif
+  return true;
 }
 
 void EngineApp::start(GameInterface& game, const EngineConfig& config) {
@@ -338,6 +556,11 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   section_end = core::SteadyClock::now();
   log_startup_stage("graphics settings", section_start, section_end);
 
+  if (!renderLoadingSplash(0.18f)) {
+    shutdownSubsystems();
+    return;
+  }
+
   game_ = &game;
   running_ = true;
   accumulator_ = 0.0f;
@@ -358,6 +581,19 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   prefabs::bindPrefabResourceContext(prefabs::PrefabResourceContext{
       .graphics = graphics_.get(),
       .particle_effects = &particle_effects_,
+      .create_texture_rgba8 = [this](int width,
+                                      int height,
+                                      const void* pixels) -> renderer::TextureId {
+        std::lock_guard<std::mutex> lock(loading_splash_graphics_mutex_);
+        return graphics_ ? graphics_->createTextureRGBA8(width, height, pixels)
+                         : renderer::kInvalidTexture;
+      },
+      .destroy_texture = [this](renderer::TextureId texture) {
+        std::lock_guard<std::mutex> lock(loading_splash_graphics_mutex_);
+        if (graphics_) {
+          graphics_->destroyTexture(texture);
+        }
+      },
   });
   section_end = core::SteadyClock::now();
   log_startup_stage("bind prefab context", section_start, section_end);
@@ -371,10 +607,60 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   section_end = core::SteadyClock::now();
   log_startup_stage("runtime module attach", section_start, section_end);
 
+  auto shutdown_started_game = [&]() {
+    if (game_) {
+      game_->onShutdown();
+    }
+    shutdownSubsystems();
+    game_ = nullptr;
+  };
+
   section_start = section_end;
-  game_->onStart();
+  bool startup_close_requested = false;
+  std::exception_ptr startup_exception;
+  if (config_.loading_splash.enabled && config_.loading_splash.async_start) {
+    std::atomic<bool> startup_done{false};
+    std::thread startup_thread([&]() {
+      try {
+        game_->onStart();
+      } catch (...) {
+        startup_exception = std::current_exception();
+      }
+      startup_done.store(true, std::memory_order_release);
+    });
+
+    const int target_fps = std::clamp(config_.loading_splash.target_fps, 1, 240);
+    const auto frame_interval = std::chrono::milliseconds(1000 / target_fps);
+    const auto async_start_time = core::SteadyClock::now();
+    auto next_frame_time = std::chrono::steady_clock::now();
+    while (!startup_done.load(std::memory_order_acquire)) {
+      const double elapsed_seconds = core::elapsedSeconds(async_start_time,
+                                                          core::SteadyClock::now());
+      const float progress =
+          std::min(0.58f, 0.18f + static_cast<float>(elapsed_seconds) * 0.10f);
+      if (!startup_close_requested && !renderLoadingSplash(progress)) {
+        startup_close_requested = true;
+      }
+      next_frame_time += frame_interval;
+      std::this_thread::sleep_until(next_frame_time);
+    }
+    startup_thread.join();
+  } else {
+    game_->onStart();
+  }
   section_end = core::SteadyClock::now();
   log_startup_stage("game onStart", section_start, section_end);
+
+  if (startup_exception) {
+    shutdownSubsystems();
+    game_ = nullptr;
+    std::rethrow_exception(startup_exception);
+  }
+
+  if (startup_close_requested || !renderLoadingSplash(0.62f)) {
+    shutdown_started_game();
+    return;
+  }
 
   section_start = section_end;
   systems_.update(world_, 0.0f);
@@ -404,6 +690,10 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                  core::elapsedMillisecondsSince(section_start));
     section_end = core::SteadyClock::now();
     log_startup_stage("engine environment setup", section_start, section_end);
+  }
+  if (!renderLoadingSplash(0.84f)) {
+    shutdown_started_game();
+    return;
   }
   warmUpRenderer();
   if (startup_diag) {

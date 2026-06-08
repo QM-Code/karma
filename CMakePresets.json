@@ -1,0 +1,85 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "portable",
+      "displayName": "Portable graphical build",
+      "binaryDir": "${sourceDir}/build/portable",
+      "cacheVariables": {
+        "KARMA_FETCH_DEPS": "ON",
+        "KARMA_BUILD_EXAMPLES": "ON",
+        "KARMA_BUILD_TESTS": "ON",
+        "KARMA_BUILD_RMLUI_DEMO": "OFF"
+      }
+    },
+    {
+      "name": "headless",
+      "displayName": "Headless build",
+      "binaryDir": "${sourceDir}/build/headless",
+      "cacheVariables": {
+        "KARMA_FETCH_DEPS": "ON",
+        "KARMA_BUILD_EXAMPLES": "ON",
+        "KARMA_BUILD_TESTS": "ON",
+        "KARMA_HEADLESS": "ON"
+      }
+    },
+    {
+      "name": "minimal-headless",
+      "displayName": "Minimal headless build",
+      "binaryDir": "${sourceDir}/build/minimal-headless",
+      "cacheVariables": {
+        "KARMA_FETCH_DEPS": "ON",
+        "KARMA_BUILD_EXAMPLES": "ON",
+        "KARMA_BUILD_TESTS": "ON",
+        "KARMA_HEADLESS": "ON",
+        "KARMA_ENABLE_AUDIO": "OFF",
+        "KARMA_ENABLE_NAVIGATION": "OFF",
+        "KARMA_NETWORK_BACKEND_ENET": "OFF",
+        "KARMA_PHYSICS_BACKEND_JOLT": "OFF",
+        "KARMA_PHYSICS_BACKEND_BULLET": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "portable",
+      "configurePreset": "portable"
+    },
+    {
+      "name": "headless",
+      "configurePreset": "headless"
+    },
+    {
+      "name": "minimal-headless",
+      "configurePreset": "minimal-headless"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "portable",
+      "configurePreset": "portable",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "headless",
+      "configurePreset": "headless",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "minimal-headless",
+      "configurePreset": "minimal-headless",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

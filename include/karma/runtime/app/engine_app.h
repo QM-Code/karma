@@ -45,10 +45,9 @@ namespace karma::app {
 /// canonical startup configuration.
 struct EngineConfig {
   struct LoadingSplashConfig {
-    bool enabled = false;
-    bool async_start = true;
+    bool enabled = true;
     int target_fps = 30;
-    std::filesystem::path image_path;
+    std::filesystem::path image_path{"docs/logo.png"};
     math::Color background{0.0f, 0.0f, 0.0f, 1.0f};
     math::Color accent{0.24f, 0.56f, 1.0f, 1.0f};
     math::Color foreground{1.0f, 1.0f, 1.0f, 1.0f};
@@ -135,6 +134,7 @@ class EngineApp {
   bool ensureLoadingSplashTexture();
   void releaseLoadingSplashTexture();
   bool renderLoadingSplash(float progress);
+  bool presentInitialLoadingSplash(float progress);
   void warmUpRenderer();
   RuntimeModuleContext makeRuntimeModuleContext();
 #if defined(KARMA_DEBUG_UI)
@@ -161,6 +161,7 @@ class EngineApp {
   int loading_splash_texture_width_ = 0;
   int loading_splash_texture_height_ = 0;
   std::mutex loading_splash_graphics_mutex_;
+  bool loading_splash_presented_ = false;
   systems::SystemGraph systems_;
   std::vector<std::unique_ptr<RuntimeModule>> runtime_modules_;
   EngineConfig config_{};

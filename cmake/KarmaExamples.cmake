@@ -5,7 +5,13 @@ if (NOT KARMA_HEADLESS)
 
   target_link_libraries(karma_example PRIVATE karma)
 
-  if (KARMA_XXHASH_ARCHIVE AND CMAKE_AR AND CMAKE_C_COMPILER)
+  if (KARMA_DILIGENT_REPACK_XXHASH
+      AND KARMA_XXHASH_ARCHIVE
+      AND CMAKE_AR
+      AND CMAKE_RANLIB
+      AND CMAKE_C_COMPILER
+      AND UNIX
+      AND NOT MSVC)
     set(KARMA_XXHASH_STAMP "${CMAKE_BINARY_DIR}/karma_xxhash.stamp")
     add_custom_command(
       OUTPUT ${KARMA_XXHASH_STAMP}
@@ -152,13 +158,15 @@ if (NOT KARMA_HEADLESS)
   endif()
 endif()
 
-add_executable(karma_network_demo
-  examples/network_demo.cpp
-)
+if (KARMA_NETWORK_BACKEND_ENET)
+  add_executable(karma_network_demo
+    examples/network_demo.cpp
+  )
 
-target_link_libraries(karma_network_demo PRIVATE karma)
-if (TARGET karma_fix_xxhash)
-  add_dependencies(karma_network_demo karma_fix_xxhash)
+  target_link_libraries(karma_network_demo PRIVATE karma)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_network_demo karma_fix_xxhash)
+  endif()
 endif()
 
 if (KARMA_ENABLE_NAVIGATION AND NOT KARMA_HEADLESS)

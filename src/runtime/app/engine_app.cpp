@@ -6,8 +6,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <thread>
 #include <string>
+#include <system_error>
 
 #include <spdlog/spdlog.h>
 
@@ -45,6 +47,40 @@ float envFloat(const char* value, float fallback) {
   } catch (const std::exception&) {
     return fallback;
   }
+}
+
+std::filesystem::path resolveStartupPath(const std::filesystem::path& path) {
+  if (path.empty()) {
+    return {};
+  }
+
+  std::error_code ec;
+  if (path.is_absolute()) {
+    return path;
+  }
+
+  if (std::filesystem::exists(path, ec)) {
+    return path;
+  }
+
+  std::filesystem::path cwd = std::filesystem::current_path(ec);
+  if (ec) {
+    return path;
+  }
+  for (int depth = 0; depth < 8; ++depth) {
+    const std::filesystem::path candidate = cwd / path;
+    ec.clear();
+    if (std::filesystem::exists(candidate, ec)) {
+      return candidate;
+    }
+    const std::filesystem::path parent = cwd.parent_path();
+    if (parent.empty() || parent == cwd) {
+      break;
+    }
+    cwd = parent;
+  }
+
+  return path;
 }
 
 uint32_t packUiColor(math::Color color) {
@@ -388,6 +424,7 @@ void EngineApp::releaseLoadingSplashTexture() {
   loading_splash_texture_ = renderer::kInvalidTexture;
   loading_splash_texture_width_ = 0;
   loading_splash_texture_height_ = 0;
+  loading_splash_presented_ = false;
 }
 
 bool EngineApp::renderLoadingSplash(float progress) {
@@ -484,9 +521,28 @@ bool EngineApp::renderLoadingSplash(float progress) {
   graphics_->beginFrame(frame);
   graphics_->renderUi(draw_data);
   graphics_->endFrame();
+  loading_splash_presented_ = true;
 #if !defined(BZ3_RENDER_BACKEND_DILIGENT)
   window_->swapBuffers();
 #endif
+  return true;
+}
+
+bool EngineApp::presentInitialLoadingSplash(float progress) {
+  if (!config_.loading_splash.enabled || !window_ || !graphics_) {
+    return true;
+  }
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(750);
+  while (!loading_splash_presented_) {
+    if (!renderLoadingSplash(progress)) {
+      return false;
+    }
+    if (loading_splash_presented_ || std::chrono::steady_clock::now() >= deadline) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(8));
+  }
   return true;
 }
 
@@ -496,6 +552,8 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
   spdlog::set_level(spdlog::level::trace);
   config_ = config;
+  loading_splash_presented_ = false;
+  config_.loading_splash.image_path = resolveStartupPath(config_.loading_splash.image_path);
   if (const char* vsync_env = std::getenv("KARMA_ENGINE_VSYNC")) {
     config_.vsync = envFlagEnabled(vsync_env);
     spdlog::info("KARMA_ENGINE_VSYNC override: {}", config_.vsync ? "on" : "off");
@@ -520,6 +578,11 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   initSubsystems();
   section_end = core::SteadyClock::now();
   log_startup_stage("init subsystems", section_start, section_end);
+
+  if (!presentInitialLoadingSplash(0.05f)) {
+    shutdownSubsystems();
+    return;
+  }
 
 #if defined(KARMA_DEBUG_UI)
   section_start = section_end;
@@ -618,7 +681,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   section_start = section_end;
   bool startup_close_requested = false;
   std::exception_ptr startup_exception;
-  if (config_.loading_splash.enabled && config_.loading_splash.async_start) {
+  if (config_.loading_splash.enabled) {
     std::atomic<bool> startup_done{false};
     std::thread startup_thread([&]() {
       try {

@@ -4,14 +4,67 @@
 Build and run the default sample:
 
 ```bash
+./build.sh
+./build/portable/karma_example
+```
+
+On Windows:
+
+```bat
+build.bat
+build\portable\Release\karma_example.exe
+```
+
+Useful script options:
+
+```bash
+./build.sh --headless
+./build.sh --headless-only --minimal-headless --no-examples --no-tests
+./build.sh --no-examples --config Debug --jobs 4
+```
+
+Equivalent manual CMake commands:
+
+```bash
 cmake -S . -B build \
-  -DKARMA_FETCH_DEPS=ON \
-  -DKARMA_BUILD_RMLUI_DEMO=OFF
+  -DKARMA_FETCH_DEPS=ON
 cmake --build build --parallel
 ./build/karma_example
 ```
 
+You can use the equivalent preset for fresh checkouts:
+
+```bash
+cmake --preset portable
+cmake --build --preset portable
+```
+
 For generated public API reference, see [API.md](API.md).
+
+## Using Karma As A Dependency
+
+Source-vendored consumers should disable examples/tests before adding Karma:
+
+```cmake
+set(KARMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(KARMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(KARMA_FETCH_DEPS ON CACHE BOOL "" FORCE)
+
+add_subdirectory(external/karma)
+target_link_libraries(my_game PRIVATE karma::karma)
+```
+
+Installed-package consumers can use the exported CMake package:
+
+```cmake
+find_package(karma CONFIG REQUIRED)
+target_link_libraries(my_game PRIVATE karma::karma)
+```
+
+The installed package config fetches missing dependency targets by default. Set
+`KARMA_CONFIG_FETCH_DEPS=OFF` before `find_package(karma)` to require system or
+parent-provided dependencies.
 
 ## Build Options
 Common toggles:
@@ -20,6 +73,10 @@ Common toggles:
 cmake -B build \
   -DKARMA_FETCH_DEPS=OFF
 ```
+
+Fetched Assimp builds only GLTF/GLB, OBJ, and STL importers by default through
+`KARMA_ASSIMP_MINIMAL_IMPORTERS=ON`. Disable that option if you need broad
+Assimp format coverage from the fetched dependency.
 
 Optional demo:
 
@@ -46,6 +103,13 @@ cmake -B build-headless \
 cmake --build build-headless --target karma_network_demo
 ```
 
+Or use the preset:
+
+```bash
+cmake --preset headless
+cmake --build --preset headless --target karma_network_demo
+```
+
 This profile is build-supported for non-visual programs such as network/server
 targets, simulation or gameplay tests, and tools that do not need a GPU. In this
 mode `platform::CreateWindow` returns `nullptr`, and `EngineApp` skips
@@ -67,11 +131,20 @@ current backend factories support it, for example:
 ```bash
 cmake -B build-headless \
   -DKARMA_HEADLESS=ON \
+  -DKARMA_ENABLE_AUDIO=OFF \
   -DKARMA_ENABLE_NAVIGATION=OFF
 ```
 
-The current audio layer still requires one audio backend. Leave miniaudio
-enabled or select SDL audio rather than disabling both audio backends.
+For the smallest non-visual profile, use:
+
+```bash
+cmake --preset minimal-headless
+cmake --build --preset minimal-headless
+```
+
+When `KARMA_ENABLE_AUDIO=OFF`, the audio facade compiles but does not create a
+backend. Calls that require loading clips still report that no backend is
+available.
 
 ## Core Helpers
 Karma's foundational math and timing helpers live under `karma/core`.
@@ -150,27 +223,24 @@ Use this when tear-free pacing is more important than input latency, or when the
 target driver/compositor does not exhibit FIFO present stalls.
 
 ## Loading Splash
-Apps with expensive startup can opt into a lightweight engine-owned loading
-splash:
+Windowed apps show a lightweight engine-owned loading splash by default:
 
 ```cpp
 karma::app::EngineConfig config;
 config.loading_splash.enabled = true;
 config.loading_splash.image_path = "docs/logo.png";
-config.loading_splash.async_start = true;
 config.loading_splash.target_fps = 30;
 config.loading_splash.accent = {0.24f, 0.56f, 1.0f, 1.0f};
 ```
 
-The splash is off by default. When enabled, `EngineApp` presents a simple
-provider-neutral UI frame as soon as the window and renderer are available. Set
-`image_path` to a PNG asset, such as the repo logo at `docs/logo.png`.
+When enabled, `EngineApp` presents a simple provider-neutral UI frame as soon as
+the window and renderer are available. Set `image_path` to a PNG asset, such as
+the repo logo at `docs/logo.png`.
 
-By default, splash-enabled apps also run `GameInterface::onStart()` on a worker
-thread while the main thread keeps presenting the splash at `target_fps`.
-Prefab sidecar texture uploads are serialized against splash rendering. Apps
-that perform custom direct renderer work inside `onStart()` can set
-`async_start = false` or move those renderer calls into the first normal frame.
+Splash-enabled apps run `GameInterface::onStart()` on a worker thread while the
+main thread keeps presenting the splash at `target_fps`. Renderer facade calls
+are serialized so startup resource creation cannot enter the backend at the same
+time as splash rendering.
 
 Local-light / point-shadow sanity check:
 

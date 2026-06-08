@@ -1,0 +1,87 @@
+name: Full Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+
+jobs:
+  build:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'ci/full-build')
+      }}
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure headless
+        run: >
+          cmake -S . -B build/ci-headless
+          -DKARMA_FETCH_DEPS=ON
+          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_TESTS=ON
+          -DBUILD_TESTING=ON
+          -DKARMA_HEADLESS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build headless
+        run: cmake --build build/ci-headless --config Release --parallel 2
+
+      - name: Test headless
+        run: ctest --test-dir build/ci-headless --build-config Release --output-on-failure
+
+      - name: Configure minimal headless install
+        run: >
+          cmake -S . -B build/ci-minimal-headless
+          -DKARMA_FETCH_DEPS=ON
+          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_TESTS=OFF
+          -DBUILD_TESTING=OFF
+          -DKARMA_HEADLESS=ON
+          -DKARMA_ENABLE_AUDIO=OFF
+          -DKARMA_ENABLE_NAVIGATION=OFF
+          -DKARMA_NETWORK_BACKEND_ENET=OFF
+          -DKARMA_PHYSICS_BACKEND_JOLT=OFF
+          -DKARMA_PHYSICS_BACKEND_BULLET=OFF
+          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build/ci-install
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build minimal headless
+        run: cmake --build build/ci-minimal-headless --config Release --parallel 2
+
+      - name: Install minimal headless
+        run: cmake --install build/ci-minimal-headless --config Release
+
+      - name: Configure installed-package consumer smoke
+        run: >
+          cmake -S tests/consumer/install -B build/consumer-install
+          -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/ci-install
+          -DKARMA_CONFIG_FETCH_DEPS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build installed-package consumer smoke
+        run: cmake --build build/consumer-install --config Release --parallel 2
+
+      - name: Test installed-package consumer smoke
+        run: ctest --test-dir build/consumer-install --build-config Release --output-on-failure
+
+      - name: Configure source-vendored consumer smoke
+        run: >
+          cmake -S tests/consumer/source -B build/consumer-source
+          -DKARMA_SOURCE_DIR=${{ github.workspace }}
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build source-vendored consumer smoke
+        run: cmake --build build/consumer-source --config Release --parallel 2
+
+      - name: Test source-vendored consumer smoke
+        run: ctest --test-dir build/consumer-source --build-config Release --output-on-failure

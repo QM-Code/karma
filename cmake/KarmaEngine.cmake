@@ -21,7 +21,6 @@ set(KARMA_SOURCES
   src/media/audio/audio_system.cpp
   src/simulation/collision/collision_event_system.cpp
   src/platform/network/transport_factory.cpp
-  src/platform/network/enet_transport.cpp
   src/runtime/input/input_system.cpp
   src/rendering/renderer/backend_factory.cpp
   src/rendering/renderer/camera_picking.cpp
@@ -129,8 +128,10 @@ if (KARMA_AUDIO_BACKEND_SDL)
   )
 endif()
 
-if (KARMA_PHYSICS_BACKEND_JOLT AND KARMA_PHYSICS_BACKEND_BULLET)
-  message(FATAL_ERROR "Choose only one physics backend: Jolt or Bullet.")
+if (KARMA_NETWORK_BACKEND_ENET)
+  list(APPEND KARMA_SOURCES
+    src/platform/network/enet_transport.cpp
+  )
 endif()
 
 if (KARMA_PHYSICS_BACKEND_JOLT)
@@ -152,16 +153,21 @@ if (KARMA_PHYSICS_BACKEND_BULLET)
 endif()
 
 add_library(karma STATIC ${KARMA_SOURCES})
+add_library(karma::karma ALIAS karma)
 
 target_include_directories(karma
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${KARMA_EXTRA_INCLUDE_DIRS}
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
 )
 
+foreach (karma_include_dir IN LISTS KARMA_EXTRA_INCLUDE_DIRS)
+  target_include_directories(karma PUBLIC $<BUILD_INTERFACE:${karma_include_dir}>)
+endforeach()
+
 if (KARMA_RENDER_BACKEND_DILIGENT AND diligentcore_SOURCE_DIR)
-  target_include_directories(karma PUBLIC ${diligentcore_SOURCE_DIR})
-  target_include_directories(karma PUBLIC ${diligentcore_SOURCE_DIR}/Graphics/GraphicsTools/interface)
+  target_include_directories(karma PUBLIC $<BUILD_INTERFACE:${diligentcore_SOURCE_DIR}>)
+  target_include_directories(karma PUBLIC $<BUILD_INTERFACE:${diligentcore_SOURCE_DIR}/Graphics/GraphicsTools/interface>)
 endif()
 
 target_compile_features(karma PUBLIC cxx_std_20)
@@ -200,23 +206,30 @@ if (KARMA_ENABLE_NAVIGATION)
   target_compile_definitions(karma PUBLIC KARMA_ENABLE_NAVIGATION)
 endif()
 
-target_link_libraries(karma
-  PUBLIC
-    ${KARMA_PLATFORM_LINK_LIBS}
-    ${KARMA_RENDER_LINK_LIBS}
-    ${KARMA_PHYSICS_LINK_LIBS}
-    ${KARMA_AUDIO_LINK_LIBS}
-    ${KARMA_NETWORK_LINK_LIBS}
-    ${KARMA_NAVIGATION_LINK_LIBS}
-    ${KARMA_EXTRA_LINK_LIBS}
+set(KARMA_BUILD_LINK_LIBS
+  ${KARMA_PLATFORM_LINK_LIBS}
+  ${KARMA_RENDER_LINK_LIBS}
+  ${KARMA_PHYSICS_LINK_LIBS}
+  ${KARMA_AUDIO_LINK_LIBS}
+  ${KARMA_NETWORK_LINK_LIBS}
+  ${KARMA_NAVIGATION_LINK_LIBS}
+  ${KARMA_EXTRA_LINK_LIBS}
 )
+
+foreach (karma_link_lib IN LISTS KARMA_BUILD_LINK_LIBS)
+  target_link_libraries(karma PUBLIC $<BUILD_INTERFACE:${karma_link_lib}>)
+endforeach()
+
+foreach (karma_link_lib IN LISTS KARMA_INSTALL_LINK_LIBS)
+  target_link_libraries(karma PUBLIC $<INSTALL_INTERFACE:$<1:${karma_link_lib}>>)
+endforeach()
 
 if (NOT KARMA_HEADLESS)
   if (KARMA_IMGUI_TARGET)
     target_link_libraries(karma PUBLIC ${KARMA_IMGUI_TARGET})
   endif()
   if (imgui_SOURCE_DIR)
-    target_include_directories(karma PUBLIC ${imgui_SOURCE_DIR})
+    target_include_directories(karma PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
   endif()
 endif()
 

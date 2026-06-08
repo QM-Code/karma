@@ -1,0 +1,248 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if (NOT DEFINED KARMA_CONFIG_FETCH_DEPS)
+  set(KARMA_CONFIG_FETCH_DEPS ON)
+endif()
+
+if (KARMA_CONFIG_FETCH_DEPS)
+  include(FetchContent)
+endif()
+
+function(_karma_alias_target alias target)
+  if (TARGET ${target} AND NOT TARGET ${alias})
+    add_library(${alias} ALIAS ${target})
+  endif()
+endfunction()
+
+function(_karma_require_target target dependency)
+  if (NOT TARGET ${target})
+    message(FATAL_ERROR
+      "Karma package requires ${dependency}, but target ${target} was not found. "
+      "Install ${dependency} or set KARMA_CONFIG_FETCH_DEPS=ON before find_package(karma).")
+  endif()
+endfunction()
+
+find_dependency(Threads)
+
+find_package(glm QUIET CONFIG)
+_karma_alias_target(glm::glm glm)
+if (NOT TARGET glm::glm AND KARMA_CONFIG_FETCH_DEPS)
+  FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG 0.9.9.8
+  )
+  FetchContent_MakeAvailable(glm)
+  _karma_alias_target(glm::glm glm)
+endif()
+_karma_require_target(glm::glm glm)
+
+find_package(spdlog QUIET CONFIG)
+_karma_alias_target(spdlog::spdlog spdlog)
+if (NOT TARGET spdlog::spdlog AND KARMA_CONFIG_FETCH_DEPS)
+  FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG v1.13.0
+  )
+  FetchContent_MakeAvailable(spdlog)
+  _karma_alias_target(spdlog::spdlog spdlog)
+endif()
+_karma_require_target(spdlog::spdlog spdlog)
+
+find_package(nlohmann_json QUIET CONFIG)
+_karma_alias_target(nlohmann_json::nlohmann_json nlohmann_json)
+if (NOT TARGET nlohmann_json::nlohmann_json AND KARMA_CONFIG_FETCH_DEPS)
+  FetchContent_Declare(
+    nlohmann_json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_MakeAvailable(nlohmann_json)
+  _karma_alias_target(nlohmann_json::nlohmann_json nlohmann_json)
+endif()
+_karma_require_target(nlohmann_json::nlohmann_json nlohmann_json)
+
+find_package(assimp QUIET CONFIG)
+find_package(assimp QUIET)
+_karma_alias_target(assimp::assimp assimp)
+if (NOT TARGET assimp::assimp AND KARMA_CONFIG_FETCH_DEPS)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+  if (@KARMA_ASSIMP_MINIMAL_IMPORTERS@)
+    set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_STL_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+  endif()
+  FetchContent_Declare(
+    assimp
+    GIT_REPOSITORY https://github.com/assimp/assimp.git
+    GIT_TAG v5.3.1
+  )
+  FetchContent_GetProperties(assimp)
+  if (NOT assimp_POPULATED)
+    FetchContent_Populate(assimp)
+  endif()
+  add_subdirectory(${assimp_SOURCE_DIR} ${assimp_BINARY_DIR} EXCLUDE_FROM_ALL)
+  _karma_alias_target(assimp::assimp assimp)
+endif()
+_karma_require_target(assimp::assimp assimp)
+
+if (@KARMA_WINDOW_BACKEND_GLFW@)
+  find_package(glfw3 QUIET CONFIG)
+  _karma_alias_target(glfw3::glfw glfw)
+  if (NOT TARGET glfw3::glfw AND KARMA_CONFIG_FETCH_DEPS)
+    FetchContent_Declare(
+      glfw
+      GIT_REPOSITORY https://github.com/glfw/glfw.git
+      GIT_TAG 3.3.8
+    )
+    FetchContent_MakeAvailable(glfw)
+    _karma_alias_target(glfw3::glfw glfw)
+  endif()
+  _karma_require_target(glfw3::glfw glfw3)
+endif()
+
+if (@KARMA_WINDOW_BACKEND_SDL@ OR @KARMA_AUDIO_BACKEND_SDL@)
+  find_package(SDL3 QUIET CONFIG)
+  if (NOT TARGET SDL3::SDL3 AND KARMA_CONFIG_FETCH_DEPS)
+    FetchContent_Declare(
+      SDL3
+      GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+      GIT_TAG release-3.1.8
+    )
+    FetchContent_MakeAvailable(SDL3)
+  endif()
+  _karma_require_target(SDL3::SDL3 SDL3)
+endif()
+
+if (@KARMA_RENDER_BACKEND_DILIGENT@)
+  find_package(DiligentCore QUIET)
+  if (NOT TARGET Diligent-GraphicsEngineVk-shared
+      AND NOT TARGET Diligent-GraphicsEngineVk-static
+      AND KARMA_CONFIG_FETCH_DEPS)
+    set(DILIGENT_NO_DIRECT3D11 ON CACHE BOOL "" FORCE)
+    set(DILIGENT_NO_DIRECT3D12 ON CACHE BOOL "" FORCE)
+    set(DILIGENT_NO_VULKAN OFF CACHE BOOL "" FORCE)
+    set(DILIGENT_NO_OPENGL ON CACHE BOOL "" FORCE)
+    set(DILIGENT_NO_OPENGLES ON CACHE BOOL "" FORCE)
+    set(DILIGENT_NO_METAL ON CACHE BOOL "" FORCE)
+    set(DILIGENT_NO_WEBGPU ON CACHE BOOL "" FORCE)
+    set(DILIGENT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(DILIGENT_BUILD_FX OFF CACHE BOOL "" FORCE)
+    set(DILIGENT_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      diligentcore
+      GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentCore.git
+      GIT_TAG @KARMA_DILIGENT_TAG@
+    )
+    FetchContent_MakeAvailable(diligentcore)
+  endif()
+  set(_karma_diligent_target "@KARMA_DILIGENT_TARGET@")
+  if (_karma_diligent_target)
+    _karma_require_target(${_karma_diligent_target} DiligentCore)
+  endif()
+endif()
+
+if (@KARMA_NETWORK_BACKEND_ENET@)
+  find_package(enet QUIET CONFIG)
+  find_package(enet QUIET)
+  _karma_alias_target(enet::enet enet_static)
+  _karma_alias_target(enet::enet enet)
+  if (NOT TARGET enet::enet AND KARMA_CONFIG_FETCH_DEPS)
+    set(ENET_TEST OFF CACHE BOOL "" FORCE)
+    set(ENET_SHARED OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      enet
+      GIT_REPOSITORY https://github.com/zpl-c/enet.git
+      GIT_TAG v2.6.5
+    )
+    FetchContent_MakeAvailable(enet)
+    _karma_alias_target(enet::enet enet_static)
+    _karma_alias_target(enet::enet enet)
+  endif()
+  _karma_require_target(enet::enet enet)
+endif()
+
+if (@KARMA_ENABLE_RMLUI@)
+  find_package(RmlUi QUIET CONFIG)
+  _karma_alias_target(RmlUi::Core rmlui_core)
+  if (NOT TARGET RmlUi::Core AND KARMA_CONFIG_FETCH_DEPS)
+    set(RMLUI_SVG_PLUGIN ON CACHE BOOL "" FORCE)
+    set(RMLUI_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(RMLUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(RMLUI_BUILD_VIEWER OFF CACHE BOOL "" FORCE)
+    set(RMLUI_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      lunasvg
+      GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
+      GIT_TAG v2.4.0
+    )
+    FetchContent_MakeAvailable(lunasvg)
+    FetchContent_Declare(
+      rmlui
+      GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
+      GIT_TAG 6.0
+    )
+    FetchContent_MakeAvailable(rmlui)
+    _karma_alias_target(RmlUi::Core rmlui_core)
+  endif()
+  _karma_require_target(RmlUi::Core RmlUi)
+endif()
+
+if (@KARMA_PHYSICS_BACKEND_BULLET@)
+  find_dependency(Bullet)
+endif()
+
+if (@KARMA_PHYSICS_BACKEND_JOLT@)
+  find_package(Jolt QUIET CONFIG)
+  _karma_alias_target(Jolt::Jolt Jolt)
+  if (NOT TARGET Jolt::Jolt AND KARMA_CONFIG_FETCH_DEPS)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(DISABLE_CUSTOM_ALLOCATOR ON CACHE BOOL "" FORCE)
+    set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+    set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+    set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+    set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      JoltPhysics
+      GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+      GIT_TAG v5.1.0
+      SOURCE_SUBDIR Build
+    )
+    FetchContent_MakeAvailable(JoltPhysics)
+    _karma_alias_target(Jolt::Jolt Jolt)
+  endif()
+  _karma_require_target(Jolt::Jolt Jolt)
+endif()
+
+if (@KARMA_ENABLE_NAVIGATION@)
+  find_package(RecastNavigation QUIET CONFIG)
+  if ((NOT TARGET Recast OR NOT TARGET Detour) AND KARMA_CONFIG_FETCH_DEPS)
+    set(RECASTNAVIGATION_DEMO OFF CACHE BOOL "" FORCE)
+    set(RECASTNAVIGATION_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(RECASTNAVIGATION_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      recastnavigation
+      GIT_REPOSITORY https://github.com/recastnavigation/recastnavigation.git
+      GIT_TAG v1.6.0
+    )
+    FetchContent_MakeAvailable(recastnavigation)
+  endif()
+  _karma_require_target(Recast RecastNavigation)
+  _karma_require_target(Detour RecastNavigation)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/karmaTargets.cmake")
+check_required_components(karma)

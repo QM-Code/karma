@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mutex>
+
 #include "karma/rendering/renderer/backend.hpp"
 #include "karma/rendering/renderer/material.h"
 
@@ -138,6 +140,7 @@ class GraphicsDevice {
 
  private:
   std::unique_ptr<renderer_backend::Backend> backend_;
+  mutable std::recursive_mutex mutex_;
   int framebuffer_width_ = 0;
   int framebuffer_height_ = 0;
 };

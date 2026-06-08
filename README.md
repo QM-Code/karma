@@ -25,18 +25,47 @@ Karma is organized as layered engine code under `include/karma/<layer>` and
 - `runtime`: `EngineApp`, input, UI context, debug overlay, and app wiring.
 
 The default non-headless build currently enables GLFW, Diligent, miniaudio,
-ENet, Jolt, navigation, debug UI, ImGui demo, and the RmlUi demo. RmlUi can be
-disabled when you do not need that demo or adapter.
+ENet, Jolt, navigation, debug UI, and the ImGui demo. RmlUi is opt-in because
+system RmlUi/FreeType packages vary more across machines.
 
 ## Quick Start
 
+Use the repo build script for the default graphical build. It configures with
+fetched dependencies and builds examples/tests by default:
+
+```bash
+./build.sh
+```
+
+On Windows:
+
+```bat
+build.bat
+```
+
+Useful script options:
+
+```bash
+./build.sh --headless
+./build.sh --headless-only --minimal-headless --no-examples --no-tests
+./build.sh --no-examples --config Debug --jobs 4
+```
+
+Equivalent manual CMake commands:
+
 ```bash
 cmake -S . -B build \
-  -DKARMA_FETCH_DEPS=ON \
-  -DKARMA_BUILD_RMLUI_DEMO=OFF
+  -DKARMA_FETCH_DEPS=ON
 
 cmake --build build --parallel
 ./build/karma_example
+```
+
+The same profile is available as a CMake preset:
+
+```bash
+cmake --preset portable
+cmake --build --preset portable
 ```
 
 Useful focused targets:
@@ -52,8 +81,8 @@ ctest --test-dir build --output-on-failure
 For a headless build that skips window/render backends and graphics demos:
 
 ```bash
-cmake -S . -B build-headless -DKARMA_HEADLESS=ON
-cmake --build build-headless --target karma_network_demo --parallel
+cmake --preset headless
+cmake --build --preset headless --target karma_network_demo
 ```
 
 `KARMA_HEADLESS` is a build-supported non-visual profile, not a full
@@ -66,7 +95,59 @@ invalid handles when no backend exists.
 
 Headless is also not a minimal dependency preset by itself. Content import,
 audio, physics, navigation, and networking stay enabled by default unless their
-own CMake options are disabled.
+own CMake options are disabled. Use `minimal-headless` when you want the
+smallest build surface for non-visual code:
+
+```bash
+cmake --preset minimal-headless
+cmake --build --preset minimal-headless
+```
+
+## Using Karma As A Dependency
+
+For source-vendored use, add Karma as a subdirectory and link the namespaced
+target:
+
+```cmake
+set(KARMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(KARMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(KARMA_FETCH_DEPS ON CACHE BOOL "" FORCE)
+
+add_subdirectory(external/karma)
+
+target_link_libraries(my_game PRIVATE karma::karma)
+```
+
+For `FetchContent`, set the same options before `FetchContent_MakeAvailable`.
+
+Karma also installs a CMake package:
+
+```bash
+cmake -S . -B build/package \
+  -DKARMA_HEADLESS=ON \
+  -DKARMA_ENABLE_AUDIO=OFF \
+  -DKARMA_ENABLE_NAVIGATION=OFF \
+  -DKARMA_NETWORK_BACKEND_ENET=OFF \
+  -DKARMA_PHYSICS_BACKEND_JOLT=OFF \
+  -DKARMA_BUILD_EXAMPLES=OFF \
+  -DKARMA_BUILD_TESTS=OFF \
+  -DBUILD_TESTING=OFF \
+  -DCMAKE_INSTALL_PREFIX=/path/to/karma-install
+cmake --build build/package --parallel
+cmake --install build/package
+```
+
+Consumers can then use:
+
+```cmake
+find_package(karma CONFIG REQUIRED)
+target_link_libraries(my_game PRIVATE karma::karma)
+```
+
+The installed package config can fetch missing third-party dependency targets by
+default. Set `KARMA_CONFIG_FETCH_DEPS=OFF` before `find_package(karma)` if your
+project requires all dependencies to be preinstalled.
 
 ## Major Features
 
@@ -116,6 +197,11 @@ Common CMake switches:
 
 - `KARMA_FETCH_DEPS`: fetch missing third-party dependencies with CMake
   `FetchContent`.
+- `KARMA_ASSIMP_MINIMAL_IMPORTERS`: when fetching Assimp, build only GLTF/GLB,
+  OBJ, and STL import support.
+- `KARMA_BUILD_EXAMPLES`: build example executable targets.
+- `KARMA_BUILD_TESTS`: build Karma test executable targets when `BUILD_TESTING`
+  is also enabled.
 - `KARMA_HEADLESS`: build-supported non-visual profile; disables window/render
   backends and graphics demos, but leaves other optional subsystems controlled
   by their own switches.
@@ -124,12 +210,23 @@ Common CMake switches:
   backend.
 - `KARMA_PHYSICS_BACKEND_JOLT` / `KARMA_PHYSICS_BACKEND_BULLET`: select one
   physics backend.
+- `KARMA_ENABLE_AUDIO`: enable or disable runtime audio backend creation.
 - `KARMA_AUDIO_BACKEND_MINIAUDIO` / `KARMA_AUDIO_BACKEND_SDL`: select one audio
   backend.
+- `KARMA_NETWORK_BACKEND_ENET`: build the default ENet networking transport and
+  `karma_network_demo`.
 - `KARMA_ENABLE_NAVIGATION`: build Recast/Detour navigation support.
 - `KARMA_BUILD_DEBUG_UI`: build the runtime debug overlay.
 - `KARMA_BUILD_IMGUI_DEMO`, `KARMA_BUILD_RMLUI_DEMO`, `KARMA_ENABLE_RMLUI`:
   optional UI demos/adapters.
+
+## CI
+
+The full cross-platform workflow lives at `.github/workflows/full-build.yml`.
+It runs on Linux, macOS, and Windows only when manually dispatched or when a pull
+request has the `ci/full-build` label. The workflow builds headless profiles,
+runs CTest, installs the minimal headless package, and builds both source and
+installed consumer smoke projects.
 
 ## Runtime Diagnostics
 

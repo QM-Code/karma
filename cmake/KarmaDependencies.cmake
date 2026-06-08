@@ -360,6 +360,9 @@ if (KARMA_PHYSICS_BACKEND_JOLT)
     set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
     set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
     set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+    if (MSVC)
+      set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+    endif()
     FetchContent_Declare(
       JoltPhysics
       GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git

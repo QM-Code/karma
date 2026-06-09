@@ -238,7 +238,7 @@ void populateGltfMeshData(const GltfDocument& doc,
         primitives[primitive_index].mesh = std::move(mesh_data);
         if (source_primitive.contains("material") &&
             source_primitive["material"].is_number_unsigned()) {
-          primitives[primitive_index].source_material_index =
+          primitives[primitive_index].source_gltf_material_index =
               source_primitive["material"].get<uint32_t>();
         }
       } else {

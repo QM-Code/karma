@@ -369,7 +369,6 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       karma_simulation_animation
       karma_simulation_collision
       karma_simulation_physics
-      karma_content
       karma_platform_network
       karma_platform_window_graphical
       karma_features_visual
@@ -390,6 +389,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     target_link_libraries(karma_runtime_graphical PUBLIC karma_simulation_navigation)
     target_compile_definitions(karma_runtime_graphical PUBLIC KARMA_ENABLE_NAVIGATION)
   endif()
+  target_link_libraries(karma_runtime_graphical PUBLIC karma_content)
   list(APPEND KARMA_INSTALL_TARGETS karma_runtime_graphical)
 
   set(KARMA_IMGUI_ADAPTER_SOURCES
@@ -466,7 +466,6 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     karma_features_visual
     karma_platform_window_graphical
     karma_platform_network
-    karma_content
     karma_media_graphical
     karma_simulation_physics
     karma_simulation_collision
@@ -478,6 +477,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   if (KARMA_ENABLE_NAVIGATION)
     list(APPEND KARMA_GRAPHICAL_PROFILE_LIBS karma_simulation_navigation)
   endif()
+  list(APPEND KARMA_GRAPHICAL_PROFILE_LIBS karma_content)
   if (KARMA_ENABLE_RMLUI)
     list(APPEND KARMA_GRAPHICAL_PROFILE_LIBS karma_features_ui_rmlui)
   endif()

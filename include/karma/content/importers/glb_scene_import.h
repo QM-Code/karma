@@ -49,7 +49,10 @@ struct GlbScenePrefabPrimitive {
   std::string name;
   geometry::MeshData mesh;
   renderer::MaterialDesc material;
+  /// Renderer-facing material index in the Assimp material table.
   uint32_t source_material_index = kInvalidGlbSceneMaterial;
+  /// Raw glTF primitive material index before backend/importer material remapping.
+  uint32_t source_gltf_material_index = kInvalidGlbSceneMaterial;
   uint32_t source_mesh_index = kInvalidGlbSceneNode;
   uint32_t skin_index = animation::kInvalidAnimationIndex;
   std::vector<components::VertexSkinInfluence> vertex_influences;

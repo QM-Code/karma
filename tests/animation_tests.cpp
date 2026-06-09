@@ -828,8 +828,11 @@ void testGltfMeshReplacementIsSkinnedOnly() {
 
   assert(prefab.nodes[0].primitives.front().mesh.vertices.size() == 1);
   assert(prefab.nodes[0].primitives.front().source_material_index == 10u);
+  assert(prefab.nodes[0].primitives.front().source_gltf_material_index ==
+         karma::scene::kInvalidGlbSceneMaterial);
   assert(prefab.nodes[1].primitives.front().mesh.vertices.size() == 3);
-  assert(prefab.nodes[1].primitives.front().source_material_index == 2u);
+  assert(prefab.nodes[1].primitives.front().source_material_index == 11u);
+  assert(prefab.nodes[1].primitives.front().source_gltf_material_index == 2u);
 }
 
 void testWalkingGlbImportSmoke() {

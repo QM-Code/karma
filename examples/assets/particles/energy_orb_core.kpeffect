@@ -1,48 +1,121 @@
-# Bright additive plasma core for the energy orb.
-layer = 0
-depth_test = true
-blend_mode = additive
-alignment = billboard
-use_soft_mask = false
-texture = orb_core_atlas
-
-enabled = true
-playing = true
-loop = true
-emit_burst_on_start = true
-local_space = true
-
-atlas_columns = 6
-atlas_rows = 1
-atlas_frame_count = 6
-animate_over_lifetime = true
-random_start_frame = true
-
-max_particles = 216
-burst_count = 72
-seed = 5203
-spawn_rate = 69.0
-duration = 0.0
-particle_lifetime_min = 1.24
-particle_lifetime_max = 2.68
-start_size_min = 1.70
-start_size_max = 2.60
-end_size_min = 0.82
-end_size_max = 1.65
-size_curve_exponent = 0.62
-alpha_curve_exponent = 0.78
-initial_rotation_min = 0.0
-initial_rotation_max = 6.2831853
-angular_velocity_min = -0.30
-angular_velocity_max = 0.30
-spawn_shape = sphere
-spawn_radius_min = 0.944
-spawn_radius_max = 1.264
-radial_speed_min = 0.0
-radial_speed_max = 0.005
-velocity_min = -0.005, -0.004, -0.005
-velocity_max = 0.005, 0.006, 0.005
-acceleration = 0.0, 0.0, 0.0
-drag = 3.55
-start_color = 1.0, 0.98, 0.94, 0.96
-end_color = 0.42, 0.78, 1.0, 0.0
+{
+  "version": 2,
+  "emitters": [
+    {
+      "texture": "orb_core_atlas",
+      "playback": {
+        "enabled": true,
+        "playing": true,
+        "loop": true,
+        "emit_burst_on_start": true,
+        "local_space": true,
+        "time_scale": 1.0,
+        "start_delay": 0.0,
+        "duration": 0.0
+      },
+      "render": {
+        "layer": 0,
+        "depth_test": true,
+        "blend_mode": "additive",
+        "alignment": "billboard",
+        "shading_mode": "standard",
+        "use_soft_mask": false,
+        "soft_particle_distance": 0.0,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "refraction_strength": 0.0,
+        "interior_glow": 0.0
+      },
+      "atlas": {
+        "columns": 6,
+        "rows": 1,
+        "frame_count": 6,
+        "frame_width": 0,
+        "frame_height": 0,
+        "border_x": 0,
+        "border_y": 0,
+        "spacing_x": 0,
+        "spacing_y": 0,
+        "animation_fps": 0.0,
+        "animate_over_lifetime": true,
+        "random_start_frame": true
+      },
+      "emission": {
+        "max_particles": 216,
+        "burst_count": 72,
+        "seed": 5203,
+        "spawn_rate": 69.0
+      },
+      "lifetime": {
+        "min": 1.24,
+        "max": 2.68
+      },
+      "size": {
+        "start_min": 1.7,
+        "start_max": 2.6,
+        "end_min": 0.82,
+        "end_max": 1.65,
+        "curve_exponent": 0.62
+      },
+      "rotation": {
+        "initial_min": 0.0,
+        "initial_max": 6.2831853,
+        "angular_velocity_min": -0.3,
+        "angular_velocity_max": 0.3
+      },
+      "spawn": {
+        "shape": "sphere",
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius_min": 0.944,
+        "radius_max": 1.264,
+        "radial_speed_min": 0.0,
+        "radial_speed_max": 0.005
+      },
+      "motion": {
+        "velocity_min": [
+          -0.005,
+          -0.004,
+          -0.005
+        ],
+        "velocity_max": [
+          0.005,
+          0.006,
+          0.005
+        ],
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "drag": 3.55
+      },
+      "collision": {
+        "ground": false,
+        "ground_height": 0.0,
+        "bounce_damping": 0.35,
+        "friction": 0.25,
+        "rest_speed_threshold": 0.35
+      },
+      "color": {
+        "start": [
+          1.0,
+          0.98,
+          0.94,
+          0.96
+        ],
+        "end": [
+          0.42,
+          0.78,
+          1.0,
+          0.0
+        ],
+        "alpha_curve_exponent": 0.78
+      }
+    }
+  ]
+}

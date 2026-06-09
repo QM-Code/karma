@@ -52,6 +52,9 @@ Command-line flags:
 - `--stats`
 - `--disable layer0,layer1,...`
 
+`--explosions` is clamped to the sample's supported controller range of
+`1..128`. The current stress acceptance bar is a 128-controller run.
+
 Environment variables:
 
 - `KARMA_EXPLOSION_STRESS_STATS=1`
@@ -168,8 +171,8 @@ The sample prints one `Explosion stress: ...` line when stats logging is enabled
 When `KARMA_PARTICLE_STATS=1` is set, the renderer also prints one
 `Particle stats: ...` line per second. Prefer the renderer line when comparing
 particle changes across examples because it is emitted after final render
-submission and includes simulation, packing, sorting, grouping, scene-copy, and
-draw-submission fields in one place.
+submission and includes GPU particle generation, compatibility CPU batches,
+sorting, grouping, scene-copy, and draw-submission fields in one place.
 
 The explosion stress startup path now relies on committed prefab-local
 EXR-derived flipbook atlases, so there is no runtime flipbook-source selection
@@ -180,9 +183,33 @@ Key fields:
 - `world_prefabs`, `world_emitters`, `world_lights`
   - rising counts during repeated replay usually mean lifetime/cleanup problems
 - `part_sys_ms(sync/sim/pack)`
-  - particle effect binding, simulation, and CPU-side packing cost
+  - particle effect binding, renderer descriptor submission, and compatibility packing cost
 - `part_render_ms(add/asort/dsort/draw)`
   - renderer-side additive prep, alpha prep, distortion prep, and draw submission
+- `gpu_particle_capacity`, `gpu_alive_particles`, `gpu_dead_particles`,
+  `gpu_spawned_particles`, `gpu_killed_particles`, `gpu_compacted_particles`
+  - persistent renderer GPU particle state capacity and one-frame-delayed exact
+    live/dead/spawn/kill/compact counters
+- `gpu_compute_dispatches`, `gpu_indirect_draws`,
+  `gpu_indirect_dispatches`, `gpu_sort_key_count`, `gpu_sort_passes`
+  - compute work, GPU-generated indirect draw/dispatch activity, and grouped
+    alpha/distortion sort-key generation
+- `gpu_allocator_live_emitters`, `gpu_allocator_free_ranges`,
+  `gpu_allocator_active_capacity`, `gpu_allocator_high_water_capacity`,
+  `gpu_allocator_retired_emitters`, `gpu_allocator_reused_slots`,
+  `gpu_allocator_allocation_failures`
+  - persistent GPU emitter slots, particle-slot allocator state, reuse, and
+    allocation failure diagnostics
+- `gpu_culled_emitters`, `gpu_culled_particles`, `gpu_culling_dispatches`
+  - camera/visibility culled GPU emitters and particles rejected during GPU
+    instance/sort-key preparation
+- `gpu_global_sort_active`, `gpu_grouped_sort_fallback`
+  - whether Vulkan descriptor-indexed global transparent sorting is active, or
+    whether the backend is using the documented grouped material fallback
+- `gpu_sort_overflow`, `gpu_fallback_active`, `gpu_stats_readback_age`
+  - sort overflow, analytic GPU bridge fallback, and async readback age
+- `cpu_fallback_particles`
+  - baked compatibility particles still submitted from CPU producers
 - `part_alpha_ms(collect/sort/span)`
   - alpha-path breakdown; `span` is the high-signal field for draw-fragmentation / prep cost
 - `part_dist_ms(collect/sort/span)`
@@ -265,6 +292,10 @@ Representative steady-state averages:
 
 Interpretation:
 
+The older 2026-05 optimization notes below describe the pre-GPU particle path.
+Use them as historical baselines only; current comparisons should include
+`gpu_*` and `cpu_fallback_particles`.
+
 - Default and gallery slowdown is not primarily sorting; alpha/distortion sort
   costs are small compared with grouping, simulation, packing, and draw
   submission.
@@ -344,6 +375,14 @@ Updated interpretation:
   - the heat-distortion layer is active and still paying for scene-color sampling
 - `alpha_half_res=true` with poor performance:
   - the problem is probably not raw alpha pixel cost alone
+- `gpu_grouped_sort_fallback=true`:
+  - descriptor-indexed global particle material sorting was unavailable, so
+    alpha/distortion particles are sorted inside material groups
+- `gpu_allocator_high_water_capacity` keeps rising after replay windows repeat:
+  - persistent particle GPU slot reuse is probably failing or max-particle
+    descriptors are changing unexpectedly
+- `gpu_allocator_allocation_failures>0` or `gpu_fallback_active=true` on Vulkan:
+  - the persistent GPU particle path is not meeting the current acceptance bar
 - `core=procedural_atlas`:
   - the fire flipbook is using the generated fast/default atlas or the EXR path failed
 - `smoke=procedural_atlas`:

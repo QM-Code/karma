@@ -70,6 +70,8 @@ class GraphicsDevice {
   void submitParticles(ParticleBatch batch);
   /// Submits a packed particle batch.
   void submitPackedParticles(PackedParticleBatch batch);
+  /// Submits a renderer-owned particle emitter descriptor.
+  void submitParticleEmitter(const ParticleEmitterGpuDesc& emitter);
   /// Provides particle-system timings/counters to the renderer.
   void setParticleSystemStats(const ParticlePassStats& stats);
   /// Retires a renderer instance id.

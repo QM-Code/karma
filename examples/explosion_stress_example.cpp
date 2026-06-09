@@ -19,7 +19,7 @@ namespace karma::demo {
 namespace {
 
 constexpr int kDefaultExplosionCount = 9;
-constexpr int kMaxExplosionCount = 64;
+constexpr int kMaxExplosionCount = 128;
 constexpr float kExplosionSpacing = 10.0f;
 constexpr float kDefaultReplayPeriod = 3.6f;
 constexpr float kExplosionVisualWindow = 2.4f;
@@ -356,7 +356,7 @@ class ExplosionStressExample final : public app::GameInterface {
     const float average_dt = perf_frame_time_sum_ / static_cast<float>(perf_frame_count_);
     const float average_fps = average_dt > 1.0e-6f ? 1.0f / average_dt : 0.0f;
     spdlog::info(
-        "Explosion stress: t={:.2f}s fps={:.1f} avg_ms={:.2f} worst_ms={:.2f} configured={} active_visuals={} recent_triggers={} active_lights={} world_prefabs={} world_emitters={} world_lights={} trigger_interval_ms={:.0f} framebuffer={}x{} local_lights={} cpu_fallback={} fp_active={} part_sys_ms(sync/sim/pack)={:.2f}/{:.2f}/{:.2f} part_render_ms(add/asort/dsort/draw)={:.2f}/{:.2f}/{:.2f}/{:.2f} part_alpha_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} part_dist_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} fx_apply={} part_sys_emit(iter/vis/cull/sub)={}/{}/{}/{} part_sys_particles(sim/pack/cull/ground)={}/{}/{}/{} part_batches={}/{}/{} part_particles={}/{}/{} part_draws={}/{}/{} part_sorted={}/{} part_bad_depth={}/{} scene_samples={}/{} scene_copy={} post_copy={} alpha_half_res={}",
+        "Explosion stress: t={:.2f}s fps={:.1f} avg_ms={:.2f} worst_ms={:.2f} configured={} active_visuals={} recent_triggers={} active_lights={} world_prefabs={} world_emitters={} world_lights={} trigger_interval_ms={:.0f} framebuffer={}x{} local_lights={} cpu_fallback={} fp_active={} part_sys_ms(sync/sim/pack)={:.2f}/{:.2f}/{:.2f} part_render_ms(add/asort/dsort/draw)={:.2f}/{:.2f}/{:.2f}/{:.2f} part_alpha_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} part_dist_ms(collect/sort/span)={:.2f}/{:.2f}/{:.2f} fx_apply={} part_sys_emit(iter/vis/cull/sub)={}/{}/{}/{} part_sys_particles(sim/pack/cull/ground)={}/{}/{}/{} gpu_particles(cap/alive/dead/spawn/kill/compact)={}/{}/{}/{}/{}/{} gpu_dispatch(compute/indirect/cull)={}/{}/{} gpu_alloc(live/free/active/high/retired/reused/fail)={}/{}/{}/{}/{}/{}/{} gpu_cull(emitters/particles)={}/{} gpu_sort(keys/passes/global/grouped/overflow)={}/{}/{}/{}/{} gpu_fallback={} cpu_fallback_particles={} part_batches={}/{}/{} part_particles={}/{}/{} part_draws={}/{}/{} part_sorted={}/{} part_bad_depth={}/{} scene_samples={}/{} scene_copy={} post_copy={} alpha_half_res={}",
         time_,
         average_fps,
         average_dt * 1000.0f,
@@ -396,6 +396,31 @@ class ExplosionStressExample final : public app::GameInterface {
         particle_stats.packed_particles,
         particle_stats.culled_particles,
         particle_stats.ground_collision_particles,
+        particle_stats.gpu_particle_capacity,
+        particle_stats.gpu_alive_particles,
+        particle_stats.gpu_dead_particles,
+        particle_stats.gpu_spawned_particles,
+        particle_stats.gpu_killed_particles,
+        particle_stats.gpu_compacted_particles,
+        particle_stats.gpu_compute_dispatches,
+        particle_stats.gpu_indirect_dispatches,
+        particle_stats.gpu_culling_dispatches,
+        particle_stats.gpu_allocator_live_emitters,
+        particle_stats.gpu_allocator_free_ranges,
+        particle_stats.gpu_allocator_active_capacity,
+        particle_stats.gpu_allocator_high_water_capacity,
+        particle_stats.gpu_allocator_retired_emitters,
+        particle_stats.gpu_allocator_reused_slots,
+        particle_stats.gpu_allocator_allocation_failures,
+        particle_stats.gpu_culled_emitters,
+        particle_stats.gpu_culled_particles,
+        particle_stats.gpu_sort_key_count,
+        particle_stats.gpu_sort_passes,
+        particle_stats.gpu_global_sort_active,
+        particle_stats.gpu_grouped_sort_fallback,
+        particle_stats.gpu_sort_overflow,
+        particle_stats.gpu_fallback_active,
+        particle_stats.cpu_fallback_particles,
         particle_stats.additive_batches,
         particle_stats.alpha_batches,
         particle_stats.distortion_batches,

@@ -9,17 +9,10 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "karma/world/components/particle_emitter.h"
+#include "karma/features/visual/particles/effect_asset.h"
 #include "karma/rendering/renderer/ids.h"
 
 namespace karma::particles {
-
-/// \ingroup karma_particles
-/// Resolved particle effect template and optional texture alias.
-struct ParticleEffectDesc {
-  components::ParticleEmitterComponent emitter{};
-  std::string texture_key;
-};
 
 /// \ingroup karma_particles
 /// Texture alias registration entry.

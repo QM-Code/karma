@@ -16,7 +16,7 @@ There are seven active technical tracks in the current tree:
 3. effect API split / prefab modularization
 4. collision/contact/ground-state ECS work
 5. local-light / point-shadow validation
-6. GLB node animation / first-pass skeletal CPU skinning
+6. GLB node animation / skeletal skinning / morph targets
 7. static navmesh generation and pathfinding
 
 Durable reference docs:
@@ -111,7 +111,7 @@ cmake --build build-local --target \
   -j2
 ```
 
-For GLB animation / first-pass skeletal skinning, these were verified:
+For GLB animation / skeletal skinning, these were verified:
 
 ```bash
 cmake --build build --target karma_animation_tests -j2
@@ -122,7 +122,7 @@ cmake --build build --target karma_glb_scene_import_example karma_glb_animation_
 
 `karma_animation_tests` is headless and exits silently on success.
 
-## GLB Animation / Skinning Summary
+## GLB Animation / Skinning / Morph Summary
 
 Recent animation-side work already in the tree:
 
@@ -133,23 +133,29 @@ Recent animation-side work already in the tree:
   world transforms
 - GLB scene import now creates local and world transforms for imported nodes and
   primitive entities
-- GLB animation clips are parsed from Assimp animation channels and stored on
-  `GlbScenePrefab::animations`
+- GLB animation clips are parsed from explicit glTF channels when available and
+  fall back to Assimp channels
 - `AnimationPlayerComponent` supports clip storage, playback state, speed, loop,
-  and helper functions for play/pause/stop and clip selection
+  transform sampling, morph-weight sampling, and helper functions for
+  play/pause/stop and clip selection
 - imported GLB roots autoplay clip `0` when clips exist unless
   `GlbSceneInstantiateOptions::autoplay_animations` is false
-- first-pass skeletal support imports Assimp bones, vertex weights, joint node
-  references, and inverse bind matrices into `SkinnedMeshComponent`
-- `CpuSkinningSystem` deforms bind-pose mesh data on the CPU and uploads through
-  `GraphicsDevice::updateMesh(...)`
+- skeletal support imports vertex weights, joint node references, skins,
+  skeletons, and inverse bind matrices into `SkinnedMeshComponent`
+- imported skinned primitives use GPU skinning by default; CPU skinning remains
+  the fallback/reference path
+- morph target deltas and mesh default weights import into `MeshData` and
+  `MorphTargetComponent`
+- `CpuSkinningSystem` is now the mesh deformation upload point: it applies CPU
+  morph targets, builds joint palettes, keeps GPU-skinned meshes in a renderer
+  bind/morphed-bind state, and performs CPU fallback skinning when needed
 
 Important limitations:
 
-- no GPU skinning yet
 - no retargeting between different skeletons
-- no blending, state machine, root motion, or morph targets
-- CPU skinning is a correctness path and can be expensive
+- no pure GPU morph target path yet
+- CPU morph deformation and CPU skinning fallback can be expensive on large
+  animated meshes
 - `MeshComponent.mesh_key = "model.glb"` remains the flat mesh path and does not
   use this scene animation/skinning path
 
@@ -205,12 +211,30 @@ Recent particle-side work already in the tree:
   - alpha curve
   - color interpolation
   - atlas frame selection / UV generation
+- normal `.kpeffect` emitters now use persistent Diligent GPU state by default:
+  - emitter descriptor/state buffers
+  - particle state buffers with alive/dead list output
+  - GPU compaction to the existing packed instance vertex layout
+  - grouped alpha/distortion depth-key sorting
+  - GPU-written indirect draw arguments
+  - one-frame-delayed async stats readback
+- particle GPU diagnostics now report allocator live/free/high-water state,
+  retired/reused/failure counts, GPU emitter/particle culling, culling dispatch
+  counts, and explicit global-sort versus grouped-sort fallback flags
+- the Diligent Vulkan particle path now requests descriptor-indexed resource
+  arrays, binds a fixed particle texture table plus material-record buffer, and
+  uses that path for global alpha/distortion sorting when available
+- the older analytic GPU instance bridge remains as a fallback when indirect
+  draw or required UAV resources are unavailable and reports
+  `gpu_fallback_active`
 - beam-authored particles intentionally remain on the baked presentation path
 - wave volume proxies now render as projected screen-bounds quads instead of near-full-screen overlays
 - analytic volumetric spheres now render post-particle, sort by real sphere center, and alpha-compose without erasing background spheres
 - prefab gallery perf logging exists behind `KARMA_PREFAB_GALLERY_STATS=1`
 - direct-load staged explosion prefabs use `prefab.resources.json` sidecars for
   prefab-local atlas textures and effect files
+- `karma_explosion_stress_example` supports up to 128 staged explosion
+  controllers; 128 is the current stress acceptance target
 - EXR source folders for the explosion are reference assets only, not runtime
   dependencies
 
@@ -317,10 +341,14 @@ If continuing particle work:
 2. capture `KARMA_PREFAB_GALLERY_STATS=1` output on a stable windowing session
 3. compare against `karma_explosion_stress_example --disable heat` if heat
    distortion remains a suspect
-4. measure alpha/distortion sort cost before another architecture change
-5. explore bucketed or approximate depth ordering before GPU simulation
-6. consider particle material/state IDs before adding more renderer state fields to emitters
-7. only move simulation fully GPU-side if the user wants a larger renderer rewrite
+4. inspect grouped GPU sort cost and sort-key counts before changing sort
+   strategy
+5. consider bindless or texture-array particle materials if exact
+   cross-material transparent ordering becomes necessary
+6. consider particle material/state IDs before adding more renderer state
+   fields to emitters
+7. validate moving-emitter local-space behavior visually before relying on it
+   for gameplay-critical effects
 
 If continuing the effect API split:
 
@@ -348,10 +376,9 @@ If continuing local-light/shadow work:
 If continuing GLB animation/skinning work:
 
 1. add a windowed skeletal visual sample with a tiny generated or checked-in GLB
-2. validate a real Blender-authored skinned GLB through scene import
-3. decide whether CPU skinning stays as debug/fallback or is replaced by GPU skinning
-4. if implementing GPU skinning, update forward and shadow passes together
-5. keep node animation, hierarchy composition, and skinning tests green
+2. validate a real Blender-authored skinned and morphed GLB through scene import
+3. decide whether morph targets should move from CPU mesh updates to a GPU path
+4. keep node animation, hierarchy composition, morph, and skinning tests green
 
 If continuing navigation work:
 

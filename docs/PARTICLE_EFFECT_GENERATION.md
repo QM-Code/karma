@@ -14,15 +14,16 @@ The runtime flow is:
 3. Bind ECS entities to those effect keys with `ParticleEffectComponent`.
 4. Optionally apply `ParticleEffectOverrideComponent` for per-instance scale,
    color, timing, or texture changes.
-5. Let `ParticleSystem` resolve, simulate, and submit the emitter to the
-   renderer.
+5. Let `ParticleSystem` resolve the binding and submit an emitter descriptor to
+   the renderer. Live particle state is renderer-owned.
 
 The format is simple and strict:
 
-- one key/value assignment per line
-- comments with `#`
-- no sections
-- one emitter per file
+- JSON document with `"version": 2`
+- one or more entries in an `"emitters"` array
+- required grouped blocks for playback, render, atlas, emission, lifetime, size,
+  rotation, spawn, motion, collision, and color
+- the current ECS binding path consumes the first emitter as the primary emitter
 - unknown fields are fatal parse errors
 - texture references are aliases, not raw texture paths
 
@@ -37,7 +38,7 @@ Primary files:
 
 The engine already has several pieces that make generation practical:
 
-- `.kpeffect` files are plain text and compact.
+- `.kpeffect` files are structured JSON with stable grouped blocks.
 - The parser is deterministic and strict.
 - Existing examples cover useful archetypes: sparks, smoke, flash, heat
   distortion, shock rings, debris, scorch marks, flipbook fire/smoke, orb core,
@@ -48,17 +49,18 @@ The engine already has several pieces that make generation practical:
 - `prefab.json` composition is separate from emitter behavior, which is the
   right model for layered effects.
 
-The best current generation target is a single `.kpeffect` file for one emitter
-layer. The next best target is a prefab directory containing several generated
-`.kpeffect` layers, a `prefab.json` composition file, and a
-`prefab.resources.json` sidecar for texture/effect registration.
+The best current generation target is a single v2 `.kpeffect` JSON file for one
+emitter layer. The next best target is a prefab directory containing several
+generated `.kpeffect` layers, a `prefab.json` composition file with only effect
+bindings/playback defaults, and a `prefab.resources.json` sidecar for
+texture/effect registration.
 
 ## Current Blockers
 
 The current system is not yet robust enough for unattended image-to-effect
 generation:
 
-- There is no machine-readable schema.
+- There is no standalone schema file outside the parser/tests.
 - There is no standalone validator or formatter for `.kpeffect`.
 - Field ranges and safe defaults live in code and examples, not in a generator
   contract.
@@ -99,7 +101,7 @@ The generation pipeline should be:
 1. Analyze the image or prompt into high-level visual intent.
 2. Choose one or more known effect archetypes.
 3. Emit a constrained intermediate JSON description.
-4. Map the JSON through presets and safe field ranges into `.kpeffect`.
+4. Map the JSON through presets and safe field ranges into `.kpeffect` v2.
 5. Validate and format the generated file.
 6. Optionally generate a prefab directory when the effect needs multiple layers.
 7. Run a preview scene and capture visual/performance feedback.
@@ -154,7 +156,10 @@ Minimum tooling before unattended generation:
 
    Load a generated effect by path/key, instantiate it in a controlled scene,
    run for a fixed duration, and optionally capture screenshots and
-   `KARMA_PARTICLE_STATS=1` output.
+   `KARMA_PARTICLE_STATS=1` output. The stats line includes one-frame-delayed
+   persistent GPU particle state counters, indirect draw/dispatch counts, sort
+   key counts, sort overflow/fallback flags, and `cpu_fallback_particles` for
+   producers that still submit baked batches.
 
 5. Package helpers
 
@@ -165,10 +170,10 @@ Minimum tooling before unattended generation:
 
 Keep the existing authoring split:
 
-- `.kpeffect`: one emitter layer, simulation tuning, renderer particle state,
-  atlas metadata, texture alias, color/size/lifetime/motion.
-- `prefab.json`: composition of multiple layers, transforms, playback defaults,
-  and high-level component overrides.
+- `.kpeffect`: v2 JSON emitter layer, GPU simulation tuning, renderer particle
+  state, atlas metadata, texture alias, color/size/lifetime/motion.
+- `prefab.json`: composition of multiple layers, transforms, effect bindings,
+  playback defaults, and high-level component overrides.
 - `prefab.resources.json`: texture alias registration, effect file
   registration, and prefab-local resource cleanup.
 

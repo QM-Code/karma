@@ -995,69 +995,7 @@ Json serializeParticleEmitter(const components::ParticleEmitterComponent& compon
   return Json{
       {"enabled", component.enabled},
       {"playing", component.playing},
-      {"loop", component.loop},
-      {"emit_burst_on_start", component.emit_burst_on_start},
-      {"local_space", component.local_space},
-      {"layer", component.layer},
-      {"depth_test", component.depth_test},
-      {"blend_mode", blendModeName(component.blend_mode)},
-      {"alignment", alignmentName(component.alignment)},
-      {"shading_mode", shadingModeName(component.shading_mode)},
-      {"use_soft_mask", component.use_soft_mask},
-      {"soft_particle_distance", component.soft_particle_distance},
-      {"distortion_strength", component.distortion_strength},
-      {"fresnel_power", component.fresnel_power},
-      {"fresnel_strength", component.fresnel_strength},
-      {"refraction_strength", component.refraction_strength},
-      {"interior_glow", component.interior_glow},
-      {"atlas_columns", component.atlas_columns},
-      {"atlas_rows", component.atlas_rows},
-      {"atlas_frame_count", component.atlas_frame_count},
-      {"atlas_frame_width", component.atlas_frame_width},
-      {"atlas_frame_height", component.atlas_frame_height},
-      {"atlas_border_x", component.atlas_border_x},
-      {"atlas_border_y", component.atlas_border_y},
-      {"atlas_spacing_x", component.atlas_spacing_x},
-      {"atlas_spacing_y", component.atlas_spacing_y},
-      {"animation_fps", component.animation_fps},
-      {"animate_over_lifetime", component.animate_over_lifetime},
-      {"random_start_frame", component.random_start_frame},
-      {"max_particles", component.max_particles},
-      {"burst_count", component.burst_count},
-      {"seed", component.seed},
-      {"time_scale", component.time_scale},
       {"start_delay", component.start_delay},
-      {"duration", component.duration},
-      {"spawn_rate", component.spawn_rate},
-      {"particle_lifetime_min", component.particle_lifetime_min},
-      {"particle_lifetime_max", component.particle_lifetime_max},
-      {"start_size_min", component.start_size_min},
-      {"start_size_max", component.start_size_max},
-      {"end_size_min", component.end_size_min},
-      {"end_size_max", component.end_size_max},
-      {"size_curve_exponent", component.size_curve_exponent},
-      {"alpha_curve_exponent", component.alpha_curve_exponent},
-      {"initial_rotation_min", component.initial_rotation_min},
-      {"initial_rotation_max", component.initial_rotation_max},
-      {"angular_velocity_min", component.angular_velocity_min},
-      {"angular_velocity_max", component.angular_velocity_max},
-      {"spawn_shape", spawnShapeName(component.spawn_shape)},
-      {"spawn_box_extents", toJson(component.spawn_box_extents)},
-      {"spawn_radius_min", component.spawn_radius_min},
-      {"spawn_radius_max", component.spawn_radius_max},
-      {"radial_speed_min", component.radial_speed_min},
-      {"radial_speed_max", component.radial_speed_max},
-      {"velocity_min", toJson(component.velocity_min)},
-      {"velocity_max", toJson(component.velocity_max)},
-      {"acceleration", toJson(component.acceleration)},
-      {"drag", component.drag},
-      {"collide_with_ground", component.collide_with_ground},
-      {"ground_height", component.ground_height},
-      {"bounce_damping", component.bounce_damping},
-      {"collision_friction", component.collision_friction},
-      {"rest_speed_threshold", component.rest_speed_threshold},
-      {"start_color", toJson(component.start_color)},
-      {"end_color", toJson(component.end_color)},
   };
 }
 
@@ -1069,69 +1007,7 @@ std::optional<components::ParticleEmitterComponent> deserializeParticleEmitter(
   components::ParticleEmitterComponent component{};
   if (!readBool(json, "enabled", component.enabled) ||
       !readBool(json, "playing", component.playing) ||
-      !readBool(json, "loop", component.loop) ||
-      !readBool(json, "emit_burst_on_start", component.emit_burst_on_start) ||
-      !readBool(json, "local_space", component.local_space) ||
-      !readUint32(json, "layer", component.layer) ||
-      !readBool(json, "depth_test", component.depth_test) ||
-      !readBlendMode(json, component.blend_mode) ||
-      !readAlignment(json, component.alignment) ||
-      !readShadingMode(json, component.shading_mode) ||
-      !readBool(json, "use_soft_mask", component.use_soft_mask) ||
-      !readFloat(json, "soft_particle_distance", component.soft_particle_distance) ||
-      !readFloat(json, "distortion_strength", component.distortion_strength) ||
-      !readFloat(json, "fresnel_power", component.fresnel_power) ||
-      !readFloat(json, "fresnel_strength", component.fresnel_strength) ||
-      !readFloat(json, "refraction_strength", component.refraction_strength) ||
-      !readFloat(json, "interior_glow", component.interior_glow) ||
-      !readUint32(json, "atlas_columns", component.atlas_columns) ||
-      !readUint32(json, "atlas_rows", component.atlas_rows) ||
-      !readUint32(json, "atlas_frame_count", component.atlas_frame_count) ||
-      !readUint32(json, "atlas_frame_width", component.atlas_frame_width) ||
-      !readUint32(json, "atlas_frame_height", component.atlas_frame_height) ||
-      !readUint32(json, "atlas_border_x", component.atlas_border_x) ||
-      !readUint32(json, "atlas_border_y", component.atlas_border_y) ||
-      !readUint32(json, "atlas_spacing_x", component.atlas_spacing_x) ||
-      !readUint32(json, "atlas_spacing_y", component.atlas_spacing_y) ||
-      !readFloat(json, "animation_fps", component.animation_fps) ||
-      !readBool(json, "animate_over_lifetime", component.animate_over_lifetime) ||
-      !readBool(json, "random_start_frame", component.random_start_frame) ||
-      !readUint32(json, "max_particles", component.max_particles) ||
-      !readUint32(json, "burst_count", component.burst_count) ||
-      !readUint32(json, "seed", component.seed) ||
-      !readFloat(json, "time_scale", component.time_scale) ||
-      !readFloat(json, "start_delay", component.start_delay) ||
-      !readFloat(json, "duration", component.duration) ||
-      !readFloat(json, "spawn_rate", component.spawn_rate) ||
-      !readFloat(json, "particle_lifetime_min", component.particle_lifetime_min) ||
-      !readFloat(json, "particle_lifetime_max", component.particle_lifetime_max) ||
-      !readFloat(json, "start_size_min", component.start_size_min) ||
-      !readFloat(json, "start_size_max", component.start_size_max) ||
-      !readFloat(json, "end_size_min", component.end_size_min) ||
-      !readFloat(json, "end_size_max", component.end_size_max) ||
-      !readFloat(json, "size_curve_exponent", component.size_curve_exponent) ||
-      !readFloat(json, "alpha_curve_exponent", component.alpha_curve_exponent) ||
-      !readFloat(json, "initial_rotation_min", component.initial_rotation_min) ||
-      !readFloat(json, "initial_rotation_max", component.initial_rotation_max) ||
-      !readFloat(json, "angular_velocity_min", component.angular_velocity_min) ||
-      !readFloat(json, "angular_velocity_max", component.angular_velocity_max) ||
-      !readSpawnShape(json, component.spawn_shape) ||
-      !readVec3(json, "spawn_box_extents", component.spawn_box_extents) ||
-      !readFloat(json, "spawn_radius_min", component.spawn_radius_min) ||
-      !readFloat(json, "spawn_radius_max", component.spawn_radius_max) ||
-      !readFloat(json, "radial_speed_min", component.radial_speed_min) ||
-      !readFloat(json, "radial_speed_max", component.radial_speed_max) ||
-      !readVec3(json, "velocity_min", component.velocity_min) ||
-      !readVec3(json, "velocity_max", component.velocity_max) ||
-      !readVec3(json, "acceleration", component.acceleration) ||
-      !readFloat(json, "drag", component.drag) ||
-      !readBool(json, "collide_with_ground", component.collide_with_ground) ||
-      !readFloat(json, "ground_height", component.ground_height) ||
-      !readFloat(json, "bounce_damping", component.bounce_damping) ||
-      !readFloat(json, "collision_friction", component.collision_friction) ||
-      !readFloat(json, "rest_speed_threshold", component.rest_speed_threshold) ||
-      !readColor(json, "start_color", component.start_color) ||
-      !readColor(json, "end_color", component.end_color)) {
+      !readFloat(json, "start_delay", component.start_delay)) {
     return std::nullopt;
   }
   return component;

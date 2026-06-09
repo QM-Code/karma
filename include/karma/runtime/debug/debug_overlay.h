@@ -69,6 +69,7 @@ class DebugOverlayLayer final : public app::UiLayer {
   void drawSelectedSummary(const scene::Node& node);
   void drawComponentInspector(const scene::Node& node);
   void drawRendererTab();
+  void drawParticlesTab();
   void drawPerformanceTab(float frame_ms, float framerate);
   void resetFramePacingStats();
 

@@ -472,6 +472,7 @@ void DiligentBackend::initializeDevice() {
     std::fprintf(stderr, "[Karma] Vulkan validation enabled via KARMA_VK_VALIDATION=1\n");
     std::fflush(stderr);
   }
+  engine_ci.Features.ShaderResourceRuntimeArray = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
 
   if (window_) {
 #if !defined(BZ3_WINDOW_BACKEND_SDL)

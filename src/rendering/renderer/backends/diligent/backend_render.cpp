@@ -2,6 +2,7 @@
 
 #include "backend_internal.h"
 #include "passes/pass_shared.h"
+#include "karma/rendering/renderer/particle_stats_report.h"
 
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/SwapChain.h>
@@ -37,131 +38,6 @@ struct alignas(16) ForwardPlusGpuLight {
   float spot_params[4];
   float screen_rect[4];
 };
-
-void accumulateParticleStatsForLog(renderer::ParticlePassStats& totals,
-                                   const renderer::ParticlePassStats& frame) {
-  totals.effect_binding_updates += frame.effect_binding_updates;
-  totals.simulated_emitters += frame.simulated_emitters;
-  totals.visible_emitters += frame.visible_emitters;
-  totals.culled_emitters += frame.culled_emitters;
-  totals.submitted_emitters += frame.submitted_emitters;
-  totals.simulated_particles += frame.simulated_particles;
-  totals.packed_particles += frame.packed_particles;
-  totals.culled_particles += frame.culled_particles;
-  totals.ground_collision_particles += frame.ground_collision_particles;
-  totals.submitted_batches += frame.submitted_batches;
-  totals.submitted_particles += frame.submitted_particles;
-  totals.additive_batches += frame.additive_batches;
-  totals.additive_particles += frame.additive_particles;
-  totals.alpha_batches += frame.alpha_batches;
-  totals.alpha_particles += frame.alpha_particles;
-  totals.distortion_batches += frame.distortion_batches;
-  totals.distortion_particles += frame.distortion_particles;
-  totals.additive_draw_calls += frame.additive_draw_calls;
-  totals.alpha_draw_calls += frame.alpha_draw_calls;
-  totals.distortion_draw_calls += frame.distortion_draw_calls;
-  totals.alpha_sorted_particles += frame.alpha_sorted_particles;
-  totals.distortion_sorted_particles += frame.distortion_sorted_particles;
-  totals.alpha_invalid_depth_particles += frame.alpha_invalid_depth_particles;
-  totals.distortion_invalid_depth_particles += frame.distortion_invalid_depth_particles;
-  totals.pre_particle_scene_sample_draws += frame.pre_particle_scene_sample_draws;
-  totals.post_particle_scene_sample_draws += frame.post_particle_scene_sample_draws;
-  totals.sync_effect_bindings_ms += frame.sync_effect_bindings_ms;
-  totals.simulation_ms += frame.simulation_ms;
-  totals.packing_ms += frame.packing_ms;
-  totals.additive_grouping_ms += frame.additive_grouping_ms;
-  totals.alpha_sort_ms += frame.alpha_sort_ms;
-  totals.distortion_sort_ms += frame.distortion_sort_ms;
-  totals.alpha_collect_ms += frame.alpha_collect_ms;
-  totals.alpha_sort_only_ms += frame.alpha_sort_only_ms;
-  totals.alpha_span_ms += frame.alpha_span_ms;
-  totals.distortion_collect_ms += frame.distortion_collect_ms;
-  totals.distortion_sort_only_ms += frame.distortion_sort_only_ms;
-  totals.distortion_span_ms += frame.distortion_span_ms;
-  totals.draw_submission_ms += frame.draw_submission_ms;
-  totals.scene_color_copy = totals.scene_color_copy || frame.scene_color_copy;
-  totals.post_particle_scene_color_copy =
-      totals.post_particle_scene_color_copy || frame.post_particle_scene_color_copy;
-  totals.alpha_half_res = totals.alpha_half_res || frame.alpha_half_res;
-  totals.distortion_present = totals.distortion_present || frame.distortion_present;
-}
-
-void logAveragedParticleStats(const renderer::ParticlePassStats& totals,
-                              uint32_t frame_count,
-                              double elapsed_seconds) {
-  if (frame_count == 0u) {
-    return;
-  }
-
-  const double inv_frames = 1.0 / static_cast<double>(frame_count);
-  const double fps = elapsed_seconds > 0.0
-                         ? static_cast<double>(frame_count) / elapsed_seconds
-                         : 0.0;
-  spdlog::info(
-      "Particle stats: seconds={:.2f} frames={} fps={:.1f} "
-      "effect_binding_updates={:.1f} simulated_emitters={:.1f} visible_emitters={:.1f} "
-      "culled_emitters={:.1f} submitted_emitters={:.1f} simulated_particles={:.1f} "
-      "packed_particles={:.1f} culled_particles={:.1f} ground_collision_particles={:.1f} "
-      "submitted_batches={:.1f} submitted_particles={:.1f} additive_batches={:.1f} "
-      "alpha_batches={:.1f} distortion_batches={:.1f} additive_particles={:.1f} "
-      "alpha_particles={:.1f} distortion_particles={:.1f} additive_draw_calls={:.1f} "
-      "alpha_draw_calls={:.1f} distortion_draw_calls={:.1f} alpha_sorted_particles={:.1f} "
-      "distortion_sorted_particles={:.1f} alpha_invalid_depth_particles={:.1f} "
-      "distortion_invalid_depth_particles={:.1f} pre_particle_scene_sample_draws={:.1f} "
-      "post_particle_scene_sample_draws={:.1f} sync_effect_bindings_ms={:.3f} "
-      "simulation_ms={:.3f} packing_ms={:.3f} additive_grouping_ms={:.3f} "
-      "alpha_collect_ms={:.3f} alpha_sort_only_ms={:.3f} alpha_span_ms={:.3f} "
-      "alpha_sort_ms={:.3f} distortion_collect_ms={:.3f} distortion_sort_only_ms={:.3f} "
-      "distortion_span_ms={:.3f} distortion_sort_ms={:.3f} draw_submission_ms={:.3f} "
-      "scene_color_copy={} post_particle_scene_color_copy={} alpha_half_res={} "
-      "distortion_present={}",
-      elapsed_seconds,
-      static_cast<unsigned int>(frame_count),
-      fps,
-      static_cast<double>(totals.effect_binding_updates) * inv_frames,
-      static_cast<double>(totals.simulated_emitters) * inv_frames,
-      static_cast<double>(totals.visible_emitters) * inv_frames,
-      static_cast<double>(totals.culled_emitters) * inv_frames,
-      static_cast<double>(totals.submitted_emitters) * inv_frames,
-      static_cast<double>(totals.simulated_particles) * inv_frames,
-      static_cast<double>(totals.packed_particles) * inv_frames,
-      static_cast<double>(totals.culled_particles) * inv_frames,
-      static_cast<double>(totals.ground_collision_particles) * inv_frames,
-      static_cast<double>(totals.submitted_batches) * inv_frames,
-      static_cast<double>(totals.submitted_particles) * inv_frames,
-      static_cast<double>(totals.additive_batches) * inv_frames,
-      static_cast<double>(totals.alpha_batches) * inv_frames,
-      static_cast<double>(totals.distortion_batches) * inv_frames,
-      static_cast<double>(totals.additive_particles) * inv_frames,
-      static_cast<double>(totals.alpha_particles) * inv_frames,
-      static_cast<double>(totals.distortion_particles) * inv_frames,
-      static_cast<double>(totals.additive_draw_calls) * inv_frames,
-      static_cast<double>(totals.alpha_draw_calls) * inv_frames,
-      static_cast<double>(totals.distortion_draw_calls) * inv_frames,
-      static_cast<double>(totals.alpha_sorted_particles) * inv_frames,
-      static_cast<double>(totals.distortion_sorted_particles) * inv_frames,
-      static_cast<double>(totals.alpha_invalid_depth_particles) * inv_frames,
-      static_cast<double>(totals.distortion_invalid_depth_particles) * inv_frames,
-      static_cast<double>(totals.pre_particle_scene_sample_draws) * inv_frames,
-      static_cast<double>(totals.post_particle_scene_sample_draws) * inv_frames,
-      totals.sync_effect_bindings_ms * static_cast<float>(inv_frames),
-      totals.simulation_ms * static_cast<float>(inv_frames),
-      totals.packing_ms * static_cast<float>(inv_frames),
-      totals.additive_grouping_ms * static_cast<float>(inv_frames),
-      totals.alpha_collect_ms * static_cast<float>(inv_frames),
-      totals.alpha_sort_only_ms * static_cast<float>(inv_frames),
-      totals.alpha_span_ms * static_cast<float>(inv_frames),
-      totals.alpha_sort_ms * static_cast<float>(inv_frames),
-      totals.distortion_collect_ms * static_cast<float>(inv_frames),
-      totals.distortion_sort_only_ms * static_cast<float>(inv_frames),
-      totals.distortion_span_ms * static_cast<float>(inv_frames),
-      totals.distortion_sort_ms * static_cast<float>(inv_frames),
-      totals.draw_submission_ms * static_cast<float>(inv_frames),
-      totals.scene_color_copy,
-      totals.post_particle_scene_color_copy,
-      totals.alpha_half_res,
-      totals.distortion_present);
-}
 
 template <typename T, bool KeepStrongReferences = false>
 T* getMappedData(Diligent::MapHelper<T, KeepStrongReferences>& map) {
@@ -1119,6 +995,20 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
       require_scene_color_copy = true;
     }
   }
+  for (const auto& submission : particle_emitter_submissions_) {
+    const auto& emitter = submission.desc;
+    if (emitter.layer != layer || !emitter.visible || !emitter.enabled ||
+        emitter.max_particles == 0u) {
+      continue;
+    }
+    if (emitter.blend_mode == renderer::ParticleBlendMode::Distortion) {
+      allow_distortion_particles = true;
+      require_scene_color_copy = true;
+    }
+    if (emitter.shading_mode == renderer::ParticleShadingMode::Shell) {
+      require_scene_color_copy = true;
+    }
+  }
   particle_pass_stats_.distortion_present =
       particle_pass_stats_.distortion_present || allow_distortion_particles;
   if (require_scene_color_copy && particle_scene_texture) {
@@ -1290,11 +1180,13 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                                          : 1.0 / 60.0;
     particle_stats_log_elapsed_seconds_ += frame_seconds;
     particle_stats_log_frame_count_ += 1u;
-    accumulateParticleStatsForLog(particle_stats_log_totals_, particle_pass_stats_);
+    renderer::accumulateParticleStats(particle_stats_log_totals_, particle_pass_stats_);
     if (particle_stats_log_elapsed_seconds_ >= 1.0) {
-      logAveragedParticleStats(particle_stats_log_totals_,
-                               particle_stats_log_frame_count_,
-                               particle_stats_log_elapsed_seconds_);
+      spdlog::info("{}", renderer::formatParticleStatsReport(renderer::ParticleStatsReport{
+                            .totals = particle_stats_log_totals_,
+                            .frame_count = particle_stats_log_frame_count_,
+                            .elapsed_seconds = particle_stats_log_elapsed_seconds_,
+                        }));
       particle_stats_log_totals_ = {};
       particle_stats_log_elapsed_seconds_ = 0.0;
       particle_stats_log_frame_count_ = 0u;

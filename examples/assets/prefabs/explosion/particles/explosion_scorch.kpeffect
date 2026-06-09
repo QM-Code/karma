@@ -1,45 +1,121 @@
-# Ground scorch mark for the replayable explosion.
-layer = 0
-depth_test = true
-blend_mode = alpha
-alignment = ground
-use_soft_mask = false
-soft_particle_distance = 0.30
-texture = prefabs/explosion/scorch_atlas
-
-enabled = true
-playing = true
-loop = false
-emit_burst_on_start = true
-
-atlas_columns = 4
-atlas_rows = 1
-atlas_frame_count = 4
-animate_over_lifetime = true
-random_start_frame = false
-
-max_particles = 1
-burst_count = 1
-seed = 4407
-spawn_rate = 0.0
-duration = 0.0
-particle_lifetime_min = 3.10
-particle_lifetime_max = 3.60
-start_size_min = 2.33
-start_size_max = 2.70
-end_size_min = 3.08
-end_size_max = 3.53
-size_curve_exponent = 0.82
-alpha_curve_exponent = 1.85
-initial_rotation_min = 0.0
-initial_rotation_max = 6.2831853
-angular_velocity_min = -0.02
-angular_velocity_max = 0.02
-spawn_shape = box
-spawn_box_extents = 0.0, 0.0, 0.0
-velocity_min = 0.0, 0.0, 0.0
-velocity_max = 0.0, 0.0, 0.0
-acceleration = 0.0, 0.0, 0.0
-drag = 0.0
-start_color = 0.24, 0.20, 0.16, 0.42
-end_color = 0.16, 0.14, 0.11, 0.0
+{
+  "version": 2,
+  "emitters": [
+    {
+      "texture": "prefabs/explosion/scorch_atlas",
+      "playback": {
+        "enabled": true,
+        "playing": true,
+        "loop": false,
+        "emit_burst_on_start": true,
+        "local_space": false,
+        "time_scale": 1.0,
+        "start_delay": 0.0,
+        "duration": 0.0
+      },
+      "render": {
+        "layer": 0,
+        "depth_test": true,
+        "blend_mode": "alpha",
+        "alignment": "ground",
+        "shading_mode": "standard",
+        "use_soft_mask": false,
+        "soft_particle_distance": 0.3,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "refraction_strength": 0.0,
+        "interior_glow": 0.0
+      },
+      "atlas": {
+        "columns": 4,
+        "rows": 1,
+        "frame_count": 4,
+        "frame_width": 0,
+        "frame_height": 0,
+        "border_x": 0,
+        "border_y": 0,
+        "spacing_x": 0,
+        "spacing_y": 0,
+        "animation_fps": 0.0,
+        "animate_over_lifetime": true,
+        "random_start_frame": false
+      },
+      "emission": {
+        "max_particles": 1,
+        "burst_count": 1,
+        "seed": 4407,
+        "spawn_rate": 0.0
+      },
+      "lifetime": {
+        "min": 3.1,
+        "max": 3.6
+      },
+      "size": {
+        "start_min": 2.33,
+        "start_max": 2.7,
+        "end_min": 3.08,
+        "end_max": 3.53,
+        "curve_exponent": 0.82
+      },
+      "rotation": {
+        "initial_min": 0.0,
+        "initial_max": 6.2831853,
+        "angular_velocity_min": -0.02,
+        "angular_velocity_max": 0.02
+      },
+      "spawn": {
+        "shape": "box",
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius_min": 0.0,
+        "radius_max": 0.0,
+        "radial_speed_min": 0.0,
+        "radial_speed_max": 0.0
+      },
+      "motion": {
+        "velocity_min": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "velocity_max": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "drag": 0.0
+      },
+      "collision": {
+        "ground": false,
+        "ground_height": 0.0,
+        "bounce_damping": 0.35,
+        "friction": 0.25,
+        "rest_speed_threshold": 0.35
+      },
+      "color": {
+        "start": [
+          0.24,
+          0.2,
+          0.16,
+          0.42
+        ],
+        "end": [
+          0.16,
+          0.14,
+          0.11,
+          0.0
+        ],
+        "alpha_curve_exponent": 1.85
+      }
+    }
+  ]
+}

@@ -240,9 +240,40 @@ void DiligentBackend::setParticleSystemStats(const renderer::ParticlePassStats& 
   particle_pass_stats_.packed_particles = stats.packed_particles;
   particle_pass_stats_.culled_particles = stats.culled_particles;
   particle_pass_stats_.ground_collision_particles = stats.ground_collision_particles;
+  particle_pass_stats_.gpu_particle_capacity = stats.gpu_particle_capacity;
+  particle_pass_stats_.gpu_alive_particles = stats.gpu_alive_particles;
+  particle_pass_stats_.gpu_dead_particles = stats.gpu_dead_particles;
+  particle_pass_stats_.gpu_spawned_particles = stats.gpu_spawned_particles;
+  particle_pass_stats_.gpu_killed_particles = stats.gpu_killed_particles;
+  particle_pass_stats_.gpu_compacted_particles = stats.gpu_compacted_particles;
+  particle_pass_stats_.gpu_compute_dispatches = stats.gpu_compute_dispatches;
+  particle_pass_stats_.gpu_indirect_draws = stats.gpu_indirect_draws;
+  particle_pass_stats_.gpu_indirect_dispatches = stats.gpu_indirect_dispatches;
+  particle_pass_stats_.gpu_sort_key_count = stats.gpu_sort_key_count;
+  particle_pass_stats_.gpu_sort_passes = stats.gpu_sort_passes;
+  particle_pass_stats_.gpu_buffer_resizes = stats.gpu_buffer_resizes;
+  particle_pass_stats_.gpu_stats_readback_age = stats.gpu_stats_readback_age;
+  particle_pass_stats_.gpu_allocator_live_emitters = stats.gpu_allocator_live_emitters;
+  particle_pass_stats_.gpu_allocator_free_ranges = stats.gpu_allocator_free_ranges;
+  particle_pass_stats_.gpu_allocator_active_capacity = stats.gpu_allocator_active_capacity;
+  particle_pass_stats_.gpu_allocator_high_water_capacity =
+      stats.gpu_allocator_high_water_capacity;
+  particle_pass_stats_.gpu_allocator_retired_emitters =
+      stats.gpu_allocator_retired_emitters;
+  particle_pass_stats_.gpu_allocator_reused_slots = stats.gpu_allocator_reused_slots;
+  particle_pass_stats_.gpu_allocator_allocation_failures =
+      stats.gpu_allocator_allocation_failures;
+  particle_pass_stats_.gpu_culled_emitters = stats.gpu_culled_emitters;
+  particle_pass_stats_.gpu_culled_particles = stats.gpu_culled_particles;
+  particle_pass_stats_.gpu_culling_dispatches = stats.gpu_culling_dispatches;
+  particle_pass_stats_.cpu_fallback_particles = stats.cpu_fallback_particles;
   particle_pass_stats_.sync_effect_bindings_ms = stats.sync_effect_bindings_ms;
   particle_pass_stats_.simulation_ms = stats.simulation_ms;
   particle_pass_stats_.packing_ms = stats.packing_ms;
+  particle_pass_stats_.gpu_sort_overflow = stats.gpu_sort_overflow;
+  particle_pass_stats_.gpu_fallback_active = stats.gpu_fallback_active;
+  particle_pass_stats_.gpu_global_sort_active = stats.gpu_global_sort_active;
+  particle_pass_stats_.gpu_grouped_sort_fallback = stats.gpu_grouped_sort_fallback;
 }
 
 void DiligentBackend::setShadowSettings(float bias,

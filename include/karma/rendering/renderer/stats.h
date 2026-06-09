@@ -50,6 +50,30 @@ struct ParticlePassStats {
   uint32_t distortion_invalid_depth_particles = 0;
   uint32_t pre_particle_scene_sample_draws = 0;
   uint32_t post_particle_scene_sample_draws = 0;
+  uint32_t gpu_particle_capacity = 0;
+  uint32_t gpu_alive_particles = 0;
+  uint32_t gpu_dead_particles = 0;
+  uint32_t gpu_spawned_particles = 0;
+  uint32_t gpu_killed_particles = 0;
+  uint32_t gpu_compacted_particles = 0;
+  uint32_t gpu_compute_dispatches = 0;
+  uint32_t gpu_indirect_draws = 0;
+  uint32_t gpu_indirect_dispatches = 0;
+  uint32_t gpu_sort_key_count = 0;
+  uint32_t gpu_sort_passes = 0;
+  uint32_t gpu_buffer_resizes = 0;
+  uint32_t gpu_stats_readback_age = 0;
+  uint32_t gpu_allocator_live_emitters = 0;
+  uint32_t gpu_allocator_free_ranges = 0;
+  uint32_t gpu_allocator_active_capacity = 0;
+  uint32_t gpu_allocator_high_water_capacity = 0;
+  uint32_t gpu_allocator_retired_emitters = 0;
+  uint32_t gpu_allocator_reused_slots = 0;
+  uint32_t gpu_allocator_allocation_failures = 0;
+  uint32_t gpu_culled_emitters = 0;
+  uint32_t gpu_culled_particles = 0;
+  uint32_t gpu_culling_dispatches = 0;
+  uint32_t cpu_fallback_particles = 0;
   float sync_effect_bindings_ms = 0.0f;
   float simulation_ms = 0.0f;
   float packing_ms = 0.0f;
@@ -67,6 +91,10 @@ struct ParticlePassStats {
   bool post_particle_scene_color_copy = false;
   bool alpha_half_res = false;
   bool distortion_present = false;
+  bool gpu_sort_overflow = false;
+  bool gpu_fallback_active = false;
+  bool gpu_global_sort_active = false;
+  bool gpu_grouped_sort_fallback = false;
 };
 
 }  // namespace karma::renderer

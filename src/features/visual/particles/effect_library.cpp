@@ -1,118 +1,166 @@
 #include "karma/features/visual/particles/effect_library.h"
 
 #include <algorithm>
-#include <cctype>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
 #include <fstream>
-#include <sstream>
+#include <initializer_list>
+#include <limits>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
+#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
 namespace karma::particles {
 
 namespace {
 
-std::string trim(std::string_view text) {
-  size_t start = 0;
-  while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])) != 0) {
-    ++start;
-  }
+using Json = nlohmann::json;
 
-  size_t end = text.size();
-  while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
-    --end;
-  }
-
-  return std::string(text.substr(start, end - start));
+bool keyAllowed(std::string_view key, std::initializer_list<std::string_view> allowed) {
+  return std::find(allowed.begin(), allowed.end(), key) != allowed.end();
 }
 
-std::string lowercase(std::string_view text) {
-  std::string out(text);
-  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  return out;
-}
-
-std::string stripQuotes(std::string value) {
-  if (value.size() >= 2u &&
-      ((value.front() == '"' && value.back() == '"') ||
-       (value.front() == '\'' && value.back() == '\''))) {
-    value = value.substr(1u, value.size() - 2u);
-  }
-  return value;
-}
-
-bool parseBool(std::string_view text, bool& out_value) {
-  const std::string value = lowercase(trim(text));
-  if (value == "true" || value == "1" || value == "yes" || value == "on") {
-    out_value = true;
-    return true;
-  }
-  if (value == "false" || value == "0" || value == "no" || value == "off") {
-    out_value = false;
-    return true;
-  }
-  return false;
-}
-
-template <typename T>
-bool parseNumber(std::string_view text, T& out_value) {
-  const std::string value = trim(text);
-  if (value.empty()) {
+bool rejectUnknownFields(const Json& object,
+                         std::initializer_list<std::string_view> allowed,
+                         std::string_view context,
+                         std::string& out_error) {
+  if (!object.is_object()) {
+    out_error = std::string(context) + " must be an object";
     return false;
   }
-  try {
-    if constexpr (std::is_same_v<T, float>) {
-      out_value = std::stof(value);
-    } else if constexpr (std::is_same_v<T, uint32_t>) {
-      out_value = static_cast<uint32_t>(std::stoul(value));
-    } else if constexpr (std::is_same_v<T, int>) {
-      out_value = std::stoi(value);
-    } else {
-      static_assert(!sizeof(T*), "Unsupported numeric type");
+  for (const auto& [key, value] : object.items()) {
+    (void)value;
+    if (!keyAllowed(key, allowed)) {
+      out_error = std::string(context) + " has unknown field '" + key + "'";
+      return false;
     }
+  }
+  return true;
+}
+
+bool readBool(const Json& object, std::string_view key, bool& out_value, std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
     return true;
-  } catch (...) {
+  }
+  if (!it->is_boolean()) {
+    out_error = "field '" + std::string(key) + "' must be a boolean";
     return false;
   }
+  out_value = it->get<bool>();
+  return true;
 }
 
-std::vector<std::string> splitCommaSeparated(std::string_view text) {
-  std::vector<std::string> values;
-  std::stringstream stream(trim(text));
-  std::string part;
-  while (std::getline(stream, part, ',')) {
-    values.push_back(trim(part));
-  }
-  return values;
-}
-
-bool parseVec3(std::string_view text, math::Vec3& out_value) {
-  const std::vector<std::string> parts = splitCommaSeparated(text);
-  if (parts.size() != 3u) {
+bool readFloatValue(const Json& value, float& out_value) {
+  if (!value.is_number()) {
     return false;
   }
-  return parseNumber(parts[0], out_value.x) &&
-         parseNumber(parts[1], out_value.y) &&
-         parseNumber(parts[2], out_value.z);
+  out_value = value.get<float>();
+  return true;
 }
 
-bool parseColor(std::string_view text, math::Color& out_value) {
-  const std::vector<std::string> parts = splitCommaSeparated(text);
-  if (parts.size() != 4u) {
+bool readFloat(const Json& object, std::string_view key, float& out_value, std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!readFloatValue(*it, out_value)) {
+    out_error = "field '" + std::string(key) + "' must be a number";
     return false;
   }
-  return parseNumber(parts[0], out_value.r) &&
-         parseNumber(parts[1], out_value.g) &&
-         parseNumber(parts[2], out_value.b) &&
-         parseNumber(parts[3], out_value.a);
+  return true;
 }
 
-bool parseBlendMode(std::string_view text, renderer::ParticleBlendMode& out_value) {
-  const std::string value = lowercase(trim(text));
+bool readUint32(const Json& object,
+                std::string_view key,
+                uint32_t& out_value,
+                std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_number_unsigned() && !it->is_number_integer()) {
+    out_error = "field '" + std::string(key) + "' must be an unsigned integer";
+    return false;
+  }
+  const int64_t value = it->get<int64_t>();
+  if (value < 0 || value > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+    out_error = "field '" + std::string(key) + "' is outside uint32 range";
+    return false;
+  }
+  out_value = static_cast<uint32_t>(value);
+  return true;
+}
+
+bool readVec3Value(const Json& value, math::Vec3& out_value) {
+  if (!value.is_array() || value.size() != 3u) {
+    return false;
+  }
+  return readFloatValue(value[0], out_value.x) &&
+         readFloatValue(value[1], out_value.y) &&
+         readFloatValue(value[2], out_value.z);
+}
+
+bool readVec3(const Json& object,
+              std::string_view key,
+              math::Vec3& out_value,
+              std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!readVec3Value(*it, out_value)) {
+    out_error = "field '" + std::string(key) + "' must be a 3-number array";
+    return false;
+  }
+  return true;
+}
+
+bool readColorValue(const Json& value, math::Color& out_value) {
+  if (!value.is_array() || value.size() != 4u) {
+    return false;
+  }
+  return readFloatValue(value[0], out_value.r) &&
+         readFloatValue(value[1], out_value.g) &&
+         readFloatValue(value[2], out_value.b) &&
+         readFloatValue(value[3], out_value.a);
+}
+
+bool readColor(const Json& object,
+               std::string_view key,
+               math::Color& out_value,
+               std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!readColorValue(*it, out_value)) {
+    out_error = "field '" + std::string(key) + "' must be a 4-number array";
+    return false;
+  }
+  return true;
+}
+
+bool readBlendMode(const Json& object,
+                   std::string_view key,
+                   renderer::ParticleBlendMode& out_value,
+                   std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    out_error = "field '" + std::string(key) + "' must be a string";
+    return false;
+  }
+  const std::string value = it->get<std::string>();
   if (value == "additive") {
     out_value = renderer::ParticleBlendMode::Additive;
     return true;
@@ -121,44 +169,77 @@ bool parseBlendMode(std::string_view text, renderer::ParticleBlendMode& out_valu
     out_value = renderer::ParticleBlendMode::Alpha;
     return true;
   }
-  if (value == "distortion" ||
-      value == "heat_distortion" ||
-      value == "heat-distortion") {
+  if (value == "distortion") {
     out_value = renderer::ParticleBlendMode::Distortion;
     return true;
   }
+  out_error = "field '" + std::string(key) + "' has invalid blend mode '" + value + "'";
   return false;
 }
 
-bool parseAlignment(std::string_view text, renderer::ParticleAlignment& out_value) {
-  const std::string value = lowercase(trim(text));
-  if (value == "billboard" || value == "camera" || value == "camera_facing") {
+bool readAlignment(const Json& object,
+                   std::string_view key,
+                   renderer::ParticleAlignment& out_value,
+                   std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    out_error = "field '" + std::string(key) + "' must be a string";
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "billboard") {
     out_value = renderer::ParticleAlignment::Billboard;
     return true;
   }
-  if (value == "ground" || value == "decal" || value == "floor") {
+  if (value == "ground") {
     out_value = renderer::ParticleAlignment::Ground;
     return true;
   }
+  out_error = "field '" + std::string(key) + "' has invalid alignment '" + value + "'";
   return false;
 }
 
-bool parseShadingMode(std::string_view text, renderer::ParticleShadingMode& out_value) {
-  const std::string value = lowercase(trim(text));
-  if (value == "standard" || value == "default") {
+bool readShadingMode(const Json& object,
+                     std::string_view key,
+                     renderer::ParticleShadingMode& out_value,
+                     std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    out_error = "field '" + std::string(key) + "' must be a string";
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "standard") {
     out_value = renderer::ParticleShadingMode::Standard;
     return true;
   }
-  if (value == "shell" || value == "sphere_shell" || value == "orb_shell" ||
-      value == "spherical_shell") {
+  if (value == "shell") {
     out_value = renderer::ParticleShadingMode::Shell;
     return true;
   }
+  out_error = "field '" + std::string(key) + "' has invalid shading mode '" + value + "'";
   return false;
 }
 
-bool parseSpawnShape(std::string_view text, components::ParticleSpawnShape& out_value) {
-  const std::string value = lowercase(trim(text));
+bool readSpawnShape(const Json& object,
+                    std::string_view key,
+                    components::ParticleSpawnShape& out_value,
+                    std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    out_error = "field '" + std::string(key) + "' must be a string";
+    return false;
+  }
+  const std::string value = it->get<std::string>();
   if (value == "box") {
     out_value = components::ParticleSpawnShape::Box;
     return true;
@@ -167,238 +248,287 @@ bool parseSpawnShape(std::string_view text, components::ParticleSpawnShape& out_
     out_value = components::ParticleSpawnShape::Sphere;
     return true;
   }
-  if (value == "sphere_surface" || value == "sphere-surface" || value == "shell") {
+  if (value == "sphere_surface") {
     out_value = components::ParticleSpawnShape::SphereSurface;
     return true;
   }
+  out_error = "field '" + std::string(key) + "' has invalid spawn shape '" + value + "'";
   return false;
 }
 
-bool applyEffectField(ParticleEffectDesc& desc,
-                      const std::string& key,
-                      const std::string& raw_value,
-                      std::string& out_error) {
-  auto& emitter = desc.emitter;
-  if (key == "enabled") {
-    return parseBool(raw_value, emitter.enabled);
-  }
-  if (key == "playing") {
-    return parseBool(raw_value, emitter.playing);
-  }
-  if (key == "loop") {
-    return parseBool(raw_value, emitter.loop);
-  }
-  if (key == "emit_burst_on_start") {
-    return parseBool(raw_value, emitter.emit_burst_on_start);
-  }
-  if (key == "local_space") {
-    return parseBool(raw_value, emitter.local_space);
-  }
-  if (key == "layer") {
-    return parseNumber(raw_value, emitter.layer);
-  }
-  if (key == "depth_test") {
-    return parseBool(raw_value, emitter.depth_test);
-  }
-  if (key == "blend_mode") {
-    return parseBlendMode(raw_value, emitter.blend_mode);
-  }
-  if (key == "alignment") {
-    return parseAlignment(raw_value, emitter.alignment);
-  }
-  if (key == "shading_mode") {
-    return parseShadingMode(raw_value, emitter.shading_mode);
-  }
-  if (key == "use_soft_mask") {
-    return parseBool(raw_value, emitter.use_soft_mask);
-  }
-  if (key == "soft_particle_distance") {
-    return parseNumber(raw_value, emitter.soft_particle_distance);
-  }
-  if (key == "distortion_strength") {
-    return parseNumber(raw_value, emitter.distortion_strength);
-  }
-  if (key == "fresnel_power") {
-    return parseNumber(raw_value, emitter.fresnel_power);
-  }
-  if (key == "fresnel_strength") {
-    return parseNumber(raw_value, emitter.fresnel_strength);
-  }
-  if (key == "refraction_strength") {
-    return parseNumber(raw_value, emitter.refraction_strength);
-  }
-  if (key == "interior_glow") {
-    return parseNumber(raw_value, emitter.interior_glow);
-  }
-  if (key == "texture") {
-    desc.texture_key = stripQuotes(trim(raw_value));
-    return true;
-  }
-  if (key == "atlas_columns") {
-    return parseNumber(raw_value, emitter.atlas_columns);
-  }
-  if (key == "atlas_rows") {
-    return parseNumber(raw_value, emitter.atlas_rows);
-  }
-  if (key == "atlas_frame_count") {
-    return parseNumber(raw_value, emitter.atlas_frame_count);
-  }
-  if (key == "atlas_frame_width") {
-    return parseNumber(raw_value, emitter.atlas_frame_width);
-  }
-  if (key == "atlas_frame_height") {
-    return parseNumber(raw_value, emitter.atlas_frame_height);
-  }
-  if (key == "atlas_border") {
-    uint32_t value = 0u;
-    if (!parseNumber(raw_value, value)) {
-      return false;
-    }
-    emitter.atlas_border_x = value;
-    emitter.atlas_border_y = value;
-    return true;
-  }
-  if (key == "atlas_border_x") {
-    return parseNumber(raw_value, emitter.atlas_border_x);
-  }
-  if (key == "atlas_border_y") {
-    return parseNumber(raw_value, emitter.atlas_border_y);
-  }
-  if (key == "atlas_spacing" || key == "atlas_gutter") {
-    uint32_t value = 0u;
-    if (!parseNumber(raw_value, value)) {
-      return false;
-    }
-    emitter.atlas_spacing_x = value;
-    emitter.atlas_spacing_y = value;
-    return true;
-  }
-  if (key == "atlas_spacing_x" || key == "atlas_gutter_x") {
-    return parseNumber(raw_value, emitter.atlas_spacing_x);
-  }
-  if (key == "atlas_spacing_y" || key == "atlas_gutter_y") {
-    return parseNumber(raw_value, emitter.atlas_spacing_y);
-  }
-  if (key == "animation_fps") {
-    return parseNumber(raw_value, emitter.animation_fps);
-  }
-  if (key == "animate_over_lifetime") {
-    return parseBool(raw_value, emitter.animate_over_lifetime);
-  }
-  if (key == "random_start_frame") {
-    return parseBool(raw_value, emitter.random_start_frame);
-  }
-  if (key == "max_particles") {
-    return parseNumber(raw_value, emitter.max_particles);
-  }
-  if (key == "burst_count") {
-    return parseNumber(raw_value, emitter.burst_count);
-  }
-  if (key == "seed") {
-    return parseNumber(raw_value, emitter.seed);
-  }
-  if (key == "time_scale") {
-    return parseNumber(raw_value, emitter.time_scale);
-  }
-  if (key == "start_delay") {
-    return parseNumber(raw_value, emitter.start_delay);
-  }
-  if (key == "duration") {
-    return parseNumber(raw_value, emitter.duration);
-  }
-  if (key == "spawn_rate") {
-    return parseNumber(raw_value, emitter.spawn_rate);
-  }
-  if (key == "particle_lifetime_min") {
-    return parseNumber(raw_value, emitter.particle_lifetime_min);
-  }
-  if (key == "particle_lifetime_max") {
-    return parseNumber(raw_value, emitter.particle_lifetime_max);
-  }
-  if (key == "start_size_min") {
-    return parseNumber(raw_value, emitter.start_size_min);
-  }
-  if (key == "start_size_max") {
-    return parseNumber(raw_value, emitter.start_size_max);
-  }
-  if (key == "end_size_min") {
-    return parseNumber(raw_value, emitter.end_size_min);
-  }
-  if (key == "end_size_max") {
-    return parseNumber(raw_value, emitter.end_size_max);
-  }
-  if (key == "size_curve_exponent") {
-    return parseNumber(raw_value, emitter.size_curve_exponent);
-  }
-  if (key == "alpha_curve_exponent") {
-    return parseNumber(raw_value, emitter.alpha_curve_exponent);
-  }
-  if (key == "initial_rotation_min") {
-    return parseNumber(raw_value, emitter.initial_rotation_min);
-  }
-  if (key == "initial_rotation_max") {
-    return parseNumber(raw_value, emitter.initial_rotation_max);
-  }
-  if (key == "angular_velocity_min") {
-    return parseNumber(raw_value, emitter.angular_velocity_min);
-  }
-  if (key == "angular_velocity_max") {
-    return parseNumber(raw_value, emitter.angular_velocity_max);
-  }
-  if (key == "spawn_shape") {
-    return parseSpawnShape(raw_value, emitter.spawn_shape);
-  }
-  if (key == "spawn_box_extents") {
-    return parseVec3(raw_value, emitter.spawn_box_extents);
-  }
-  if (key == "spawn_radius_min") {
-    return parseNumber(raw_value, emitter.spawn_radius_min);
-  }
-  if (key == "spawn_radius_max") {
-    return parseNumber(raw_value, emitter.spawn_radius_max);
-  }
-  if (key == "radial_speed_min") {
-    return parseNumber(raw_value, emitter.radial_speed_min);
-  }
-  if (key == "radial_speed_max") {
-    return parseNumber(raw_value, emitter.radial_speed_max);
-  }
-  if (key == "velocity_min") {
-    return parseVec3(raw_value, emitter.velocity_min);
-  }
-  if (key == "velocity_max") {
-    return parseVec3(raw_value, emitter.velocity_max);
-  }
-  if (key == "acceleration") {
-    return parseVec3(raw_value, emitter.acceleration);
-  }
-  if (key == "drag") {
-    return parseNumber(raw_value, emitter.drag);
-  }
-  if (key == "collide_with_ground" || key == "ground_collision") {
-    return parseBool(raw_value, emitter.collide_with_ground);
-  }
-  if (key == "ground_height") {
-    return parseNumber(raw_value, emitter.ground_height);
-  }
-  if (key == "bounce_damping") {
-    return parseNumber(raw_value, emitter.bounce_damping);
-  }
-  if (key == "collision_friction") {
-    return parseNumber(raw_value, emitter.collision_friction);
-  }
-  if (key == "rest_speed_threshold") {
-    return parseNumber(raw_value, emitter.rest_speed_threshold);
-  }
-  if (key == "start_color") {
-    return parseColor(raw_value, emitter.start_color);
-  }
-  if (key == "end_color") {
-    return parseColor(raw_value, emitter.end_color);
+const Json* requiredBlock(const Json& object, std::string_view key, std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    out_error = "emitter is missing required block '" + std::string(key) + "'";
+    return nullptr;
+  }
+  if (!it->is_object()) {
+    out_error = "block '" + std::string(key) + "' must be an object";
+    return nullptr;
+  }
+  return &*it;
+}
+
+bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& out_error) {
+  if (!rejectUnknownFields(json,
+                           {"name",
+                            "texture",
+                            "playback",
+                            "render",
+                            "atlas",
+                            "emission",
+                            "lifetime",
+                            "size",
+                            "rotation",
+                            "spawn",
+                            "motion",
+                            "collision",
+                            "color"},
+                           "emitter",
+                           out_error)) {
+    return false;
   }
 
-  out_error = "unknown field '" + key + "'";
-  return false;
+  if (const auto texture_it = json.find("texture"); texture_it != json.end()) {
+    if (!texture_it->is_string()) {
+      out_error = "field 'texture' must be a string";
+      return false;
+    }
+    out_desc.texture_key = texture_it->get<std::string>();
+  }
+
+  auto& emitter = out_desc.emitter;
+
+  const Json* playback = requiredBlock(json, "playback", out_error);
+  const Json* render = requiredBlock(json, "render", out_error);
+  const Json* atlas = requiredBlock(json, "atlas", out_error);
+  const Json* emission = requiredBlock(json, "emission", out_error);
+  const Json* lifetime = requiredBlock(json, "lifetime", out_error);
+  const Json* size = requiredBlock(json, "size", out_error);
+  const Json* rotation = requiredBlock(json, "rotation", out_error);
+  const Json* spawn = requiredBlock(json, "spawn", out_error);
+  const Json* motion = requiredBlock(json, "motion", out_error);
+  const Json* collision = requiredBlock(json, "collision", out_error);
+  const Json* color = requiredBlock(json, "color", out_error);
+  if (!playback || !render || !atlas || !emission || !lifetime || !size || !rotation ||
+      !spawn || !motion || !collision || !color) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*playback,
+                           {"enabled",
+                            "playing",
+                            "loop",
+                            "emit_burst_on_start",
+                            "local_space",
+                            "time_scale",
+                            "start_delay",
+                            "duration"},
+                           "playback",
+                           out_error) ||
+      !readBool(*playback, "enabled", emitter.enabled, out_error) ||
+      !readBool(*playback, "playing", emitter.playing, out_error) ||
+      !readBool(*playback, "loop", emitter.loop, out_error) ||
+      !readBool(*playback, "emit_burst_on_start", emitter.emit_burst_on_start, out_error) ||
+      !readBool(*playback, "local_space", emitter.local_space, out_error) ||
+      !readFloat(*playback, "time_scale", emitter.time_scale, out_error) ||
+      !readFloat(*playback, "start_delay", emitter.start_delay, out_error) ||
+      !readFloat(*playback, "duration", emitter.duration, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*render,
+                           {"layer",
+                            "depth_test",
+                            "blend_mode",
+                            "alignment",
+                            "shading_mode",
+                            "use_soft_mask",
+                            "soft_particle_distance",
+                            "distortion_strength",
+                            "fresnel_power",
+                            "fresnel_strength",
+                            "refraction_strength",
+                            "interior_glow"},
+                           "render",
+                           out_error) ||
+      !readUint32(*render, "layer", emitter.layer, out_error) ||
+      !readBool(*render, "depth_test", emitter.depth_test, out_error) ||
+      !readBlendMode(*render, "blend_mode", emitter.blend_mode, out_error) ||
+      !readAlignment(*render, "alignment", emitter.alignment, out_error) ||
+      !readShadingMode(*render, "shading_mode", emitter.shading_mode, out_error) ||
+      !readBool(*render, "use_soft_mask", emitter.use_soft_mask, out_error) ||
+      !readFloat(*render, "soft_particle_distance", emitter.soft_particle_distance, out_error) ||
+      !readFloat(*render, "distortion_strength", emitter.distortion_strength, out_error) ||
+      !readFloat(*render, "fresnel_power", emitter.fresnel_power, out_error) ||
+      !readFloat(*render, "fresnel_strength", emitter.fresnel_strength, out_error) ||
+      !readFloat(*render, "refraction_strength", emitter.refraction_strength, out_error) ||
+      !readFloat(*render, "interior_glow", emitter.interior_glow, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*atlas,
+                           {"columns",
+                            "rows",
+                            "frame_count",
+                            "frame_width",
+                            "frame_height",
+                            "border_x",
+                            "border_y",
+                            "spacing_x",
+                            "spacing_y",
+                            "animation_fps",
+                            "animate_over_lifetime",
+                            "random_start_frame"},
+                           "atlas",
+                           out_error) ||
+      !readUint32(*atlas, "columns", emitter.atlas_columns, out_error) ||
+      !readUint32(*atlas, "rows", emitter.atlas_rows, out_error) ||
+      !readUint32(*atlas, "frame_count", emitter.atlas_frame_count, out_error) ||
+      !readUint32(*atlas, "frame_width", emitter.atlas_frame_width, out_error) ||
+      !readUint32(*atlas, "frame_height", emitter.atlas_frame_height, out_error) ||
+      !readUint32(*atlas, "border_x", emitter.atlas_border_x, out_error) ||
+      !readUint32(*atlas, "border_y", emitter.atlas_border_y, out_error) ||
+      !readUint32(*atlas, "spacing_x", emitter.atlas_spacing_x, out_error) ||
+      !readUint32(*atlas, "spacing_y", emitter.atlas_spacing_y, out_error) ||
+      !readFloat(*atlas, "animation_fps", emitter.animation_fps, out_error) ||
+      !readBool(*atlas, "animate_over_lifetime", emitter.animate_over_lifetime, out_error) ||
+      !readBool(*atlas, "random_start_frame", emitter.random_start_frame, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*emission,
+                           {"max_particles", "burst_count", "seed", "spawn_rate"},
+                           "emission",
+                           out_error) ||
+      !readUint32(*emission, "max_particles", emitter.max_particles, out_error) ||
+      !readUint32(*emission, "burst_count", emitter.burst_count, out_error) ||
+      !readUint32(*emission, "seed", emitter.seed, out_error) ||
+      !readFloat(*emission, "spawn_rate", emitter.spawn_rate, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*lifetime, {"min", "max"}, "lifetime", out_error) ||
+      !readFloat(*lifetime, "min", emitter.particle_lifetime_min, out_error) ||
+      !readFloat(*lifetime, "max", emitter.particle_lifetime_max, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*size,
+                           {"start_min", "start_max", "end_min", "end_max", "curve_exponent"},
+                           "size",
+                           out_error) ||
+      !readFloat(*size, "start_min", emitter.start_size_min, out_error) ||
+      !readFloat(*size, "start_max", emitter.start_size_max, out_error) ||
+      !readFloat(*size, "end_min", emitter.end_size_min, out_error) ||
+      !readFloat(*size, "end_max", emitter.end_size_max, out_error) ||
+      !readFloat(*size, "curve_exponent", emitter.size_curve_exponent, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*rotation,
+                           {"initial_min", "initial_max", "angular_velocity_min",
+                            "angular_velocity_max"},
+                           "rotation",
+                           out_error) ||
+      !readFloat(*rotation, "initial_min", emitter.initial_rotation_min, out_error) ||
+      !readFloat(*rotation, "initial_max", emitter.initial_rotation_max, out_error) ||
+      !readFloat(*rotation, "angular_velocity_min", emitter.angular_velocity_min, out_error) ||
+      !readFloat(*rotation, "angular_velocity_max", emitter.angular_velocity_max, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*spawn,
+                           {"shape",
+                            "box_extents",
+                            "radius_min",
+                            "radius_max",
+                            "radial_speed_min",
+                            "radial_speed_max"},
+                           "spawn",
+                           out_error) ||
+      !readSpawnShape(*spawn, "shape", emitter.spawn_shape, out_error) ||
+      !readVec3(*spawn, "box_extents", emitter.spawn_box_extents, out_error) ||
+      !readFloat(*spawn, "radius_min", emitter.spawn_radius_min, out_error) ||
+      !readFloat(*spawn, "radius_max", emitter.spawn_radius_max, out_error) ||
+      !readFloat(*spawn, "radial_speed_min", emitter.radial_speed_min, out_error) ||
+      !readFloat(*spawn, "radial_speed_max", emitter.radial_speed_max, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*motion,
+                           {"velocity_min", "velocity_max", "acceleration", "drag"},
+                           "motion",
+                           out_error) ||
+      !readVec3(*motion, "velocity_min", emitter.velocity_min, out_error) ||
+      !readVec3(*motion, "velocity_max", emitter.velocity_max, out_error) ||
+      !readVec3(*motion, "acceleration", emitter.acceleration, out_error) ||
+      !readFloat(*motion, "drag", emitter.drag, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*collision,
+                           {"ground",
+                            "ground_height",
+                            "bounce_damping",
+                            "friction",
+                            "rest_speed_threshold"},
+                           "collision",
+                           out_error) ||
+      !readBool(*collision, "ground", emitter.collide_with_ground, out_error) ||
+      !readFloat(*collision, "ground_height", emitter.ground_height, out_error) ||
+      !readFloat(*collision, "bounce_damping", emitter.bounce_damping, out_error) ||
+      !readFloat(*collision, "friction", emitter.collision_friction, out_error) ||
+      !readFloat(*collision, "rest_speed_threshold", emitter.rest_speed_threshold, out_error)) {
+    return false;
+  }
+
+  if (!rejectUnknownFields(*color, {"start", "end", "alpha_curve_exponent"}, "color", out_error) ||
+      !readColor(*color, "start", emitter.start_color, out_error) ||
+      !readColor(*color, "end", emitter.end_color, out_error) ||
+      !readFloat(*color, "alpha_curve_exponent", emitter.alpha_curve_exponent, out_error)) {
+    return false;
+  }
+
+  return true;
+}
+
+bool parseEffectJson(const Json& json, ParticleEffectDesc& out_desc, std::string& out_error) {
+  if (!rejectUnknownFields(json, {"version", "emitters"}, "effect", out_error)) {
+    return false;
+  }
+
+  const auto version_it = json.find("version");
+  if (version_it == json.end() ||
+      (!version_it->is_number_integer() && !version_it->is_number_unsigned()) ||
+      version_it->get<int>() != 2) {
+    out_error = "effect must declare version 2";
+    return false;
+  }
+
+  const auto emitters_it = json.find("emitters");
+  if (emitters_it == json.end() || !emitters_it->is_array() || emitters_it->empty()) {
+    out_error = "effect must contain a non-empty 'emitters' array";
+    return false;
+  }
+
+  ParticleEffectAsset asset{};
+  asset.emitters.reserve(emitters_it->size());
+  for (const Json& emitter_json : *emitters_it) {
+    ParticleEmitterDesc emitter{};
+    if (!parseEmitter(emitter_json, emitter, out_error)) {
+      return false;
+    }
+    asset.emitters.push_back(std::move(emitter));
+  }
+
+  const ParticleEmitterDesc* primary = asset.primaryEmitter();
+  if (primary == nullptr) {
+    out_error = "effect has no primary emitter";
+    return false;
+  }
+  out_desc = *primary;
+  return true;
 }
 
 }  // namespace
@@ -558,54 +688,31 @@ bool ParticleLibrary::reloadEffectFile(const std::string& key, EffectFileRecord&
 
   effects_[key] = std::move(desc);
   version_ += 1;
-  spdlog::info("Particle effect '{}' reloaded from {}", key, record.path.string());
   return true;
 }
 
 bool ParticleLibrary::parseEffectFile(const std::filesystem::path& path,
                                       ParticleEffectDesc& out_desc) const {
-  std::ifstream file(path);
-  if (!file.is_open()) {
-    spdlog::error("Particle effect load failed: could not open {}", path.string());
+  std::ifstream stream(path);
+  if (!stream) {
+    spdlog::error("Failed to open particle effect '{}'", path.string());
     return false;
   }
 
-  ParticleEffectDesc parsed{};
-  std::string line;
-  size_t line_number = 0;
-  while (std::getline(file, line)) {
-    line_number += 1;
-    const size_t comment_pos = line.find('#');
-    if (comment_pos != std::string::npos) {
-      line.erase(comment_pos);
-    }
-
-    const std::string trimmed = trim(line);
-    if (trimmed.empty()) {
-      continue;
-    }
-
-    const size_t equals_pos = trimmed.find('=');
-    if (equals_pos == std::string::npos) {
-      spdlog::error("Particle effect parse failed: {}:{} missing '='",
-                    path.string(),
-                    line_number);
-      return false;
-    }
-
-    const std::string key = lowercase(trim(std::string_view(trimmed).substr(0, equals_pos)));
-    const std::string value = trim(std::string_view(trimmed).substr(equals_pos + 1));
-    std::string parse_error;
-    if (!applyEffectField(parsed, key, value, parse_error)) {
-      spdlog::error("Particle effect parse failed: {}:{} {}",
-                    path.string(),
-                    line_number,
-                    parse_error.empty() ? "invalid value" : parse_error);
-      return false;
-    }
+  Json json;
+  try {
+    stream >> json;
+  } catch (const std::exception& e) {
+    spdlog::error("Failed to parse particle effect '{}': {}", path.string(), e.what());
+    return false;
   }
 
-  out_desc = std::move(parsed);
+  std::string error;
+  if (!parseEffectJson(json, out_desc, error)) {
+    spdlog::error("Invalid particle effect '{}': {}", path.string(), error);
+    return false;
+  }
+
   return true;
 }
 

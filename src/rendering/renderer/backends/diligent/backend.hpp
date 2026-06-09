@@ -2,6 +2,8 @@
 
 #include "karma/rendering/renderer/backend.hpp"
 
+#include "passes/pass_shared.h"
+
 #include <Common/interface/RefCntAutoPtr.hpp>
 #include <Graphics/GraphicsTools/interface/RenderStateCache.hpp>
 #include <filesystem>
@@ -75,6 +77,7 @@ class DiligentBackend final : public Backend {
   void submit(const renderer::DrawItem& item) override;
   void submitParticles(renderer::ParticleBatch batch) override;
   void submitPackedParticles(renderer::PackedParticleBatch batch) override;
+  void submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) override;
   void setParticleSystemStats(const renderer::ParticlePassStats& stats) override;
   void retireInstance(renderer::InstanceId instance) override;
   void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) override;
@@ -328,6 +331,39 @@ class DiligentBackend final : public Backend {
     std::vector<renderer::ParticlePackedInstance> particles;
   };
 
+  struct ParticleEmitterRuntimeState {
+    float elapsed_seconds = 0.0f;
+    float previous_elapsed_seconds = 0.0f;
+    uint32_t gpu_slot_offset = 0u;
+    uint32_t gpu_slot_capacity = 0u;
+    uint32_t gpu_emitter_state_index = 0u;
+    uint32_t restart_count = 0u;
+    bool initialized = false;
+    bool gpu_reset_pending = true;
+    bool gpu_emitter_state_allocated = false;
+  };
+
+  struct ParticleEmitterSubmission {
+    renderer::ParticleEmitterGpuDesc desc{};
+    float elapsed_seconds = 0.0f;
+    float previous_elapsed_seconds = 0.0f;
+  };
+
+  struct ParticleGpuSlotRange {
+    uint32_t offset = 0u;
+    uint32_t capacity = 0u;
+  };
+
+  struct ParticleGlobalPipeline {
+    Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
+    Diligent::IShaderResourceVariable* materials_vs_var = nullptr;
+    Diligent::IShaderResourceVariable* materials_ps_var = nullptr;
+    Diligent::IShaderResourceVariable* textures_var = nullptr;
+    Diligent::IShaderResourceVariable* scene_color_var = nullptr;
+    Diligent::IShaderResourceVariable* scene_depth_var = nullptr;
+  };
+
   void initializeDevice();
   void clearFrame(const float* color, bool clear_depth);
   void recreateShadowMap();
@@ -389,7 +425,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path render_state_cache_path_;
   bool shader_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 7;
+  std::uint32_t shader_cache_version_ = 8;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
@@ -529,6 +565,11 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_distortion_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_distortion_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_half_res_composite_pipeline_state_;
+  ParticleGlobalPipeline particle_global_alpha_depth_;
+  ParticleGlobalPipeline particle_global_alpha_no_depth_;
+  ParticleGlobalPipeline particle_global_alpha_half_res_;
+  ParticleGlobalPipeline particle_global_distortion_depth_;
+  ParticleGlobalPipeline particle_global_distortion_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_additive_depth_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_additive_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_srb_alpha_depth_;
@@ -561,7 +602,96 @@ class DiligentBackend final : public Backend {
   Diligent::IShaderResourceVariable* particle_half_res_alpha_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_instance_vb_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_instance_uav_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_sim_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_sim_compute_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_sim_compute_srb_;
+  Diligent::IShaderResourceVariable* particle_sim_output_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_frame_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_sort_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_emitter_desc_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_emitter_desc_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_emitter_state_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_emitter_state_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_emitter_state_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_state_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_state_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_state_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_alive_list_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_alive_list_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_dead_list_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_dead_list_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_group_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_group_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_material_record_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_material_record_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_group_counter_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_group_counter_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_group_counter_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_sort_item_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_sort_item_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_sort_item_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_indirect_draw_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_indirect_draw_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_indirect_dispatch_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_indirect_dispatch_uav_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_stats_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_stats_uav_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IBuffer>, 2> particle_gpu_stats_readback_buffers_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_clear_compute_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_clear_compute_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_clear_groups_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_clear_counters_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_clear_sort_items_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_clear_draw_args_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_clear_dispatch_args_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_clear_stats_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_update_emitters_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_update_emitters_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_update_emitters_descs_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_update_emitters_states_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_simulate_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_simulate_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_simulate_descs_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_simulate_emitters_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_simulate_states_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_simulate_alive_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_simulate_dead_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_simulate_stats_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_prepare_unsorted_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_prepare_unsorted_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_unsorted_descs_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_unsorted_states_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_unsorted_groups_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_unsorted_counters_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_unsorted_instances_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_unsorted_stats_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_generate_sort_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_generate_sort_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_generate_sort_descs_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_generate_sort_states_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_generate_sort_groups_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_generate_sort_counters_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_generate_sort_items_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_generate_sort_stats_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_sort_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_sort_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_sort_items_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_prepare_sorted_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_prepare_sorted_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_sorted_states_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_sorted_groups_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_sorted_counters_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_sorted_sort_items_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_sorted_instances_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_prepare_sorted_stats_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_indirect_args_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_indirect_args_srb_;
+  Diligent::IShaderResourceVariable* particle_gpu_indirect_args_groups_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_indirect_args_counters_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_indirect_args_draw_args_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_indirect_args_stats_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_scene_color_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_scene_color_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_scene_color_rtv_;
@@ -629,6 +759,8 @@ class DiligentBackend final : public Backend {
   std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;
   std::unordered_map<renderer::InstanceId, InstanceRecord> instances_;
   std::vector<ParticleBatchRecord> particle_batches_;
+  std::vector<ParticleEmitterSubmission> particle_emitter_submissions_;
+  std::unordered_map<uint64_t, ParticleEmitterRuntimeState> particle_emitter_runtime_states_;
   std::vector<LineVertex> line_vertices_depth_;
   std::vector<LineVertex> line_vertices_no_depth_;
 
@@ -674,6 +806,27 @@ class DiligentBackend final : public Backend {
   size_t forward_plus_tile_index_capacity_ = 0;
   size_t line_vb_size_ = 0;
   size_t particle_instance_capacity_ = 0;
+  size_t particle_gpu_emitter_desc_capacity_ = 0;
+  size_t particle_gpu_emitter_state_capacity_ = 0;
+  size_t particle_gpu_state_capacity_ = 0;
+  size_t particle_gpu_allocated_capacity_ = 0;
+  size_t particle_gpu_high_water_capacity_ = 0;
+  size_t particle_gpu_emitter_state_allocated_capacity_ = 0;
+  size_t particle_gpu_alive_list_capacity_ = 0;
+  size_t particle_gpu_dead_list_capacity_ = 0;
+  size_t particle_gpu_group_capacity_ = 0;
+  size_t particle_gpu_material_record_capacity_ = 0;
+  size_t particle_gpu_group_counter_capacity_ = 0;
+  size_t particle_gpu_sort_capacity_ = 0;
+  size_t particle_gpu_indirect_draw_capacity_ = 0;
+  size_t particle_gpu_indirect_dispatch_capacity_ = 0;
+  size_t particle_gpu_stats_capacity_ = 0;
+  uint32_t particle_gpu_stats_readback_frame_ = 0u;
+  uint32_t particle_gpu_stats_readback_age_ = 0u;
+  bool particle_gpu_stats_readback_valid_ = false;
+  ParticleGpuStatsReadback particle_gpu_last_stats_{};
+  std::vector<ParticleGpuSlotRange> particle_gpu_free_particle_slots_;
+  std::vector<uint32_t> particle_gpu_free_emitter_state_slots_;
   int default_scene_width_ = 0;
   int default_scene_height_ = 0;
   int particle_scene_color_copy_width_ = 0;

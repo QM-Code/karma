@@ -1,48 +1,121 @@
-# Fast interior electric arcs for the energy orb.
-layer = 0
-depth_test = true
-blend_mode = additive
-alignment = billboard
-use_soft_mask = false
-texture = orb_arc_atlas
-
-enabled = true
-playing = true
-loop = true
-emit_burst_on_start = true
-local_space = true
-
-atlas_columns = 6
-atlas_rows = 1
-atlas_frame_count = 6
-animate_over_lifetime = true
-random_start_frame = true
-
-max_particles = 960
-burst_count = 216
-seed = 5309
-spawn_rate = 189.0
-duration = 0.0
-particle_lifetime_min = 0.32
-particle_lifetime_max = 0.68
-start_size_min = 0.22
-start_size_max = 0.46
-end_size_min = 0.08
-end_size_max = 0.18
-size_curve_exponent = 0.52
-alpha_curve_exponent = 0.68
-initial_rotation_min = 0.0
-initial_rotation_max = 6.2831853
-angular_velocity_min = -2.5
-angular_velocity_max = 2.5
-spawn_shape = sphere
-spawn_radius_min = 1.62
-spawn_radius_max = 2.24
-radial_speed_min = 0.004
-radial_speed_max = 0.022
-velocity_min = -0.012, -0.008, -0.012
-velocity_max = 0.012, 0.008, 0.012
-acceleration = 0.0, 0.0, 0.0
-drag = 3.10
-start_color = 1.0, 1.0, 1.0, 1.0
-end_color = 0.44, 0.82, 1.0, 0.0
+{
+  "version": 2,
+  "emitters": [
+    {
+      "texture": "orb_arc_atlas",
+      "playback": {
+        "enabled": true,
+        "playing": true,
+        "loop": true,
+        "emit_burst_on_start": true,
+        "local_space": true,
+        "time_scale": 1.0,
+        "start_delay": 0.0,
+        "duration": 0.0
+      },
+      "render": {
+        "layer": 0,
+        "depth_test": true,
+        "blend_mode": "additive",
+        "alignment": "billboard",
+        "shading_mode": "standard",
+        "use_soft_mask": false,
+        "soft_particle_distance": 0.0,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "refraction_strength": 0.0,
+        "interior_glow": 0.0
+      },
+      "atlas": {
+        "columns": 6,
+        "rows": 1,
+        "frame_count": 6,
+        "frame_width": 0,
+        "frame_height": 0,
+        "border_x": 0,
+        "border_y": 0,
+        "spacing_x": 0,
+        "spacing_y": 0,
+        "animation_fps": 0.0,
+        "animate_over_lifetime": true,
+        "random_start_frame": true
+      },
+      "emission": {
+        "max_particles": 960,
+        "burst_count": 216,
+        "seed": 5309,
+        "spawn_rate": 189.0
+      },
+      "lifetime": {
+        "min": 0.32,
+        "max": 0.68
+      },
+      "size": {
+        "start_min": 0.22,
+        "start_max": 0.46,
+        "end_min": 0.08,
+        "end_max": 0.18,
+        "curve_exponent": 0.52
+      },
+      "rotation": {
+        "initial_min": 0.0,
+        "initial_max": 6.2831853,
+        "angular_velocity_min": -2.5,
+        "angular_velocity_max": 2.5
+      },
+      "spawn": {
+        "shape": "sphere",
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius_min": 1.62,
+        "radius_max": 2.24,
+        "radial_speed_min": 0.004,
+        "radial_speed_max": 0.022
+      },
+      "motion": {
+        "velocity_min": [
+          -0.012,
+          -0.008,
+          -0.012
+        ],
+        "velocity_max": [
+          0.012,
+          0.008,
+          0.012
+        ],
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "drag": 3.1
+      },
+      "collision": {
+        "ground": false,
+        "ground_height": 0.0,
+        "bounce_damping": 0.35,
+        "friction": 0.25,
+        "rest_speed_threshold": 0.35
+      },
+      "color": {
+        "start": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "end": [
+          0.44,
+          0.82,
+          1.0,
+          0.0
+        ],
+        "alpha_curve_exponent": 0.68
+      }
+    }
+  ]
+}

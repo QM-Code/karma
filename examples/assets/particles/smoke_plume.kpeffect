@@ -1,40 +1,121 @@
-# Alpha-blended smoke plume for the particle example.
-layer = 0
-depth_test = true
-blend_mode = alpha
-use_soft_mask = false
-soft_particle_distance = 0.65
-texture = smoke_atlas
-
-enabled = true
-playing = true
-loop = true
-emit_burst_on_start = false
-
-atlas_columns = 4
-atlas_rows = 1
-atlas_frame_count = 4
-animate_over_lifetime = true
-random_start_frame = true
-
-max_particles = 240
-burst_count = 0
-seed = 7777
-spawn_rate = 26.0
-particle_lifetime_min = 1.8
-particle_lifetime_max = 2.8
-start_size_min = 0.55
-start_size_max = 0.85
-end_size_min = 1.45
-end_size_max = 2.10
-initial_rotation_min = 0.0
-initial_rotation_max = 6.2831853
-angular_velocity_min = -0.45
-angular_velocity_max = 0.45
-spawn_box_extents = 0.12, 0.04, 0.12
-velocity_min = -0.18, 0.65, -0.18
-velocity_max = 0.18, 1.25, 0.18
-acceleration = 0.0, 0.18, 0.0
-drag = 0.12
-start_color = 0.52, 0.56, 0.60, 0.28
-end_color = 0.24, 0.26, 0.29, 0.0
+{
+  "version": 2,
+  "emitters": [
+    {
+      "texture": "smoke_atlas",
+      "playback": {
+        "enabled": true,
+        "playing": true,
+        "loop": true,
+        "emit_burst_on_start": false,
+        "local_space": false,
+        "time_scale": 1.0,
+        "start_delay": 0.0,
+        "duration": 0.0
+      },
+      "render": {
+        "layer": 0,
+        "depth_test": true,
+        "blend_mode": "alpha",
+        "alignment": "billboard",
+        "shading_mode": "standard",
+        "use_soft_mask": false,
+        "soft_particle_distance": 0.65,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "refraction_strength": 0.0,
+        "interior_glow": 0.0
+      },
+      "atlas": {
+        "columns": 4,
+        "rows": 1,
+        "frame_count": 4,
+        "frame_width": 0,
+        "frame_height": 0,
+        "border_x": 0,
+        "border_y": 0,
+        "spacing_x": 0,
+        "spacing_y": 0,
+        "animation_fps": 0.0,
+        "animate_over_lifetime": true,
+        "random_start_frame": true
+      },
+      "emission": {
+        "max_particles": 240,
+        "burst_count": 0,
+        "seed": 7777,
+        "spawn_rate": 26.0
+      },
+      "lifetime": {
+        "min": 1.8,
+        "max": 2.8
+      },
+      "size": {
+        "start_min": 0.55,
+        "start_max": 0.85,
+        "end_min": 1.45,
+        "end_max": 2.1,
+        "curve_exponent": 1.0
+      },
+      "rotation": {
+        "initial_min": 0.0,
+        "initial_max": 6.2831853,
+        "angular_velocity_min": -0.45,
+        "angular_velocity_max": 0.45
+      },
+      "spawn": {
+        "shape": "box",
+        "box_extents": [
+          0.12,
+          0.04,
+          0.12
+        ],
+        "radius_min": 0.0,
+        "radius_max": 0.0,
+        "radial_speed_min": 0.0,
+        "radial_speed_max": 0.0
+      },
+      "motion": {
+        "velocity_min": [
+          -0.18,
+          0.65,
+          -0.18
+        ],
+        "velocity_max": [
+          0.18,
+          1.25,
+          0.18
+        ],
+        "acceleration": [
+          0.0,
+          0.18,
+          0.0
+        ],
+        "drag": 0.12
+      },
+      "collision": {
+        "ground": false,
+        "ground_height": 0.0,
+        "bounce_damping": 0.35,
+        "friction": 0.25,
+        "rest_speed_threshold": 0.35
+      },
+      "color": {
+        "start": [
+          0.52,
+          0.56,
+          0.6,
+          0.28
+        ],
+        "end": [
+          0.24,
+          0.26,
+          0.29,
+          0.0
+        ],
+        "alpha_curve_exponent": 1.0
+      }
+    }
+  ]
+}

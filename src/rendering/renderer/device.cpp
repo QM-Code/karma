@@ -164,6 +164,12 @@ void GraphicsDevice::submitPackedParticles(PackedParticleBatch batch) {
   }
 }
 
+void GraphicsDevice::submitParticleEmitter(const ParticleEmitterGpuDesc& emitter) {
+  if (backend_) {
+    backend_->submitParticleEmitter(emitter);
+  }
+}
+
 void GraphicsDevice::setParticleSystemStats(const ParticlePassStats& stats) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {

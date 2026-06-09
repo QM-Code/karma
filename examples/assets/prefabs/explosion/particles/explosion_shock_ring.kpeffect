@@ -1,44 +1,121 @@
-# Bright additive shock ring for the replayable explosion.
-layer = 0
-depth_test = true
-blend_mode = additive
-alignment = ground
-use_soft_mask = false
-texture = prefabs/explosion/shock_ring_atlas
-
-enabled = true
-playing = true
-loop = false
-emit_burst_on_start = true
-
-atlas_columns = 4
-atlas_rows = 1
-atlas_frame_count = 4
-animate_over_lifetime = true
-random_start_frame = false
-
-max_particles = 2
-burst_count = 2
-seed = 8641
-spawn_rate = 0.0
-duration = 0.0
-particle_lifetime_min = 0.50
-particle_lifetime_max = 0.72
-start_size_min = 2.85
-start_size_max = 3.90
-end_size_min = 19.20
-end_size_max = 22.80
-size_curve_exponent = 0.28
-alpha_curve_exponent = 0.42
-initial_rotation_min = 0.0
-initial_rotation_max = 6.2831853
-angular_velocity_min = -0.12
-angular_velocity_max = 0.12
-spawn_shape = box
-spawn_box_extents = 0.0, 0.0, 0.0
-velocity_min = 0.0, 0.0, 0.0
-velocity_max = 0.0, 0.0, 0.0
-acceleration = 0.0, 0.0, 0.0
-drag = 0.0
-start_color = 1.0, 0.90, 0.36, 1.0
-end_color = 1.0, 0.16, 0.02, 0.0
+{
+  "version": 2,
+  "emitters": [
+    {
+      "texture": "prefabs/explosion/shock_ring_atlas",
+      "playback": {
+        "enabled": true,
+        "playing": true,
+        "loop": false,
+        "emit_burst_on_start": true,
+        "local_space": false,
+        "time_scale": 1.0,
+        "start_delay": 0.0,
+        "duration": 0.0
+      },
+      "render": {
+        "layer": 0,
+        "depth_test": true,
+        "blend_mode": "additive",
+        "alignment": "ground",
+        "shading_mode": "standard",
+        "use_soft_mask": false,
+        "soft_particle_distance": 0.0,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "refraction_strength": 0.0,
+        "interior_glow": 0.0
+      },
+      "atlas": {
+        "columns": 4,
+        "rows": 1,
+        "frame_count": 4,
+        "frame_width": 0,
+        "frame_height": 0,
+        "border_x": 0,
+        "border_y": 0,
+        "spacing_x": 0,
+        "spacing_y": 0,
+        "animation_fps": 0.0,
+        "animate_over_lifetime": true,
+        "random_start_frame": false
+      },
+      "emission": {
+        "max_particles": 2,
+        "burst_count": 2,
+        "seed": 8641,
+        "spawn_rate": 0.0
+      },
+      "lifetime": {
+        "min": 0.5,
+        "max": 0.72
+      },
+      "size": {
+        "start_min": 2.85,
+        "start_max": 3.9,
+        "end_min": 19.2,
+        "end_max": 22.8,
+        "curve_exponent": 0.28
+      },
+      "rotation": {
+        "initial_min": 0.0,
+        "initial_max": 6.2831853,
+        "angular_velocity_min": -0.12,
+        "angular_velocity_max": 0.12
+      },
+      "spawn": {
+        "shape": "box",
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius_min": 0.0,
+        "radius_max": 0.0,
+        "radial_speed_min": 0.0,
+        "radial_speed_max": 0.0
+      },
+      "motion": {
+        "velocity_min": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "velocity_max": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "drag": 0.0
+      },
+      "collision": {
+        "ground": false,
+        "ground_height": 0.0,
+        "bounce_damping": 0.35,
+        "friction": 0.25,
+        "rest_speed_threshold": 0.35
+      },
+      "color": {
+        "start": [
+          1.0,
+          0.9,
+          0.36,
+          1.0
+        ],
+        "end": [
+          1.0,
+          0.16,
+          0.02,
+          0.0
+        ],
+        "alpha_curve_exponent": 0.42
+      }
+    }
+  ]
+}

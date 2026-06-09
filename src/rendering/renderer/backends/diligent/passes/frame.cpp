@@ -9,10 +9,12 @@
 #include <Graphics/GraphicsEngine/interface/GraphicsTypes.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cmath>
 #include <limits>
 #include <string_view>
+#include <utility>
 
 #include <spdlog/spdlog.h>
 
@@ -166,6 +168,9 @@ void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
   }
   if (!particle_batches_.empty()) {
     particle_batches_.clear();
+  }
+  if (!particle_emitter_submissions_.empty()) {
+    particle_emitter_submissions_.clear();
   }
 }
 
@@ -497,6 +502,9 @@ void DiligentBackend::submitPackedParticles(renderer::PackedParticleBatch batch)
     return;
   }
   accumulateParticlePassStats(particle_pass_stats_, batch);
+  particle_pass_stats_.cpu_fallback_particles += static_cast<uint32_t>(std::min<std::size_t>(
+      batch.particles.size(),
+      static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())));
 
   ParticleBatchRecord record{};
   copyParticleBatchMetadata(record, batch);
@@ -504,11 +512,56 @@ void DiligentBackend::submitPackedParticles(renderer::PackedParticleBatch batch)
   particle_batches_.push_back(std::move(record));
 }
 
+void DiligentBackend::submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) {
+  if (emitter.instance_id == 0u) {
+    return;
+  }
+
+  ParticleEmitterRuntimeState& state = particle_emitter_runtime_states_[emitter.instance_id];
+  if (state.initialized && state.restart_count != emitter.restart_count) {
+    state.elapsed_seconds = 0.0f;
+    state.previous_elapsed_seconds = 0.0f;
+    state.restart_count = emitter.restart_count;
+    state.gpu_reset_pending = true;
+  }
+  if (!state.initialized) {
+    state.restart_count = emitter.restart_count;
+    state.initialized = true;
+  }
+
+  state.previous_elapsed_seconds = state.elapsed_seconds;
+  if (emitter.enabled && emitter.playing) {
+    state.elapsed_seconds += std::max(emitter.delta_seconds, 0.0f) *
+                             std::max(emitter.time_scale, 0.0f);
+  }
+
+  particle_emitter_submissions_.push_back(ParticleEmitterSubmission{
+      .desc = emitter,
+      .elapsed_seconds = state.elapsed_seconds,
+      .previous_elapsed_seconds = state.previous_elapsed_seconds,
+  });
+}
+
 void DiligentBackend::retireInstance(renderer::InstanceId instance) {
   if (instance == renderer::kInvalidInstance) {
     return;
   }
   instances_.erase(instance);
+  auto particle_it = particle_emitter_runtime_states_.find(static_cast<uint64_t>(instance));
+  if (particle_it == particle_emitter_runtime_states_.end()) {
+    return;
+  }
+  const ParticleEmitterRuntimeState state = particle_it->second;
+  if (state.gpu_slot_capacity > 0u) {
+    particle_gpu_free_particle_slots_.push_back(ParticleGpuSlotRange{
+        .offset = state.gpu_slot_offset,
+        .capacity = state.gpu_slot_capacity,
+    });
+  }
+  if (state.gpu_emitter_state_allocated) {
+    particle_gpu_free_emitter_state_slots_.push_back(state.gpu_emitter_state_index);
+  }
+  particle_emitter_runtime_states_.erase(particle_it);
 }
 
 void DiligentBackend::drawLine(const math::Vec3& start, const math::Vec3& end,

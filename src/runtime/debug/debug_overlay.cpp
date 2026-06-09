@@ -585,6 +585,10 @@ void DebugOverlayLayer::drawDebugWindow(float frame_ms, float framerate) {
         drawRendererTab();
         ImGui::EndTabItem();
       }
+      if (ImGui::BeginTabItem("Particles")) {
+        drawParticlesTab();
+        ImGui::EndTabItem();
+      }
       if (ImGui::BeginTabItem("Performance")) {
         drawPerformanceTab(frame_ms, framerate);
         ImGui::EndTabItem();
@@ -1240,6 +1244,141 @@ void DebugOverlayLayer::drawRendererTab() {
     if (stats.overflow_risk) {
       ImGui::Text("Warning: local light density may exceed per-tile capacity.");
     }
+  }
+}
+
+void DebugOverlayLayer::drawParticlesTab() {
+  if (!graphics_) {
+    ImGui::TextDisabled("No graphics device.");
+    return;
+  }
+
+  const renderer::ParticlePassStats stats = graphics_->getParticlePassStats();
+
+  if (ImGui::CollapsingHeader("System", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("Effect Binding Updates: %u",
+                static_cast<unsigned int>(stats.effect_binding_updates));
+    ImGui::Text("Emitters: simulated %u, visible %u, culled %u, submitted %u",
+                static_cast<unsigned int>(stats.simulated_emitters),
+                static_cast<unsigned int>(stats.visible_emitters),
+                static_cast<unsigned int>(stats.culled_emitters),
+                static_cast<unsigned int>(stats.submitted_emitters));
+    ImGui::Text("Particles: simulated %u, packed %u, culled %u, ground collision %u",
+                static_cast<unsigned int>(stats.simulated_particles),
+                static_cast<unsigned int>(stats.packed_particles),
+                static_cast<unsigned int>(stats.culled_particles),
+                static_cast<unsigned int>(stats.ground_collision_particles));
+  }
+
+  if (ImGui::CollapsingHeader("Render Submission", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("Submitted Batches: %u",
+                static_cast<unsigned int>(stats.submitted_batches));
+    ImGui::Text("Submitted Particles: %u",
+                static_cast<unsigned int>(stats.submitted_particles));
+    ImGui::Separator();
+    ImGui::Text("Additive: %u batches, %u particles, %u draw calls",
+                static_cast<unsigned int>(stats.additive_batches),
+                static_cast<unsigned int>(stats.additive_particles),
+                static_cast<unsigned int>(stats.additive_draw_calls));
+    ImGui::Text("Alpha: %u batches, %u particles, %u draw calls",
+                static_cast<unsigned int>(stats.alpha_batches),
+                static_cast<unsigned int>(stats.alpha_particles),
+                static_cast<unsigned int>(stats.alpha_draw_calls));
+    ImGui::Text("Distortion: %u batches, %u particles, %u draw calls",
+                static_cast<unsigned int>(stats.distortion_batches),
+                static_cast<unsigned int>(stats.distortion_particles),
+                static_cast<unsigned int>(stats.distortion_draw_calls));
+  }
+
+  if (ImGui::CollapsingHeader("GPU Runtime", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("GPU Capacity: %u",
+                static_cast<unsigned int>(stats.gpu_particle_capacity));
+    ImGui::Text("GPU Alive / Dead / Compacted: %u / %u / %u",
+                static_cast<unsigned int>(stats.gpu_alive_particles),
+                static_cast<unsigned int>(stats.gpu_dead_particles),
+                static_cast<unsigned int>(stats.gpu_compacted_particles));
+    ImGui::Text("GPU Spawned / Killed: %u / %u",
+                static_cast<unsigned int>(stats.gpu_spawned_particles),
+                static_cast<unsigned int>(stats.gpu_killed_particles));
+    ImGui::Text("Compute Dispatches: %u",
+                static_cast<unsigned int>(stats.gpu_compute_dispatches));
+    ImGui::Text("Indirect Draws / Dispatches: %u / %u",
+                static_cast<unsigned int>(stats.gpu_indirect_draws),
+                static_cast<unsigned int>(stats.gpu_indirect_dispatches));
+    ImGui::Text("Sort Keys: %u",
+                static_cast<unsigned int>(stats.gpu_sort_key_count));
+    ImGui::Text("Sort Passes: %u",
+                static_cast<unsigned int>(stats.gpu_sort_passes));
+    ImGui::Text("Buffer Resizes: %u",
+                static_cast<unsigned int>(stats.gpu_buffer_resizes));
+    ImGui::Text("Stats Readback Age: %u frame(s)",
+                static_cast<unsigned int>(stats.gpu_stats_readback_age));
+    ImGui::Text("GPU Culled Emitters / Particles: %u / %u",
+                static_cast<unsigned int>(stats.gpu_culled_emitters),
+                static_cast<unsigned int>(stats.gpu_culled_particles));
+    ImGui::Text("GPU Culling Dispatches: %u",
+                static_cast<unsigned int>(stats.gpu_culling_dispatches));
+    ImGui::Separator();
+    ImGui::Text("Allocator Live Emitters: %u",
+                static_cast<unsigned int>(stats.gpu_allocator_live_emitters));
+    ImGui::Text("Allocator Free Ranges: %u",
+                static_cast<unsigned int>(stats.gpu_allocator_free_ranges));
+    ImGui::Text("Allocator Active / High Water Capacity: %u / %u",
+                static_cast<unsigned int>(stats.gpu_allocator_active_capacity),
+                static_cast<unsigned int>(stats.gpu_allocator_high_water_capacity));
+    ImGui::Text("Allocator Retired / Reused / Failures: %u / %u / %u",
+                static_cast<unsigned int>(stats.gpu_allocator_retired_emitters),
+                static_cast<unsigned int>(stats.gpu_allocator_reused_slots),
+                static_cast<unsigned int>(stats.gpu_allocator_allocation_failures));
+    ImGui::Text("GPU Sort Overflow: %s", stats.gpu_sort_overflow ? "yes" : "no");
+    ImGui::Text("GPU Fallback Active: %s", stats.gpu_fallback_active ? "yes" : "no");
+    ImGui::Text("CPU Fallback Particles: %u",
+                static_cast<unsigned int>(stats.cpu_fallback_particles));
+  }
+
+  if (ImGui::CollapsingHeader("Sorting And Scene Copies")) {
+    ImGui::Text("Alpha Sorted Particles: %u",
+                static_cast<unsigned int>(stats.alpha_sorted_particles));
+    ImGui::Text("Distortion Sorted Particles: %u",
+                static_cast<unsigned int>(stats.distortion_sorted_particles));
+    ImGui::Text("Alpha Invalid Depth: %u",
+                static_cast<unsigned int>(stats.alpha_invalid_depth_particles));
+    ImGui::Text("Distortion Invalid Depth: %u",
+                static_cast<unsigned int>(stats.distortion_invalid_depth_particles));
+    ImGui::Separator();
+    ImGui::Text("GPU Global Sort Active: %s",
+                stats.gpu_global_sort_active ? "yes" : "no");
+    ImGui::Text("GPU Grouped Sort Fallback: %s",
+                stats.gpu_grouped_sort_fallback ? "yes" : "no");
+    ImGui::Separator();
+    ImGui::Text("Pre-Particle Scene Sample Draws: %u",
+                static_cast<unsigned int>(stats.pre_particle_scene_sample_draws));
+    ImGui::Text("Post-Particle Scene Sample Draws: %u",
+                static_cast<unsigned int>(stats.post_particle_scene_sample_draws));
+    ImGui::Text("Scene Color Copy: %s", stats.scene_color_copy ? "yes" : "no");
+    ImGui::Text("Post-Particle Scene Color Copy: %s",
+                stats.post_particle_scene_color_copy ? "yes" : "no");
+    ImGui::Text("Alpha Half Res: %s", stats.alpha_half_res ? "yes" : "no");
+    ImGui::Text("Distortion Present: %s", stats.distortion_present ? "yes" : "no");
+  }
+
+  if (ImGui::CollapsingHeader("Timings", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("Sync Effect Bindings: %.3f ms", stats.sync_effect_bindings_ms);
+    ImGui::Text("Simulation / Descriptor Submit: %.3f ms", stats.simulation_ms);
+    ImGui::Text("Packing: %.3f ms", stats.packing_ms);
+    ImGui::Text("Additive Grouping: %.3f ms", stats.additive_grouping_ms);
+    ImGui::Text("Alpha Sort: %.3f ms", stats.alpha_sort_ms);
+    ImGui::Text("Distortion Sort: %.3f ms", stats.distortion_sort_ms);
+    ImGui::Text("Draw Submission: %.3f ms", stats.draw_submission_ms);
+    ImGui::Separator();
+    ImGui::Text("Alpha Collect / Sort / Span: %.3f / %.3f / %.3f ms",
+                stats.alpha_collect_ms,
+                stats.alpha_sort_only_ms,
+                stats.alpha_span_ms);
+    ImGui::Text("Distortion Collect / Sort / Span: %.3f / %.3f / %.3f ms",
+                stats.distortion_collect_ms,
+                stats.distortion_sort_only_ms,
+                stats.distortion_span_ms);
   }
 }
 

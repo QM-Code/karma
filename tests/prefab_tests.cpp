@@ -15,10 +15,12 @@
 #include "karma/features/visual/particles/effect_library.h"
 #include "karma/features/visual/particles/particle_system.h"
 #include "karma/rendering/renderer/ids.h"
+#include "karma/rendering/renderer/particle_stats_report.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/light_pulse.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/particle_effect.h"
+#include "karma/world/components/particle_effect_override.h"
 #include "karma/world/components/particle_emitter.h"
 #include "karma/world/components/tag.h"
 #include "karma/world/components/transform.h"
@@ -63,6 +65,87 @@ Json readJson(const std::filesystem::path& path) {
 bool nearly(float a, float b) {
   const float diff = a > b ? a - b : b - a;
   return diff < 0.0001f;
+}
+
+Json validParticleEffectJson() {
+  return Json{
+      {"version", 2},
+      {"emitters",
+       Json::array({Json{
+           {"texture", "test/texture"},
+           {"playback",
+            Json{{"enabled", true},
+                 {"playing", true},
+                 {"loop", true},
+                 {"emit_burst_on_start", true},
+                 {"local_space", false},
+                 {"time_scale", 1.0f},
+                 {"start_delay", 0.0f},
+                 {"duration", 0.0f}}},
+           {"render",
+            Json{{"layer", 0},
+                 {"depth_test", true},
+                 {"blend_mode", "additive"},
+                 {"alignment", "billboard"},
+                 {"shading_mode", "standard"},
+                 {"use_soft_mask", true},
+                 {"soft_particle_distance", 0.25f},
+                 {"distortion_strength", 0.0f},
+                 {"fresnel_power", 4.0f},
+                 {"fresnel_strength", 1.0f},
+                 {"refraction_strength", 0.0f},
+                 {"interior_glow", 0.0f}}},
+           {"atlas",
+            Json{{"columns", 1},
+                 {"rows", 1},
+                 {"frame_count", 1},
+                 {"frame_width", 0},
+                 {"frame_height", 0},
+                 {"border_x", 0},
+                 {"border_y", 0},
+                 {"spacing_x", 0},
+                 {"spacing_y", 0},
+                 {"animation_fps", 0.0f},
+                 {"animate_over_lifetime", false},
+                 {"random_start_frame", false}}},
+           {"emission",
+            Json{{"max_particles", 8}, {"burst_count", 4}, {"seed", 7}, {"spawn_rate", 0.0f}}},
+           {"lifetime", Json{{"min", 1.0f}, {"max", 1.0f}}},
+           {"size",
+            Json{{"start_min", 0.1f},
+                 {"start_max", 0.1f},
+                 {"end_min", 0.0f},
+                 {"end_max", 0.0f},
+                 {"curve_exponent", 1.0f}}},
+           {"rotation",
+            Json{{"initial_min", 0.0f},
+                 {"initial_max", 0.0f},
+                 {"angular_velocity_min", 0.0f},
+                 {"angular_velocity_max", 0.0f}}},
+           {"spawn",
+            Json{{"shape", "box"},
+                 {"box_extents", Json::array({0.0f, 0.0f, 0.0f})},
+                 {"radius_min", 0.0f},
+                 {"radius_max", 0.0f},
+                 {"radial_speed_min", 0.0f},
+                 {"radial_speed_max", 0.0f}}},
+           {"motion",
+            Json{{"velocity_min", Json::array({0.0f, 0.0f, 0.0f})},
+                 {"velocity_max", Json::array({0.0f, 0.0f, 0.0f})},
+                 {"acceleration", Json::array({0.0f, 0.0f, 0.0f})},
+                 {"drag", 0.0f}}},
+           {"collision",
+            Json{{"ground", false},
+                 {"ground_height", 0.0f},
+                 {"bounce_damping", 0.35f},
+                 {"friction", 0.25f},
+                 {"rest_speed_threshold", 0.35f}}},
+           {"color",
+            Json{{"start", Json::array({1.0f, 1.0f, 1.0f, 1.0f})},
+                 {"end", Json::array({1.0f, 1.0f, 1.0f, 0.0f})},
+                 {"alpha_curve_exponent", 1.0f}}},
+       }})},
+  };
 }
 
 std::string simplePrefabJson() {
@@ -340,7 +423,7 @@ void testSidecarParsingSuccessAndFailure(const std::filesystem::path& dir) {
     const std::filesystem::path prefab_dir = dir / "sidecar_success";
     std::filesystem::create_directories(prefab_dir / "particles");
     writeText(prefab_dir / "prefab.json", simplePrefabJson());
-    writeText(prefab_dir / "particles/test.kpeffect", "enabled = true\n");
+    writeText(prefab_dir / "particles/test.kpeffect", validParticleEffectJson().dump(2));
     writeText(prefab_dir / "prefab.resources.json",
               R"({
   "version": 1,
@@ -419,7 +502,44 @@ void testSidecarMissingContextAndResourceFailure(const std::filesystem::path& di
   }
 }
 
-void testParticleEmitterStartDelay() {
+void testParticleEffectParserV2() {
+  const std::filesystem::path dir = makeTempDir();
+  const std::filesystem::path valid = dir / "valid.kpeffect";
+  writeText(valid, validParticleEffectJson().dump(2));
+
+  karma::particles::ParticleLibrary library;
+  library.registerTextureAlias("test/texture", 77u);
+  KARMA_REQUIRE(library.registerEffectFile("test/effect", valid));
+  const auto* effect = library.find("test/effect");
+  KARMA_REQUIRE(effect != nullptr);
+  KARMA_REQUIRE(effect->texture_key == "test/texture");
+  KARMA_REQUIRE(effect->emitter.max_particles == 8u);
+  auto emitter = library.instantiateEmitter("test/effect");
+  KARMA_REQUIRE(emitter.has_value());
+  KARMA_REQUIRE(emitter->texture == 77u);
+
+  Json unknown = validParticleEffectJson();
+  unknown["emitters"][0]["render"]["unknown"] = 1;
+  const std::filesystem::path unknown_path = dir / "unknown.kpeffect";
+  writeText(unknown_path, unknown.dump(2));
+  KARMA_REQUIRE(!library.registerEffectFile("test/unknown", unknown_path));
+
+  Json invalid_enum = validParticleEffectJson();
+  invalid_enum["emitters"][0]["render"]["blend_mode"] = "multiply";
+  const std::filesystem::path invalid_enum_path = dir / "invalid_enum.kpeffect";
+  writeText(invalid_enum_path, invalid_enum.dump(2));
+  KARMA_REQUIRE(!library.registerEffectFile("test/invalid_enum", invalid_enum_path));
+
+  Json missing_block = validParticleEffectJson();
+  missing_block["emitters"][0].erase("motion");
+  const std::filesystem::path missing_block_path = dir / "missing_block.kpeffect";
+  writeText(missing_block_path, missing_block.dump(2));
+  KARMA_REQUIRE(!library.registerEffectFile("test/missing_block", missing_block_path));
+
+  std::filesystem::remove_all(dir);
+}
+
+void testParticleSystemRendererOwnedState() {
   karma::ecs::World world;
   const karma::ecs::Entity entity = world.createEntity();
   world.add(entity, karma::components::TransformComponent{});
@@ -438,10 +558,79 @@ void testParticleEmitterStartDelay() {
   karma::particles::ParticleSystem system(nullptr, nullptr);
   system.update(world, 0.05f, 1.0f);
   KARMA_REQUIRE(system.liveParticleCount(entity) == 0u);
-  system.update(world, 0.049f, 1.0f);
-  KARMA_REQUIRE(system.liveParticleCount(entity) == 0u);
-  system.update(world, 0.002f, 1.0f);
-  KARMA_REQUIRE(system.liveParticleCount(entity) == 4u);
+}
+
+void testParticleSystemEffectLifecycleReapply() {
+  karma::particles::ParticleLibrary library;
+  karma::particles::ParticleEffectDesc effect{};
+  effect.emitter.enabled = true;
+  effect.emitter.playing = true;
+  effect.emitter.layer = 2u;
+  effect.emitter.texture = 11u;
+  effect.emitter.max_particles = 32u;
+  effect.emitter.start_delay = 0.1f;
+  effect.emitter.start_size_min = 0.2f;
+  effect.emitter.start_size_max = 0.4f;
+  effect.emitter.start_color = {1.0f, 0.5f, 0.25f, 0.8f};
+  library.registerEffect("spark", effect);
+
+  karma::ecs::World world;
+  const karma::ecs::Entity entity = world.createEntity();
+  world.add(entity, karma::components::TransformComponent{});
+  world.add(entity, karma::components::VisibilityComponent{.visible = false});
+  world.add(entity, karma::components::ParticleEffectComponent{
+                        .effect_key = "spark",
+                        .preserve_enabled = true,
+                        .preserve_playing = true,
+                        .preserve_start_delay = true,
+                    });
+  karma::components::ParticleEmitterComponent existing{};
+  existing.enabled = false;
+  existing.playing = false;
+  existing.start_delay = 0.75f;
+  existing.max_particles = 1u;
+  world.add(entity, existing);
+  karma::components::ParticleEffectOverrideComponent effect_override{};
+  effect_override.size_scale = 2.0f;
+  effect_override.alpha_scale = 0.5f;
+  effect_override.texture = 99u;
+  world.add(entity, effect_override);
+
+  karma::particles::ParticleSystem system(nullptr, &library);
+  system.update(world, 0.016f, 1.0f);
+  const auto& applied = world.get<karma::components::ParticleEmitterComponent>(entity);
+  KARMA_REQUIRE(!applied.enabled);
+  KARMA_REQUIRE(!applied.playing);
+  KARMA_REQUIRE(nearly(applied.start_delay, 0.75f));
+  KARMA_REQUIRE(applied.layer == 2u);
+  KARMA_REQUIRE(applied.texture == 99u);
+  KARMA_REQUIRE(applied.max_particles == 32u);
+  KARMA_REQUIRE(nearly(applied.start_size_min, 0.4f));
+  KARMA_REQUIRE(nearly(applied.start_size_max, 0.8f));
+  KARMA_REQUIRE(nearly(applied.start_color.a, 0.4f));
+
+  auto& override_component =
+      world.get<karma::components::ParticleEffectOverrideComponent>(entity);
+  override_component.texture = 123u;
+  system.update(world, 0.016f, 1.0f);
+  KARMA_REQUIRE(world.get<karma::components::ParticleEmitterComponent>(entity).texture == 123u);
+
+  auto& effect_component =
+      world.get<karma::components::ParticleEffectComponent>(entity);
+  effect_component.restart_count += 1u;
+  system.update(world, 0.016f, 1.0f);
+  KARMA_REQUIRE(effect_component.applied_restart_count == effect_component.restart_count);
+
+  effect.emitter.layer = 7u;
+  effect.emitter.max_particles = 64u;
+  library.registerEffect("spark", effect);
+  system.update(world, 0.016f, 1.0f);
+  const auto& reapplied = world.get<karma::components::ParticleEmitterComponent>(entity);
+  KARMA_REQUIRE(reapplied.layer == 7u);
+  KARMA_REQUIRE(reapplied.max_particles == 64u);
+  KARMA_REQUIRE(!reapplied.enabled);
+  KARMA_REQUIRE(!reapplied.playing);
+  KARMA_REQUIRE(nearly(reapplied.start_delay, 0.75f));
 }
 
 void testLightPulseSystem() {
@@ -634,6 +823,71 @@ void testEnergyOrbPrefabDirectLoad() {
   KARMA_REQUIRE(destroyed_textures.size() == 4u);
 }
 
+void testParticleStatsReportFormatting() {
+  karma::renderer::ParticlePassStats totals{};
+  karma::renderer::ParticlePassStats frame{};
+  frame.submitted_emitters = 3u;
+  frame.gpu_particle_capacity = 128u;
+  frame.gpu_alive_particles = 42u;
+  frame.gpu_dead_particles = 86u;
+  frame.gpu_compute_dispatches = 2u;
+  frame.gpu_indirect_draws = 4u;
+  frame.gpu_indirect_dispatches = 1u;
+  frame.gpu_sort_key_count = 12u;
+  frame.gpu_sort_passes = 1u;
+  frame.gpu_stats_readback_age = 1u;
+  frame.gpu_allocator_live_emitters = 5u;
+  frame.gpu_allocator_free_ranges = 2u;
+  frame.gpu_allocator_active_capacity = 96u;
+  frame.gpu_allocator_high_water_capacity = 160u;
+  frame.gpu_allocator_retired_emitters = 1u;
+  frame.gpu_allocator_reused_slots = 3u;
+  frame.gpu_allocator_allocation_failures = 1u;
+  frame.gpu_culled_emitters = 2u;
+  frame.gpu_culled_particles = 9u;
+  frame.gpu_culling_dispatches = 2u;
+  frame.cpu_fallback_particles = 7u;
+  frame.simulation_ms = 0.5f;
+  frame.scene_color_copy = true;
+  frame.gpu_sort_overflow = true;
+  frame.gpu_grouped_sort_fallback = true;
+  karma::renderer::accumulateParticleStats(totals, frame);
+  karma::renderer::accumulateParticleStats(totals, frame);
+
+  const std::string line = karma::renderer::formatParticleStatsReport(
+      karma::renderer::ParticleStatsReport{
+          .totals = totals,
+          .frame_count = 2u,
+          .elapsed_seconds = 1.0,
+      });
+  KARMA_REQUIRE(line.find("submitted_emitters=3.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_particle_capacity=128.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_alive_particles=42.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_dead_particles=86.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_compute_dispatches=2.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_indirect_draws=4.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_indirect_dispatches=1.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_sort_key_count=12.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_sort_passes=1.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_stats_readback_age=1.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_allocator_live_emitters=5.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_allocator_free_ranges=2.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_allocator_active_capacity=96.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_allocator_high_water_capacity=160.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_allocator_retired_emitters=1.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_allocator_reused_slots=3.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_allocator_allocation_failures=1.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_culled_emitters=2.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_culled_particles=9.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_culling_dispatches=2.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("cpu_fallback_particles=7.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("simulation_ms=0.500") != std::string::npos);
+  KARMA_REQUIRE(line.find("scene_color_copy=true") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_sort_overflow=true") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_global_sort_active=false") != std::string::npos);
+  KARMA_REQUIRE(line.find("gpu_grouped_sort_fallback=true") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -646,7 +900,10 @@ int main() {
   testMissingSidecarKeepsPrefabLoad(dir);
   testSidecarParsingSuccessAndFailure(dir);
   testSidecarMissingContextAndResourceFailure(dir);
-  testParticleEmitterStartDelay();
+  testParticleEffectParserV2();
+  testParticleSystemRendererOwnedState();
+  testParticleSystemEffectLifecycleReapply();
+  testParticleStatsReportFormatting();
   testLightPulseSystem();
   testExplosionPrefabDirectLoad();
   testEnergyOrbPrefabDirectLoad();

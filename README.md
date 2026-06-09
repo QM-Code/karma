@@ -105,6 +105,29 @@ cmake --build --preset minimal-headless
 
 ## Using Karma As A Dependency
 
+Current consumer import status:
+
+- Supported paths are source-vendored CMake import and installed CMake package
+  import.
+- Both paths expose the same public target: `karma::karma`.
+- Public includes are under `include/karma/...`; consumers should include
+  headers such as `<karma/karma.h>` or layered headers such as
+  `<karma/content/geometry/mesh_loader.h>`.
+- The engine is currently built as a static C++20 library. It is still moving
+  quickly, so source-vendoring is the most flexible integration path during
+  active development.
+- GitHub CI smoke-tests both consumer paths on Linux, macOS, and Windows. The
+  smoke tests build a small external executable, link `karma::karma`, exercise a
+  core component, and call the GLB loader to verify content/import symbols and
+  dependency linkage.
+- The best-tested external-consumer profile today is minimal headless. Graphical
+  consumer builds use the same target, but depend on the selected window,
+  renderer, UI, audio, physics, navigation, and networking backends and are not
+  yet covered by CI smoke tests.
+- The installed package can fetch missing third-party dependency targets during
+  `find_package(karma)`. Disable that with `KARMA_CONFIG_FETCH_DEPS=OFF` when a
+  parent project wants to provide all dependencies itself.
+
 For source-vendored use, add Karma as a subdirectory and link the namespaced
 target:
 

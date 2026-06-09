@@ -29,7 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#if !defined(BZ3_WINDOW_BACKEND_SDL)
+#if !defined(KARMA_WINDOW_BACKEND_SDL)
   #include <GLFW/glfw3.h>
   #include <GLFW/glfw3native.h>
 #endif
@@ -475,7 +475,7 @@ void DiligentBackend::initializeDevice() {
   engine_ci.Features.ShaderResourceRuntimeArray = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
 
   if (window_) {
-#if !defined(BZ3_WINDOW_BACKEND_SDL)
+#if !defined(KARMA_WINDOW_BACKEND_SDL)
     Diligent::NativeWindow native = toNativeWindow(static_cast<GLFWwindow*>(window_->nativeHandle()));
     Diligent::SwapChainDesc sc_desc{};
     sc_desc.ColorBufferFormat = Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;

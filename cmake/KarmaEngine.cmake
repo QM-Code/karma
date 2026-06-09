@@ -113,9 +113,9 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   target_link_libraries(karma_rendering_graphical PUBLIC karma_core karma_world)
   karma_link_build_and_install(karma_rendering_graphical PUBLIC KARMA_RENDER_LINK_LIBS KARMA_INSTALL_LINK_LIBS)
   if (KARMA_RENDER_BACKEND_DILIGENT)
-    target_compile_definitions(karma_rendering_graphical PUBLIC BZ3_RENDER_BACKEND_DILIGENT)
+    target_compile_definitions(karma_rendering_graphical PUBLIC KARMA_RENDER_BACKEND_DILIGENT)
     if (KARMA_WINDOW_BACKEND_SDL)
-      target_compile_definitions(karma_rendering_graphical PUBLIC BZ3_WINDOW_BACKEND_SDL)
+      target_compile_definitions(karma_rendering_graphical PUBLIC KARMA_WINDOW_BACKEND_SDL)
     endif()
     if (diligentcore_SOURCE_DIR)
       target_include_directories(karma_rendering_graphical PUBLIC $<BUILD_INTERFACE:${diligentcore_SOURCE_DIR}>)
@@ -228,12 +228,12 @@ endif()
 
 karma_add_static(karma_content
   src/content/importers/gltf_document.cpp
+  src/content/importers/mesh_import.cpp
   src/content/importers/glb_scene_animation_import.cpp
   src/content/importers/glb_scene_mesh_import.cpp
   src/content/importers/glb_scene_skinning.cpp
   src/content/importers/glb_scene_import.cpp
   src/content/image/stb_image.cpp
-  src/content/geometry/mesh_loader.cpp
   src/content/prefabs/component_serializer_registry.cpp
   src/content/prefabs/prefab_resources.cpp
   src/content/prefabs/prefab_runtime.cpp
@@ -275,10 +275,10 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   target_link_libraries(karma_platform_window_graphical PUBLIC karma_core)
   karma_link_build_and_install(karma_platform_window_graphical PUBLIC KARMA_PLATFORM_LINK_LIBS KARMA_INSTALL_LINK_LIBS)
   if (KARMA_RENDER_BACKEND_DILIGENT)
-    target_compile_definitions(karma_platform_window_graphical PUBLIC BZ3_RENDER_BACKEND_DILIGENT)
+    target_compile_definitions(karma_platform_window_graphical PUBLIC KARMA_RENDER_BACKEND_DILIGENT)
   endif()
   if (KARMA_WINDOW_BACKEND_SDL)
-    target_compile_definitions(karma_platform_window_graphical PUBLIC BZ3_WINDOW_BACKEND_SDL)
+    target_compile_definitions(karma_platform_window_graphical PUBLIC KARMA_WINDOW_BACKEND_SDL)
     target_sources(karma_platform_window_graphical PRIVATE
       src/platform/window/backends/window_sdl.cpp
     )
@@ -290,7 +290,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   list(APPEND KARMA_INSTALL_TARGETS karma_platform_window_graphical)
 endif()
 
-if (KARMA_BUILD_GRAPHICAL_PROFILE)
+if (KARMA_BUILD_HEADLESS_PROFILE OR KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_static(karma_features_visual
     src/features/visual/beams/beam_path_runtime_module.cpp
     src/features/visual/beams/beam_path_system.cpp
@@ -324,6 +324,7 @@ if (KARMA_BUILD_HEADLESS_PROFILE)
       karma_simulation_collision
       karma_simulation_physics
       karma_content
+      karma_features_visual
       karma_platform_network
       karma_platform_window_headless
   )
@@ -374,7 +375,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       karma_features_visual
   )
   if (KARMA_RENDER_BACKEND_DILIGENT)
-    target_compile_definitions(karma_runtime_graphical PUBLIC BZ3_RENDER_BACKEND_DILIGENT)
+    target_compile_definitions(karma_runtime_graphical PUBLIC KARMA_RENDER_BACKEND_DILIGENT)
   endif()
   if (KARMA_BUILD_DEBUG_UI)
     target_compile_definitions(karma_runtime_graphical PUBLIC KARMA_DEBUG_UI)
@@ -408,10 +409,21 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_imgui)
 
   if (KARMA_ENABLE_RMLUI)
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.26)
+      set(KARMA_RMLUI_BUILD_LINK "$<BUILD_LOCAL_INTERFACE:${KARMA_RMLUI_TARGET}>")
+    else()
+      set(KARMA_RMLUI_BUILD_LINK "$<BUILD_INTERFACE:${KARMA_RMLUI_TARGET}>")
+    endif()
     karma_add_static(karma_features_ui_rmlui
       src/features/ui/rmlui/rmlui_layer.cpp
     )
-    target_link_libraries(karma_features_ui_rmlui PUBLIC karma_core karma_runtime_graphical ${KARMA_RMLUI_TARGET})
+    target_link_libraries(karma_features_ui_rmlui
+      PUBLIC
+        karma_core
+        karma_runtime_graphical
+        ${KARMA_RMLUI_BUILD_LINK}
+        $<INSTALL_INTERFACE:$<1:RmlUi::Core>>
+    )
     list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_rmlui)
   endif()
 endif()
@@ -419,6 +431,7 @@ endif()
 if (KARMA_BUILD_HEADLESS_PROFILE)
   set(KARMA_HEADLESS_PROFILE_LIBS
     karma_runtime_headless
+    karma_features_visual
     karma_platform_window_headless
     karma_platform_network
     karma_content
@@ -474,7 +487,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_configure_interface(karma_graphical)
   target_link_libraries(karma_graphical INTERFACE ${KARMA_GRAPHICAL_PROFILE_LIBS})
   if (KARMA_RENDER_BACKEND_DILIGENT)
-    target_compile_definitions(karma_graphical INTERFACE BZ3_RENDER_BACKEND_DILIGENT)
+    target_compile_definitions(karma_graphical INTERFACE KARMA_RENDER_BACKEND_DILIGENT)
   endif()
   if (KARMA_BUILD_DEBUG_UI)
     target_compile_definitions(karma_graphical INTERFACE KARMA_DEBUG_UI)

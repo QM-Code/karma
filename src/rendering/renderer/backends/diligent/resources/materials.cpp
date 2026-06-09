@@ -378,6 +378,39 @@ renderer::MaterialSetId DiligentBackend::createMaterialSetFromMesh(
   switch (desc.kind) {
     case renderer::MaterialResourceDesc::Kind::MeshTint:
       break;
+    case renderer::MaterialResourceDesc::Kind::Explicit: {
+      const std::size_t material_count =
+          mesh_record.submeshes.empty() ? 1u : mesh_record.submeshes.size();
+      set_record.materials.reserve(material_count);
+      for (std::size_t i = 0; i < material_count; ++i) {
+        set_record.materials.push_back(createMaterial(desc.material));
+      }
+      break;
+    }
+    case renderer::MaterialResourceDesc::Kind::ImportedAssetMaterial: {
+      const std::size_t material_count =
+          mesh_record.submeshes.empty() ? 1u : mesh_record.submeshes.size();
+      set_record.materials.reserve(material_count);
+      for (std::size_t i = 0; i < material_count; ++i) {
+        renderer::MaterialId material =
+            createMaterialFromAsset(desc.material_asset_path, desc.material_asset_index);
+        if (material == renderer::kInvalidMaterial) {
+          material = createMaterial(desc.material);
+        }
+        set_record.materials.push_back(material);
+      }
+      break;
+    }
+  }
+
+  if (desc.kind == renderer::MaterialResourceDesc::Kind::Explicit ||
+      desc.kind == renderer::MaterialResourceDesc::Kind::ImportedAssetMaterial) {
+    if (set_record.materials.empty()) {
+      return renderer::kInvalidMaterialSet;
+    }
+    const renderer::MaterialSetId set_id = nextMaterialSetId_++;
+    material_sets_[set_id] = std::move(set_record);
+    return set_id;
   }
 
   if (!mesh_record.submeshes.empty()) {

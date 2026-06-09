@@ -257,7 +257,7 @@ public:
             return;
         }
 
-#if defined(BZ3_RENDER_BACKEND_DILIGENT)
+#if defined(KARMA_RENDER_BACKEND_DILIGENT)
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 #else
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, config.glMajor);
@@ -273,7 +273,7 @@ public:
             return;
         }
 
-#if !defined(BZ3_RENDER_BACKEND_DILIGENT)
+#if !defined(KARMA_RENDER_BACKEND_DILIGENT)
         glfwMakeContextCurrent(window);
 #endif
         glfwSetWindowUserPointer(window, this);
@@ -315,7 +315,7 @@ public:
 
     void swapBuffers() override {
         if (window) {
-#if defined(BZ3_RENDER_BACKEND_DILIGENT)
+#if defined(KARMA_RENDER_BACKEND_DILIGENT)
             return;
 #else
             glfwSwapBuffers(window);
@@ -324,7 +324,7 @@ public:
     }
 
     void setVsync(bool enabled) override {
-#if defined(BZ3_RENDER_BACKEND_DILIGENT)
+#if defined(KARMA_RENDER_BACKEND_DILIGENT)
         (void)enabled;
         return;
 #else

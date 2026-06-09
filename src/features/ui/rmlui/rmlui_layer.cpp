@@ -168,7 +168,7 @@ class RmlUiLayer final : public app::UiLayer,
 
   void onFrame(app::UIContext& ctx) override {
     ctx_ = &ctx;
-    app::UIDrawData& out = ctx.drawData();
+    renderer::UIDrawData& out = ctx.drawData();
     out.clear();
     out.premultiplied_alpha = false;
 
@@ -258,7 +258,7 @@ class RmlUiLayer final : public app::UiLayer,
       return;
     }
 
-    app::UIDrawData& out = ctx_->drawData();
+    renderer::UIDrawData& out = ctx_->drawData();
     const size_t base_vertex = out.vertices.size();
     const size_t base_index = out.indices.size();
 
@@ -276,7 +276,7 @@ class RmlUiLayer final : public app::UiLayer,
         pos.y = ty;
       }
 
-      app::UIVertex out_v{};
+      renderer::UIVertex out_v{};
       out_v.x = pos.x;
       out_v.y = pos.y;
       out_v.u = v.tex_coord.x;
@@ -289,7 +289,7 @@ class RmlUiLayer final : public app::UiLayer,
       out.indices.push_back(static_cast<uint32_t>(idx) + static_cast<uint32_t>(base_vertex));
     }
 
-    app::UIDrawCmd cmd{};
+    renderer::UIDrawCmd cmd{};
     cmd.index_offset = static_cast<uint32_t>(base_index);
     cmd.index_count = static_cast<uint32_t>(it->second.indices.size());
     cmd.scissor_enabled = scissor_enabled_;

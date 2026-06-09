@@ -13,6 +13,7 @@
       "cacheVariables": {
         "KARMA_FETCH_DEPS": "ON",
         "KARMA_BUILD_EXAMPLES": "ON",
+        "BUILD_TESTING": "ON",
         "KARMA_BUILD_TESTS": "ON",
         "KARMA_BUILD_RMLUI_DEMO": "OFF"
       }
@@ -24,6 +25,7 @@
       "cacheVariables": {
         "KARMA_FETCH_DEPS": "ON",
         "KARMA_BUILD_EXAMPLES": "ON",
+        "BUILD_TESTING": "ON",
         "KARMA_BUILD_TESTS": "ON",
         "KARMA_HEADLESS": "ON"
       }
@@ -35,6 +37,7 @@
       "cacheVariables": {
         "KARMA_FETCH_DEPS": "ON",
         "KARMA_BUILD_EXAMPLES": "ON",
+        "BUILD_TESTING": "ON",
         "KARMA_BUILD_TESTS": "ON",
         "KARMA_HEADLESS": "ON",
         "KARMA_ENABLE_AUDIO": "OFF",

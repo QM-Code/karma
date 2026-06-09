@@ -122,8 +122,8 @@ Current consumer import status:
     graphical profile is built.
 - Public includes are under `include/karma/...`; consumers should include
   profile headers such as `<karma/headless.h>` / `<karma/karma.h>`, or layered
-  headers such as
-  `<karma/content/geometry/mesh_loader.h>`.
+	  headers such as
+	  `<karma/content/importers/mesh_import.h>`.
 - The engine is currently built as a static C++20 library. It is still moving
   quickly, so source-vendoring is the most flexible integration path during
   active development.

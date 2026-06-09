@@ -71,7 +71,7 @@ bool readVec4Attribute(const GltfDocument& doc,
   return true;
 }
 
-std::vector<glm::vec4> generateTangents(const renderer::MeshData& mesh) {
+std::vector<glm::vec4> generateTangents(const geometry::MeshData& mesh) {
   std::vector<glm::vec4> tangents(mesh.vertices.size(), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
   if (mesh.vertices.empty() ||
       mesh.normals.size() != mesh.vertices.size() ||
@@ -135,14 +135,14 @@ std::vector<glm::vec4> generateTangents(const renderer::MeshData& mesh) {
 
 bool buildMeshDataFromGltfPrimitive(const GltfDocument& doc,
                                     const Json& source_primitive,
-                                    renderer::MeshData& out) {
+                                    geometry::MeshData& out) {
   if (!source_primitive.contains("attributes") ||
       !source_primitive["attributes"].is_object()) {
     return false;
   }
   const Json& attributes = source_primitive["attributes"];
 
-  renderer::MeshData mesh{};
+  geometry::MeshData mesh{};
   if (!readVec3Attribute(doc, attributes, "POSITION", mesh.vertices) ||
       mesh.vertices.empty()) {
     return false;
@@ -233,7 +233,7 @@ void populateGltfMeshData(const GltfDocument& doc,
     }
     for (size_t primitive_index = 0; primitive_index < primitive_count; ++primitive_index) {
       const Json& source_primitive = mesh["primitives"][primitive_index];
-      renderer::MeshData mesh_data{};
+      geometry::MeshData mesh_data{};
       if (buildMeshDataFromGltfPrimitive(doc, source_primitive, mesh_data)) {
         primitives[primitive_index].mesh = std::move(mesh_data);
         if (source_primitive.contains("material") &&

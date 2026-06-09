@@ -659,7 +659,7 @@ void testAnimatorBlendTreeAndRootMotion() {
 }
 
 void testCpuSkinning() {
-  karma::renderer::MeshData bind_mesh{};
+  karma::geometry::MeshData bind_mesh{};
   bind_mesh.vertices.push_back({1.0f, 0.0f, 0.0f});
   bind_mesh.normals.push_back({1.0f, 0.0f, 0.0f});
   bind_mesh.indices.push_back(0);
@@ -671,7 +671,7 @@ void testCpuSkinning() {
       glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)),
   };
 
-  const karma::renderer::MeshData skinned =
+  const karma::geometry::MeshData skinned =
       karma::animation::skinMesh(bind_mesh, influences, skin_matrices);
   assert(skinned.vertices.size() == 1);
   assert(near(skinned.vertices[0].x, 3.0f));
@@ -857,7 +857,7 @@ void testWalkingGlbImportSmoke() {
   assert(suit_node_it != prefab_nodes_by_name.end());
   assert(suit_node_it->second < prefab.nodes.size());
   assert(!prefab.nodes[suit_node_it->second].primitives.empty());
-  const karma::renderer::MeshData& suit_mesh =
+  const karma::geometry::MeshData& suit_mesh =
       prefab.nodes[suit_node_it->second].primitives.front().mesh;
   assert(!suit_mesh.uvs.empty());
   assert(near(suit_mesh.uvs.front().x, 0.5138f, 0.0001f));
@@ -934,7 +934,7 @@ void testWalkingGlbImportSmoke() {
       if (!primitive.skinned()) {
         continue;
       }
-      const karma::renderer::MeshData skinned_mesh =
+      const karma::geometry::MeshData skinned_mesh =
           karma::animation::skinMesh(primitive.mesh,
                                      primitive.vertex_influences,
                                      sampled_palette.joint_matrices);
@@ -1037,7 +1037,7 @@ void testWalkingGlbImportSmoke() {
                                                         runtime_scene,
                                                         glm::mat4(1.0f));
     assert(palette.valid);
-    const karma::renderer::MeshData skinned_mesh =
+    const karma::geometry::MeshData skinned_mesh =
         karma::animation::skinMesh(runtime_primitive.primitive->mesh,
                                    runtime_primitive.primitive->vertex_influences,
                                    palette.joint_matrices);

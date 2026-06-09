@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "karma/simulation/navigation/nav_mesh.h"
-#include "karma/rendering/renderer/mesh_data.h"
+#include "karma/world/geometry/mesh_data.h"
 
 namespace karma::ecs {
 class World;
@@ -18,7 +18,7 @@ namespace karma::navigation {
 /// \ingroup karma_navigation
 /// Appends transformed mesh triangles to navmesh input geometry.
 void appendGeometry(NavMeshInputGeometry& out,
-                    const renderer::MeshData& mesh,
+                    const geometry::MeshData& mesh,
                     const math::Vec3& position = {},
                     const math::Quat& rotation = {},
                     const math::Vec3& scale = {1.0f, 1.0f, 1.0f},

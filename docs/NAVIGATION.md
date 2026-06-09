@@ -37,7 +37,7 @@ ECS collection now prefers explicit navigation surfaces:
 - `NavMeshComponent`: attach to an empty owner entity to hold bake config,
   build state, debug flags, and the runtime `navigation::NavMesh`.
 - `NavMeshSurfaceComponent`: attach to render/source entities that should feed
-  the bake. It supports CPU `renderer::MeshData`, a mesh key, area IDs, and
+  the bake. It supports CPU `geometry::MeshData`, a mesh key, area IDs, and
   walkable/non-walkable marking.
 - `NavOffMeshLinkComponent`: attach to an entity to add a point-to-point
   Detour off-mesh connection during bake.

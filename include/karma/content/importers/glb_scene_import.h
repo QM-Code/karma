@@ -11,6 +11,7 @@
 #include "karma/world/components/skinned_mesh.h"
 #include "karma/world/ecs/world.h"
 #include "karma/rendering/renderer/device.h"
+#include "karma/rendering/renderer/material_library.h"
 #include "karma/world/scene/scene.h"
 
 namespace karma::scene {
@@ -46,7 +47,7 @@ struct GlbSceneImportOptions {
 /// One renderable primitive inside an imported GLB node.
 struct GlbScenePrefabPrimitive {
   std::string name;
-  renderer::MeshData mesh;
+  geometry::MeshData mesh;
   renderer::MaterialDesc material;
   uint32_t source_material_index = kInvalidGlbSceneMaterial;
   uint32_t source_mesh_index = kInvalidGlbSceneNode;
@@ -118,13 +119,15 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     scene::Scene& scene,
     renderer::GraphicsDevice& device,
     const GlbScenePrefab& prefab,
-    const GlbSceneInstantiateOptions& options = {});
+    const GlbSceneInstantiateOptions& options = {},
+    renderer::MaterialLibrary* materials = nullptr);
 
 /// Loads and instantiates a GLB scene in one call.
 GlbSceneImportResult importGlbScene(ecs::World& world,
                                     scene::Scene& scene,
                                     renderer::GraphicsDevice& device,
                                     const std::filesystem::path& path,
-                                    const GlbSceneImportOptions& options = {});
+                                    const GlbSceneImportOptions& options = {},
+                                    renderer::MaterialLibrary* materials = nullptr);
 
 }  // namespace karma::scene

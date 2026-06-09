@@ -46,7 +46,7 @@ class UIContext {
   void reset();
 
   /// Mutable draw list consumed by the renderer.
-  UIDrawData& drawData() { return draw_data_; }
+  renderer::UIDrawData& drawData() { return draw_data_; }
 
   /// Input system for UI provider adapters.
   karma::input::InputSystem& input();
@@ -54,7 +54,7 @@ class UIContext {
  private:
   friend class EngineApp;
   UIFrameInfo frame_{};
-  UIDrawData draw_data_{};
+  renderer::UIDrawData draw_data_{};
   std::vector<UITextureHandle> owned_textures_;
   input::InputSystem* input_ = nullptr;
   renderer::GraphicsDevice* device_ = nullptr;

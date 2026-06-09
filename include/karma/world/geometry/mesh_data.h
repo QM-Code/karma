@@ -5,10 +5,10 @@
 
 #include <glm/glm.hpp>
 
-namespace karma::renderer {
+namespace karma::geometry {
 
-/// \ingroup karma_rendering
-/// CPU-side mesh payload used for uploads, importers, and generated geometry.
+/// \ingroup karma_world
+/// Shared CPU-side mesh geometry used by importers, simulation, and rendering uploads.
 struct MeshData {
   std::vector<glm::vec3> vertices;
   std::vector<glm::vec3> normals;
@@ -27,4 +27,4 @@ struct MeshData {
   std::vector<MorphTarget> morph_targets;
 };
 
-}  // namespace karma::renderer
+}  // namespace karma::geometry

@@ -4,6 +4,7 @@ PROJECT_LOGO           = @KARMA_DOXYGEN_INPUT_DIR@/docs/logo.png
 OUTPUT_DIRECTORY       = @KARMA_DOXYGEN_OUTPUT_DIR@
 
 INPUT                  = @KARMA_DOXYGEN_INPUT_DIR@/include/karma \
+                         @KARMA_DOXYGEN_GENERATED_INCLUDE_DIR@/karma \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/api/mainpage.md \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/api/groups.dox \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/API.md
@@ -59,7 +60,7 @@ ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = NO
 PREDEFINED             = KARMA_DEBUG_UI=1 \
                          KARMA_ENABLE_NAVIGATION=1 \
-                         BZ3_RENDER_BACKEND_DILIGENT=1 \
+                         KARMA_RENDER_BACKEND_DILIGENT=1 \
                          KARMA_PHYSICS_BACKEND_JOLT=1 \
                          KARMA_AUDIO_BACKEND_MINIAUDIO=1 \
                          KARMA_NETWORK_BACKEND_ENET=1

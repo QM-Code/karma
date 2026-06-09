@@ -134,14 +134,14 @@ void DiligentBackend::ensureUiResources() {
 
   Diligent::LayoutElement layout[] = {
       Diligent::LayoutElement{0, 0, 2, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(offsetof(karma::app::UIVertex, x)),
-                              static_cast<Diligent::Uint32>(sizeof(karma::app::UIVertex))},
+                              static_cast<Diligent::Uint32>(offsetof(karma::renderer::UIVertex, x)),
+                              static_cast<Diligent::Uint32>(sizeof(karma::renderer::UIVertex))},
       Diligent::LayoutElement{1, 0, 2, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(offsetof(karma::app::UIVertex, u)),
-                              static_cast<Diligent::Uint32>(sizeof(karma::app::UIVertex))},
+                              static_cast<Diligent::Uint32>(offsetof(karma::renderer::UIVertex, u)),
+                              static_cast<Diligent::Uint32>(sizeof(karma::renderer::UIVertex))},
       Diligent::LayoutElement{2, 0, 4, Diligent::VT_UINT8, true,
-                              static_cast<Diligent::Uint32>(offsetof(karma::app::UIVertex, rgba)),
-                              static_cast<Diligent::Uint32>(sizeof(karma::app::UIVertex))}
+                              static_cast<Diligent::Uint32>(offsetof(karma::renderer::UIVertex, rgba)),
+                              static_cast<Diligent::Uint32>(sizeof(karma::renderer::UIVertex))}
   };
 
   if (!ui_cb_) {
@@ -252,7 +252,7 @@ void DiligentBackend::ensureUiResources() {
   }
 }
 
-void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
+void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
   if (!context_ || !swap_chain_) {
     return;
   }
@@ -275,7 +275,7 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
     desc.Usage = Diligent::USAGE_DYNAMIC;
     desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::app::UIVertex));
+    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::renderer::UIVertex));
     ui_vb_.Release();
     device_->CreateBuffer(desc, nullptr, &ui_vb_);
   }
@@ -297,10 +297,10 @@ void DiligentBackend::renderUi(const karma::app::UIDrawData& draw_data) {
   }
 
   {
-    Diligent::MapHelper<karma::app::UIVertex> vb_map(context_, ui_vb_, Diligent::MAP_WRITE,
+    Diligent::MapHelper<karma::renderer::UIVertex> vb_map(context_, ui_vb_, Diligent::MAP_WRITE,
                                                      Diligent::MAP_FLAG_DISCARD);
     std::memcpy(vb_map, draw_data.vertices.data(),
-                draw_data.vertices.size() * sizeof(karma::app::UIVertex));
+                draw_data.vertices.size() * sizeof(karma::renderer::UIVertex));
   }
   {
     Diligent::MapHelper<uint32_t> ib_map(context_, ui_ib_, Diligent::MAP_WRITE,

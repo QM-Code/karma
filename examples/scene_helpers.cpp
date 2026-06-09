@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "karma/rendering/renderer/device.h"
+#include "karma/rendering/renderer/material_library.h"
 #include "karma/world/components/audio_listener.h"
 #include "karma/world/components/environment.h"
 #include "karma/world/components/mesh.h"
@@ -13,7 +14,7 @@
 namespace karma::demo::helpers {
 namespace {
 
-void appendVertex(renderer::MeshData& mesh,
+void appendVertex(geometry::MeshData& mesh,
                   const glm::vec3& position,
                   const glm::vec3& normal,
                   const glm::vec2& uv = {}) {
@@ -23,7 +24,7 @@ void appendVertex(renderer::MeshData& mesh,
   mesh.tangents.push_back({1.0f, 0.0f, 0.0f, 1.0f});
 }
 
-void appendQuad(renderer::MeshData& mesh,
+void appendQuad(geometry::MeshData& mesh,
                 const glm::vec3& a,
                 const glm::vec3& b,
                 const glm::vec3& c,
@@ -39,10 +40,10 @@ void appendQuad(renderer::MeshData& mesh,
 
 }  // namespace
 
-renderer::MeshData makeBoxMesh(const glm::vec3& half_extents) {
+geometry::MeshData makeBoxMesh(const glm::vec3& half_extents) {
   const glm::vec3 min = -half_extents;
   const glm::vec3 max = half_extents;
-  renderer::MeshData mesh;
+  geometry::MeshData mesh;
 
   appendQuad(mesh, {min.x, max.y, min.z}, {max.x, max.y, min.z},
              {max.x, max.y, max.z}, {min.x, max.y, max.z}, {0.0f, 1.0f, 0.0f});
@@ -60,30 +61,10 @@ renderer::MeshData makeBoxMesh(const glm::vec3& half_extents) {
   return mesh;
 }
 
-renderer::MaterialId createMaterial(renderer::GraphicsDevice* graphics,
-                                    const math::Color& color,
-                                    bool unlit,
-                                    float roughness,
-                                    float metallic) {
-  if (graphics == nullptr) {
-    return renderer::kInvalidMaterial;
-  }
-
-  renderer::MaterialDesc material;
-  material.base_color = color;
-  material.roughness = roughness;
-  material.metallic = metallic;
-  material.unlit = unlit;
-  if (unlit) {
-    material.emissive_color = color;
-  }
-  return graphics->createMaterial(material);
-}
-
 ecs::Entity spawnMesh(ecs::World& world,
                       std::string name,
-                      renderer::MeshId mesh,
-                      renderer::MaterialId material,
+                      std::string mesh_key,
+                      std::string material_key,
                       const math::Vec3& position,
                       bool visible) {
   const ecs::Entity entity = world.createEntity();
@@ -92,10 +73,8 @@ ecs::Entity spawnMesh(ecs::World& world,
   transform.setPosition(position);
   world.add(entity, transform);
   world.add(entity, components::MeshComponent{
-                        .mesh_id = mesh,
-                        .material_id = material,
-                        .owns_mesh_id = mesh != renderer::kInvalidMesh,
-                        .owns_material_id = material != renderer::kInvalidMaterial,
+                        .mesh_key = std::move(mesh_key),
+                        .material_key = std::move(material_key),
                         .visible = visible,
                         .shadow_visible = visible,
                     });
@@ -119,16 +98,27 @@ ecs::Entity spawnMeshAsset(ecs::World& world,
 
 ecs::Entity createDebugBoxMarker(ecs::World& world,
                                  renderer::GraphicsDevice* graphics,
+                                 renderer::MaterialLibrary* materials,
                                  std::string name,
                                  const math::Color& color,
                                  const math::Vec3& position,
                                  const glm::vec3& half_extents,
                                  bool visible) {
-  const renderer::MeshData marker_mesh = makeBoxMesh(half_extents);
-  const renderer::MeshId mesh =
-      graphics != nullptr ? graphics->createMesh(marker_mesh) : renderer::kInvalidMesh;
-  const renderer::MaterialId material = createMaterial(graphics, color, true);
-  return spawnMesh(world, std::move(name), mesh, material, position, visible);
+  const geometry::MeshData marker_mesh = makeBoxMesh(half_extents);
+  const std::string mesh_key = "runtime/debug_box/" + name + "/mesh";
+  const std::string material_key = "runtime/debug_box/" + name + "/material";
+  if (graphics != nullptr) {
+    graphics->registerRuntimeMesh(mesh_key, marker_mesh);
+  }
+  if (materials != nullptr) {
+    renderer::MaterialDesc material;
+    material.base_color = color;
+    material.emissive_color = color;
+    material.unlit = true;
+    material.roughness = 0.85f;
+    materials->registerMaterialDesc(material_key, material);
+  }
+  return spawnMesh(world, std::move(name), mesh_key, material_key, position, visible);
 }
 
 ecs::Entity spawnCamera(ecs::World& world,

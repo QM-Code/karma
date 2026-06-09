@@ -1,5 +1,5 @@
 #include <karma/headless.h>
-#include <karma/content/geometry/mesh_loader.h>
+#include <karma/content/importers/mesh_import.h>
 
 int main() {
   static_assert(karma::core::VersionMajor == 0);
@@ -12,6 +12,6 @@ int main() {
     return 1;
   }
 
-  const auto meshes = karma::geometry::loadGLB("karma_consumer_smoke_missing.glb");
+  const auto meshes = karma::content::importMeshes("karma_consumer_smoke_missing.glb");
   return meshes.empty() ? 0 : 2;
 }

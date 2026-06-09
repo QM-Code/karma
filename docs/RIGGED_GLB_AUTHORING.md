@@ -31,14 +31,15 @@ This is the expected authoring path for Karma rigged-animation validation assets
 - Multiple skins and skeletons.
 - Joint names, joint parent indices, joint node indices, inverse bind matrices.
 - Node, joint, and morph-weight animation channel mappings.
-- CPU skinning fallback with renderer-facing joint/weight mesh data retained.
+- CPU skinning fallback with shared `geometry::MeshData` joint/weight payloads retained.
 - Animator state machines with clip states, 1D blend trees, transitions,
   conditions, triggers, events, and root-motion deltas.
 
 ## Current Gaps
 
 - GPU skinning is not wired through the Diligent forward, transparent, depth
-  prepass, and shadow draw paths yet. Imported skinned meshes report CPU fallback.
+  prepass, and shadow draw paths yet. Imported skinned meshes currently run
+  through the CPU fallback unless explicitly switched for diagnostics.
 - Morph target deltas are represented on `MeshData`, and morph-weight animation
   tracks import, but runtime deformation is not applied yet.
 - Retargeting between skeletons is not implemented.

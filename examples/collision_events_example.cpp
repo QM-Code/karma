@@ -283,7 +283,7 @@ class CollisionUiLayer final : public app::UiLayer {
       return;
     }
 
-    app::UIDrawData& out = ctx.drawData();
+    renderer::UIDrawData& out = ctx.drawData();
     out.clear();
     out.vertices.reserve(static_cast<size_t>(draw_data->TotalVtxCount));
     out.indices.reserve(static_cast<size_t>(draw_data->TotalIdxCount));
@@ -295,7 +295,7 @@ class CollisionUiLayer final : public app::UiLayer {
       const ImDrawList* cmd_list = draw_data->CmdLists[n];
       for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
         const ImDrawVert& v = cmd_list->VtxBuffer[i];
-        app::UIVertex out_v{};
+        renderer::UIVertex out_v{};
         out_v.x = v.pos.x;
         out_v.y = v.pos.y;
         out_v.u = v.uv.x;
@@ -324,7 +324,7 @@ class CollisionUiLayer final : public app::UiLayer {
           continue;
         }
 
-        app::UIDrawCmd out_cmd{};
+        renderer::UIDrawCmd out_cmd{};
         out_cmd.index_offset = global_idx_offset;
         out_cmd.index_count = cmd.ElemCount;
         out_cmd.scissor_enabled = true;
@@ -579,6 +579,7 @@ class CollisionEventsGame final : public app::GameInterface {
                          const math::Color& color,
                          float radius) {
     auto entity = world->createEntity();
+    const std::string material_key = "runtime/collision_trigger/" + name + "/material";
     world->setName(entity, std::move(name));
 
     components::TransformComponent transform{};
@@ -586,8 +587,7 @@ class CollisionEventsGame final : public app::GameInterface {
     transform.setScale({radius, radius, radius});
     world->add(entity, transform);
 
-    renderer::MaterialId material_id = renderer::kInvalidMaterial;
-    if (graphics != nullptr) {
+    if (materials != nullptr) {
       renderer::MaterialDesc material{};
       material.base_color = color;
       material.emissive_color = {color.r * 1.8f, color.g * 1.8f, color.b * 1.8f, 1.0f};
@@ -597,13 +597,12 @@ class CollisionEventsGame final : public app::GameInterface {
       material.double_sided = true;
       material.roughness = 1.0f;
       material.metallic = 0.0f;
-      material_id = graphics->createMaterial(material);
+      materials->registerMaterialDesc(material_key, material);
     }
 
     world->add(entity, components::MeshComponent{
         .mesh_key = resolveExampleAssetPath("wave.glb").string(),
-        .material_id = material_id,
-        .owns_material_id = material_id != renderer::kInvalidMaterial,
+        .material_key = material_key,
         .visible = true,
         .shadow_visible = false,
     });

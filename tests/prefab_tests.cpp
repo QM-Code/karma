@@ -200,10 +200,6 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
                       .mesh_key = "assets/crate.glb",
                       .material_key = "crate",
                       .texture_key = "crate_albedo",
-                      .mesh_id = 42,
-                      .material_id = 99,
-                      .owns_mesh_id = true,
-                      .owns_material_id = true,
                       .visible = true,
                       .shadow_visible = false,
                   });
@@ -243,10 +239,6 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
   KARMA_REQUIRE(mesh.mesh_key == "assets/crate.glb");
   KARMA_REQUIRE(mesh.material_key == "crate");
   KARMA_REQUIRE(mesh.texture_key == "crate_albedo");
-  KARMA_REQUIRE(mesh.mesh_id == karma::renderer::kInvalidMesh);
-  KARMA_REQUIRE(mesh.material_id == karma::renderer::kInvalidMaterial);
-  KARMA_REQUIRE(!mesh.owns_mesh_id);
-  KARMA_REQUIRE(!mesh.owns_material_id);
   KARMA_REQUIRE(!mesh.shadow_visible);
 
   const auto& light = loaded_world.get<karma::components::LightComponent>(instance->root);
@@ -516,7 +508,7 @@ void testParticleEffectParserV2() {
   KARMA_REQUIRE(effect->emitter.max_particles == 8u);
   auto emitter = library.instantiateEmitter("test/effect");
   KARMA_REQUIRE(emitter.has_value());
-  KARMA_REQUIRE(emitter->texture == 77u);
+  KARMA_REQUIRE(emitter->texture_key == "test/texture");
 
   Json unknown = validParticleEffectJson();
   unknown["emitters"][0]["render"]["unknown"] = 1;
@@ -566,7 +558,7 @@ void testParticleSystemEffectLifecycleReapply() {
   effect.emitter.enabled = true;
   effect.emitter.playing = true;
   effect.emitter.layer = 2u;
-  effect.emitter.texture = 11u;
+  effect.texture_key = "spark/base_texture";
   effect.emitter.max_particles = 32u;
   effect.emitter.start_delay = 0.1f;
   effect.emitter.start_size_min = 0.2f;
@@ -593,7 +585,7 @@ void testParticleSystemEffectLifecycleReapply() {
   karma::components::ParticleEffectOverrideComponent effect_override{};
   effect_override.size_scale = 2.0f;
   effect_override.alpha_scale = 0.5f;
-  effect_override.texture = 99u;
+  effect_override.texture_key = "spark/override_texture";
   world.add(entity, effect_override);
 
   karma::particles::ParticleSystem system(nullptr, &library);
@@ -603,7 +595,7 @@ void testParticleSystemEffectLifecycleReapply() {
   KARMA_REQUIRE(!applied.playing);
   KARMA_REQUIRE(nearly(applied.start_delay, 0.75f));
   KARMA_REQUIRE(applied.layer == 2u);
-  KARMA_REQUIRE(applied.texture == 99u);
+  KARMA_REQUIRE(applied.texture_key == "spark/override_texture");
   KARMA_REQUIRE(applied.max_particles == 32u);
   KARMA_REQUIRE(nearly(applied.start_size_min, 0.4f));
   KARMA_REQUIRE(nearly(applied.start_size_max, 0.8f));
@@ -611,9 +603,10 @@ void testParticleSystemEffectLifecycleReapply() {
 
   auto& override_component =
       world.get<karma::components::ParticleEffectOverrideComponent>(entity);
-  override_component.texture = 123u;
+  override_component.texture_key = "spark/updated_texture";
   system.update(world, 0.016f, 1.0f);
-  KARMA_REQUIRE(world.get<karma::components::ParticleEmitterComponent>(entity).texture == 123u);
+  KARMA_REQUIRE(world.get<karma::components::ParticleEmitterComponent>(entity).texture_key ==
+                "spark/updated_texture");
 
   auto& effect_component =
       world.get<karma::components::ParticleEffectComponent>(entity);
@@ -744,7 +737,7 @@ void testExplosionPrefabDirectLoad() {
   KARMA_REQUIRE(core_flipbook->emitter.atlas_border_y == 4u);
   KARMA_REQUIRE(core_flipbook->emitter.atlas_spacing_x == 4u);
   KARMA_REQUIRE(core_flipbook->emitter.atlas_spacing_y == 4u);
-  KARMA_REQUIRE(core_flipbook->emitter.blend_mode == karma::renderer::ParticleBlendMode::Additive);
+  KARMA_REQUIRE(core_flipbook->emitter.blend_mode == karma::components::ParticleBlendMode::Additive);
 
   const auto* smoke_flipbook = library.find("prefabs/explosion/smoke_flipbook");
   KARMA_REQUIRE(smoke_flipbook != nullptr);
@@ -756,7 +749,7 @@ void testExplosionPrefabDirectLoad() {
   KARMA_REQUIRE(smoke_flipbook->emitter.atlas_border_y == 4u);
   KARMA_REQUIRE(smoke_flipbook->emitter.atlas_spacing_x == 4u);
   KARMA_REQUIRE(smoke_flipbook->emitter.atlas_spacing_y == 4u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.blend_mode == karma::renderer::ParticleBlendMode::Alpha);
+  KARMA_REQUIRE(smoke_flipbook->emitter.blend_mode == karma::components::ParticleBlendMode::Alpha);
 
   karma::prefabs::clearPrefabResourceContext();
   KARMA_REQUIRE(destroyed_textures.size() == uploaded_textures.size());

@@ -23,10 +23,10 @@ Karma is a C++20 client/server 3D game engine with a layered architecture and a 
 ## UI / Draw Data Integration
 - Core types: `include/karma/runtime/app/ui_draw_data.h` + `include/karma/runtime/app/ui_context.h`.
 - Engine owns a `UIContext` and calls a user-provided `UiLayer` each frame.
-- The renderer consumes `UIDrawData` and composites it over the 3D frame.
+- The renderer consumes `renderer::UIDrawData` and composites it over the 3D frame.
 - UI provider adapters live under `include/karma/features/ui/<provider>` and
   `src/features/ui/<provider>`. They translate provider draw lists into
-  `UIDrawData` behind factories returning `app::UiLayer`.
+  `renderer::UIDrawData` behind factories returning `app::UiLayer`.
 
 ## Optional Dependencies
 Optional dependencies are controlled via CMake (window/audio/physics/network backends). When `KARMA_FETCH_DEPS=ON`,

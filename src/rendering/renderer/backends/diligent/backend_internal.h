@@ -1,7 +1,7 @@
 #pragma once
 
 #include "karma/rendering/renderer/camera.h"
-#include "karma/rendering/renderer/mesh_data.h"
+#include "karma/world/geometry/mesh_data.h"
 
 #include <filesystem>
 #include <vector>
@@ -94,14 +94,14 @@ LoadedImage loadImageFromMemory(const unsigned char* data, size_t size);
 LoadedImage loadImageFromFile(const std::filesystem::path& path);
 LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path);
 
-#if !defined(BZ3_WINDOW_BACKEND_SDL)
+#if !defined(KARMA_WINDOW_BACKEND_SDL)
 Diligent::NativeWindow toNativeWindow(GLFWwindow* window);
 #endif
 
-renderer::MeshData combineMeshes(const aiScene& scene,
+geometry::MeshData combineMeshes(const aiScene& scene,
                                  glm::vec4& out_color,
                                  std::vector<SubmeshInfo>& out_submeshes);
 void copyMat4(float out[16], const glm::mat4& m);
-std::vector<float> buildInterleavedVertices(const renderer::MeshData& mesh);
+std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh);
 
 }  // namespace karma::renderer_backend

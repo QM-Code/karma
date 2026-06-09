@@ -17,7 +17,7 @@ namespace karma::animation {
 
 /// \ingroup karma_animation
 /// Skins `bind_mesh` on the CPU using final skin matrices.
-renderer::MeshData skinMesh(const renderer::MeshData& bind_mesh,
+geometry::MeshData skinMesh(const geometry::MeshData& bind_mesh,
                             const std::vector<components::VertexSkinInfluence>& influences,
                             const std::vector<glm::mat4>& skin_matrices);
 

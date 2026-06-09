@@ -30,14 +30,13 @@ class VolumeSphereSystem {
 
  private:
   struct RuntimeState {
-    ecs::Entity proxy{};
     renderer::MaterialId material = renderer::kInvalidMaterial;
   };
 
   void ensureSharedResources();
   void destroySharedResources();
-  void destroyRuntimeState(ecs::World& world, RuntimeState& state);
-  RuntimeState& ensureRuntimeState(ecs::World& world, ecs::Entity source);
+  void destroyRuntimeState(RuntimeState& state);
+  RuntimeState& ensureRuntimeState(ecs::Entity source);
 
   static uint64_t entityKey(ecs::Entity entity) {
     return (static_cast<uint64_t>(entity.index) << 32) |

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cstdint>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "karma/rendering/renderer/material.h"
 
@@ -26,6 +29,21 @@ class MaterialLibrary {
                             const std::string& mesh_key,
                             Color tint) {
     registerMaterial(key, MaterialResourceDesc::fromMeshTint(mesh_key, tint));
+  }
+
+  /// Registers an explicit material descriptor.
+  void registerMaterialDesc(const std::string& key, MaterialDesc desc) {
+    registerMaterial(key, MaterialResourceDesc::fromMaterial(std::move(desc)));
+  }
+
+  /// Registers a material descriptor sourced from an imported asset material.
+  void registerImportedAssetMaterial(const std::string& key,
+                                     std::filesystem::path path,
+                                     uint32_t material_index,
+                                     MaterialDesc fallback = {}) {
+    registerMaterial(key,
+                     MaterialResourceDesc::fromImportedAssetMaterial(
+                         std::move(path), material_index, std::move(fallback)));
   }
 
   /// Removes a material descriptor.

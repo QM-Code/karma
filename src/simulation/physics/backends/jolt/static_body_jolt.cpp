@@ -1,7 +1,7 @@
 #include "karma/simulation/physics/backends/jolt/static_body_jolt.hpp"
 #include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
-#include "karma/content/geometry/mesh_loader.h"
-#include "karma/content/geometry/mesh_loader.h"
+#include "karma/content/importers/mesh_import.h"
+#include <glm/glm.hpp>
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
@@ -23,7 +23,7 @@ namespace karma::physics_backend {
 std::unique_ptr<PhysicsStaticBodyBackend> PhysicsStaticBodyJolt::fromMesh(PhysicsWorldJolt* world, const std::string& meshPath) {
     if (!world || !world->physicsSystem()) return std::make_unique<PhysicsStaticBodyJolt>();
 
-    std::vector<karma::geometry::MeshData> meshes = karma::geometry::loadGLB(meshPath);
+    std::vector<karma::geometry::MeshData> meshes = karma::content::importMeshes(meshPath);
     if (meshes.empty()) {
         spdlog::warn("PhysicsStaticBodyJolt::fromMesh: No meshes found at {}", meshPath);
         return std::make_unique<PhysicsStaticBodyJolt>();

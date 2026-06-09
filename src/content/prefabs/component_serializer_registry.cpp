@@ -321,19 +321,19 @@ bool readSpawnShape(const Json& object, components::ParticleSpawnShape& out) {
   return false;
 }
 
-std::string blendModeName(renderer::ParticleBlendMode mode) {
+std::string blendModeName(components::ParticleBlendMode mode) {
   switch (mode) {
-    case renderer::ParticleBlendMode::Additive:
+    case components::ParticleBlendMode::Additive:
       return "additive";
-    case renderer::ParticleBlendMode::Alpha:
+    case components::ParticleBlendMode::Alpha:
       return "alpha";
-    case renderer::ParticleBlendMode::Distortion:
+    case components::ParticleBlendMode::Distortion:
       return "distortion";
   }
   return "additive";
 }
 
-bool readBlendMode(const Json& object, renderer::ParticleBlendMode& out) {
+bool readBlendMode(const Json& object, components::ParticleBlendMode& out) {
   const auto it = object.find("blend_mode");
   if (it == object.end()) {
     return true;
@@ -343,31 +343,31 @@ bool readBlendMode(const Json& object, renderer::ParticleBlendMode& out) {
   }
   const std::string value = it->get<std::string>();
   if (value == "additive") {
-    out = renderer::ParticleBlendMode::Additive;
+    out = components::ParticleBlendMode::Additive;
     return true;
   }
   if (value == "alpha") {
-    out = renderer::ParticleBlendMode::Alpha;
+    out = components::ParticleBlendMode::Alpha;
     return true;
   }
   if (value == "distortion") {
-    out = renderer::ParticleBlendMode::Distortion;
+    out = components::ParticleBlendMode::Distortion;
     return true;
   }
   return false;
 }
 
-std::string alignmentName(renderer::ParticleAlignment alignment) {
+std::string alignmentName(components::ParticleAlignment alignment) {
   switch (alignment) {
-    case renderer::ParticleAlignment::Billboard:
+    case components::ParticleAlignment::Billboard:
       return "billboard";
-    case renderer::ParticleAlignment::Ground:
+    case components::ParticleAlignment::Ground:
       return "ground";
   }
   return "billboard";
 }
 
-bool readAlignment(const Json& object, renderer::ParticleAlignment& out) {
+bool readAlignment(const Json& object, components::ParticleAlignment& out) {
   const auto it = object.find("alignment");
   if (it == object.end()) {
     return true;
@@ -377,27 +377,27 @@ bool readAlignment(const Json& object, renderer::ParticleAlignment& out) {
   }
   const std::string value = it->get<std::string>();
   if (value == "billboard") {
-    out = renderer::ParticleAlignment::Billboard;
+    out = components::ParticleAlignment::Billboard;
     return true;
   }
   if (value == "ground") {
-    out = renderer::ParticleAlignment::Ground;
+    out = components::ParticleAlignment::Ground;
     return true;
   }
   return false;
 }
 
-std::string shadingModeName(renderer::ParticleShadingMode mode) {
+std::string shadingModeName(components::ParticleShadingMode mode) {
   switch (mode) {
-    case renderer::ParticleShadingMode::Standard:
+    case components::ParticleShadingMode::Standard:
       return "standard";
-    case renderer::ParticleShadingMode::Shell:
+    case components::ParticleShadingMode::Shell:
       return "shell";
   }
   return "standard";
 }
 
-bool readShadingMode(const Json& object, renderer::ParticleShadingMode& out) {
+bool readShadingMode(const Json& object, components::ParticleShadingMode& out) {
   const auto it = object.find("shading_mode");
   if (it == object.end()) {
     return true;
@@ -407,11 +407,11 @@ bool readShadingMode(const Json& object, renderer::ParticleShadingMode& out) {
   }
   const std::string value = it->get<std::string>();
   if (value == "standard") {
-    out = renderer::ParticleShadingMode::Standard;
+    out = components::ParticleShadingMode::Standard;
     return true;
   }
   if (value == "shell") {
-    out = renderer::ParticleShadingMode::Shell;
+    out = components::ParticleShadingMode::Shell;
     return true;
   }
   return false;
@@ -966,6 +966,9 @@ Json serializeParticleEffectOverride(
   if (component.end_color.has_value()) {
     json["end_color"] = toJson(*component.end_color);
   }
+  if (component.texture_key.has_value()) {
+    json["texture_key"] = *component.texture_key;
+  }
   return json;
 }
 
@@ -988,6 +991,12 @@ deserializeParticleEffectOverride(const Json& json) {
       !readOptionalColor(json, "end_color", component.end_color)) {
     return std::nullopt;
   }
+  if (const auto it = json.find("texture_key"); it != json.end()) {
+    if (!it->is_string()) {
+      return std::nullopt;
+    }
+    component.texture_key = it->get<std::string>();
+  }
   return component;
 }
 
@@ -996,6 +1005,7 @@ Json serializeParticleEmitter(const components::ParticleEmitterComponent& compon
       {"enabled", component.enabled},
       {"playing", component.playing},
       {"start_delay", component.start_delay},
+      {"texture_key", component.texture_key},
   };
 }
 
@@ -1007,7 +1017,8 @@ std::optional<components::ParticleEmitterComponent> deserializeParticleEmitter(
   components::ParticleEmitterComponent component{};
   if (!readBool(json, "enabled", component.enabled) ||
       !readBool(json, "playing", component.playing) ||
-      !readFloat(json, "start_delay", component.start_delay)) {
+      !readFloat(json, "start_delay", component.start_delay) ||
+      !readString(json, "texture_key", component.texture_key)) {
     return std::nullopt;
   }
   return component;

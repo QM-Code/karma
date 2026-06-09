@@ -110,7 +110,8 @@ class GlbSceneImportExample final : public app::GameInterface {
         prefab,
         scene::GlbSceneInstantiateOptions{
             .create_synthetic_root = false,
-        });
+        },
+        materials);
     if (!imported.valid()) {
       spdlog::error("Failed to instantiate GLB scene from {}", scene_path.string());
     }

@@ -42,12 +42,12 @@ void GraphicsDevice::getFramebufferSize(int& width, int& height) const {
   height = framebuffer_height_;
 }
 
-MeshId GraphicsDevice::createMesh(const MeshData& mesh) {
+MeshId GraphicsDevice::createMesh(const geometry::MeshData& mesh) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   return backend_ ? backend_->createMesh(mesh) : kInvalidMesh;
 }
 
-void GraphicsDevice::updateMesh(MeshId mesh, const MeshData& data) {
+void GraphicsDevice::updateMesh(MeshId mesh, const geometry::MeshData& data) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {
     backend_->updateMesh(mesh, data);
@@ -72,6 +72,44 @@ bool GraphicsDevice::getMeshBounds(MeshId mesh, glm::vec3& center, float& radius
     return false;
   }
   return backend_->getMeshBounds(mesh, center, radius);
+}
+
+MeshId GraphicsDevice::registerRuntimeMesh(const std::string& key,
+                                           const geometry::MeshData& mesh) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (key.empty() || backend_ == nullptr) {
+    return kInvalidMesh;
+  }
+
+  auto it = runtime_meshes_.find(key);
+  if (it != runtime_meshes_.end()) {
+    backend_->updateMesh(it->second, mesh);
+    return it->second;
+  }
+
+  const MeshId id = backend_->createMesh(mesh);
+  if (id != kInvalidMesh) {
+    runtime_meshes_.emplace(key, id);
+  }
+  return id;
+}
+
+void GraphicsDevice::unregisterRuntimeMesh(const std::string& key) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  auto it = runtime_meshes_.find(key);
+  if (it == runtime_meshes_.end()) {
+    return;
+  }
+  if (backend_ != nullptr && it->second != kInvalidMesh) {
+    backend_->destroyMesh(it->second);
+  }
+  runtime_meshes_.erase(it);
+}
+
+MeshId GraphicsDevice::findRuntimeMesh(const std::string& key) const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  const auto it = runtime_meshes_.find(key);
+  return it != runtime_meshes_.end() ? it->second : kInvalidMesh;
 }
 
 MaterialId GraphicsDevice::createMaterial(const MaterialDesc& material) {
@@ -367,7 +405,7 @@ void GraphicsDevice::updateTextureRGBA8(TextureId texture, int width, int height
   }
 }
 
-void GraphicsDevice::renderUi(const karma::app::UIDrawData& draw_data) {
+void GraphicsDevice::renderUi(const karma::renderer::UIDrawData& draw_data) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {
     backend_->renderUi(draw_data);

@@ -8,7 +8,7 @@
 #include "karma/world/ecs/entity.h"
 #include "karma/core/math/types.h"
 #include "karma/simulation/navigation/nav_mesh.h"
-#include "karma/rendering/renderer/mesh_data.h"
+#include "karma/world/geometry/mesh_data.h"
 
 namespace karma::components {
 
@@ -19,7 +19,7 @@ struct NavMeshSurfaceComponent : ecs::ComponentTag {
   uint32_t layer_mask = 0xffffffffu;
   unsigned char area = navigation::kNavAreaDefault;
   bool walkable = true;
-  std::shared_ptr<const renderer::MeshData> mesh_data;
+  std::shared_ptr<const geometry::MeshData> mesh_data;
   std::string mesh_key;
 };
 

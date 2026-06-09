@@ -11,7 +11,7 @@
 #include "karma/world/components/nav_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
-#include "karma/content/geometry/mesh_loader.h"
+#include "karma/content/importers/mesh_import.h"
 #include "karma/content/importers/glb_scene_import.h"
 
 namespace karma::navigation {
@@ -104,7 +104,7 @@ void appendOffMeshLinks(NavMeshInputGeometry& geometry,
 }  // namespace
 
 void appendGeometry(NavMeshInputGeometry& out,
-                    const renderer::MeshData& mesh,
+                    const geometry::MeshData& mesh,
                     const math::Vec3& position,
                     const math::Quat& rotation,
                     const math::Vec3& scale,
@@ -160,7 +160,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
         }
 
         const std::vector<karma::geometry::MeshData> meshes =
-            karma::geometry::loadGLB(mesh_key);
+            karma::content::importMeshes(mesh_key);
         for (const auto& mesh : meshes) {
           appendMesh(geometry, mesh, world_transform, area);
         }
@@ -183,7 +183,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
                                                         transform.getRotation(),
                                                         transform.getScale());
         const std::vector<karma::geometry::MeshData> meshes =
-            karma::geometry::loadGLB(mesh_component.mesh_key);
+            karma::content::importMeshes(mesh_component.mesh_key);
         for (const auto& mesh : meshes) {
           appendMesh(geometry, mesh, world_transform, kNavAreaDefault);
         }

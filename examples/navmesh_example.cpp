@@ -87,6 +87,7 @@ class NavMeshSceneExample final : public app::GameInterface {
     player_entity_ = helpers::spawnMeshAsset(*world, "Click Move Tank", tank_mesh_key, start_);
     target_marker_entity_ = helpers::createDebugBoxMarker(*world,
                                                           graphics,
+                                                          materials,
                                                           "Move Target",
                                                           {0.98f, 0.72f, 0.1f, 1.0f},
                                                           toMarkerVisualPoint(start_),

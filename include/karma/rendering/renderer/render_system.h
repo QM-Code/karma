@@ -39,10 +39,6 @@ class RenderSystem {
     renderer::MeshId mesh = renderer::kInvalidMesh;
     renderer::MaterialId material = renderer::kInvalidMaterial;
     renderer::MaterialSetId material_set = renderer::kInvalidMaterialSet;
-    renderer::MeshId direct_mesh_id = renderer::kInvalidMesh;
-    renderer::MaterialId direct_material_id = renderer::kInvalidMaterial;
-    bool owns_direct_mesh_id = false;
-    bool owns_direct_material_id = false;
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
@@ -54,6 +50,7 @@ class RenderSystem {
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
+    bool owned_by_render_system = false;
   };
 
   struct SharedMaterialVariant {

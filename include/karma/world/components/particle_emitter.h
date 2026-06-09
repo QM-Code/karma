@@ -1,18 +1,41 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
+#include "karma/core/math/types.h"
 #include "karma/world/ecs/component.h"
-#include "karma/rendering/renderer/particles.h"
 
 namespace karma::components {
 
 /// \ingroup karma_components
+/// Particle blend path selected by particle emitters.
+enum class ParticleBlendMode : uint32_t {
+  Additive = 0,
+  Alpha = 1,
+  Distortion = 2,
+};
+
+/// \ingroup karma_components
+/// Particle orientation mode.
+enum class ParticleAlignment : uint32_t {
+  Billboard = 0,
+  Ground = 1,
+};
+
+/// \ingroup karma_components
+/// Particle shader family.
+enum class ParticleShadingMode : uint32_t {
+  Standard = 0,
+  Shell = 1,
+};
+
+/// \ingroup karma_components
 /// Particle spawn volume used by `ParticleEmitterComponent`.
-enum class ParticleSpawnShape : uint8_t {
-  Box,
-  Sphere,
-  SphereSurface,
+enum class ParticleSpawnShape : uint32_t {
+  Box = 0,
+  Sphere = 1,
+  SphereSurface = 2,
 };
 
 /// \ingroup karma_components
@@ -26,11 +49,11 @@ struct ParticleEmitterComponent : ecs::ComponentTag {
   bool loop = true;
   bool emit_burst_on_start = true;
   bool local_space = false;
-  renderer::LayerId layer = 0;
+  uint32_t layer = 0;
   bool depth_test = true;
-  renderer::ParticleBlendMode blend_mode = renderer::ParticleBlendMode::Additive;
-  renderer::ParticleAlignment alignment = renderer::ParticleAlignment::Billboard;
-  renderer::ParticleShadingMode shading_mode = renderer::ParticleShadingMode::Standard;
+  ParticleBlendMode blend_mode = ParticleBlendMode::Additive;
+  ParticleAlignment alignment = ParticleAlignment::Billboard;
+  ParticleShadingMode shading_mode = ParticleShadingMode::Standard;
   bool use_soft_mask = true;
   float soft_particle_distance = 0.0f;
   float distortion_strength = 0.0f;
@@ -38,7 +61,7 @@ struct ParticleEmitterComponent : ecs::ComponentTag {
   float fresnel_strength = 1.0f;
   float refraction_strength = 0.0f;
   float interior_glow = 0.0f;
-  renderer::TextureId texture = renderer::kInvalidTexture;
+  std::string texture_key;
   uint32_t atlas_columns = 1;
   uint32_t atlas_rows = 1;
   uint32_t atlas_frame_count = 0;

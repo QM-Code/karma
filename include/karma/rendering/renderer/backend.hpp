@@ -7,12 +7,12 @@
 #include "karma/rendering/renderer/ids.h"
 #include "karma/rendering/renderer/lights.h"
 #include "karma/rendering/renderer/material.h"
-#include "karma/rendering/renderer/mesh_data.h"
+#include "karma/world/geometry/mesh_data.h"
 #include "karma/rendering/renderer/particles.h"
 #include "karma/rendering/renderer/render_target.h"
 #include "karma/rendering/renderer/stats.h"
 #include "karma/rendering/renderer/texture.h"
-#include "karma/runtime/app/ui_draw_data.h"
+#include "karma/rendering/renderer/ui_draw_data.h"
 
 #include <filesystem>
 #include <memory>
@@ -40,8 +40,8 @@ class Backend {
   virtual void endFrame() = 0;
   virtual void resize(int width, int height) = 0;
 
-  virtual renderer::MeshId createMesh(const renderer::MeshData& mesh) = 0;
-  virtual void updateMesh(renderer::MeshId mesh, const renderer::MeshData& data) = 0;
+  virtual renderer::MeshId createMesh(const geometry::MeshData& mesh) = 0;
+  virtual void updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) = 0;
   virtual renderer::MeshId createMeshFromFile(const std::filesystem::path& path) = 0;
   virtual void destroyMesh(renderer::MeshId mesh) = 0;
   virtual bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const = 0;
@@ -107,7 +107,7 @@ class Backend {
   virtual void setExposure(float exposure) = 0;
 
   virtual void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) = 0;
-  virtual void renderUi(const karma::app::UIDrawData& draw_data) = 0;
+  virtual void renderUi(const karma::renderer::UIDrawData& draw_data) = 0;
 };
 
 /// Creates the configured graphics backend for a platform window.

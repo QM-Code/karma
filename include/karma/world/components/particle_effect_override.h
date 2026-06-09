@@ -1,9 +1,10 @@
 #pragma once
 
 #include <optional>
+#include <string>
 
+#include "karma/core/math/types.h"
 #include "karma/world/ecs/component.h"
-#include "karma/rendering/renderer/ids.h"
 
 namespace karma::components {
 
@@ -21,7 +22,7 @@ struct ParticleEffectOverrideComponent : ecs::ComponentTag {
   float alpha_scale = 1.0f;
   std::optional<math::Color> start_color;
   std::optional<math::Color> end_color;
-  std::optional<renderer::TextureId> texture;
+  std::optional<std::string> texture_key;
 };
 
 }  // namespace karma::components

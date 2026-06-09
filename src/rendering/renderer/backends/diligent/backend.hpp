@@ -51,8 +51,8 @@ class DiligentBackend final : public Backend {
   void endFrame() override;
   void resize(int width, int height) override;
 
-  renderer::MeshId createMesh(const renderer::MeshData& mesh) override;
-  void updateMesh(renderer::MeshId mesh, const renderer::MeshData& data) override;
+  renderer::MeshId createMesh(const geometry::MeshData& mesh) override;
+  void updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) override;
   renderer::MeshId createMeshFromFile(const std::filesystem::path& path) override;
   void destroyMesh(renderer::MeshId mesh) override;
   bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const override;
@@ -118,7 +118,7 @@ class DiligentBackend final : public Backend {
                                 float directional_shadow_lift_strength) override;
   void setExposure(float exposure) override;
   void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) override;
-  void renderUi(const karma::app::UIDrawData& draw_data) override;
+  void renderUi(const karma::renderer::UIDrawData& draw_data) override;
 
   Diligent::IRenderDevice* getDevice() const { return device_; }
   Diligent::IDeviceContext* getContext() const { return context_; }
@@ -126,7 +126,7 @@ class DiligentBackend final : public Backend {
 
  private:
   struct MeshRecord {
-    renderer::MeshData data;
+    geometry::MeshData data;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> vertex_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> index_buffer;
     Diligent::Uint32 vertex_count = 0;
@@ -383,7 +383,7 @@ class DiligentBackend final : public Backend {
                                            int height,
                                            Diligent::TEXTURE_FORMAT format);
   void ensureParticleFallbackDepthResource();
-  void uploadMeshBuffers(const renderer::MeshData& mesh, MeshRecord& record);
+  void uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
                                                                    int width,
                                                                    int height,

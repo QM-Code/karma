@@ -1,9 +1,12 @@
 #pragma once
 
 #include <mutex>
+#include <string>
+#include <unordered_map>
 
 #include "karma/rendering/renderer/backend.hpp"
 #include "karma/rendering/renderer/material.h"
+#include "karma/world/geometry/mesh_data.h"
 
 namespace karma::renderer {
 
@@ -29,15 +32,22 @@ class GraphicsDevice {
   void getFramebufferSize(int& width, int& height) const;
 
   /// Uploads CPU mesh data and returns a mesh handle.
-  MeshId createMesh(const MeshData& mesh);
+  MeshId createMesh(const geometry::MeshData& mesh);
   /// Replaces mesh data for an existing handle.
-  void updateMesh(MeshId mesh, const MeshData& data);
+  void updateMesh(MeshId mesh, const geometry::MeshData& data);
   /// Loads and uploads mesh data from a file.
   MeshId createMeshFromFile(const std::filesystem::path& path);
   /// Destroys a mesh handle.
   void destroyMesh(MeshId mesh);
   /// Queries cached mesh bounds.
   bool getMeshBounds(MeshId mesh, glm::vec3& center, float& radius) const;
+
+  /// Registers or replaces a runtime mesh bound by `MeshComponent::mesh_key`.
+  MeshId registerRuntimeMesh(const std::string& key, const geometry::MeshData& mesh);
+  /// Removes a runtime mesh registration.
+  void unregisterRuntimeMesh(const std::string& key);
+  /// Returns a registered runtime mesh id, or `kInvalidMesh`.
+  MeshId findRuntimeMesh(const std::string& key) const;
 
   /// Creates a material from explicit parameters.
   MaterialId createMaterial(const MaterialDesc& material);
@@ -134,7 +144,7 @@ class GraphicsDevice {
   /// Updates an RGBA8 texture from raw pixels.
   void updateTextureRGBA8(TextureId texture, int width, int height, const void* pixels);
   /// Renders provider-neutral UI draw data.
-  void renderUi(const karma::app::UIDrawData& draw_data);
+  void renderUi(const karma::renderer::UIDrawData& draw_data);
   /// Returns the backend implementation for narrow diagnostics/interops.
   renderer_backend::Backend* backend() { return backend_.get(); }
   /// Returns the backend implementation for narrow diagnostics/interops.
@@ -142,6 +152,7 @@ class GraphicsDevice {
 
  private:
   std::unique_ptr<renderer_backend::Backend> backend_;
+  std::unordered_map<std::string, MeshId> runtime_meshes_;
   mutable std::recursive_mutex mutex_;
   int framebuffer_width_ = 0;
   int framebuffer_height_ = 0;

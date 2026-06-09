@@ -11,7 +11,7 @@ Start with these modules:
 - \ref karma_world for ECS, components, systems, and scene hierarchy.
 - \ref karma_rendering for renderer-facing APIs and render data contracts.
 - \ref karma_simulation for animation, physics, collision, and navigation.
-- \ref karma_content for GLB import, mesh loading, and prefab runtime APIs.
+- \ref karma_content for GLB import, mesh import, and prefab runtime APIs.
 - \ref karma_features for optional visual and UI feature modules.
 - \ref karma_media for audio APIs.
 - \ref karma_platform for windows, input events, and networking.

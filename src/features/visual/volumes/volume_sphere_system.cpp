@@ -4,11 +4,13 @@
 #include <cmath>
 #include <limits>
 #include <unordered_set>
+#include <utility>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "karma/world/components/camera.h"
-#include "karma/world/components/mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/volume_sphere.h"
 #include "karma/core/math/quat.h"
@@ -29,8 +31,8 @@ struct OverlayRectNdc {
   bool visible = true;
 };
 
-renderer::MeshData buildOverlayQuadMesh() {
-  renderer::MeshData mesh{};
+geometry::MeshData buildOverlayQuadMesh() {
+  geometry::MeshData mesh{};
   mesh.vertices = {
       {-1.0f, -1.0f, 0.0f},
       {1.0f, -1.0f, 0.0f},
@@ -70,6 +72,22 @@ float computeVolumeDensity(float radius, float center_opacity) {
 
 float maxAbsScale(const math::Vec3& scale) {
   return std::max({std::abs(scale.x), std::abs(scale.y), std::abs(scale.z), 1.0f});
+}
+
+glm::vec3 toGlm(const math::Vec3& v) {
+  return {v.x, v.y, v.z};
+}
+
+glm::quat toGlm(const math::Quat& q) {
+  return {q.w, q.x, q.y, q.z};
+}
+
+glm::mat4 toGlmMat4(const components::TransformComponent& transform) {
+  glm::mat4 matrix(1.0f);
+  matrix = glm::translate(matrix, toGlm(transform.getPosition()));
+  matrix *= glm::mat4_cast(toGlm(transform.getRotation()));
+  matrix = glm::scale(matrix, toGlm(transform.getScale()));
+  return matrix;
 }
 
 float resolveVolumeRadius(const components::VolumeSphereComponent& sphere,
@@ -238,25 +256,25 @@ void VolumeSphereSystem::destroySharedResources() {
   if (device_ == nullptr) {
     return;
   }
+  for (auto& [key, state] : runtime_) {
+    (void)key;
+    destroyRuntimeState(state);
+  }
+  runtime_.clear();
   if (overlay_mesh_ != renderer::kInvalidMesh) {
     device_->destroyMesh(overlay_mesh_);
     overlay_mesh_ = renderer::kInvalidMesh;
   }
 }
 
-void VolumeSphereSystem::destroyRuntimeState(ecs::World& world, RuntimeState& state) {
+void VolumeSphereSystem::destroyRuntimeState(RuntimeState& state) {
   if (device_ != nullptr && state.material != renderer::kInvalidMaterial) {
     device_->destroyMaterial(state.material);
     state.material = renderer::kInvalidMaterial;
   }
-  if (state.proxy.isValid() && world.isAlive(state.proxy)) {
-    world.destroyEntity(state.proxy);
-  }
-  state.proxy = {};
 }
 
-VolumeSphereSystem::RuntimeState& VolumeSphereSystem::ensureRuntimeState(ecs::World& world,
-                                                                         ecs::Entity source) {
+VolumeSphereSystem::RuntimeState& VolumeSphereSystem::ensureRuntimeState(ecs::Entity source) {
   const uint64_t key = entityKey(source);
   auto it = runtime_.find(key);
   if (it != runtime_.end()) {
@@ -267,7 +285,6 @@ VolumeSphereSystem::RuntimeState& VolumeSphereSystem::ensureRuntimeState(ecs::Wo
   if (device_ != nullptr) {
     state.material = device_->createMaterial(renderer::MaterialDesc{});
   }
-  state.proxy = world.createEntity();
   it = runtime_.emplace(key, std::move(state)).first;
   return it->second;
 }
@@ -318,23 +335,7 @@ void VolumeSphereSystem::update(ecs::World& world, float dt, float interpolation
     const uint64_t key = entityKey(entity);
     active_keys.insert(key);
 
-    RuntimeState& state = ensureRuntimeState(world, entity);
-    if (!world.isAlive(state.proxy)) {
-      state.proxy = world.createEntity();
-    }
-    if (!world.has<components::TransformComponent>(state.proxy)) {
-      world.add(state.proxy, components::TransformComponent{});
-    }
-    if (!world.has<components::MeshComponent>(state.proxy)) {
-      world.add(state.proxy,
-                components::MeshComponent{
-                    .mesh_id = overlay_mesh_,
-                    .material_id = state.material,
-                    .owns_material_id = false,
-                    .visible = sphere.visible,
-                    .shadow_visible = false,
-                });
-    }
+    RuntimeState& state = ensureRuntimeState(entity);
 
     const components::TransformComponent world_transform{
         source_transform.getInterpolatedPosition(interpolation_alpha),
@@ -355,17 +356,17 @@ void VolumeSphereSystem::update(ecs::World& world, float dt, float interpolation
                                    aspect,
                                    sphere.overlay_depth,
                                    overlay_rect);
-    world.get<components::TransformComponent>(state.proxy) = overlay_transform;
-
-    auto& mesh = world.get<components::MeshComponent>(state.proxy);
-    mesh.mesh_id = overlay_mesh_;
-    mesh.material_id = state.material;
-    mesh.visible = sphere.visible && overlay_rect.visible;
-    mesh.shadow_visible = false;
-
     if (device_ != nullptr && state.material != renderer::kInvalidMaterial) {
       device_->updateMaterial(state.material,
                               buildMaterialDesc(sphere, world_transform, volume_radius));
+      renderer::DrawItem item{};
+      item.instance = key;
+      item.mesh = overlay_mesh_;
+      item.material = state.material;
+      item.transform = toGlmMat4(overlay_transform);
+      item.visible = sphere.visible && overlay_rect.visible;
+      item.shadow_visible = false;
+      device_->submit(item);
     }
   }
 
@@ -374,7 +375,7 @@ void VolumeSphereSystem::update(ecs::World& world, float dt, float interpolation
       ++it;
       continue;
     }
-    destroyRuntimeState(world, it->second);
+    destroyRuntimeState(it->second);
     it = runtime_.erase(it);
   }
 }

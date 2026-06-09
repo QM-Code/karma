@@ -518,7 +518,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
     return;
   }
 
-  app::UIDrawData& out = ctx.drawData();
+  renderer::UIDrawData& out = ctx.drawData();
   out.clear();
   out.vertices.reserve(static_cast<size_t>(draw_data->TotalVtxCount));
   out.indices.reserve(static_cast<size_t>(draw_data->TotalIdxCount));
@@ -530,7 +530,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
     const ImDrawList* cmd_list = draw_data->CmdLists[n];
     for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
       const ImDrawVert& v = cmd_list->VtxBuffer[i];
-      app::UIVertex out_v{};
+      renderer::UIVertex out_v{};
       out_v.x = v.pos.x;
       out_v.y = v.pos.y;
       out_v.u = v.uv.x;
@@ -558,7 +558,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
         continue;
       }
 
-      app::UIDrawCmd out_cmd{};
+      renderer::UIDrawCmd out_cmd{};
       out_cmd.index_offset = global_idx_offset;
       out_cmd.index_count = cmd.ElemCount;
       out_cmd.scissor_enabled = true;

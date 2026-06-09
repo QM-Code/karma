@@ -1,8 +1,8 @@
 #include "karma/simulation/physics/backends/bullet/static_body_bullet.hpp"
 #include "karma/simulation/physics/backends/bullet/physics_world_bullet.hpp"
-#include "karma/content/geometry/mesh_loader.h"
-#include "engine/geometry/mesh_loader.hpp"
+#include "karma/content/importers/mesh_import.h"
 #include <btBulletDynamicsCommon.h>
+#include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
 namespace {
@@ -14,7 +14,7 @@ namespace karma::physics_backend {
 std::unique_ptr<PhysicsStaticBodyBackend> PhysicsStaticBodyBullet::fromMesh(PhysicsWorldBullet* world, const std::string& meshPath) {
     if (!world || !world->world()) return std::make_unique<PhysicsStaticBodyBullet>();
 
-    std::vector<karma::geometry::MeshData> meshes = karma::geometry::loadGLB(meshPath);
+    std::vector<karma::geometry::MeshData> meshes = karma::content::importMeshes(meshPath);
     if (meshes.empty()) {
         spdlog::warn("PhysicsStaticBodyBullet::fromMesh: No meshes found at {}", meshPath);
         return std::make_unique<PhysicsStaticBodyBullet>();

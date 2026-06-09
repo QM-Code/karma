@@ -150,7 +150,7 @@ bool readColor(const Json& object,
 
 bool readBlendMode(const Json& object,
                    std::string_view key,
-                   renderer::ParticleBlendMode& out_value,
+                   components::ParticleBlendMode& out_value,
                    std::string& out_error) {
   const auto it = object.find(key);
   if (it == object.end()) {
@@ -162,15 +162,15 @@ bool readBlendMode(const Json& object,
   }
   const std::string value = it->get<std::string>();
   if (value == "additive") {
-    out_value = renderer::ParticleBlendMode::Additive;
+    out_value = components::ParticleBlendMode::Additive;
     return true;
   }
   if (value == "alpha") {
-    out_value = renderer::ParticleBlendMode::Alpha;
+    out_value = components::ParticleBlendMode::Alpha;
     return true;
   }
   if (value == "distortion") {
-    out_value = renderer::ParticleBlendMode::Distortion;
+    out_value = components::ParticleBlendMode::Distortion;
     return true;
   }
   out_error = "field '" + std::string(key) + "' has invalid blend mode '" + value + "'";
@@ -179,7 +179,7 @@ bool readBlendMode(const Json& object,
 
 bool readAlignment(const Json& object,
                    std::string_view key,
-                   renderer::ParticleAlignment& out_value,
+                   components::ParticleAlignment& out_value,
                    std::string& out_error) {
   const auto it = object.find(key);
   if (it == object.end()) {
@@ -191,11 +191,11 @@ bool readAlignment(const Json& object,
   }
   const std::string value = it->get<std::string>();
   if (value == "billboard") {
-    out_value = renderer::ParticleAlignment::Billboard;
+    out_value = components::ParticleAlignment::Billboard;
     return true;
   }
   if (value == "ground") {
-    out_value = renderer::ParticleAlignment::Ground;
+    out_value = components::ParticleAlignment::Ground;
     return true;
   }
   out_error = "field '" + std::string(key) + "' has invalid alignment '" + value + "'";
@@ -204,7 +204,7 @@ bool readAlignment(const Json& object,
 
 bool readShadingMode(const Json& object,
                      std::string_view key,
-                     renderer::ParticleShadingMode& out_value,
+                     components::ParticleShadingMode& out_value,
                      std::string& out_error) {
   const auto it = object.find(key);
   if (it == object.end()) {
@@ -216,11 +216,11 @@ bool readShadingMode(const Json& object,
   }
   const std::string value = it->get<std::string>();
   if (value == "standard") {
-    out_value = renderer::ParticleShadingMode::Standard;
+    out_value = components::ParticleShadingMode::Standard;
     return true;
   }
   if (value == "shell") {
-    out_value = renderer::ParticleShadingMode::Shell;
+    out_value = components::ParticleShadingMode::Shell;
     return true;
   }
   out_error = "field '" + std::string(key) + "' has invalid shading mode '" + value + "'";
@@ -660,7 +660,7 @@ bool ParticleLibrary::instantiateEmitter(const std::string& key,
   }
   out_emitter = effect->emitter;
   if (!effect->texture_key.empty()) {
-    out_emitter.texture = resolveTextureAlias(effect->texture_key);
+    out_emitter.texture_key = effect->texture_key;
   }
   return true;
 }

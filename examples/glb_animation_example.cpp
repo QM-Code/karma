@@ -141,7 +141,8 @@ class GlbAnimationExample final : public app::GameInterface {
         scene::GlbSceneInstantiateOptions{
             .create_synthetic_root = false,
             .autoplay_animations = true,
-        });
+        },
+        materials);
     if (!imported.valid()) {
       spdlog::error("Failed to instantiate animation model from {}", model_path.string());
     } else {
@@ -191,17 +192,22 @@ class GlbAnimationExample final : public app::GameInterface {
     const glm::vec3 half_extents{std::max(2.4f, radius * 2.2f), 0.015f,
                                  std::max(2.4f, radius * 2.2f)};
 
-    const renderer::MeshId mesh = graphics->createMesh(helpers::makeBoxMesh(half_extents));
-    const renderer::MaterialId material = helpers::createMaterial(
-        graphics,
-        math::Color{0.16f, 0.18f, 0.18f, 1.0f},
-        false,
-        0.82f,
-        0.0f);
+    const std::string mesh_key = "runtime/glb_animation/ground/mesh";
+    const std::string material_key = "runtime/glb_animation/ground/material";
+    if (graphics != nullptr) {
+      graphics->registerRuntimeMesh(mesh_key, helpers::makeBoxMesh(half_extents));
+    }
+    if (materials != nullptr) {
+      renderer::MaterialDesc material;
+      material.base_color = math::Color{0.16f, 0.18f, 0.18f, 1.0f};
+      material.roughness = 0.82f;
+      material.metallic = 0.0f;
+      materials->registerMaterialDesc(material_key, material);
+    }
     helpers::spawnMesh(*world,
                        "Animation Model Ground",
-                       mesh,
-                       material,
+                       mesh_key,
+                       material_key,
                        {center.x, floor_y, center.z},
                        true);
   }

@@ -34,7 +34,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "../../../../third_party/stb_image.h"
-#if !defined(BZ3_WINDOW_BACKEND_SDL)
+#if !defined(KARMA_WINDOW_BACKEND_SDL)
   #if defined(PLATFORM_WIN32)
     #define GLFW_EXPOSE_NATIVE_WIN32
     #define GLFW_EXPOSE_NATIVE_WGL
@@ -122,7 +122,7 @@ LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path) {
   return image;
 }
 
-#if !defined(BZ3_WINDOW_BACKEND_SDL)
+#if !defined(KARMA_WINDOW_BACKEND_SDL)
 Diligent::NativeWindow toNativeWindow(GLFWwindow* window) {
 #if defined(PLATFORM_WIN32)
   return Diligent::Win32NativeWindow{glfwGetWin32Window(window)};
@@ -140,10 +140,10 @@ Diligent::NativeWindow toNativeWindow(GLFWwindow* window) {
 }
 #endif
 
-renderer::MeshData combineMeshes(const aiScene& scene,
+geometry::MeshData combineMeshes(const aiScene& scene,
                                  glm::vec4& out_color,
                                  std::vector<SubmeshInfo>& out_submeshes) {
-  renderer::MeshData combined;
+  geometry::MeshData combined;
   out_color = glm::vec4(1.0f);
   bool has_color = false;
   out_submeshes.clear();
@@ -234,7 +234,7 @@ void copyMat4(float out[16], const glm::mat4& m) {
   }
 }
 
-std::vector<float> buildInterleavedVertices(const renderer::MeshData& mesh) {
+std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh) {
   const bool has_normals = mesh.normals.size() == mesh.vertices.size();
   const bool has_uvs = mesh.uvs.size() == mesh.vertices.size();
   const bool has_tangents = mesh.tangents.size() == mesh.vertices.size();

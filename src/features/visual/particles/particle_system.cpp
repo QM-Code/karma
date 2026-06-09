@@ -65,9 +65,11 @@ uint64_t hashParticleEffectOverride(
   if (effect_override->end_color.has_value()) {
     seed = hashColor(seed, *effect_override->end_color);
   }
-  seed = hashCombine(seed, effect_override->texture.has_value() ? 1ull : 0ull);
-  if (effect_override->texture.has_value()) {
-    seed = hashCombine(seed, static_cast<uint64_t>(*effect_override->texture));
+  seed = hashCombine(seed, effect_override->texture_key.has_value() ? 1ull : 0ull);
+  if (effect_override->texture_key.has_value()) {
+    for (const char c : *effect_override->texture_key) {
+      seed = hashCombine(seed, static_cast<unsigned char>(c));
+    }
   }
   return seed;
 }
@@ -123,9 +125,41 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   emitter.start_color.a *= alpha_scale;
   emitter.end_color.a *= alpha_scale;
 
-  if (effect_override.texture.has_value()) {
-    emitter.texture = *effect_override.texture;
+  if (effect_override.texture_key.has_value()) {
+    emitter.texture_key = *effect_override.texture_key;
   }
+}
+
+renderer::ParticleBlendMode toRendererBlendMode(components::ParticleBlendMode mode) {
+  switch (mode) {
+    case components::ParticleBlendMode::Additive:
+      return renderer::ParticleBlendMode::Additive;
+    case components::ParticleBlendMode::Alpha:
+      return renderer::ParticleBlendMode::Alpha;
+    case components::ParticleBlendMode::Distortion:
+      return renderer::ParticleBlendMode::Distortion;
+  }
+  return renderer::ParticleBlendMode::Additive;
+}
+
+renderer::ParticleAlignment toRendererAlignment(components::ParticleAlignment alignment) {
+  switch (alignment) {
+    case components::ParticleAlignment::Billboard:
+      return renderer::ParticleAlignment::Billboard;
+    case components::ParticleAlignment::Ground:
+      return renderer::ParticleAlignment::Ground;
+  }
+  return renderer::ParticleAlignment::Billboard;
+}
+
+renderer::ParticleShadingMode toRendererShadingMode(components::ParticleShadingMode mode) {
+  switch (mode) {
+    case components::ParticleShadingMode::Standard:
+      return renderer::ParticleShadingMode::Standard;
+    case components::ParticleShadingMode::Shell:
+      return renderer::ParticleShadingMode::Shell;
+  }
+  return renderer::ParticleShadingMode::Standard;
 }
 
 renderer::ParticleSpawnShape toRendererSpawnShape(components::ParticleSpawnShape shape) {
@@ -144,6 +178,7 @@ renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
     ecs::Entity entity,
     const components::ParticleEmitterComponent& emitter,
     const components::TransformComponent& transform,
+    renderer::TextureId texture,
     uint32_t restart_count,
     bool visible,
     float dt,
@@ -161,11 +196,11 @@ renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
   desc.loop = emitter.loop;
   desc.emit_burst_on_start = emitter.emit_burst_on_start;
   desc.local_space = emitter.local_space;
-  desc.layer = emitter.layer;
+  desc.layer = static_cast<renderer::LayerId>(emitter.layer);
   desc.depth_test = emitter.depth_test;
-  desc.blend_mode = emitter.blend_mode;
-  desc.alignment = emitter.alignment;
-  desc.shading_mode = emitter.shading_mode;
+  desc.blend_mode = toRendererBlendMode(emitter.blend_mode);
+  desc.alignment = toRendererAlignment(emitter.alignment);
+  desc.shading_mode = toRendererShadingMode(emitter.shading_mode);
   desc.use_soft_mask = emitter.use_soft_mask;
   desc.soft_particle_distance = emitter.soft_particle_distance;
   desc.distortion_strength = emitter.distortion_strength;
@@ -173,7 +208,7 @@ renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
   desc.fresnel_strength = emitter.fresnel_strength;
   desc.refraction_strength = emitter.refraction_strength;
   desc.interior_glow = emitter.interior_glow;
-  desc.texture = emitter.texture;
+  desc.texture = texture;
   desc.atlas_columns = emitter.atlas_columns;
   desc.atlas_rows = emitter.atlas_rows;
   desc.atlas_frame_count = emitter.atlas_frame_count;
@@ -320,10 +355,15 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     }
 
     if (device_ != nullptr) {
+      const renderer::TextureId texture =
+          (library_ != nullptr && !emitter.texture_key.empty())
+              ? library_->resolveTextureAlias(emitter.texture_key)
+              : renderer::kInvalidTexture;
       const renderer::ParticleEmitterGpuDesc desc =
           makeRendererEmitterDesc(entity,
                                   emitter,
                                   transform,
+                                  texture,
                                   restart_count,
                                   visible,
                                   dt,

@@ -33,8 +33,8 @@ std::filesystem::path resolveRepoPath(const std::filesystem::path& relative) {
   return relative;
 }
 
-karma::renderer::MeshData makePlaneMesh(float half_extent = 5.0f) {
-  karma::renderer::MeshData mesh;
+karma::geometry::MeshData makePlaneMesh(float half_extent = 5.0f) {
+  karma::geometry::MeshData mesh;
   mesh.vertices = {
       {-half_extent, 0.0f, -half_extent},
       {half_extent, 0.0f, -half_extent},
@@ -51,7 +51,7 @@ karma::navigation::NavMeshInputGeometry makePlaneGeometry(float half_extent = 5.
   return geometry;
 }
 
-void appendQuad(karma::renderer::MeshData& mesh,
+void appendQuad(karma::geometry::MeshData& mesh,
                 const karma::math::Vec3& a,
                 const karma::math::Vec3& b,
                 const karma::math::Vec3& c,
@@ -65,7 +65,7 @@ void appendQuad(karma::renderer::MeshData& mesh,
 }
 
 karma::navigation::NavMeshInputGeometry makeRingGeometry() {
-  karma::renderer::MeshData mesh;
+  karma::geometry::MeshData mesh;
   appendQuad(mesh, {-5.0f, 0.0f, -5.0f}, {-1.0f, 0.0f, -5.0f},
              {-1.0f, 0.0f, 5.0f}, {-5.0f, 0.0f, 5.0f});
   appendQuad(mesh, {1.0f, 0.0f, -5.0f}, {5.0f, 0.0f, -5.0f},
@@ -162,7 +162,7 @@ void testWorldSurfaceCollectionUsesNavMeshSurfaceArea() {
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
                          .area = 2,
-                         .mesh_data = std::make_shared<karma::renderer::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
                      });
 
   const karma::navigation::NavMeshInputGeometry geometry =
@@ -215,7 +215,7 @@ void testAreaFlagsFilterQueries() {
 }
 
 void testOffMeshConnectionBridgesGap() {
-  karma::renderer::MeshData mesh;
+  karma::geometry::MeshData mesh;
   appendQuad(mesh, {-5.0f, 0.0f, -2.0f}, {-1.0f, 0.0f, -2.0f},
              {-1.0f, 0.0f, 2.0f}, {-5.0f, 0.0f, 2.0f});
   appendQuad(mesh, {1.0f, 0.0f, -2.0f}, {5.0f, 0.0f, -2.0f},
@@ -280,7 +280,7 @@ void testNavigationSystemBuildsAndMovesAgent() {
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
-                         .mesh_data = std::make_shared<karma::renderer::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
                      });
 
   const auto nav_entity = world.createEntity();
@@ -339,7 +339,7 @@ void testReplacementRequestKeepsCurrentPathMoving() {
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
-                         .mesh_data = std::make_shared<karma::renderer::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
                      });
 
   const auto nav_entity = world.createEntity();

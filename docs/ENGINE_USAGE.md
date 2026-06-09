@@ -704,7 +704,7 @@ Current limitation:
 
 ## GLB Scene Import
 Karma now has a separate GLB scene-import path for authored scenes.
-This is distinct from `MeshComponent.mesh_key = "model.glb"`, which still uses the flat mesh loader.
+This is distinct from `MeshComponent.mesh_key = "model.glb"`, which still uses the flat mesh import path.
 
 Use the convenience import directly:
 
@@ -745,8 +745,9 @@ Current behavior:
 - one structural ECS entity is created for each imported GLB node
 - imported lights become `LightComponent`s on those node entities
 - imported point and spot lights are created with `casts_shadows = true`
-- mesh primitives become child render entities with `MeshComponent`s already attached
-- imported primitive materials preserve the source asset's PBR textures and scalar factors
+- mesh primitives become child render entities with key-only `MeshComponent`s backed by renderer-owned runtime mesh registrations
+- imported primitive materials preserve the source asset's PBR textures and scalar factors through registered material keys
+- optional GLB animation, skeleton, skin, joint-weight, and morph-target payloads are imported for rigged animation workflows
 - the full node tree is recreated in `scene::Scene`
 
 Imported light assumptions:
@@ -764,7 +765,8 @@ Current v1 limitations:
 - scene hierarchy is preserved, but parent-driven transform propagation is not implemented yet
 - imported material alpha/double-sided metadata is preserved, but the runtime still does not specialize draw state per material
 - GLB light scaling is currently importer-defined, not configurable per asset
-- cameras, animation, and skinning are not imported yet
+- cameras are not imported yet
+- imported skinned meshes currently use the CPU skinning fallback path until the GPU skinning renderer path is complete
 
 ## Rendering Features
 - Directional light with shadows (PCF supported)
@@ -806,10 +808,10 @@ Reference sample:
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.
-Use `BZ3_DATA_DIR` at runtime when needed:
+Use `KARMA_DATA_DIR` at runtime when needed:
 
 ```bash
-BZ3_DATA_DIR="$PWD/data" ./build/karma_example
+KARMA_DATA_DIR="$PWD/data" ./build/karma_example
 ```
 
 ## Demos

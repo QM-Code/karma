@@ -66,8 +66,8 @@ interacts with EngineApp, GameInterface, RuntimeModule, and UI layer contracts.
 
 /**
 \defgroup karma_rendering Rendering
-Renderer-facing APIs, material/mesh/texture handles, scene extraction, particle
-submission, and backend abstractions.
+Renderer-facing APIs, material/mesh/texture handles, UI draw submission, scene
+extraction, particle submission, and backend abstractions.
 
 Gameplay code should prefer ECS components and high-level helpers. Use renderer
 types directly for resources, diagnostics, picking, debug drawing, or custom
@@ -115,11 +115,12 @@ direct mesh data. Runtime path requests are queued through NavigationSystem.
 
 /**
 \defgroup karma_content Content
-Asset loading, image/mesh helpers, GLB import, prefab instantiation, and
+Asset loading, image helpers, mesh import, GLB import, prefab instantiation, and
 prefab-local resource registration.
 
-Content APIs transform authored data into ECS components and renderer resources.
-They should not own per-frame behavior.
+Content APIs transform authored data into shared world contracts, ECS
+components, and registered resource keys. They should not own per-frame
+behavior.
 */
 
 /**

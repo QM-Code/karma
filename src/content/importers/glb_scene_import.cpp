@@ -41,8 +41,8 @@ std::string safeName(std::string_view base, std::string_view fallback) {
   return base.empty() ? std::string(fallback) : std::string(base);
 }
 
-renderer::MeshData buildMeshData(const aiMesh& mesh) {
-  renderer::MeshData out{};
+geometry::MeshData buildMeshData(const aiMesh& mesh) {
+  geometry::MeshData out{};
   out.vertices.reserve(mesh.mNumVertices);
   out.normals.reserve(mesh.mNumVertices);
   out.uvs.reserve(mesh.mNumVertices);
@@ -301,6 +301,21 @@ std::string primitiveDisplayName(const GlbScenePrefabNode& node,
   }
   return nodeDisplayName(node, node_index) + " Primitive " + std::to_string(primitive_index);
 }
+
+std::string prefabResourceKey(const GlbScenePrefab& prefab,
+                              uint32_t node_index,
+                              size_t primitive_index,
+                              std::string_view suffix) {
+  std::string key = prefab.source_path.empty() ? std::string("imported_glb")
+                                               : prefab.source_path.string();
+  key.append("#node=");
+  key.append(std::to_string(node_index));
+  key.append("/primitive=");
+  key.append(std::to_string(primitive_index));
+  key.push_back('/');
+  key.append(suffix);
+  return key;
+}
 }  // namespace
 
 GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
@@ -352,7 +367,8 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     scene::Scene& scene,
     renderer::GraphicsDevice& device,
     const GlbScenePrefab& prefab,
-    const GlbSceneInstantiateOptions& options) {
+    const GlbSceneInstantiateOptions& options,
+    renderer::MaterialLibrary* materials) {
   GlbSceneImportResult result{};
   if (!prefab.valid()) {
     return result;
@@ -435,20 +451,24 @@ GlbSceneImportResult instantiateGlbScenePrefab(
                                      prefab_node.world_scale});
       world.add(primitive_entity, components::LocalTransformComponent{});
 
-      const renderer::MeshId mesh_id = device.createMesh(primitive.mesh);
-      renderer::MaterialId material_id = renderer::kInvalidMaterial;
+      const std::string mesh_key =
+          prefabResourceKey(prefab, prefab_node_index, primitive_index, "mesh");
+      const std::string material_key =
+          prefabResourceKey(prefab, prefab_node_index, primitive_index, "material");
+      const renderer::MeshId mesh_id = device.registerRuntimeMesh(mesh_key, primitive.mesh);
       if (primitive.source_material_index != kInvalidGlbSceneMaterial &&
-          !prefab.source_path.empty()) {
-        material_id = device.createMaterialFromAsset(prefab.source_path, primitive.source_material_index);
-      }
-      if (material_id == renderer::kInvalidMaterial) {
-        material_id = device.createMaterial(primitive.material);
+          !prefab.source_path.empty() &&
+          materials != nullptr) {
+        materials->registerImportedAssetMaterial(material_key,
+                                                 prefab.source_path,
+                                                 primitive.source_material_index,
+                                                 primitive.material);
+      } else if (materials != nullptr) {
+        materials->registerMaterialDesc(material_key, primitive.material);
       }
       world.add(primitive_entity, components::MeshComponent{
-                                     .mesh_id = mesh_id,
-                                     .material_id = material_id,
-                                     .owns_mesh_id = mesh_id != renderer::kInvalidMesh,
-                                     .owns_material_id = material_id != renderer::kInvalidMaterial,
+                                     .mesh_key = mesh_id != renderer::kInvalidMesh ? mesh_key : "",
+                                     .material_key = materials != nullptr ? material_key : "",
                                      .visible = true});
       if (primitive.skinned()) {
         pending_skins.push_back(PendingSkin{.entity = primitive_entity, .primitive = &primitive});
@@ -521,9 +541,10 @@ GlbSceneImportResult importGlbScene(ecs::World& world,
                                     scene::Scene& scene,
                                     renderer::GraphicsDevice& device,
                                     const std::filesystem::path& path,
-                                    const GlbSceneImportOptions& options) {
+                                    const GlbSceneImportOptions& options,
+                                    renderer::MaterialLibrary* materials) {
   const GlbScenePrefab prefab = loadGlbScenePrefab(path, options.load);
-  return instantiateGlbScenePrefab(world, scene, device, prefab, options.instantiate);
+  return instantiateGlbScenePrefab(world, scene, device, prefab, options.instantiate, materials);
 }
 
 }  // namespace karma::scene

@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
+#include <utility>
 
 #include "karma/core/math/types.h"
 #include "karma/rendering/renderer/ids.h"
@@ -84,6 +86,8 @@ struct MaterialResourceDesc {
   /// Material resource construction mode.
   enum class Kind {
     MeshTint,
+    Explicit,
+    ImportedAssetMaterial,
   };
 
   Kind kind = Kind::MeshTint;
@@ -97,6 +101,9 @@ struct MaterialResourceDesc {
   float metallic = 0.0f;
   float roughness = 0.5f;
   bool double_sided = false;
+  MaterialDesc material{};
+  std::filesystem::path material_asset_path;
+  uint32_t material_asset_index = std::numeric_limits<uint32_t>::max();
 
   /// Creates a material resource that tints materials from a mesh asset.
   static MaterialResourceDesc fromMeshTint(std::string source_mesh, Color tint) {
@@ -104,6 +111,26 @@ struct MaterialResourceDesc {
     desc.kind = Kind::MeshTint;
     desc.source_mesh_key = std::move(source_mesh);
     desc.base_color_tint = tint;
+    return desc;
+  }
+
+  /// Creates a material resource from explicit renderer material parameters.
+  static MaterialResourceDesc fromMaterial(MaterialDesc material_desc) {
+    MaterialResourceDesc desc{};
+    desc.kind = Kind::Explicit;
+    desc.material = std::move(material_desc);
+    return desc;
+  }
+
+  /// Creates a material resource from an imported asset material index.
+  static MaterialResourceDesc fromImportedAssetMaterial(std::filesystem::path path,
+                                                       uint32_t material_index,
+                                                       MaterialDesc fallback = {}) {
+    MaterialResourceDesc desc{};
+    desc.kind = Kind::ImportedAssetMaterial;
+    desc.material_asset_path = std::move(path);
+    desc.material_asset_index = material_index;
+    desc.material = std::move(fallback);
     return desc;
   }
 };

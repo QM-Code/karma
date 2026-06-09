@@ -8,7 +8,7 @@
 
 #include "karma/world/ecs/component.h"
 #include "karma/world/ecs/entity.h"
-#include "karma/rendering/renderer/mesh_data.h"
+#include "karma/world/geometry/mesh_data.h"
 
 namespace karma::components {
 
@@ -37,8 +37,8 @@ struct VertexSkinInfluence {
 /// matrices. `CpuSkinningSystem` currently updates `skinned_mesh` and uploads
 /// it as a correctness/fallback path.
 struct SkinnedMeshComponent : ecs::ComponentTag {
-  renderer::MeshData bind_mesh;
-  renderer::MeshData skinned_mesh;
+  geometry::MeshData bind_mesh;
+  geometry::MeshData skinned_mesh;
   std::vector<VertexSkinInfluence> vertex_influences;
   std::vector<ecs::Entity> joint_entities;
   std::vector<glm::mat4> inverse_bind_matrices;

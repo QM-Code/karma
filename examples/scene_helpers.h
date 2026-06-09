@@ -5,9 +5,9 @@
 #include <glm/glm.hpp>
 
 #include "karma/core/math/types.h"
-#include "karma/rendering/renderer/ids.h"
 #include "karma/rendering/renderer/material.h"
-#include "karma/rendering/renderer/mesh_data.h"
+#include "karma/rendering/renderer/material_library.h"
+#include "karma/world/geometry/mesh_data.h"
 #include "karma/world/components/camera.h"
 #include "karma/world/components/light.h"
 #include "karma/world/ecs/entity.h"
@@ -26,18 +26,12 @@ class GraphicsDevice;
 
 namespace karma::demo::helpers {
 
-renderer::MeshData makeBoxMesh(const glm::vec3& half_extents);
-
-renderer::MaterialId createMaterial(renderer::GraphicsDevice* graphics,
-                                    const math::Color& color,
-                                    bool unlit = false,
-                                    float roughness = 0.85f,
-                                    float metallic = 0.0f);
+geometry::MeshData makeBoxMesh(const glm::vec3& half_extents);
 
 ecs::Entity spawnMesh(ecs::World& world,
                       std::string name,
-                      renderer::MeshId mesh,
-                      renderer::MaterialId material,
+                      std::string mesh_key,
+                      std::string material_key,
                       const math::Vec3& position,
                       bool visible = true);
 
@@ -48,6 +42,7 @@ ecs::Entity spawnMeshAsset(ecs::World& world,
 
 ecs::Entity createDebugBoxMarker(ecs::World& world,
                                  renderer::GraphicsDevice* graphics,
+                                 renderer::MaterialLibrary* materials,
                                  std::string name,
                                  const math::Color& color,
                                  const math::Vec3& position,

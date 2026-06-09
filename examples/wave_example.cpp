@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -89,8 +90,8 @@ components::TransformComponent makeScreenOverlayTransform(
   return transform;
 }
 
-renderer::MeshData buildAuraQuadMesh() {
-  renderer::MeshData mesh{};
+geometry::MeshData buildAuraQuadMesh() {
+  geometry::MeshData mesh{};
   mesh.vertices = {
       {-1.0f, -1.0f, 0.0f},
       {1.0f, -1.0f, 0.0f},
@@ -184,14 +185,14 @@ std::vector<std::uint8_t> buildWaveDistortionTexture() {
   return pixels;
 }
 
-components::ParticleEmitterComponent buildWaveCoreGlowEmitter(renderer::TextureId texture,
+components::ParticleEmitterComponent buildWaveCoreGlowEmitter(std::string texture_key,
                                                              float wave_radius) {
   components::ParticleEmitterComponent emitter{};
   emitter.local_space = true;
   emitter.depth_test = true;
-  emitter.blend_mode = renderer::ParticleBlendMode::Additive;
+  emitter.blend_mode = components::ParticleBlendMode::Additive;
   emitter.use_soft_mask = false;
-  emitter.texture = texture;
+  emitter.texture_key = std::move(texture_key);
   emitter.loop = true;
   emitter.emit_burst_on_start = true;
   emitter.max_particles = 760u;
@@ -219,14 +220,14 @@ components::ParticleEmitterComponent buildWaveCoreGlowEmitter(renderer::TextureI
   return emitter;
 }
 
-components::ParticleEmitterComponent buildWaveOuterGlowEmitter(renderer::TextureId texture,
+components::ParticleEmitterComponent buildWaveOuterGlowEmitter(std::string texture_key,
                                                               float wave_radius) {
   components::ParticleEmitterComponent emitter{};
   emitter.local_space = true;
   emitter.depth_test = true;
-  emitter.blend_mode = renderer::ParticleBlendMode::Additive;
+  emitter.blend_mode = components::ParticleBlendMode::Additive;
   emitter.use_soft_mask = false;
-  emitter.texture = texture;
+  emitter.texture_key = std::move(texture_key);
   emitter.loop = true;
   emitter.emit_burst_on_start = true;
   emitter.max_particles = 520u;
@@ -254,16 +255,16 @@ components::ParticleEmitterComponent buildWaveOuterGlowEmitter(renderer::Texture
   return emitter;
 }
 
-components::ParticleEmitterComponent buildWaveDistortionEmitter(renderer::TextureId texture,
+components::ParticleEmitterComponent buildWaveDistortionEmitter(std::string texture_key,
                                                               float wave_radius) {
   components::ParticleEmitterComponent emitter{};
   emitter.local_space = true;
   emitter.depth_test = true;
-  emitter.blend_mode = renderer::ParticleBlendMode::Distortion;
+  emitter.blend_mode = components::ParticleBlendMode::Distortion;
   emitter.use_soft_mask = true;
   emitter.soft_particle_distance = 1.4f;
   emitter.distortion_strength = 22.0f;
-  emitter.texture = texture;
+  emitter.texture_key = std::move(texture_key);
   emitter.loop = true;
   emitter.emit_burst_on_start = true;
   emitter.max_particles = 260u;
@@ -373,8 +374,13 @@ class WaveExample final : public app::GameInterface {
     world_mesh_ = resolveExampleAssetPath("world.glb").string();
     wave_mesh_ = resolveExampleAssetPath("wave.glb").string();
     environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
-    aura_quad_mesh_ =
-        graphics != nullptr ? graphics->createMesh(buildAuraQuadMesh()) : renderer::kInvalidMesh;
+    aura_quad_mesh_key_ = "runtime/wave/aura_quad/mesh";
+    wave_material_key_ = "runtime/wave/sphere/material";
+    wave_volume_material_key_ = "runtime/wave/volume/material";
+    wave_overlay_material_key_ = "runtime/wave/overlay/material";
+    if (graphics != nullptr) {
+      graphics->registerRuntimeMesh(aura_quad_mesh_key_, buildAuraQuadMesh());
+    }
 
     spawnWorld();
     spawnLighting();
@@ -433,6 +439,10 @@ class WaveExample final : public app::GameInterface {
   }
 
   void onShutdown() override {
+    if (particle_effects != nullptr) {
+      particle_effects->unregisterTextureAlias("runtime/wave/glow_texture");
+      particle_effects->unregisterTextureAlias("runtime/wave/distortion_texture");
+    }
     if (graphics != nullptr) {
       if (wave_glow_texture_ != renderer::kInvalidTexture) {
         graphics->destroyTexture(wave_glow_texture_);
@@ -443,9 +453,9 @@ class WaveExample final : public app::GameInterface {
         wave_distortion_texture_ = renderer::kInvalidTexture;
       }
     }
-    if (graphics != nullptr && aura_quad_mesh_ != renderer::kInvalidMesh) {
-      graphics->destroyMesh(aura_quad_mesh_);
-      aura_quad_mesh_ = renderer::kInvalidMesh;
+    if (graphics != nullptr && !aura_quad_mesh_key_.empty()) {
+      graphics->unregisterRuntimeMesh(aura_quad_mesh_key_);
+      aura_quad_mesh_key_.clear();
     }
   }
 
@@ -493,33 +503,31 @@ class WaveExample final : public app::GameInterface {
   }
 
   void spawnWave() {
-    wave_material_ =
-        graphics != nullptr ? graphics->createMaterial(buildWaveOutsideMaterialDesc())
-                            : renderer::kInvalidMaterial;
+    if (materials != nullptr) {
+      materials->registerMaterialDesc(wave_material_key_, buildWaveOutsideMaterialDesc());
+    }
 
     wave_entity_ = world->createEntity();
     world->setName(wave_entity_, "Wave Sphere");
     world->add(wave_entity_, makeWaveTransform());
     world->add(wave_entity_, components::MeshComponent{
                          .mesh_key = wave_mesh_,
-                         .material_id = wave_material_,
-                         .owns_material_id = wave_material_ != renderer::kInvalidMaterial,
+                         .material_key = wave_material_key_,
                          .shadow_visible = false,
                      });
   }
 
   void spawnWaveVolume() {
-    wave_volume_material_ =
-        graphics != nullptr ? graphics->createMaterial(buildWaveVolumeMaterialDesc())
-                            : renderer::kInvalidMaterial;
+    if (materials != nullptr) {
+      materials->registerMaterialDesc(wave_volume_material_key_, buildWaveVolumeMaterialDesc());
+    }
 
     wave_volume_entity_ = world->createEntity();
     world->setName(wave_volume_entity_, "Wave Volume");
     world->add(wave_volume_entity_, makeWaveTransform());
     world->add(wave_volume_entity_, components::MeshComponent{
                                 .mesh_key = wave_mesh_,
-                                .material_id = wave_volume_material_,
-                                .owns_material_id = wave_volume_material_ != renderer::kInvalidMaterial,
+                                .material_key = wave_volume_material_key_,
                                 .visible = false,
                                 .shadow_visible = false,
                             });
@@ -539,6 +547,14 @@ class WaveExample final : public app::GameInterface {
     if (wave_glow_texture_ == renderer::kInvalidTexture) {
       return;
     }
+    const std::string glow_texture_key = "runtime/wave/glow_texture";
+    const std::string distortion_texture_key = "runtime/wave/distortion_texture";
+    if (particle_effects != nullptr) {
+      particle_effects->registerTextureAlias(glow_texture_key, wave_glow_texture_);
+      if (wave_distortion_texture_ != renderer::kInvalidTexture) {
+        particle_effects->registerTextureAlias(distortion_texture_key, wave_distortion_texture_);
+      }
+    }
 
     auto spawn_emitter = [&](std::string_view name,
                              const components::ParticleEmitterComponent& emitter) -> ecs::Entity {
@@ -551,31 +567,28 @@ class WaveExample final : public app::GameInterface {
     };
 
     wave_core_glow_entity_ =
-        spawn_emitter("Wave Core Glow", buildWaveCoreGlowEmitter(wave_glow_texture_, kWaveRadius));
+        spawn_emitter("Wave Core Glow", buildWaveCoreGlowEmitter(glow_texture_key, kWaveRadius));
     wave_outer_glow_entity_ =
         spawn_emitter("Wave Outer Glow",
-                      buildWaveOuterGlowEmitter(wave_glow_texture_, kWaveRadius));
+                      buildWaveOuterGlowEmitter(glow_texture_key, kWaveRadius));
     if (wave_distortion_texture_ != renderer::kInvalidTexture) {
       wave_distortion_entity_ =
           spawn_emitter("Wave Distortion Shell",
-                        buildWaveDistortionEmitter(wave_distortion_texture_, kWaveRadius));
+                        buildWaveDistortionEmitter(distortion_texture_key, kWaveRadius));
     }
   }
 
   void spawnWaveOverlay() {
-    wave_overlay_material_ =
-        graphics != nullptr
-            ? graphics->createMaterial(buildWaveOverlayMaterialDesc())
-            : renderer::kInvalidMaterial;
+    if (materials != nullptr) {
+      materials->registerMaterialDesc(wave_overlay_material_key_, buildWaveOverlayMaterialDesc());
+    }
 
     wave_overlay_entity_ = world->createEntity();
     world->setName(wave_overlay_entity_, "Wave Overlay");
     world->add(wave_overlay_entity_, components::TransformComponent{});
     world->add(wave_overlay_entity_, components::MeshComponent{
-                                      .mesh_id = aura_quad_mesh_,
-                                      .material_id = wave_overlay_material_,
-                                      .owns_material_id =
-                                          wave_overlay_material_ != renderer::kInvalidMaterial,
+                                      .mesh_key = aura_quad_mesh_key_,
+                                      .material_key = wave_overlay_material_key_,
                                       .shadow_visible = false,
                                   });
   }
@@ -650,10 +663,6 @@ class WaveExample final : public app::GameInterface {
     sync_wave_shell_transform(wave_outer_glow_entity_);
     sync_wave_shell_transform(wave_distortion_entity_);
 
-    if (graphics != nullptr && wave_overlay_material_ != renderer::kInvalidMaterial) {
-      graphics->updateMaterial(wave_overlay_material_, buildWaveOverlayMaterialDesc());
-    }
-
     if (world->isAlive(wave_light_entity_) &&
         world->has<components::TransformComponent>(wave_light_entity_)) {
       auto& light_transform = world->get<components::TransformComponent>(wave_light_entity_);
@@ -691,12 +700,12 @@ class WaveExample final : public app::GameInterface {
   std::string world_mesh_;
   std::string wave_mesh_;
   std::string environment_map_;
-  renderer::MeshId aura_quad_mesh_ = renderer::kInvalidMesh;
+  std::string aura_quad_mesh_key_;
+  std::string wave_material_key_;
+  std::string wave_volume_material_key_;
+  std::string wave_overlay_material_key_;
   renderer::TextureId wave_glow_texture_ = renderer::kInvalidTexture;
   renderer::TextureId wave_distortion_texture_ = renderer::kInvalidTexture;
-  renderer::MaterialId wave_material_ = renderer::kInvalidMaterial;
-  renderer::MaterialId wave_volume_material_ = renderer::kInvalidMaterial;
-  renderer::MaterialId wave_overlay_material_ = renderer::kInvalidMaterial;
   ecs::Entity wave_entity_{};
   ecs::Entity wave_volume_entity_{};
   ecs::Entity wave_core_glow_entity_{};

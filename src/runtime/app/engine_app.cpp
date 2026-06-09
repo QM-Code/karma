@@ -102,7 +102,7 @@ math::Color scaledColor(math::Color color, float scale, float alpha) {
   return color;
 }
 
-void addUiQuad(UIDrawData& out,
+void addUiQuad(renderer::UIDrawData& out,
                float x,
                float y,
                float w,
@@ -113,10 +113,10 @@ void addUiQuad(UIDrawData& out,
   }
   const uint32_t rgba = packUiColor(color);
   const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-  out.vertices.push_back(UIVertex{.x = x, .y = y, .rgba = rgba});
-  out.vertices.push_back(UIVertex{.x = x + w, .y = y, .rgba = rgba});
-  out.vertices.push_back(UIVertex{.x = x + w, .y = y + h, .rgba = rgba});
-  out.vertices.push_back(UIVertex{.x = x, .y = y + h, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y + h, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y + h, .rgba = rgba});
   out.indices.push_back(base);
   out.indices.push_back(base + 1u);
   out.indices.push_back(base + 2u);
@@ -125,7 +125,7 @@ void addUiQuad(UIDrawData& out,
   out.indices.push_back(base + 3u);
 }
 
-void addUiTexturedQuad(UIDrawData& out,
+void addUiTexturedQuad(renderer::UIDrawData& out,
                        float x,
                        float y,
                        float w,
@@ -137,10 +137,10 @@ void addUiTexturedQuad(UIDrawData& out,
   }
   const uint32_t rgba = packUiColor(color);
   const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-  out.vertices.push_back(UIVertex{.x = x, .y = y, .u = 0.0f, .v = 0.0f, .rgba = rgba});
-  out.vertices.push_back(UIVertex{.x = x + w, .y = y, .u = 1.0f, .v = 0.0f, .rgba = rgba});
-  out.vertices.push_back(UIVertex{.x = x + w, .y = y + h, .u = 1.0f, .v = 1.0f, .rgba = rgba});
-  out.vertices.push_back(UIVertex{.x = x, .y = y + h, .u = 0.0f, .v = 1.0f, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y, .u = 0.0f, .v = 0.0f, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y, .u = 1.0f, .v = 0.0f, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y + h, .u = 1.0f, .v = 1.0f, .rgba = rgba});
+  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y + h, .u = 0.0f, .v = 1.0f, .rgba = rgba});
   out.indices.push_back(base);
   out.indices.push_back(base + 1u);
   out.indices.push_back(base + 2u);
@@ -474,7 +474,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
   const float bar_x = center_x - bar_w * 0.5f;
   const float bar_y = std::min(height - unit * 10.0f, image_y + image_h + unit * 5.5f);
 
-  UIDrawData draw_data;
+  renderer::UIDrawData draw_data;
   uint32_t command_index_offset = 0;
   auto append_command = [&](UITextureHandle texture) {
     const uint32_t index_count =
@@ -482,7 +482,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
     if (index_count == 0u) {
       return;
     }
-    UIDrawCmd cmd{};
+    renderer::UIDrawCmd cmd{};
     cmd.index_offset = command_index_offset;
     cmd.index_count = index_count;
     cmd.texture = texture;
@@ -522,7 +522,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
   graphics_->renderUi(draw_data);
   graphics_->endFrame();
   loading_splash_presented_ = true;
-#if !defined(BZ3_RENDER_BACKEND_DILIGENT)
+#if !defined(KARMA_RENDER_BACKEND_DILIGENT)
   window_->swapBuffers();
 #endif
   return true;
@@ -1064,7 +1064,7 @@ void EngineApp::tick() {
 
     section_start = section_end;
     if (window_) {
-#if !defined(BZ3_RENDER_BACKEND_DILIGENT)
+#if !defined(KARMA_RENDER_BACKEND_DILIGENT)
       window_->swapBuffers();
 #endif
     }

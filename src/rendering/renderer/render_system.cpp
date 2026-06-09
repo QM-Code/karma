@@ -307,16 +307,8 @@ void RenderSystem::cleanupStaleRecords(ecs::World& world) {
 }
 
 void RenderSystem::releaseMeshBinding(RenderRecord& record) {
-  if (record.direct_mesh_id != renderer::kInvalidMesh) {
-    if (record.owns_direct_mesh_id) {
-      device_.destroyMesh(record.direct_mesh_id);
-    }
-    record.direct_mesh_id = renderer::kInvalidMesh;
-    record.owns_direct_mesh_id = false;
-  } else {
-    releaseSharedMesh(record.mesh_key);
-    record.mesh_key.clear();
-  }
+  releaseSharedMesh(record.mesh_key);
+  record.mesh_key.clear();
 
   record.mesh = renderer::kInvalidMesh;
   record.bounds_center = glm::vec3(0.0f);
@@ -325,36 +317,14 @@ void RenderSystem::releaseMeshBinding(RenderRecord& record) {
 }
 
 void RenderSystem::releaseMaterialBinding(RenderRecord& record) {
-  if (record.direct_material_id != renderer::kInvalidMaterial) {
-    if (record.owns_direct_material_id) {
-      device_.destroyMaterial(record.direct_material_id);
-    }
-    record.direct_material_id = renderer::kInvalidMaterial;
-    record.owns_direct_material_id = false;
-  } else {
-    releaseSharedMaterialVariant(record.mesh_key, record.material_key);
-    record.material_key.clear();
-  }
+  releaseSharedMaterialVariant(record.mesh_key, record.material_key);
+  record.material_key.clear();
 
   record.material = renderer::kInvalidMaterial;
   record.material_set = renderer::kInvalidMaterialSet;
 }
 
 void RenderSystem::bindMesh(const components::MeshComponent& mesh, RenderRecord& record) {
-  if (mesh.mesh_id != renderer::kInvalidMesh) {
-    record.mesh_key.clear();
-    record.direct_mesh_id = mesh.mesh_id;
-    record.owns_direct_mesh_id = mesh.owns_mesh_id;
-    record.mesh = mesh.mesh_id;
-    record.bounds_center = glm::vec3(0.0f);
-    record.bounds_radius = 0.0f;
-    record.bounds_valid = device_.getMeshBounds(record.mesh, record.bounds_center,
-                                                record.bounds_radius);
-    return;
-  }
-
-  record.direct_mesh_id = renderer::kInvalidMesh;
-  record.owns_direct_mesh_id = false;
   record.mesh_key = mesh.mesh_key;
   acquireSharedMesh(mesh.mesh_key, record);
 }
@@ -363,16 +333,6 @@ void RenderSystem::bindMaterial(const components::MeshComponent& mesh, RenderRec
   record.material = renderer::kInvalidMaterial;
   record.material_set = renderer::kInvalidMaterialSet;
 
-  if (mesh.material_id != renderer::kInvalidMaterial) {
-    record.material_key.clear();
-    record.direct_material_id = mesh.material_id;
-    record.owns_direct_material_id = mesh.owns_material_id;
-    record.material = mesh.material_id;
-    return;
-  }
-
-  record.direct_material_id = renderer::kInvalidMaterial;
-  record.owns_direct_material_id = false;
   record.material_key = mesh.material_key;
   acquireSharedMaterialVariant(record.mesh_key, mesh.material_key, record);
 }
@@ -389,7 +349,11 @@ void RenderSystem::acquireSharedMesh(const std::string& mesh_key, RenderRecord& 
   auto shared_it = shared_meshes_.find(mesh_key);
   if (shared_it == shared_meshes_.end()) {
     SharedMeshResource shared{};
-    shared.mesh = device_.createMeshFromFile(mesh_key);
+    shared.mesh = device_.findRuntimeMesh(mesh_key);
+    shared.owned_by_render_system = shared.mesh == renderer::kInvalidMesh;
+    if (shared.owned_by_render_system) {
+      shared.mesh = device_.createMeshFromFile(mesh_key);
+    }
     if (shared.mesh != renderer::kInvalidMesh) {
       shared.bounds_valid =
           device_.getMeshBounds(shared.mesh, shared.bounds_center, shared.bounds_radius);
@@ -418,7 +382,8 @@ void RenderSystem::releaseSharedMesh(const std::string& mesh_key) {
     shared_it->second.ref_count -= 1;
   }
   if (shared_it->second.ref_count == 0) {
-    if (shared_it->second.mesh != renderer::kInvalidMesh) {
+    if (shared_it->second.owned_by_render_system &&
+        shared_it->second.mesh != renderer::kInvalidMesh) {
       device_.destroyMesh(shared_it->second.mesh);
     }
     shared_meshes_.erase(shared_it);
@@ -511,8 +476,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       material_library_->version() != last_material_library_version_) {
     for (auto& [key, record] : records_) {
       (void)key;
-      if (record.direct_material_id == renderer::kInvalidMaterial &&
-          !record.material_key.empty()) {
+      if (!record.material_key.empty()) {
         releaseSharedMaterialVariant(record.mesh_key, record.material_key);
         record.material_set = renderer::kInvalidMaterialSet;
       }
@@ -699,7 +663,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
         spdlog::info("RenderSystem new record entity={}:{} mesh='{}' bindMesh took {:.2f} ms",
                      entity.index,
                      entity.generation,
-                     mesh.mesh_key.empty() ? "<direct>" : mesh.mesh_key,
+                     mesh.mesh_key.empty() ? "<empty>" : mesh.mesh_key,
                      core::elapsedMilliseconds(bind_mesh_start, bind_mesh_end));
       }
 
@@ -717,11 +681,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       it = records_.emplace(key, std::move(record)).first;
       ++new_render_record_count;
     } else {
-      const bool mesh_binding_changed =
-          it->second.direct_mesh_id != mesh.mesh_id ||
-          it->second.owns_direct_mesh_id != mesh.owns_mesh_id ||
-          (mesh.mesh_id == renderer::kInvalidMesh && it->second.mesh_key != mesh.mesh_key) ||
-          (mesh.mesh_id != renderer::kInvalidMesh && !it->second.mesh_key.empty());
+      const bool mesh_binding_changed = it->second.mesh_key != mesh.mesh_key;
 
       if (mesh_binding_changed) {
         releaseMaterialBinding(it->second);
@@ -729,12 +689,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
         bindMesh(mesh, it->second);
         bindMaterial(mesh, it->second);
       } else {
-        const bool material_binding_changed =
-            it->second.direct_material_id != mesh.material_id ||
-            it->second.owns_direct_material_id != mesh.owns_material_id ||
-            (mesh.material_id == renderer::kInvalidMaterial &&
-             it->second.material_key != mesh.material_key) ||
-            (mesh.material_id != renderer::kInvalidMaterial && !it->second.material_key.empty());
+        const bool material_binding_changed = it->second.material_key != mesh.material_key;
         if (material_binding_changed) {
           releaseMaterialBinding(it->second);
           bindMaterial(mesh, it->second);

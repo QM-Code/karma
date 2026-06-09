@@ -36,7 +36,7 @@ bool renderResourceDiagEnabled() {
   return enabled;
 }
 
-void computeBounds(const renderer::MeshData& mesh, glm::vec3& out_center, float& out_radius) {
+void computeBounds(const geometry::MeshData& mesh, glm::vec3& out_center, float& out_radius) {
   if (mesh.vertices.empty()) {
     out_center = glm::vec3(0.0f);
     out_radius = 0.0f;
@@ -57,7 +57,7 @@ void computeBounds(const renderer::MeshData& mesh, glm::vec3& out_center, float&
 
 }  // namespace
 
-void DiligentBackend::uploadMeshBuffers(const renderer::MeshData& mesh, MeshRecord& record) {
+void DiligentBackend::uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record) {
   record.vertex_buffer.Release();
   record.index_buffer.Release();
   record.vertex_count = 0;
@@ -89,7 +89,7 @@ void DiligentBackend::uploadMeshBuffers(const renderer::MeshData& mesh, MeshReco
   }
 }
 
-renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
+renderer::MeshId DiligentBackend::createMesh(const geometry::MeshData& mesh) {
   const renderer::MeshId id = nextMeshId_++;
   MeshRecord record{};
   record.data = mesh;
@@ -108,7 +108,7 @@ renderer::MeshId DiligentBackend::createMesh(const renderer::MeshData& mesh) {
   return id;
 }
 
-void DiligentBackend::updateMesh(renderer::MeshId mesh, const renderer::MeshData& data) {
+void DiligentBackend::updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) {
   auto it = meshes_.find(mesh);
   if (it == meshes_.end()) {
     return;

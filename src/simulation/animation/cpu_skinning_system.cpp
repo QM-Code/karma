@@ -122,7 +122,6 @@ void CpuSkinningSystem::update(ecs::World& world,
       skin.diagnostic.clear();
     }
     if (!skin.enabled ||
-        mesh.mesh_id == renderer::kInvalidMesh ||
         skin.bind_mesh.vertices.empty() ||
         skin.vertex_influences.size() != skin.bind_mesh.vertices.size()) {
       skin.palette_valid = false;
@@ -143,17 +142,25 @@ void CpuSkinningSystem::update(ecs::World& world,
       skin.diagnostic = "Skin joint count exceeds renderer palette capacity";
     }
 
+    const renderer::MeshId renderer_mesh = device.findRuntimeMesh(mesh.mesh_key);
     if (skin.skinning_path == components::SkinningPath::Gpu) {
       if (!skin.renderer_mesh_is_bind_pose) {
         skin.skinned_mesh = skin.bind_mesh;
-        device.updateMesh(mesh.mesh_id, skin.bind_mesh);
+        if (renderer_mesh != renderer::kInvalidMesh) {
+          device.updateMesh(renderer_mesh, skin.bind_mesh);
+        }
         skin.renderer_mesh_is_bind_pose = true;
       }
       continue;
     }
 
+    if (renderer_mesh == renderer::kInvalidMesh) {
+      skin.palette_valid = false;
+      skin.diagnostic = "Skinned mesh key is not registered as a runtime mesh";
+      continue;
+    }
     skin.skinned_mesh = skinMesh(skin.bind_mesh, skin.vertex_influences, skin.joint_palette);
-    device.updateMesh(mesh.mesh_id, skin.skinned_mesh);
+    device.updateMesh(renderer_mesh, skin.skinned_mesh);
     skin.renderer_mesh_is_bind_pose = false;
   }
 }
@@ -226,10 +233,10 @@ SkinningPalette buildSkinningPaletteFromScene(
                               skin.skin_index);
 }
 
-renderer::MeshData skinMesh(const renderer::MeshData& bind_mesh,
+geometry::MeshData skinMesh(const geometry::MeshData& bind_mesh,
                             const std::vector<components::VertexSkinInfluence>& influences,
                             const std::vector<glm::mat4>& skin_matrices) {
-  renderer::MeshData skinned_mesh = bind_mesh;
+  geometry::MeshData skinned_mesh = bind_mesh;
   if (bind_mesh.vertices.empty() || influences.size() != bind_mesh.vertices.size()) {
     return skinned_mesh;
   }

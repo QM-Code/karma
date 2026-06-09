@@ -59,6 +59,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
 
   add_executable(karma_glb_animation_example
     examples/glb_animation_example.cpp
+    examples/scene_helpers.cpp
   )
   target_link_libraries(karma_glb_animation_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
@@ -172,6 +173,7 @@ endif()
 if (KARMA_ENABLE_NAVIGATION AND KARMA_BUILD_GRAPHICAL_PROFILE)
   add_executable(karma_navmesh_example
     examples/navmesh_example.cpp
+    examples/scene_helpers.cpp
   )
   target_link_libraries(karma_navmesh_example PRIVATE karma::graphical)
 endif()

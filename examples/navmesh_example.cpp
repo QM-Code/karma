@@ -1,4 +1,5 @@
 #include "demo_asset_paths.h"
+#include "scene_helpers.h"
 #include "karma/karma.h"
 
 #include <cmath>
@@ -77,14 +78,14 @@ class NavMeshSceneExample final : public app::GameInterface {
     const std::string world_mesh_key = resolveExampleAssetPath("world.glb").string();
     const std::string tank_mesh_key = resolveExampleAssetPath("tank_final.glb").string();
 
-    world_entity_ = runtime::spawnMeshAsset(*world, "World", world_mesh_key, {});
+    world_entity_ = helpers::spawnMeshAsset(*world, "World", world_mesh_key, {});
     world->add(world_entity_, components::NavMeshSurfaceComponent{
                                 .area = navigation::kNavAreaDefault,
                                 .mesh_key = world_mesh_key,
                             });
 
-    player_entity_ = runtime::spawnMeshAsset(*world, "Click Move Tank", tank_mesh_key, start_);
-    target_marker_entity_ = runtime::createDebugBoxMarker(*world,
+    player_entity_ = helpers::spawnMeshAsset(*world, "Click Move Tank", tank_mesh_key, start_);
+    target_marker_entity_ = helpers::createDebugBoxMarker(*world,
                                                           graphics,
                                                           "Move Target",
                                                           {0.98f, 0.72f, 0.1f, 1.0f},
@@ -151,7 +152,7 @@ class NavMeshSceneExample final : public app::GameInterface {
     const math::Vec3 camera_position{start_.x + camera_follow_offset_.x,
                                      start_.y + camera_follow_offset_.y,
                                      start_.z + camera_follow_offset_.z};
-    camera_entity_ = runtime::spawnCamera(*world,
+    camera_entity_ = helpers::spawnCamera(*world,
                                           "Camera",
                                           camera_position,
                                           math::fromYawPitch(0.0f, camera_pitch_),
@@ -163,7 +164,7 @@ class NavMeshSceneExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    runtime::spawnDirectionalLight(*world,
+    helpers::spawnDirectionalLight(*world,
                                    "Sun Light",
                                    {0.0f, 50.0f, 0.0f},
                                    math::fromYawPitch(0.5f, -0.9f),
@@ -175,7 +176,7 @@ class NavMeshSceneExample final : public app::GameInterface {
                                        .shadow_extent = 60.0f,
                                    });
 
-    runtime::spawnPointLight(*world,
+    helpers::spawnPointLight(*world,
                              "Point Light Warm",
                              {-9.0f, 4.0f, 1.0f},
                              components::LightComponent{
@@ -185,7 +186,7 @@ class NavMeshSceneExample final : public app::GameInterface {
                                  .range = 24.0f,
                                  .casts_shadows = true,
                              });
-    runtime::spawnPointLight(*world,
+    helpers::spawnPointLight(*world,
                              "Point Light Cool",
                              {8.0f, 3.5f, -6.0f},
                              components::LightComponent{
@@ -195,7 +196,7 @@ class NavMeshSceneExample final : public app::GameInterface {
                                  .range = 22.0f,
                                  .casts_shadows = true,
                              });
-    runtime::spawnPointLight(*world,
+    helpers::spawnPointLight(*world,
                              "Point Light Fill",
                              {0.0f, 6.0f, 12.0f},
                              components::LightComponent{
@@ -205,7 +206,7 @@ class NavMeshSceneExample final : public app::GameInterface {
                                  .range = 26.0f,
                              });
 
-    runtime::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world,
                               "Environment",
                               resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
                               0.4f,

@@ -308,7 +308,6 @@ set(KARMA_RUNTIME_COMMON_SOURCES
   src/runtime/app/engine_app.cpp
   src/runtime/app/ui_context.cpp
   src/runtime/input/input_system.cpp
-  src/runtime/scene/scene_helpers.cpp
 )
 
 if (KARMA_BUILD_HEADLESS_PROFILE)
@@ -337,6 +336,19 @@ if (KARMA_BUILD_HEADLESS_PROFILE)
 endif()
 
 if (KARMA_BUILD_GRAPHICAL_PROFILE)
+  set(KARMA_IMGUI_LINK_TARGET "${KARMA_IMGUI_TARGET}")
+  if (NOT KARMA_IMGUI_LINK_TARGET AND DEFINED IMGUI_SOURCES)
+    karma_add_static(karma_imgui_vendor
+      ${IMGUI_SOURCES}
+    )
+    if (imgui_SOURCE_DIR)
+      target_include_directories(karma_imgui_vendor PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
+    endif()
+    set_target_properties(karma_imgui_vendor PROPERTIES EXPORT_NAME imgui_vendor)
+    list(APPEND KARMA_INSTALL_TARGETS karma_imgui_vendor)
+    set(KARMA_IMGUI_LINK_TARGET karma_imgui_vendor)
+  endif()
+
   set(KARMA_RUNTIME_GRAPHICAL_SOURCES ${KARMA_RUNTIME_COMMON_SOURCES})
   if (KARMA_BUILD_DEBUG_UI)
     list(APPEND KARMA_RUNTIME_GRAPHICAL_SOURCES
@@ -366,8 +378,8 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   endif()
   if (KARMA_BUILD_DEBUG_UI)
     target_compile_definitions(karma_runtime_graphical PUBLIC KARMA_DEBUG_UI)
-    if (KARMA_IMGUI_TARGET)
-      target_link_libraries(karma_runtime_graphical PUBLIC ${KARMA_IMGUI_TARGET})
+    if (KARMA_IMGUI_LINK_TARGET)
+      target_link_libraries(karma_runtime_graphical PUBLIC ${KARMA_IMGUI_LINK_TARGET})
     endif()
     if (imgui_SOURCE_DIR)
       target_include_directories(karma_runtime_graphical PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
@@ -382,16 +394,13 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   set(KARMA_IMGUI_ADAPTER_SOURCES
     src/features/ui/imgui/imgui_layer.cpp
   )
-  if (DEFINED IMGUI_SOURCES)
-    list(APPEND KARMA_IMGUI_ADAPTER_SOURCES ${IMGUI_SOURCES})
-  endif()
 
   karma_add_static(karma_features_ui_imgui
     ${KARMA_IMGUI_ADAPTER_SOURCES}
   )
   target_link_libraries(karma_features_ui_imgui PUBLIC karma_core karma_runtime_graphical)
-  if (KARMA_IMGUI_TARGET)
-    target_link_libraries(karma_features_ui_imgui PUBLIC ${KARMA_IMGUI_TARGET})
+  if (KARMA_IMGUI_LINK_TARGET)
+    target_link_libraries(karma_features_ui_imgui PUBLIC ${KARMA_IMGUI_LINK_TARGET})
   endif()
   if (imgui_SOURCE_DIR)
     target_include_directories(karma_features_ui_imgui PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)

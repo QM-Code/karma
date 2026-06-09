@@ -1,4 +1,4 @@
-#include "karma/runtime/scene/scene_helpers.h"
+#include "scene_helpers.h"
 
 #include <cstdint>
 #include <utility>
@@ -10,7 +10,7 @@
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
 
-namespace karma::runtime {
+namespace karma::demo::helpers {
 namespace {
 
 void appendVertex(renderer::MeshData& mesh,
@@ -193,4 +193,4 @@ ecs::Entity spawnEnvironment(ecs::World& world,
   return entity;
 }
 
-}  // namespace karma::runtime
+}  // namespace karma::demo::helpers

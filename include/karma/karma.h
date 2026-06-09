@@ -71,5 +71,4 @@
 #include "karma/content/importers/glb_scene_import.h"
 #include "karma/world/scene/transform_hierarchy.h"
 #include "karma/runtime/app/ui_context.h"
-#include "karma/runtime/scene/scene_helpers.h"
 #include "karma/features/visual/volumes/volume_sphere_runtime_module.h"

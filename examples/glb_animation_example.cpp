@@ -1,4 +1,5 @@
 #include "demo_asset_paths.h"
+#include "scene_helpers.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -190,14 +191,14 @@ class GlbAnimationExample final : public app::GameInterface {
     const glm::vec3 half_extents{std::max(2.4f, radius * 2.2f), 0.015f,
                                  std::max(2.4f, radius * 2.2f)};
 
-    const renderer::MeshId mesh = graphics->createMesh(runtime::makeBoxMesh(half_extents));
-    const renderer::MaterialId material = runtime::createMaterial(
+    const renderer::MeshId mesh = graphics->createMesh(helpers::makeBoxMesh(half_extents));
+    const renderer::MaterialId material = helpers::createMaterial(
         graphics,
         math::Color{0.16f, 0.18f, 0.18f, 1.0f},
         false,
         0.82f,
         0.0f);
-    runtime::spawnMesh(*world,
+    helpers::spawnMesh(*world,
                        "Animation Model Ground",
                        mesh,
                        material,
@@ -260,7 +261,7 @@ class GlbAnimationExample final : public app::GameInterface {
 
   void spawnEnvironment() {
     const std::filesystem::path env_path = resolveExampleAssetPath("golden_gate_hills_4k.hdr");
-    runtime::spawnEnvironment(*world, "Environment", env_path.string(), 0.28f, false);
+    helpers::spawnEnvironment(*world, "Environment", env_path.string(), 0.28f, false);
   }
 
   void setImportedSkinningPath(components::SkinningPath path) {

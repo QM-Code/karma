@@ -4,6 +4,10 @@
 
 # Karma Engine
 
+<p align="center">
+  <a href="VERSION"><img alt="Version" src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FQM-Code%2Fkarma%2Fmain%2FVERSION&amp;search=%28.%2A%29&amp;replace=%241&amp;label=version&amp;color=blue"></a>
+</p>
+
 Karma is a C++20 ECS-driven 3D game engine. The current tree is a working
 static library plus examples, with a layered runtime, Diligent/Vulkan rendering,
 prefabs, particles, GLB import, animation/skinning, physics/collision,
@@ -264,7 +268,9 @@ projects.
 The root [VERSION](VERSION) file is the source of truth for the CMake project
 version, generated package version files, and `<karma/core/version.h>`. Karma
 uses SemVer `0.x`: breaking changes are allowed before `1.0.0`, but version
-updates should still be intentional.
+updates should still be intentional. The README badge reads the pushed `main`
+branch's `VERSION` file through Shields, so local unpushed version edits are
+visible in the file itself before the badge updates.
 
 ## Runtime Diagnostics
 

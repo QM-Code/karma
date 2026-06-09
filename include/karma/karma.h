@@ -8,6 +8,7 @@
 
 #include "karma/runtime/app/engine_app.h"
 #include "karma/runtime/app/runtime_module.h"
+#include "karma/core/version.h"
 #include "karma/simulation/animation/animation_clip.h"
 #include "karma/simulation/animation/animation_system.h"
 #include "karma/simulation/animation/cpu_skinning_system.h"

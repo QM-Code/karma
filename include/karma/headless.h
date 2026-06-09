@@ -1,0 +1,52 @@
+#pragma once
+
+/// \file
+/// Convenience umbrella header for the Karma server/non-visual runtime profile.
+///
+/// This profile exposes engine, ECS, content, simulation, networking, physics,
+/// and navigation-facing APIs without including graphical UI provider or backend
+/// headers. Prefer narrower `karma/<layer>/...` includes in library code.
+
+#include "karma/runtime/app/engine_app.h"
+#include "karma/runtime/app/game_interface.h"
+#include "karma/runtime/app/runtime_module.h"
+#include "karma/core/math/quat.h"
+#include "karma/core/math/vec3.h"
+#include "karma/core/time.h"
+#include "karma/core/version.h"
+#include "karma/world/components/animator.h"
+#include "karma/world/components/animation_player.h"
+#include "karma/world/components/collision_events.h"
+#include "karma/world/components/contact_events.h"
+#include "karma/world/components/collider.h"
+#include "karma/world/components/ground_contact.h"
+#include "karma/world/components/layers.h"
+#include "karma/world/components/nav_mesh.h"
+#include "karma/world/components/nav_mesh_agent.h"
+#include "karma/world/components/player_controller.h"
+#include "karma/world/components/rigidbody.h"
+#include "karma/world/components/skinned_mesh.h"
+#include "karma/world/components/tag.h"
+#include "karma/world/components/transform.h"
+#include "karma/world/ecs/collider_queries.h"
+#include "karma/world/ecs/world.h"
+#include "karma/world/scene/scene.h"
+#include "karma/world/scene/transform_hierarchy.h"
+#include "karma/runtime/input/input_system.h"
+#include "karma/platform/network/transport.h"
+#include "karma/platform/network/transport_factory.h"
+#include "karma/simulation/animation/animation_clip.h"
+#include "karma/simulation/animation/animation_system.h"
+#include "karma/simulation/animation/cpu_skinning_system.h"
+#include "karma/simulation/animation/pose.h"
+#include "karma/simulation/collision/collision_event_system.h"
+#include "karma/simulation/navigation/nav_geometry.h"
+#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/simulation/navigation/navigation_diagnostics.h"
+#include "karma/simulation/navigation/navigation_system.h"
+#include "karma/simulation/physics/physics_world.hpp"
+#include "karma/content/geometry/mesh_loader.h"
+#include "karma/content/importers/glb_scene_import.h"
+#include "karma/content/prefabs/component_serializer_registry.h"
+#include "karma/content/prefabs/prefab.h"
+#include "karma/content/prefabs/prefab_resource_context.h"

@@ -24,9 +24,11 @@ Karma is organized as layered engine code under `include/karma/<layer>` and
 - `features`: optional visual/UI feature modules.
 - `runtime`: `EngineApp`, input, UI context, debug overlay, and app wiring.
 
-The default non-headless build currently enables GLFW, Diligent, miniaudio,
+The default graphical profile currently enables GLFW, Diligent, miniaudio,
 ENet, Jolt, navigation, debug UI, and the ImGui demo. RmlUi is opt-in because
-system RmlUi/FreeType packages vary more across machines.
+system RmlUi/FreeType packages vary more across machines. The headless profile
+keeps the server/non-visual runtime surface and omits window, graphical
+renderer, UI provider, and audio backends by default.
 
 ## Quick Start
 
@@ -85,18 +87,18 @@ cmake --preset headless
 cmake --build --preset headless --target karma_network_demo
 ```
 
-`KARMA_HEADLESS` is a build-supported non-visual profile, not a full
-replacement for the graphical runtime. It disables window and render backends,
-debug UI, UI demos/adapters, graphics examples, and the rendered navmesh
-example. It is intended for network/server targets, simulation/gameplay logic,
-and tests that do not need a window or GPU. Runtime code should treat graphics
-handles as optional in this mode; renderer-facing APIs either no-op or return
-invalid handles when no backend exists.
+`KARMA_HEADLESS` builds only the non-visual `karma::headless` profile. It
+disables window, render, graphical UI provider, debug UI, audio backend, graphics
+examples, and rendered navmesh example targets. It is intended for
+network/server targets, simulation/gameplay logic, and tests that do not need a
+window or GPU. Runtime code should treat graphics handles as optional in this
+mode; renderer-facing APIs either no-op or return invalid handles when no
+backend exists.
 
 Headless is also not a minimal dependency preset by itself. Content import,
-audio, physics, navigation, and networking stay enabled by default unless their
-own CMake options are disabled. Use `minimal-headless` when you want the
-smallest build surface for non-visual code:
+physics, navigation, and networking stay enabled by default unless their own
+CMake options are disabled. Use `minimal-headless` when you want the smallest
+build surface for non-visual code:
 
 ```bash
 cmake --preset minimal-headless
@@ -109,24 +111,25 @@ Current consumer import status:
 
 - Supported paths are source-vendored CMake import and installed CMake package
   import.
-- Both paths expose the same public target: `karma::karma`.
+- Consumers choose a public profile target:
+  - `karma::headless`: server/non-visual runtime profile.
+  - `karma::graphical`: full graphical runtime profile.
+  - `karma::karma`: compatibility alias for `karma::graphical` when the
+    graphical profile is built.
 - Public includes are under `include/karma/...`; consumers should include
-  headers such as `<karma/karma.h>` or layered headers such as
+  profile headers such as `<karma/headless.h>` / `<karma/karma.h>`, or layered
+  headers such as
   `<karma/content/geometry/mesh_loader.h>`.
 - The engine is currently built as a static C++20 library. It is still moving
   quickly, so source-vendoring is the most flexible integration path during
   active development.
 - GitHub CI smoke-tests both consumer paths on Linux, macOS, and Windows. The
-  smoke tests build a small external executable, link `karma::karma`, exercise a
-  core component, and call the GLB loader to verify content/import symbols and
-  dependency linkage.
-- The best-tested external-consumer profile today is minimal headless. Graphical
-  consumer builds use the same target, but depend on the selected window,
-  renderer, UI, audio, physics, navigation, and networking backends and are not
-  yet covered by CI smoke tests.
-- The installed package can fetch missing third-party dependency targets during
-  `find_package(karma)`. Disable that with `KARMA_CONFIG_FETCH_DEPS=OFF` when a
-  parent project wants to provide all dependencies itself.
+  smoke tests build small external executables, link `karma::headless`,
+  `karma::graphical`, and `karma::karma`, and exercise basic public headers and
+  linkage.
+- Installed packages do not fetch missing third-party dependency targets during
+  `find_package(karma)` by default. Set `KARMA_CONFIG_FETCH_DEPS=ON` before
+  `find_package(karma)` if package-time dependency fetching is desired.
 
 For source-vendored use, add Karma as a subdirectory and link the namespaced
 target:
@@ -139,7 +142,8 @@ set(KARMA_FETCH_DEPS ON CACHE BOOL "" FORCE)
 
 add_subdirectory(external/karma)
 
-target_link_libraries(my_game PRIVATE karma::karma)
+target_link_libraries(my_server PRIVATE karma::headless)
+target_link_libraries(my_game PRIVATE karma::graphical)
 ```
 
 For `FetchContent`, set the same options before `FetchContent_MakeAvailable`.
@@ -161,16 +165,17 @@ cmake --build build/package --parallel
 cmake --install build/package
 ```
 
-Consumers can then use:
+Consumers can then use the installed headless profile:
 
 ```cmake
 find_package(karma CONFIG REQUIRED)
-target_link_libraries(my_game PRIVATE karma::karma)
+target_link_libraries(my_server PRIVATE karma::headless)
 ```
 
-The installed package config can fetch missing third-party dependency targets by
-default. Set `KARMA_CONFIG_FETCH_DEPS=OFF` before `find_package(karma)` if your
-project requires all dependencies to be preinstalled.
+For graphical installs, use `karma::graphical` or `karma::karma` as the
+convenient default graphical target. The installed package config requires
+dependency targets to be available by default; set `KARMA_CONFIG_FETCH_DEPS=ON`
+before `find_package(karma)` to allow package-time fetching.
 
 ## Major Features
 
@@ -225,9 +230,11 @@ Common CMake switches:
 - `KARMA_BUILD_EXAMPLES`: build example executable targets.
 - `KARMA_BUILD_TESTS`: build Karma test executable targets when `BUILD_TESTING`
   is also enabled.
-- `KARMA_HEADLESS`: build-supported non-visual profile; disables window/render
-  backends and graphics demos, but leaves other optional subsystems controlled
-  by their own switches.
+- `KARMA_BUILD_HEADLESS_PROFILE`: build the `karma::headless` target.
+- `KARMA_BUILD_GRAPHICAL_PROFILE`: build the `karma::graphical` and
+  `karma::karma` targets.
+- `KARMA_HEADLESS`: legacy shortcut for building only `karma::headless`;
+  disables graphical and audio backends plus graphics demos.
 - `KARMA_RENDER_BACKEND_DILIGENT`: enable the Diligent renderer.
 - `KARMA_WINDOW_BACKEND_GLFW` / `KARMA_WINDOW_BACKEND_SDL`: select one window
   backend.
@@ -248,8 +255,16 @@ Common CMake switches:
 The full cross-platform workflow lives at `.github/workflows/full-build.yml`.
 It runs on Linux, macOS, and Windows only when manually dispatched or when a pull
 request has the `ci/full-build` label. The workflow builds headless profiles,
-runs CTest, installs the minimal headless package, and builds both source and
-installed consumer smoke projects.
+runs CTest, builds the graphical profile without launching a window, installs
+the minimal headless package, and builds source/installed consumer smoke
+projects.
+
+## Versioning
+
+The root [VERSION](VERSION) file is the source of truth for the CMake project
+version, generated package version files, and `<karma/core/version.h>`. Karma
+uses SemVer `0.x`: breaking changes are allowed before `1.0.0`, but version
+updates should still be intentional.
 
 ## Runtime Diagnostics
 
@@ -269,6 +284,7 @@ Useful environment flags:
 Start with:
 
 - [Usage Guide](docs/ENGINE_USAGE.md)
+- [Consumer Profiles And Versioning](docs/CONSUMER_PROFILES.md)
 - [API Documentation](docs/API.md)
 - [Implementation Notes](docs/ENGINE_IMPLEMENTATION.md)
 - [Architecture](docs/ARCHITECTURE.md)

@@ -39,6 +39,20 @@ jobs:
       - name: Test headless
         run: ctest --test-dir build/ci-headless --build-config Release --output-on-failure
 
+      - name: Configure graphical
+        run: >
+          cmake -S . -B build/ci-graphical
+          -DKARMA_FETCH_DEPS=ON
+          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_TESTS=OFF
+          -DBUILD_TESTING=OFF
+          -DKARMA_BUILD_HEADLESS_PROFILE=OFF
+          -DKARMA_BUILD_GRAPHICAL_PROFILE=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build graphical
+        run: cmake --build build/ci-graphical --config Release --parallel 2
+
       - name: Configure minimal headless install
         run: >
           cmake -S . -B build/ci-minimal-headless
@@ -65,7 +79,7 @@ jobs:
         run: >
           cmake -S tests/consumer/install -B build/consumer-install
           -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/ci-install
-          -DKARMA_CONFIG_FETCH_DEPS=ON
+          -DKARMA_CONFIG_FETCH_DEPS=OFF
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build installed-package consumer smoke
@@ -85,3 +99,15 @@ jobs:
 
       - name: Test source-vendored consumer smoke
         run: ctest --test-dir build/consumer-source --build-config Release --output-on-failure
+
+      - name: Configure source-vendored graphical consumer smoke
+        run: >
+          cmake -S tests/consumer/source-graphical -B build/consumer-source-graphical
+          -DKARMA_SOURCE_DIR=${{ github.workspace }}
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build source-vendored graphical consumer smoke
+        run: cmake --build build/consumer-source-graphical --config Release --parallel 2
+
+      - name: Test source-vendored graphical consumer smoke
+        run: ctest --test-dir build/consumer-source-graphical --build-config Release --output-on-failure

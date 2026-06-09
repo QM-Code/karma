@@ -27,10 +27,9 @@ if (NOT TARGET glm::glm)
   message(FATAL_ERROR "glm is required but not found. Provide glm or enable KARMA_FETCH_DEPS.")
 endif()
 
-# `karma_example` and `karma_collision_events_example` both use ImGui-backed
-# UI overlays, so any non-headless build needs ImGui even when the standalone
-# ImGui demo target is disabled.
-if (NOT KARMA_HEADLESS)
+# Graphical examples and the built-in ImGui UI adapter need ImGui even when the
+# standalone ImGui demo target is disabled.
+if (KARMA_BUILD_GRAPHICAL_PROFILE)
   find_package(imgui CONFIG QUIET)
   if (TARGET imgui::imgui)
     set(KARMA_IMGUI_TARGET imgui::imgui)
@@ -99,6 +98,7 @@ endif()
 
 find_package(spdlog QUIET)
 if (NOT TARGET spdlog::spdlog AND KARMA_FETCH_DEPS)
+  set(SPDLOG_INSTALL ON CACHE BOOL "" FORCE)
   FetchContent_Declare(
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
@@ -115,6 +115,7 @@ endif()
 
 find_package(nlohmann_json CONFIG QUIET)
 if (NOT TARGET nlohmann_json::nlohmann_json AND KARMA_FETCH_DEPS)
+  set(JSON_Install ON CACHE BOOL "" FORCE)
   FetchContent_Declare(
     nlohmann_json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
@@ -274,7 +275,7 @@ endif()
 find_package(assimp QUIET)
 if (NOT TARGET assimp::assimp AND KARMA_FETCH_DEPS)
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-  set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INSTALL ON CACHE BOOL "" FORCE)
   set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
@@ -299,7 +300,7 @@ if (NOT TARGET assimp::assimp AND KARMA_FETCH_DEPS)
   if (NOT assimp_POPULATED)
     FetchContent_Populate(assimp)
   endif()
-  add_subdirectory(${assimp_SOURCE_DIR} ${assimp_BINARY_DIR} EXCLUDE_FROM_ALL)
+  add_subdirectory(${assimp_SOURCE_DIR} ${assimp_BINARY_DIR})
 endif()
 if (TARGET assimp::assimp)
   list(APPEND KARMA_EXTRA_LINK_LIBS assimp::assimp)

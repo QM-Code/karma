@@ -52,7 +52,8 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(KARMA_FETCH_DEPS ON CACHE BOOL "" FORCE)
 
 add_subdirectory(external/karma)
-target_link_libraries(my_game PRIVATE karma::karma)
+target_link_libraries(my_server PRIVATE karma::headless)
+target_link_libraries(my_game PRIVATE karma::graphical)
 ```
 
 Installed-package consumers can use the exported CMake package:
@@ -62,9 +63,14 @@ find_package(karma CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE karma::karma)
 ```
 
-The installed package config fetches missing dependency targets by default. Set
-`KARMA_CONFIG_FETCH_DEPS=OFF` before `find_package(karma)` to require system or
-parent-provided dependencies.
+`karma::headless` is the server/non-visual profile, `karma::graphical` is the
+full graphical profile, and `karma::karma` is the compatibility alias for
+`karma::graphical`. The installed package config does not fetch missing
+dependency targets by default. Set `KARMA_CONFIG_FETCH_DEPS=ON` before
+`find_package(karma)` to allow package-time dependency fetching.
+
+See [CONSUMER_PROFILES.md](CONSUMER_PROFILES.md) for the profile target
+contract, package behavior, versioning policy, and validation matrix.
 
 ## Build Options
 Common toggles:
@@ -94,7 +100,8 @@ cmake -B build \
 
 ### Headless Builds
 
-Headless builds compile the engine without window or renderer backends and
+Headless builds compile the `karma::headless` profile without window,
+graphical renderer, graphical UI provider, debug UI, or audio backends and
 disable graphics demos:
 
 ```bash
@@ -122,16 +129,15 @@ available to keep public types and components usable, but without a backend they
 no-op or return invalid handles. Graphics examples and the rendered navmesh
 example are not built.
 
-Headless is also not a minimal dependency preset. Content import, audio,
-physics, navigation, and networking remain controlled by their own options, so a
-default headless build can still build dependencies such as Assimp, miniaudio,
-Jolt, Recast/Detour, and ENet. Disable unused subsystems explicitly where the
-current backend factories support it, for example:
+Headless is also not a minimal dependency preset. Content import, physics,
+navigation, and networking remain controlled by their own options, so a default
+headless build can still build dependencies such as Assimp, Jolt,
+Recast/Detour, and ENet. Disable unused subsystems explicitly where the current
+backend factories support it, for example:
 
 ```bash
 cmake -B build-headless \
   -DKARMA_HEADLESS=ON \
-  -DKARMA_ENABLE_AUDIO=OFF \
   -DKARMA_ENABLE_NAVIGATION=OFF
 ```
 

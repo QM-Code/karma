@@ -1,9 +1,9 @@
-if (NOT KARMA_HEADLESS)
+if (KARMA_BUILD_GRAPHICAL_PROFILE)
   add_executable(karma_example
     examples/main.cpp
   )
 
-  target_link_libraries(karma_example PRIVATE karma)
+  target_link_libraries(karma_example PRIVATE karma::graphical)
 
   if (KARMA_DILIGENT_REPACK_XXHASH
       AND KARMA_XXHASH_ARCHIVE
@@ -28,7 +28,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_collision_events_example
     examples/collision_events_example.cpp
   )
-  target_link_libraries(karma_collision_events_example PRIVATE karma)
+  target_link_libraries(karma_collision_events_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_collision_events_example karma_fix_xxhash)
   endif()
@@ -36,7 +36,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_light_stress_example
     examples/light_stress_example.cpp
   )
-  target_link_libraries(karma_light_stress_example PRIVATE karma)
+  target_link_libraries(karma_light_stress_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_light_stress_example karma_fix_xxhash)
   endif()
@@ -44,7 +44,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_material_override_example
     examples/material_override_example.cpp
   )
-  target_link_libraries(karma_material_override_example PRIVATE karma)
+  target_link_libraries(karma_material_override_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_material_override_example karma_fix_xxhash)
   endif()
@@ -52,7 +52,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_glb_scene_import_example
     examples/glb_scene_import_example.cpp
   )
-  target_link_libraries(karma_glb_scene_import_example PRIVATE karma)
+  target_link_libraries(karma_glb_scene_import_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_glb_scene_import_example karma_fix_xxhash)
   endif()
@@ -60,7 +60,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_glb_animation_example
     examples/glb_animation_example.cpp
   )
-  target_link_libraries(karma_glb_animation_example PRIVATE karma)
+  target_link_libraries(karma_glb_animation_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_glb_animation_example karma_fix_xxhash)
   endif()
@@ -68,7 +68,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_particle_example
     examples/particle_example.cpp
   )
-  target_link_libraries(karma_particle_example PRIVATE karma)
+  target_link_libraries(karma_particle_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_particle_example karma_fix_xxhash)
   endif()
@@ -76,7 +76,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_energy_orb_example
     examples/energy_orb_example.cpp
   )
-  target_link_libraries(karma_energy_orb_example PRIVATE karma)
+  target_link_libraries(karma_energy_orb_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_energy_orb_example karma_fix_xxhash)
   endif()
@@ -84,7 +84,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_laser_example
     examples/laser_example.cpp
   )
-  target_link_libraries(karma_laser_example PRIVATE karma)
+  target_link_libraries(karma_laser_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_laser_example karma_fix_xxhash)
   endif()
@@ -92,7 +92,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_laser_prefab_example
     examples/laser_prefab_example.cpp
   )
-  target_link_libraries(karma_laser_prefab_example PRIVATE karma)
+  target_link_libraries(karma_laser_prefab_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_laser_prefab_example karma_fix_xxhash)
   endif()
@@ -100,7 +100,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_wave_example
     examples/wave_example.cpp
   )
-  target_link_libraries(karma_wave_example PRIVATE karma)
+  target_link_libraries(karma_wave_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_wave_example karma_fix_xxhash)
   endif()
@@ -108,7 +108,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_volumetric_sphere_example
     examples/volumetric_sphere_example.cpp
   )
-  target_link_libraries(karma_volumetric_sphere_example PRIVATE karma)
+  target_link_libraries(karma_volumetric_sphere_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_volumetric_sphere_example karma_fix_xxhash)
   endif()
@@ -116,7 +116,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_volumetric_sphere_prefab_example
     examples/volumetric_sphere_prefab_example.cpp
   )
-  target_link_libraries(karma_volumetric_sphere_prefab_example PRIVATE karma)
+  target_link_libraries(karma_volumetric_sphere_prefab_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_volumetric_sphere_prefab_example karma_fix_xxhash)
   endif()
@@ -124,7 +124,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_prefab_gallery_example
     examples/prefab_gallery_example.cpp
   )
-  target_link_libraries(karma_prefab_gallery_example PRIVATE karma)
+  target_link_libraries(karma_prefab_gallery_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_prefab_gallery_example karma_fix_xxhash)
   endif()
@@ -132,7 +132,7 @@ if (NOT KARMA_HEADLESS)
   add_executable(karma_explosion_stress_example
     examples/explosion_stress_example.cpp
   )
-  target_link_libraries(karma_explosion_stress_example PRIVATE karma)
+  target_link_libraries(karma_explosion_stress_example PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_explosion_stress_example karma_fix_xxhash)
   endif()
@@ -141,7 +141,7 @@ if (NOT KARMA_HEADLESS)
     add_executable(karma_imgui_ui_demo
       examples/imgui_ui_demo.cpp
     )
-    target_link_libraries(karma_imgui_ui_demo PRIVATE karma)
+    target_link_libraries(karma_imgui_ui_demo PRIVATE karma::graphical)
     if (TARGET karma_fix_xxhash)
       add_dependencies(karma_imgui_ui_demo karma_fix_xxhash)
     endif()
@@ -151,27 +151,27 @@ if (NOT KARMA_HEADLESS)
     add_executable(karma_rmlui_ui_demo
       examples/rmlui_ui_demo.cpp
     )
-    target_link_libraries(karma_rmlui_ui_demo PRIVATE karma)
+    target_link_libraries(karma_rmlui_ui_demo PRIVATE karma::graphical)
     if (TARGET karma_fix_xxhash)
       add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
     endif()
   endif()
 endif()
 
-if (KARMA_NETWORK_BACKEND_ENET)
+if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_HEADLESS_PROFILE)
   add_executable(karma_network_demo
     examples/network_demo.cpp
   )
 
-  target_link_libraries(karma_network_demo PRIVATE karma)
+  target_link_libraries(karma_network_demo PRIVATE karma::headless)
   if (TARGET karma_fix_xxhash)
     add_dependencies(karma_network_demo karma_fix_xxhash)
   endif()
 endif()
 
-if (KARMA_ENABLE_NAVIGATION AND NOT KARMA_HEADLESS)
+if (KARMA_ENABLE_NAVIGATION AND KARMA_BUILD_GRAPHICAL_PROFILE)
   add_executable(karma_navmesh_example
     examples/navmesh_example.cpp
   )
-  target_link_libraries(karma_navmesh_example PRIVATE karma)
+  target_link_libraries(karma_navmesh_example PRIVATE karma::graphical)
 endif()

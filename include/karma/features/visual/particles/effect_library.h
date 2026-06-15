@@ -22,6 +22,13 @@ struct ParticleTextureAliasRegistration {
 };
 
 /// \ingroup karma_particles
+/// Mesh-source alias registration entry.
+struct ParticleMeshSourceAliasRegistration {
+  std::string_view key;
+  renderer::MeshId mesh = renderer::kInvalidMesh;
+};
+
+/// \ingroup karma_particles
 /// File-backed particle effect registration entry.
 struct ParticleEffectFileRegistration {
   std::string_view key;
@@ -38,7 +45,7 @@ class ParticleLibrary {
   ParticleLibrary() = default;
 
   /// Registers an in-memory effect template.
-  void registerEffect(const std::string& key, ParticleEffectDesc desc);
+  void registerEffect(const std::string& key, ParticleEffectAsset asset);
   /// Registers an emitter template without a texture alias.
   void registerEmitterTemplate(const std::string& key,
                                components::ParticleEmitterComponent emitter);
@@ -61,6 +68,18 @@ class ParticleLibrary {
   /// Resolves a texture alias to a renderer texture handle.
   renderer::TextureId resolveTextureAlias(const std::string& key) const;
 
+  /// Registers a mesh-source alias used by `.kpeffect` files.
+  void registerMeshSourceAlias(const std::string& key, renderer::MeshId mesh);
+  /// Registers several mesh-source aliases.
+  void registerMeshSourceAliases(
+      std::initializer_list<ParticleMeshSourceAliasRegistration> aliases);
+  /// Removes a mesh-source alias.
+  void unregisterMeshSourceAlias(const std::string& key);
+  /// Clears mesh-source aliases.
+  void clearMeshSourceAliases();
+  /// Resolves a mesh-source alias to a renderer mesh handle.
+  renderer::MeshId resolveMeshSourceAlias(const std::string& key) const;
+
   /// Registers several file-backed effects.
   bool registerEffectFiles(std::initializer_list<ParticleEffectFileRegistration> effects);
 
@@ -68,7 +87,7 @@ class ParticleLibrary {
   void update();
 
   /// Finds a resolved effect by key.
-  const ParticleEffectDesc* find(const std::string& key) const;
+  const ParticleEffectAsset* find(const std::string& key) const;
   /// Finds an emitter template by key.
   const components::ParticleEmitterComponent* findEmitterTemplate(
       const std::string& key) const;
@@ -91,11 +110,12 @@ class ParticleLibrary {
   };
 
   bool reloadEffectFile(const std::string& key, EffectFileRecord& record);
-  bool parseEffectFile(const std::filesystem::path& path, ParticleEffectDesc& out_desc) const;
+  bool parseEffectFile(const std::filesystem::path& path, ParticleEffectAsset& out_asset) const;
 
-  std::unordered_map<std::string, ParticleEffectDesc> effects_;
+  std::unordered_map<std::string, ParticleEffectAsset> effects_;
   std::unordered_map<std::string, EffectFileRecord> effect_files_;
   std::unordered_map<std::string, renderer::TextureId> texture_aliases_;
+  std::unordered_map<std::string, renderer::MeshId> mesh_source_aliases_;
   uint64_t version_ = 0;
   std::chrono::steady_clock::time_point next_poll_time_{};
   std::chrono::milliseconds poll_interval_{250};

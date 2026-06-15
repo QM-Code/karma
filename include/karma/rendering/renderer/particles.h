@@ -33,11 +33,36 @@ enum class ParticleShadingMode : uint32_t {
 };
 
 /// \ingroup karma_rendering
-/// Particle spawn volume for renderer-owned particle simulation.
-enum class ParticleSpawnShape : uint32_t {
+/// Particle source shape for renderer-owned particle simulation.
+enum class ParticleSourceShape : uint32_t {
   Box = 0,
   Sphere = 1,
   SphereSurface = 2,
+  Disc = 3,
+  Ring = 4,
+  Cylinder = 5,
+  Capsule = 6,
+  Cone = 7,
+  Line = 8,
+  Path = 9,
+  TrailPath = 10,
+  MeshSurface = 11,
+};
+
+/// \ingroup karma_rendering
+/// Particle source sampling policy.
+enum class ParticleSourceSamplingMode : uint32_t {
+  Random = 0,
+  Sequential = 1,
+  Vertices = 2,
+};
+
+/// \ingroup karma_rendering
+/// Particle source emission distribution.
+enum class ParticleSourceDistribution : uint32_t {
+  Uniform = 0,
+  Surface = 1,
+  Edge = 2,
 };
 
 /// \ingroup karma_rendering
@@ -145,7 +170,7 @@ struct PackedParticleBatch {
 };
 
 /// \ingroup karma_rendering
-/// Renderer-facing particle emitter submission for v2 GPU-first effects.
+/// Renderer-facing particle emitter submission for GPU-first effects.
 ///
 /// This is intentionally plain data: feature systems resolve ECS bindings,
 /// library assets, overrides, and transforms, then submit this descriptor to the
@@ -209,10 +234,23 @@ struct ParticleEmitterGpuDesc {
   float initial_rotation_max = 6.2831853f;
   float angular_velocity_min = -1.5f;
   float angular_velocity_max = 1.5f;
-  ParticleSpawnShape spawn_shape = ParticleSpawnShape::Box;
-  math::Vec3 spawn_box_extents{0.0f, 0.0f, 0.0f};
-  float spawn_radius_min = 0.0f;
-  float spawn_radius_max = 0.0f;
+  ParticleSourceShape source_shape = ParticleSourceShape::Box;
+  math::Vec3 source_box_extents{0.0f, 0.0f, 0.0f};
+  math::Vec3 source_dimensions{0.0f, 0.0f, 0.0f};
+  float source_radius_min = 0.0f;
+  float source_radius_max = 0.0f;
+  float source_inner_radius = 0.0f;
+  float source_outer_radius = 0.0f;
+  float source_height = 0.0f;
+  float source_angle = 0.0f;
+  std::vector<math::Vec3> source_path_points;
+  bool source_closed_loop = false;
+  ParticleSourceSamplingMode source_sampling = ParticleSourceSamplingMode::Random;
+  float source_jitter_radius = 0.0f;
+  MeshId source_mesh = kInvalidMesh;
+  math::Vec3 source_mesh_bounds_center{0.0f, 0.0f, 0.0f};
+  float source_mesh_bounds_radius = 0.0f;
+  ParticleSourceDistribution source_distribution = ParticleSourceDistribution::Uniform;
   float radial_speed_min = 0.0f;
   float radial_speed_max = 0.0f;
   math::Vec3 velocity_min{-0.6f, 2.5f, -0.6f};

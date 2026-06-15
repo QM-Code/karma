@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -33,6 +35,19 @@ math::Vec3 toMath(const glm::vec3& v) {
   return {v.x, v.y, v.z};
 }
 
+std::string_view laserEffectMode() {
+  const char* raw_mode = std::getenv("KARMA_LASER_EFFECT");
+  if (raw_mode == nullptr || raw_mode[0] == '\0') {
+    return "volumetric";
+  }
+
+  const std::string_view mode{raw_mode};
+  if (mode == "impostor" || mode == "legacy" || mode == "sprite_path") {
+    return "impostor";
+  }
+  return "volumetric";
+}
+
 void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   if (!bounds.valid) {
     bounds.min = point;
@@ -58,6 +73,18 @@ SceneBounds computePointBounds(const std::vector<math::Vec3>& points) {
     expandBounds(bounds, toGlm(point));
   }
   return bounds;
+}
+
+const std::vector<math::Vec3>& beamPrefabPoints() {
+  static const std::vector<math::Vec3> points{
+      {-7.9555f, 4.0975f, -3.4132f},
+      {-4.8736f, 2.277f, -2.8742f},
+      {-1.2182f, 2.8607f, -4.6603f},
+      {0.6275f, 1.9098f, -0.4058f},
+      {4.0246f, 3.073f, -1.7853f},
+      {8.5249f, 1.7081f, 0.9211f},
+  };
+  return points;
 }
 
 }  // namespace
@@ -160,12 +187,7 @@ class LaserExample final : public app::GameInterface {
   }
 
   void spawnCamera() {
-    SceneBounds bounds{};
-    if (world->isAlive(beam_entity_) &&
-        world->has<components::BeamPathComponent>(beam_entity_)) {
-      const auto& beam_component = world->get<components::BeamPathComponent>(beam_entity_);
-      bounds = computePointBounds(beam_component.points);
-    }
+    SceneBounds bounds = computePointBounds(beamPrefabPoints());
     const glm::vec3 center = bounds.valid ? (bounds.min + bounds.max) * 0.5f : glm::vec3(0.0f);
     const glm::vec3 extents =
         bounds.valid ? (bounds.max - bounds.min) * 0.5f : glm::vec3(2.0f, 2.0f, 2.0f);
@@ -193,22 +215,25 @@ class LaserExample final : public app::GameInterface {
   }
 
   void spawnBeam() {
+    const std::string_view effect_mode = laserEffectMode();
+    const std::string prefab_path =
+        effect_mode == "impostor" ? "prefabs/beam_impostor" : "prefabs/beam";
     const auto beam = prefabs::instantiatePrefab(
         *world,
         *scene,
-        resolveExampleAssetPath("prefabs/beam"),
+        resolveExampleAssetPath(prefab_path),
         prefabs::PrefabInstantiateDesc{
-            .name_override = "Laser Path",
+            .name_override =
+                effect_mode == "impostor" ? "Laser Path Impostor" : "Laser Path",
         });
     if (!beam.has_value()) {
       spdlog::error("Laser example failed to instantiate beam prefab");
       return;
     }
 
-    beam_entity_ = beam->find("beam");
+    beam_entity_ = beam->find(effect_mode == "impostor" ? "path_hot_core" : "beam");
     if (!beam_entity_.isValid()) {
-      spdlog::error("Laser example beam prefab is missing the 'beam' member");
-      return;
+      beam_entity_ = beam->root;
     }
   }
 
@@ -226,7 +251,6 @@ class LaserExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
   karma::demo::LaserExample game;
 
   karma::app::EngineConfig config;
@@ -243,6 +267,8 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.0f;
   config.lighting_exposure = 0.95f;
+
+  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeRuntimeModule>());
 
   engine.start(game, config);
   while (engine.isRunning()) {

@@ -1,0 +1,470 @@
+{
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Path Energy Beam",
+      "parent": null,
+      "components": {
+        "TagComponent": { "name": "Path Energy Beam" },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        }
+      }
+    },
+    {
+      "id": 1,
+      "name": "path_warm_glow",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_warm_glow" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "path_energy/warm_glow",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "ParticleEffectOverrideComponent": {
+          "source_shape": "path",
+          "source_path_points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "source_closed_loop": false,
+          "source_sampling": "sequential"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "path_hot_core",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_hot_core" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "path_energy/hot_core",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "ParticleEffectOverrideComponent": {
+          "source_shape": "path",
+          "source_path_points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "source_closed_loop": false,
+          "source_sampling": "sequential"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "path_electric_glow",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_electric_glow" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "path_energy/electric_glow",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "ParticleEffectOverrideComponent": {
+          "source_shape": "path",
+          "source_path_points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "source_closed_loop": false,
+          "source_sampling": "sequential"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "path_electric_core",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_electric_core" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "path_energy/electric_core",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "ParticleEffectOverrideComponent": {
+          "source_shape": "path",
+          "source_path_points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "source_closed_loop": false,
+          "source_sampling": "sequential"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "path_heat_distortion",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_heat_distortion" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "path_energy/heat_distortion",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "ParticleEffectOverrideComponent": {
+          "source_shape": "path",
+          "source_path_points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "source_closed_loop": false,
+          "source_sampling": "sequential"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "path_endpoint_glow",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_endpoint_glow" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "path_energy/endpoint_glow",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "ParticleEffectOverrideComponent": {
+          "source_shape": "path",
+          "source_path_points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "source_closed_loop": false,
+          "source_sampling": "vertices"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "name": "path_endpoint_core",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_endpoint_core" },
+        "LocalTransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleEffectComponent": {
+          "effect_key": "path_energy/endpoint_core",
+          "auto_apply": true,
+          "preserve_enabled": true,
+          "preserve_playing": true
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "ParticleEffectOverrideComponent": {
+          "source_shape": "path",
+          "source_path_points": [
+            [-7.9555, 4.0975, -3.4132],
+            [-4.8736, 2.277, -2.8742],
+            [-1.2182, 2.8607, -4.6603],
+            [0.6275, 1.9098, -0.4058],
+            [4.0246, 3.073, -1.7853],
+            [8.5249, 1.7081, 0.9211]
+          ],
+          "source_closed_loop": false,
+          "source_sampling": "vertices"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "name": "path_light_0",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_light_0" },
+        "LocalTransformComponent": {
+          "position": [-7.9555, 4.0975, -3.4132],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [-7.9555, 4.0975, -3.4132],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [1.0, 0.68, 0.54, 1.0],
+          "intensity": 1.25,
+          "range": 5.2,
+          "casts_shadows": false
+        }
+      }
+    },
+    {
+      "id": 9,
+      "name": "path_light_1",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_light_1" },
+        "LocalTransformComponent": {
+          "position": [-4.8736, 2.277, -2.8742],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [-4.8736, 2.277, -2.8742],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [1.0, 0.68, 0.54, 1.0],
+          "intensity": 1.25,
+          "range": 5.2,
+          "casts_shadows": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "name": "path_light_2",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_light_2" },
+        "LocalTransformComponent": {
+          "position": [-1.2182, 2.8607, -4.6603],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [-1.2182, 2.8607, -4.6603],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [1.0, 0.68, 0.54, 1.0],
+          "intensity": 1.25,
+          "range": 5.2,
+          "casts_shadows": false
+        }
+      }
+    },
+    {
+      "id": 11,
+      "name": "path_light_3",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_light_3" },
+        "LocalTransformComponent": {
+          "position": [0.6275, 1.9098, -0.4058],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [0.6275, 1.9098, -0.4058],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [1.0, 0.68, 0.54, 1.0],
+          "intensity": 1.25,
+          "range": 5.2,
+          "casts_shadows": false
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "path_light_4",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_light_4" },
+        "LocalTransformComponent": {
+          "position": [4.0246, 3.073, -1.7853],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [4.0246, 3.073, -1.7853],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [1.0, 0.68, 0.54, 1.0],
+          "intensity": 1.25,
+          "range": 5.2,
+          "casts_shadows": false
+        }
+      }
+    },
+    {
+      "id": 13,
+      "name": "path_light_5",
+      "parent": 0,
+      "components": {
+        "TagComponent": { "name": "path_light_5" },
+        "LocalTransformComponent": {
+          "position": [8.5249, 1.7081, 0.9211],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "TransformComponent": {
+          "position": [8.5249, 1.7081, 0.9211],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "LightComponent": {
+          "type": "point",
+          "color": [1.0, 0.68, 0.54, 1.0],
+          "intensity": 1.25,
+          "range": 5.2,
+          "casts_shadows": false
+        }
+      }
+    }
+  ]
+}

@@ -28,6 +28,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <vector>
 
 #if !defined(KARMA_WINDOW_BACKEND_SDL)
   #include <GLFW/glfw3.h>
@@ -47,6 +49,112 @@ bool envFlagEnabled(const char* name) {
            std::strcmp(value, "OFF") != 0;
   }
   return false;
+}
+
+const char* adapterTypeName(Diligent::ADAPTER_TYPE type) {
+  switch (type) {
+    case Diligent::ADAPTER_TYPE_DISCRETE:
+      return "discrete";
+    case Diligent::ADAPTER_TYPE_INTEGRATED:
+      return "integrated";
+    case Diligent::ADAPTER_TYPE_SOFTWARE:
+      return "software";
+    case Diligent::ADAPTER_TYPE_UNKNOWN:
+      return "unknown";
+    default:
+      return "invalid";
+  }
+}
+
+Diligent::Uint32 adapterIdFromEnv(const char* name) {
+  const char* value = std::getenv(name);
+  if (!value || value[0] == '\0') {
+    return Diligent::DEFAULT_ADAPTER_ID;
+  }
+
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  if (!end || *end != '\0' || parsed > std::numeric_limits<Diligent::Uint32>::max()) {
+    std::fprintf(stderr, "[Karma] Ignoring invalid %s=%s\n", name, value);
+    std::fflush(stderr);
+    return Diligent::DEFAULT_ADAPTER_ID;
+  }
+  return static_cast<Diligent::Uint32>(parsed);
+}
+
+Diligent::Uint32 chooseVulkanAdapter(Diligent::IEngineFactoryVk& factory) {
+  Diligent::Uint32 adapter_count = 0;
+  factory.EnumerateAdapters(Diligent::Version{}, adapter_count, nullptr);
+  if (adapter_count == 0) {
+    return Diligent::DEFAULT_ADAPTER_ID;
+  }
+
+  std::vector<Diligent::GraphicsAdapterInfo> adapters(adapter_count);
+  factory.EnumerateAdapters(Diligent::Version{}, adapter_count, adapters.data());
+
+  for (Diligent::Uint32 i = 0; i < adapter_count; ++i) {
+    const auto& adapter = adapters[i];
+    std::fprintf(stderr,
+                 "[Karma] Vulkan adapter %u: %s (%s)\n",
+                 i,
+                 adapter.Description,
+                 adapterTypeName(adapter.Type));
+  }
+
+  const Diligent::Uint32 requested = adapterIdFromEnv("KARMA_VK_ADAPTER");
+  if (requested != Diligent::DEFAULT_ADAPTER_ID) {
+    if (requested < adapter_count) {
+      std::fprintf(stderr,
+                   "[Karma] Using Vulkan adapter %u from KARMA_VK_ADAPTER\n",
+                   requested);
+      std::fflush(stderr);
+      return requested;
+    }
+    std::fprintf(stderr,
+                 "[Karma] Ignoring KARMA_VK_ADAPTER=%u; only %u adapter(s) available\n",
+                 requested,
+                 adapter_count);
+  }
+
+  auto find_type = [&](Diligent::ADAPTER_TYPE type) {
+    for (Diligent::Uint32 i = 0; i < adapter_count; ++i) {
+      if (adapters[i].Type == type) {
+        return i;
+      }
+    }
+    return Diligent::DEFAULT_ADAPTER_ID;
+  };
+
+  Diligent::Uint32 selected = find_type(Diligent::ADAPTER_TYPE_DISCRETE);
+  if (selected == Diligent::DEFAULT_ADAPTER_ID) {
+    selected = find_type(Diligent::ADAPTER_TYPE_INTEGRATED);
+  }
+  if (selected == Diligent::DEFAULT_ADAPTER_ID) {
+    for (Diligent::Uint32 i = 0; i < adapter_count; ++i) {
+      if (adapters[i].Type != Diligent::ADAPTER_TYPE_SOFTWARE) {
+        selected = i;
+        break;
+      }
+    }
+  }
+  if (selected == Diligent::DEFAULT_ADAPTER_ID && envFlagEnabled("KARMA_ALLOW_SOFTWARE_VULKAN")) {
+    selected = find_type(Diligent::ADAPTER_TYPE_SOFTWARE);
+  }
+
+  if (selected == Diligent::DEFAULT_ADAPTER_ID) {
+    std::fprintf(stderr,
+                 "[Karma] No hardware Vulkan adapter found; using Diligent default adapter\n");
+    std::fflush(stderr);
+    return selected;
+  }
+
+  std::fprintf(stderr,
+               "[Karma] Using Vulkan adapter %u: %s (%s)\n",
+               selected,
+               adapters[selected].Description,
+               adapterTypeName(adapters[selected].Type));
+  std::fflush(stderr);
+  return selected;
 }
 
 void DILIGENT_CALL_TYPE IgnoreDiligentMessage(Diligent::DEBUG_MESSAGE_SEVERITY,
@@ -128,6 +236,9 @@ cbuffer Constants
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
     float4 g_MaterialParams2;
+    float4 g_MaterialParams3;
+    float4 g_MaterialParams4;
+    float4 g_MaterialParams5;
 };
 
 cbuffer SkinningConstants
@@ -473,6 +584,7 @@ void DiligentBackend::initializeDevice() {
     std::fflush(stderr);
   }
   engine_ci.Features.ShaderResourceRuntimeArray = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
+  engine_ci.AdapterId = chooseVulkanAdapter(*factory);
 
   if (window_) {
 #if !defined(KARMA_WINDOW_BACKEND_SDL)
@@ -562,6 +674,9 @@ cbuffer Constants
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
     float4 g_MaterialParams2;
+    float4 g_MaterialParams3;
+    float4 g_MaterialParams4;
+    float4 g_MaterialParams5;
 };
 
 cbuffer SkinningConstants
@@ -676,6 +791,9 @@ cbuffer Constants
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
     float4 g_MaterialParams2;
+    float4 g_MaterialParams3;
+    float4 g_MaterialParams4;
+    float4 g_MaterialParams5;
 };
 
 Texture2D g_BaseColorTex;
@@ -1092,6 +1210,184 @@ float3 SafeNormalize(float3 v, float3 fallback)
         return fallback;
     }
     return v * rsqrt(len_sq);
+}
+
+void MergeInterval(float candidate_enter,
+                   float candidate_exit,
+                   inout float t_enter,
+                   inout float t_exit,
+                   inout float hit)
+{
+    if (candidate_exit <= 0.0 || candidate_exit < candidate_enter)
+    {
+        return;
+    }
+    t_enter = hit > 0.5 ? min(t_enter, candidate_enter) : candidate_enter;
+    t_exit = hit > 0.5 ? max(t_exit, candidate_exit) : candidate_exit;
+    hit = 1.0;
+}
+
+bool IntersectSphere(float3 ro, float3 rd, float radius, out float t_enter, out float t_exit)
+{
+    float half_b = dot(ro, rd);
+    float c = dot(ro, ro) - radius * radius;
+    float h = half_b * half_b - c;
+    if (h <= 0.0)
+    {
+        t_enter = 0.0;
+        t_exit = 0.0;
+        return false;
+    }
+    h = sqrt(h);
+    t_enter = -half_b - h;
+    t_exit = -half_b + h;
+    return t_exit > 0.0;
+}
+
+bool IntersectCapsule(float3 ro,
+                      float3 rd,
+                      float3 axis,
+                      float half_length,
+                      float radius,
+                      out float t_enter,
+                      out float t_exit)
+{
+    t_enter = 0.0;
+    t_exit = 0.0;
+    float hit = 0.0;
+
+    float ro_axis = dot(ro, axis);
+    float rd_axis = dot(rd, axis);
+    float3 ro_perp = ro - axis * ro_axis;
+    float3 rd_perp = rd - axis * rd_axis;
+    float radial_a = dot(rd_perp, rd_perp);
+    float radial_b = dot(ro_perp, rd_perp);
+    float radial_c = dot(ro_perp, ro_perp) - radius * radius;
+    if (radial_a > 1.0e-6)
+    {
+        float h = radial_b * radial_b - radial_a * radial_c;
+        if (h >= 0.0)
+        {
+            h = sqrt(h);
+            float cyl_enter = (-radial_b - h) / radial_a;
+            float cyl_exit = (-radial_b + h) / radial_a;
+            float slab_enter = -1.0e20;
+            float slab_exit = 1.0e20;
+            if (abs(rd_axis) > 1.0e-6)
+            {
+                float a = (-half_length - ro_axis) / rd_axis;
+                float b = (half_length - ro_axis) / rd_axis;
+                slab_enter = min(a, b);
+                slab_exit = max(a, b);
+            }
+            else if (ro_axis < -half_length || ro_axis > half_length)
+            {
+                slab_enter = 1.0;
+                slab_exit = 0.0;
+            }
+            MergeInterval(max(cyl_enter, slab_enter), min(cyl_exit, slab_exit), t_enter, t_exit, hit);
+        }
+    }
+
+    float cap_enter = 0.0;
+    float cap_exit = 0.0;
+    if (IntersectSphere(ro - axis * half_length, rd, radius, cap_enter, cap_exit))
+    {
+        MergeInterval(cap_enter, cap_exit, t_enter, t_exit, hit);
+    }
+    if (IntersectSphere(ro + axis * half_length, rd, radius, cap_enter, cap_exit))
+    {
+        MergeInterval(cap_enter, cap_exit, t_enter, t_exit, hit);
+    }
+    return hit > 0.5;
+}
+
+float VolumePhase(float3 light_dir, float3 view_dir, float anisotropy)
+{
+    float g = clamp(anisotropy, -0.85, 0.85);
+    float cos_theta = dot(light_dir, view_dir);
+    float denom = max(1.0 + g * g - 2.0 * g * cos_theta, 1.0e-3);
+    return (1.0 - g * g) / pow(denom, 1.5);
+}
+
+void AccumulateVolumeLocalLight(ForwardPlusLight light,
+                                float3 world_pos,
+                                float3 view_dir,
+                                float anisotropy,
+                                inout float3 light_accum)
+{
+    float3 to_light = light.position_range.xyz - world_pos;
+    float dist = length(to_light);
+    if (dist <= 1.0e-4 || dist >= light.position_range.w)
+    {
+        return;
+    }
+    float3 l_local = to_light / dist;
+    float dist_sq = max(dot(to_light, to_light), 1.0e-4);
+    float range_t = saturate(dist / light.position_range.w);
+    float range_falloff = saturate(1.0 - range_t);
+    range_falloff = range_falloff * range_falloff * (3.0 - 2.0 * range_falloff);
+    range_falloff = pow(range_falloff, max(g_LocalLightParams.y, 0.1));
+    float atten = range_falloff / max(dist_sq + max(g_LocalLightParams.x, 0.0), 1.0e-4);
+    if (light.direction_type.w > 1.5)
+    {
+        float3 spot_dir = normalize(-light.direction_type.xyz);
+        float cone = dot(spot_dir, l_local);
+        float denom = max(light.spot_params.x - light.spot_params.y, 1.0e-4);
+        atten *= saturate((cone - light.spot_params.y) / denom);
+    }
+    float phase = VolumePhase(l_local, view_dir, anisotropy);
+    light_accum += light.color_intensity.rgb * light.color_intensity.w * atten * phase;
+}
+
+float3 SampleVolumeLighting(float3 world_pos, float3 ray_dir, float anisotropy, uint2 pixel)
+{
+    float3 view_dir = -ray_dir;
+    float3 directional_dir = normalize(-g_LightDir.xyz);
+    float3 lighting = g_LightColor.rgb * (0.16 + 0.84 * VolumePhase(directional_dir, view_dir, anisotropy));
+
+    uint cb_local_light_count = (uint)max(g_LocalLightMeta.x, 0.0);
+    cb_local_light_count = min(cb_local_light_count, 64u);
+    uint total_local_light_count = (uint)max(g_LocalLightMeta.y, 0.0);
+    if (cb_local_light_count > 0u)
+    {
+        [loop]
+        for (uint i = 0u; i < cb_local_light_count; ++i)
+        {
+            ForwardPlusLight light;
+            light.position_range = g_LocalLightPositionRange[i];
+            light.direction_type = g_LocalLightDirectionType[i];
+            light.color_intensity = g_LocalLightColorIntensity[i];
+            light.spot_params = g_LocalLightSpotParams[i];
+            AccumulateVolumeLocalLight(light, world_pos, view_dir, anisotropy, lighting);
+        }
+    }
+
+    uint max_lights_per_tile = (uint)max(g_ForwardPlusParams.w, 0.0);
+    if (cb_local_light_count == 0u && max_lights_per_tile > 0u)
+    {
+        uint tile_size = (uint)max(g_ForwardPlusParams.x, 1.0);
+        uint safe_tiles_x = (uint)max(g_ForwardPlusParams.y, 1.0);
+        uint safe_tiles_y = (uint)max(g_ForwardPlusParams.z, 1.0);
+        uint tile_x = min(pixel.x / tile_size, safe_tiles_x - 1u);
+        uint tile_y = min(pixel.y / tile_size, safe_tiles_y - 1u);
+        uint tile_idx = tile_y * safe_tiles_x + tile_x;
+        uint light_count = min(g_ForwardPlusTileLightCounts[tile_idx], max_lights_per_tile);
+        light_count = min(light_count, total_local_light_count);
+        uint base_idx = tile_idx * max_lights_per_tile;
+        [loop]
+        for (uint i = 0u; i < light_count; ++i)
+        {
+            uint light_index = g_ForwardPlusTileLightIndices[base_idx + i];
+            if (light_index >= total_local_light_count)
+            {
+                continue;
+            }
+            ForwardPlusLight light = g_ForwardPlusLights[light_index];
+            AccumulateVolumeLocalLight(light, world_pos, view_dir, anisotropy, lighting);
+        }
+    }
+    return lighting;
 }
 
 float4 main(PSInput input) : SV_TARGET
@@ -1518,31 +1814,39 @@ float4 main(PSInput input) : SV_TARGET
     }
     else if (shading_mode == 6u)
     {
-        float3 sphere_center_ws = g_MaterialParams1.xyz;
-        float sphere_radius = max(g_MaterialParams1.w, 1.0e-4);
-        float density = max(g_MaterialParams2.x, 0.0);
-        float distortion_strength = max(g_MaterialParams2.y, 0.0);
-        float noise_strength = saturate(g_MaterialParams2.z);
+        uint volume_shape = (uint)round(g_MaterialParams0.y);
+        float anisotropy = clamp(g_MaterialParams0.z, -0.95, 0.95);
+        float absorption = max(g_MaterialParams0.w, 0.0);
+        float3 volume_center_ws = g_MaterialParams1.xyz;
+        float volume_radius = max(g_MaterialParams1.w, 1.0e-4);
+        float3 axis_x = SafeNormalize(g_MaterialParams2.xyz, float3(1.0, 0.0, 0.0));
+        float capsule_half_length = max(g_MaterialParams2.w, 0.0);
+        float3 axis_y = SafeNormalize(g_MaterialParams3.xyz, float3(0.0, 1.0, 0.0));
+        float density = max(g_MaterialParams3.w, 0.0);
+        float3 axis_z = SafeNormalize(g_MaterialParams4.xyz, float3(0.0, 0.0, 1.0));
+        float scattering = max(g_MaterialParams4.w, 0.0);
+        float distortion_strength = max(g_MaterialParams5.x, 0.0);
+        float noise_strength = saturate(g_MaterialParams5.y);
         float time = g_LocalLightMeta.w;
 
-        float3 ro = g_CameraPos.xyz - sphere_center_ws;
+        float3 ro = g_CameraPos.xyz - volume_center_ws;
         float3 ray_dir = SafeNormalize(input.WorldPos - g_CameraPos.xyz, -g_CameraForward.xyz);
         float ray_forward = max(dot(ray_dir, g_CameraForward.xyz), 1.0e-4);
-        float half_b = dot(ro, ray_dir);
-        float c = dot(ro, ro) - sphere_radius * sphere_radius;
-        float h = half_b * half_b - c;
-        if (h <= 0.0)
+        float t0 = 0.0;
+        float t1 = 0.0;
+        bool volume_hit = false;
+        if (volume_shape == 1u)
+        {
+            volume_hit = IntersectCapsule(ro, ray_dir, axis_x, capsule_half_length, volume_radius, t0, t1);
+        }
+        else
+        {
+            volume_hit = IntersectSphere(ro, ray_dir, volume_radius, t0, t1);
+        }
+        if (!volume_hit || t1 <= 0.0)
         {
             discard;
         }
-        h = sqrt(h);
-        float t0 = -half_b - h;
-        float t1 = -half_b + h;
-        if (t1 <= 0.0)
-        {
-            discard;
-        }
-
         float t_enter = max(t0, 0.0);
         float t_exit = max(t1, t_enter + 1.0e-4);
         float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
@@ -1561,17 +1865,55 @@ float4 main(PSInput input) : SV_TARGET
             discard;
         }
 
-        float transmittance = exp(-density * path_length);
-        float opacity = saturate(1.0 - transmittance);
+        float transmittance = 1.0;
+        float3 in_scatter = float3(0.0, 0.0, 0.0);
+        float noise_a = 0.5;
+        float noise_b = 0.5;
+        float alpha_core = 0.0;
+        const int step_count = 8;
+        float step_length = path_length / (float)step_count;
+        uint2 pixel = uint2(input.Pos.xy);
+        [unroll]
+        for (int step_idx = 0; step_idx < step_count; ++step_idx)
+        {
+            float sample_t = t_enter + ((float)step_idx + 0.5) * step_length;
+            float3 sample_pos = g_CameraPos.xyz + ray_dir * sample_t;
+            float3 offset = sample_pos - volume_center_ws;
+            float axis_pos = dot(offset, axis_x);
+            float radial_distance = length(offset) / volume_radius;
+            if (volume_shape == 1u)
+            {
+                float closest_axis_pos = clamp(axis_pos, -capsule_half_length, capsule_half_length);
+                radial_distance = length(offset - axis_x * closest_axis_pos) / volume_radius;
+            }
+            float local_x = axis_pos / max(capsule_half_length + volume_radius, volume_radius);
+            float local_y = dot(offset, axis_y) / volume_radius;
+            float local_z = dot(offset, axis_z) / volume_radius;
+            float3 noise_domain =
+                float3(local_x, local_y, local_z) * (2.4 + noise_strength * 1.6) +
+                float3(time * 0.46, -time * 0.34, time * 0.29);
+            noise_a = Noise3(noise_domain * 1.6);
+            noise_b = Noise3(noise_domain.yzx * 2.3 + float3(2.1, -1.4, 4.3));
+            float core_weight = pow(saturate(1.0 - radial_distance), 3.25);
+            float glow_weight = pow(saturate(1.0 - radial_distance), 0.72);
+            alpha_core = max(alpha_core, core_weight);
+            float density_noise = lerp(1.0, 0.70 + 0.60 * noise_a, noise_strength);
+            float radial_density = lerp(0.12, 1.85, core_weight);
+            float sigma_t = max(density * density_noise * radial_density + absorption, 0.0);
+            float step_alpha = saturate(1.0 - exp(-sigma_t * step_length));
+            float3 lighting = SampleVolumeLighting(sample_pos, ray_dir, anisotropy, pixel);
+            float emissive_strength = max(max(emissive.r, emissive.g), emissive.b);
+            float3 hot_color = emissive_strength > 0.001 ? emissive : base_color * 1.20;
+            float3 medium_color = saturate(lerp(base_color, hot_color, core_weight) *
+                                           (0.72 + 0.28 * noise_b) + float3(0.03, 0.03, 0.03));
+            float3 emission = hot_color * core_weight * (3.20 + step_alpha * 8.00) +
+                              base_color * glow_weight * (0.08 + scattering * 0.15);
+            float3 scattered = medium_color * lighting * scattering + emission;
+            in_scatter += transmittance * step_alpha * scattered;
+            transmittance *= exp(-sigma_t * step_length);
+        }
 
-        float sample_t = lerp(t_enter, t_hit, 0.5);
-        float3 sample_local =
-            (g_CameraPos.xyz + ray_dir * sample_t - sphere_center_ws) / sphere_radius;
-        float3 noise_domain =
-            sample_local * (2.4 + noise_strength * 1.6) +
-            float3(time * 0.46, -time * 0.34, time * 0.29);
-        float noise_a = Noise3(noise_domain * 1.6);
-        float noise_b = Noise3(noise_domain.yzx * 2.3 + float3(2.1, -1.4, 4.3));
+        float opacity = saturate((1.0 - transmittance) * lerp(0.28, 1.0, alpha_core));
         float2 distort_dir = normalize(float2(noise_a - 0.5, noise_b - 0.5) + 1.0e-4);
         float distort_scale =
             (0.0012 + distortion_strength * 0.0060) *
@@ -1580,29 +1922,16 @@ float4 main(PSInput input) : SV_TARGET
 
         float3 background_color = g_SceneColor.Sample(g_SamplerColor, screen_uv).rgb;
         float3 scene_color = g_SceneColor.Sample(g_SamplerColor, distorted_uv).rgb;
-        float3 medium_color =
-            lerp(float3(0.04, 0.04, 0.04),
-                 saturate(base_color * 0.92 + float3(0.08, 0.08, 0.08)),
-                 0.96);
-        float3 fluorescent_glow =
-            emissive * (5.5 + opacity * 14.0) +
-            base_color * (0.45 + opacity * 0.80);
-
-        float radial = saturate(sqrt(max(sphere_radius * sphere_radius - h * h, 0.0)) /
-                                sphere_radius);
-        float rim = pow(saturate(radial), 5.0);
+        float rim = pow(saturate(1.0 - path_length / max(volume_radius * 2.0, 1.0e-4)), 2.2);
         float shimmer = 0.82 + 0.18 * sin(time * 1.9 + noise_a * 5.8 + noise_b * 3.1);
         float3 boundary_glow =
-            (emissive * 0.38 + base_color * 0.62) *
-            rim * (0.50 + distortion_strength * 0.08 + noise_strength * 0.20) * shimmer;
+            (emissive * 0.12 + base_color * 0.88) *
+            rim * (0.08 + distortion_strength * 0.04 + noise_strength * 0.08) * shimmer;
 
-        float alpha = saturate(opacity + rim * (0.16 + noise_strength * 0.05));
+        float alpha = saturate(opacity + rim * (0.035 + noise_strength * 0.015));
         float safe_alpha = max(alpha, 0.05);
-        float3 old_composite = scene_color * transmittance +
-                               medium_color * opacity +
-                               fluorescent_glow +
-                               boundary_glow;
-        lit = max((old_composite - background_color * (1.0 - alpha)) / safe_alpha, 0.0);
+        float3 composite = scene_color * transmittance + in_scatter + boundary_glow;
+        lit = max((composite - background_color * (1.0 - alpha)) / safe_alpha, 0.0);
         base_alpha = alpha;
     }
     else if (shading_mode == 5u)

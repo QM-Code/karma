@@ -1,35 +1,37 @@
-# Volumetric Sphere Transparency Notes
+# Volumetric Solid Transparency Notes
 
-This documents the renderer changes made to fix analytic volumetric-sphere
+This documents the renderer changes made to fix analytic volumetric-solid
 ordering while preserving the original refractive/glowing appearance.
+The shared `VolumetricSolid` material path now supports sphere and capsule
+`VolumetricComponent` shapes.
 
 ## Original Problems
 
-Analytic `VolumetricSphere` effects had three separate transparency problems:
+Analytic `VolumetricSolid` effects had three separate transparency problems:
 
 1. They rendered in the wrong transparent pass relative to particles and beams.
-2. Multiple spheres sorted by their screen-proxy quad depth instead of their real
-   world-space sphere position.
-3. Once depth sorting worked, foreground spheres fully erased background spheres
+2. Multiple solids sorted by their screen-proxy quad depth instead of their real
+   world-space solid position.
+3. Once depth sorting worked, foreground solids fully erased background solids
    because the shader wrote an opaque scene-color composite.
 
 The visible symptoms were:
 
-- beams could appear in front of a sphere even when the beam was behind it in 3D
-- overlapping volumetric spheres fought for foreground order
-- a rear volumetric sphere became completely invisible behind a front sphere
-- the first alpha fix made the sphere look too flat by weakening shimmer,
+- beams could appear in front of a solid even when the beam was behind it in 3D
+- overlapping volumetric solids fought for foreground order
+- a rear volumetric solid became completely invisible behind a front solid
+- the first alpha fix made the solid look too flat by weakening shimmer,
   distortion, glow, and the crisp boundary
 
 ## Render-Pass Routing
 
-`WaveVolume` and `VolumetricSphere` are now deliberately split:
+`WaveVolume` and `VolumetricSolid` are now deliberately split:
 
 - `WaveVolume` stays in the pre-particle transparent scene-sampling path.
-- `VolumetricSphere` renders in the post-particle transparent bucket.
+- `VolumetricSolid` renders in the post-particle transparent bucket.
 
 That keeps the wave volume from sampling explosion particles into its background
-copy, while allowing analytic spheres to compose after beams and particles when
+copy, while allowing analytic solids to compose after beams and particles when
 they are in front of those effects.
 
 Primary file:
@@ -38,17 +40,17 @@ Primary file:
 
 ## Sort Key
 
-Volumetric spheres render through a camera-facing screen-space proxy quad. The
+Volumetric solids render through a camera-facing screen-space proxy quad. The
 proxy quad lives at a fixed overlay depth, so sorting by proxy transform depth
-caused multiple spheres to tie or sort incorrectly.
+caused multiple solids to tie or sort incorrectly.
 
-Transparent sorting now uses the analytic sphere center for
-`VolumetricSphere` materials:
+Transparent sorting now uses the analytic solid center for
+`VolumetricSolid` materials:
 
 - normal transparent meshes sort by mesh bounds / transform depth
-- analytic volumetric spheres sort by `MaterialRecord::volume_center`
+- analytic volumetric solids sort by `MaterialRecord::volume_center`
 
-This gives stable front-to-back perception between multiple spheres.
+This gives stable front-to-back perception between multiple solids.
 
 Primary file:
 
@@ -56,23 +58,23 @@ Primary file:
 
 ## Compositing Fix
 
-The old volumetric-sphere shader computed a dense refractive/glowing
+The old volumetric-solid shader computed a dense refractive/glowing
 scene-color composite, then returned `base_alpha = 1.0`. That made a single
-sphere look strong, but it also made a foreground sphere fully replace any
-background sphere already in the framebuffer.
+solid look strong, but it also made a foreground solid fully replace any
+background solid already in the framebuffer.
 
 The shader now:
 
 - computes Beer-Lambert transmittance from the actual ray path length through
-  the sphere
+  the solid
 - uses path-length opacity, with a rim boost, as the transparent alpha
 - preserves the old-looking refractive/glowing result by solving for the source
   color that normal alpha blending needs
-- restores a camera-ray rim/shimmer contribution so the sphere keeps its crisp
+- restores a camera-ray rim/shimmer contribution so the solid keeps its crisp
   boundary, glow, shimmer, and distortion
 
-In effect, a single sphere should remain visually close to the previous
-appearance, while overlapping spheres no longer erase each other completely.
+In effect, a single solid should remain visually close to the previous
+appearance, while overlapping solids no longer erase each other completely.
 
 Primary file:
 
@@ -81,16 +83,16 @@ Primary file:
 ## Current Limitations
 
 This is still sorted alpha transparency, not full order-independent
-transparency. It handles the known volumetric-sphere cases much better, but the
+transparency. It handles the known volumetric-solid cases much better, but the
 renderer still does not have a shared transparency-depth/composition buffer for
 all transparent effects.
 
 Future work should consider:
 
-1. A focused visual regression scene with two overlapping volumetric spheres and
+1. A focused visual regression scene with two overlapping volumetric solids and
    beams crossing both in front and behind.
 2. A deliberate transparent-effect composition strategy for beams, particles,
-   `WaveVolume`, and `VolumetricSphere`.
+   `WaveVolume`, and `VolumetricSolid`.
 3. Material-aware transparent pipeline selection for depth-test/depth-write
    behavior.
 4. A specialized volume/composite pass if sorted alpha becomes too fragile.

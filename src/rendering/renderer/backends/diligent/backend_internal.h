@@ -69,6 +69,9 @@ struct DrawConstants {
   float material_params0[4];
   float material_params1[4];
   float material_params2[4];
+  float material_params3[4];
+  float material_params4[4];
+  float material_params5[4];
 };
 
 struct SkinningConstants {

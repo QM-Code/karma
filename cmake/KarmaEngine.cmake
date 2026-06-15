@@ -292,13 +292,11 @@ endif()
 
 if (KARMA_BUILD_HEADLESS_PROFILE OR KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_static(karma_features_visual
-    src/features/visual/beams/beam_path_runtime_module.cpp
-    src/features/visual/beams/beam_path_system.cpp
     src/features/visual/lights/light_pulse_system.cpp
     src/features/visual/particles/effect_library.cpp
     src/features/visual/particles/particle_system.cpp
-    src/features/visual/volumes/volume_sphere_runtime_module.cpp
-    src/features/visual/volumes/volume_sphere_system.cpp
+    src/features/visual/volumes/volume_runtime_module.cpp
+    src/features/visual/volumes/volume_system.cpp
   )
   target_link_libraries(karma_features_visual PUBLIC karma_core karma_world)
   list(APPEND KARMA_INSTALL_TARGETS karma_features_visual)

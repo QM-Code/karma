@@ -10,9 +10,11 @@
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <glm/geometric.hpp>
 #include <spdlog/spdlog.h>
 
 #include "karma/core/time.h"
@@ -55,6 +57,54 @@ void computeBounds(const geometry::MeshData& mesh, glm::vec3& out_center, float&
   out_radius = 0.5f * glm::length(extents);
 }
 
+std::vector<ParticleGpuMeshSample> buildParticleMeshSamples(const geometry::MeshData& mesh) {
+  std::vector<ParticleGpuMeshSample> samples;
+  float cumulative_area = 0.0f;
+
+  auto append_triangle = [&](uint32_t i0, uint32_t i1, uint32_t i2) {
+    if (i0 >= mesh.vertices.size() || i1 >= mesh.vertices.size() || i2 >= mesh.vertices.size()) {
+      return;
+    }
+    const glm::vec3& p0 = mesh.vertices[i0];
+    const glm::vec3& p1 = mesh.vertices[i1];
+    const glm::vec3& p2 = mesh.vertices[i2];
+    const float area = 0.5f * glm::length(glm::cross(p1 - p0, p2 - p0));
+    if (!(area > 1.0e-7f) || !std::isfinite(area)) {
+      return;
+    }
+
+    cumulative_area += area;
+    ParticleGpuMeshSample sample{};
+    sample.p0[0] = p0.x;
+    sample.p0[1] = p0.y;
+    sample.p0[2] = p0.z;
+    sample.p0[3] = cumulative_area;
+    sample.p1[0] = p1.x;
+    sample.p1[1] = p1.y;
+    sample.p1[2] = p1.z;
+    sample.p2[0] = p2.x;
+    sample.p2[1] = p2.y;
+    sample.p2[2] = p2.z;
+    samples.push_back(sample);
+  };
+
+  if (!mesh.indices.empty()) {
+    samples.reserve(mesh.indices.size() / 3u);
+    for (std::size_t i = 0u; i + 2u < mesh.indices.size(); i += 3u) {
+      append_triangle(mesh.indices[i], mesh.indices[i + 1u], mesh.indices[i + 2u]);
+    }
+  } else {
+    samples.reserve(mesh.vertices.size() / 3u);
+    for (std::size_t i = 0u; i + 2u < mesh.vertices.size(); i += 3u) {
+      append_triangle(static_cast<uint32_t>(i),
+                      static_cast<uint32_t>(i + 1u),
+                      static_cast<uint32_t>(i + 2u));
+    }
+  }
+
+  return samples;
+}
+
 }  // namespace
 
 void DiligentBackend::uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record) {
@@ -94,6 +144,7 @@ renderer::MeshId DiligentBackend::createMesh(const geometry::MeshData& mesh) {
   MeshRecord record{};
   record.data = mesh;
   computeBounds(mesh, record.bounds_center, record.bounds_radius);
+  record.particle_source_samples = buildParticleMeshSamples(record.data);
   record.base_color = glm::vec4(1.0f);
   uploadMeshBuffers(mesh, record);
 
@@ -117,6 +168,7 @@ void DiligentBackend::updateMesh(renderer::MeshId mesh, const geometry::MeshData
   MeshRecord& record = it->second;
   record.data = data;
   computeBounds(data, record.bounds_center, record.bounds_radius);
+  record.particle_source_samples = buildParticleMeshSamples(record.data);
   uploadMeshBuffers(data, record);
   record.submeshes.clear();
   if (!data.indices.empty()) {
@@ -171,6 +223,7 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
   record.base_color = base_color;
   section_start = section_end;
   computeBounds(record.data, record.bounds_center, record.bounds_radius);
+  record.particle_source_samples = buildParticleMeshSamples(record.data);
   section_end = core::SteadyClock::now();
   if (diag_enabled) {
     spdlog::info("Render resource '{}' bounds took {:.2f} ms",

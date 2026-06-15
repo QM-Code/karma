@@ -134,6 +134,7 @@ class DiligentBackend final : public Backend {
     glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
     glm::vec3 bounds_center{0.0f, 0.0f, 0.0f};
     float bounds_radius = 0.0f;
+    std::vector<ParticleGpuMeshSample> particle_source_samples;
     struct Submesh {
       Diligent::Uint32 index_offset = 0;
       Diligent::Uint32 index_count = 0;
@@ -171,8 +172,18 @@ class DiligentBackend final : public Backend {
     float wave_edge_strength = 0.35f;
     float wave_noise_strength = 0.65f;
     glm::vec3 volume_center{0.0f, 0.0f, 0.0f};
+    glm::vec3 volume_axis_x{1.0f, 0.0f, 0.0f};
+    glm::vec3 volume_axis_y{0.0f, 1.0f, 0.0f};
+    glm::vec3 volume_axis_z{0.0f, 0.0f, 1.0f};
+    uint32_t volume_shape = 0u;
     float volume_radius = 1.0f;
+    float volume_capsule_half_length = 0.0f;
     float volume_density = 1.0f;
+    float volume_scattering = 1.0f;
+    float volume_anisotropy = 0.0f;
+    float volume_absorption = 0.0f;
+    float volume_distortion_strength = 0.0f;
+    float volume_noise_strength = 1.0f;
     renderer::MaterialDesc::BlendMode blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> base_color_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_srv;
@@ -425,7 +436,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path render_state_cache_path_;
   bool shader_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 8;
+  std::uint32_t shader_cache_version_ = 15;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
@@ -626,6 +637,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_group_srv_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_material_record_buffer_;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_material_record_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_mesh_sample_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_mesh_sample_srv_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_gpu_group_counter_buffer_;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_group_counter_srv_;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> particle_gpu_group_counter_uav_;
@@ -659,6 +672,7 @@ class DiligentBackend final : public Backend {
   Diligent::IShaderResourceVariable* particle_gpu_simulate_alive_var_ = nullptr;
   Diligent::IShaderResourceVariable* particle_gpu_simulate_dead_var_ = nullptr;
   Diligent::IShaderResourceVariable* particle_gpu_simulate_stats_var_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_gpu_simulate_mesh_samples_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_gpu_prepare_unsorted_pso_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_gpu_prepare_unsorted_srb_;
   Diligent::IShaderResourceVariable* particle_gpu_prepare_unsorted_descs_var_ = nullptr;
@@ -816,6 +830,7 @@ class DiligentBackend final : public Backend {
   size_t particle_gpu_dead_list_capacity_ = 0;
   size_t particle_gpu_group_capacity_ = 0;
   size_t particle_gpu_material_record_capacity_ = 0;
+  size_t particle_gpu_mesh_sample_capacity_ = 0;
   size_t particle_gpu_group_counter_capacity_ = 0;
   size_t particle_gpu_sort_capacity_ = 0;
   size_t particle_gpu_indirect_draw_capacity_ = 0;

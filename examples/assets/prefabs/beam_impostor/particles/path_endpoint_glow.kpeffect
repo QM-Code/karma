@@ -1,0 +1,99 @@
+{
+  "version": 3,
+  "emitters": [
+    {
+      "texture": "path_energy/glow_atlas",
+      "playback": {
+        "enabled": true,
+        "playing": true,
+        "loop": true,
+        "emit_burst_on_start": true,
+        "local_space": false,
+        "time_scale": 1.0,
+        "start_delay": 0.0,
+        "duration": 0.0
+      },
+      "render": {
+        "layer": 0,
+        "depth_test": true,
+        "blend_mode": "additive",
+        "alignment": "billboard",
+        "shading_mode": "standard",
+        "use_soft_mask": false,
+        "soft_particle_distance": 0.0,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "refraction_strength": 0.0,
+        "interior_glow": 0.0
+      },
+      "atlas": {
+        "columns": 4,
+        "rows": 1,
+        "frame_count": 4,
+        "frame_width": 0,
+        "frame_height": 0,
+        "border_x": 0,
+        "border_y": 0,
+        "spacing_x": 0,
+        "spacing_y": 0,
+        "animation_fps": 8.0,
+        "animate_over_lifetime": false,
+        "random_start_frame": true
+      },
+      "emission": {
+        "max_particles": 6,
+        "burst_count": 6,
+        "seed": 8407,
+        "spawn_rate": 0.0
+      },
+      "lifetime": {
+        "min": 240.0,
+        "max": 240.0
+      },
+      "size": {
+        "start_min": 1.35,
+        "start_max": 1.62,
+        "end_min": 1.35,
+        "end_max": 1.62,
+        "curve_exponent": 1.0
+      },
+      "rotation": {
+        "initial_min": 0.0,
+        "initial_max": 6.2831853,
+        "angular_velocity_min": -0.12,
+        "angular_velocity_max": 0.12
+      },
+      "source": {
+        "shape": "path",
+        "points": [
+          [-0.5, 0.0, 0.0],
+          [0.5, 0.0, 0.0]
+        ],
+        "closed_loop": false,
+        "sampling": "vertices",
+        "jitter_radius": 0.0,
+        "radial_speed_min": 0.0,
+        "radial_speed_max": 0.0
+      },
+      "motion": {
+        "velocity_min": [0.0, 0.0, 0.0],
+        "velocity_max": [0.0, 0.0, 0.0],
+        "acceleration": [0.0, 0.0, 0.0],
+        "drag": 0.0
+      },
+      "collision": {
+        "ground": false,
+        "ground_height": 0.0,
+        "bounce_damping": 0.35,
+        "friction": 0.25,
+        "rest_speed_threshold": 0.35
+      },
+      "color": {
+        "start": [2.2, 0.72, 0.42, 0.58],
+        "end": [2.2, 0.72, 0.42, 0.58],
+        "alpha_curve_exponent": 1.0
+      }
+    }
+  ]
+}

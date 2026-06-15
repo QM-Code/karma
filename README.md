@@ -194,8 +194,8 @@ before `find_package(karma)` to allow package-time fetching.
 - Particle tooling with `.kpeffect` files, hot reload, emitter overrides,
   flipbooks, distortion, ground-aligned particles, soft particles, and renderer
   performance diagnostics.
-- Visual feature modules for beam paths, analytic volume spheres, light pulses,
-  energy orbs, staged explosions, and prefab gallery scenes.
+- Visual feature modules for particle beam prefabs, analytic volumetric solids,
+  light pulses, energy orbs, staged explosions, and prefab gallery scenes.
 - Simulation stack with Jolt or Bullet physics backends, collision/contact ECS
   events, grounded/support state, player controllers, static navmesh baking, and
   Detour path queries.
@@ -284,6 +284,12 @@ Useful environment flags:
 - `KARMA_LIGHT_PROBE_STATS=1`: local-light probe stats.
 - `KARMA_VK_VALIDATION=1` and `KARMA_DILIGENT_DEBUG=1`: Vulkan/Diligent debug
   output.
+- `KARMA_VK_ADAPTER=<index>`: force a Vulkan adapter printed at startup.
+- `KARMA_ALLOW_SOFTWARE_VULKAN=1`: permit software Vulkan adapters when
+  hardware Vulkan is unavailable.
+- `KARMA_DRAW_DEBUG=1`: print forward draw submissions before Diligent draw calls.
+- `KARMA_DISABLE_DEPTH_PREPASS=1` / `KARMA_FORCE_DEPTH_PREPASS=1`: override the
+  guarded forward depth-prepass policy for renderer triage.
 
 ## Documentation
 
@@ -303,11 +309,11 @@ Focused references:
 - [Particle System](docs/PARTICLE_SYSTEM.md)
 - [Particle Effect Generation](docs/PARTICLE_EFFECT_GENERATION.md)
 - [Effect Prefabs](docs/EFFECT_PREFABS.md)
-- [Beam Paths](docs/BEAM_PATHS.md)
+- [Particle Beam Prefabs](docs/BEAM_PATHS.md)
 - [Explosion Prefab](docs/EXPLOSION_PREFAB.md)
 - [Explosion Stress Performance](docs/EXPLOSION_STRESS_PERF.md)
 - [Rigged GLB Authoring](docs/RIGGED_GLB_AUTHORING.md)
-- [Volumetric Sphere Transparency](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
+- [Volumetric Solid Transparency](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 - [Debug Editor](docs/DEBUG_EDITOR.md)
 
 ## Notes For Contributors

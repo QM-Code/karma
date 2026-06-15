@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "emitters": [
     {
       "texture": "prefabs/explosion/smoke_atlas",
@@ -64,7 +64,7 @@
         "angular_velocity_min": -0.9,
         "angular_velocity_max": 0.9
       },
-      "spawn": {
+      "source": {
         "shape": "sphere",
         "box_extents": [
           0.0,

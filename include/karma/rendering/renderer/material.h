@@ -38,7 +38,7 @@ struct MaterialDesc {
     SphereHalo = 3,
     ScreenWave = 4,
     SphereGlowVolume = 5,
-    VolumetricSphere = 6,
+    VolumetricSolid = 6,
   };
 
   std::filesystem::path vertex_shader_path;
@@ -68,8 +68,18 @@ struct MaterialDesc {
   float wave_edge_strength = 0.35f;
   float wave_noise_strength = 0.65f;
   glm::vec3 volume_center{0.0f, 0.0f, 0.0f};
+  glm::vec3 volume_axis_x{1.0f, 0.0f, 0.0f};
+  glm::vec3 volume_axis_y{0.0f, 1.0f, 0.0f};
+  glm::vec3 volume_axis_z{0.0f, 0.0f, 1.0f};
+  uint32_t volume_shape = 0u;
   float volume_radius = 1.0f;
+  float volume_capsule_half_length = 0.0f;
   float volume_density = 1.0f;
+  float volume_scattering = 1.0f;
+  float volume_anisotropy = 0.0f;
+  float volume_absorption = 0.0f;
+  float volume_distortion_strength = 0.0f;
+  float volume_noise_strength = 1.0f;
   TextureId base_color_texture = kInvalidTexture;
   bool unlit = false;
   bool transparent = false;

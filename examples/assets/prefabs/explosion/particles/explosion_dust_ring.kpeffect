@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "emitters": [
     {
       "texture": "prefabs/explosion/dust_ring_atlas",
@@ -64,7 +64,7 @@
         "angular_velocity_min": -0.1,
         "angular_velocity_max": 0.1
       },
-      "spawn": {
+      "source": {
         "shape": "box",
         "box_extents": [
           0.0,

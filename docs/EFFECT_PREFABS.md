@@ -12,8 +12,7 @@ Component map keys use the real component struct names, for example:
 - `LightComponent`
 - `ParticleEffectComponent`
 - `ParticleEmitterComponent`
-- `BeamPathComponent`
-- `VolumeSphereComponent`
+- `VolumetricComponent`
 
 Do not invent shortened schema names unless the engine has a matching component
 type. This keeps prefab files honest snapshots of engine entities.

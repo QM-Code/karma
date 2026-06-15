@@ -194,7 +194,7 @@ class VolumetricSphereExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeSphereRuntimeModule>());
+  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeRuntimeModule>());
   karma::demo::VolumetricSphereExample game;
 
   karma::app::EngineConfig config;

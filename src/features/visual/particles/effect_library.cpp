@@ -99,6 +99,22 @@ bool readUint32(const Json& object,
   return true;
 }
 
+bool readString(const Json& object,
+                std::string_view key,
+                std::string& out_value,
+                std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    out_error = "field '" + std::string(key) + "' must be a string";
+    return false;
+  }
+  out_value = it->get<std::string>();
+  return true;
+}
+
 bool readVec3Value(const Json& value, math::Vec3& out_value) {
   if (!value.is_array() || value.size() != 3u) {
     return false;
@@ -227,10 +243,10 @@ bool readShadingMode(const Json& object,
   return false;
 }
 
-bool readSpawnShape(const Json& object,
-                    std::string_view key,
-                    components::ParticleSpawnShape& out_value,
-                    std::string& out_error) {
+bool readSourceShape(const Json& object,
+                     std::string_view key,
+                     components::ParticleSourceShape& out_value,
+                     std::string& out_error) {
   const auto it = object.find(key);
   if (it == object.end()) {
     return true;
@@ -241,19 +257,138 @@ bool readSpawnShape(const Json& object,
   }
   const std::string value = it->get<std::string>();
   if (value == "box") {
-    out_value = components::ParticleSpawnShape::Box;
+    out_value = components::ParticleSourceShape::Box;
     return true;
   }
   if (value == "sphere") {
-    out_value = components::ParticleSpawnShape::Sphere;
+    out_value = components::ParticleSourceShape::Sphere;
     return true;
   }
   if (value == "sphere_surface") {
-    out_value = components::ParticleSpawnShape::SphereSurface;
+    out_value = components::ParticleSourceShape::SphereSurface;
     return true;
   }
-  out_error = "field '" + std::string(key) + "' has invalid spawn shape '" + value + "'";
+  if (value == "disc") {
+    out_value = components::ParticleSourceShape::Disc;
+    return true;
+  }
+  if (value == "ring") {
+    out_value = components::ParticleSourceShape::Ring;
+    return true;
+  }
+  if (value == "cylinder") {
+    out_value = components::ParticleSourceShape::Cylinder;
+    return true;
+  }
+  if (value == "capsule") {
+    out_value = components::ParticleSourceShape::Capsule;
+    return true;
+  }
+  if (value == "cone") {
+    out_value = components::ParticleSourceShape::Cone;
+    return true;
+  }
+  if (value == "line") {
+    out_value = components::ParticleSourceShape::Line;
+    return true;
+  }
+  if (value == "path") {
+    out_value = components::ParticleSourceShape::Path;
+    return true;
+  }
+  if (value == "trail_path") {
+    out_value = components::ParticleSourceShape::TrailPath;
+    return true;
+  }
+  if (value == "mesh_surface") {
+    out_value = components::ParticleSourceShape::MeshSurface;
+    return true;
+  }
+  out_error = "field '" + std::string(key) + "' has invalid source shape '" + value + "'";
   return false;
+}
+
+bool readSourceSampling(const Json& object,
+                        std::string_view key,
+                        components::ParticleSourceSamplingMode& out_value,
+                        std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    out_error = "field '" + std::string(key) + "' must be a string";
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "random") {
+    out_value = components::ParticleSourceSamplingMode::Random;
+    return true;
+  }
+  if (value == "sequential") {
+    out_value = components::ParticleSourceSamplingMode::Sequential;
+    return true;
+  }
+  if (value == "vertices") {
+    out_value = components::ParticleSourceSamplingMode::Vertices;
+    return true;
+  }
+  out_error = "field '" + std::string(key) + "' has invalid source sampling mode '" + value + "'";
+  return false;
+}
+
+bool readSourceDistribution(const Json& object,
+                            std::string_view key,
+                            components::ParticleSourceDistribution& out_value,
+                            std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    out_error = "field '" + std::string(key) + "' must be a string";
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "uniform") {
+    out_value = components::ParticleSourceDistribution::Uniform;
+    return true;
+  }
+  if (value == "surface") {
+    out_value = components::ParticleSourceDistribution::Surface;
+    return true;
+  }
+  if (value == "edge") {
+    out_value = components::ParticleSourceDistribution::Edge;
+    return true;
+  }
+  out_error = "field '" + std::string(key) + "' has invalid source distribution '" + value + "'";
+  return false;
+}
+
+bool readVec3Array(const Json& object,
+                   std::string_view key,
+                   std::vector<math::Vec3>& out_value,
+                   std::string& out_error) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_array()) {
+    out_error = "field '" + std::string(key) + "' must be an array of 3-number arrays";
+    return false;
+  }
+  out_value.clear();
+  out_value.reserve(it->size());
+  for (const Json& point_json : *it) {
+    math::Vec3 point{};
+    if (!readVec3Value(point_json, point)) {
+      out_error = "field '" + std::string(key) + "' must be an array of 3-number arrays";
+      return false;
+    }
+    out_value.push_back(point);
+  }
+  return true;
 }
 
 const Json* requiredBlock(const Json& object, std::string_view key, std::string& out_error) {
@@ -280,7 +415,7 @@ bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& 
                             "lifetime",
                             "size",
                             "rotation",
-                            "spawn",
+                            "source",
                             "motion",
                             "collision",
                             "color"},
@@ -306,12 +441,16 @@ bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& 
   const Json* lifetime = requiredBlock(json, "lifetime", out_error);
   const Json* size = requiredBlock(json, "size", out_error);
   const Json* rotation = requiredBlock(json, "rotation", out_error);
-  const Json* spawn = requiredBlock(json, "spawn", out_error);
+  const Json* source = requiredBlock(json, "source", out_error);
   const Json* motion = requiredBlock(json, "motion", out_error);
   const Json* collision = requiredBlock(json, "collision", out_error);
   const Json* color = requiredBlock(json, "color", out_error);
   if (!playback || !render || !atlas || !emission || !lifetime || !size || !rotation ||
-      !spawn || !motion || !collision || !color) {
+      !source || !motion || !collision || !color) {
+    return false;
+  }
+  if (source->find("shape") == source->end()) {
+    out_error = "source is missing required field 'shape'";
     return false;
   }
 
@@ -438,21 +577,45 @@ bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& 
     return false;
   }
 
-  if (!rejectUnknownFields(*spawn,
+  if (!rejectUnknownFields(*source,
                            {"shape",
                             "box_extents",
+                            "dimensions",
                             "radius_min",
                             "radius_max",
+                            "inner_radius",
+                            "outer_radius",
+                            "height",
+                            "angle",
+                            "points",
+                            "closed_loop",
+                            "sampling",
+                            "jitter_radius",
+                            "mesh_key",
+                            "mesh_path",
+                            "distribution",
                             "radial_speed_min",
                             "radial_speed_max"},
-                           "spawn",
+                           "source",
                            out_error) ||
-      !readSpawnShape(*spawn, "shape", emitter.spawn_shape, out_error) ||
-      !readVec3(*spawn, "box_extents", emitter.spawn_box_extents, out_error) ||
-      !readFloat(*spawn, "radius_min", emitter.spawn_radius_min, out_error) ||
-      !readFloat(*spawn, "radius_max", emitter.spawn_radius_max, out_error) ||
-      !readFloat(*spawn, "radial_speed_min", emitter.radial_speed_min, out_error) ||
-      !readFloat(*spawn, "radial_speed_max", emitter.radial_speed_max, out_error)) {
+      !readSourceShape(*source, "shape", emitter.source_shape, out_error) ||
+      !readVec3(*source, "box_extents", emitter.source_box_extents, out_error) ||
+      !readVec3(*source, "dimensions", emitter.source_dimensions, out_error) ||
+      !readFloat(*source, "radius_min", emitter.source_radius_min, out_error) ||
+      !readFloat(*source, "radius_max", emitter.source_radius_max, out_error) ||
+      !readFloat(*source, "inner_radius", emitter.source_inner_radius, out_error) ||
+      !readFloat(*source, "outer_radius", emitter.source_outer_radius, out_error) ||
+      !readFloat(*source, "height", emitter.source_height, out_error) ||
+      !readFloat(*source, "angle", emitter.source_angle, out_error) ||
+      !readVec3Array(*source, "points", emitter.source_path_points, out_error) ||
+      !readBool(*source, "closed_loop", emitter.source_closed_loop, out_error) ||
+      !readSourceSampling(*source, "sampling", emitter.source_sampling, out_error) ||
+      !readFloat(*source, "jitter_radius", emitter.source_jitter_radius, out_error) ||
+      !readString(*source, "mesh_key", emitter.source_mesh_key, out_error) ||
+      !readString(*source, "mesh_path", emitter.source_mesh_path, out_error) ||
+      !readSourceDistribution(*source, "distribution", emitter.source_distribution, out_error) ||
+      !readFloat(*source, "radial_speed_min", emitter.radial_speed_min, out_error) ||
+      !readFloat(*source, "radial_speed_max", emitter.radial_speed_max, out_error)) {
     return false;
   }
 
@@ -493,7 +656,7 @@ bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& 
   return true;
 }
 
-bool parseEffectJson(const Json& json, ParticleEffectDesc& out_desc, std::string& out_error) {
+bool parseEffectJson(const Json& json, ParticleEffectAsset& out_asset, std::string& out_error) {
   if (!rejectUnknownFields(json, {"version", "emitters"}, "effect", out_error)) {
     return false;
   }
@@ -501,8 +664,8 @@ bool parseEffectJson(const Json& json, ParticleEffectDesc& out_desc, std::string
   const auto version_it = json.find("version");
   if (version_it == json.end() ||
       (!version_it->is_number_integer() && !version_it->is_number_unsigned()) ||
-      version_it->get<int>() != 2) {
-    out_error = "effect must declare version 2";
+      version_it->get<int>() != 3) {
+    out_error = "effect must declare version 3";
     return false;
   }
 
@@ -522,25 +685,22 @@ bool parseEffectJson(const Json& json, ParticleEffectDesc& out_desc, std::string
     asset.emitters.push_back(std::move(emitter));
   }
 
-  const ParticleEmitterDesc* primary = asset.primaryEmitter();
-  if (primary == nullptr) {
-    out_error = "effect has no primary emitter";
-    return false;
-  }
-  out_desc = *primary;
+  out_asset = std::move(asset);
   return true;
 }
 
 }  // namespace
 
-void ParticleLibrary::registerEffect(const std::string& key, ParticleEffectDesc desc) {
-  effects_[key] = std::move(desc);
+void ParticleLibrary::registerEffect(const std::string& key, ParticleEffectAsset asset) {
+  effects_[key] = std::move(asset);
   version_ += 1;
 }
 
 void ParticleLibrary::registerEmitterTemplate(const std::string& key,
                                               components::ParticleEmitterComponent emitter) {
-  registerEffect(key, ParticleEffectDesc{.emitter = std::move(emitter)});
+  ParticleEffectAsset asset{};
+  asset.emitters.push_back(ParticleEmitterDesc{.emitter = std::move(emitter)});
+  registerEffect(key, std::move(asset));
 }
 
 bool ParticleLibrary::registerEffectFile(const std::string& key,
@@ -605,6 +765,44 @@ renderer::TextureId ParticleLibrary::resolveTextureAlias(const std::string& key)
   return it->second;
 }
 
+void ParticleLibrary::registerMeshSourceAlias(const std::string& key,
+                                              renderer::MeshId mesh) {
+  auto it = mesh_source_aliases_.find(key);
+  if (it != mesh_source_aliases_.end() && it->second == mesh) {
+    return;
+  }
+  mesh_source_aliases_[key] = mesh;
+  version_ += 1;
+}
+
+void ParticleLibrary::registerMeshSourceAliases(
+    std::initializer_list<ParticleMeshSourceAliasRegistration> aliases) {
+  for (const ParticleMeshSourceAliasRegistration& alias : aliases) {
+    registerMeshSourceAlias(std::string(alias.key), alias.mesh);
+  }
+}
+
+void ParticleLibrary::unregisterMeshSourceAlias(const std::string& key) {
+  if (mesh_source_aliases_.erase(key) > 0) {
+    version_ += 1;
+  }
+}
+
+void ParticleLibrary::clearMeshSourceAliases() {
+  if (!mesh_source_aliases_.empty()) {
+    mesh_source_aliases_.clear();
+    version_ += 1;
+  }
+}
+
+renderer::MeshId ParticleLibrary::resolveMeshSourceAlias(const std::string& key) const {
+  auto it = mesh_source_aliases_.find(key);
+  if (it == mesh_source_aliases_.end()) {
+    return renderer::kInvalidMesh;
+  }
+  return it->second;
+}
+
 bool ParticleLibrary::registerEffectFiles(
     std::initializer_list<ParticleEffectFileRegistration> effects) {
   bool all_ok = true;
@@ -638,7 +836,7 @@ void ParticleLibrary::update() {
   }
 }
 
-const ParticleEffectDesc* ParticleLibrary::find(const std::string& key) const {
+const ParticleEffectAsset* ParticleLibrary::find(const std::string& key) const {
   auto it = effects_.find(key);
   if (it == effects_.end()) {
     return nullptr;
@@ -648,19 +846,21 @@ const ParticleEffectDesc* ParticleLibrary::find(const std::string& key) const {
 
 const components::ParticleEmitterComponent* ParticleLibrary::findEmitterTemplate(
     const std::string& key) const {
-  const ParticleEffectDesc* effect = find(key);
-  return effect ? &effect->emitter : nullptr;
+  const ParticleEffectAsset* effect = find(key);
+  const ParticleEmitterDesc* primary = effect ? effect->primaryEmitter() : nullptr;
+  return primary ? &primary->emitter : nullptr;
 }
 
 bool ParticleLibrary::instantiateEmitter(const std::string& key,
                                          components::ParticleEmitterComponent& out_emitter) const {
-  const ParticleEffectDesc* effect = find(key);
-  if (effect == nullptr) {
+  const ParticleEffectAsset* effect = find(key);
+  const ParticleEmitterDesc* primary = effect ? effect->primaryEmitter() : nullptr;
+  if (primary == nullptr) {
     return false;
   }
-  out_emitter = effect->emitter;
-  if (!effect->texture_key.empty()) {
-    out_emitter.texture_key = effect->texture_key;
+  out_emitter = primary->emitter;
+  if (!primary->texture_key.empty()) {
+    out_emitter.texture_key = primary->texture_key;
   }
   return true;
 }
@@ -675,8 +875,8 @@ std::optional<components::ParticleEmitterComponent> ParticleLibrary::instantiate
 }
 
 bool ParticleLibrary::reloadEffectFile(const std::string& key, EffectFileRecord& record) {
-  ParticleEffectDesc desc{};
-  if (!parseEffectFile(record.path, desc)) {
+  ParticleEffectAsset asset{};
+  if (!parseEffectFile(record.path, asset)) {
     return false;
   }
 
@@ -686,13 +886,13 @@ bool ParticleLibrary::reloadEffectFile(const std::string& key, EffectFileRecord&
     record.last_write_time = std::filesystem::file_time_type{};
   }
 
-  effects_[key] = std::move(desc);
+  effects_[key] = std::move(asset);
   version_ += 1;
   return true;
 }
 
 bool ParticleLibrary::parseEffectFile(const std::filesystem::path& path,
-                                      ParticleEffectDesc& out_desc) const {
+                                      ParticleEffectAsset& out_asset) const {
   std::ifstream stream(path);
   if (!stream) {
     spdlog::error("Failed to open particle effect '{}'", path.string());
@@ -708,7 +908,7 @@ bool ParticleLibrary::parseEffectFile(const std::filesystem::path& path,
   }
 
   std::string error;
-  if (!parseEffectJson(json, out_desc, error)) {
+  if (!parseEffectJson(json, out_asset, error)) {
     spdlog::error("Invalid particle effect '{}': {}", path.string(), error);
     return false;
   }

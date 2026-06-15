@@ -19,7 +19,7 @@ class ParticleLibrary;
 ///
 /// The system consumes `ParticleEmitterComponent`, `ParticleEffectComponent`,
 /// and `ParticleEffectOverrideComponent`. Live particle state is owned by the
-/// renderer backend for v2 GPU-first effects.
+/// renderer backend for GPU-first effects.
 class ParticleSystem {
  public:
   explicit ParticleSystem(renderer::GraphicsDevice* device,

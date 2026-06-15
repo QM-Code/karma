@@ -13,7 +13,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <unordered_map>
@@ -224,7 +226,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
            mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo ||
            mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave ||
            mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereGlowVolume ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere;
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid;
   };
 
   auto uses_pre_particle_scene_sample_pass = [&](const MaterialRecord* mat) {
@@ -241,7 +243,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         mesh.bounds_radius > 0.0f
             ? glm::vec3(transform * glm::vec4(mesh.bounds_center, 1.0f))
             : glm::vec3(transform[3]);
-    if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
+    if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
       world_center = mat->volume_center;
     }
     return glm::dot(world_center - camera_position, camera_forward);
@@ -406,6 +408,10 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   if (!active_forward_pipeline || !constants_) {
     return 0;
   }
+  const bool draw_debug = [] {
+    const char* value = std::getenv("KARMA_DRAW_DEBUG");
+    return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+  }();
 
   auto ensure_instance_buffer = [&](size_t instance_count) {
     if (instance_count == 0) {
@@ -510,11 +516,30 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params1[2] = mat->wave_edge_strength;
       constants.material_params1[3] = mat->wave_noise_strength;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
+               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+      constants.material_params0[1] = static_cast<float>(mat->volume_shape);
+      constants.material_params0[2] = mat->volume_anisotropy;
+      constants.material_params0[3] = mat->volume_absorption;
       constants.material_params1[0] = mat->volume_center.x;
       constants.material_params1[1] = mat->volume_center.y;
       constants.material_params1[2] = mat->volume_center.z;
       constants.material_params1[3] = mat->volume_radius;
+      constants.material_params2[0] = mat->volume_axis_x.x;
+      constants.material_params2[1] = mat->volume_axis_x.y;
+      constants.material_params2[2] = mat->volume_axis_x.z;
+      constants.material_params2[3] = mat->volume_capsule_half_length;
+      constants.material_params3[0] = mat->volume_axis_y.x;
+      constants.material_params3[1] = mat->volume_axis_y.y;
+      constants.material_params3[2] = mat->volume_axis_y.z;
+      constants.material_params3[3] = mat->volume_density;
+      constants.material_params4[0] = mat->volume_axis_z.x;
+      constants.material_params4[1] = mat->volume_axis_z.y;
+      constants.material_params4[2] = mat->volume_axis_z.z;
+	      constants.material_params4[3] = mat->volume_scattering;
+	      constants.material_params5[0] = mat->volume_distortion_strength;
+	      constants.material_params5[1] = mat->volume_noise_strength;
+	      constants.material_params5[2] = 0.0f;
+	      constants.material_params5[3] = 0.0f;
     } else {
       constants.material_params1[0] = mat ? mat->shell_interior_strength : 0.4f;
       constants.material_params1[1] = mat ? mat->shell_highlight_strength : 1.0f;
@@ -532,11 +557,8 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params2[2] = mat->screen_radius_x;
       constants.material_params2[3] = mat->screen_radius_y;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
-      constants.material_params2[0] = mat->volume_density;
-      constants.material_params2[1] = mat->wave_distortion_strength;
-      constants.material_params2[2] = mat->wave_noise_strength;
-      constants.material_params2[3] = 0.0f;
+               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+      // Volumetric solids pack params 2-5 above with shape axes and optical data.
     } else {
       constants.material_params2[0] = (mat && mat->analytic_sphere_normals) ? 1.0f : 0.0f;
       constants.material_params2[1] = mat ? mat->shell_body_strength : 1.0f;
@@ -607,9 +629,34 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   auto draw_forward_batch = [&](const MeshRecord& mesh,
                                 const ForwardBatchKey& key,
                                 Diligent::Uint32 instance_count,
-                                Diligent::IBuffer*& bound_index_buffer) {
+                                Diligent::IBuffer*& bound_index_buffer,
+                                const char* pass_label) {
+    auto log_draw = [&](const char* draw_kind) {
+      if (!draw_debug) {
+        return;
+      }
+      std::fprintf(stderr,
+                   "[Karma][DrawDebug] pass=%s kind=%s mesh=%u material=%u "
+                   "indexed=%s skinned=%s vertices=%u mesh_indices=%u "
+                   "first_index=%u draw_indices=%u instances=%u vb=%s ib=%s\n",
+                   pass_label,
+                   draw_kind,
+                   key.mesh,
+                   key.material,
+                   key.indexed ? "true" : "false",
+                   key.skinned ? "true" : "false",
+                   mesh.vertex_count,
+                   mesh.index_count,
+                   key.index_offset,
+                   key.index_count,
+                   instance_count,
+                   mesh.vertex_buffer ? "yes" : "no",
+                   mesh.index_buffer ? "yes" : "no");
+      std::fflush(stderr);
+    };
     if (key.indexed) {
       if (!is_valid_indexed_draw(mesh, key.index_offset, key.index_count)) {
+        log_draw("invalid-indexed-skip");
         return false;
       }
       Diligent::IBuffer* index_buffer = mesh.index_buffer.RawPtr();
@@ -625,6 +672,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       indexed.FirstIndexLocation = key.index_offset;
       indexed.NumInstances = instance_count;
       indexed.Flags = kHotPathDrawFlags;
+      log_draw("indexed");
       context_->DrawIndexed(indexed);
       return true;
     }
@@ -633,6 +681,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     draw_attrs.NumVertices = mesh.vertex_count;
     draw_attrs.NumInstances = instance_count;
     draw_attrs.Flags = kHotPathDrawFlags;
+    log_draw("non-indexed");
     context_->Draw(draw_attrs);
     return true;
   };
@@ -642,10 +691,21 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   const auto& adapter_info = device_->GetAdapterInfo();
   const bool disable_depth_prepass_for_driver =
       device_->GetDeviceInfo().IsVulkanDevice() &&
-      adapter_info.Vendor == Diligent::ADAPTER_VENDOR_NVIDIA;
+      (adapter_info.Vendor == Diligent::ADAPTER_VENDOR_NVIDIA ||
+       adapter_info.Vendor == Diligent::ADAPTER_VENDOR_INTEL);
+  const bool disable_depth_prepass_for_env = [] {
+    const char* value = std::getenv("KARMA_DISABLE_DEPTH_PREPASS");
+    return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+  }();
+  const bool force_depth_prepass_for_env = [] {
+    const char* value = std::getenv("KARMA_FORCE_DEPTH_PREPASS");
+    return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+  }();
   const bool run_depth_prepass =
       depth_prepass_pipeline_state_ && active_dsv && state.opaque_batches.size() > 1 &&
-      !disable_depth_prepass_for_driver && !use_custom_shader_override;
+      (!disable_depth_prepass_for_driver || force_depth_prepass_for_env) &&
+      !disable_depth_prepass_for_env &&
+      !use_custom_shader_override;
 
   if (run_depth_prepass) {
     context_->SetRenderTargets(0,
@@ -691,7 +751,8 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         draw_forward_batch(mesh,
                            batch.key,
                            static_cast<Diligent::Uint32>(packed_transforms.size()),
-                           depth_bound_index_buffer);
+                           depth_bound_index_buffer,
+                           "opaque-depth-prepass");
       }
       for (const auto& draw : state.skinned_opaque_draws) {
         auto mesh_it = meshes_.find(draw.key.mesh);
@@ -716,7 +777,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                 mesh, single_transform, depth_bound_mesh_vb, depth_bound_instance_vb)) {
           continue;
         }
-        draw_forward_batch(mesh, draw.key, 1, depth_bound_index_buffer);
+        draw_forward_batch(mesh, draw.key, 1, depth_bound_index_buffer, "skinned-depth-prepass");
       }
     }
 
@@ -791,7 +852,8 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     if (draw_forward_batch(mesh,
                            batch.key,
                            static_cast<Diligent::Uint32>(packed_transforms.size()),
-                           bound_index_buffer)) {
+                           bound_index_buffer,
+                           "opaque-forward")) {
       draw_count += 1;
     }
   }
@@ -840,7 +902,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                bound_instance_vb)) {
       continue;
     }
-    if (draw_forward_batch(mesh, draw.key, 1, bound_index_buffer)) {
+    if (draw_forward_batch(mesh, draw.key, 1, bound_index_buffer, "skinned-forward")) {
       draw_count += 1;
     }
   }
@@ -863,6 +925,10 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   if (draws.empty() || !active_forward_pipeline || !constants_) {
     return 0;
   }
+  const bool draw_debug = [] {
+    const char* value = std::getenv("KARMA_DRAW_DEBUG");
+    return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+  }();
 
   auto ensure_instance_buffer = [&](size_t instance_count) {
     if (instance_count == 0) {
@@ -952,11 +1018,30 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params1[2] = mat->wave_edge_strength;
       constants.material_params1[3] = mat->wave_noise_strength;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
+               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+      constants.material_params0[1] = static_cast<float>(mat->volume_shape);
+      constants.material_params0[2] = mat->volume_anisotropy;
+      constants.material_params0[3] = mat->volume_absorption;
       constants.material_params1[0] = mat->volume_center.x;
       constants.material_params1[1] = mat->volume_center.y;
       constants.material_params1[2] = mat->volume_center.z;
       constants.material_params1[3] = mat->volume_radius;
+      constants.material_params2[0] = mat->volume_axis_x.x;
+      constants.material_params2[1] = mat->volume_axis_x.y;
+      constants.material_params2[2] = mat->volume_axis_x.z;
+      constants.material_params2[3] = mat->volume_capsule_half_length;
+      constants.material_params3[0] = mat->volume_axis_y.x;
+      constants.material_params3[1] = mat->volume_axis_y.y;
+      constants.material_params3[2] = mat->volume_axis_y.z;
+      constants.material_params3[3] = mat->volume_density;
+      constants.material_params4[0] = mat->volume_axis_z.x;
+      constants.material_params4[1] = mat->volume_axis_z.y;
+      constants.material_params4[2] = mat->volume_axis_z.z;
+	      constants.material_params4[3] = mat->volume_scattering;
+	      constants.material_params5[0] = mat->volume_distortion_strength;
+	      constants.material_params5[1] = mat->volume_noise_strength;
+	      constants.material_params5[2] = 0.0f;
+	      constants.material_params5[3] = 0.0f;
     } else {
       constants.material_params1[0] = mat ? mat->shell_interior_strength : 0.4f;
       constants.material_params1[1] = mat ? mat->shell_highlight_strength : 1.0f;
@@ -974,11 +1059,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params2[2] = mat->screen_radius_x;
       constants.material_params2[3] = mat->screen_radius_y;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
-      constants.material_params2[0] = mat->volume_density;
-      constants.material_params2[1] = mat->wave_distortion_strength;
-      constants.material_params2[2] = mat->wave_noise_strength;
-      constants.material_params2[3] = 0.0f;
+               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+      // Volumetric solids pack params 2-5 above with shape axes and optical data.
     } else {
       constants.material_params2[0] = (mat && mat->analytic_sphere_normals) ? 1.0f : 0.0f;
       constants.material_params2[1] = mat ? mat->shell_body_strength : 1.0f;
@@ -1114,8 +1196,31 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
                                 const ForwardBatchKey& key,
                                 Diligent::Uint32 instance_count,
                                 Diligent::IBuffer*& bound_index_buffer) {
+    auto log_draw = [&](const char* draw_kind) {
+      if (!draw_debug) {
+        return;
+      }
+      std::fprintf(stderr,
+                   "[Karma][DrawDebug] pass=transparent-forward kind=%s mesh=%u material=%u "
+                   "indexed=%s skinned=%s vertices=%u mesh_indices=%u "
+                   "first_index=%u draw_indices=%u instances=%u vb=%s ib=%s\n",
+                   draw_kind,
+                   key.mesh,
+                   key.material,
+                   key.indexed ? "true" : "false",
+                   key.skinned ? "true" : "false",
+                   mesh.vertex_count,
+                   mesh.index_count,
+                   key.index_offset,
+                   key.index_count,
+                   instance_count,
+                   mesh.vertex_buffer ? "yes" : "no",
+                   mesh.index_buffer ? "yes" : "no");
+      std::fflush(stderr);
+    };
     if (key.indexed) {
       if (!is_valid_indexed_draw(mesh, key.index_offset, key.index_count)) {
+        log_draw("invalid-indexed-skip");
         return false;
       }
       Diligent::IBuffer* index_buffer = mesh.index_buffer.RawPtr();
@@ -1131,6 +1236,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       indexed.FirstIndexLocation = key.index_offset;
       indexed.NumInstances = instance_count;
       indexed.Flags = kHotPathDrawFlags;
+      log_draw("indexed");
       context_->DrawIndexed(indexed);
       return true;
     }
@@ -1139,6 +1245,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     draw_attrs.NumVertices = mesh.vertex_count;
     draw_attrs.NumInstances = instance_count;
     draw_attrs.Flags = kHotPathDrawFlags;
+    log_draw("non-indexed");
     context_->Draw(draw_attrs);
     return true;
   };
@@ -1203,7 +1310,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, pipeline);
     if (mat &&
         (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-         mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) &&
+         mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) &&
         srb) {
       Diligent::ITextureView* desired_scene_color =
           scene_color_sample_srv ? scene_color_sample_srv : default_base_color_;
@@ -1265,7 +1372,7 @@ bool DiligentBackend::forwardDrawsRequireSceneColorCopy(
     }
     const auto& mat = mat_it->second;
     if (mat.shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-        mat.shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSphere) {
+        mat.shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
       return true;
     }
   }

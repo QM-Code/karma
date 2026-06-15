@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "emitters": [
     {
       "texture": "orb_arc_atlas",
@@ -64,7 +64,7 @@
         "angular_velocity_min": -2.5,
         "angular_velocity_max": 2.5
       },
-      "spawn": {
+      "source": {
         "shape": "sphere",
         "box_extents": [
           0.0,

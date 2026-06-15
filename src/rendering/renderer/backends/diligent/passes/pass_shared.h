@@ -35,6 +35,18 @@ struct alignas(16) ParticleSimComputeConstants {
   float rotation_params[4];
   float spawn_box[4];
   float spawn_sphere[4];
+  float source_params0[4];
+  float source_params1[4];
+  float source_params2[4];
+  float source_mesh[4];
+  float source_path0[4];
+  float source_path1[4];
+  float source_path2[4];
+  float source_path3[4];
+  float source_path4[4];
+  float source_path5[4];
+  float source_path6[4];
+  float source_path7[4];
   float velocity_min[4];
   float velocity_max[4];
   float acceleration_drag[4];
@@ -51,6 +63,12 @@ struct ParticleVertex {
 
 using ParticleInstanceGpu = renderer::ParticlePackedInstance;
 
+struct alignas(16) ParticleGpuMeshSample {
+  float p0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float p1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float p2[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
 struct alignas(16) ParticleGpuEmitterDesc {
   float position[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float rotation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -62,6 +80,18 @@ struct alignas(16) ParticleGpuEmitterDesc {
   float rotation_params[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float spawn_box[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float spawn_sphere[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_params0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_params1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_params2[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_mesh[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path2[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path3[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path4[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path5[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path6[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float source_path7[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float velocity_min[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float velocity_max[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float acceleration_drag[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -77,9 +107,9 @@ struct alignas(16) ParticleGpuEmitterDesc {
   uint32_t emitter_index = 0u;
   uint32_t emitter_state_index = 0u;
   uint32_t material_id = 0u;
+  uint32_t source_mesh_sample_offset = 0u;
+  uint32_t source_mesh_sample_count = 0u;
   uint32_t pad0 = 0u;
-  uint32_t pad1 = 0u;
-  uint32_t pad2 = 0u;
 };
 
 struct alignas(16) ParticleGpuEmitterState {

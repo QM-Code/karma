@@ -14,17 +14,17 @@ class GraphicsDevice;
 namespace karma::volumes {
 
 /// \ingroup karma_volumes
-/// Per-frame analytic volume sphere visual system.
+/// Per-frame analytic volumetric solid visual system.
 ///
 /// The system creates/updates renderer proxy entities for source
-/// `VolumeSphereComponent` entities.
-class VolumeSphereSystem {
+/// `VolumetricComponent` entities.
+class VolumeSystem {
  public:
-  explicit VolumeSphereSystem(renderer::GraphicsDevice* device);
-  ~VolumeSphereSystem();
+  explicit VolumeSystem(renderer::GraphicsDevice* device);
+  ~VolumeSystem();
 
-  VolumeSphereSystem(const VolumeSphereSystem&) = delete;
-  VolumeSphereSystem& operator=(const VolumeSphereSystem&) = delete;
+  VolumeSystem(const VolumeSystem&) = delete;
+  VolumeSystem& operator=(const VolumeSystem&) = delete;
 
   void update(ecs::World& world, float dt, float interpolation_alpha);
 

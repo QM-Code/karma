@@ -737,12 +737,19 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     const float max_scale =
         std::max({std::abs(emitter.scale.x), std::abs(emitter.scale.y),
                   std::abs(emitter.scale.z), 1.0e-4f});
-    const glm::vec3 box_extents(emitter.spawn_box_extents.x * max_scale,
-                                emitter.spawn_box_extents.y * max_scale,
-                                emitter.spawn_box_extents.z * max_scale);
+    const glm::vec3 box_extents(emitter.source_box_extents.x * max_scale,
+                                emitter.source_box_extents.y * max_scale,
+                                emitter.source_box_extents.z * max_scale);
     float radius = glm::length(box_extents);
-    radius = std::max(radius, std::max(emitter.spawn_radius_min,
-                                       emitter.spawn_radius_max) * max_scale);
+    radius = std::max(radius, std::max(emitter.source_radius_min,
+                                       emitter.source_radius_max) * max_scale);
+    radius = std::max(radius, std::max(emitter.source_inner_radius,
+                                       emitter.source_outer_radius) * max_scale);
+    radius = std::max(radius, emitter.source_height * 0.5f * max_scale);
+    radius = std::max(radius, emitter.source_mesh_bounds_radius * max_scale);
+    for (const math::Vec3& point : emitter.source_path_points) {
+      radius = std::max(radius, glm::length(glm::vec3(point.x, point.y, point.z)) * max_scale);
+    }
 
     const glm::vec3 velocity_min(emitter.velocity_min.x,
                                  emitter.velocity_min.y,
@@ -808,6 +815,60 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
            std::abs(horizontal) <= horizontal_limit;
   };
 
+  auto fill_source_data = [](auto& constants, const renderer::ParticleEmitterGpuDesc& emitter) {
+    constants.spawn_box[0] = emitter.source_box_extents.x;
+    constants.spawn_box[1] = emitter.source_box_extents.y;
+    constants.spawn_box[2] = emitter.source_box_extents.z;
+    constants.spawn_box[3] = static_cast<float>(static_cast<uint32_t>(emitter.source_shape));
+    constants.spawn_sphere[0] = emitter.source_radius_min;
+    constants.spawn_sphere[1] = emitter.source_radius_max;
+    constants.spawn_sphere[2] = emitter.radial_speed_min;
+    constants.spawn_sphere[3] = emitter.radial_speed_max;
+    constants.source_params0[0] = emitter.source_inner_radius;
+    constants.source_params0[1] = emitter.source_outer_radius;
+    constants.source_params0[2] = emitter.source_angle;
+    constants.source_params0[3] = emitter.source_jitter_radius;
+    constants.source_params1[0] = emitter.source_height;
+    constants.source_params1[1] = emitter.source_dimensions.x;
+    constants.source_params1[2] = emitter.source_dimensions.y;
+    constants.source_params1[3] = emitter.source_closed_loop ? 1.0f : 0.0f;
+    constants.source_params2[0] = static_cast<float>(
+        std::min<std::size_t>(emitter.source_path_points.size(), 8u));
+    constants.source_params2[1] =
+        static_cast<float>(static_cast<uint32_t>(emitter.source_sampling));
+    constants.source_params2[2] =
+        static_cast<float>(static_cast<uint32_t>(emitter.source_distribution));
+    constants.source_params2[3] = emitter.source_dimensions.z;
+    constants.source_mesh[0] = emitter.source_mesh_bounds_center.x;
+    constants.source_mesh[1] = emitter.source_mesh_bounds_center.y;
+    constants.source_mesh[2] = emitter.source_mesh_bounds_center.z;
+    constants.source_mesh[3] = emitter.source_mesh_bounds_radius;
+
+    float* paths[] = {
+        constants.source_path0,
+        constants.source_path1,
+        constants.source_path2,
+        constants.source_path3,
+        constants.source_path4,
+        constants.source_path5,
+        constants.source_path6,
+        constants.source_path7,
+    };
+    for (std::size_t i = 0u; i < 8u; ++i) {
+      paths[i][0] = 0.0f;
+      paths[i][1] = 0.0f;
+      paths[i][2] = 0.0f;
+      paths[i][3] = 0.0f;
+      if (i < emitter.source_path_points.size()) {
+        const math::Vec3& point = emitter.source_path_points[i];
+        paths[i][0] = point.x;
+        paths[i][1] = point.y;
+        paths[i][2] = point.z;
+        paths[i][3] = 1.0f;
+      }
+    }
+  };
+
   auto fill_sim_constants = [&](const GpuEmitterDraw& draw,
                                 ParticleSimComputeConstants& constants) {
     const auto& emitter = draw.submission->desc;
@@ -854,14 +915,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     constants.rotation_params[1] = emitter.initial_rotation_max;
     constants.rotation_params[2] = emitter.angular_velocity_min;
     constants.rotation_params[3] = emitter.angular_velocity_max;
-    constants.spawn_box[0] = emitter.spawn_box_extents.x;
-    constants.spawn_box[1] = emitter.spawn_box_extents.y;
-    constants.spawn_box[2] = emitter.spawn_box_extents.z;
-    constants.spawn_box[3] = static_cast<float>(static_cast<uint32_t>(emitter.spawn_shape));
-    constants.spawn_sphere[0] = emitter.spawn_radius_min;
-    constants.spawn_sphere[1] = emitter.spawn_radius_max;
-    constants.spawn_sphere[2] = emitter.radial_speed_min;
-    constants.spawn_sphere[3] = emitter.radial_speed_max;
+    fill_source_data(constants, emitter);
     constants.velocity_min[0] = emitter.velocity_min.x;
     constants.velocity_min[1] = emitter.velocity_min.y;
     constants.velocity_min[2] = emitter.velocity_min.z;
@@ -927,6 +981,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
 
   thread_local std::vector<PersistentGpuParticleGroup> persistent_gpu_groups;
   thread_local std::vector<ParticleGpuEmitterDesc> persistent_gpu_emitters;
+  thread_local std::vector<ParticleGpuMeshSample> persistent_gpu_mesh_samples;
   thread_local std::vector<uint64_t> persistent_gpu_instance_ids;
   thread_local std::vector<ParticleGpuMaterialGroup> persistent_gpu_material_groups;
   thread_local std::vector<ParticleGpuMaterialRecord> persistent_gpu_material_records;
@@ -1394,6 +1449,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     record_particle_gpu_allocator_stats();
     persistent_gpu_groups.clear();
     persistent_gpu_emitters.clear();
+    persistent_gpu_mesh_samples.clear();
     persistent_gpu_instance_ids.clear();
     persistent_gpu_material_groups.clear();
     persistent_gpu_material_records.clear();
@@ -1593,6 +1649,33 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       return static_cast<uint32_t>(persistent_gpu_groups.size() - 1u);
     };
 
+    auto append_mesh_source_samples =
+        [&](ParticleGpuEmitterDesc& gpu_desc,
+            const renderer::ParticleEmitterGpuDesc& emitter) {
+          if (emitter.source_shape != renderer::ParticleSourceShape::MeshSurface ||
+              emitter.source_mesh == renderer::kInvalidMesh) {
+            return true;
+          }
+          const auto mesh_it = meshes_.find(emitter.source_mesh);
+          if (mesh_it == meshes_.end() || mesh_it->second.particle_source_samples.empty()) {
+            return true;
+          }
+          const auto& samples = mesh_it->second.particle_source_samples;
+          if (samples.size() > static_cast<std::size_t>(std::numeric_limits<uint32_t>::max()) ||
+              persistent_gpu_mesh_samples.size() >
+                  static_cast<std::size_t>(std::numeric_limits<uint32_t>::max()) - samples.size()) {
+            return false;
+          }
+
+          gpu_desc.source_mesh_sample_offset =
+              static_cast<uint32_t>(persistent_gpu_mesh_samples.size());
+          gpu_desc.source_mesh_sample_count = static_cast<uint32_t>(samples.size());
+          persistent_gpu_mesh_samples.insert(persistent_gpu_mesh_samples.end(),
+                                             samples.begin(),
+                                             samples.end());
+          return true;
+        };
+
     for (const auto& submission : particle_emitter_submissions_) {
       const auto& emitter = submission.desc;
       if (emitter.layer != layer || emitter.max_particles == 0u) {
@@ -1667,14 +1750,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       gpu_desc.rotation_params[1] = emitter.initial_rotation_max;
       gpu_desc.rotation_params[2] = emitter.angular_velocity_min;
       gpu_desc.rotation_params[3] = emitter.angular_velocity_max;
-      gpu_desc.spawn_box[0] = emitter.spawn_box_extents.x;
-      gpu_desc.spawn_box[1] = emitter.spawn_box_extents.y;
-      gpu_desc.spawn_box[2] = emitter.spawn_box_extents.z;
-      gpu_desc.spawn_box[3] = static_cast<float>(static_cast<uint32_t>(emitter.spawn_shape));
-      gpu_desc.spawn_sphere[0] = emitter.spawn_radius_min;
-      gpu_desc.spawn_sphere[1] = emitter.spawn_radius_max;
-      gpu_desc.spawn_sphere[2] = emitter.radial_speed_min;
-      gpu_desc.spawn_sphere[3] = emitter.radial_speed_max;
+      fill_source_data(gpu_desc, emitter);
       gpu_desc.velocity_min[0] = emitter.velocity_min.x;
       gpu_desc.velocity_min[1] = emitter.velocity_min.y;
       gpu_desc.velocity_min[2] = emitter.velocity_min.z;
@@ -1718,6 +1794,11 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       gpu_desc.emitter_index = static_cast<uint32_t>(persistent_gpu_emitters.size());
       gpu_desc.emitter_state_index = runtime.gpu_emitter_state_index;
       gpu_desc.material_id = material_id;
+      if (!append_mesh_source_samples(gpu_desc, emitter)) {
+        particle_pass_stats_.gpu_allocator_allocation_failures += 1u;
+        particle_pass_stats_.gpu_fallback_active = true;
+        return false;
+      }
       persistent_gpu_emitters.push_back(gpu_desc);
       persistent_gpu_instance_ids.push_back(emitter.instance_id);
     }
@@ -1823,6 +1904,15 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                                 nullptr,
                                                 particle_gpu_material_record_capacity_,
                                                 false)) ||
+        !ensure_particle_gpu_structured_buffer("Karma Particle GPU Mesh Samples",
+                                               persistent_gpu_mesh_samples.size(),
+                                               sizeof(ParticleGpuMeshSample),
+                                               Diligent::BIND_SHADER_RESOURCE,
+                                               particle_gpu_mesh_sample_buffer_,
+                                               std::addressof(particle_gpu_mesh_sample_srv_),
+                                               nullptr,
+                                               particle_gpu_mesh_sample_capacity_,
+                                               false) ||
         !ensure_particle_gpu_structured_buffer("Karma Particle GPU Group Counters",
                                                group_count,
                                                sizeof(uint32_t),
@@ -1903,6 +1993,15 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
           persistent_gpu_material_records.data(),
           Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     }
+    if (!persistent_gpu_mesh_samples.empty() && particle_gpu_mesh_sample_buffer_) {
+      context_->UpdateBuffer(
+          particle_gpu_mesh_sample_buffer_,
+          0,
+          static_cast<Diligent::Uint32>(persistent_gpu_mesh_samples.size() *
+                                        sizeof(ParticleGpuMeshSample)),
+          persistent_gpu_mesh_samples.data(),
+          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    }
 
     ParticleGpuFrameConstants frame_constants{};
     frame_constants.emitter_count = static_cast<uint32_t>(emitter_count);
@@ -1979,6 +2078,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     set_var(particle_gpu_simulate_alive_var_, particle_gpu_alive_list_uav_.RawPtr());
     set_var(particle_gpu_simulate_dead_var_, particle_gpu_dead_list_uav_.RawPtr());
     set_var(particle_gpu_simulate_stats_var_, particle_gpu_stats_uav_.RawPtr());
+    set_var(particle_gpu_simulate_mesh_samples_var_, particle_gpu_mesh_sample_srv_.RawPtr());
     context_->SetPipelineState(particle_gpu_simulate_pso_);
     context_->CommitShaderResources(particle_gpu_simulate_srb_,
                                     Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);

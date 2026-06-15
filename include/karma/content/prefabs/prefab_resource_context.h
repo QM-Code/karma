@@ -22,6 +22,8 @@ struct PrefabResourceContext {
   particles::ParticleLibrary* particle_effects = nullptr;
   std::function<renderer::TextureId(int, int, const void*)> create_texture_rgba8;
   std::function<void(renderer::TextureId)> destroy_texture;
+  std::function<renderer::MeshId(const std::filesystem::path&)> create_mesh_from_file;
+  std::function<void(renderer::MeshId)> destroy_mesh;
 };
 
 /// Binds global services used by `ensurePrefabResourcesLoaded`.

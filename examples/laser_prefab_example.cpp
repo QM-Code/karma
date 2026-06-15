@@ -1,14 +1,41 @@
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace karma::demo {
+
+namespace {
+
+std::string_view laserEffectMode() {
+  const char* raw_mode = std::getenv("KARMA_LASER_EFFECT");
+  if (raw_mode == nullptr || raw_mode[0] == '\0') {
+    return "volumetric";
+  }
+
+  const std::string_view mode{raw_mode};
+  if (mode == "impostor" || mode == "legacy" || mode == "sprite_path") {
+    return "impostor";
+  }
+  return "volumetric";
+}
+
+}  // namespace
 
 class LaserPrefabExample final : public app::GameInterface {
  public:
   void onStart() override {
+    input->bindKey("cam_forward", platform::Key::W);
+    input->bindKey("cam_backward", platform::Key::S);
+    input->bindKey("cam_left", platform::Key::A);
+    input->bindKey("cam_right", platform::Key::D);
+    input->bindMouse("cam_pan", platform::MouseButton::Right);
+
     world_mesh_ = resolveExampleAssetPath("world.glb").string();
     environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
 
@@ -20,7 +47,48 @@ class LaserPrefabExample final : public app::GameInterface {
 
   void onFixedUpdate(float dt) override { (void)dt; }
 
-  void onUpdate(float dt) override { (void)dt; }
+  void onUpdate(float dt) override {
+    if (!world->isAlive(camera_entity_)) {
+      return;
+    }
+
+    const float look_sensitivity = 0.0008f;
+    const float move_speed = 18.0f;
+    const float smoothing = 20.0f;
+
+    if (input->actionDown("cam_pan")) {
+      target_camera_yaw_ -= input->mouseDeltaX() * look_sensitivity;
+      target_camera_pitch_ -= input->mouseDeltaY() * look_sensitivity;
+    }
+    target_camera_pitch_ = std::clamp(target_camera_pitch_, -1.55f, 1.55f);
+
+    const float alpha = 1.0f - std::exp(-smoothing * dt);
+    camera_yaw_ += (target_camera_yaw_ - camera_yaw_) * alpha;
+    camera_pitch_ += (target_camera_pitch_ - camera_pitch_) * alpha;
+
+    auto& camera_transform = world->get<components::TransformComponent>(camera_entity_);
+    const math::Quat camera_rotation = math::fromYawPitch(camera_yaw_, camera_pitch_);
+    const math::Vec3 forward =
+        math::normalize(math::rotateVec(camera_rotation, {0.0f, 0.0f, -1.0f}));
+    const math::Vec3 up{0.0f, 1.0f, 0.0f};
+    const math::Vec3 right = math::normalize(math::cross(forward, up));
+
+    float forward_input = 0.0f;
+    float right_input = 0.0f;
+    if (input->actionDown("cam_forward")) forward_input += 1.0f;
+    if (input->actionDown("cam_backward")) forward_input -= 1.0f;
+    if (input->actionDown("cam_right")) right_input += 1.0f;
+    if (input->actionDown("cam_left")) right_input -= 1.0f;
+
+    math::Vec3 camera_position = camera_transform.getPosition();
+    camera_position.x +=
+        (forward.x * forward_input + right.x * right_input) * move_speed * dt;
+    camera_position.y += forward.y * forward_input * move_speed * dt;
+    camera_position.z +=
+        (forward.z * forward_input + right.z * right_input) * move_speed * dt;
+    camera_transform.setPosition(camera_position);
+    camera_transform.setRotation(camera_rotation);
+  }
 
   void onShutdown() override {}
 
@@ -60,9 +128,14 @@ class LaserPrefabExample final : public app::GameInterface {
   void spawnCamera() {
     const ecs::Entity camera = world->createEntity();
     world->setName(camera, "Camera");
+    camera_entity_ = camera;
+    camera_yaw_ = 0.02f;
+    target_camera_yaw_ = camera_yaw_;
+    camera_pitch_ = -0.34f;
+    target_camera_pitch_ = camera_pitch_;
     components::TransformComponent camera_transform{};
     camera_transform.setPosition({1.4f, 9.0f, 22.0f});
-    camera_transform.setRotation(math::fromYawPitch(0.02f, -0.34f));
+    camera_transform.setRotation(math::fromYawPitch(camera_yaw_, camera_pitch_));
     components::CameraComponent camera_component{};
     camera_component.near_clip = 0.05f;
     camera_component.far_clip = 200.0f;
@@ -73,24 +146,32 @@ class LaserPrefabExample final : public app::GameInterface {
   }
 
   void spawnBeam() {
+    const std::string_view effect_mode = laserEffectMode();
+    const std::string prefab_path =
+        effect_mode == "impostor" ? "prefabs/beam_impostor" : "prefabs/beam";
     prefabs::instantiatePrefab(
         *world,
         *scene,
-        resolveExampleAssetPath("prefabs/beam"),
+        resolveExampleAssetPath(prefab_path),
         prefabs::PrefabInstantiateDesc{
-            .name_override = "Prefab Laser",
+            .name_override =
+                effect_mode == "impostor" ? "Prefab Laser Impostor" : "Prefab Laser",
         });
   }
 
   std::string world_mesh_;
   std::string environment_map_;
+  ecs::Entity camera_entity_{};
+  float camera_yaw_ = 0.0f;
+  float camera_pitch_ = 0.0f;
+  float target_camera_yaw_ = 0.0f;
+  float target_camera_pitch_ = 0.0f;
 };
 
 }  // namespace karma::demo
 
 int main() {
   karma::app::EngineApp engine;
-  engine.addRuntimeModule(std::make_unique<karma::beams::BeamPathRuntimeModule>());
   karma::demo::LaserPrefabExample game;
 
   karma::app::EngineConfig config;
@@ -107,6 +188,8 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.0f;
   config.lighting_exposure = 0.95f;
+
+  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeRuntimeModule>());
 
   engine.start(game, config);
   while (engine.isRunning()) {

@@ -139,6 +139,14 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     add_dependencies(karma_prefab_gallery_example karma_fix_xxhash)
   endif()
 
+  add_executable(karma_prefab_particle_isolation_example
+    examples/prefab_particle_isolation_example.cpp
+  )
+  target_link_libraries(karma_prefab_particle_isolation_example PRIVATE karma::graphical)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_prefab_particle_isolation_example karma_fix_xxhash)
+  endif()
+
   add_executable(karma_explosion_stress_example
     examples/explosion_stress_example.cpp
   )

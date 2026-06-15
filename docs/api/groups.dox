@@ -154,19 +154,9 @@ binds entities to effect keys and can apply per-instance overrides.
 */
 
 /**
-\defgroup karma_beams Beams
-\ingroup karma_features
-Beam path authoring helpers and runtime module support.
-
-Beam paths are ECS-authored visual effects built from path points, particles,
-optional lights, shimmer, and distortion. Register the runtime module before
-startup when a scene contains BeamPathComponent entities.
-*/
-
-/**
 \defgroup karma_volumes Volumes
 \ingroup karma_features
-Analytic volume-sphere feature runtime and system APIs.
+Analytic volumetric-solid feature runtime and system APIs.
 
 Volume spheres are authored as ECS data and rendered through the renderer's
 transparent volume path.

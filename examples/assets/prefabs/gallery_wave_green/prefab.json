@@ -31,10 +31,12 @@
           "rotation": [0, 0, 0, 1],
           "scale": [1, 1, 1]
         },
-        "VolumeSphereComponent": {
+        "VolumetricComponent": {
+          "shape": "sphere",
           "color": [0.2, 1, 0.36, 1],
           "emissive_color": [0.48, 2.4, 0.864, 1],
           "radius": 2.4,
+          "density": 0.201580,
           "center_opacity": 0.62,
           "distortion_strength": 1.8,
           "noise_strength": 1,

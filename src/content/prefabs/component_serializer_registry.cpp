@@ -1,11 +1,13 @@
 #include "karma/content/prefabs/component_serializer_registry.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string_view>
 #include <utility>
+#include <vector>
 
-#include "karma/world/components/beam_path.h"
 #include "karma/world/components/animator.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/light.h"
@@ -18,7 +20,7 @@
 #include "karma/world/components/tag.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
-#include "karma/world/components/volume_sphere.h"
+#include "karma/world/components/volumetric.h"
 
 namespace karma::prefabs {
 
@@ -285,37 +287,154 @@ std::optional<components::AnimatorMotionType> parseAnimatorMotionType(std::strin
   return std::nullopt;
 }
 
-std::string spawnShapeName(components::ParticleSpawnShape shape) {
+std::string sourceShapeName(components::ParticleSourceShape shape) {
   switch (shape) {
-    case components::ParticleSpawnShape::Box:
+    case components::ParticleSourceShape::Box:
       return "box";
-    case components::ParticleSpawnShape::Sphere:
+    case components::ParticleSourceShape::Sphere:
       return "sphere";
-    case components::ParticleSpawnShape::SphereSurface:
+    case components::ParticleSourceShape::SphereSurface:
       return "sphere_surface";
+    case components::ParticleSourceShape::Disc:
+      return "disc";
+    case components::ParticleSourceShape::Ring:
+      return "ring";
+    case components::ParticleSourceShape::Cylinder:
+      return "cylinder";
+    case components::ParticleSourceShape::Capsule:
+      return "capsule";
+    case components::ParticleSourceShape::Cone:
+      return "cone";
+    case components::ParticleSourceShape::Line:
+      return "line";
+    case components::ParticleSourceShape::Path:
+      return "path";
+    case components::ParticleSourceShape::TrailPath:
+      return "trail_path";
+    case components::ParticleSourceShape::MeshSurface:
+      return "mesh_surface";
   }
   return "box";
 }
 
-bool readSpawnShape(const Json& object, components::ParticleSpawnShape& out) {
-  const auto it = object.find("spawn_shape");
+bool readSourceShapeValue(std::string_view value, components::ParticleSourceShape& out) {
+  if (value == "box") {
+    out = components::ParticleSourceShape::Box;
+    return true;
+  }
+  if (value == "sphere") {
+    out = components::ParticleSourceShape::Sphere;
+    return true;
+  }
+  if (value == "sphere_surface") {
+    out = components::ParticleSourceShape::SphereSurface;
+    return true;
+  }
+  if (value == "disc") {
+    out = components::ParticleSourceShape::Disc;
+    return true;
+  }
+  if (value == "ring") {
+    out = components::ParticleSourceShape::Ring;
+    return true;
+  }
+  if (value == "cylinder") {
+    out = components::ParticleSourceShape::Cylinder;
+    return true;
+  }
+  if (value == "capsule") {
+    out = components::ParticleSourceShape::Capsule;
+    return true;
+  }
+  if (value == "cone") {
+    out = components::ParticleSourceShape::Cone;
+    return true;
+  }
+  if (value == "line") {
+    out = components::ParticleSourceShape::Line;
+    return true;
+  }
+  if (value == "path") {
+    out = components::ParticleSourceShape::Path;
+    return true;
+  }
+  if (value == "trail_path") {
+    out = components::ParticleSourceShape::TrailPath;
+    return true;
+  }
+  if (value == "mesh_surface") {
+    out = components::ParticleSourceShape::MeshSurface;
+    return true;
+  }
+  return false;
+}
+
+bool readSourceShape(const Json& object,
+                     std::string_view key,
+                     components::ParticleSourceShape& out) {
+  const auto it = object.find(key);
   if (it == object.end()) {
     return true;
   }
   if (!it->is_string()) {
     return false;
   }
-  const std::string value = it->get<std::string>();
-  if (value == "box") {
-    out = components::ParticleSpawnShape::Box;
+  return readSourceShapeValue(it->get<std::string>(), out);
+}
+
+std::string sourceSamplingName(components::ParticleSourceSamplingMode sampling) {
+  switch (sampling) {
+    case components::ParticleSourceSamplingMode::Random:
+      return "random";
+    case components::ParticleSourceSamplingMode::Sequential:
+      return "sequential";
+    case components::ParticleSourceSamplingMode::Vertices:
+      return "vertices";
+  }
+  return "random";
+}
+
+bool readSourceSamplingValue(std::string_view value,
+                             components::ParticleSourceSamplingMode& out) {
+  if (value == "random") {
+    out = components::ParticleSourceSamplingMode::Random;
     return true;
   }
-  if (value == "sphere") {
-    out = components::ParticleSpawnShape::Sphere;
+  if (value == "sequential") {
+    out = components::ParticleSourceSamplingMode::Sequential;
     return true;
   }
-  if (value == "sphere_surface") {
-    out = components::ParticleSpawnShape::SphereSurface;
+  if (value == "vertices") {
+    out = components::ParticleSourceSamplingMode::Vertices;
+    return true;
+  }
+  return false;
+}
+
+std::string sourceDistributionName(components::ParticleSourceDistribution distribution) {
+  switch (distribution) {
+    case components::ParticleSourceDistribution::Uniform:
+      return "uniform";
+    case components::ParticleSourceDistribution::Surface:
+      return "surface";
+    case components::ParticleSourceDistribution::Edge:
+      return "edge";
+  }
+  return "uniform";
+}
+
+bool readSourceDistributionValue(std::string_view value,
+                                 components::ParticleSourceDistribution& out) {
+  if (value == "uniform") {
+    out = components::ParticleSourceDistribution::Uniform;
+    return true;
+  }
+  if (value == "surface") {
+    out = components::ParticleSourceDistribution::Surface;
+    return true;
+  }
+  if (value == "edge") {
+    out = components::ParticleSourceDistribution::Edge;
     return true;
   }
   return false;
@@ -969,6 +1088,58 @@ Json serializeParticleEffectOverride(
   if (component.texture_key.has_value()) {
     json["texture_key"] = *component.texture_key;
   }
+  if (component.source_shape.has_value()) {
+    json["source_shape"] = sourceShapeName(*component.source_shape);
+  }
+  if (component.source_box_extents.has_value()) {
+    json["source_box_extents"] = toJson(*component.source_box_extents);
+  }
+  if (component.source_dimensions.has_value()) {
+    json["source_dimensions"] = toJson(*component.source_dimensions);
+  }
+  if (component.source_radius_min.has_value()) {
+    json["source_radius_min"] = *component.source_radius_min;
+  }
+  if (component.source_radius_max.has_value()) {
+    json["source_radius_max"] = *component.source_radius_max;
+  }
+  if (component.source_inner_radius.has_value()) {
+    json["source_inner_radius"] = *component.source_inner_radius;
+  }
+  if (component.source_outer_radius.has_value()) {
+    json["source_outer_radius"] = *component.source_outer_radius;
+  }
+  if (component.source_height.has_value()) {
+    json["source_height"] = *component.source_height;
+  }
+  if (component.source_angle.has_value()) {
+    json["source_angle"] = *component.source_angle;
+  }
+  if (component.source_path_points.has_value()) {
+    Json points = Json::array();
+    for (const math::Vec3& point : *component.source_path_points) {
+      points.push_back(toJson(point));
+    }
+    json["source_path_points"] = std::move(points);
+  }
+  if (component.source_closed_loop.has_value()) {
+    json["source_closed_loop"] = *component.source_closed_loop;
+  }
+  if (component.source_sampling.has_value()) {
+    json["source_sampling"] = sourceSamplingName(*component.source_sampling);
+  }
+  if (component.source_jitter_radius.has_value()) {
+    json["source_jitter_radius"] = *component.source_jitter_radius;
+  }
+  if (component.source_mesh_key.has_value()) {
+    json["source_mesh_key"] = *component.source_mesh_key;
+  }
+  if (component.source_mesh_path.has_value()) {
+    json["source_mesh_path"] = *component.source_mesh_path;
+  }
+  if (component.source_distribution.has_value()) {
+    json["source_distribution"] = sourceDistributionName(*component.source_distribution);
+  }
   return json;
 }
 
@@ -996,6 +1167,104 @@ deserializeParticleEffectOverride(const Json& json) {
       return std::nullopt;
     }
     component.texture_key = it->get<std::string>();
+  }
+  if (const auto it = json.find("source_shape"); it != json.end()) {
+    if (!it->is_string()) {
+      return std::nullopt;
+    }
+    components::ParticleSourceShape shape{};
+    if (!readSourceShapeValue(it->get<std::string>(), shape)) {
+      return std::nullopt;
+    }
+    component.source_shape = shape;
+  }
+  auto readOptionalVec3Field = [&](std::string_view key, std::optional<math::Vec3>& out) {
+    const auto it = json.find(key);
+    if (it == json.end()) {
+      return true;
+    }
+    math::Vec3 value{};
+    if (!readVec3Value(*it, value)) {
+      return false;
+    }
+    out = value;
+    return true;
+  };
+  auto readOptionalFloatField = [&](std::string_view key, std::optional<float>& out) {
+    const auto it = json.find(key);
+    if (it == json.end()) {
+      return true;
+    }
+    float value = 0.0f;
+    if (!readFloatValue(*it, value)) {
+      return false;
+    }
+    out = value;
+    return true;
+  };
+  if (!readOptionalVec3Field("source_box_extents", component.source_box_extents) ||
+      !readOptionalVec3Field("source_dimensions", component.source_dimensions) ||
+      !readOptionalFloatField("source_radius_min", component.source_radius_min) ||
+      !readOptionalFloatField("source_radius_max", component.source_radius_max) ||
+      !readOptionalFloatField("source_inner_radius", component.source_inner_radius) ||
+      !readOptionalFloatField("source_outer_radius", component.source_outer_radius) ||
+      !readOptionalFloatField("source_height", component.source_height) ||
+      !readOptionalFloatField("source_angle", component.source_angle) ||
+      !readOptionalFloatField("source_jitter_radius", component.source_jitter_radius)) {
+    return std::nullopt;
+  }
+  if (const auto it = json.find("source_path_points"); it != json.end()) {
+    if (!it->is_array()) {
+      return std::nullopt;
+    }
+    std::vector<math::Vec3> points;
+    points.reserve(it->size());
+    for (const Json& point_json : *it) {
+      math::Vec3 point{};
+      if (!readVec3Value(point_json, point)) {
+        return std::nullopt;
+      }
+      points.push_back(point);
+    }
+    component.source_path_points = std::move(points);
+  }
+  if (const auto it = json.find("source_closed_loop"); it != json.end()) {
+    if (!it->is_boolean()) {
+      return std::nullopt;
+    }
+    component.source_closed_loop = it->get<bool>();
+  }
+  if (const auto it = json.find("source_sampling"); it != json.end()) {
+    if (!it->is_string()) {
+      return std::nullopt;
+    }
+    components::ParticleSourceSamplingMode sampling{};
+    if (!readSourceSamplingValue(it->get<std::string>(), sampling)) {
+      return std::nullopt;
+    }
+    component.source_sampling = sampling;
+  }
+  if (const auto it = json.find("source_mesh_key"); it != json.end()) {
+    if (!it->is_string()) {
+      return std::nullopt;
+    }
+    component.source_mesh_key = it->get<std::string>();
+  }
+  if (const auto it = json.find("source_mesh_path"); it != json.end()) {
+    if (!it->is_string()) {
+      return std::nullopt;
+    }
+    component.source_mesh_path = it->get<std::string>();
+  }
+  if (const auto it = json.find("source_distribution"); it != json.end()) {
+    if (!it->is_string()) {
+      return std::nullopt;
+    }
+    components::ParticleSourceDistribution distribution{};
+    if (!readSourceDistributionValue(it->get<std::string>(), distribution)) {
+      return std::nullopt;
+    }
+    component.source_distribution = distribution;
   }
   return component;
 }
@@ -1063,131 +1332,98 @@ std::optional<components::LightPulseComponent> deserializeLightPulse(const Json&
   return component;
 }
 
-Json serializeBeamPath(const components::BeamPathComponent& component) {
-  Json points = Json::array();
-  for (const math::Vec3& point : component.points) {
-    points.push_back(toJson(point));
+float computeVolumeDensity(float radius, float center_opacity) {
+  if (center_opacity >= 0.9999f) {
+    return 1000.0f / std::max(radius * 2.0f, 1.0e-4f);
   }
-  return Json{
-      {"points", std::move(points)},
-      {"core_color", toJson(component.core_color)},
-      {"glow_color", toJson(component.glow_color)},
-      {"core_radius", component.core_radius},
-      {"glow_radius", component.glow_radius},
-      {"core_intensity", component.core_intensity},
-      {"glow_intensity", component.glow_intensity},
-      {"endpoint_core_size", component.endpoint_core_size},
-      {"endpoint_glow_size", component.endpoint_glow_size},
-      {"light_count", component.light_count},
-      {"light_intensity", component.light_intensity},
-      {"light_range", component.light_range},
-      {"light_spacing", component.light_spacing},
-      {"electric_intensity", component.electric_intensity},
-      {"electric_size", component.electric_size},
-      {"electric_spacing", component.electric_spacing},
-      {"electric_jitter_radius", component.electric_jitter_radius},
-      {"electric_speed", component.electric_speed},
-      {"distortion_intensity", component.distortion_intensity},
-      {"distortion_size", component.distortion_size},
-      {"distortion_spacing", component.distortion_spacing},
-      {"distortion_jitter_radius", component.distortion_jitter_radius},
-      {"distortion_strength", component.distortion_strength},
-      {"distortion_soft_particle_distance", component.distortion_soft_particle_distance},
-      {"distortion_speed", component.distortion_speed},
-      {"layer", component.layer},
-      {"visible", component.visible},
-      {"depth_test", component.depth_test},
-      {"closed_loop", component.closed_loop},
-      {"world_space", component.world_space},
-      {"endpoint_flares", component.endpoint_flares},
-  };
+  const float clamped_opacity = std::clamp(center_opacity, 0.001f, 0.999f);
+  const float center_transmittance = 1.0f - clamped_opacity;
+  return -std::log(center_transmittance) / std::max(radius * 2.0f, 1.0e-4f);
 }
 
-std::optional<components::BeamPathComponent> deserializeBeamPath(const Json& json) {
-  if (!json.is_object()) {
-    return std::nullopt;
+std::string volumetricShapeName(components::VolumetricShape shape) {
+  switch (shape) {
+    case components::VolumetricShape::Sphere:
+      return "sphere";
+    case components::VolumetricShape::Capsule:
+      return "capsule";
   }
-  components::BeamPathComponent component{};
-  const auto points_it = json.find("points");
-  if (points_it != json.end()) {
-    if (!points_it->is_array()) {
-      return std::nullopt;
-    }
-    component.points.clear();
-    for (const Json& point_json : *points_it) {
-      math::Vec3 point{};
-      if (!readVec3Value(point_json, point)) {
-        return std::nullopt;
-      }
-      component.points.push_back(point);
-    }
-  }
-  if (!readColor(json, "core_color", component.core_color) ||
-      !readColor(json, "glow_color", component.glow_color) ||
-      !readFloat(json, "core_radius", component.core_radius) ||
-      !readFloat(json, "glow_radius", component.glow_radius) ||
-      !readFloat(json, "core_intensity", component.core_intensity) ||
-      !readFloat(json, "glow_intensity", component.glow_intensity) ||
-      !readFloat(json, "endpoint_core_size", component.endpoint_core_size) ||
-      !readFloat(json, "endpoint_glow_size", component.endpoint_glow_size) ||
-      !readUint32(json, "light_count", component.light_count) ||
-      !readFloat(json, "light_intensity", component.light_intensity) ||
-      !readFloat(json, "light_range", component.light_range) ||
-      !readFloat(json, "light_spacing", component.light_spacing) ||
-      !readFloat(json, "electric_intensity", component.electric_intensity) ||
-      !readFloat(json, "electric_size", component.electric_size) ||
-      !readFloat(json, "electric_spacing", component.electric_spacing) ||
-      !readFloat(json, "electric_jitter_radius", component.electric_jitter_radius) ||
-      !readFloat(json, "electric_speed", component.electric_speed) ||
-      !readFloat(json, "distortion_intensity", component.distortion_intensity) ||
-      !readFloat(json, "distortion_size", component.distortion_size) ||
-      !readFloat(json, "distortion_spacing", component.distortion_spacing) ||
-      !readFloat(json, "distortion_jitter_radius", component.distortion_jitter_radius) ||
-      !readFloat(json, "distortion_strength", component.distortion_strength) ||
-      !readFloat(json,
-                 "distortion_soft_particle_distance",
-                 component.distortion_soft_particle_distance) ||
-      !readFloat(json, "distortion_speed", component.distortion_speed) ||
-      !readUint32(json, "layer", component.layer) ||
-      !readBool(json, "visible", component.visible) ||
-      !readBool(json, "depth_test", component.depth_test) ||
-      !readBool(json, "closed_loop", component.closed_loop) ||
-      !readBool(json, "world_space", component.world_space) ||
-      !readBool(json, "endpoint_flares", component.endpoint_flares)) {
-    return std::nullopt;
-  }
-  return component;
+  return "sphere";
 }
 
-Json serializeVolumeSphere(const components::VolumeSphereComponent& component) {
+bool readVolumetricShape(const Json& object, components::VolumetricShape& out) {
+  const auto it = object.find("shape");
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "sphere") {
+    out = components::VolumetricShape::Sphere;
+    return true;
+  }
+  if (value == "capsule") {
+    out = components::VolumetricShape::Capsule;
+    return true;
+  }
+  return false;
+}
+
+Json serializeVolumetric(const components::VolumetricComponent& component) {
   return Json{
+      {"shape", volumetricShapeName(component.shape)},
       {"color", toJson(component.color)},
       {"emissive_color", toJson(component.emissive_color)},
-      {"radius", component.radius},
+      {"density", component.density},
       {"center_opacity", component.center_opacity},
+      {"scattering", component.scattering},
+      {"anisotropy", component.anisotropy},
+      {"absorption", component.absorption},
       {"distortion_strength", component.distortion_strength},
       {"noise_strength", component.noise_strength},
-      {"overlay_depth", component.overlay_depth},
-      {"visible", component.visible},
+      {"radius", component.radius},
+      {"capsule_half_length", component.capsule_half_length},
       {"scale_with_transform", component.scale_with_transform},
+      {"visible", component.visible},
+      {"overlay_depth", component.overlay_depth},
   };
 }
 
-std::optional<components::VolumeSphereComponent> deserializeVolumeSphere(const Json& json) {
+std::optional<components::VolumetricComponent> deserializeVolumetric(const Json& json) {
   if (!json.is_object()) {
     return std::nullopt;
   }
-  components::VolumeSphereComponent component{};
-  if (!readColor(json, "color", component.color) ||
+  components::VolumetricComponent component{};
+  const bool has_density = json.find("density") != json.end();
+  if (!readVolumetricShape(json, component.shape) ||
+      !readColor(json, "color", component.color) ||
       !readColor(json, "emissive_color", component.emissive_color) ||
-      !readFloat(json, "radius", component.radius) ||
+      !readFloat(json, "density", component.density) ||
       !readFloat(json, "center_opacity", component.center_opacity) ||
+      !readFloat(json, "scattering", component.scattering) ||
+      !readFloat(json, "anisotropy", component.anisotropy) ||
+      !readFloat(json, "absorption", component.absorption) ||
       !readFloat(json, "distortion_strength", component.distortion_strength) ||
       !readFloat(json, "noise_strength", component.noise_strength) ||
-      !readFloat(json, "overlay_depth", component.overlay_depth) ||
+      !readFloat(json, "radius", component.radius) ||
+      !readFloat(json, "capsule_half_length", component.capsule_half_length) ||
+      !readBool(json, "scale_with_transform", component.scale_with_transform) ||
       !readBool(json, "visible", component.visible) ||
-      !readBool(json, "scale_with_transform", component.scale_with_transform)) {
+      !readFloat(json, "overlay_depth", component.overlay_depth)) {
     return std::nullopt;
+  }
+  if (component.radius <= 0.0f ||
+      component.capsule_half_length < 0.0f ||
+      component.density < 0.0f ||
+      component.scattering < 0.0f ||
+      component.absorption < 0.0f ||
+      component.overlay_depth <= 0.0f) {
+    return std::nullopt;
+  }
+  if (!has_density) {
+    component.density = computeVolumeDensity(component.radius, component.center_opacity);
   }
   return component;
 }
@@ -1291,10 +1527,8 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       deserializeParticleEffectOverride);
   registerComponent<components::ParticleEmitterComponent>(
       registry, "ParticleEmitterComponent", serializeParticleEmitter, deserializeParticleEmitter);
-  registerComponent<components::BeamPathComponent>(
-      registry, "BeamPathComponent", serializeBeamPath, deserializeBeamPath);
-  registerComponent<components::VolumeSphereComponent>(
-      registry, "VolumeSphereComponent", serializeVolumeSphere, deserializeVolumeSphere);
+  registerComponent<components::VolumetricComponent>(
+      registry, "VolumetricComponent", serializeVolumetric, deserializeVolumetric);
 }
 
 void ensureBuiltinComponentSerializers() {

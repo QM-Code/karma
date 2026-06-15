@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <optional>
+#include <string>
+#include <tuple>
 
 #include "karma/core/time.h"
 #include "karma/features/visual/particles/effect_library.h"
@@ -42,6 +45,45 @@ uint64_t hashColor(uint64_t seed, const math::Color& color) {
   return seed;
 }
 
+uint64_t hashString(uint64_t seed, const std::string& value) {
+  for (const char c : value) {
+    seed = hashCombine(seed, static_cast<unsigned char>(c));
+  }
+  return seed;
+}
+
+uint64_t hashVec3(uint64_t seed, const math::Vec3& value) {
+  seed = hashFloat(seed, value.x);
+  seed = hashFloat(seed, value.y);
+  seed = hashFloat(seed, value.z);
+  return seed;
+}
+
+uint64_t hashOptionalVec3(uint64_t seed, const std::optional<math::Vec3>& value) {
+  seed = hashCombine(seed, value.has_value() ? 1ull : 0ull);
+  if (value.has_value()) {
+    seed = hashVec3(seed, *value);
+  }
+  return seed;
+}
+
+uint64_t hashOptionalFloat(uint64_t seed, const std::optional<float>& value) {
+  seed = hashCombine(seed, value.has_value() ? 1ull : 0ull);
+  if (value.has_value()) {
+    seed = hashFloat(seed, *value);
+  }
+  return seed;
+}
+
+template <typename Enum>
+uint64_t hashOptionalEnum(uint64_t seed, const std::optional<Enum>& value) {
+  seed = hashCombine(seed, value.has_value() ? 1ull : 0ull);
+  if (value.has_value()) {
+    seed = hashCombine(seed, static_cast<uint64_t>(*value));
+  }
+  return seed;
+}
+
 uint64_t hashParticleEffectOverride(
     const components::ParticleEffectOverrideComponent* effect_override) {
   if (effect_override == nullptr || !effect_override->active) {
@@ -67,10 +109,39 @@ uint64_t hashParticleEffectOverride(
   }
   seed = hashCombine(seed, effect_override->texture_key.has_value() ? 1ull : 0ull);
   if (effect_override->texture_key.has_value()) {
-    for (const char c : *effect_override->texture_key) {
-      seed = hashCombine(seed, static_cast<unsigned char>(c));
+    seed = hashString(seed, *effect_override->texture_key);
+  }
+  seed = hashOptionalEnum(seed, effect_override->source_shape);
+  seed = hashOptionalVec3(seed, effect_override->source_box_extents);
+  seed = hashOptionalVec3(seed, effect_override->source_dimensions);
+  seed = hashOptionalFloat(seed, effect_override->source_radius_min);
+  seed = hashOptionalFloat(seed, effect_override->source_radius_max);
+  seed = hashOptionalFloat(seed, effect_override->source_inner_radius);
+  seed = hashOptionalFloat(seed, effect_override->source_outer_radius);
+  seed = hashOptionalFloat(seed, effect_override->source_height);
+  seed = hashOptionalFloat(seed, effect_override->source_angle);
+  seed = hashCombine(seed, effect_override->source_path_points.has_value() ? 1ull : 0ull);
+  if (effect_override->source_path_points.has_value()) {
+    seed = hashCombine(seed, effect_override->source_path_points->size());
+    for (const math::Vec3& point : *effect_override->source_path_points) {
+      seed = hashVec3(seed, point);
     }
   }
+  seed = hashCombine(seed, effect_override->source_closed_loop.has_value() ? 1ull : 0ull);
+  if (effect_override->source_closed_loop.has_value()) {
+    seed = hashCombine(seed, *effect_override->source_closed_loop ? 1ull : 0ull);
+  }
+  seed = hashOptionalEnum(seed, effect_override->source_sampling);
+  seed = hashOptionalFloat(seed, effect_override->source_jitter_radius);
+  seed = hashCombine(seed, effect_override->source_mesh_key.has_value() ? 1ull : 0ull);
+  if (effect_override->source_mesh_key.has_value()) {
+    seed = hashString(seed, *effect_override->source_mesh_key);
+  }
+  seed = hashCombine(seed, effect_override->source_mesh_path.has_value() ? 1ull : 0ull);
+  if (effect_override->source_mesh_path.has_value()) {
+    seed = hashString(seed, *effect_override->source_mesh_path);
+  }
+  seed = hashOptionalEnum(seed, effect_override->source_distribution);
   return seed;
 }
 
@@ -97,11 +168,18 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   emitter.start_size_max *= size_scale;
   emitter.end_size_min *= size_scale;
   emitter.end_size_max *= size_scale;
-  emitter.spawn_box_extents.x *= radius_scale;
-  emitter.spawn_box_extents.y *= radius_scale;
-  emitter.spawn_box_extents.z *= radius_scale;
-  emitter.spawn_radius_min *= radius_scale;
-  emitter.spawn_radius_max *= radius_scale;
+  emitter.source_box_extents.x *= radius_scale;
+  emitter.source_box_extents.y *= radius_scale;
+  emitter.source_box_extents.z *= radius_scale;
+  emitter.source_dimensions.x *= radius_scale;
+  emitter.source_dimensions.y *= radius_scale;
+  emitter.source_dimensions.z *= radius_scale;
+  emitter.source_radius_min *= radius_scale;
+  emitter.source_radius_max *= radius_scale;
+  emitter.source_inner_radius *= radius_scale;
+  emitter.source_outer_radius *= radius_scale;
+  emitter.source_height *= radius_scale;
+  emitter.source_jitter_radius *= radius_scale;
   emitter.radial_speed_min *= velocity_scale;
   emitter.radial_speed_max *= velocity_scale;
   emitter.velocity_min.x *= velocity_scale;
@@ -127,6 +205,54 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
 
   if (effect_override.texture_key.has_value()) {
     emitter.texture_key = *effect_override.texture_key;
+  }
+  if (effect_override.source_shape.has_value()) {
+    emitter.source_shape = *effect_override.source_shape;
+  }
+  if (effect_override.source_box_extents.has_value()) {
+    emitter.source_box_extents = *effect_override.source_box_extents;
+  }
+  if (effect_override.source_dimensions.has_value()) {
+    emitter.source_dimensions = *effect_override.source_dimensions;
+  }
+  if (effect_override.source_radius_min.has_value()) {
+    emitter.source_radius_min = *effect_override.source_radius_min;
+  }
+  if (effect_override.source_radius_max.has_value()) {
+    emitter.source_radius_max = *effect_override.source_radius_max;
+  }
+  if (effect_override.source_inner_radius.has_value()) {
+    emitter.source_inner_radius = *effect_override.source_inner_radius;
+  }
+  if (effect_override.source_outer_radius.has_value()) {
+    emitter.source_outer_radius = *effect_override.source_outer_radius;
+  }
+  if (effect_override.source_height.has_value()) {
+    emitter.source_height = *effect_override.source_height;
+  }
+  if (effect_override.source_angle.has_value()) {
+    emitter.source_angle = *effect_override.source_angle;
+  }
+  if (effect_override.source_path_points.has_value()) {
+    emitter.source_path_points = *effect_override.source_path_points;
+  }
+  if (effect_override.source_closed_loop.has_value()) {
+    emitter.source_closed_loop = *effect_override.source_closed_loop;
+  }
+  if (effect_override.source_sampling.has_value()) {
+    emitter.source_sampling = *effect_override.source_sampling;
+  }
+  if (effect_override.source_jitter_radius.has_value()) {
+    emitter.source_jitter_radius = *effect_override.source_jitter_radius;
+  }
+  if (effect_override.source_mesh_key.has_value()) {
+    emitter.source_mesh_key = *effect_override.source_mesh_key;
+  }
+  if (effect_override.source_mesh_path.has_value()) {
+    emitter.source_mesh_path = *effect_override.source_mesh_path;
+  }
+  if (effect_override.source_distribution.has_value()) {
+    emitter.source_distribution = *effect_override.source_distribution;
   }
 }
 
@@ -162,29 +288,80 @@ renderer::ParticleShadingMode toRendererShadingMode(components::ParticleShadingM
   return renderer::ParticleShadingMode::Standard;
 }
 
-renderer::ParticleSpawnShape toRendererSpawnShape(components::ParticleSpawnShape shape) {
+renderer::ParticleSourceShape toRendererSourceShape(components::ParticleSourceShape shape) {
   switch (shape) {
-    case components::ParticleSpawnShape::Box:
-      return renderer::ParticleSpawnShape::Box;
-    case components::ParticleSpawnShape::Sphere:
-      return renderer::ParticleSpawnShape::Sphere;
-    case components::ParticleSpawnShape::SphereSurface:
-      return renderer::ParticleSpawnShape::SphereSurface;
+    case components::ParticleSourceShape::Box:
+      return renderer::ParticleSourceShape::Box;
+    case components::ParticleSourceShape::Sphere:
+      return renderer::ParticleSourceShape::Sphere;
+    case components::ParticleSourceShape::SphereSurface:
+      return renderer::ParticleSourceShape::SphereSurface;
+    case components::ParticleSourceShape::Disc:
+      return renderer::ParticleSourceShape::Disc;
+    case components::ParticleSourceShape::Ring:
+      return renderer::ParticleSourceShape::Ring;
+    case components::ParticleSourceShape::Cylinder:
+      return renderer::ParticleSourceShape::Cylinder;
+    case components::ParticleSourceShape::Capsule:
+      return renderer::ParticleSourceShape::Capsule;
+    case components::ParticleSourceShape::Cone:
+      return renderer::ParticleSourceShape::Cone;
+    case components::ParticleSourceShape::Line:
+      return renderer::ParticleSourceShape::Line;
+    case components::ParticleSourceShape::Path:
+      return renderer::ParticleSourceShape::Path;
+    case components::ParticleSourceShape::TrailPath:
+      return renderer::ParticleSourceShape::TrailPath;
+    case components::ParticleSourceShape::MeshSurface:
+      return renderer::ParticleSourceShape::MeshSurface;
   }
-  return renderer::ParticleSpawnShape::Box;
+  return renderer::ParticleSourceShape::Box;
+}
+
+renderer::ParticleSourceSamplingMode toRendererSourceSampling(
+    components::ParticleSourceSamplingMode sampling) {
+  switch (sampling) {
+    case components::ParticleSourceSamplingMode::Random:
+      return renderer::ParticleSourceSamplingMode::Random;
+    case components::ParticleSourceSamplingMode::Sequential:
+      return renderer::ParticleSourceSamplingMode::Sequential;
+    case components::ParticleSourceSamplingMode::Vertices:
+      return renderer::ParticleSourceSamplingMode::Vertices;
+  }
+  return renderer::ParticleSourceSamplingMode::Random;
+}
+
+renderer::ParticleSourceDistribution toRendererSourceDistribution(
+    components::ParticleSourceDistribution distribution) {
+  switch (distribution) {
+    case components::ParticleSourceDistribution::Uniform:
+      return renderer::ParticleSourceDistribution::Uniform;
+    case components::ParticleSourceDistribution::Surface:
+      return renderer::ParticleSourceDistribution::Surface;
+    case components::ParticleSourceDistribution::Edge:
+      return renderer::ParticleSourceDistribution::Edge;
+  }
+  return renderer::ParticleSourceDistribution::Uniform;
 }
 
 renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
     ecs::Entity entity,
+    uint32_t emitter_index,
     const components::ParticleEmitterComponent& emitter,
     const components::TransformComponent& transform,
     renderer::TextureId texture,
+    renderer::MeshId source_mesh,
+    const math::Vec3& source_mesh_bounds_center,
+    float source_mesh_bounds_radius,
     uint32_t restart_count,
     bool visible,
     float dt,
     float interpolation_alpha) {
   renderer::ParticleEmitterGpuDesc desc{};
-  desc.instance_id = entityKey(entity);
+  desc.instance_id = hashCombine(entityKey(entity), static_cast<uint64_t>(emitter_index) + 1ull);
+  if (desc.instance_id == 0u) {
+    desc.instance_id = 1u;
+  }
   desc.restart_count = restart_count;
   desc.delta_seconds = std::max(dt, 0.0f);
   desc.visible = visible;
@@ -240,10 +417,23 @@ renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
   desc.initial_rotation_max = emitter.initial_rotation_max;
   desc.angular_velocity_min = emitter.angular_velocity_min;
   desc.angular_velocity_max = emitter.angular_velocity_max;
-  desc.spawn_shape = toRendererSpawnShape(emitter.spawn_shape);
-  desc.spawn_box_extents = emitter.spawn_box_extents;
-  desc.spawn_radius_min = emitter.spawn_radius_min;
-  desc.spawn_radius_max = emitter.spawn_radius_max;
+  desc.source_shape = toRendererSourceShape(emitter.source_shape);
+  desc.source_box_extents = emitter.source_box_extents;
+  desc.source_dimensions = emitter.source_dimensions;
+  desc.source_radius_min = emitter.source_radius_min;
+  desc.source_radius_max = emitter.source_radius_max;
+  desc.source_inner_radius = emitter.source_inner_radius;
+  desc.source_outer_radius = emitter.source_outer_radius;
+  desc.source_height = emitter.source_height;
+  desc.source_angle = emitter.source_angle;
+  desc.source_path_points = emitter.source_path_points;
+  desc.source_closed_loop = emitter.source_closed_loop;
+  desc.source_sampling = toRendererSourceSampling(emitter.source_sampling);
+  desc.source_jitter_radius = emitter.source_jitter_radius;
+  desc.source_mesh = source_mesh;
+  desc.source_mesh_bounds_center = source_mesh_bounds_center;
+  desc.source_mesh_bounds_radius = source_mesh_bounds_radius;
+  desc.source_distribution = toRendererSourceDistribution(emitter.source_distribution);
   desc.radial_speed_min = emitter.radial_speed_min;
   desc.radial_speed_max = emitter.radial_speed_max;
   desc.velocity_min = emitter.velocity_min;
@@ -333,44 +523,150 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       core::elapsedMilliseconds(sync_start, core::SteadyClock::now());
 
   const auto submit_start = core::SteadyClock::now();
-  world.forEach<components::ParticleEmitterComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
-    const auto& emitter = world.get<components::ParticleEmitterComponent>(entity);
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    frame_stats.simulated_emitters += 1u;
-
+  auto emitter_visible = [&](ecs::Entity entity,
+                             const components::ParticleEmitterComponent& emitter) {
     bool visible = emitter.enabled;
     if (world.has<components::VisibilityComponent>(entity)) {
       visible = visible && world.get<components::VisibilityComponent>(entity).visible;
     }
+    return visible;
+  };
+
+  auto resolve_source_mesh = [&](const components::ParticleEmitterComponent& emitter) {
+    renderer::MeshId mesh = renderer::kInvalidMesh;
+    if (library_ != nullptr && !emitter.source_mesh_key.empty()) {
+      mesh = library_->resolveMeshSourceAlias(emitter.source_mesh_key);
+    }
+    if (mesh == renderer::kInvalidMesh && library_ != nullptr &&
+        !emitter.source_mesh_path.empty()) {
+      mesh = library_->resolveMeshSourceAlias(emitter.source_mesh_path);
+    }
+    math::Vec3 bounds_center{};
+    float bounds_radius = 0.0f;
+    if (device_ != nullptr && mesh != renderer::kInvalidMesh) {
+      glm::vec3 center{0.0f, 0.0f, 0.0f};
+      float radius = 0.0f;
+      if (device_->getMeshBounds(mesh, center, radius)) {
+        bounds_center = {center.x, center.y, center.z};
+        bounds_radius = radius;
+      }
+    }
+    return std::tuple<renderer::MeshId, math::Vec3, float>{mesh, bounds_center, bounds_radius};
+  };
+
+  auto submit_emitter = [&](ecs::Entity entity,
+                            uint32_t emitter_index,
+                            const components::ParticleEmitterComponent& emitter,
+                            const components::TransformComponent& transform,
+                            uint32_t restart_count,
+                            bool visible) {
+    frame_stats.simulated_emitters += 1u;
     if (visible) {
       frame_stats.visible_emitters += 1u;
     } else {
       frame_stats.culled_emitters += 1u;
     }
 
+    if (device_ == nullptr) {
+      return;
+    }
+
+    const renderer::TextureId texture =
+        (library_ != nullptr && !emitter.texture_key.empty())
+            ? library_->resolveTextureAlias(emitter.texture_key)
+            : renderer::kInvalidTexture;
+    const auto [source_mesh, source_mesh_bounds_center, source_mesh_bounds_radius] =
+        resolve_source_mesh(emitter);
+    const renderer::ParticleEmitterGpuDesc desc =
+        makeRendererEmitterDesc(entity,
+                                emitter_index,
+                                emitter,
+                                transform,
+                                texture,
+                                source_mesh,
+                                source_mesh_bounds_center,
+                                source_mesh_bounds_radius,
+                                restart_count,
+                                visible,
+                                dt,
+                                interpolation_alpha);
+    device_->submitParticleEmitter(desc);
+    frame_stats.submitted_emitters += 1u;
+  };
+
+  if (library_ != nullptr) {
+    world.forEach<components::ParticleEffectComponent, components::TransformComponent>(
+        [&](const ecs::Entity entity) {
+      const auto& effect = world.get<components::ParticleEffectComponent>(entity);
+      if (!effect.auto_apply || effect.effect_key.empty()) {
+        return;
+      }
+
+      const ParticleEffectAsset* asset = library_->find(effect.effect_key);
+      if (asset == nullptr || asset->emitters.empty()) {
+        return;
+      }
+
+      const components::ParticleEffectOverrideComponent* effect_override =
+          world.has<components::ParticleEffectOverrideComponent>(entity)
+              ? &world.get<components::ParticleEffectOverrideComponent>(entity)
+              : nullptr;
+      const components::ParticleEmitterComponent* playback_override =
+          world.has<components::ParticleEmitterComponent>(entity)
+              ? &world.get<components::ParticleEmitterComponent>(entity)
+              : nullptr;
+      const auto& transform = world.get<components::TransformComponent>(entity);
+      uint32_t emitter_index = 0u;
+      for (const ParticleEmitterDesc& emitter_desc : asset->emitters) {
+        components::ParticleEmitterComponent emitter = emitter_desc.emitter;
+        if (!emitter_desc.texture_key.empty()) {
+          emitter.texture_key = emitter_desc.texture_key;
+        }
+        if (playback_override != nullptr) {
+          if (effect.preserve_enabled) {
+            emitter.enabled = playback_override->enabled;
+          }
+          if (effect.preserve_playing) {
+            emitter.playing = playback_override->playing;
+          }
+          if (effect.preserve_start_delay) {
+            emitter.start_delay = playback_override->start_delay;
+          }
+        }
+        if (effect_override != nullptr) {
+          applyEffectOverrideToEmitter(*effect_override, emitter);
+        }
+        submit_emitter(entity,
+                       emitter_index,
+                       emitter,
+                       transform,
+                       effect.restart_count,
+                       emitter_visible(entity, emitter));
+        emitter_index += 1u;
+      }
+    });
+  }
+
+  world.forEach<components::ParticleEmitterComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
+    if (world.has<components::ParticleEffectComponent>(entity) &&
+        world.get<components::ParticleEffectComponent>(entity).auto_apply) {
+      return;
+    }
+    const auto& emitter = world.get<components::ParticleEmitterComponent>(entity);
+    const auto& transform = world.get<components::TransformComponent>(entity);
+
     uint32_t restart_count = 0u;
     if (world.has<components::ParticleEffectComponent>(entity)) {
       restart_count = world.get<components::ParticleEffectComponent>(entity).restart_count;
     }
 
-    if (device_ != nullptr) {
-      const renderer::TextureId texture =
-          (library_ != nullptr && !emitter.texture_key.empty())
-              ? library_->resolveTextureAlias(emitter.texture_key)
-              : renderer::kInvalidTexture;
-      const renderer::ParticleEmitterGpuDesc desc =
-          makeRendererEmitterDesc(entity,
-                                  emitter,
-                                  transform,
-                                  texture,
-                                  restart_count,
-                                  visible,
-                                  dt,
-                                  interpolation_alpha);
-      device_->submitParticleEmitter(desc);
-      frame_stats.submitted_emitters += 1u;
-    }
+    submit_emitter(entity,
+                   0u,
+                   emitter,
+                   transform,
+                   restart_count,
+                   emitter_visible(entity, emitter));
   });
   frame_stats.simulation_ms = core::elapsedMilliseconds(submit_start, core::SteadyClock::now());
 

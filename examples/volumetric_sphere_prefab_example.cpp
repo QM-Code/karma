@@ -106,7 +106,7 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeSphereRuntimeModule>());
+  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeRuntimeModule>());
   karma::demo::VolumetricSpherePrefabExample game;
 
   karma::app::EngineConfig config;

@@ -19,11 +19,11 @@ The runtime flow is:
 
 The format is simple and strict:
 
-- JSON document with `"version": 2`
+- JSON document with `"version": 3`
 - one or more entries in an `"emitters"` array
 - required grouped blocks for playback, render, atlas, emission, lifetime, size,
-  rotation, spawn, motion, collision, and color
-- the current ECS binding path consumes the first emitter as the primary emitter
+  rotation, source, motion, collision, and color
+- the ECS binding path retains and submits every emitter in the asset
 - unknown fields are fatal parse errors
 - texture references are aliases, not raw texture paths
 
@@ -49,9 +49,9 @@ The engine already has several pieces that make generation practical:
 - `prefab.json` composition is separate from emitter behavior, which is the
   right model for layered effects.
 
-The best current generation target is a single v2 `.kpeffect` JSON file for one
-emitter layer. The next best target is a prefab directory containing several
-generated `.kpeffect` layers, a `prefab.json` composition file with only effect
+The best current generation target is a v3 `.kpeffect` JSON file with one or
+more emitter layers. The next best target is a prefab directory containing
+generated `.kpeffect` assets, a `prefab.json` composition file with only effect
 bindings/playback defaults, and a `prefab.resources.json` sidecar for
 texture/effect registration.
 
@@ -101,7 +101,7 @@ The generation pipeline should be:
 1. Analyze the image or prompt into high-level visual intent.
 2. Choose one or more known effect archetypes.
 3. Emit a constrained intermediate JSON description.
-4. Map the JSON through presets and safe field ranges into `.kpeffect` v2.
+4. Map the JSON through presets and safe field ranges into `.kpeffect` v3.
 5. Validate and format the generated file.
 6. Optionally generate a prefab directory when the effect needs multiple layers.
 7. Run a preview scene and capture visual/performance feedback.
@@ -170,7 +170,7 @@ Minimum tooling before unattended generation:
 
 Keep the existing authoring split:
 
-- `.kpeffect`: v2 JSON emitter layer, GPU simulation tuning, renderer particle
+- `.kpeffect`: v3 JSON emitter layers, GPU simulation tuning, renderer particle
   state, atlas metadata, texture alias, color/size/lifetime/motion.
 - `prefab.json`: composition of multiple layers, transforms, effect bindings,
   playback defaults, and high-level component overrides.

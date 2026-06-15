@@ -31,8 +31,14 @@ struct TextureResource {
   renderer::TextureId texture = renderer::kInvalidTexture;
 };
 
+struct MeshSourceResource {
+  std::string key;
+  renderer::MeshId mesh = renderer::kInvalidMesh;
+};
+
 struct LoadedPrefabResources {
   std::vector<TextureResource> textures;
+  std::vector<MeshSourceResource> mesh_sources;
   std::vector<std::string> particle_effects;
 };
 
@@ -43,6 +49,7 @@ struct ResourceManifestEntry {
 
 struct ResourceManifest {
   std::vector<ResourceManifestEntry> textures;
+  std::vector<ResourceManifestEntry> mesh_sources;
   std::vector<ResourceManifestEntry> particle_effects;
 };
 
@@ -168,6 +175,7 @@ std::optional<ResourceManifest> loadManifest(const std::filesystem::path& path) 
 
   ResourceManifest manifest{};
   if (!parseEntryArray(json, "textures", manifest.textures, path) ||
+      !parseEntryArray(json, "mesh_sources", manifest.mesh_sources, path) ||
       !parseEntryArray(json, "particle_effects", manifest.particle_effects, path)) {
     return std::nullopt;
   }
@@ -197,16 +205,46 @@ void destroyTexture(renderer::TextureId texture) {
   }
 }
 
+renderer::MeshId loadMeshSource(const std::filesystem::path& path) {
+  if (g_context.create_mesh_from_file) {
+    return g_context.create_mesh_from_file(path);
+  }
+  if (g_context.graphics != nullptr) {
+    return g_context.graphics->createMeshFromFile(path);
+  }
+  return renderer::kInvalidMesh;
+}
+
+void destroyMeshSource(renderer::MeshId mesh) {
+  if (mesh == renderer::kInvalidMesh) {
+    return;
+  }
+  if (g_context.destroy_mesh) {
+    g_context.destroy_mesh(mesh);
+    return;
+  }
+  if (g_context.graphics != nullptr) {
+    g_context.graphics->destroyMesh(mesh);
+  }
+}
+
 void cleanupLoadedResources(LoadedPrefabResources& resources) {
   if (g_context.particle_effects != nullptr) {
     for (const std::string& key : resources.particle_effects) {
       g_context.particle_effects->unregisterEffect(key);
+    }
+    for (const MeshSourceResource& mesh : resources.mesh_sources) {
+      g_context.particle_effects->unregisterMeshSourceAlias(mesh.key);
     }
     for (const TextureResource& texture : resources.textures) {
       g_context.particle_effects->unregisterTextureAlias(texture.key);
     }
   }
 
+  for (MeshSourceResource& mesh : resources.mesh_sources) {
+    destroyMeshSource(mesh.mesh);
+    mesh.mesh = renderer::kInvalidMesh;
+  }
   for (TextureResource& texture : resources.textures) {
     destroyTexture(texture.texture);
     texture.texture = renderer::kInvalidTexture;
@@ -223,9 +261,18 @@ bool loadResources(const std::filesystem::path& directory,
     spdlog::error("Prefab resources '{}' require a graphics context", directory.string());
     return false;
   }
-  if ((!manifest.textures.empty() || !manifest.particle_effects.empty()) &&
+  if ((!manifest.textures.empty() || !manifest.mesh_sources.empty() ||
+       !manifest.particle_effects.empty()) &&
       g_context.particle_effects == nullptr) {
     spdlog::error("Prefab resources '{}' require a particle library context",
+                  directory.string());
+    return false;
+  }
+
+  if (!manifest.mesh_sources.empty() &&
+      g_context.graphics == nullptr &&
+      !g_context.create_mesh_from_file) {
+    spdlog::error("Prefab resources '{}' require a graphics context for mesh sources",
                   directory.string());
     return false;
   }
@@ -259,6 +306,21 @@ bool loadResources(const std::filesystem::path& directory,
     loaded.textures.push_back(TextureResource{
         .key = texture_entry.key,
         .texture = texture,
+    });
+  }
+
+  for (const ResourceManifestEntry& mesh_entry : manifest.mesh_sources) {
+    const std::filesystem::path mesh_path = directory / mesh_entry.path;
+    const renderer::MeshId mesh = loadMeshSource(mesh_path);
+    if (mesh == renderer::kInvalidMesh) {
+      spdlog::error("Prefab mesh source '{}' failed to load", mesh_path.string());
+      cleanupLoadedResources(loaded);
+      return false;
+    }
+    g_context.particle_effects->registerMeshSourceAlias(mesh_entry.key, mesh);
+    loaded.mesh_sources.push_back(MeshSourceResource{
+        .key = mesh_entry.key,
+        .mesh = mesh,
     });
   }
 

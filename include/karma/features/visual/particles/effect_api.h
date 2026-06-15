@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "karma/world/components/particle_effect.h"
 #include "karma/world/components/particle_effect_override.h"
@@ -103,6 +104,42 @@ inline bool setEffectOverrides(ecs::World& world,
   if (!world.isAlive(entity)) {
     return false;
   }
+  world.add(entity, std::move(effect_override));
+  return true;
+}
+
+/// Replaces the source path for one particle-effect instance.
+inline bool setEffectSourcePath(ecs::World& world,
+                                ecs::Entity entity,
+                                std::vector<math::Vec3> points,
+                                bool closed_loop = false) {
+  if (!world.isAlive(entity)) {
+    return false;
+  }
+  components::ParticleEffectOverrideComponent effect_override =
+      world.has<components::ParticleEffectOverrideComponent>(entity)
+          ? world.get<components::ParticleEffectOverrideComponent>(entity)
+          : components::ParticleEffectOverrideComponent{};
+  effect_override.source_shape = components::ParticleSourceShape::Path;
+  effect_override.source_path_points = std::move(points);
+  effect_override.source_closed_loop = closed_loop;
+  world.add(entity, std::move(effect_override));
+  return true;
+}
+
+/// Replaces the source box extents for one particle-effect instance.
+inline bool setEffectSourceBoxExtents(ecs::World& world,
+                                      ecs::Entity entity,
+                                      const math::Vec3& extents) {
+  if (!world.isAlive(entity)) {
+    return false;
+  }
+  components::ParticleEffectOverrideComponent effect_override =
+      world.has<components::ParticleEffectOverrideComponent>(entity)
+          ? world.get<components::ParticleEffectOverrideComponent>(entity)
+          : components::ParticleEffectOverrideComponent{};
+  effect_override.source_shape = components::ParticleSourceShape::Box;
+  effect_override.source_box_extents = extents;
   world.add(entity, std::move(effect_override));
   return true;
 }

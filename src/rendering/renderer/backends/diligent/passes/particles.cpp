@@ -597,6 +597,18 @@ cbuffer ParticleSimConstants
     float4 g_RotationParams;
     float4 g_SpawnBox;
     float4 g_SpawnSphere;
+    float4 g_SourceParams0;
+    float4 g_SourceParams1;
+    float4 g_SourceParams2;
+    float4 g_SourceMesh;
+    float4 g_SourcePath0;
+    float4 g_SourcePath1;
+    float4 g_SourcePath2;
+    float4 g_SourcePath3;
+    float4 g_SourcePath4;
+    float4 g_SourcePath5;
+    float4 g_SourcePath6;
+    float4 g_SourcePath7;
     float4 g_VelocityMin;
     float4 g_VelocityMax;
     float4 g_AccelerationDrag;
@@ -654,14 +666,84 @@ float3 RandomUnitVector(uint slot)
     return float3(cos(angle) * r, z, sin(angle) * r);
 }
 
+float2 RandomDisc(uint slot, float radius_min, float radius_max)
+{
+    float a = Range(0.0, 6.28318530718, slot, 61u);
+    float min_r = max(radius_min, 0.0);
+    float max_r = max(radius_max, min_r);
+    float r2 = lerp(min_r * min_r, max_r * max_r, Rand01(slot, 67u));
+    float r = sqrt(max(r2, 0.0));
+    return float2(cos(a) * r, sin(a) * r);
+}
+
+float3 SourcePathPoint(uint index)
+{
+    if (index == 0u) return g_SourcePath0.xyz;
+    if (index == 1u) return g_SourcePath1.xyz;
+    if (index == 2u) return g_SourcePath2.xyz;
+    if (index == 3u) return g_SourcePath3.xyz;
+    if (index == 4u) return g_SourcePath4.xyz;
+    if (index == 5u) return g_SourcePath5.xyz;
+    if (index == 6u) return g_SourcePath6.xyz;
+    return g_SourcePath7.xyz;
+}
+
+float3 SamplePath(uint slot, bool force_line)
+{
+    uint point_count = min((uint)max(g_SourceParams2.x, 0.0), 8u);
+    if (force_line && point_count < 2u)
+    {
+        float half_length = max(max(g_SourceParams1.x, g_SpawnBox.x), 0.5);
+        return float3(Range(-half_length, half_length, slot, 71u), 0.0, 0.0);
+    }
+    if (point_count == 0u)
+    {
+        return float3(0.0, 0.0, 0.0);
+    }
+    uint sampling = (uint)max(g_SourceParams2.y, 0.0);
+    if (sampling == 2u || point_count == 1u)
+    {
+        return SourcePathPoint(slot % point_count);
+    }
+    bool closed_loop = g_SourceParams1.w > 0.5;
+    uint segment_count = closed_loop ? point_count : max(point_count - 1u, 1u);
+    float u = sampling == 1u
+                  ? frac((float)slot * 0.61803398875)
+                  : Rand01(slot, 73u);
+    float scaled = u * (float)segment_count;
+    uint segment = min((uint)floor(scaled), segment_count - 1u);
+    float t = frac(scaled);
+    uint next_index = segment + 1u;
+    if (closed_loop && next_index >= point_count)
+    {
+        next_index = 0u;
+    }
+    else
+    {
+        next_index = min(next_index, point_count - 1u);
+    }
+    return lerp(SourcePathPoint(segment), SourcePathPoint(next_index), t);
+}
+
+float3 AddSourceJitter(float3 offset, uint slot)
+{
+    float jitter_radius = max(g_SourceParams0.w, 0.0);
+    if (jitter_radius <= 0.0)
+    {
+        return offset;
+    }
+    return offset + RandomUnitVector(slot) * Range(0.0, jitter_radius, slot, 79u);
+}
+
 float3 RandomSpawnOffset(uint slot)
 {
     uint shape = (uint)max(g_SpawnBox.w, 0.0);
     if (shape == 0u)
     {
-        return float3(Range(-g_SpawnBox.x, g_SpawnBox.x, slot, 1u),
-                      Range(-g_SpawnBox.y, g_SpawnBox.y, slot, 2u),
-                      Range(-g_SpawnBox.z, g_SpawnBox.z, slot, 3u));
+        return AddSourceJitter(float3(Range(-g_SpawnBox.x, g_SpawnBox.x, slot, 1u),
+                                      Range(-g_SpawnBox.y, g_SpawnBox.y, slot, 2u),
+                                      Range(-g_SpawnBox.z, g_SpawnBox.z, slot, 3u)),
+                               slot);
     }
 
     float radius = Range(max(g_SpawnSphere.x, 0.0),
@@ -672,7 +754,52 @@ float3 RandomSpawnOffset(uint slot)
     {
         radius = max(g_SpawnSphere.y, g_SpawnSphere.x);
     }
-    return RandomUnitVector(slot) * radius;
+    if (shape <= 2u)
+    {
+        return AddSourceJitter(RandomUnitVector(slot) * radius, slot);
+    }
+    if (shape == 3u || shape == 4u)
+    {
+        float min_r = shape == 4u ? max(g_SourceParams0.x, 0.0) : max(g_SpawnSphere.x, 0.0);
+        float max_r = shape == 4u ? max(g_SourceParams0.y, min_r) : max(g_SpawnSphere.y, min_r);
+        float2 disc = RandomDisc(slot, min_r, max_r);
+        return AddSourceJitter(float3(disc.x, 0.0, disc.y), slot);
+    }
+    if (shape == 5u || shape == 6u || shape == 7u)
+    {
+        float height = max(g_SourceParams1.x, 0.0);
+        float half_height = height * 0.5;
+        float y = Range(-half_height, half_height, slot, 83u);
+        float radius_max = max(g_SpawnSphere.y, max(g_SourceParams0.y, g_SourceParams1.y));
+        if (shape == 7u && height > 1.0e-4)
+        {
+            float t = saturate((y + half_height) / height);
+            radius_max *= 1.0 - t;
+        }
+        float2 disc = RandomDisc(slot, 0.0, radius_max);
+        float3 offset = float3(disc.x, y, disc.y);
+        if (shape == 6u && abs(y) > max(half_height - radius_max, 0.0))
+        {
+            float cap_sign = y >= 0.0 ? 1.0 : -1.0;
+            offset += RandomUnitVector(slot) * radius_max;
+            offset.y = cap_sign * half_height + offset.y * 0.35;
+        }
+        return AddSourceJitter(offset, slot);
+    }
+    if (shape == 8u)
+    {
+        return AddSourceJitter(SamplePath(slot, true), slot);
+    }
+    if (shape == 9u || shape == 10u)
+    {
+        return AddSourceJitter(SamplePath(slot, false), slot);
+    }
+    if (shape == 11u)
+    {
+        float mesh_radius = max(g_SourceMesh.w, max(g_SpawnSphere.y, 0.0));
+        return AddSourceJitter(g_SourceMesh.xyz + RandomUnitVector(slot) * mesh_radius, slot);
+    }
+    return float3(0.0, 0.0, 0.0);
 }
 
 float ResolveLifetime(uint slot)
@@ -854,6 +981,18 @@ struct ParticleGpuEmitterDesc
     float4 rotation_params;
     float4 spawn_box;
     float4 spawn_sphere;
+    float4 source_params0;
+    float4 source_params1;
+    float4 source_params2;
+    float4 source_mesh;
+    float4 source_path0;
+    float4 source_path1;
+    float4 source_path2;
+    float4 source_path3;
+    float4 source_path4;
+    float4 source_path5;
+    float4 source_path6;
+    float4 source_path7;
     float4 velocity_min;
     float4 velocity_max;
     float4 acceleration_drag;
@@ -869,9 +1008,9 @@ struct ParticleGpuEmitterDesc
     uint emitter_index;
     uint emitter_state_index;
     uint material_id;
+    uint source_mesh_sample_offset;
+    uint source_mesh_sample_count;
     uint pad0;
-    uint pad1;
-    uint pad2;
 };
 
 struct ParticleGpuEmitterState
@@ -898,6 +1037,15 @@ struct ParticleGpuState
     uint flags;
     uint frame_offset;
 };
+
+struct ParticleGpuMeshSample
+{
+    float4 p0;
+    float4 p1;
+    float4 p2;
+};
+
+StructuredBuffer<ParticleGpuMeshSample> g_MeshSamples;
 
 struct ParticleGpuMaterialGroup
 {
@@ -1005,14 +1153,168 @@ float3 RandomUnitVector(uint seed, uint slot)
     return float3(cos(angle) * r, z, sin(angle) * r);
 }
 
+float2 RandomDisc(uint seed, uint slot, float radius_min, float radius_max)
+{
+    float a = Range(0.0, 6.28318530718, seed, slot, 61u);
+    float min_r = max(radius_min, 0.0);
+    float max_r = max(radius_max, min_r);
+    float r2 = lerp(min_r * min_r, max_r * max_r, Rand01(seed, slot, 67u));
+    float r = sqrt(max(r2, 0.0));
+    return float2(cos(a) * r, sin(a) * r);
+}
+
+float3 SourcePathPoint(ParticleGpuEmitterDesc emitter, uint index)
+{
+    if (index == 0u) return emitter.source_path0.xyz;
+    if (index == 1u) return emitter.source_path1.xyz;
+    if (index == 2u) return emitter.source_path2.xyz;
+    if (index == 3u) return emitter.source_path3.xyz;
+    if (index == 4u) return emitter.source_path4.xyz;
+    if (index == 5u) return emitter.source_path5.xyz;
+    if (index == 6u) return emitter.source_path6.xyz;
+    return emitter.source_path7.xyz;
+}
+
+float3 SamplePath(ParticleGpuEmitterDesc emitter, uint slot, bool force_line)
+{
+    uint point_count = min((uint)max(emitter.source_params2.x, 0.0), 8u);
+    if (force_line && point_count < 2u)
+    {
+        float half_length = max(max(emitter.source_params1.x, emitter.spawn_box.x), 0.5);
+        return float3(Range(-half_length, half_length, emitter.seed, slot, 71u), 0.0, 0.0);
+    }
+    if (point_count == 0u)
+    {
+        return float3(0.0, 0.0, 0.0);
+    }
+    uint sampling = (uint)max(emitter.source_params2.y, 0.0);
+    if (sampling == 2u || point_count == 1u)
+    {
+        return SourcePathPoint(emitter, slot % point_count);
+    }
+    bool closed_loop = emitter.source_params1.w > 0.5;
+    uint segment_count = closed_loop ? point_count : max(point_count - 1u, 1u);
+    float u = sampling == 1u
+                  ? frac((float)slot * 0.61803398875)
+                  : Rand01(emitter.seed, slot, 73u);
+    float scaled = u * (float)segment_count;
+    uint segment = min((uint)floor(scaled), segment_count - 1u);
+    float t = frac(scaled);
+    uint next_index = segment + 1u;
+    if (closed_loop && next_index >= point_count)
+    {
+        next_index = 0u;
+    }
+    else
+    {
+        next_index = min(next_index, point_count - 1u);
+    }
+    return lerp(SourcePathPoint(emitter, segment), SourcePathPoint(emitter, next_index), t);
+}
+
+float3 AddSourceJitter(ParticleGpuEmitterDesc emitter, float3 offset, uint slot)
+{
+    float jitter_radius = max(emitter.source_params0.w, 0.0);
+    if (jitter_radius <= 0.0)
+    {
+        return offset;
+    }
+    return offset + RandomUnitVector(emitter.seed, slot) *
+        Range(0.0, jitter_radius, emitter.seed, slot, 79u);
+}
+
+float3 MeshFallbackOffset(ParticleGpuEmitterDesc emitter, uint slot)
+{
+    float mesh_radius = max(emitter.source_mesh.w, max(emitter.spawn_sphere.y, 0.0));
+    return emitter.source_mesh.xyz + RandomUnitVector(emitter.seed, slot) * mesh_radius;
+}
+
+float3 SampleMeshSurface(ParticleGpuEmitterDesc emitter, uint slot)
+{
+    uint sample_count = emitter.source_mesh_sample_count;
+    if (sample_count == 0u)
+    {
+        return MeshFallbackOffset(emitter, slot);
+    }
+
+    uint offset = emitter.source_mesh_sample_offset;
+    uint last_index = offset + sample_count - 1u;
+    float total_area = g_MeshSamples[last_index].p0.w;
+    if (total_area <= 1.0e-7)
+    {
+        return MeshFallbackOffset(emitter, slot);
+    }
+
+    uint sampling = (uint)max(emitter.source_params2.y, 0.0);
+    uint distribution = (uint)max(emitter.source_params2.z, 0.0);
+    uint sample_index = offset;
+    if (sampling == 1u)
+    {
+        sample_index = offset + (slot % sample_count);
+    }
+    else
+    {
+        float target = Rand01(emitter.seed, slot, 89u) * total_area;
+        uint lo = 0u;
+        uint hi = sample_count - 1u;
+        [loop]
+        while (lo < hi)
+        {
+            uint mid = (lo + hi) >> 1u;
+            if (g_MeshSamples[offset + mid].p0.w < target)
+            {
+                lo = mid + 1u;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+        sample_index = offset + lo;
+    }
+
+    ParticleGpuMeshSample sample = g_MeshSamples[sample_index];
+    float3 p0 = sample.p0.xyz;
+    float3 p1 = sample.p1.xyz;
+    float3 p2 = sample.p2.xyz;
+    if (sampling == 2u)
+    {
+        uint vertex = slot % 3u;
+        return vertex == 0u ? p0 : (vertex == 1u ? p1 : p2);
+    }
+    if (distribution == 2u)
+    {
+        uint edge = slot % 3u;
+        float t = sampling == 1u
+                      ? frac((float)slot * 0.754877666)
+                      : Rand01(emitter.seed, slot, 97u);
+        if (edge == 0u) return lerp(p0, p1, t);
+        if (edge == 1u) return lerp(p1, p2, t);
+        return lerp(p2, p0, t);
+    }
+
+    float r0 = sampling == 1u ? frac((float)slot * 0.61803398875)
+                              : Rand01(emitter.seed, slot, 101u);
+    float r1 = sampling == 1u ? frac((float)slot * 0.41421356237)
+                              : Rand01(emitter.seed, slot, 103u);
+    float sr0 = sqrt(max(r0, 0.0));
+    float b0 = 1.0 - sr0;
+    float b1 = sr0 * (1.0 - r1);
+    float b2 = sr0 * r1;
+    return p0 * b0 + p1 * b1 + p2 * b2;
+}
+
 float3 RandomSpawnOffset(ParticleGpuEmitterDesc emitter, uint slot)
 {
     uint shape = (uint)max(emitter.spawn_box.w, 0.0);
     if (shape == 0u)
     {
-        return float3(Range(-emitter.spawn_box.x, emitter.spawn_box.x, emitter.seed, slot, 1u),
-                      Range(-emitter.spawn_box.y, emitter.spawn_box.y, emitter.seed, slot, 2u),
-                      Range(-emitter.spawn_box.z, emitter.spawn_box.z, emitter.seed, slot, 3u));
+        return AddSourceJitter(
+            emitter,
+            float3(Range(-emitter.spawn_box.x, emitter.spawn_box.x, emitter.seed, slot, 1u),
+                   Range(-emitter.spawn_box.y, emitter.spawn_box.y, emitter.seed, slot, 2u),
+                   Range(-emitter.spawn_box.z, emitter.spawn_box.z, emitter.seed, slot, 3u)),
+            slot);
     }
 
     float radius = Range(max(emitter.spawn_sphere.x, 0.0),
@@ -1024,7 +1326,54 @@ float3 RandomSpawnOffset(ParticleGpuEmitterDesc emitter, uint slot)
     {
         radius = max(emitter.spawn_sphere.y, emitter.spawn_sphere.x);
     }
-    return RandomUnitVector(emitter.seed, slot) * radius;
+    if (shape <= 2u)
+    {
+        return AddSourceJitter(emitter, RandomUnitVector(emitter.seed, slot) * radius, slot);
+    }
+    if (shape == 3u || shape == 4u)
+    {
+        float min_r = shape == 4u ? max(emitter.source_params0.x, 0.0)
+                                  : max(emitter.spawn_sphere.x, 0.0);
+        float max_r = shape == 4u ? max(emitter.source_params0.y, min_r)
+                                  : max(emitter.spawn_sphere.y, min_r);
+        float2 disc = RandomDisc(emitter.seed, slot, min_r, max_r);
+        return AddSourceJitter(emitter, float3(disc.x, 0.0, disc.y), slot);
+    }
+    if (shape == 5u || shape == 6u || shape == 7u)
+    {
+        float height = max(emitter.source_params1.x, 0.0);
+        float half_height = height * 0.5;
+        float y = Range(-half_height, half_height, emitter.seed, slot, 83u);
+        float radius_max = max(emitter.spawn_sphere.y,
+                               max(emitter.source_params0.y, emitter.source_params1.y));
+        if (shape == 7u && height > 1.0e-4)
+        {
+            float t = saturate((y + half_height) / height);
+            radius_max *= 1.0 - t;
+        }
+        float2 disc = RandomDisc(emitter.seed, slot, 0.0, radius_max);
+        float3 offset = float3(disc.x, y, disc.y);
+        if (shape == 6u && abs(y) > max(half_height - radius_max, 0.0))
+        {
+            float cap_sign = y >= 0.0 ? 1.0 : -1.0;
+            offset += RandomUnitVector(emitter.seed, slot) * radius_max;
+            offset.y = cap_sign * half_height + offset.y * 0.35;
+        }
+        return AddSourceJitter(emitter, offset, slot);
+    }
+    if (shape == 8u)
+    {
+        return AddSourceJitter(emitter, SamplePath(emitter, slot, true), slot);
+    }
+    if (shape == 9u || shape == 10u)
+    {
+        return AddSourceJitter(emitter, SamplePath(emitter, slot, false), slot);
+    }
+    if (shape == 11u)
+    {
+        return AddSourceJitter(emitter, SampleMeshSurface(emitter, slot), slot);
+    }
+    return float3(0.0, 0.0, 0.0);
 }
 
 float ResolveLifetime(ParticleGpuEmitterDesc emitter, uint slot)
@@ -1974,6 +2323,9 @@ void DiligentBackend::ensureParticleResources() {
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_Stats",
        Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_COMPUTE,
+       "g_MeshSamples",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
   };
   create_gpu_compute_pipeline("Karma Particle GPU Clear CS",
                               kParticleGpuClearCS,
@@ -2077,6 +2429,9 @@ void DiligentBackend::ensureParticleResources() {
     particle_gpu_simulate_stats_var_ =
         particle_gpu_simulate_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
                                                       "g_Stats");
+    particle_gpu_simulate_mesh_samples_var_ =
+        particle_gpu_simulate_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
+                                                      "g_MeshSamples");
   }
 
   static const Diligent::ShaderResourceVariableDesc kParticleGpuPrepareUnsortedVars[] = {

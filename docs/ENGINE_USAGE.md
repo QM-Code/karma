@@ -191,6 +191,65 @@ Typical crash or hang triage run:
 KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/karma_laser_example
 ```
 
+### Vulkan Adapter Selection
+On startup, the Diligent Vulkan backend enumerates compatible adapters and
+chooses a hardware adapter explicitly. The default preference order is:
+
+1. discrete GPU
+2. integrated GPU
+3. other non-software adapter
+
+Software Vulkan adapters, such as Mesa Lavapipe/llvmpipe, are skipped by
+default when a hardware adapter is available. This avoids failures where the
+loader exposes both a hardware ICD and a CPU Vulkan ICD, but the default adapter
+path enters the software driver and crashes or stalls during rendering/present.
+
+To force a specific enumerated adapter for triage, set `KARMA_VK_ADAPTER` to the
+adapter index printed at startup:
+
+```bash
+KARMA_VK_ADAPTER=0 ./build/karma_navmesh_example
+```
+
+To allow the backend to choose a software Vulkan adapter on systems without
+hardware Vulkan support, opt in explicitly:
+
+```bash
+KARMA_ALLOW_SOFTWARE_VULKAN=1 ./build/karma_navmesh_example
+```
+
+For one-off host debugging outside Karma's adapter selection, you can still
+force a Vulkan ICD through the loader:
+
+```bash
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json ./build/karma_navmesh_example
+```
+
+### Forward Draw Diagnostics
+Set `KARMA_DRAW_DEBUG=1` to print forward-pass draw submissions immediately
+before `Draw` or `DrawIndexed` reaches Diligent:
+
+```bash
+KARMA_DRAW_DEBUG=1 ./build/karma_prefab_gallery_example
+```
+
+Each line includes the pass, mesh/material IDs, vertex and index counts, first
+index, instance count, and whether vertex/index buffers are bound. This is meant
+for short crash triage runs; it is intentionally verbose.
+
+The forward depth prepass is skipped by default on Vulkan drivers where it has
+shown driver-specific instability. To disable it explicitly during triage:
+
+```bash
+KARMA_DISABLE_DEPTH_PREPASS=1 ./build/karma_prefab_gallery_example
+```
+
+To force the depth prepass even on guarded drivers:
+
+```bash
+KARMA_FORCE_DEPTH_PREPASS=1 ./build/karma_prefab_gallery_example
+```
+
 For frame pacing and input-latency triage, enable engine frame diagnostics:
 
 ```bash

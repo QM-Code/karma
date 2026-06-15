@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,7 @@
 #include "karma/world/components/tag.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
+#include "karma/world/components/volumetric.h"
 #include "karma/world/ecs/world.h"
 #include "karma/world/scene/scene.h"
 
@@ -69,7 +71,7 @@ bool nearly(float a, float b) {
 
 Json validParticleEffectJson() {
   return Json{
-      {"version", 2},
+      {"version", 3},
       {"emitters",
        Json::array({Json{
            {"texture", "test/texture"},
@@ -122,7 +124,7 @@ Json validParticleEffectJson() {
                  {"initial_max", 0.0f},
                  {"angular_velocity_min", 0.0f},
                  {"angular_velocity_max", 0.0f}}},
-           {"spawn",
+           {"source",
             Json{{"shape", "box"},
                  {"box_extents", Json::array({0.0f, 0.0f, 0.0f})},
                  {"radius_min", 0.0f},
@@ -357,6 +359,137 @@ void testMalformedAndInvalidPayloads(const std::filesystem::path& dir) {
   KARMA_REQUIRE(world_b.entities().empty());
 }
 
+std::string volumetricPrefabJson(const std::string& component_payload) {
+  return R"({
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Volume",
+      "parent": null,
+      "components": {
+        "TransformComponent": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] },
+        "VolumetricComponent": )" + component_payload + R"(
+      }
+    }
+  ]
+})";
+}
+
+void testVolumetricComponentPrefabRoundTrip(const std::filesystem::path& dir) {
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+  const karma::ecs::Entity root = world.createEntity();
+  scene.createNode(root);
+  world.setName(root, "Volume");
+  world.add(root, karma::components::TransformComponent{});
+  karma::components::VolumetricComponent authored{};
+  authored.shape = karma::components::VolumetricShape::Capsule;
+  authored.color = {0.24f, 0.56f, 1.0f, 1.0f};
+  authored.emissive_color = {0.8f, 1.5f, 3.0f, 1.0f};
+  authored.density = 1.75f;
+  authored.center_opacity = 0.7f;
+  authored.scattering = 1.2f;
+  authored.anisotropy = 0.25f;
+  authored.absorption = 0.04f;
+  authored.distortion_strength = 0.2f;
+  authored.noise_strength = 0.45f;
+  authored.radius = 0.35f;
+  authored.capsule_half_length = 2.25f;
+  authored.scale_with_transform = false;
+  authored.visible = true;
+  authored.overlay_depth = 0.16f;
+  world.add(root, authored);
+
+  const std::filesystem::path path = dir / "volumetric_round_trip.json";
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+  const Json saved = readJson(path);
+  const Json& components = saved["nodes"][0]["components"];
+  KARMA_REQUIRE(components.contains("VolumetricComponent"));
+  KARMA_REQUIRE(!components.contains("VolumeSphereComponent"));
+  KARMA_REQUIRE(components["VolumetricComponent"]["shape"] == "capsule");
+
+  karma::ecs::World loaded_world;
+  karma::scene::Scene loaded_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  KARMA_REQUIRE(loaded_world.has<karma::components::VolumetricComponent>(instance->root));
+  const auto& loaded =
+      loaded_world.get<karma::components::VolumetricComponent>(instance->root);
+  KARMA_REQUIRE(loaded.shape == karma::components::VolumetricShape::Capsule);
+  KARMA_REQUIRE(nearly(loaded.radius, 0.35f));
+  KARMA_REQUIRE(nearly(loaded.capsule_half_length, 2.25f));
+  KARMA_REQUIRE(nearly(loaded.density, 1.75f));
+  KARMA_REQUIRE(nearly(loaded.scattering, 1.2f));
+  KARMA_REQUIRE(nearly(loaded.anisotropy, 0.25f));
+  KARMA_REQUIRE(nearly(loaded.absorption, 0.04f));
+}
+
+void testVolumetricComponentValidation(const std::filesystem::path& dir) {
+  const std::string valid = R"({
+          "shape": "sphere",
+          "color": [0.18, 0.82, 1.0, 1.0],
+          "emissive_color": [0.0, 0.0, 0.0, 1.0],
+          "center_opacity": 0.62,
+          "radius": 2.0,
+          "capsule_half_length": 1.0
+        })";
+  const std::filesystem::path derived_path = dir / "volumetric_derived_density.json";
+  writeText(derived_path, volumetricPrefabJson(valid));
+  karma::ecs::World derived_world;
+  karma::scene::Scene derived_scene;
+  const auto derived =
+      karma::prefabs::instantiatePrefab(derived_world, derived_scene, derived_path);
+  KARMA_REQUIRE(derived.has_value());
+  const auto& volume =
+      derived_world.get<karma::components::VolumetricComponent>(derived->root);
+  KARMA_REQUIRE(volume.shape == karma::components::VolumetricShape::Sphere);
+  KARMA_REQUIRE(volume.density > 0.0f);
+
+  const std::vector<std::pair<std::string, std::string>> invalid_cases{
+      {"invalid_shape", R"({
+          "shape": "tube",
+          "radius": 1.0,
+          "capsule_half_length": 1.0
+        })"},
+      {"negative_radius", R"({
+          "shape": "sphere",
+          "radius": -1.0,
+          "capsule_half_length": 1.0
+        })"},
+      {"negative_length", R"({
+          "shape": "capsule",
+          "radius": 1.0,
+          "capsule_half_length": -0.1
+        })"},
+  };
+  for (const auto& [name, payload] : invalid_cases) {
+    const std::filesystem::path path = dir / (name + ".json");
+    writeText(path, volumetricPrefabJson(payload));
+    karma::ecs::World invalid_world;
+    karma::scene::Scene invalid_scene;
+    KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(invalid_world, invalid_scene, path)
+                       .has_value());
+    KARMA_REQUIRE(invalid_world.entities().empty());
+  }
+}
+
+void testMigratedPrefabAssetsDoNotUseVolumeSphereComponent() {
+  const std::filesystem::path repo_root = findRepoRoot();
+  KARMA_REQUIRE(!repo_root.empty());
+  const std::filesystem::path prefab_root = repo_root / "examples/assets/prefabs";
+  for (const auto& entry : std::filesystem::recursive_directory_iterator(prefab_root)) {
+    if (!entry.is_regular_file() || entry.path().filename() != "prefab.json") {
+      continue;
+    }
+    std::ifstream stream(entry.path());
+    const std::string text((std::istreambuf_iterator<char>(stream)),
+                           std::istreambuf_iterator<char>());
+    KARMA_REQUIRE(text.find("VolumeSphereComponent") == std::string::npos);
+  }
+}
+
 void testDestroyPrefab(const std::filesystem::path& dir) {
   const std::filesystem::path path = dir / "destroy.json";
   writeText(path,
@@ -494,7 +627,7 @@ void testSidecarMissingContextAndResourceFailure(const std::filesystem::path& di
   }
 }
 
-void testParticleEffectParserV2() {
+void testParticleEffectParserV3() {
   const std::filesystem::path dir = makeTempDir();
   const std::filesystem::path valid = dir / "valid.kpeffect";
   writeText(valid, validParticleEffectJson().dump(2));
@@ -504,8 +637,12 @@ void testParticleEffectParserV2() {
   KARMA_REQUIRE(library.registerEffectFile("test/effect", valid));
   const auto* effect = library.find("test/effect");
   KARMA_REQUIRE(effect != nullptr);
-  KARMA_REQUIRE(effect->texture_key == "test/texture");
-  KARMA_REQUIRE(effect->emitter.max_particles == 8u);
+  const auto* primary = effect->primaryEmitter();
+  KARMA_REQUIRE(primary != nullptr);
+  KARMA_REQUIRE(primary->texture_key == "test/texture");
+  KARMA_REQUIRE(primary->emitter.max_particles == 8u);
+  KARMA_REQUIRE(primary->emitter.source_shape ==
+                karma::components::ParticleSourceShape::Box);
   auto emitter = library.instantiateEmitter("test/effect");
   KARMA_REQUIRE(emitter.has_value());
   KARMA_REQUIRE(emitter->texture_key == "test/texture");
@@ -527,6 +664,83 @@ void testParticleEffectParserV2() {
   const std::filesystem::path missing_block_path = dir / "missing_block.kpeffect";
   writeText(missing_block_path, missing_block.dump(2));
   KARMA_REQUIRE(!library.registerEffectFile("test/missing_block", missing_block_path));
+
+  Json missing_source = validParticleEffectJson();
+  missing_source["emitters"][0].erase("source");
+  const std::filesystem::path missing_source_path = dir / "missing_source.kpeffect";
+  writeText(missing_source_path, missing_source.dump(2));
+  KARMA_REQUIRE(!library.registerEffectFile("test/missing_source", missing_source_path));
+
+  std::filesystem::remove_all(dir);
+}
+
+void testParticleEffectParserV3SourceShapesAndMultiEmitter() {
+  const std::filesystem::path dir = makeTempDir();
+  const std::vector<std::string> shapes{
+      "box",
+      "sphere",
+      "sphere_surface",
+      "disc",
+      "ring",
+      "cylinder",
+      "capsule",
+      "cone",
+      "line",
+      "path",
+      "trail_path",
+      "mesh_surface",
+  };
+
+  karma::particles::ParticleLibrary library;
+  for (const std::string& shape : shapes) {
+    Json json = validParticleEffectJson();
+    Json& source = json["emitters"][0]["source"];
+    source["shape"] = shape;
+    source["dimensions"] = Json::array({2.0f, 0.5f, 0.25f});
+    source["inner_radius"] = 0.25f;
+    source["outer_radius"] = 0.75f;
+    source["height"] = 1.5f;
+    source["angle"] = 6.2831853f;
+    source["points"] = Json::array({
+        Json::array({0.0f, 0.0f, 0.0f}),
+        Json::array({1.0f, 0.0f, 0.0f}),
+        Json::array({1.0f, 1.0f, 0.0f}),
+    });
+    source["closed_loop"] = shape == "trail_path";
+    source["sampling"] = shape == "line" ? "vertices" : "sequential";
+    source["jitter_radius"] = 0.05f;
+    source["mesh_key"] = "test/mesh";
+    source["mesh_path"] = "mesh.glb";
+    source["distribution"] = shape == "ring" ? "edge" : "uniform";
+
+    const std::filesystem::path path = dir / (shape + ".kpeffect");
+    writeText(path, json.dump(2));
+    KARMA_REQUIRE(library.registerEffectFile("shape/" + shape, path));
+    const auto* effect = library.find("shape/" + shape);
+    KARMA_REQUIRE(effect != nullptr);
+    const auto* primary = effect->primaryEmitter();
+    KARMA_REQUIRE(primary != nullptr);
+    KARMA_REQUIRE(!primary->emitter.source_path_points.empty());
+  }
+
+  Json multi = validParticleEffectJson();
+  Json second = multi["emitters"][0];
+  second["texture"] = "test/second_texture";
+  second["emission"]["max_particles"] = 23;
+  second["source"]["shape"] = "path";
+  second["source"]["points"] = Json::array({
+      Json::array({0.0f, 0.0f, 0.0f}),
+      Json::array({0.0f, 1.0f, 0.0f}),
+  });
+  multi["emitters"].push_back(second);
+  const std::filesystem::path multi_path = dir / "multi.kpeffect";
+  writeText(multi_path, multi.dump(2));
+  KARMA_REQUIRE(library.registerEffectFile("multi", multi_path));
+  const auto* effect = library.find("multi");
+  KARMA_REQUIRE(effect != nullptr);
+  KARMA_REQUIRE(effect->emitters.size() == 2u);
+  KARMA_REQUIRE(effect->emitters[1].texture_key == "test/second_texture");
+  KARMA_REQUIRE(effect->emitters[1].emitter.max_particles == 23u);
 
   std::filesystem::remove_all(dir);
 }
@@ -555,15 +769,17 @@ void testParticleSystemRendererOwnedState() {
 void testParticleSystemEffectLifecycleReapply() {
   karma::particles::ParticleLibrary library;
   karma::particles::ParticleEffectDesc effect{};
-  effect.emitter.enabled = true;
-  effect.emitter.playing = true;
-  effect.emitter.layer = 2u;
-  effect.texture_key = "spark/base_texture";
-  effect.emitter.max_particles = 32u;
-  effect.emitter.start_delay = 0.1f;
-  effect.emitter.start_size_min = 0.2f;
-  effect.emitter.start_size_max = 0.4f;
-  effect.emitter.start_color = {1.0f, 0.5f, 0.25f, 0.8f};
+  effect.emitters.push_back(karma::particles::ParticleEmitterDesc{});
+  auto& authored = effect.emitters[0];
+  authored.emitter.enabled = true;
+  authored.emitter.playing = true;
+  authored.emitter.layer = 2u;
+  authored.texture_key = "spark/base_texture";
+  authored.emitter.max_particles = 32u;
+  authored.emitter.start_delay = 0.1f;
+  authored.emitter.start_size_min = 0.2f;
+  authored.emitter.start_size_max = 0.4f;
+  authored.emitter.start_color = {1.0f, 0.5f, 0.25f, 0.8f};
   library.registerEffect("spark", effect);
 
   karma::ecs::World world;
@@ -586,6 +802,12 @@ void testParticleSystemEffectLifecycleReapply() {
   effect_override.size_scale = 2.0f;
   effect_override.alpha_scale = 0.5f;
   effect_override.texture_key = "spark/override_texture";
+  effect_override.source_shape = karma::components::ParticleSourceShape::Line;
+  effect_override.source_path_points = std::vector<karma::math::Vec3>{
+      {0.0f, 0.0f, 0.0f},
+      {2.0f, 0.0f, 0.0f},
+  };
+  effect_override.source_jitter_radius = 0.25f;
   world.add(entity, effect_override);
 
   karma::particles::ParticleSystem system(nullptr, &library);
@@ -600,6 +822,9 @@ void testParticleSystemEffectLifecycleReapply() {
   KARMA_REQUIRE(nearly(applied.start_size_min, 0.4f));
   KARMA_REQUIRE(nearly(applied.start_size_max, 0.8f));
   KARMA_REQUIRE(nearly(applied.start_color.a, 0.4f));
+  KARMA_REQUIRE(applied.source_shape == karma::components::ParticleSourceShape::Line);
+  KARMA_REQUIRE(applied.source_path_points.size() == 2u);
+  KARMA_REQUIRE(nearly(applied.source_jitter_radius, 0.25f));
 
   auto& override_component =
       world.get<karma::components::ParticleEffectOverrideComponent>(entity);
@@ -614,8 +839,8 @@ void testParticleSystemEffectLifecycleReapply() {
   system.update(world, 0.016f, 1.0f);
   KARMA_REQUIRE(effect_component.applied_restart_count == effect_component.restart_count);
 
-  effect.emitter.layer = 7u;
-  effect.emitter.max_particles = 64u;
+  effect.emitters[0].emitter.layer = 7u;
+  effect.emitters[0].emitter.max_particles = 64u;
   library.registerEffect("spark", effect);
   system.update(world, 0.016f, 1.0f);
   const auto& reapplied = world.get<karma::components::ParticleEmitterComponent>(entity);
@@ -729,27 +954,33 @@ void testExplosionPrefabDirectLoad() {
 
   const auto* core_flipbook = library.find("prefabs/explosion/core_flipbook");
   KARMA_REQUIRE(core_flipbook != nullptr);
-  KARMA_REQUIRE(core_flipbook->texture_key == "prefabs/explosion/explosion00_flipbook");
-  KARMA_REQUIRE(core_flipbook->emitter.atlas_frame_count == 25u);
-  KARMA_REQUIRE(core_flipbook->emitter.atlas_frame_width == 400u);
-  KARMA_REQUIRE(core_flipbook->emitter.atlas_frame_height == 400u);
-  KARMA_REQUIRE(core_flipbook->emitter.atlas_border_x == 4u);
-  KARMA_REQUIRE(core_flipbook->emitter.atlas_border_y == 4u);
-  KARMA_REQUIRE(core_flipbook->emitter.atlas_spacing_x == 4u);
-  KARMA_REQUIRE(core_flipbook->emitter.atlas_spacing_y == 4u);
-  KARMA_REQUIRE(core_flipbook->emitter.blend_mode == karma::components::ParticleBlendMode::Additive);
+  const auto* core_primary = core_flipbook->primaryEmitter();
+  KARMA_REQUIRE(core_primary != nullptr);
+  KARMA_REQUIRE(core_primary->texture_key == "prefabs/explosion/explosion00_flipbook");
+  KARMA_REQUIRE(core_primary->emitter.atlas_frame_count == 25u);
+  KARMA_REQUIRE(core_primary->emitter.atlas_frame_width == 400u);
+  KARMA_REQUIRE(core_primary->emitter.atlas_frame_height == 400u);
+  KARMA_REQUIRE(core_primary->emitter.atlas_border_x == 4u);
+  KARMA_REQUIRE(core_primary->emitter.atlas_border_y == 4u);
+  KARMA_REQUIRE(core_primary->emitter.atlas_spacing_x == 4u);
+  KARMA_REQUIRE(core_primary->emitter.atlas_spacing_y == 4u);
+  KARMA_REQUIRE(core_primary->emitter.blend_mode ==
+                karma::components::ParticleBlendMode::Additive);
 
   const auto* smoke_flipbook = library.find("prefabs/explosion/smoke_flipbook");
   KARMA_REQUIRE(smoke_flipbook != nullptr);
-  KARMA_REQUIRE(smoke_flipbook->texture_key == "prefabs/explosion/explosion01_smoke_flipbook");
-  KARMA_REQUIRE(smoke_flipbook->emitter.atlas_frame_count == 25u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.atlas_frame_width == 400u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.atlas_frame_height == 400u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.atlas_border_x == 4u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.atlas_border_y == 4u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.atlas_spacing_x == 4u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.atlas_spacing_y == 4u);
-  KARMA_REQUIRE(smoke_flipbook->emitter.blend_mode == karma::components::ParticleBlendMode::Alpha);
+  const auto* smoke_primary = smoke_flipbook->primaryEmitter();
+  KARMA_REQUIRE(smoke_primary != nullptr);
+  KARMA_REQUIRE(smoke_primary->texture_key == "prefabs/explosion/explosion01_smoke_flipbook");
+  KARMA_REQUIRE(smoke_primary->emitter.atlas_frame_count == 25u);
+  KARMA_REQUIRE(smoke_primary->emitter.atlas_frame_width == 400u);
+  KARMA_REQUIRE(smoke_primary->emitter.atlas_frame_height == 400u);
+  KARMA_REQUIRE(smoke_primary->emitter.atlas_border_x == 4u);
+  KARMA_REQUIRE(smoke_primary->emitter.atlas_border_y == 4u);
+  KARMA_REQUIRE(smoke_primary->emitter.atlas_spacing_x == 4u);
+  KARMA_REQUIRE(smoke_primary->emitter.atlas_spacing_y == 4u);
+  KARMA_REQUIRE(smoke_primary->emitter.blend_mode ==
+                karma::components::ParticleBlendMode::Alpha);
 
   karma::prefabs::clearPrefabResourceContext();
   KARMA_REQUIRE(destroyed_textures.size() == uploaded_textures.size());
@@ -814,6 +1045,73 @@ void testEnergyOrbPrefabDirectLoad() {
 
   karma::prefabs::clearPrefabResourceContext();
   KARMA_REQUIRE(destroyed_textures.size() == 4u);
+}
+
+void testPathEnergyBeamPrefabDirectLoad() {
+  const std::filesystem::path repo_root = findRepoRoot();
+  KARMA_REQUIRE(!repo_root.empty());
+  const std::filesystem::path prefab_dir =
+      repo_root / "examples/assets/prefabs/beam_impostor";
+
+  std::uint32_t next_texture = 300u;
+  std::vector<karma::renderer::TextureId> destroyed_textures;
+  karma::particles::ParticleLibrary library;
+  karma::prefabs::bindPrefabResourceContext(karma::prefabs::PrefabResourceContext{
+      .particle_effects = &library,
+      .create_texture_rgba8 =
+          [&next_texture](int width, int height, const void* pixels) {
+            KARMA_REQUIRE(width == 256);
+            KARMA_REQUIRE(height == 64);
+            KARMA_REQUIRE(pixels != nullptr);
+            return next_texture++;
+          },
+      .destroy_texture =
+          [&destroyed_textures](karma::renderer::TextureId texture) {
+            destroyed_textures.push_back(texture);
+          },
+  });
+
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+  const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
+  KARMA_REQUIRE(instance.has_value());
+  KARMA_REQUIRE(instance->find("path_warm_glow").isValid());
+  KARMA_REQUIRE(instance->find("path_hot_core").isValid());
+  KARMA_REQUIRE(instance->find("path_electric_core").isValid());
+  KARMA_REQUIRE(instance->find("path_heat_distortion").isValid());
+  KARMA_REQUIRE(instance->find("path_endpoint_glow").isValid());
+  KARMA_REQUIRE(instance->find("path_light_0").isValid());
+
+  const karma::ecs::Entity core = instance->find("path_hot_core");
+  KARMA_REQUIRE(world.has<karma::components::ParticleEffectComponent>(core));
+  KARMA_REQUIRE(world.has<karma::components::ParticleEffectOverrideComponent>(core));
+  KARMA_REQUIRE(world.get<karma::components::ParticleEffectComponent>(core).effect_key ==
+                "path_energy/hot_core");
+  const auto& core_override =
+      world.get<karma::components::ParticleEffectOverrideComponent>(core);
+  KARMA_REQUIRE(core_override.source_shape.has_value());
+  KARMA_REQUIRE(*core_override.source_shape == karma::components::ParticleSourceShape::Path);
+  KARMA_REQUIRE(core_override.source_path_points.has_value());
+  KARMA_REQUIRE(core_override.source_path_points->size() == 6u);
+
+  const auto* hot_core = library.find("path_energy/hot_core");
+  KARMA_REQUIRE(hot_core != nullptr);
+  const auto* hot_core_emitter = hot_core->primaryEmitter();
+  KARMA_REQUIRE(hot_core_emitter != nullptr);
+  KARMA_REQUIRE(hot_core_emitter->emitter.source_shape ==
+                karma::components::ParticleSourceShape::Path);
+  KARMA_REQUIRE(hot_core_emitter->emitter.max_particles == 520u);
+  KARMA_REQUIRE(hot_core_emitter->texture_key == "path_energy/glow_atlas");
+
+  const auto* distortion = library.find("path_energy/heat_distortion");
+  KARMA_REQUIRE(distortion != nullptr);
+  const auto* distortion_emitter = distortion->primaryEmitter();
+  KARMA_REQUIRE(distortion_emitter != nullptr);
+  KARMA_REQUIRE(distortion_emitter->emitter.blend_mode ==
+                karma::components::ParticleBlendMode::Distortion);
+
+  karma::prefabs::clearPrefabResourceContext();
+  KARMA_REQUIRE(destroyed_textures.size() == 3u);
 }
 
 void testParticleStatsReportFormatting() {
@@ -889,17 +1187,22 @@ int main() {
   testHierarchyRoundTrip(dir);
   testUnknownComponentSkips(dir);
   testMalformedAndInvalidPayloads(dir);
+  testVolumetricComponentPrefabRoundTrip(dir);
+  testVolumetricComponentValidation(dir);
+  testMigratedPrefabAssetsDoNotUseVolumeSphereComponent();
   testDestroyPrefab(dir);
   testMissingSidecarKeepsPrefabLoad(dir);
   testSidecarParsingSuccessAndFailure(dir);
   testSidecarMissingContextAndResourceFailure(dir);
-  testParticleEffectParserV2();
+  testParticleEffectParserV3();
+  testParticleEffectParserV3SourceShapesAndMultiEmitter();
   testParticleSystemRendererOwnedState();
   testParticleSystemEffectLifecycleReapply();
   testParticleStatsReportFormatting();
   testLightPulseSystem();
   testExplosionPrefabDirectLoad();
   testEnergyOrbPrefabDirectLoad();
+  testPathEnergyBeamPrefabDirectLoad();
   std::filesystem::remove_all(dir);
   return 0;
 }

@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "karma/core/math/scalar.h"
 #include "karma/core/math/types.h"
 
 namespace karma::math {
@@ -22,6 +23,22 @@ inline Vec3 subtract(const Vec3& a, const Vec3& b) {
 /// Multiplies each component by `s`.
 inline Vec3 scale(const Vec3& v, float s) {
   return {v.x * s, v.y * s, v.z * s};
+}
+
+/// \ingroup karma_core
+/// Multiplies two vectors component-wise.
+inline Vec3 multiply(const Vec3& a, const Vec3& b) {
+  return {a.x * b.x, a.y * b.y, a.z * b.z};
+}
+
+/// \ingroup karma_core
+/// Linearly interpolates between two vectors component-wise.
+inline Vec3 lerp(const Vec3& a, const Vec3& b, float t) {
+  return {
+      lerp(a.x, b.x, t),
+      lerp(a.y, b.y, t),
+      lerp(a.z, b.z, t),
+  };
 }
 
 /// \ingroup karma_core

@@ -1,19 +1,12 @@
 #include "karma/world/scene/transform_hierarchy.h"
 
+#include "karma/core/math/vec3.h"
 #include "karma/world/components/transform.h"
 #include "karma/core/math/quat.h"
 
 namespace karma::scene {
 
 namespace {
-
-math::Vec3 multiplyVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x * b.x, a.y * b.y, a.z * b.z};
-}
-
-math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
 
 components::TransformComponent toWorldTransform(
     const components::LocalTransformComponent& local) {
@@ -24,11 +17,11 @@ components::TransformComponent composeTransform(
     const components::TransformComponent& parent,
     const components::LocalTransformComponent& local) {
   components::TransformComponent world_transform{};
-  const math::Vec3 scaled_local = multiplyVec3(local.position, parent.getScale());
+  const math::Vec3 scaled_local = math::multiply(local.position, parent.getScale());
   const math::Vec3 rotated_local = math::rotateVec(parent.getRotation(), scaled_local);
-  world_transform.setPosition(addVec3(parent.getPosition(), rotated_local));
+  world_transform.setPosition(math::add(parent.getPosition(), rotated_local));
   world_transform.setRotation(math::mul(parent.getRotation(), local.rotation));
-  world_transform.setScale(multiplyVec3(parent.getScale(), local.scale));
+  world_transform.setScale(math::multiply(parent.getScale(), local.scale));
   return world_transform;
 }
 

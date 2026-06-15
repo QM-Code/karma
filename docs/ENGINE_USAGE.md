@@ -52,7 +52,8 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(KARMA_FETCH_DEPS ON CACHE BOOL "" FORCE)
 
 add_subdirectory(external/karma)
-target_link_libraries(my_server PRIVATE karma::headless)
+target_link_libraries(my_server PRIVATE karma::server)
+target_link_libraries(my_simulation_tool PRIVATE karma::headless)
 target_link_libraries(my_game PRIVATE karma::graphical)
 ```
 
@@ -63,11 +64,12 @@ find_package(karma CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE karma::karma)
 ```
 
-`karma::headless` is the server/non-visual profile, `karma::graphical` is the
-full graphical profile, and `karma::karma` is the compatibility alias for
-`karma::graphical`. The installed package config does not fetch missing
-dependency targets by default. Set `KARMA_CONFIG_FETCH_DEPS=ON` before
-`find_package(karma)` to allow package-time dependency fetching.
+`karma::server` is the minimal ECS/network profile, `karma::headless` is the
+server/non-visual runtime profile, `karma::graphical` is the full graphical
+profile, and `karma::karma` is the compatibility alias for `karma::graphical`.
+The installed package config does not fetch missing dependency targets by
+default. Set `KARMA_CONFIG_FETCH_DEPS=ON` before `find_package(karma)` to allow
+package-time dependency fetching.
 
 See [CONSUMER_PROFILES.md](CONSUMER_PROFILES.md) for the profile target
 contract, package behavior, versioning policy, and validation matrix.
@@ -107,14 +109,14 @@ disable graphics demos:
 ```bash
 cmake -B build-headless \
   -DKARMA_HEADLESS=ON
-cmake --build build-headless --target karma_network_demo
+cmake --build build-headless --target karma_network_server_demo
 ```
 
 Or use the preset:
 
 ```bash
 cmake --preset headless
-cmake --build --preset headless --target karma_network_demo
+cmake --build --preset headless --target karma_network_server_demo
 ```
 
 This profile is build-supported for non-visual programs such as network/server
@@ -156,6 +158,9 @@ available.
 Karma's foundational math and timing helpers live under `karma/core`.
 
 ```cpp
+#include "karma/core/math/glm.h"
+#include "karma/core/math/quat.h"
+#include "karma/core/math/scalar.h"
 #include "karma/core/math/vec3.h"
 #include "karma/core/time.h"
 
@@ -165,14 +170,31 @@ const karma::math::Vec3 b{0.0f, 2.0f, 0.0f};
 const karma::math::Vec3 sum = karma::math::add(a, b);
 const karma::math::Vec3 delta = karma::math::subtract(b, a);
 const karma::math::Vec3 half = karma::math::scale(sum, 0.5f);
+const karma::math::Vec3 component_scaled = karma::math::multiply(a, b);
+const karma::math::Vec3 midpoint = karma::math::lerp(a, b, 0.5f);
+
+const float raw_alpha = 1.25f;
+const float alpha = karma::math::clamp01(raw_alpha);
+
+const karma::math::Quat previous_rotation{};
+const karma::math::Quat current_rotation = karma::math::fromYawPitch(0.25f, 0.1f);
+const karma::math::Quat blended =
+    karma::math::slerp(previous_rotation, current_rotation, alpha);
+const karma::math::Quat unit_rotation = karma::math::normalize(blended);
+
+const glm::vec3 renderer_position = karma::math::toGlm(midpoint);
+const karma::math::Vec3 engine_position = karma::math::fromGlm(renderer_position);
 
 const auto start = karma::core::SteadyClock::now();
 // ...
 const double elapsed_ms = karma::core::elapsedMillisecondsSince(start);
 ```
 
-Use these helpers instead of adding local `Vec3` arithmetic or elapsed-time
-wrappers in systems, runtime code, and examples.
+Use these helpers instead of adding local `Vec3` arithmetic, quaternion
+conversion, clamp/interpolation, scale, or elapsed-time wrappers in systems,
+runtime code, and examples. GLM conversions for engine math types should go
+through `karma/core/math/glm.h`; backend-specific conversions such as Bullet,
+Jolt, or Assimp native types can stay local to those backend/importer files.
 
 ## Renderer Diagnostics
 For Vulkan-side renderer debugging, Karma exposes two environment variables:

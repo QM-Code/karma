@@ -6,8 +6,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <glm/gtx/quaternion.hpp>
-
 #include "karma/core/math/quat.h"
 #include "karma/core/math/vec3.h"
 #include "karma/simulation/animation/pose.h"
@@ -35,26 +33,6 @@ struct AccumulatedTransform {
   float rotation_weight = 0.0f;
   float scale_weight = 0.0f;
 };
-
-math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
-math::Vec3 subtractVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-
-math::Vec3 scaleVec3(const math::Vec3& v, float s) {
-  return {v.x * s, v.y * s, v.z * s};
-}
-
-glm::quat toGlm(const math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
-
-math::Quat fromGlm(const glm::quat& q) {
-  return {q.x, q.y, q.z, q.w};
-}
 
 float clipDuration(const components::AnimatorComponent& animator, uint32_t clip_index) {
   if (clip_index >= animator.clips.size()) {
@@ -252,17 +230,17 @@ void accumulateTransform(AccumulatedTransform& dst,
     return;
   }
   if (sampled.position) {
-    dst.position = addVec3(dst.position, scaleVec3(*sampled.position, weight));
+    dst.position = math::add(dst.position, math::scale(*sampled.position, weight));
     dst.position_weight += weight;
   }
   if (sampled.scale) {
-    dst.scale = addVec3(dst.scale, scaleVec3(*sampled.scale, weight));
+    dst.scale = math::add(dst.scale, math::scale(*sampled.scale, weight));
     dst.scale_weight += weight;
   }
   if (sampled.rotation) {
-    glm::quat q = toGlm(*sampled.rotation);
-    if (dst.rotation_weight > 0.0f && glm::dot(toGlm(dst.rotation), q) < 0.0f) {
-      q = -q;
+    math::Quat q = *sampled.rotation;
+    if (dst.rotation_weight > 0.0f && math::dot(dst.rotation, q) < 0.0f) {
+      q = {-q.x, -q.y, -q.z, -q.w};
     }
     dst.rotation.x += q.x * weight;
     dst.rotation.y += q.y * weight;
@@ -275,19 +253,13 @@ void accumulateTransform(AccumulatedTransform& dst,
 SampledTransform finalizeTransform(const AccumulatedTransform& accumulated) {
   SampledTransform out{};
   if (accumulated.position_weight > 0.0f) {
-    out.position = scaleVec3(accumulated.position, 1.0f / accumulated.position_weight);
+    out.position = math::scale(accumulated.position, 1.0f / accumulated.position_weight);
   }
   if (accumulated.scale_weight > 0.0f) {
-    out.scale = scaleVec3(accumulated.scale, 1.0f / accumulated.scale_weight);
+    out.scale = math::scale(accumulated.scale, 1.0f / accumulated.scale_weight);
   }
   if (accumulated.rotation_weight > 0.0f) {
-    glm::quat q = toGlm(accumulated.rotation);
-    if (glm::length(q) <= 0.000001f) {
-      q = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-    } else {
-      q = glm::normalize(q);
-    }
-    out.rotation = fromGlm(q);
+    out.rotation = math::normalize(accumulated.rotation);
   }
   return out;
 }
@@ -412,7 +384,7 @@ void appendStateSamples(const components::AnimatorComponent& animator,
     }
     const auto& lo = children[i - 1];
     const float span = std::max(hi.threshold - lo.threshold, 0.0001f);
-    const float t = std::clamp((parameter - lo.threshold) / span, 0.0f, 1.0f);
+    const float t = math::clamp01((parameter - lo.threshold) / span);
     out_samples.push_back(WeightedClipSample{
         .clip_index = lo.clip_index,
         .state_index = state_index,
@@ -489,21 +461,20 @@ void updateRootMotion(ecs::World& world,
   const SampledTransform previous = sampleRootMotion(clip, source_node, previous_time, loop);
   const SampledTransform current = sampleRootMotion(clip, source_node, current_time, loop);
   if (previous.position && current.position) {
-    animator.root_motion_delta.position = subtractVec3(*current.position, *previous.position);
+    animator.root_motion_delta.position = math::subtract(*current.position, *previous.position);
     animator.root_motion_accumulated.position =
         animator.root_motion_accumulated.position
-            ? addVec3(*animator.root_motion_accumulated.position,
-                      *animator.root_motion_delta.position)
+            ? math::add(*animator.root_motion_accumulated.position,
+                        *animator.root_motion_delta.position)
             : animator.root_motion_delta.position;
   }
   if (previous.rotation && current.rotation) {
-    const glm::quat prev = toGlm(*previous.rotation);
-    const glm::quat cur = toGlm(*current.rotation);
-    animator.root_motion_delta.rotation = fromGlm(glm::normalize(cur * glm::inverse(prev)));
+    animator.root_motion_delta.rotation =
+        math::normalize(math::mul(*current.rotation, math::inverse(*previous.rotation)));
     animator.root_motion_accumulated.rotation =
         animator.root_motion_accumulated.rotation
-            ? fromGlm(glm::normalize(toGlm(*animator.root_motion_delta.rotation) *
-                                     toGlm(*animator.root_motion_accumulated.rotation)))
+            ? math::normalize(math::mul(*animator.root_motion_delta.rotation,
+                                        *animator.root_motion_accumulated.rotation))
             : animator.root_motion_delta.rotation;
   }
 
@@ -512,7 +483,7 @@ void updateRootMotion(ecs::World& world,
       world.has<components::LocalTransformComponent>(owner)) {
     auto& local = world.get<components::LocalTransformComponent>(owner);
     if (animator.root_motion_delta.position) {
-      local.position = addVec3(local.position, *animator.root_motion_delta.position);
+      local.position = math::add(local.position, *animator.root_motion_delta.position);
     }
     if (animator.root_motion_delta.rotation) {
       local.rotation = math::mul(local.rotation, *animator.root_motion_delta.rotation);
@@ -561,7 +532,7 @@ void updateSimpleAnimator(ecs::World& world,
                                  animator.loop);
     }
     const float t =
-        std::clamp(animator.blend_elapsed_seconds / animator.blend_duration_seconds, 0.0f, 1.0f);
+        math::clamp01(animator.blend_elapsed_seconds / animator.blend_duration_seconds);
     samples.push_back(WeightedClipSample{
         .clip_index = static_cast<uint32_t>(animator.blend_from_clip_index),
         .time_seconds = animator.blend_from_time_seconds,
@@ -700,10 +671,8 @@ void updateStateMachineAnimator(ecs::World& world,
   std::vector<WeightedClipSample> samples;
   if (animator.transition.active) {
     const float t = animator.transition.duration_seconds > 0.0f
-                        ? std::clamp(animator.transition.elapsed_seconds /
-                                         animator.transition.duration_seconds,
-                                     0.0f,
-                                     1.0f)
+                        ? math::clamp01(animator.transition.elapsed_seconds /
+                                        animator.transition.duration_seconds)
                         : 1.0f;
     appendStateSamples(animator,
                        animator.transition.from_state_index,

@@ -8,9 +8,15 @@ backend implementation targets directly.
 ## Public Targets
 
 - `karma::headless`: server/non-visual runtime profile.
+- `karma::server`: minimal ECS/network server profile.
 - `karma::graphical`: full graphical runtime profile.
 - `karma::karma`: compatibility alias for `karma::graphical` when the
   graphical profile is built.
+
+`karma::server` is intended for lightweight dedicated servers and networking
+tests. It links core ECS, platform networking, and the networking feature layer
+only; games opt into content, physics, navigation, or runtime libraries
+explicitly.
 
 `karma::headless` is intended for servers, simulation/gameplay tests, and
 tools that do not need a window or GPU. It includes core ECS/runtime APIs,
@@ -24,6 +30,7 @@ debug UI, ImGui UI, and audio backend support.
 
 ## Profile Headers
 
+- Include `<karma/server.h>` for the minimal ECS/network server umbrella.
 - Include `<karma/headless.h>` for the server/non-visual umbrella.
 - Include `<karma/karma.h>` for the full graphical umbrella.
 - Prefer narrower `karma/<layer>/...` headers in reusable libraries.
@@ -37,9 +44,12 @@ backend in a headless build.
 
 `KARMA_HEADLESS=ON` remains the shortcut for a non-visual build. It forces
 `KARMA_BUILD_HEADLESS_PROFILE=ON` and `KARMA_BUILD_GRAPHICAL_PROFILE=OFF`.
+`KARMA_BUILD_SERVER_PROFILE` defaults to `ON` and remains independently
+controllable.
 
 For direct profile control:
 
+- `KARMA_BUILD_SERVER_PROFILE=ON|OFF`
 - `KARMA_BUILD_HEADLESS_PROFILE=ON|OFF`
 - `KARMA_BUILD_GRAPHICAL_PROFILE=ON|OFF`
 
@@ -86,11 +96,10 @@ ctest --test-dir build/minimal-headless --output-on-failure
 
 Additional smoke checks covered:
 
+- source-vendored consumer linking `karma::server`
 - source-vendored consumer linking `karma::headless`
-- installed-package consumer linking `karma::headless` with
-  `KARMA_CONFIG_FETCH_DEPS=OFF`
+- installed-package consumer linking `karma::server` and `karma::headless`
 - source-vendored graphical consumer linking `karma::graphical`
 - source-vendored alias consumer linking `karma::karma`
 - full default graphical profile build with GLFW, Diligent/Vulkan, miniaudio,
   ENet, Jolt, Recast/Detour, debug UI, and ImGui
-

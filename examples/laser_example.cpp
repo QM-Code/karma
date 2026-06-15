@@ -12,6 +12,8 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
+#include "karma/core/math/glm.h"
+
 namespace karma::demo {
 
 namespace {
@@ -26,14 +28,6 @@ struct LookAngles {
   float yaw = 0.0f;
   float pitch = 0.0f;
 };
-
-glm::vec3 toGlm(const math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-math::Vec3 toMath(const glm::vec3& v) {
-  return {v.x, v.y, v.z};
-}
 
 std::string_view laserEffectMode() {
   const char* raw_mode = std::getenv("KARMA_LASER_EFFECT");
@@ -70,7 +64,7 @@ LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
 SceneBounds computePointBounds(const std::vector<math::Vec3>& points) {
   SceneBounds bounds{};
   for (const math::Vec3& point : points) {
-    expandBounds(bounds, toGlm(point));
+    expandBounds(bounds, math::toGlm(point));
   }
   return bounds;
 }
@@ -203,7 +197,7 @@ class LaserExample final : public app::GameInterface {
     camera_pitch_ = look.pitch;
     target_camera_pitch_ = look.pitch;
     components::TransformComponent camera_transform{};
-    camera_transform.setPosition(toMath(eye));
+    camera_transform.setPosition(math::fromGlm(eye));
     camera_transform.setRotation(math::fromYawPitch(camera_yaw_, camera_pitch_));
     components::CameraComponent camera_component{};
     camera_component.near_clip = 0.05f;

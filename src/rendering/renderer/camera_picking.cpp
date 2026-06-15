@@ -31,7 +31,7 @@ bool screenPointToWorldRay(double screen_x,
   const float aspect = static_cast<float>(viewport_width) / static_cast<float>(viewport_height);
   const float tan_half_fov = std::tan(fov_y_degrees * 0.5f * kPi / 180.0f);
   const math::Vec3 camera_ray =
-      math::normalize({ndc_x * aspect * tan_half_fov, ndc_y * tan_half_fov, -1.0f});
+      math::normalize(math::Vec3{ndc_x * aspect * tan_half_fov, ndc_y * tan_half_fov, -1.0f});
   const math::Vec3 ray_dir =
       math::normalize(math::rotateVec(camera_rotation, camera_ray));
 

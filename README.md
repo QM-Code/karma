@@ -30,9 +30,10 @@ Karma is organized as layered engine code under `include/karma/<layer>` and
 
 The default graphical profile currently enables GLFW, Diligent, miniaudio,
 ENet, Jolt, navigation, debug UI, and the ImGui demo. RmlUi is opt-in because
-system RmlUi/FreeType packages vary more across machines. The headless profile
-keeps the server/non-visual runtime surface and omits window, graphical
-renderer, UI provider, and audio backends by default.
+system RmlUi/FreeType packages vary more across machines. The server profile is
+a minimal ECS/network surface, while the headless profile keeps the broader
+non-visual runtime surface and omits window, graphical renderer, UI provider,
+and audio backends by default.
 
 ## Quick Start
 
@@ -88,16 +89,17 @@ For a headless build that skips window/render backends and graphics demos:
 
 ```bash
 cmake --preset headless
-cmake --build --preset headless --target karma_network_demo
+cmake --build --preset headless --target karma_network_server_demo
 ```
 
-`KARMA_HEADLESS` builds only the non-visual `karma::headless` profile. It
-disables window, render, graphical UI provider, debug UI, audio backend, graphics
-examples, and rendered navmesh example targets. It is intended for
-network/server targets, simulation/gameplay logic, and tests that do not need a
-window or GPU. Runtime code should treat graphics handles as optional in this
-mode; renderer-facing APIs either no-op or return invalid handles when no
-backend exists.
+`KARMA_HEADLESS` builds the non-visual `karma::headless` runtime profile and
+disables window, render, graphical UI provider, debug UI, audio backend,
+graphics examples, and rendered navmesh example targets. The minimal
+`karma::server` profile is controlled separately and defaults to enabled. Use
+these non-visual profiles for network/server targets, simulation/gameplay logic,
+and tests that do not need a window or GPU. Runtime code should treat graphics
+handles as optional in headless mode; renderer-facing APIs either no-op or return
+invalid handles when no backend exists.
 
 Headless is also not a minimal dependency preset by itself. Content import,
 physics, navigation, and networking stay enabled by default unless their own
@@ -116,21 +118,23 @@ Current consumer import status:
 - Supported paths are source-vendored CMake import and installed CMake package
   import.
 - Consumers choose a public profile target:
+  - `karma::server`: minimal ECS/network server profile.
   - `karma::headless`: server/non-visual runtime profile.
   - `karma::graphical`: full graphical runtime profile.
   - `karma::karma`: compatibility alias for `karma::graphical` when the
     graphical profile is built.
 - Public includes are under `include/karma/...`; consumers should include
-  profile headers such as `<karma/headless.h>` / `<karma/karma.h>`, or layered
+  profile headers such as `<karma/server.h>`, `<karma/headless.h>`, or
+  `<karma/karma.h>`, or layered
 	  headers such as
 	  `<karma/content/importers/mesh_import.h>`.
 - The engine is currently built as a static C++20 library. It is still moving
   quickly, so source-vendoring is the most flexible integration path during
   active development.
 - GitHub CI smoke-tests both consumer paths on Linux, macOS, and Windows. The
-  smoke tests build small external executables, link `karma::headless`,
-  `karma::graphical`, and `karma::karma`, and exercise basic public headers and
-  linkage.
+  smoke tests build small external executables, link `karma::server`,
+  `karma::headless`, `karma::graphical`, and `karma::karma`, and exercise basic
+  public headers and linkage.
 - Installed packages do not fetch missing third-party dependency targets during
   `find_package(karma)` by default. Set `KARMA_CONFIG_FETCH_DEPS=ON` before
   `find_package(karma)` if package-time dependency fetching is desired.
@@ -146,7 +150,8 @@ set(KARMA_FETCH_DEPS ON CACHE BOOL "" FORCE)
 
 add_subdirectory(external/karma)
 
-target_link_libraries(my_server PRIVATE karma::headless)
+target_link_libraries(my_server PRIVATE karma::server)
+target_link_libraries(my_simulation_tool PRIVATE karma::headless)
 target_link_libraries(my_game PRIVATE karma::graphical)
 ```
 
@@ -169,11 +174,11 @@ cmake --build build/package --parallel
 cmake --install build/package
 ```
 
-Consumers can then use the installed headless profile:
+Consumers can then use the installed server or headless profile:
 
 ```cmake
 find_package(karma CONFIG REQUIRED)
-target_link_libraries(my_server PRIVATE karma::headless)
+target_link_libraries(my_server PRIVATE karma::server)
 ```
 
 For graphical installs, use `karma::graphical` or `karma::karma` as the
@@ -217,8 +222,9 @@ The examples under [examples/](examples/) cover the current engine surface:
   module samples.
 - `karma_collision_events_example`: trigger, contact, and grounded-state demo.
 - `karma_light_stress_example`: Forward+ local-light and point-shadow probe.
-- `karma_imgui_ui_demo`, `karma_rmlui_ui_demo`, and `karma_network_demo`:
-  provider and platform demos.
+- `karma_imgui_ui_demo`, `karma_rmlui_ui_demo`,
+  `karma_network_server_demo`, and `karma_network_client_demo`: provider and
+  platform demos.
 
 See [examples/README.md](examples/README.md) for the full target list and
 runtime flags.
@@ -234,11 +240,13 @@ Common CMake switches:
 - `KARMA_BUILD_EXAMPLES`: build example executable targets.
 - `KARMA_BUILD_TESTS`: build Karma test executable targets when `BUILD_TESTING`
   is also enabled.
+- `KARMA_BUILD_SERVER_PROFILE`: build the minimal `karma::server` target.
 - `KARMA_BUILD_HEADLESS_PROFILE`: build the `karma::headless` target.
 - `KARMA_BUILD_GRAPHICAL_PROFILE`: build the `karma::graphical` and
   `karma::karma` targets.
-- `KARMA_HEADLESS`: legacy shortcut for building only `karma::headless`;
-  disables graphical and audio backends plus graphics demos.
+- `KARMA_HEADLESS`: legacy shortcut for building the non-visual
+  `karma::headless` runtime profile; disables graphical and audio backends plus
+  graphics demos.
 - `KARMA_RENDER_BACKEND_DILIGENT`: enable the Diligent renderer.
 - `KARMA_WINDOW_BACKEND_GLFW` / `KARMA_WINDOW_BACKEND_SDL`: select one window
   backend.
@@ -248,7 +256,7 @@ Common CMake switches:
 - `KARMA_AUDIO_BACKEND_MINIAUDIO` / `KARMA_AUDIO_BACKEND_SDL`: select one audio
   backend.
 - `KARMA_NETWORK_BACKEND_ENET`: build the default ENet networking transport and
-  `karma_network_demo`.
+  split network demo targets when their profiles are enabled.
 - `KARMA_ENABLE_NAVIGATION`: build Recast/Detour navigation support.
 - `KARMA_BUILD_DEBUG_UI`: build the runtime debug overlay.
 - `KARMA_BUILD_IMGUI_DEMO`, `KARMA_BUILD_RMLUI_DEMO`, `KARMA_ENABLE_RMLUI`:

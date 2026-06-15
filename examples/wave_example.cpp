@@ -11,6 +11,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+#include "karma/core/math/glm.h"
+
 namespace karma::demo {
 
 namespace {
@@ -28,20 +30,8 @@ struct LookAngles {
   float pitch = 0.0f;
 };
 
-math::Vec3 toMath(const glm::vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::vec3 toGlm(const math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-math::Quat toMath(const glm::quat& q) {
-  return {q.x, q.y, q.z, q.w};
-}
-
 float saturate(float value) {
-  return std::clamp(value, 0.0f, 1.0f);
+  return math::clamp01(value);
 }
 
 std::uint8_t toByte(float value) {
@@ -684,7 +674,7 @@ class WaveExample final : public app::GameInterface {
     target_camera_pitch_ = look.pitch;
 
     components::TransformComponent camera_transform{};
-    camera_transform.setPosition(toMath(eye));
+    camera_transform.setPosition(math::fromGlm(eye));
     camera_transform.setRotation(math::fromYawPitch(camera_yaw_, camera_pitch_));
 
     components::CameraComponent camera_component{};

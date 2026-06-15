@@ -2,32 +2,14 @@
 
 #include <cmath>
 
+#include "karma/core/math/glm.h"
+#include "karma/core/math/vec3.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/visibility.h"
 
 namespace karma::physics {
 
 namespace {
-
-math::Vec3 toVec3(const glm::vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::vec3 toGlm(const math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::quat toGlm(const math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
-
-math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
-math::Vec3 subVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
 
 bool nearlyEqualVec3(const math::Vec3& a, const math::Vec3& b, float eps = 1e-4f) {
   return std::abs(a.x - b.x) <= eps &&
@@ -137,9 +119,9 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
     auto& body = world.get<components::RigidbodyComponent>(entity);
 
     if (it == rigid_bodies_.end() || half_extents_changed) {
-      glm::quat current_rot = toGlm(transform.getRotation());
-      glm::vec3 current_vel = toGlm(body.velocity);
-      glm::vec3 current_ang_vel = toGlm(body.angular_velocity);
+      glm::quat current_rot = math::toGlm(transform.getRotation());
+      glm::vec3 current_vel = math::toGlm(body.velocity);
+      glm::vec3 current_ang_vel = math::toGlm(body.angular_velocity);
       if (it != rigid_bodies_.end() && it->second.isValid()) {
         physics_entities_by_handle_.erase(it->second.nativeHandle());
         current_rot = it->second.getRotation();
@@ -149,9 +131,9 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
       }
       PhysicsMaterial material;
       RigidBody rigid = physics_.createBoxBody(
-          toGlm(collider_half_extents),
+          math::toGlm(collider_half_extents),
           body.mass,
-          toGlm(addVec3(transform.getPosition(), collider_center)),
+          math::toGlm(math::add(transform.getPosition(), collider_center)),
           material);
       rigid.setRotation(current_rot);
       rigid.setVelocity(current_vel);
@@ -165,7 +147,7 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
       }
       box_collider_state_[key] = {collider_center, collider_half_extents};
     } else if (center_changed && it->second.isValid()) {
-      it->second.setPosition(toGlm(addVec3(transform.getPosition(), collider_center)));
+      it->second.setPosition(math::toGlm(math::add(transform.getPosition(), collider_center)));
       state_it->second.center = collider_center;
     }
 
@@ -174,10 +156,10 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
     if (position_dirty || rotation_dirty) {
       if (it->second.isValid()) {
         if (position_dirty) {
-          it->second.setPosition(toGlm(addVec3(transform.getPosition(), collider_center)));
+          it->second.setPosition(math::toGlm(math::add(transform.getPosition(), collider_center)));
         }
         if (rotation_dirty) {
-          it->second.setRotation(toGlm(transform.getRotation()));
+          it->second.setRotation(math::toGlm(transform.getRotation()));
         }
       }
       transform.position_dirty_ = false;
@@ -190,8 +172,8 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
       it->second.setUseGravity(body.use_gravity);
       it->second.setTrigger(trigger);
       if (body.is_kinematic) {
-        it->second.setVelocity(toGlm(body.velocity));
-        it->second.setAngularVelocity(toGlm(body.angular_velocity));
+        it->second.setVelocity(math::toGlm(body.velocity));
+        it->second.setAngularVelocity(math::toGlm(body.angular_velocity));
       }
     }
   });
@@ -242,12 +224,11 @@ void PhysicsSystem::syncDynamicBodies(ecs::World& world) {
     auto& transform = world.get<components::TransformComponent>(entity);
     const auto& collider = world.get<components::BoxColliderComponent>(entity);
     const math::Vec3 collider_center = collider.center;
-    const math::Vec3 body_pos = toVec3(it->second.getPosition());
-    transform.setPositionFromPhysics(subVec3(body_pos, collider_center));
-    transform.setRotationFromPhysics({it->second.getRotation().x, it->second.getRotation().y,
-                                      it->second.getRotation().z, it->second.getRotation().w});
-    body.velocity = toVec3(it->second.getVelocity());
-    body.angular_velocity = toVec3(it->second.getAngularVelocity());
+    const math::Vec3 body_pos = math::fromGlm(it->second.getPosition());
+    transform.setPositionFromPhysics(math::subtract(body_pos, collider_center));
+    transform.setRotationFromPhysics(math::fromGlm(it->second.getRotation()));
+    body.velocity = math::fromGlm(it->second.getVelocity());
+    body.angular_velocity = math::fromGlm(it->second.getAngularVelocity());
   });
 }
 
@@ -332,9 +313,9 @@ void PhysicsSystem::syncContactEvents(ecs::World& world) {
       TrackedContact tracked{
           .other = other,
           .other_shape = colliderShape(world, other),
-          .point = self_is_a ? toVec3(contact.point_a) : toVec3(contact.point_b),
-          .normal = self_is_a ? negateVec3(toVec3(contact.normal_a_to_b))
-                              : toVec3(contact.normal_a_to_b),
+          .point = self_is_a ? math::fromGlm(contact.point_a) : math::fromGlm(contact.point_b),
+          .normal = self_is_a ? negateVec3(math::fromGlm(contact.normal_a_to_b))
+                              : math::fromGlm(contact.normal_a_to_b),
       };
 
       current_contacts[other_key] = tracked;
@@ -376,7 +357,7 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
       const int shape_kind = colliderShapeKind(world, entity);
       if (world.has<components::BoxColliderComponent>(entity)) {
         const auto& collider = world.get<components::BoxColliderComponent>(entity);
-        half_extents = toGlm(collider.half_extents);
+        half_extents = math::toGlm(collider.half_extents);
         center = collider.center;
       } else if (world.has<components::SphereColliderComponent>(entity)) {
         const auto& collider = world.get<components::SphereColliderComponent>(entity);
@@ -400,8 +381,8 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
         physics_entities_by_handle_[player_native_handle_] = entity;
       }
       auto& transform = world.get<components::TransformComponent>(entity);
-      controller.setCenter(toGlm(center));
-      controller.setPosition(toGlm(transform.getPosition()));
+      controller.setCenter(math::toGlm(center));
+      controller.setPosition(math::toGlm(transform.getPosition()));
       return false;
     });
   }
@@ -426,7 +407,7 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
   const int shape_kind = colliderShapeKind(world, player_entity_);
   if (world.has<components::BoxColliderComponent>(player_entity_)) {
     const auto& collider = world.get<components::BoxColliderComponent>(player_entity_);
-    half_extents = toGlm(collider.half_extents);
+    half_extents = math::toGlm(collider.half_extents);
     center = collider.center;
   } else if (world.has<components::SphereColliderComponent>(player_entity_)) {
     const auto& collider = world.get<components::SphereColliderComponent>(player_entity_);
@@ -458,8 +439,8 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
     controller->destroy();
     auto& new_controller = physics_.createPlayer(half_extents * 2.0f);
     controller = &new_controller;
-    controller->setCenter(toGlm(center));
-    controller->setPosition(toGlm(transform.getPosition()));
+    controller->setCenter(math::toGlm(center));
+    controller->setPosition(math::toGlm(transform.getPosition()));
     controller->setRotation(current_rot);
     controller->setVelocity(current_vel);
     controller->setAngularVelocity(current_ang_vel);
@@ -473,19 +454,19 @@ void PhysicsSystem::syncPlayerController(ecs::World& world, float dt) {
   }
 
   if (center_changed && !size_changed && !shape_changed) {
-    controller->setCenter(toGlm(center));
-    controller->setPosition(toGlm(transform.getPosition()));
+    controller->setCenter(math::toGlm(center));
+    controller->setPosition(math::toGlm(transform.getPosition()));
     player_center_ = center;
   }
 
   const math::Vec3 desired = input.desiredVelocity();
   const math::Vec3 impulse = input.addVelocity();
-  glm::vec3 velocity = toGlm(desired) + toGlm(impulse);
+  glm::vec3 velocity = math::toGlm(desired) + math::toGlm(impulse);
   controller->setVelocity(velocity);
   input.clearImpulse();
 
   transform.setPositionFromPhysics(
-      toVec3(controller->getPosition()));
+      math::fromGlm(controller->getPosition()));
   transform.setRotationFromPhysics({controller->getRotation().x, controller->getRotation().y,
                                     controller->getRotation().z, controller->getRotation().w});
 }
@@ -556,8 +537,8 @@ void PhysicsSystem::syncGroundContacts(ecs::World& world) {
     contact.exited = !contact.grounded && was_grounded;
     contact.has_support = hit != nullptr && hit->grounded;
     contact.support_entity = support_entity;
-    contact.point = hit != nullptr ? toVec3(hit->point) : math::Vec3{};
-    contact.normal = hit != nullptr ? toVec3(hit->normal) : math::Vec3{0.0f, 1.0f, 0.0f};
+    contact.point = hit != nullptr ? math::fromGlm(hit->point) : math::Vec3{};
+    contact.normal = hit != nullptr ? math::fromGlm(hit->normal) : math::Vec3{0.0f, 1.0f, 0.0f};
   };
 
   world.forEach<components::GroundContactComponent>([&](const ecs::Entity entity) {

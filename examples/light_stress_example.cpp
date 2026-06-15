@@ -449,7 +449,7 @@ class LocalLightProbeExample final : public app::GameInterface {
       fov_y_degrees = 72.0f;
       center.z = depth_span * 0.25f;
     }
-    const math::Vec3 direction = math::normalize({
+    const math::Vec3 direction = math::normalize(math::Vec3{
         center.x - eye.x,
         center.y - eye.y,
         center.z - eye.z,

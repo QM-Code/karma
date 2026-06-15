@@ -6,6 +6,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "karma/core/math/glm.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/nav_mesh.h"
@@ -17,25 +18,13 @@
 namespace karma::navigation {
 namespace {
 
-glm::vec3 toGlm(const math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::quat toGlm(const math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
-
-math::Vec3 toVec3(const glm::vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
 glm::mat4 makeTransform(const math::Vec3& position,
                         const math::Quat& rotation,
                         const math::Vec3& scale) {
   glm::mat4 transform(1.0f);
-  transform = glm::translate(transform, toGlm(position));
-  transform *= glm::mat4_cast(toGlm(rotation));
-  transform = glm::scale(transform, toGlm(scale));
+  transform = glm::translate(transform, math::toGlm(position));
+  transform *= glm::mat4_cast(math::toGlm(rotation));
+  transform = glm::scale(transform, math::toGlm(scale));
   return transform;
 }
 
@@ -48,7 +37,7 @@ void appendMesh(NavMeshInputGeometry& out,
   out.vertices.reserve(out.vertices.size() + mesh.vertices.size());
   for (const glm::vec3& vertex : mesh.vertices) {
     const glm::vec4 world = transform * glm::vec4(vertex, 1.0f);
-    out.vertices.push_back(toVec3(glm::vec3(world)));
+    out.vertices.push_back(math::fromGlm(glm::vec3(world)));
   }
 
   out.indices.reserve(out.indices.size() + mesh.indices.size());

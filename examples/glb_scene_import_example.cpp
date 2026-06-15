@@ -9,17 +9,11 @@
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
+#include "karma/core/math/glm.h"
+
 namespace karma::demo {
 
 namespace {
-
-glm::vec3 toGlm(const math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::quat toGlm(const math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
 
 struct SceneBounds {
   glm::vec3 min{0.0f};
@@ -49,11 +43,11 @@ SceneBounds computePrefabBounds(const scene::GlbScenePrefab& prefab) {
   SceneBounds fallback_bounds{};
 
   for (const auto& node : prefab.nodes) {
-    const glm::vec3 world_pos = toGlm(node.world_position);
+    const glm::vec3 world_pos = math::toGlm(node.world_position);
     expandBounds(fallback_bounds, world_pos);
 
-    const glm::vec3 world_scale = toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
+    const glm::vec3 world_scale = math::toGlm(node.world_scale);
+    const glm::mat3 rotation = glm::mat3_cast(math::toGlm(node.world_rotation));
     for (const auto& primitive : node.primitives) {
       for (const glm::vec3& vertex : primitive.mesh.vertices) {
         const glm::vec3 scaled = vertex * world_scale;

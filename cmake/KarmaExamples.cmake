@@ -176,14 +176,24 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   endif()
 endif()
 
-if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_HEADLESS_PROFILE)
-  add_executable(karma_network_demo
-    examples/network_demo.cpp
+if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_SERVER_PROFILE)
+  add_executable(karma_network_server_demo
+    examples/network_server_demo.cpp
+    examples/network_demo_shared.cpp
   )
 
-  target_link_libraries(karma_network_demo PRIVATE karma::headless)
+  target_link_libraries(karma_network_server_demo PRIVATE karma::server)
+endif()
+
+if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_GRAPHICAL_PROFILE)
+  add_executable(karma_network_client_demo
+    examples/network_client_demo.cpp
+    examples/network_demo_shared.cpp
+  )
+
+  target_link_libraries(karma_network_client_demo PRIVATE karma::graphical)
   if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_network_demo karma_fix_xxhash)
+    add_dependencies(karma_network_client_demo karma_fix_xxhash)
   endif()
 endif()
 

@@ -34,20 +34,8 @@ struct WorldCapsule {
   float radius = 0.0f;
 };
 
-math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
-math::Vec3 subVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-
-math::Vec3 scaleVec3(const math::Vec3& v, float s) {
-  return {v.x * s, v.y * s, v.z * s};
-}
-
 math::Vec3 scaledLocalPoint(const math::Vec3& point, const math::Vec3& scale) {
-  return {point.x * scale.x, point.y * scale.y, point.z * scale.z};
+  return math::multiply(point, scale);
 }
 
 float maxAbs3(const math::Vec3& v) {
@@ -67,9 +55,9 @@ float component(const math::Vec3& v, int axis) {
 
 math::Vec3 worldPointFromLocal(const components::TransformComponent& transform,
                                const math::Vec3& local_point) {
-  return addVec3(transform.getPosition(),
-                 math::rotateVec(transform.getRotation(),
-                                 scaledLocalPoint(local_point, transform.getScale())));
+  return math::add(transform.getPosition(),
+                   math::rotateVec(transform.getRotation(),
+                                   scaledLocalPoint(local_point, transform.getScale())));
 }
 
 bool matchesCollisionLayerMask(const ecs::World& world,
@@ -149,14 +137,14 @@ WorldCapsule makeWorldCapsule(const components::TransformComponent& transform,
   const float half_height = std::abs(scale.y) * collider.height * 0.5f;
   const float radius = std::max(std::abs(scale.x), std::abs(scale.z)) * collider.radius;
   return WorldCapsule{
-      .a = addVec3(center, scaleVec3(axis, half_height)),
-      .b = subVec3(center, scaleVec3(axis, half_height)),
+      .a = math::add(center, math::scale(axis, half_height)),
+      .b = math::subtract(center, math::scale(axis, half_height)),
       .radius = radius,
   };
 }
 
 math::Vec3 pointInBoxLocalSpace(const OrientedBox& box, const math::Vec3& point) {
-  const math::Vec3 rel = subVec3(point, box.center);
+  const math::Vec3 rel = math::subtract(point, box.center);
   return {
       math::dot(rel, box.axes[0]),
       math::dot(rel, box.axes[1]),
@@ -178,7 +166,7 @@ float pointAabbDistanceSquared(const math::Vec3& point, const math::Vec3& extent
 float segmentAabbDistanceSquared(const math::Vec3& a,
                                  const math::Vec3& b,
                                  const math::Vec3& extents) {
-  const math::Vec3 d = subVec3(b, a);
+  const math::Vec3 d = math::subtract(b, a);
   std::array<float, 8> t_values{};
   size_t count = 0;
   t_values[count++] = 0.0f;
@@ -211,7 +199,7 @@ float segmentAabbDistanceSquared(const math::Vec3& a,
   }
 
   auto evaluate = [&](float t) {
-    const math::Vec3 point = addVec3(a, scaleVec3(d, t));
+    const math::Vec3 point = math::add(a, math::scale(d, t));
     return pointAabbDistanceSquared(point, extents);
   };
 
@@ -247,7 +235,7 @@ float segmentAabbDistanceSquared(const math::Vec3& a,
     }
 
     if (coeff_a > kContainmentEpsilon) {
-      const float candidate = std::clamp(-coeff_b / (2.0f * coeff_a), start, end);
+      const float candidate = math::clamp(-coeff_b / (2.0f * coeff_a), start, end);
       best = std::min(best, coeff_a * candidate * candidate + coeff_b * candidate + coeff_c);
     }
   }
@@ -258,23 +246,23 @@ float segmentAabbDistanceSquared(const math::Vec3& a,
 float pointSegmentDistanceSquared(const math::Vec3& point,
                                   const math::Vec3& a,
                                   const math::Vec3& b) {
-  const math::Vec3 ab = subVec3(b, a);
+  const math::Vec3 ab = math::subtract(b, a);
   const float ab_len_sq = math::lengthSquared(ab);
   float t = 0.0f;
   if (ab_len_sq > kContainmentEpsilon) {
-    t = std::clamp(math::dot(subVec3(point, a), ab) / ab_len_sq, 0.0f, 1.0f);
+    t = math::clamp01(math::dot(math::subtract(point, a), ab) / ab_len_sq);
   }
-  const math::Vec3 closest = addVec3(a, scaleVec3(ab, t));
-  return math::lengthSquared(subVec3(point, closest));
+  const math::Vec3 closest = math::add(a, math::scale(ab, t));
+  return math::lengthSquared(math::subtract(point, closest));
 }
 
 float segmentSegmentDistanceSquared(const math::Vec3& p1,
                                     const math::Vec3& q1,
                                     const math::Vec3& p2,
                                     const math::Vec3& q2) {
-  const math::Vec3 d1 = subVec3(q1, p1);
-  const math::Vec3 d2 = subVec3(q2, p2);
-  const math::Vec3 r = subVec3(p1, p2);
+  const math::Vec3 d1 = math::subtract(q1, p1);
+  const math::Vec3 d2 = math::subtract(q2, p2);
+  const math::Vec3 r = math::subtract(p1, p2);
   const float a = math::dot(d1, d1);
   const float e = math::dot(d2, d2);
   const float f = math::dot(d2, r);
@@ -283,40 +271,40 @@ float segmentSegmentDistanceSquared(const math::Vec3& p1,
   float t = 0.0f;
 
   if (a <= kContainmentEpsilon && e <= kContainmentEpsilon) {
-    return math::lengthSquared(subVec3(p1, p2));
+    return math::lengthSquared(math::subtract(p1, p2));
   }
 
   if (a <= kContainmentEpsilon) {
-    t = std::clamp(f / e, 0.0f, 1.0f);
+    t = math::clamp01(f / e);
   } else {
     const float c = math::dot(d1, r);
     if (e <= kContainmentEpsilon) {
-      s = std::clamp(-c / a, 0.0f, 1.0f);
+      s = math::clamp01(-c / a);
     } else {
       const float b_dot = math::dot(d1, d2);
       const float denom = a * e - b_dot * b_dot;
       if (std::abs(denom) > kContainmentEpsilon) {
-        s = std::clamp((b_dot * f - c * e) / denom, 0.0f, 1.0f);
+        s = math::clamp01((b_dot * f - c * e) / denom);
       }
       t = (b_dot * s + f) / e;
       if (t < 0.0f) {
         t = 0.0f;
-        s = std::clamp(-c / a, 0.0f, 1.0f);
+        s = math::clamp01(-c / a);
       } else if (t > 1.0f) {
         t = 1.0f;
-        s = std::clamp((b_dot - c) / a, 0.0f, 1.0f);
+        s = math::clamp01((b_dot - c) / a);
       }
     }
   }
 
-  const math::Vec3 c1 = addVec3(p1, scaleVec3(d1, s));
-  const math::Vec3 c2 = addVec3(p2, scaleVec3(d2, t));
-  return math::lengthSquared(subVec3(c1, c2));
+  const math::Vec3 c1 = math::add(p1, math::scale(d1, s));
+  const math::Vec3 c2 = math::add(p2, math::scale(d2, t));
+  return math::lengthSquared(math::subtract(c1, c2));
 }
 
 bool overlapsSphereSphere(const WorldSphere& a, const WorldSphere& b) {
   const float radius = a.radius + b.radius;
-  return math::lengthSquared(subVec3(a.center, b.center)) <= radius * radius + kContainmentEpsilon;
+  return math::lengthSquared(math::subtract(a.center, b.center)) <= radius * radius + kContainmentEpsilon;
 }
 
 bool overlapsSphereBox(const WorldSphere& sphere, const OrientedBox& box) {
@@ -356,7 +344,7 @@ bool overlapsBoxBox(const OrientedBox& a, const OrientedBox& b) {
     }
   }
 
-  const math::Vec3 t_world = subVec3(b.center, a.center);
+  const math::Vec3 t_world = math::subtract(b.center, a.center);
   const float t[3] = {
       math::dot(t_world, a.axes[0]),
       math::dot(t_world, a.axes[1]),
@@ -405,7 +393,7 @@ bool containsPointBox(const components::TransformComponent& transform,
                       const math::Vec3& world_point) {
   const math::Vec3 center = worldPointFromLocal(transform, collider.center);
   const math::Quat rotation = transform.getRotation();
-  const math::Vec3 rel = subVec3(world_point, center);
+  const math::Vec3 rel = math::subtract(world_point, center);
   const math::Vec3 right = math::rotateVec(rotation, {1.0f, 0.0f, 0.0f});
   const math::Vec3 up = math::rotateVec(rotation, {0.0f, 1.0f, 0.0f});
   const math::Vec3 forward = math::rotateVec(rotation, {0.0f, 0.0f, 1.0f});
@@ -425,7 +413,7 @@ bool containsPointSphere(const components::TransformComponent& transform,
                          const math::Vec3& world_point) {
   const math::Vec3 center = worldPointFromLocal(transform, collider.center);
   const float radius = collider.radius * maxAbs3(transform.getScale());
-  const math::Vec3 delta = subVec3(world_point, center);
+  const math::Vec3 delta = math::subtract(world_point, center);
   return math::lengthSquared(delta) <= radius * radius + kContainmentEpsilon;
 }
 

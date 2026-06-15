@@ -23,3 +23,7 @@ Karma ECS + scene graph from game code.
 - `particle_example.cpp`: minimal billboard particle example with file-backed `.kpeffect` assets, live hot reload, additive sparks, alpha-sorted smoke, soft-particle depth fading, heat distortion, ground-aligned particles, simple ground-colliding debris, and a staged replayable explosion with authored fire and smoke flipbooks from EXR sequences, bright shock rings, extra debris, hotter ember particles that settle and fade, a dust ring, a scorch mark, radial spherical emission, curve-shaped smoke bloom, and a short-lived point light. See [../docs/PARTICLE_SYSTEM.md](../docs/PARTICLE_SYSTEM.md) for the ECS-facing workflow.
 - `imgui_ui_demo.cpp`: minimal ImGui app code using Karma's built-in ImGui adapter.
 - `rmlui_ui_demo.cpp`: minimal RmlUi app code using Karma's built-in RmlUi adapter.
+- `network_server_demo.cpp` and `network_client_demo.cpp`: split ENet-backed
+  multiplayer smoke demos. The server links `karma::server`, owns authority,
+  and exercises session groups, targeted custom messages, input commands, and
+  replication. The graphical-linked client is log-based for now.

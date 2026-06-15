@@ -28,27 +28,21 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "karma/core/math/glm.h"
+
 namespace {
 
 bool near(float a, float b, float epsilon = 0.0001f) {
   return std::abs(a - b) <= epsilon;
 }
 
-glm::vec3 toGlm(const karma::math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::quat toGlm(const karma::math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
-
 glm::mat4 composeTransform(const karma::math::Vec3& position,
                            const karma::math::Quat& rotation,
                            const karma::math::Vec3& scale) {
   glm::mat4 matrix(1.0f);
-  matrix = glm::translate(matrix, toGlm(position));
-  matrix *= glm::mat4_cast(toGlm(rotation));
-  matrix = glm::scale(matrix, toGlm(scale));
+  matrix = glm::translate(matrix, karma::math::toGlm(position));
+  matrix *= glm::mat4_cast(karma::math::toGlm(rotation));
+  matrix = glm::scale(matrix, karma::math::toGlm(scale));
   return matrix;
 }
 

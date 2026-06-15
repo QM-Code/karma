@@ -9,6 +9,8 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
+#include "karma/core/math/glm.h"
+
 namespace karma::demo {
 
 namespace {
@@ -19,14 +21,6 @@ struct LookAngles {
   float yaw = 0.0f;
   float pitch = 0.0f;
 };
-
-math::Vec3 toMath(const glm::vec3& value) {
-  return {value.x, value.y, value.z};
-}
-
-glm::vec3 toGlm(const math::Vec3& value) {
-  return {value.x, value.y, value.z};
-}
 
 components::TransformComponent makeTransform(const math::Vec3& position) {
   components::TransformComponent transform{};
@@ -156,7 +150,7 @@ class VolumetricSphereExample final : public app::GameInterface {
   }
 
   void spawnCamera() {
-    const glm::vec3 target = toGlm(kVolumeSphereCenter);
+    const glm::vec3 target = math::toGlm(kVolumeSphereCenter);
     const glm::vec3 eye = target + glm::vec3(0.0f, 0.35f, 12.0f);
     const LookAngles look = lookAnglesToTarget(eye, target);
 
@@ -168,7 +162,7 @@ class VolumetricSphereExample final : public app::GameInterface {
     target_camera_pitch_ = look.pitch;
 
     components::TransformComponent camera_transform{};
-    camera_transform.setPosition(toMath(eye));
+    camera_transform.setPosition(math::fromGlm(eye));
     camera_transform.setRotation(math::fromYawPitch(camera_yaw_, camera_pitch_));
 
     components::CameraComponent camera_component{};

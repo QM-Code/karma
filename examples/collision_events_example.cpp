@@ -463,7 +463,7 @@ class CollisionEventsGame final : public app::GameInterface {
     if (physics != nullptr) {
       if (auto* controller = physics->playerController()) {
         const glm::vec3 controller_forward = controller->getForwardVector();
-        move_forward = math::normalize({controller_forward.x, 0.0f, controller_forward.z});
+        move_forward = math::normalize(math::Vec3{controller_forward.x, 0.0f, controller_forward.z});
         const glm::vec3 controller_velocity = controller->getVelocity();
         vertical_velocity = controller_velocity.y;
         grounded = controller->isGrounded();

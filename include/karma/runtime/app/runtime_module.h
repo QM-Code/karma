@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "karma/world/ecs/world.h"
 
 namespace karma::renderer {
@@ -44,8 +46,29 @@ class RuntimeModule {
   virtual void onWarmUp(ecs::World& world) {
     onUpdate(world, 0.0f, 1.0f);
   }
+  /// Called once near the beginning of each frame before fixed simulation steps.
+  virtual void onFrameBegin(ecs::World& world, float dt) {
+    (void)world;
+    (void)dt;
+  }
+  /// Called before each fixed simulation step.
+  virtual void onBeforeFixedUpdate(ecs::World& world, float fixed_dt, uint64_t fixed_tick) {
+    (void)world;
+    (void)fixed_dt;
+    (void)fixed_tick;
+  }
+  /// Called after each fixed simulation step.
+  virtual void onAfterFixedUpdate(ecs::World& world, float fixed_dt, uint64_t fixed_tick) {
+    (void)world;
+    (void)fixed_dt;
+    (void)fixed_tick;
+  }
   /// Called once per rendered frame.
   virtual void onUpdate(ecs::World& world, float dt, float interpolation_alpha) = 0;
+  /// Called at the end of a frame after rendering/presentation work.
+  virtual void onFrameEnd(ecs::World& world) {
+    (void)world;
+  }
 };
 
 }  // namespace karma::app

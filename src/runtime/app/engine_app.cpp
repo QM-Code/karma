@@ -627,6 +627,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   game_ = &game;
   running_ = true;
   accumulator_ = 0.0f;
+  fixed_tick_ = 0;
   last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
   section_start = section_end;
   game_->bindContext(world_,
@@ -909,13 +910,29 @@ void EngineApp::tick() {
 
   int fixed_steps = 0;
   section_start = section_end;
+  for (auto& module : runtime_modules_) {
+    if (module) {
+      module->onFrameBegin(world_, frame_dt);
+    }
+  }
   while (accumulator_ >= fixed_dt_) {
+    for (auto& module : runtime_modules_) {
+      if (module) {
+        module->onBeforeFixedUpdate(world_, fixed_dt_, fixed_tick_);
+      }
+    }
     game_->onFixedUpdate(fixed_dt_);
     // Physics runs via SystemGraph.
     systems_.update(world_, fixed_dt_);
     game_->onPostFixedUpdate(fixed_dt_);
+    for (auto& module : runtime_modules_) {
+      if (module) {
+        module->onAfterFixedUpdate(world_, fixed_dt_, fixed_tick_);
+      }
+    }
     accumulator_ -= fixed_dt_;
     ++fixed_steps;
+    ++fixed_tick_;
   }
   section_end = core::SteadyClock::now();
   const double fixed_ms = core::elapsedMilliseconds(section_start, section_end);
@@ -1070,6 +1087,12 @@ void EngineApp::tick() {
     }
     section_end = core::SteadyClock::now();
     swap_buffers_ms = core::elapsedMilliseconds(section_start, section_end);
+  }
+
+  for (auto& module : runtime_modules_) {
+    if (module) {
+      module->onFrameEnd(world_);
+    }
   }
 
   const auto tick_end = core::SteadyClock::now();

@@ -11,6 +11,7 @@
 #include <vector>
 #include <spdlog/spdlog.h>
 
+#include "karma/core/math/glm.h"
 #include "karma/core/time.h"
 #include "karma/world/components/camera.h"
 #include "karma/world/components/collider.h"
@@ -65,20 +66,12 @@ std::string makeMaterialVariantCacheKey(const std::string& mesh_key,
   return key;
 }
 
-glm::vec3 toGlm(const math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::quat toGlm(const math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
-
 glm::vec3 transformPoint(const components::TransformComponent& transform,
                          const math::Vec3& local,
                          float interpolation_alpha) {
-  const glm::vec3 pos = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 pos = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::vec3 scale = math::toGlm(transform.getScale());
   const glm::vec3 scaled{local.x * scale.x, local.y * scale.y, local.z * scale.z};
   return pos + glm::mat3_cast(rot) * scaled;
 }
@@ -145,7 +138,7 @@ void drawSphereWire(GraphicsDevice& device,
                     const math::Color& color,
                     float interpolation_alpha) {
   const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 scale = math::toGlm(transform.getScale());
   const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
   const float r = radius * max_scale;
   drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, r, color);
@@ -160,10 +153,10 @@ void drawCapsuleWire(GraphicsDevice& device,
                      float height,
                      const math::Color& color,
                      float interpolation_alpha) {
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 scale = math::toGlm(transform.getScale());
   const float r = radius * std::max(scale.x, scale.z);
   const float half_height = (height * 0.5f) * scale.y;
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
   const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
@@ -189,10 +182,10 @@ renderer::DirectionalLightData toDirectionalLight(const components::LightCompone
   renderer::DirectionalLightData out{};
   out.color = light.color;
   out.intensity = light.intensity;
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   out.direction = basis * glm::vec3(0.0f, 0.0f, -1.0f);
-  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  out.position = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.shadow_extent = light.shadow_extent;
   out.casts_shadows = light.casts_shadows;
   return out;
@@ -202,7 +195,7 @@ renderer::LightData toLightData(const components::LightComponent& light,
                                 const components::TransformComponent& transform,
                                 float interpolation_alpha) {
   renderer::LightData out{};
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   glm::vec3 dir = basis * glm::vec3(0.0f, 0.0f, -1.0f);
   if (glm::length(dir) < 1e-5f) {
@@ -210,7 +203,7 @@ renderer::LightData toLightData(const components::LightComponent& light,
   } else {
     dir = glm::normalize(dir);
   }
-  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  out.position = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.direction = dir;
   out.color = light.color;
   out.intensity = light.intensity;
@@ -243,9 +236,9 @@ renderer::LightData toLightData(const components::LightComponent& light,
 }
 
 glm::mat4 toTransform(const components::TransformComponent& transform, float interpolation_alpha) {
-  const glm::vec3 pos = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 pos = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::vec3 scale = math::toGlm(transform.getScale());
   glm::mat4 matrix(1.0f);
   matrix = glm::translate(matrix, pos);
   matrix *= glm::mat4_cast(rot);
@@ -257,8 +250,8 @@ renderer::CameraData toCameraData(const components::CameraComponent& camera,
                                   const components::TransformComponent& transform,
                                   float interpolation_alpha) {
   renderer::CameraData out{};
-  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  out.rotation = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  out.position = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  out.rotation = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   out.perspective = camera.perspective;
   out.render_shadows = camera.render_shadows;
   out.fov_y_degrees = camera.fov_y_degrees;

@@ -14,6 +14,8 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
+#include "karma/core/math/glm.h"
+
 namespace karma::demo {
 
 namespace {
@@ -90,10 +92,6 @@ components::TransformComponent makeTransform(const math::Vec3& position) {
   components::TransformComponent transform{};
   transform.setPosition(position);
   return transform;
-}
-
-math::Vec3 toMath(const glm::vec3& value) {
-  return {value.x, value.y, value.z};
 }
 
 LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
@@ -575,7 +573,7 @@ class ExplosionStressExample final : public app::GameInterface {
     target_camera_pitch_ = look.pitch;
 
     components::TransformComponent camera_transform{};
-    camera_transform.setPosition(toMath(eye));
+    camera_transform.setPosition(math::fromGlm(eye));
     camera_transform.setRotation(math::fromYawPitch(camera_yaw_, camera_pitch_));
 
     components::CameraComponent camera_component{};

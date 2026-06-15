@@ -310,7 +310,7 @@ class DemoGame : public app::GameInterface {
     if (physics) {
       if (auto* controller = physics->playerController()) {
         const glm::vec3 controller_forward = controller->getForwardVector();
-        move_forward = math::normalize({controller_forward.x, 0.0f, controller_forward.z});
+        move_forward = math::normalize(math::Vec3{controller_forward.x, 0.0f, controller_forward.z});
         const glm::vec3 controller_velocity = controller->getVelocity();
         vertical_velocity = controller_velocity.y;
         controller->setAngularVelocity(glm::vec3{0.0f, turn_input * turn_speed_rad_, 0.0f});

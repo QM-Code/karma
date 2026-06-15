@@ -15,6 +15,7 @@
 #include "karma/content/prefabs/component_serializer_registry.h"
 #include "karma/content/prefabs/prefab_resource_context.h"
 #include "karma/core/math/quat.h"
+#include "karma/core/math/vec3.h"
 #include "karma/world/components/tag.h"
 #include "karma/world/scene/transform_hierarchy.h"
 
@@ -24,23 +25,15 @@ namespace {
 
 using Json = nlohmann::json;
 
-math::Vec3 multiplyVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x * b.x, a.y * b.y, a.z * b.z};
-}
-
-math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
 components::TransformComponent composeTransform(
     const components::TransformComponent& parent,
     const components::TransformComponent& local) {
   components::TransformComponent transform{};
-  const math::Vec3 scaled_local = multiplyVec3(local.getPosition(), parent.getScale());
+  const math::Vec3 scaled_local = math::multiply(local.getPosition(), parent.getScale());
   const math::Vec3 rotated_local = math::rotateVec(parent.getRotation(), scaled_local);
-  transform.setPosition(addVec3(parent.getPosition(), rotated_local));
+  transform.setPosition(math::add(parent.getPosition(), rotated_local));
   transform.setRotation(math::mul(parent.getRotation(), local.getRotation()));
-  transform.setScale(multiplyVec3(parent.getScale(), local.getScale()));
+  transform.setScale(math::multiply(parent.getScale(), local.getScale()));
   return transform;
 }
 

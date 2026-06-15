@@ -6,7 +6,9 @@ and dependency direction clear before reading implementation details.
 ## Layers
 
 - `core`: foundational IDs, type IDs, and math. Depends only on the standard
-  library and small third-party math types already used by core math.
+  library and small third-party math types already used by core math. Shared
+  scalar, vector, quaternion, and GLM interop helpers belong here rather than in
+  subsystem-local anonymous helpers.
 - `world`: ECS, components, scene graph, and system graph. Defines shared data
   contracts.
 - `simulation`: animation, physics, collision, and navigation behavior.
@@ -62,3 +64,8 @@ Rules:
   unrelated contracts.
 - Keep concrete backend internals private unless an example or integration needs
   a small public access surface.
+- Keep math operations centralized under `karma/core/math`. Use
+  `karma/core/math/glm.h` for conversions between engine math types and GLM at
+  renderer, physics, content, and example boundaries. Do not add subsystem-local
+  `Vec3`/`Quat` conversion, clamp, interpolation, or scale helpers when the
+  shared math API covers the operation.

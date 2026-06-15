@@ -247,6 +247,8 @@ target_link_libraries(karma_content
 list(APPEND KARMA_INSTALL_TARGETS karma_content)
 
 karma_add_static(karma_platform_network
+  src/platform/network/protocol.cpp
+  src/platform/network/session.cpp
   src/platform/network/transport_factory.cpp
 )
 target_link_libraries(karma_platform_network PUBLIC karma_core)
@@ -290,6 +292,12 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   list(APPEND KARMA_INSTALL_TARGETS karma_platform_window_graphical)
 endif()
 
+karma_add_static(karma_features_network
+  src/features/network/component_replication.cpp
+)
+target_link_libraries(karma_features_network PUBLIC karma_core karma_world karma_platform_network)
+list(APPEND KARMA_INSTALL_TARGETS karma_features_network)
+
 if (KARMA_BUILD_HEADLESS_PROFILE OR KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_static(karma_features_visual
     src/features/visual/lights/light_pulse_system.cpp
@@ -322,6 +330,7 @@ if (KARMA_BUILD_HEADLESS_PROFILE)
       karma_simulation_collision
       karma_simulation_physics
       karma_content
+      karma_features_network
       karma_features_visual
       karma_platform_network
       karma_platform_window_headless
@@ -368,6 +377,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       karma_simulation_collision
       karma_simulation_physics
       karma_platform_network
+      karma_features_network
       karma_platform_window_graphical
       karma_features_visual
   )
@@ -426,10 +436,27 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   endif()
 endif()
 
+if (KARMA_BUILD_SERVER_PROFILE)
+  set(KARMA_SERVER_PROFILE_LIBS
+    karma_features_network
+    karma_platform_network
+    karma_world
+    karma_core
+  )
+
+  add_library(karma_server INTERFACE)
+  add_library(karma::server ALIAS karma_server)
+  karma_configure_interface(karma_server)
+  target_link_libraries(karma_server INTERFACE ${KARMA_SERVER_PROFILE_LIBS})
+  set_target_properties(karma_server PROPERTIES EXPORT_NAME server)
+  list(APPEND KARMA_INSTALL_TARGETS karma_server)
+endif()
+
 if (KARMA_BUILD_HEADLESS_PROFILE)
   set(KARMA_HEADLESS_PROFILE_LIBS
     karma_runtime_headless
     karma_features_visual
+    karma_features_network
     karma_platform_window_headless
     karma_platform_network
     karma_content
@@ -462,6 +489,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     karma_runtime_graphical
     karma_features_ui_imgui
     karma_features_visual
+    karma_features_network
     karma_platform_window_graphical
     karma_platform_network
     karma_media_graphical

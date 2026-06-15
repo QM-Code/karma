@@ -5,25 +5,15 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "karma/core/math/glm.h"
+
 namespace karma::animation {
-
-namespace {
-
-glm::vec3 toGlm(const math::Vec3& v) {
-  return {v.x, v.y, v.z};
-}
-
-glm::quat toGlm(const math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
-
-}  // namespace
 
 glm::mat4 poseTransformToMatrix(const PoseTransform& transform) {
   glm::mat4 matrix(1.0f);
-  matrix = glm::translate(matrix, toGlm(transform.position));
-  matrix *= glm::mat4_cast(toGlm(transform.rotation));
-  matrix = glm::scale(matrix, toGlm(transform.scale));
+  matrix = glm::translate(matrix, math::toGlm(transform.position));
+  matrix *= glm::mat4_cast(math::toGlm(transform.rotation));
+  matrix = glm::scale(matrix, math::toGlm(transform.scale));
   return matrix;
 }
 

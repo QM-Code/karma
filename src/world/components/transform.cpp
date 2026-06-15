@@ -1,26 +1,10 @@
 #include "karma/world/components/transform.h"
 
-#include <algorithm>
-
-#include <glm/gtx/quaternion.hpp>
+#include "karma/core/math/quat.h"
+#include "karma/core/math/scalar.h"
+#include "karma/core/math/vec3.h"
 
 namespace karma::components {
-
-namespace {
-
-glm::quat toGlm(const math::Quat& q) {
-  return {q.w, q.x, q.y, q.z};
-}
-
-math::Quat fromGlm(const glm::quat& q) {
-  return {q.x, q.y, q.z, q.w};
-}
-
-float clampAlpha(float alpha) {
-  return std::clamp(alpha, 0.0f, 1.0f);
-}
-
-}  // namespace
 
 TransformComponent::TransformComponent() = default;
 
@@ -61,19 +45,11 @@ void TransformComponent::setRotationFromPhysics(const math::Quat& rotation) {
 }
 
 math::Vec3 TransformComponent::getInterpolatedPosition(float alpha) const {
-  const float t = clampAlpha(alpha);
-  return {
-      previous_position_.x + (position_.x - previous_position_.x) * t,
-      previous_position_.y + (position_.y - previous_position_.y) * t,
-      previous_position_.z + (position_.z - previous_position_.z) * t,
-  };
+  return math::lerp(previous_position_, position_, math::clamp01(alpha));
 }
 
 math::Quat TransformComponent::getInterpolatedRotation(float alpha) const {
-  const float t = clampAlpha(alpha);
-  const glm::quat interpolated =
-      glm::normalize(glm::slerp(toGlm(previous_rotation_), toGlm(rotation_), t));
-  return fromGlm(interpolated);
+  return math::slerp(previous_rotation_, rotation_, math::clamp01(alpha));
 }
 
 }  // namespace karma::components

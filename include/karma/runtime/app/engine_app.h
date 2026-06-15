@@ -180,6 +180,7 @@ class EngineApp {
   float frame_diag_threshold_ms_ = 25.0f;
   float fixed_dt_ = 1.0f / 60.0f;
   float accumulator_ = 0.0f;
+  uint64_t fixed_tick_ = 0;
   core::SteadyClock::time_point last_time_{};
 };
 

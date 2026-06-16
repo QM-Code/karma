@@ -112,11 +112,12 @@ Choose one backend at configure time.
 /**
 \defgroup karma_navigation Navigation
 \ingroup karma_simulation
-Static navmesh baking, Detour queries, geometry collection, diagnostics, and
-the engine-owned async navigation system.
+Solo/tiled navmesh baking, Detour queries, tile-cache obstacles, crowd steering,
+geometry collection, diagnostics, and the engine-owned async navigation system.
 
 Navmesh generation can collect geometry from GLB scenes, ECS mesh colliders, or
-direct mesh data. Runtime path requests are queued through NavigationSystem.
+direct mesh data. Runtime path requests are queued through NavigationSystem;
+tile-cache and crowd updates mutate live simulation state on the main thread.
 */
 
 /**

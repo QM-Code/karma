@@ -224,10 +224,58 @@ if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_GRAPHICAL_PROFILE)
   endif()
 endif()
 
+if (KARMA_ENABLE_NAVIGATION AND TARGET karma::headless)
+  add_executable(karma_recast_navigation_examples
+    examples/recast_navigation_examples.cpp
+  )
+  target_link_libraries(karma_recast_navigation_examples
+    PRIVATE
+      karma_content
+      karma_simulation_navigation
+      karma_rendering_headless
+      karma::headless
+  )
+  if (BUILD_TESTING)
+    add_test(NAME karma_recast_navigation_examples
+      COMMAND karma_recast_navigation_examples all
+    )
+  endif()
+endif()
+
 if (KARMA_ENABLE_NAVIGATION AND KARMA_BUILD_GRAPHICAL_PROFILE)
   add_executable(karma_navmesh_example
     examples/navmesh_example.cpp
     examples/scene_helpers.cpp
   )
   target_link_libraries(karma_navmesh_example PRIVATE karma::graphical)
+
+  function(karma_add_recast_sample target source)
+    add_executable(${target}
+      ${source}
+      examples/recast_navigation_sample_app.cpp
+      examples/scene_helpers.cpp
+    )
+    target_link_libraries(${target} PRIVATE karma::graphical)
+    if (TARGET karma_fix_xxhash)
+      add_dependencies(${target} karma_fix_xxhash)
+    endif()
+  endfunction()
+
+  karma_add_recast_sample(karma_recast_solo_mesh_example
+    examples/recast_solo_mesh_example.cpp)
+  karma_add_recast_sample(karma_recast_tile_mesh_example
+    examples/recast_tile_mesh_example.cpp)
+  karma_add_recast_sample(karma_recast_temp_obstacles_example
+    examples/recast_temp_obstacles_example.cpp)
+  karma_add_recast_sample(karma_recast_debug_example
+    examples/recast_debug_example.cpp)
+
+  add_executable(karma_recast_navigation_graphical_example
+    examples/recast_navigation_graphical_example.cpp
+    examples/scene_helpers.cpp
+  )
+  target_link_libraries(karma_recast_navigation_graphical_example PRIVATE karma::graphical)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_recast_navigation_graphical_example karma_fix_xxhash)
+  endif()
 endif()

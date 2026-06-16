@@ -67,6 +67,16 @@ class NavigationSystem : public systems::ISystem {
                             const math::Vec3& destination);
   /// Clears an agent path/request state.
   static void clearPath(ecs::World& world, ecs::Entity agent_entity);
+  /// Requests a crowd-controlled move target for an agent entity.
+  static bool requestCrowdMoveTo(ecs::World& world,
+                                 ecs::Entity agent_entity,
+                                 const math::Vec3& destination);
+  /// Requests direct crowd velocity steering for an agent entity.
+  static bool requestCrowdVelocity(ecs::World& world,
+                                   ecs::Entity agent_entity,
+                                   const math::Vec3& velocity);
+  /// Clears a crowd-controlled agent target/request state.
+  static void clearCrowdTarget(ecs::World& world, ecs::Entity agent_entity);
 
  private:
   struct WorkerState;

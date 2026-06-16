@@ -40,7 +40,13 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     add_executable(karma_navmesh_tests
       tests/navmesh_tests.cpp
     )
-    target_link_libraries(karma_navmesh_tests PRIVATE karma::headless)
+    target_link_libraries(karma_navmesh_tests
+      PRIVATE
+        karma::headless
+        karma_content
+        karma_rendering_headless
+        karma_simulation_navigation
+    )
     add_test(NAME karma_navmesh_tests COMMAND karma_navmesh_tests)
   endif()
 endif()

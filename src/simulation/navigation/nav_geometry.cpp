@@ -1,6 +1,8 @@
 #include "karma/simulation/navigation/nav_geometry.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -90,6 +92,40 @@ void appendOffMeshLinks(NavMeshInputGeometry& geometry,
       });
 }
 
+void appendConvexVolumes(NavMeshInputGeometry& geometry,
+                         const ecs::World& world,
+                         uint32_t source_mask) {
+  world.forEach<components::NavConvexVolumeComponent, components::TransformComponent>(
+      [&](const ecs::Entity entity) {
+        const auto& volume = world.get<components::NavConvexVolumeComponent>(entity);
+        if (!volume.enabled ||
+            volume.vertices.size() < 3 ||
+            volume.area == kNavAreaNull ||
+            (volume.layer_mask & source_mask) == 0u) {
+          return;
+        }
+
+        const auto& transform = world.get<components::TransformComponent>(entity);
+        const glm::mat4 world_transform = makeTransform(transform.getPosition(),
+                                                        transform.getRotation(),
+                                                        transform.getScale());
+        NavConvexVolume out;
+        out.vertices.reserve(volume.vertices.size());
+        float min_y = std::numeric_limits<float>::max();
+        float max_y = -std::numeric_limits<float>::max();
+        for (const math::Vec3& vertex : volume.vertices) {
+          const glm::vec4 world = world_transform * glm::vec4(vertex.x, vertex.y, vertex.z, 1.0f);
+          out.vertices.push_back(math::fromGlm(glm::vec3(world)));
+          min_y = std::min(min_y, out.vertices.back().y);
+          max_y = std::max(max_y, out.vertices.back().y);
+        }
+        out.min_y = min_y + volume.min_y;
+        out.max_y = max_y + volume.max_y;
+        out.area = volume.area;
+        geometry.convex_volumes.push_back(std::move(out));
+      });
+}
+
 }  // namespace
 
 void appendGeometry(NavMeshInputGeometry& out,
@@ -157,6 +193,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
 
   if (has_explicit_surfaces) {
     appendOffMeshLinks(geometry, world, source_mask);
+    appendConvexVolumes(geometry, world, source_mask);
     return geometry;
   }
 
@@ -178,6 +215,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
         }
       });
   appendOffMeshLinks(geometry, world, source_mask);
+  appendConvexVolumes(geometry, world, source_mask);
   return geometry;
 }
 

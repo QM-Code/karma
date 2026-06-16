@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "karma/world/ecs/component.h"
 #include "karma/world/ecs/entity.h"
@@ -39,6 +40,17 @@ struct NavOffMeshLinkComponent : ecs::ComponentTag {
 };
 
 /// \ingroup karma_components
+/// Marks a vertical convex volume with a navigation area during navmesh builds.
+struct NavConvexVolumeComponent : ecs::ComponentTag {
+  bool enabled = true;
+  uint32_t layer_mask = 0xffffffffu;
+  std::vector<math::Vec3> vertices;
+  float min_y = 0.0f;
+  float max_y = 2.0f;
+  unsigned char area = navigation::kNavAreaDefault;
+};
+
+/// \ingroup karma_components
 /// Owns a baked navigation mesh and build settings for an entity.
 struct NavMeshComponent : ecs::ComponentTag {
   bool enabled = true;
@@ -46,6 +58,7 @@ struct NavMeshComponent : ecs::ComponentTag {
   bool rebuild_requested = true;
   bool built = false;
   bool debug_draw = true;
+  navigation::NavMeshDebugDrawMode debug_draw_mode = navigation::NavMeshDebugDrawMode::NavMeshEdges;
   uint64_t build_version = 0;
   uint32_t source_mask = 0xffffffffu;
   navigation::NavMeshBuildConfig build_config{};

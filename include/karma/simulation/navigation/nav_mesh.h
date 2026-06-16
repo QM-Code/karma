@@ -19,6 +19,9 @@ class GraphicsDevice;
 
 namespace karma::navigation {
 
+class NavCrowd;
+class NavTileCache;
+
 /// \ingroup karma_navigation
 /// Navigation area id used for non-walkable geometry.
 static constexpr unsigned char kNavAreaNull = 0;
@@ -44,6 +47,14 @@ enum NavPathPointFlag : uint8_t {
 };
 
 /// \ingroup karma_navigation
+/// Straight-path vertex emission options used by Detour path queries.
+enum NavStraightPathOption : int {
+  NavStraightPathOptionNone = 0,
+  NavStraightPathOptionAreaCrossings = 1,
+  NavStraightPathOptionAllCrossings = 2,
+};
+
+/// \ingroup karma_navigation
 /// Build/query status shared by navmesh operations.
 enum class NavStatus {
   Success,
@@ -57,6 +68,52 @@ enum class NavStatus {
   InvalidEnd,
   NoPath,
   QueryFailed,
+};
+
+/// \ingroup karma_navigation
+/// Recast region partitioning strategy used during navmesh baking.
+enum class NavMeshPartitionType {
+  Watershed,
+  Monotone,
+  Layers,
+};
+
+/// \ingroup karma_navigation
+/// Recast/Detour navmesh build topology.
+enum class NavMeshBuildMode {
+  Solo,
+  Tiled,
+};
+
+/// \ingroup karma_navigation
+/// Navigation debug draw data layers inspired by RecastDemo draw modes.
+enum class NavMeshDebugDrawMode : uint8_t {
+  NavMeshEdges,
+  NavMesh,
+  NavMeshBVTree,
+  NavMeshPortals,
+  Voxels,
+  WalkableVoxels,
+  Compact,
+  CompactDistance,
+  CompactRegions,
+  RegionConnections,
+  RawContours,
+  BothContours,
+  Contours,
+  PolyMesh,
+  PolyMeshDetail,
+};
+
+static constexpr size_t kNavMeshDebugDrawModeCount = 15;
+
+/// \ingroup karma_navigation
+/// Renderer-neutral debug line emitted by Recast/Detour debug capture.
+struct NavDebugLine {
+  math::Vec3 start{};
+  math::Vec3 end{};
+  math::Color color{0.1f, 0.85f, 0.35f, 1.0f};
+  float thickness = 1.0f;
 };
 
 /// \ingroup karma_navigation
@@ -85,6 +142,8 @@ struct NavQueryFilter {
 /// \ingroup karma_navigation
 /// Static navmesh build settings.
 struct NavMeshBuildConfig {
+  NavMeshBuildMode build_mode = NavMeshBuildMode::Solo;
+  NavMeshPartitionType partition_type = NavMeshPartitionType::Watershed;
   float cell_size = 0.3f;
   float cell_height = 0.2f;
   float agent_height = 2.0f;
@@ -100,6 +159,10 @@ struct NavMeshBuildConfig {
   float detail_sample_max_error = 1.0f;
   uint16_t default_poly_flags = kNavPolyFlagWalk;
   uint16_t off_mesh_poly_flags = kNavPolyFlagWalk | kNavPolyFlagOffMesh;
+  int tile_size = 32;
+  int max_tiles = 0;
+  int max_polys_per_tile = 0;
+  bool collect_build_debug_draw = false;
   std::vector<NavAreaConfig> area_configs;
 };
 
@@ -121,12 +184,22 @@ struct NavOffMeshConnection {
 };
 
 /// \ingroup karma_navigation
+/// Convex area marker applied to compact heightfields before contour extraction.
+struct NavConvexVolume {
+  std::vector<math::Vec3> vertices;
+  float min_y = 0.0f;
+  float max_y = 0.0f;
+  unsigned char area = kNavAreaDefault;
+};
+
+/// \ingroup karma_navigation
 /// Triangle geometry and off-mesh links used to bake a navmesh.
 struct NavMeshInputGeometry {
   std::vector<math::Vec3> vertices;
   std::vector<uint32_t> indices;
   std::vector<unsigned char> triangle_areas;
   std::vector<NavOffMeshConnection> off_mesh_connections;
+  std::vector<NavConvexVolume> convex_volumes;
 
   /// Returns true when there is not enough triangle data to build.
   bool empty() const { return vertices.empty() || indices.size() < 3; }
@@ -165,8 +238,46 @@ struct NavPath {
   bool success() const { return status == NavStatus::Success || status == NavStatus::PartialPath; }
 };
 
+/// \ingroup karma_navigation
+/// Result from Detour polygon neighbourhood queries.
+struct NavPolyQueryResult {
+  NavStatus status = NavStatus::QueryFailed;
+  std::vector<uint64_t> polys;
+  std::vector<uint64_t> parents;
+  std::vector<float> costs;
+
+  bool success() const { return status == NavStatus::Success; }
+};
+
+/// \ingroup karma_navigation
+/// Wall segment returned by `NavQuery::getPolyWallSegments`.
+struct NavWallSegment {
+  math::Vec3 start{};
+  math::Vec3 end{};
+  uint64_t neighbor_ref = 0;
+};
+
+/// \ingroup karma_navigation
+/// Result from Detour wall segment queries.
+struct NavWallSegments {
+  NavStatus status = NavStatus::QueryFailed;
+  std::vector<NavWallSegment> segments;
+
+  bool success() const { return status == NavStatus::Success; }
+};
+
+/// \ingroup karma_navigation
+/// Options for smooth path sampling over a Detour corridor.
+struct NavSmoothPathConfig {
+  float step_size = 0.5f;
+  float slop = 0.01f;
+  int max_smooth_points = 2048;
+};
+
 /// Human-readable name for a navigation status.
 const char* navStatusName(NavStatus status);
+/// Human-readable name for a navigation debug draw mode.
+const char* navMeshDebugDrawModeName(NavMeshDebugDrawMode mode);
 
 /// \ingroup karma_navigation
 /// Owns a Recast/Detour navmesh and debug draw data.
@@ -184,6 +295,32 @@ class NavMesh {
   bool build(const NavMeshInputGeometry& geometry,
              const NavMeshBuildConfig& config = {},
              NavMeshBuildResult* result = nullptr);
+  /// Bakes a tiled navmesh from triangle geometry.
+  bool buildTiled(const NavMeshInputGeometry& geometry,
+                  const NavMeshBuildConfig& config,
+                  NavMeshBuildResult* result = nullptr);
+  /// Rebuilds one tile containing `world_position`; valid only for tiled navmeshes.
+  bool rebuildTile(const NavMeshInputGeometry& geometry,
+                   const math::Vec3& world_position,
+                   NavMeshBuildResult* result = nullptr);
+  /// Removes one tile containing `world_position`; valid only for tiled navmeshes.
+  bool removeTile(const math::Vec3& world_position);
+  /// Removes all tiles from a tiled navmesh without changing its parameters.
+  bool removeAllTiles();
+  /// Rehydrates a navmesh from snapshot data.
+  bool loadSnapshot(const NavMeshSnapshot& snapshot,
+                    NavMeshBuildResult* result = nullptr);
+  /// Sets Detour flags for one polygon reference.
+  bool setPolyFlags(uint64_t poly_ref, uint16_t flags);
+  /// Reads Detour flags for one polygon reference.
+  bool getPolyFlags(uint64_t poly_ref, uint16_t& out_flags) const;
+  /// Computes the center of one Detour polygon reference.
+  bool polyCenter(uint64_t poly_ref, math::Vec3& out_center) const;
+  /// Marks polygons unreachable from `start` with `disabled_flags`.
+  uint32_t pruneUnreachable(const math::Vec3& start,
+                            uint16_t disabled_flags,
+                            const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                            const NavQueryFilter& filter = NavQueryFilter{});
   /// Releases Detour data and clears build metadata.
   void reset();
 
@@ -199,20 +336,39 @@ class NavMesh {
   const math::Vec3& boundsMin() const { return bounds_min_; }
   /// World-space maximum navmesh bounds.
   const math::Vec3& boundsMax() const { return bounds_max_; }
+  /// Returns true when a debug draw layer has line data.
+  bool hasDebugDrawMode(NavMeshDebugDrawMode mode) const;
+  /// Returns captured line data for a debug draw layer.
+  const std::vector<NavDebugLine>& debugDrawLines(NavMeshDebugDrawMode mode) const;
 
   /// Draws navmesh debug edges through the graphics device.
   void debugDraw(renderer::GraphicsDevice& graphics,
                  const math::Color& color = {0.1f, 0.85f, 0.35f, 1.0f},
                  bool depth_test = true) const;
+  /// Draws a selected Recast/Detour debug layer through the graphics device.
+  void debugDraw(renderer::GraphicsDevice& graphics,
+                 NavMeshDebugDrawMode mode,
+                 bool depth_test = true,
+                 const math::Color& fallback_color = {0.1f, 0.85f, 0.35f, 1.0f}) const;
+  /// Draws highlighted Detour polygon references through the graphics device.
+  void debugDrawPolygons(renderer::GraphicsDevice& graphics,
+                         const std::vector<uint64_t>& poly_refs,
+                         const math::Color& color = {0.0f, 0.0f, 0.0f, 0.35f},
+                         bool depth_test = false) const;
 
  private:
   friend class NavQuery;
+  friend class NavCrowd;
+  friend class NavTileCache;
+  void refreshSnapshot();
+  void refreshDetourDebugDraw();
   dtNavMesh* nav_mesh_ = nullptr;
   NavMeshBuildConfig config_{};
   NavMeshBuildResult last_result_{};
   math::Vec3 bounds_min_{};
   math::Vec3 bounds_max_{};
   std::vector<math::Vec3> debug_edges_;
+  std::array<std::vector<NavDebugLine>, kNavMeshDebugDrawModeCount> debug_draw_lines_;
   std::shared_ptr<const NavMeshSnapshot> snapshot_;
 };
 
@@ -236,7 +392,15 @@ class NavQuery {
                    const math::Vec3& end,
                    const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
                    int max_points = 256,
-                   const NavQueryFilter& filter = NavQueryFilter{}) const;
+                   const NavQueryFilter& filter = NavQueryFilter{},
+                   int straight_path_options = NavStraightPathOptionNone) const;
+  /// Finds a smoothed path by iteratively moving along the Detour corridor.
+  NavPath findSmoothPath(const math::Vec3& start,
+                         const math::Vec3& end,
+                         const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                         const NavSmoothPathConfig& smooth = NavSmoothPathConfig{},
+                         int max_path_polys = 1024,
+                         const NavQueryFilter& filter = NavQueryFilter{}) const;
   /// Performs a Detour raycast across the navmesh.
   NavPath raycast(const math::Vec3& start,
                   const math::Vec3& end,
@@ -248,6 +412,12 @@ class NavQuery {
                         math::Vec3& out_point,
                         const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
                         const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Finds the nearest polygon reference and optionally the nearest point around `point`.
+  bool findNearestPoly(const math::Vec3& point,
+                       uint64_t& out_poly_ref,
+                       math::Vec3* out_point = nullptr,
+                       const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                       const NavQueryFilter& filter = NavQueryFilter{}) const;
   /// Moves from start toward end along the navmesh surface.
   bool moveAlongSurface(const math::Vec3& start,
                         const math::Vec3& end,
@@ -269,6 +439,35 @@ class NavQuery {
                           const NavQueryFilter& filter = NavQueryFilter{}) const;
   /// Finds a random point on the navmesh.
   bool findRandomPoint(math::Vec3& out_point, const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Finds a random point around `center` within `radius`.
+  bool findRandomPointAroundCircle(const math::Vec3& center,
+                                   float radius,
+                                   math::Vec3& out_point,
+                                   const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                                   const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Finds polygon refs around a circle on the navmesh.
+  NavPolyQueryResult findPolysAroundCircle(const math::Vec3& center,
+                                           float radius,
+                                           const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                                           int max_polys = 256,
+                                           const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Finds polygon refs around a convex shape on the navmesh.
+  NavPolyQueryResult findPolysAroundShape(const math::Vec3& start,
+                                          const std::vector<math::Vec3>& shape,
+                                          const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                                          int max_polys = 256,
+                                          const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Finds local polygon neighbourhood around a point.
+  NavPolyQueryResult findLocalNeighbourhood(const math::Vec3& center,
+                                            float radius,
+                                            const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                                            int max_polys = 256,
+                                            const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Returns wall/portal segments for the nearest polygon.
+  NavWallSegments getPolyWallSegments(const math::Vec3& point,
+                                      const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                                      int max_segments = 256,
+                                      const NavQueryFilter& filter = NavQueryFilter{}) const;
 
   /// Begins an incremental sliced path request.
   NavStatus beginSlicedPath(const math::Vec3& start,

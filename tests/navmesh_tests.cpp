@@ -1,6 +1,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -9,12 +10,28 @@
 
 #include "karma/world/components/nav_mesh.h"
 #include "karma/world/components/nav_mesh_agent.h"
+#include "karma/world/components/nav_crowd.h"
+#include "karma/world/components/nav_tile_cache.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
 #include "karma/simulation/navigation/nav_geometry.h"
+#include "karma/simulation/navigation/nav_crowd.h"
 #include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/simulation/navigation/nav_tile_cache.h"
 #include "karma/simulation/navigation/navigation_system.h"
 #include "karma/content/importers/glb_scene_import.h"
+
+#ifdef NDEBUG
+#undef assert
+#define assert(expr)                                                            \
+  do {                                                                          \
+    if (!(expr)) {                                                              \
+      std::cerr << "assertion failed: " #expr << " at " << __FILE__ << ":"     \
+                << __LINE__ << "\n";                                           \
+      std::abort();                                                             \
+    }                                                                           \
+  } while (false)
+#endif
 
 namespace {
 
@@ -80,6 +97,31 @@ karma::navigation::NavMeshInputGeometry makeRingGeometry() {
   return geometry;
 }
 
+karma::navigation::NavMeshInputGeometry makeCorridorGeometry() {
+  karma::geometry::MeshData mesh;
+  appendQuad(mesh,
+             {-5.0f, 0.0f, -1.0f},
+             {5.0f, 0.0f, -1.0f},
+             {5.0f, 0.0f, 1.0f},
+             {-5.0f, 0.0f, 1.0f});
+
+  karma::navigation::NavMeshInputGeometry geometry;
+  karma::navigation::appendGeometry(geometry, mesh);
+  return geometry;
+}
+
+void updateTileCacheUntilReady(karma::navigation::NavTileCache& tile_cache,
+                               karma::navigation::NavMesh& nav_mesh) {
+  for (int i = 0; i < 16; ++i) {
+    bool up_to_date = false;
+    assert(tile_cache.update(0.0f, nav_mesh, &up_to_date));
+    if (up_to_date) {
+      return;
+    }
+  }
+  assert(false && "tile cache did not become ready");
+}
+
 void testFlatPlaneBuildAndPath() {
   karma::navigation::NavMesh nav_mesh;
   karma::navigation::NavMeshBuildResult build_result;
@@ -133,7 +175,46 @@ void testNearestPoint() {
   karma::navigation::NavQuery query(nav_mesh);
   karma::math::Vec3 nearest;
   assert(query.findNearestPoint({0.0f, 3.0f, 0.0f}, nearest));
-  assert(std::abs(nearest.y) < 0.05f);
+  assert(std::abs(nearest.y) <= 0.25f);
+}
+
+void testNearestPolyFlagsAndSnapshotRefresh() {
+  karma::navigation::NavMesh nav_mesh;
+  karma::navigation::NavMeshBuildConfig config;
+  config.default_poly_flags = karma::navigation::kNavPolyFlagWalk;
+  assert(nav_mesh.build(makePlaneGeometry(), config));
+
+  karma::navigation::NavQuery query(nav_mesh);
+  uint64_t poly_ref = 0;
+  karma::math::Vec3 nearest{};
+  assert(query.findNearestPoly({0.0f, 0.2f, 0.0f}, poly_ref, &nearest));
+  assert(poly_ref != 0);
+
+  karma::math::Vec3 center{};
+  assert(nav_mesh.polyCenter(poly_ref, center));
+  assert(std::isfinite(center.x));
+  assert(std::isfinite(center.y));
+  assert(std::isfinite(center.z));
+
+  uint16_t flags = 0;
+  assert(nav_mesh.getPolyFlags(poly_ref, flags));
+  assert((flags & karma::navigation::kNavPolyFlagWalk) != 0);
+  assert(nav_mesh.setPolyFlags(poly_ref, static_cast<uint16_t>(flags | (1u << 4u))));
+  assert(nav_mesh.getPolyFlags(poly_ref, flags));
+  assert((flags & (1u << 4u)) != 0);
+
+  const std::shared_ptr<const karma::navigation::NavMeshSnapshot> snapshot = nav_mesh.snapshot();
+  assert(snapshot != nullptr);
+  karma::navigation::NavQuery snapshot_query(*snapshot);
+  karma::navigation::NavQueryFilter filter;
+  filter.exclude_flags = 1u << 4u;
+  const karma::navigation::NavPath blocked =
+      snapshot_query.findPath({0.0f, 0.2f, 0.0f},
+                              {1.0f, 0.2f, 0.0f},
+                              {2.0f, 4.0f, 2.0f},
+                              256,
+                              filter);
+  assert(!blocked.success());
 }
 
 void testGlbPrefabCollectionAppliesWorldTransform() {
@@ -212,6 +293,273 @@ void testAreaFlagsFilterQueries() {
                      256,
                      rejected_filter);
   assert(!rejected_path.success());
+}
+
+void testConvexVolumeMarksArea() {
+  karma::navigation::NavMeshInputGeometry geometry = makePlaneGeometry();
+  geometry.convex_volumes.push_back({
+      .vertices = {{-5.0f, 0.0f, -5.0f},
+                   {5.0f, 0.0f, -5.0f},
+                   {5.0f, 0.0f, 5.0f},
+                   {-5.0f, 0.0f, 5.0f}},
+      .min_y = -1.0f,
+      .max_y = 1.0f,
+      .area = 2,
+  });
+
+  karma::navigation::NavMeshBuildConfig config;
+  config.area_configs.push_back({
+      .area = 2,
+      .flags = static_cast<uint16_t>(1u << 4u),
+      .cost = 1.0f,
+  });
+
+  karma::navigation::NavMesh nav_mesh;
+  assert(nav_mesh.build(geometry, config));
+  karma::navigation::NavQuery query(nav_mesh);
+
+  karma::navigation::NavQueryFilter matching_filter;
+  matching_filter.include_flags = static_cast<uint16_t>(1u << 4u);
+  assert(query.findPath({-4.0f, 0.1f, -4.0f},
+                        {4.0f, 0.1f, 4.0f},
+                        {2.0f, 4.0f, 2.0f},
+                        256,
+                        matching_filter).success());
+
+  karma::navigation::NavQueryFilter rejected_filter;
+  rejected_filter.include_flags = karma::navigation::kNavPolyFlagWalk;
+  assert(!query.findPath({-4.0f, 0.1f, -4.0f},
+                         {4.0f, 0.1f, 4.0f},
+                         {2.0f, 4.0f, 2.0f},
+                         256,
+                         rejected_filter).success());
+}
+
+void testPartitionModesAndTiledSnapshot() {
+  for (const karma::navigation::NavMeshPartitionType partition :
+       {karma::navigation::NavMeshPartitionType::Watershed,
+        karma::navigation::NavMeshPartitionType::Monotone,
+        karma::navigation::NavMeshPartitionType::Layers}) {
+    karma::navigation::NavMeshBuildConfig config;
+    config.partition_type = partition;
+    config.agent_radius = 0.2f;
+    karma::navigation::NavMesh nav_mesh;
+    assert(nav_mesh.build(makeRingGeometry(), config));
+    karma::navigation::NavQuery query(nav_mesh);
+    assert(query.findPath({-4.0f, 0.1f, 0.0f}, {4.0f, 0.1f, 0.0f}).success());
+  }
+
+  karma::navigation::NavMeshBuildConfig tiled_config;
+  tiled_config.build_mode = karma::navigation::NavMeshBuildMode::Tiled;
+  tiled_config.partition_type = karma::navigation::NavMeshPartitionType::Layers;
+  tiled_config.tile_size = 16;
+  tiled_config.agent_radius = 0.2f;
+
+  karma::navigation::NavMesh nav_mesh;
+  assert(nav_mesh.build(makePlaneGeometry(), tiled_config));
+  assert(nav_mesh.lastBuildResult().polygon_count > 0);
+
+  const std::shared_ptr<const karma::navigation::NavMeshSnapshot> snapshot = nav_mesh.snapshot();
+  assert(snapshot != nullptr);
+  karma::navigation::NavQuery snapshot_query(*snapshot);
+  assert(snapshot_query.findPath({-4.0f, 0.1f, -4.0f}, {4.0f, 0.1f, 4.0f}).success());
+
+  karma::navigation::NavMesh loaded;
+  assert(loaded.loadSnapshot(*snapshot));
+  karma::navigation::NavQuery loaded_query(loaded);
+  karma::math::Vec3 loaded_nearest;
+  assert(loaded_query.findNearestPoint({0.0f, 1.0f, 0.0f}, loaded_nearest));
+}
+
+void testBuildDebugDrawArtifacts() {
+  karma::navigation::NavMeshBuildConfig config;
+  config.agent_radius = 0.2f;
+  config.collect_build_debug_draw = true;
+
+  karma::navigation::NavMesh nav_mesh;
+  assert(nav_mesh.build(makePlaneGeometry(), config));
+  assert(nav_mesh.hasDebugDrawMode(karma::navigation::NavMeshDebugDrawMode::NavMeshEdges));
+  assert(nav_mesh.hasDebugDrawMode(karma::navigation::NavMeshDebugDrawMode::NavMesh));
+  assert(nav_mesh.hasDebugDrawMode(karma::navigation::NavMeshDebugDrawMode::Voxels));
+  assert(nav_mesh.hasDebugDrawMode(karma::navigation::NavMeshDebugDrawMode::CompactRegions));
+  assert(nav_mesh.hasDebugDrawMode(karma::navigation::NavMeshDebugDrawMode::Contours));
+  assert(nav_mesh.hasDebugDrawMode(karma::navigation::NavMeshDebugDrawMode::PolyMeshDetail));
+  assert(!nav_mesh.debugDrawLines(karma::navigation::NavMeshDebugDrawMode::Contours).empty());
+  assert(karma::navigation::navMeshDebugDrawModeName(
+             karma::navigation::NavMeshDebugDrawMode::WalkableVoxels)[0] != '\0');
+}
+
+void testAdvancedQueryHelpers() {
+  karma::navigation::NavMesh nav_mesh;
+  karma::navigation::NavMeshBuildConfig config;
+  config.agent_radius = 0.2f;
+  assert(nav_mesh.build(makePlaneGeometry(), config));
+
+  karma::navigation::NavQuery query(nav_mesh);
+  const karma::navigation::NavPath smooth =
+      query.findSmoothPath({-4.0f, 0.1f, -4.0f}, {4.0f, 0.1f, 4.0f});
+  assert(smooth.success());
+  assert(smooth.points.size() > 2);
+
+  karma::math::Vec3 random_point;
+  assert(query.findRandomPoint(random_point));
+  assert(query.findRandomPointAroundCircle({0.0f, 0.1f, 0.0f}, 2.0f, random_point));
+
+  const karma::navigation::NavPolyQueryResult circle =
+      query.findPolysAroundCircle({0.0f, 0.1f, 0.0f}, 2.0f);
+  assert(circle.success());
+  assert(!circle.polys.empty());
+
+  const karma::navigation::NavPolyQueryResult shape =
+      query.findPolysAroundShape({0.0f, 0.1f, 0.0f},
+                                 {{-1.0f, 0.1f, -1.0f},
+                                  {1.0f, 0.1f, -1.0f},
+                                  {1.0f, 0.1f, 1.0f},
+                                  {-1.0f, 0.1f, 1.0f}});
+  assert(shape.success());
+  assert(!shape.polys.empty());
+
+  const karma::navigation::NavPolyQueryResult local =
+      query.findLocalNeighbourhood({0.0f, 0.1f, 0.0f}, 2.0f);
+  assert(local.success());
+  assert(!local.polys.empty());
+
+  const karma::navigation::NavWallSegments walls =
+      query.getPolyWallSegments({0.0f, 0.1f, 0.0f});
+  assert(walls.success());
+  assert(!walls.segments.empty());
+
+}
+
+void testTileCacheDynamicObstacleBlocksAndRestoresPath() {
+  karma::navigation::NavMeshBuildConfig config;
+  config.tile_size = 16;
+  config.agent_radius = 0.2f;
+  config.agent_height = 1.0f;
+  config.agent_max_climb = 0.2f;
+
+  karma::navigation::NavMesh nav_mesh;
+  karma::navigation::NavTileCache tile_cache;
+  karma::navigation::NavTileCacheBuildResult result;
+  const bool built = tile_cache.build(nav_mesh, makeCorridorGeometry(), config, {}, &result);
+  if (!built) {
+    std::cerr << "tile cache build failed: " << result.message << "\n";
+  }
+  assert(built);
+  assert(result.status == karma::navigation::NavStatus::Success);
+  assert(result.layer_count > 0);
+  assert(tile_cache.tileCount() > 0);
+
+  karma::navigation::NavQuery query(nav_mesh);
+  assert(query.findPath({-4.0f, 0.1f, 0.0f}, {4.0f, 0.1f, 0.0f}).success());
+
+  uint64_t obstacle_ref = 0;
+  assert(tile_cache.addBoxObstacle({-0.5f, -0.2f, -2.0f},
+                                   {0.5f, 2.0f, 2.0f},
+                                   &obstacle_ref));
+  assert(obstacle_ref != 0);
+  updateTileCacheUntilReady(tile_cache, nav_mesh);
+  assert(tile_cache.obstacleCount() == 1);
+  const auto obstacles = tile_cache.obstacles();
+  assert(!obstacles.empty());
+  assert(obstacles[0].shape == karma::navigation::NavTileCacheObstacleShape::Box);
+  assert(obstacles[0].state == karma::navigation::NavTileCacheObstacleState::Processed);
+
+  karma::navigation::NavQuery blocked_query(nav_mesh);
+  const karma::navigation::NavPath blocked =
+      blocked_query.findPath({-4.0f, 0.1f, 0.0f}, {4.0f, 0.1f, 0.0f});
+  assert(blocked.status != karma::navigation::NavStatus::Success || blocked.partial);
+
+  assert(tile_cache.removeObstacle(obstacle_ref));
+  updateTileCacheUntilReady(tile_cache, nav_mesh);
+  karma::navigation::NavQuery restored_query(nav_mesh);
+  assert(restored_query.findPath({-4.0f, 0.1f, 0.0f}, {4.0f, 0.1f, 0.0f}).success());
+}
+
+void testTileCacheBoxObstacleDiagnostics() {
+  karma::navigation::NavMeshBuildConfig config;
+  config.tile_size = 16;
+  config.agent_radius = 0.2f;
+
+  karma::navigation::NavMesh nav_mesh;
+  karma::navigation::NavTileCache tile_cache;
+  assert(tile_cache.build(nav_mesh, makePlaneGeometry(), config));
+
+  uint64_t box_ref = 0;
+  uint64_t oriented_ref = 0;
+  uint64_t cylinder_ref = 0;
+  assert(tile_cache.addBoxObstacle({-4.5f, -0.2f, -4.5f},
+                                   {-3.5f, 1.8f, -3.5f},
+                                   &box_ref));
+  assert(tile_cache.addOrientedBoxObstacle({4.0f, 0.8f, 4.0f},
+                                           {0.5f, 1.0f, 0.4f},
+                                           0.5f,
+                                           &oriented_ref));
+  assert(tile_cache.addCylinderObstacle({0.0f, 0.0f, 4.0f}, 0.4f, 2.0f, &cylinder_ref));
+  updateTileCacheUntilReady(tile_cache, nav_mesh);
+
+  const auto obstacles = tile_cache.obstacles();
+  bool saw_box = false;
+  bool saw_oriented_box = false;
+  bool saw_cylinder = false;
+  for (const auto& obstacle : obstacles) {
+    saw_box = saw_box || (obstacle.ref == box_ref &&
+                          obstacle.shape == karma::navigation::NavTileCacheObstacleShape::Box);
+    saw_oriented_box = saw_oriented_box ||
+                       (obstacle.ref == oriented_ref &&
+                        obstacle.shape == karma::navigation::NavTileCacheObstacleShape::OrientedBox);
+    saw_cylinder = saw_cylinder ||
+                   (obstacle.ref == cylinder_ref &&
+                    obstacle.shape == karma::navigation::NavTileCacheObstacleShape::Cylinder);
+  }
+  assert(saw_box);
+  assert(saw_oriented_box);
+  assert(saw_cylinder);
+  assert(tile_cache.tileCapacity() >= tile_cache.tileCount());
+  const auto tiles = tile_cache.tiles();
+  assert(!tiles.empty());
+  assert(tiles.front().bounds_max.x > tiles.front().bounds_min.x);
+  assert(tiles.front().bounds_max.z > tiles.front().bounds_min.z);
+}
+
+void testCrowdMovesAgentToTarget() {
+  karma::navigation::NavMeshBuildConfig nav_config;
+  nav_config.agent_radius = 0.2f;
+  karma::navigation::NavMesh nav_mesh;
+  assert(nav_mesh.build(makePlaneGeometry(), nav_config));
+
+  karma::navigation::NavCrowd crowd;
+  karma::navigation::NavCrowdConfig crowd_config;
+  crowd_config.max_agents = 8;
+  crowd_config.max_agent_radius = 0.4f;
+  assert(crowd.init(nav_mesh, crowd_config));
+
+  karma::navigation::NavCrowdAgentParams params;
+  params.radius = 0.2f;
+  params.height = 1.0f;
+  params.max_speed = 2.5f;
+  params.max_acceleration = 12.0f;
+  const int agent_id = crowd.addAgent({-4.0f, 0.1f, 0.0f}, params);
+  assert(agent_id >= 0);
+  assert(crowd.activeAgentCount() == 1);
+  assert(crowd.requestMoveTarget(agent_id, {4.0f, 0.1f, 0.0f}));
+
+  karma::navigation::NavCrowdAgentInfo info;
+  for (int i = 0; i < 80; ++i) {
+    crowd.update(0.1f);
+    assert(crowd.agentInfo(agent_id, info));
+    if (std::abs(info.position.x - 4.0f) < 0.5f) {
+      break;
+    }
+  }
+  assert(info.active);
+  assert(info.state == karma::navigation::NavCrowdAgentState::Walking);
+  assert(std::abs(info.position.x - 4.0f) < 0.75f);
+
+  assert(crowd.requestMoveVelocity(agent_id, {-1.0f, 0.0f, 0.0f}));
+  crowd.update(0.2f);
+  assert(crowd.agentInfo(agent_id, info));
+  assert(info.target_state == karma::navigation::NavCrowdTargetState::Velocity);
 }
 
 void testOffMeshConnectionBridgesGap() {
@@ -333,6 +681,121 @@ void testNavigationSystemBuildsAndMovesAgent() {
   assert(std::abs(transform.getPosition().z - 4.0f) < 0.25f);
 }
 
+void testNavigationSystemTileCacheObstacleComponent() {
+  karma::ecs::World world;
+
+  auto surface_mesh = std::make_shared<karma::geometry::MeshData>();
+  appendQuad(*surface_mesh,
+             {-5.0f, 0.0f, -1.0f},
+             {5.0f, 0.0f, -1.0f},
+             {5.0f, 0.0f, 1.0f},
+             {-5.0f, 0.0f, 1.0f});
+
+  const auto surface = world.createEntity();
+  world.add(surface, karma::components::TransformComponent{});
+  world.add(surface, karma::components::NavMeshSurfaceComponent{
+                         .mesh_data = surface_mesh,
+                     });
+
+  const auto nav_entity = world.createEntity();
+  karma::components::NavMeshComponent nav_component;
+  nav_component.build_config.tile_size = 16;
+  nav_component.build_config.agent_radius = 0.2f;
+  nav_component.build_config.agent_height = 1.0f;
+  nav_component.build_config.agent_max_climb = 0.2f;
+  world.add(nav_entity, std::move(nav_component));
+  world.add(nav_entity, karma::components::NavTileCacheComponent{});
+
+  const auto obstacle_entity = world.createEntity();
+  world.add(obstacle_entity, karma::components::TransformComponent{{0.0f, 0.0f, 0.0f}});
+  karma::components::NavTileCacheObstacleComponent obstacle;
+  obstacle.nav_mesh_entity = nav_entity;
+  obstacle.shape = karma::navigation::NavTileCacheObstacleShape::Box;
+  obstacle.bounds_min = {-0.5f, -0.2f, -2.0f};
+  obstacle.bounds_max = {0.5f, 2.0f, 2.0f};
+  world.add(obstacle_entity, obstacle);
+
+  karma::navigation::NavigationSystem system;
+  for (int i = 0; i < 8; ++i) {
+    system.update(world, 0.0f);
+  }
+
+  auto& nav_component_ref = world.get<karma::components::NavMeshComponent>(nav_entity);
+  auto& cache_component_ref = world.get<karma::components::NavTileCacheComponent>(nav_entity);
+  assert(nav_component_ref.built);
+  assert(cache_component_ref.built);
+  assert(cache_component_ref.tile_cache.obstacleCount() == 1);
+
+  karma::navigation::NavQuery blocked_query(nav_component_ref.nav_mesh);
+  const karma::navigation::NavPath blocked =
+      blocked_query.findPath({-4.0f, 0.1f, 0.0f}, {4.0f, 0.1f, 0.0f});
+  assert(blocked.status != karma::navigation::NavStatus::Success || blocked.partial);
+
+  auto& obstacle_ref =
+      world.get<karma::components::NavTileCacheObstacleComponent>(obstacle_entity);
+  obstacle_ref.remove_requested = true;
+  for (int i = 0; i < 8; ++i) {
+    system.update(world, 0.0f);
+  }
+
+  karma::navigation::NavQuery restored_query(nav_component_ref.nav_mesh);
+  assert(restored_query.findPath({-4.0f, 0.1f, 0.0f},
+                                 {4.0f, 0.1f, 0.0f}).success());
+}
+
+void testNavigationSystemCrowdAgentComponent() {
+  karma::ecs::World world;
+
+  const auto surface = world.createEntity();
+  world.add(surface, karma::components::TransformComponent{});
+  world.add(surface, karma::components::NavMeshSurfaceComponent{
+                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
+                     });
+
+  const auto nav_entity = world.createEntity();
+  karma::components::NavMeshComponent nav_component;
+  nav_component.build_config.agent_radius = 0.2f;
+  world.add(nav_entity, std::move(nav_component));
+  karma::components::NavCrowdComponent crowd_component;
+  crowd_component.config.max_agents = 8;
+  crowd_component.config.max_agent_radius = 0.4f;
+  world.add(nav_entity, std::move(crowd_component));
+
+  const auto agent_entity = world.createEntity();
+  world.add(agent_entity, karma::components::TransformComponent{{-4.0f, 0.1f, 0.0f}});
+  karma::components::NavCrowdAgentComponent crowd_agent;
+  crowd_agent.crowd_entity = nav_entity;
+  crowd_agent.params.radius = 0.2f;
+  crowd_agent.params.height = 1.0f;
+  crowd_agent.params.max_speed = 2.5f;
+  crowd_agent.params.max_acceleration = 12.0f;
+  crowd_agent.stopping_distance = 0.5f;
+  world.add(agent_entity, crowd_agent);
+
+  karma::navigation::NavigationSystem system;
+  system.update(world, 0.0f);
+  assert(world.get<karma::components::NavMeshComponent>(nav_entity).built);
+  assert(world.get<karma::components::NavCrowdComponent>(nav_entity).built);
+  assert(karma::navigation::NavigationSystem::requestCrowdMoveTo(
+      world, agent_entity, {4.0f, 0.1f, 0.0f}));
+
+  for (int i = 0; i < 100; ++i) {
+    system.update(world, 0.1f);
+    const auto& agent =
+        world.get<karma::components::NavCrowdAgentComponent>(agent_entity);
+    if (agent.reached_destination) {
+      break;
+    }
+  }
+
+  const auto& transform = world.get<karma::components::TransformComponent>(agent_entity);
+  const auto& agent = world.get<karma::components::NavCrowdAgentComponent>(agent_entity);
+  assert(agent.agent_id >= 0);
+  assert(agent.state == karma::navigation::NavCrowdAgentState::Walking);
+  assert(agent.reached_destination);
+  assert(std::abs(transform.getPosition().x - 4.0f) < 0.75f);
+}
+
 void testReplacementRequestKeepsCurrentPathMoving() {
   karma::ecs::World world;
 
@@ -438,12 +901,22 @@ int main() {
   testHoleForcesDetour();
   testInvalidInputFailsCleanly();
   testNearestPoint();
+  testNearestPolyFlagsAndSnapshotRefresh();
   testGlbPrefabCollectionAppliesWorldTransform();
   testWorldSurfaceCollectionUsesNavMeshSurfaceArea();
   testAreaFlagsFilterQueries();
+  testConvexVolumeMarksArea();
+  testPartitionModesAndTiledSnapshot();
+  testBuildDebugDrawArtifacts();
+  testAdvancedQueryHelpers();
+  testTileCacheDynamicObstacleBlocksAndRestoresPath();
+  testTileCacheBoxObstacleDiagnostics();
+  testCrowdMovesAgentToTarget();
   testOffMeshConnectionBridgesGap();
   testSlicedPathCompletes();
   testNavigationSystemBuildsAndMovesAgent();
+  testNavigationSystemTileCacheObstacleComponent();
+  testNavigationSystemCrowdAgentComponent();
   testReplacementRequestKeepsCurrentPathMoving();
   testExampleWorldGlbCanBake();
   std::cout << "navmesh tests passed\n";

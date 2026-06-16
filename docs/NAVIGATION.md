@@ -1,14 +1,23 @@
 # Navigation
 
-Karma navigation is built around Recast/Detour. Recast bakes static triangle
-geometry into a navigation mesh, and Detour answers runtime path queries.
+Karma navigation is built around Recast/Detour. Recast bakes triangle geometry
+into solo or tiled navmeshes, Detour answers runtime path queries, DetourTileCache
+updates dynamic obstacle tiles, and DetourCrowd provides local steering and
+avoidance.
 
-The current implementation is a static-world v1. It is suitable for baking
-loaded or procedural triangle geometry once, then running path queries and
-simple ECS agent movement against that mesh. Direct `NavQuery` calls are
-synchronous. ECS agent path requests submitted through `NavigationSystem` are
-resolved on a worker thread from immutable navmesh snapshots, then applied back
-to components on the main thread.
+The public API follows the engine layers:
+
+- `world` owns ECS data contracts such as `NavMeshComponent`,
+  `NavTileCacheObstacleComponent`, and `NavCrowdAgentComponent`.
+- `simulation/navigation` owns Recast/Detour wrappers such as `NavMesh`,
+  `NavQuery`, `NavTileCache`, `NavCrowd`, and `NavigationSystem`.
+- `content` imports GLB/mesh data into shared geometry contracts.
+- `runtime` wires systems together; it does not own navigation data types.
+
+Direct `NavQuery`, `NavTileCache`, and `NavCrowd` calls are synchronous.
+ECS path requests submitted through `NavigationSystem` are resolved from immutable
+navmesh snapshots on a worker thread, while tile-cache and crowd updates run on
+the main thread because they mutate live Detour state and entity transforms.
 
 ## Build Flow
 
@@ -41,9 +50,36 @@ ECS collection now prefers explicit navigation surfaces:
   walkable/non-walkable marking.
 - `NavOffMeshLinkComponent`: attach to an entity to add a point-to-point
   Detour off-mesh connection during bake.
+- `NavConvexVolumeComponent`: attach to mark a vertical convex area volume
+  during bake.
 - `NavMeshAgentComponent`: attach to moving entities. `NavigationSystem`
   consumes destinations, resolves paths asynchronously, and advances the entity
   transform.
+- `NavTileCacheComponent`: attach beside `NavMeshComponent` to bake a Detour
+  tile cache and allow dynamic obstacle updates.
+- `NavTileCacheObstacleComponent`: attach to obstacle entities to add/remove
+  cylinder, AABB, or oriented-box temporary obstacles.
+- `NavCrowdComponent`: attach beside `NavMeshComponent` to own a DetourCrowd
+  instance.
+- `NavCrowdAgentComponent`: attach to entities whose transforms should be
+  controlled by DetourCrowd steering.
+
+## Baking
+
+`NavMeshBuildConfig::build_mode` selects `Solo` or `Tiled`. Tiled builds expose
+tile rebuild/removal APIs and are required for DetourTileCache. Recast
+partitioning is selected with `NavMeshPartitionType::Watershed`, `Monotone`, or
+`Layers`.
+
+`NavMeshInputGeometry` supports:
+
+- triangles and optional per-triangle area IDs
+- authored off-mesh links
+- convex area volumes
+
+`NavMesh::snapshot()` serializes solo or tiled navmeshes for worker-thread
+queries. `NavMesh::loadSnapshot()` rehydrates the snapshot into a live Detour
+mesh.
 
 ## ECS Request Pipeline
 
@@ -69,6 +105,13 @@ resolves. Navmesh rebakes increment `NavMeshComponent::build_version`, so paths
 calculated against an older bake are discarded instead of being applied to the
 wrong mesh.
 
+Crowd agents use a separate synchronous pipeline. Add `NavCrowdComponent` to the
+navmesh entity, add `NavCrowdAgentComponent` to controlled entities, then call
+`NavigationSystem::requestCrowdMoveTo(...)` or
+`NavigationSystem::requestCrowdVelocity(...)`. The system initializes the crowd,
+adds/removes Detour agents, submits move requests, advances `NavCrowd`, and
+writes agent positions/velocities back to transforms.
+
 `NavigationSystem::stats()` exposes lightweight diagnostics for this pipeline:
 main-thread update/rebuild/submit/move/apply timings, worker queue/solve timing,
 request counters, stale-result count, last path status, and whether the worker
@@ -89,11 +132,76 @@ navigation::appendGeometry(geometry, mesh_data, position, rotation, scale);
 Area IDs are assigned per appended triangle or per `NavMeshSurfaceComponent`.
 Build config area flags control which polygons a filter can traverse, while
 `NavQueryFilter` controls include/exclude flags and per-area costs for each
-query or agent. Use `navigation::makeQueryFilter(config)` to seed a query
-filter from `NavMeshBuildConfig::area_configs`.
+query, path agent, or crowd filter slot. Use `navigation::makeQueryFilter(config)`
+to seed a query filter from `NavMeshBuildConfig::area_configs`.
 
-`NavMesh::debugDraw()` and `NavQuery::debugDrawPath()` draw the baked mesh and
-paths through `renderer::GraphicsDevice::drawLine`.
+`NavQuery` exposes Detour path, raycast, sliced path, nearest-point, height,
+wall-distance, random-point, smooth-path, local-neighbourhood,
+polys-around-circle, polys-around-shape, and wall-segment helpers.
+
+Set `NavMeshBuildConfig::collect_build_debug_draw` when tools need RecastDemo
+build-intermediate views. Successful builds then populate `NavMeshDebugDrawMode`
+line layers for voxels, walkable voxels, compact heightfields, distance fields,
+regions, region connections, raw/processed contours, poly mesh, and detail mesh.
+`NavMeshComponent::debug_draw_mode` selects which layer the ECS
+`NavigationSystem` submits.
+
+## Dynamic Obstacles
+
+`NavTileCache` builds compressed tile layers from `NavMeshInputGeometry` and
+initializes a tiled `NavMesh`. Runtime code can add or remove temporary
+obstacles:
+
+```cpp
+navigation::NavTileCache tile_cache;
+navigation::NavMesh nav_mesh;
+navigation::NavTileCacheBuildResult result;
+
+if (tile_cache.build(nav_mesh, geometry, nav_config, {}, &result)) {
+  uint64_t obstacle = 0;
+  tile_cache.addBoxObstacle({-0.5f, 0.0f, -2.0f},
+                            {0.5f, 2.0f, 2.0f},
+                            &obstacle);
+
+  bool up_to_date = false;
+  while (!up_to_date) {
+    tile_cache.update(0.0f, nav_mesh, &up_to_date);
+  }
+}
+```
+
+In ECS, put `NavTileCacheComponent` on the navmesh entity and
+`NavTileCacheObstacleComponent` on obstacle entities. The system owns obstacle
+handles and refreshes navmesh snapshots after tile updates.
+
+## Crowds
+
+`NavCrowd` wraps DetourCrowd local steering. It supports per-agent radius,
+height, speed, acceleration, collision range, optimization range, separation,
+update flags, query filter slots, obstacle avoidance quality slots, move
+targets, velocity targets, and per-agent diagnostics.
+
+```cpp
+navigation::NavCrowd crowd;
+navigation::NavCrowdConfig crowd_config;
+crowd_config.max_agents = 32;
+crowd_config.max_agent_radius = 0.6f;
+
+if (crowd.init(nav_mesh, crowd_config)) {
+  const int agent = crowd.addAgent(start, {});
+  crowd.requestMoveTarget(agent, goal);
+  crowd.update(dt);
+}
+```
+
+For ECS, put `NavCrowdComponent` on the navmesh entity and
+`NavCrowdAgentComponent` on controlled entities. Crowd agents are intended for
+local avoidance and steering; use the existing async `NavMeshAgentComponent`
+when you only need point-to-point path following.
+
+`NavMesh::debugDraw()` and `NavQuery::debugDrawPath()` draw the baked mesh,
+captured Recast debug layers, and paths through
+`renderer::GraphicsDevice::drawLine`.
 
 ## Example
 
@@ -120,6 +228,50 @@ walks slopes up to 45 degrees. Tune `NavMeshBuildConfig` per game.
 The rendered example overrides these defaults with a smaller agent radius and
 cell size so the central-hole layout produces a clean visible detour.
 
+## Recast Examples
+
+`karma_recast_navigation_examples` is a headless parity runner for the upstream
+RecastDemo samples and tools. It uses copied assets in
+`examples/assets/navigation/recast` and exposes scenarios through Karma's public
+navigation API rather than RecastDemo internals:
+
+- `solo`: solo navmesh bake, Recast path test cases, smooth paths, snapshots
+- `tile`: tiled/layer bake, Recast raycast test cases, tile rebuild/removal
+- `temp-obstacles`: DetourTileCache build, cylinder/AABB/oriented-box obstacles
+- `crowd`: DetourCrowd initialization, agents, steering requests, updates
+- `debug`: partition modes, convex volumes, off-mesh links, pruning, build debug
+  layers, and advanced Detour query helpers
+
+Run all scenarios with:
+
+```bash
+cmake --build build/headless --target karma_recast_navigation_examples --parallel 1
+./build/headless/karma_recast_navigation_examples all
+```
+
+The graphical RecastDemo recreations are split into one Karma binary per
+upstream sample class:
+
+- `karma_recast_solo_mesh_example`
+- `karma_recast_tile_mesh_example`
+- `karma_recast_temp_obstacles_example`
+- `karma_recast_debug_example`
+
+Each binary renders the matching copied OBJ asset, owns its own ECS scene, and
+uses Karma's ImGui adapter for the sample settings, tools, debug draw modes,
+save/load actions, tile/cache controls, off-mesh links, convex volumes, crowd
+agents, and Recast build-debug layers exposed by that sample.
+
+Build them with:
+
+```bash
+cmake --build build/portable --target karma_recast_solo_mesh_example karma_recast_tile_mesh_example karma_recast_temp_obstacles_example karma_recast_debug_example --parallel 1
+```
+
+`karma_recast_navigation_graphical_example` remains as an extra combined gallery
+for quick side-by-side smoke checks. Run it with `all`, `solo`, `tile`,
+`temp-obstacles`, `crowd`, or `debug`.
+
 ## Tests
 
 `karma_navmesh_tests` covers:
@@ -131,6 +283,11 @@ cell size so the central-hole layout produces a clean visible detour.
 - GLB prefab world-transform geometry collection
 - ECS navmesh surface collection
 - area flags/query filtering
+- convex area volumes
+- partition modes and tiled snapshots
+- advanced Detour query helpers
+- dynamic tile-cache obstacles and tile diagnostics
+- DetourCrowd wrapper movement and ECS crowd agents
 - off-mesh connection paths
 - sliced path queries
 - `NavigationSystem` build and agent movement
@@ -146,8 +303,8 @@ ctest --test-dir build -R karma_navmesh_tests --output-on-failure
 
 ## Current Scope
 
-The first engine-facing implementation supports static-world navmesh baking,
-synchronous direct Detour queries, async ECS path requests, sliced Detour
-queries, area flags/costs, off-mesh links, and simple transform-driven agent
-movement. Dynamic tile rebakes, runtime obstacles, serialized navmesh assets,
-physics-controller movement, and DetourCrowd avoidance are future work.
+The engine-facing implementation supports solo and tiled navmesh baking,
+snapshots, direct Detour queries, async ECS path requests, sliced queries, area
+flags/costs, convex volumes, off-mesh links, dynamic tile-cache obstacles,
+DetourCrowd steering, and transform-driven ECS movement. Serialized standalone
+tile-cache assets and physics-controller crowd movement are not implemented yet.

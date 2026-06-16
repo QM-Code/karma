@@ -157,6 +157,8 @@ struct AnimatorEventRecord {
 struct AnimatorComponent : ecs::ComponentTag {
   std::vector<animation::AnimationClip> clips;
   std::vector<ecs::Entity> node_entities_by_index;
+  /// Renderable morph primitive entities keyed by imported GLB node index.
+  std::vector<std::vector<ecs::Entity>> morph_entities_by_node_index;
   std::vector<animation::Skeleton> skeletons;
   std::vector<animation::Skin> skins;
 

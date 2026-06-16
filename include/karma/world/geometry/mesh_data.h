@@ -13,6 +13,7 @@ struct MeshData {
   std::vector<glm::vec3> vertices;
   std::vector<glm::vec3> normals;
   std::vector<glm::vec2> uvs;
+  std::vector<glm::vec2> uvs1;
   std::vector<glm::vec4> tangents;
   std::vector<glm::uvec4> joint_indices;
   std::vector<glm::vec4> joint_weights;

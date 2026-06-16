@@ -239,6 +239,9 @@ cbuffer Constants
     float4 g_MaterialParams3;
     float4 g_MaterialParams4;
     float4 g_MaterialParams5;
+    float4 g_MaterialParams6;
+    float4 g_TexCoordRow0[12];
+    float4 g_TexCoordRow1[12];
 };
 
 cbuffer SkinningConstants
@@ -253,6 +256,7 @@ struct VSInput
     float3 Normal : ATTRIB1;
     float4 Tangent : ATTRIB2;
     float2 UV : ATTRIB3;
+    float2 UV1 : ATTRIB10;
     float4 ModelCol0 : ATTRIB4;
     float4 ModelCol1 : ATTRIB5;
     float4 ModelCol2 : ATTRIB6;
@@ -500,6 +504,7 @@ void DiligentBackend::recreateShadowPipeline() {
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{10, 0, 2, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{8, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{9, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
@@ -556,6 +561,14 @@ void DiligentBackend::initializeDevice() {
 #if defined(ENGINE_FORCE_VULKAN)
   (void)window_;
 #endif
+  const auto init_start = core::SteadyClock::now();
+  auto stage_start = init_start;
+  auto mark_stage = [&](const char* stage) {
+    const auto stage_end = core::SteadyClock::now();
+    logStartupDiag("diligent_device", stage, stage_start, stage_end);
+    stage_start = stage_end;
+  };
+
   const bool enable_vk_validation = envFlagEnabled("KARMA_VK_VALIDATION");
   const bool enable_diligent_debug =
       enable_vk_validation || envFlagEnabled("KARMA_DILIGENT_DEBUG");
@@ -585,6 +598,7 @@ void DiligentBackend::initializeDevice() {
   }
   engine_ci.Features.ShaderResourceRuntimeArray = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
   engine_ci.AdapterId = chooseVulkanAdapter(*factory);
+  mark_stage("factory and adapter selection");
 
   if (window_) {
 #if !defined(KARMA_WINDOW_BACKEND_SDL)
@@ -609,8 +623,10 @@ void DiligentBackend::initializeDevice() {
 
   if (!device_ || !context_) {
   }
+  mark_stage("device and swapchain create");
 
   if (!device_) {
+    logStartupDiag("diligent_device", "total", init_start, core::SteadyClock::now());
     return;
   }
 
@@ -634,6 +650,7 @@ void DiligentBackend::initializeDevice() {
     }
   } else if (shader_cache_log_) {
   }
+  mark_stage("render state cache load");
 
   Diligent::ShaderCreateInfo shader_ci{};
   shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
@@ -677,6 +694,9 @@ cbuffer Constants
     float4 g_MaterialParams3;
     float4 g_MaterialParams4;
     float4 g_MaterialParams5;
+    float4 g_MaterialParams6;
+    float4 g_TexCoordRow0[12];
+    float4 g_TexCoordRow1[12];
 };
 
 cbuffer SkinningConstants
@@ -691,6 +711,7 @@ struct VSInput
     float3 Normal : ATTRIB1;
     float4 Tangent : ATTRIB2;
     float2 UV : ATTRIB3;
+    float2 UV1 : ATTRIB10;
     float4 ModelCol0 : ATTRIB4;
     float4 ModelCol1 : ATTRIB5;
     float4 ModelCol2 : ATTRIB6;
@@ -704,8 +725,9 @@ struct VSOutput
     float4 Pos : SV_POSITION;
     float3 Normal : NORMAL0;
     float2 UV : TEXCOORD0;
-    float4 Tangent : TEXCOORD1;
-    float3 WorldPos : TEXCOORD2;
+    float2 UV1 : TEXCOORD1;
+    float4 Tangent : TEXCOORD2;
+    float3 WorldPos : TEXCOORD3;
 };
 
 VSOutput main(VSInput input)
@@ -750,6 +772,7 @@ VSOutput main(VSInput input)
                               input.ModelCol1.xyz * local_normal.y +
                               input.ModelCol2.xyz * local_normal.z);
     output.UV = input.UV;
+    output.UV1 = input.UV1;
     output.Tangent = input.Tangent;
     return output;
 }
@@ -794,6 +817,9 @@ cbuffer Constants
     float4 g_MaterialParams3;
     float4 g_MaterialParams4;
     float4 g_MaterialParams5;
+    float4 g_MaterialParams6;
+    float4 g_TexCoordRow0[12];
+    float4 g_TexCoordRow1[12];
 };
 
 Texture2D g_BaseColorTex;
@@ -801,6 +827,13 @@ Texture2D g_NormalTex;
 Texture2D g_MetallicRoughnessTex;
 Texture2D g_OcclusionTex;
 Texture2D g_EmissiveTex;
+Texture2D g_ClearcoatTex;
+Texture2D g_ClearcoatRoughnessTex;
+Texture2D g_ClearcoatNormalTex;
+Texture2D g_SheenColorTex;
+Texture2D g_SheenRoughnessTex;
+Texture2D g_TransmissionTex;
+Texture2D g_ThicknessTex;
 TextureCube g_IrradianceTex;
 TextureCube g_PrefilterTex;
 Texture2D g_BRDFLUT;
@@ -830,10 +863,20 @@ struct PSInput
     float4 Pos : SV_POSITION;
     float3 Normal : NORMAL0;
     float2 UV : TEXCOORD0;
-    float4 Tangent : TEXCOORD1;
-    float3 WorldPos : TEXCOORD2;
+    float2 UV1 : TEXCOORD1;
+    float4 Tangent : TEXCOORD2;
+    float3 WorldPos : TEXCOORD3;
     bool FrontFace : SV_IsFrontFace;
 };
+
+float2 MaterialUV(float2 uv0, float2 uv1, uint slot)
+{
+    float4 row0 = g_TexCoordRow0[slot];
+    float4 row1 = g_TexCoordRow1[slot];
+    float2 uv = lerp(uv0, uv1, step(0.5, row0.w));
+    return float2(dot(row0.xy, uv) + row0.z,
+                  dot(row1.xy, uv) + row1.z);
+}
 
 float SampleCascadeShadow(uint cascade_idx,
                           float3 world_pos,
@@ -875,7 +918,7 @@ float SampleCascadeShadow(uint cascade_idx,
         {
             float2 texel = float2(g_ShadowParams.w, g_ShadowParams.w);
             float sum = 0.0;
-            int count = 0;
+            float weight_sum = 0.0;
             [unroll]
             for (int y = -4; y <= 4; ++y)
             {
@@ -884,16 +927,18 @@ float SampleCascadeShadow(uint cascade_idx,
                 {
                     if (abs(x) <= radius && abs(y) <= radius)
                     {
+                        float weight = ((float)(radius + 1 - abs(x))) *
+                                       ((float)(radius + 1 - abs(y)));
                         float2 offset = float2((float)x, (float)y) * texel;
-                        sum += g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
-                                                              float3(shadow_uv + offset,
-                                                                     (float)cascade_idx),
-                                                              shadow_depth - bias);
-                        count += 1;
+                        sum += weight * g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
+                                                                       float3(shadow_uv + offset,
+                                                                              (float)cascade_idx),
+                                                                       shadow_depth - bias);
+                        weight_sum += weight;
                     }
                 }
             }
-            shadow = (count > 0) ? (sum / count) : 1.0;
+            shadow = (weight_sum > 0.0) ? (sum / weight_sum) : 1.0;
         }
     }
     return shadow;
@@ -966,7 +1011,7 @@ float SamplePointShadowFace(uint shadow_slot,
     {
         float2 texel = float2(texel_size, texel_size);
         float sum = 0.0;
-        int count = 0;
+        float weight_sum = 0.0;
         [unroll]
         for (int y = -1; y <= 1; ++y)
         {
@@ -975,16 +1020,18 @@ float SamplePointShadowFace(uint shadow_slot,
             {
                 if (abs(x) <= radius && abs(y) <= radius)
                 {
+                    float weight = ((float)(radius + 1 - abs(x))) *
+                                   ((float)(radius + 1 - abs(y)));
                     float2 offset = float2((float)x, (float)y) * texel;
-                    sum += g_PointShadowMap.SampleCmpLevelZero(g_ShadowSampler,
-                                                               float3(shadow_uv + offset,
-                                                                      (float)matrix_idx),
-                                                               compare_depth);
-                    count += 1;
+                    sum += weight * g_PointShadowMap.SampleCmpLevelZero(g_ShadowSampler,
+                                                                        float3(shadow_uv + offset,
+                                                                               (float)matrix_idx),
+                                                                        compare_depth);
+                    weight_sum += weight;
                 }
             }
         }
-        shadow = (count > 0) ? (sum / count) : 1.0;
+        shadow = (weight_sum > 0.0) ? (sum / weight_sum) : 1.0;
     }
 
     valid = 1.0;
@@ -1103,14 +1150,229 @@ float SamplePointShadow(ForwardPlusLight light,
     return weight_sum > 0.0 ? (shadow_sum / weight_sum) : 1.0;
 }
 
+float DistributionGGX(float3 n, float3 h, float perceptual_roughness)
+{
+    const float PI = 3.14159265;
+    float a = max(perceptual_roughness * perceptual_roughness, 0.001);
+    float a2 = a * a;
+    float n_dot_h = max(dot(n, h), 0.0);
+    float n_dot_h2 = n_dot_h * n_dot_h;
+    float denom = n_dot_h2 * (a2 - 1.0) + 1.0;
+    return a2 / max(PI * denom * denom, 1.0e-5);
+}
+
+float DistributionGGXAnisotropic(float3 n,
+                                 float3 h,
+                                 float3 tangent,
+                                 float3 bitangent,
+                                 float perceptual_roughness,
+                                 float anisotropy)
+{
+    const float PI = 3.14159265;
+    float alpha = max(perceptual_roughness * perceptual_roughness, 0.001);
+    float stretch = sqrt(max(1.0 - 0.9 * abs(anisotropy), 0.1));
+    float alpha_x = anisotropy >= 0.0 ? alpha / stretch : alpha * stretch;
+    float alpha_y = anisotropy >= 0.0 ? alpha * stretch : alpha / stretch;
+    alpha_x = max(alpha_x, 0.001);
+    alpha_y = max(alpha_y, 0.001);
+
+    float t_dot_h = dot(tangent, h);
+    float b_dot_h = dot(bitangent, h);
+    float n_dot_h = max(dot(n, h), 0.0);
+    float denom = (t_dot_h * t_dot_h) / (alpha_x * alpha_x) +
+                  (b_dot_h * b_dot_h) / (alpha_y * alpha_y) +
+                  n_dot_h * n_dot_h;
+    return 1.0 / max(PI * alpha_x * alpha_y * denom * denom, 1.0e-5);
+}
+
+float GeometrySchlickGGXDirect(float n_dot_v, float perceptual_roughness)
+{
+    float r = perceptual_roughness + 1.0;
+    float k = (r * r) * 0.125;
+    return n_dot_v / max(n_dot_v * (1.0 - k) + k, 1.0e-5);
+}
+
+float GeometrySmithDirect(float3 n, float3 v, float3 l, float perceptual_roughness)
+{
+    float n_dot_v = max(dot(n, v), 0.0);
+    float n_dot_l = max(dot(n, l), 0.0);
+    return GeometrySchlickGGXDirect(n_dot_v, perceptual_roughness) *
+           GeometrySchlickGGXDirect(n_dot_l, perceptual_roughness);
+}
+
+float3 FresnelSchlick(float cos_theta, float3 f0)
+{
+    return f0 + (1.0 - f0) * pow(saturate(1.0 - cos_theta), 5.0);
+}
+
+float3 EvaluatePbrLight(float3 n,
+                        float3 v,
+                        float3 l,
+                        float3 radiance,
+                        float3 base_color,
+                        float metallic,
+                        float perceptual_roughness)
+{
+    const float PI = 3.14159265;
+    float n_dot_l = max(dot(n, l), 0.0);
+    float n_dot_v = max(dot(n, v), 0.0);
+    if (n_dot_l <= 0.0 || n_dot_v <= 0.0)
+    {
+        return float3(0.0, 0.0, 0.0);
+    }
+
+    float3 h = normalize(v + l);
+    float3 f0 = lerp(float3(0.04, 0.04, 0.04), base_color, metallic);
+    float3 fresnel = FresnelSchlick(max(dot(h, v), 0.0), f0);
+    float distribution = DistributionGGX(n, h, perceptual_roughness);
+    float geometry = GeometrySmithDirect(n, v, l, perceptual_roughness);
+    float3 specular = distribution * geometry * fresnel / max(4.0 * n_dot_v * n_dot_l, 1.0e-4);
+    float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base_color / PI;
+    return (diffuse + specular) * radiance * n_dot_l;
+}
+
+float3 EvaluatePbrLightAnisotropic(float3 n,
+                                   float3 v,
+                                   float3 l,
+                                   float3 radiance,
+                                   float3 base_color,
+                                   float metallic,
+                                   float perceptual_roughness,
+                                   float3 tangent,
+                                   float3 bitangent,
+                                   float anisotropy)
+{
+    const float PI = 3.14159265;
+    float n_dot_l = max(dot(n, l), 0.0);
+    float n_dot_v = max(dot(n, v), 0.0);
+    if (n_dot_l <= 0.0 || n_dot_v <= 0.0)
+    {
+        return float3(0.0, 0.0, 0.0);
+    }
+
+    float3 h = normalize(v + l);
+    float3 f0 = lerp(float3(0.04, 0.04, 0.04), base_color, metallic);
+    float3 fresnel = FresnelSchlick(max(dot(h, v), 0.0), f0);
+    float distribution = abs(anisotropy) > 0.001
+        ? DistributionGGXAnisotropic(n, h, tangent, bitangent, perceptual_roughness, anisotropy)
+        : DistributionGGX(n, h, perceptual_roughness);
+    float geometry = GeometrySmithDirect(n, v, l, perceptual_roughness);
+    float3 specular = distribution * geometry * fresnel / max(4.0 * n_dot_v * n_dot_l, 1.0e-4);
+    float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base_color / PI;
+    return (diffuse + specular) * radiance * n_dot_l;
+}
+
+float ClearcoatFresnel(float3 n, float3 v, float3 l)
+{
+    float n_dot_l = max(dot(n, l), 0.0);
+    float n_dot_v = max(dot(n, v), 0.0);
+    if (n_dot_l <= 0.0 || n_dot_v <= 0.0)
+    {
+        return 0.0;
+    }
+    float3 h = normalize(v + l);
+    return FresnelSchlick(max(dot(h, v), 0.0), float3(0.04, 0.04, 0.04)).r;
+}
+
+float3 EvaluateClearcoatLight(float3 n,
+                              float3 v,
+                              float3 l,
+                              float3 radiance,
+                              float factor,
+                              float perceptual_roughness)
+{
+    float n_dot_l = max(dot(n, l), 0.0);
+    float n_dot_v = max(dot(n, v), 0.0);
+    if (factor <= 0.0 || n_dot_l <= 0.0 || n_dot_v <= 0.0)
+    {
+        return float3(0.0, 0.0, 0.0);
+    }
+
+    float3 h = normalize(v + l);
+    float3 fresnel = FresnelSchlick(max(dot(h, v), 0.0), float3(0.04, 0.04, 0.04));
+    float distribution = DistributionGGX(n, h, perceptual_roughness);
+    float geometry = GeometrySmithDirect(n, v, l, perceptual_roughness);
+    float3 specular = distribution * geometry * fresnel / max(4.0 * n_dot_v * n_dot_l, 1.0e-4);
+    return specular * radiance * n_dot_l * factor;
+}
+
+float CharlieDistribution(float n_dot_h, float perceptual_roughness)
+{
+    const float PI = 3.14159265;
+    float alpha = clamp(perceptual_roughness, 0.045, 1.0);
+    float inv_alpha = 1.0 / max(alpha, 1.0e-4);
+    float sin2h = max(1.0 - n_dot_h * n_dot_h, 1.0e-4);
+    return (2.0 + inv_alpha) * pow(sin2h, inv_alpha * 0.5) / (2.0 * PI);
+}
+
+float SheenVisibility(float n_dot_l, float n_dot_v)
+{
+    return 1.0 / max(4.0 * (n_dot_l + n_dot_v - n_dot_l * n_dot_v), 1.0e-4);
+}
+
+float3 EvaluateSheenLight(float3 n,
+                          float3 v,
+                          float3 l,
+                          float3 radiance,
+                          float3 sheen_color,
+                          float perceptual_roughness)
+{
+    float n_dot_l = max(dot(n, l), 0.0);
+    float n_dot_v = max(dot(n, v), 0.0);
+    float sheen_strength = max(max(sheen_color.r, sheen_color.g), sheen_color.b);
+    if (sheen_strength <= 0.0 || n_dot_l <= 0.0 || n_dot_v <= 0.0)
+    {
+        return float3(0.0, 0.0, 0.0);
+    }
+
+    float3 h = normalize(v + l);
+    float n_dot_h = saturate(dot(n, h));
+    float distribution = CharlieDistribution(n_dot_h, perceptual_roughness);
+    float visibility = SheenVisibility(n_dot_l, n_dot_v);
+    return sheen_color * distribution * visibility * radiance * n_dot_l;
+}
+
+float3 Uncharted2Tonemap(float3 x)
+{
+    const float A = 0.15;
+    const float B = 0.50;
+    const float C = 0.10;
+    const float D = 0.20;
+    const float E = 0.02;
+    const float F = 0.30;
+    return ((x * (A * x + C * B) + D * E) /
+            max(x * (A * x + B) + D * F, float3(1.0e-4, 1.0e-4, 1.0e-4))) -
+           E / F;
+}
+
+float3 ApplyFilmicTonemap(float3 color, float exposure)
+{
+    float average_log_lum = 0.30;
+    float middle_gray = 0.18;
+    float white_point = 3.0;
+    float luminance_scale = middle_gray / max(average_log_lum, 1.0e-4);
+    float3 mapped = Uncharted2Tonemap(max(color, float3(0.0, 0.0, 0.0)) * exposure * luminance_scale);
+    float white_scale = 1.0 / max(Uncharted2Tonemap(float3(white_point, white_point, white_point)).r,
+                                  1.0e-4);
+    return saturate(mapped * white_scale);
+}
+
 void AccumulateLocalLight(ForwardPlusLight light,
                           float3 world_pos,
                           float3 geom_n,
                           float3 n,
+                          float3 clearcoat_n,
                           float3 v,
-                          float shininess,
+                          float perceptual_roughness,
+                          float metallic,
                           float3 base_color,
-                          float3 spec_color,
+                          float3 tangent,
+                          float3 bitangent,
+                          float anisotropy,
+                          float clearcoat_factor,
+                          float clearcoat_roughness,
+                          float3 sheen_color,
+                          float sheen_roughness,
                           inout float3 lit,
                           inout float local_shadow_lift_energy)
 {
@@ -1149,12 +1411,32 @@ void AccumulateLocalLight(ForwardPlusLight light,
     {
         return;
     }
-    float3 h_local = normalize(v + l_local);
-    float local_spec = pow(max(dot(n, h_local), 0.0), shininess);
     float point_shadow = SamplePointShadow(light, world_pos, geom_n, l_local);
     float3 light_color = light.color_intensity.rgb * light.color_intensity.w * atten * point_shadow;
-    lit += base_color * light_color * local_ndotl;
-    lit += spec_color * light_color * local_spec;
+    float clearcoat_fresnel = ClearcoatFresnel(clearcoat_n, v, l_local) * clearcoat_factor;
+    lit += EvaluatePbrLightAnisotropic(n,
+                                       v,
+                                       l_local,
+                                       light_color,
+                                       base_color,
+                                       metallic,
+                                       perceptual_roughness,
+                                       tangent,
+                                       bitangent,
+                                       anisotropy) *
+           (1.0 - clearcoat_fresnel);
+    lit += EvaluateClearcoatLight(clearcoat_n,
+                                  v,
+                                  l_local,
+                                  light_color,
+                                  clearcoat_factor,
+                                  clearcoat_roughness);
+    lit += EvaluateSheenLight(n,
+                              v,
+                              l_local,
+                              light_color,
+                              sheen_color,
+                              sheen_roughness);
     float local_luminance = dot(light_color, float3(0.2126, 0.7152, 0.0722));
     local_shadow_lift_energy += local_luminance * local_ndotl;
 }
@@ -1397,29 +1679,83 @@ float4 main(PSInput input) : SV_TARGET
     float3 n = geom_n;
     float3 t = normalize(input.Tangent.xyz);
     float3 b = normalize(cross(geom_n, t) * input.Tangent.w);
-    float3 normal_tex = g_NormalTex.Sample(g_SamplerData, input.UV).xyz * 2.0 - 1.0;
+    float2 base_uv = MaterialUV(input.UV, input.UV1, 0u);
+    float2 normal_uv = MaterialUV(input.UV, input.UV1, 1u);
+    float2 metallic_roughness_uv = MaterialUV(input.UV, input.UV1, 2u);
+    float2 occlusion_uv = MaterialUV(input.UV, input.UV1, 3u);
+    float2 emissive_uv = MaterialUV(input.UV, input.UV1, 4u);
+    float2 clearcoat_uv = MaterialUV(input.UV, input.UV1, 5u);
+    float2 clearcoat_roughness_uv = MaterialUV(input.UV, input.UV1, 6u);
+    float2 clearcoat_normal_uv = MaterialUV(input.UV, input.UV1, 7u);
+    float2 sheen_color_uv = MaterialUV(input.UV, input.UV1, 8u);
+    float2 sheen_roughness_uv = MaterialUV(input.UV, input.UV1, 9u);
+    float2 transmission_uv = MaterialUV(input.UV, input.UV1, 10u);
+    float2 thickness_uv = MaterialUV(input.UV, input.UV1, 11u);
+    float3 normal_tex = g_NormalTex.Sample(g_SamplerData, normal_uv).xyz * 2.0 - 1.0;
     normal_tex.xy *= g_PbrParams.w;
     normal_tex = normalize(normal_tex);
     n = normalize(normal_tex.x * t + normal_tex.y * b + normal_tex.z * n);
+    float3 clearcoat_normal_tex =
+        g_ClearcoatNormalTex.Sample(g_SamplerData, clearcoat_normal_uv).xyz * 2.0 - 1.0;
+    clearcoat_normal_tex.xy *= g_PbrParams.w;
+    clearcoat_normal_tex = normalize(clearcoat_normal_tex);
+    float3 clearcoat_n =
+        normalize(clearcoat_normal_tex.x * t +
+                  clearcoat_normal_tex.y * b +
+                  clearcoat_normal_tex.z * geom_n);
     float3 l_dir = normalize(-g_LightDir.xyz);
     float ndotl = max(dot(n, l_dir), 0.0);
-    float4 base_tex = g_BaseColorTex.Sample(g_SamplerColor, input.UV);
-    float3 emissive_tex = g_EmissiveTex.Sample(g_SamplerColor, input.UV).rgb;
-    float occlusion = g_OcclusionTex.Sample(g_SamplerData, input.UV).r;
-    float2 mr = g_MetallicRoughnessTex.Sample(g_SamplerData, input.UV).bg;
+    float4 base_tex = g_BaseColorTex.Sample(g_SamplerColor, base_uv);
+    float3 emissive_tex = g_EmissiveTex.Sample(g_SamplerColor, emissive_uv).rgb;
+    float occlusion = g_OcclusionTex.Sample(g_SamplerData, occlusion_uv).r;
+    float2 mr = g_MetallicRoughnessTex.Sample(g_SamplerData, metallic_roughness_uv).bg;
     float metallic = saturate(mr.x * g_PbrParams.x);
     float roughness = saturate(mr.y * g_PbrParams.y);
 
     float3 base_color = g_BaseColorFactor.rgb * base_tex.rgb;
     float3 emissive = g_EmissiveFactor.rgb * emissive_tex;
+    uint shading_mode = (uint)round(g_MaterialParams0.x);
+    bool standard_material = shading_mode == 0u;
 
     float3 v = normalize(g_CameraPos.xyz - input.WorldPos);
-    float3 h = normalize(v + l_dir);
-    float ndoth = max(dot(n, h), 0.0);
-    float rough = max(roughness, 0.05);
-    float shininess = 2.0 / (rough * rough) - 2.0;
-    float spec = pow(ndoth, shininess);
+    if (dot(clearcoat_n, v) < 0.0)
+    {
+        clearcoat_n = -clearcoat_n;
+    }
+    float perceptual_roughness = clamp(roughness, 0.045, 1.0);
     float3 spec_color = lerp(float3(0.04, 0.04, 0.04), base_color, metallic);
+    float clearcoat_factor =
+        standard_material ? saturate(g_MaterialParams3.x *
+                                     g_ClearcoatTex.Sample(g_SamplerData, clearcoat_uv).r)
+                          : 0.0;
+    float clearcoat_roughness =
+        standard_material ? clamp(g_MaterialParams3.y *
+                                  g_ClearcoatRoughnessTex.Sample(g_SamplerData,
+                                                                 clearcoat_roughness_uv).g,
+                                  0.045,
+                                  1.0)
+                          : 0.045;
+    float sheen_roughness =
+        standard_material ? clamp(g_MaterialParams3.z *
+                                  g_SheenRoughnessTex.Sample(g_SamplerData,
+                                                             sheen_roughness_uv).a,
+                                  0.045,
+                                  1.0)
+                          : 0.045;
+    float anisotropy = standard_material ? clamp(g_MaterialParams3.w, -1.0, 1.0) : 0.0;
+    float3 sheen_color =
+        standard_material ? saturate(g_MaterialParams4.rgb *
+                                     g_SheenColorTex.Sample(g_SamplerColor, sheen_color_uv).rgb)
+                          : float3(0.0, 0.0, 0.0);
+    float transmission =
+        standard_material ? saturate(g_MaterialParams4.w *
+                                     g_TransmissionTex.Sample(g_SamplerData, transmission_uv).r)
+                          : 0.0;
+    float thickness =
+        standard_material ? max(g_MaterialParams5.y *
+                                g_ThicknessTex.Sample(g_SamplerData, thickness_uv).g,
+                                0.0)
+                          : 0.0;
 
     float shadow = 1.0;
     if (g_ShadowParams.x > 0.5)
@@ -1483,10 +1819,18 @@ float4 main(PSInput input) : SV_TARGET
                                  input.WorldPos,
                                  geom_n,
                                  n,
+                                 clearcoat_n,
                                  v,
-                                 shininess,
+                                 perceptual_roughness,
+                                 metallic,
                                  base_color,
-                                 spec_color,
+                                 t,
+                                 b,
+                                 anisotropy,
+                                 clearcoat_factor,
+                                 clearcoat_roughness,
+                                 sheen_color,
+                                 sheen_roughness,
                                  lit_local,
                                  local_shadow_lift_energy);
         }
@@ -1519,10 +1863,18 @@ float4 main(PSInput input) : SV_TARGET
                                  input.WorldPos,
                                  geom_n,
                                  n,
+                                 clearcoat_n,
                                  v,
-                                 shininess,
+                                 perceptual_roughness,
+                                 metallic,
                                  base_color,
-                                 spec_color,
+                                 t,
+                                 b,
+                                 anisotropy,
+                                 clearcoat_factor,
+                                 clearcoat_roughness,
+                                 sheen_color,
+                                 sheen_roughness,
                                  lit_local,
                                  local_shadow_lift_energy);
         }
@@ -1530,8 +1882,32 @@ float4 main(PSInput input) : SV_TARGET
     float shadow_lift_strength = max(g_LocalLightParams.w, 0.0);
     float shadow_lift = 1.0 - exp(-local_shadow_lift_energy * shadow_lift_strength);
     float lifted_shadow = lerp(shadow, 1.0, saturate(shadow_lift));
-    float3 lit_directional = base_color * g_LightColor.rgb * (ndotl * lifted_shadow);
-    lit_directional += spec_color * spec * g_LightColor.rgb * lifted_shadow;
+    float3 directional_radiance = g_LightColor.rgb * lifted_shadow;
+    float clearcoat_directional_fresnel =
+        ClearcoatFresnel(clearcoat_n, v, l_dir) * clearcoat_factor;
+    float3 lit_directional = EvaluatePbrLightAnisotropic(n,
+                                                         v,
+                                                         l_dir,
+                                                         directional_radiance,
+                                                         base_color,
+                                                         metallic,
+                                                         perceptual_roughness,
+                                                         t,
+                                                         b,
+                                                         anisotropy) *
+                             (1.0 - clearcoat_directional_fresnel);
+    lit_directional += EvaluateClearcoatLight(clearcoat_n,
+                                              v,
+                                              l_dir,
+                                              directional_radiance,
+                                              clearcoat_factor,
+                                              clearcoat_roughness);
+    lit_directional += EvaluateSheenLight(n,
+                                          v,
+                                          l_dir,
+                                          directional_radiance,
+                                          sheen_color,
+                                          sheen_roughness);
     occlusion = lerp(1.0, occlusion, g_PbrParams.z);
     float local_ao_factor = lerp(1.0, occlusion, saturate(g_LocalLightParams.z));
     float3 lit = lit_directional * occlusion + lit_local * local_ao_factor;
@@ -1543,12 +1919,34 @@ float4 main(PSInput input) : SV_TARGET
     {
         env_diffuse = g_IrradianceTex.Sample(g_SamplerColor, n).rgb * g_EnvParams.x;
         float3 r = reflect(-v, n);
-        float mip = saturate(roughness) * g_EnvParams.y;
+        float mip = saturate(perceptual_roughness) * g_EnvParams.y;
         float3 prefiltered = g_PrefilterTex.SampleLevel(g_SamplerColor, r, mip).rgb;
-        float2 brdf = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, roughness)).rg;
+        float2 brdf = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, perceptual_roughness)).rg;
         env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
-        lit += env_diffuse * base_color * occlusion;
-        lit += env_spec * g_EnvParams.x;
+        float clearcoat_ndotv = max(dot(clearcoat_n, v), 0.0);
+        float clearcoat_ibl_fresnel =
+            FresnelSchlick(clearcoat_ndotv, float3(0.04, 0.04, 0.04)).r * clearcoat_factor;
+        float base_layer_ibl_weight = 1.0 - clearcoat_ibl_fresnel;
+        lit += env_diffuse * base_color * (1.0 - metallic) * occlusion * base_layer_ibl_weight;
+        lit += env_spec * g_EnvParams.x * base_layer_ibl_weight;
+        if (clearcoat_factor > 0.0)
+        {
+            float clearcoat_mip = saturate(clearcoat_roughness) * g_EnvParams.y;
+            float3 clearcoat_r = reflect(-v, clearcoat_n);
+            float3 clearcoat_prefiltered =
+                g_PrefilterTex.SampleLevel(g_SamplerColor, clearcoat_r, clearcoat_mip).rgb;
+            float2 clearcoat_brdf =
+                g_BRDFLUT.Sample(g_SamplerColor, float2(clearcoat_ndotv, clearcoat_roughness)).rg;
+            float3 clearcoat_spec =
+                clearcoat_prefiltered * (float3(0.04, 0.04, 0.04) * clearcoat_brdf.x +
+                                         clearcoat_brdf.y);
+            lit += clearcoat_spec * g_EnvParams.x * clearcoat_factor;
+        }
+        if (max(max(sheen_color.r, sheen_color.g), sheen_color.b) > 0.0)
+        {
+            float sheen_facing = 0.25 + 0.75 * pow(saturate(1.0 - ndotv), 5.0);
+            lit += env_diffuse * sheen_color * sheen_facing * (1.0 - metallic) * occlusion;
+        }
         if (env_debug)
         {
             if (g_EnvParams.z < 1.5)
@@ -1581,7 +1979,7 @@ float4 main(PSInput input) : SV_TARGET
             }
             if (g_EnvParams.z < 8.5)
             {
-                return float4(input.UV, 0.0, 1.0);
+                return float4(base_uv, 0.0, 1.0);
             }
             if (g_EnvParams.z < 9.5)
             {
@@ -1590,8 +1988,29 @@ float4 main(PSInput input) : SV_TARGET
         }
     }
     float base_alpha = saturate(g_BaseColorFactor.a * base_tex.a);
-    uint shading_mode = (uint)round(g_MaterialParams0.x);
-    if (shading_mode == 1u)
+    if (standard_material && g_MaterialParams6.w > 0.5)
+    {
+        float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+        float clearcoat_reflection_strength =
+            clearcoat_factor * (1.0 - clearcoat_roughness * 0.55);
+        float base_reflection_strength = metallic * (1.0 - roughness);
+        float reflection_strength = saturate(clearcoat_reflection_strength +
+                                             base_reflection_strength);
+        float3 reflection_n = clearcoat_factor > 0.001 ? clearcoat_n : n;
+        float3 reflection_dir = reflect(-v, reflection_n);
+        float fresnel = pow(saturate(1.0 - max(dot(reflection_n, v), 0.0)), 5.0);
+        float2 reflection_offset =
+            reflection_dir.xy *
+            (0.006 + 0.030 * reflection_strength) *
+            (1.0 - roughness * 0.70);
+        float2 reflection_uv = clamp(screen_uv + reflection_offset, 0.001, 0.999);
+        float3 scene_reflection = g_SceneColor.Sample(g_SamplerColor, reflection_uv).rgb;
+        lit = scene_reflection * lerp(float3(1.0, 1.0, 1.0), base_color, metallic * 0.28);
+        base_alpha =
+            saturate(reflection_strength * (0.08 + 0.40 * fresnel) *
+                     (1.0 - roughness * 0.70));
+    }
+    else if (shading_mode == 1u)
     {
         float fresnel_power = max(g_MaterialParams0.y, 0.001);
         float fresnel_strength = max(g_MaterialParams0.z, 0.0);
@@ -2110,6 +2529,39 @@ float4 main(PSInput input) : SV_TARGET
     }
     else
     {
+        if (standard_material && transmission > 0.001)
+        {
+            float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+            float ior = max(g_MaterialParams5.x, 1.0);
+            float eta = 1.0 / ior;
+            float3 refract_dir = refract(-v, n, eta);
+            if (dot(refract_dir, refract_dir) <= 1.0e-5)
+            {
+                refract_dir = -v;
+            }
+            float thickness_scale = 0.003 + min(thickness, 4.0) * 0.004;
+            float2 refract_uv =
+                clamp(screen_uv +
+                      (refract_dir.xy + n.xy * 0.25) *
+                          thickness_scale *
+                          (1.0 - roughness * 0.65),
+                      0.001,
+                      0.999);
+            float3 scene_refract = g_SceneColor.Sample(g_SamplerColor, refract_uv).rgb;
+            float3 attenuation_color =
+                max(saturate(g_MaterialParams6.rgb), float3(1.0e-3, 1.0e-3, 1.0e-3));
+            float attenuation_distance = max(g_MaterialParams5.z, 0.0);
+            float3 transmittance = float3(1.0, 1.0, 1.0);
+            if (attenuation_distance > 0.0 && thickness > 0.0)
+            {
+                transmittance = pow(attenuation_color, thickness / attenuation_distance);
+            }
+            float3 transmitted =
+                scene_refract * transmittance * lerp(float3(1.0, 1.0, 1.0), base_color, 0.35);
+            lit = lit * (1.0 - transmission) + transmitted * transmission;
+            base_alpha = saturate(max(base_alpha * (1.0 - transmission),
+                                      0.14 + transmission * 0.38));
+        }
         float transparency = saturate(1.0 - base_alpha);
         if (transparency > 0.001)
         {
@@ -2120,7 +2572,11 @@ float4 main(PSInput input) : SV_TARGET
         }
         lit += emissive;
     }
-    float exposure = max(g_EnvParams.w, 0.0);
+    float exposure = abs(g_EnvParams.w);
+    if (g_EnvParams.w < 0.0)
+    {
+        return float4(max(lit * exposure, float3(0.0, 0.0, 0.0)), base_alpha);
+    }
     float3 mapped = 1.0 - exp(-lit * exposure);
     return float4(mapped, base_alpha);
 }
@@ -2235,6 +2691,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kForwardPlusComputeShader;
   forward_plus_cs = device_with_cache_.CreateShader(shader_ci);
+  mark_stage("main shader compile");
 
   Diligent::GraphicsPipelineStateCreateInfo pso_ci{};
   pso_ci.PSODesc.Name = "Karma Pipeline";
@@ -2260,6 +2717,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{10, 0, 2, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{8, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{9, 0, 4, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
@@ -2305,7 +2763,19 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       {Diligent::SHADER_TYPE_PIXEL, "g_NormalTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-      {Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE}
+      {Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatRoughnessTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatNormalTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SheenColorTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SheenRoughnessTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_TransmissionTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ThicknessTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE}
   };
   pso_ci.PSODesc.ResourceLayout.Variables = vars;
   pso_ci.PSODesc.ResourceLayout.NumVariables =
@@ -2365,6 +2835,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
 
   recreateShadowMap();
   recreatePointShadowMap();
+  mark_stage("samplers and shadow maps");
 
   pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
   depth_prepass_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(depth_prepass_ci);
@@ -2407,8 +2878,10 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                               Diligent::CULL_MODE_NONE,
                               true,
                               additive_double_sided_pipeline_state_);
+  mark_stage("forward pipeline creation");
 
   if (!pipeline_state_) {
+    logStartupDiag("diligent_device", "total", init_start, core::SteadyClock::now());
     return;
   }
 
@@ -2538,6 +3011,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       }
     }
   }
+  mark_stage("constant buffers and forward plus");
 
   default_base_color_ = createSolidTextureSRV(255, 255, 255, 255, true, "DefaultBaseColor",
                                               default_base_color_tex_);
@@ -2547,11 +3021,12 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                                       default_metallic_roughness_tex_);
   default_occlusion_ = createSolidTextureSRV(255, 255, 255, 255, false, "DefaultOcclusion",
                                              default_occlusion_tex_);
-  default_emissive_ = createSolidTextureSRV(0, 0, 0, 255, true, "DefaultEmissive",
+  default_emissive_ = createSolidTextureSRV(255, 255, 255, 255, true, "DefaultEmissive",
                                             default_emissive_tex_);
   default_env_ = createSolidTextureSRV(0, 0, 0, 255, true, "DefaultEnv",
                                        default_env_tex_);
   env_srv_ = default_env_;
+  mark_stage("default textures");
 
   if (pipeline_state_ || transparent_pipeline_state_ || transparent_double_sided_pipeline_state_ ||
       additive_pipeline_state_ || additive_double_sided_pipeline_state_) {
@@ -2586,6 +3061,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
 
   recreateShadowPipeline();
   ensureParticleFallbackDepthResource();
+  mark_stage("shadow pipeline and fallback depth");
 
   auto initialize_default_material_srb =
       [&](Diligent::IPipelineState* pso,
@@ -2624,6 +3100,34 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         if (auto* var =
                 out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
           var->Set(default_emissive_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatTex")) {
+          var->Set(default_base_color_);
+        }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                   "g_ClearcoatRoughnessTex")) {
+          var->Set(default_base_color_);
+        }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                   "g_ClearcoatNormalTex")) {
+          var->Set(default_normal_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SheenColorTex")) {
+          var->Set(default_base_color_);
+        }
+        if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                   "g_SheenRoughnessTex")) {
+          var->Set(default_base_color_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_TransmissionTex")) {
+          var->Set(default_base_color_);
+        }
+        if (auto* var =
+                out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ThicknessTex")) {
+          var->Set(default_base_color_);
         }
         if (auto* var =
                 out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
@@ -2668,8 +3172,12 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                   additive_default_material_srb_);
   initialize_default_material_srb(additive_double_sided_pipeline_state_.RawPtr(),
                                   additive_double_sided_default_material_srb_);
+  mark_stage("default material srbs");
 
+  const auto line_start = core::SteadyClock::now();
   ensureLineResources();
+  logStartupDiag("diligent_device", "line resources prewarm", line_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
 
   if (shader_cache_enabled_ && shader_cache_flush_ && device_with_cache_.GetCache()) {
     device_with_cache_.SaveCache(render_state_cache_path_.string().c_str());
@@ -2679,6 +3187,8 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       (void)size;
     }
   }
+  mark_stage("shader cache flush");
+  logStartupDiag("diligent_device", "total", init_start, core::SteadyClock::now());
 }
 
 }  // namespace karma::renderer_backend

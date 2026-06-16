@@ -19,6 +19,12 @@ install(DIRECTORY ${KARMA_GENERATED_INCLUDE_DIR}/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+if (EXISTS "${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders")
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/karma/shaders/diligent
+  )
+endif()
+
 configure_package_config_file(
   ${PROJECT_SOURCE_DIR}/cmake/karmaConfig.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/karmaConfig.cmake

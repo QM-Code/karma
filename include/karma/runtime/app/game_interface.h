@@ -5,6 +5,7 @@
 #include "karma/simulation/physics/physics_world.hpp"
 #include "karma/rendering/renderer/device.h"
 #include "karma/rendering/renderer/material_library.h"
+#include "karma/rendering/renderer/post_process_profile_library.h"
 #include "karma/features/visual/particles/effect_library.h"
 #include "karma/world/scene/scene.h"
 #include "karma/world/systems/system_graph.h"
@@ -47,16 +48,21 @@ class GameInterface {
   renderer::GraphicsDevice* graphics = nullptr;
   /// Borrowed material registry.
   renderer::MaterialLibrary* materials = nullptr;
+  /// Borrowed post-process profile registry for camera-selected looks.
+  ///
+  /// Empty camera keys use this registry's default profile.
+  renderer::PostProcessProfileLibrary* post_process_profiles = nullptr;
   /// Borrowed particle effect registry.
   particles::ParticleLibrary* particle_effects = nullptr;
   /// Borrowed optional system graph.
   systems::SystemGraph* systems = nullptr;
 
-  private:
+ private:
   friend class EngineApp;
   void bindContext(ecs::World& world, scene::Scene& scene, input::InputSystem& input,
                    physics::World& physics, renderer::GraphicsDevice* graphics,
                    renderer::MaterialLibrary& materials,
+                   renderer::PostProcessProfileLibrary& post_process_profiles,
                    particles::ParticleLibrary& particle_effects,
                    systems::SystemGraph& systems) {
     this->world = &world;
@@ -65,6 +71,7 @@ class GameInterface {
     this->physics = &physics;
     this->graphics = graphics;
     this->materials = &materials;
+    this->post_process_profiles = &post_process_profiles;
     this->particle_effects = &particle_effects;
     this->systems = &systems;
   }

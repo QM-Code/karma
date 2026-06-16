@@ -5,6 +5,48 @@
 namespace karma::renderer {
 
 /// \ingroup karma_rendering
+/// Renderer command counters reported by the active graphics backend.
+///
+/// Counters are backend lifetime totals unless a backend explicitly documents a
+/// different reset policy. They are intended for diagnostics and performance
+/// overlays, not gameplay decisions.
+struct RendererCommandStats {
+  uint32_t set_pipeline_state = 0;
+  uint32_t commit_shader_resources = 0;
+  uint32_t set_vertex_buffers = 0;
+  uint32_t set_index_buffer = 0;
+  uint32_t set_render_targets = 0;
+  uint32_t set_viewports = 0;
+  uint32_t set_scissor_rects = 0;
+  uint32_t clear_render_target = 0;
+  uint32_t clear_depth_stencil = 0;
+  uint32_t draw = 0;
+  uint32_t draw_indexed = 0;
+  uint32_t draw_indirect = 0;
+  uint32_t draw_indexed_indirect = 0;
+  uint32_t multi_draw = 0;
+  uint32_t multi_draw_indexed = 0;
+  uint32_t dispatch_compute = 0;
+  uint32_t dispatch_compute_indirect = 0;
+  uint32_t draw_mesh = 0;
+  uint32_t draw_mesh_indirect = 0;
+  uint32_t trace_rays = 0;
+  uint32_t trace_rays_indirect = 0;
+  uint32_t update_buffer = 0;
+  uint32_t copy_buffer = 0;
+  uint32_t map_buffer = 0;
+  uint32_t update_texture = 0;
+  uint32_t copy_texture = 0;
+  uint32_t map_texture_subresource = 0;
+  uint32_t begin_query = 0;
+  uint32_t generate_mips = 0;
+  uint32_t resolve_texture_subresource = 0;
+  uint32_t total_triangles = 0;
+  uint32_t total_lines = 0;
+  uint32_t total_points = 0;
+};
+
+/// \ingroup karma_rendering
 /// Forward+ light-culling diagnostics.
 struct ForwardPlusStats {
   uint32_t tile_size = 16;

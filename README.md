@@ -191,11 +191,12 @@ before `find_package(karma)` to allow package-time fetching.
 - ECS runtime with fixed-step updates, per-frame systems, scene graph transforms,
   app/game interfaces, and optional runtime modules.
 - Diligent renderer with Forward+ local lights, directional shadows, point-light
-  shadows, transparent passes, debug lines, particles, UI draw-data composition,
-  and environment/texture/mesh resource management.
-- Content pipeline for GLB scene import, materials, cameras/lights, node
-  animation, first-pass CPU skinning, JSON prefabs, and prefab-local
-  `prefab.resources.json` registrations.
+  shadows, camera-selected post-process profiles, bloom/tone/color controls,
+  transparent passes, debug lines, particles, UI draw-data composition, and
+  environment/texture/mesh resource management.
+- Content pipeline for GLB scene import, materials, lights, node animation,
+  skeletal animation, GPU skinning with CPU fallback, morph target deformation,
+  JSON prefabs, and prefab-local `prefab.resources.json` registrations.
 - Particle tooling with `.kpeffect` files, hot reload, emitter overrides,
   flipbooks, distortion, ground-aligned particles, soft particles, and renderer
   performance diagnostics.
@@ -211,10 +212,14 @@ before `find_package(karma)` to allow package-time fetching.
 
 The examples under [examples/](examples/) cover the current engine surface:
 
-- `karma_example`: main demo scene.
+- `karma_example`: tank/world movement demo with a shadow-casting directional
+  sun, local lights, radar render target, and UI overlay.
 - `karma_navmesh_example`: click-to-move navmesh sample over the GLB world.
 - `karma_glb_scene_import_example` and `karma_glb_animation_example`: authored
   GLB import, animation, and skinning paths.
+- `karma_diligent_gltf_viewer_example`, `karma_diligentfx_postprocess_example`,
+  and `karma_diligentfx_bloom_example`: Diligent sample/Fx-inspired rendering
+  examples built through Karma APIs and copied local example assets.
 - `karma_particle_example`, `karma_explosion_stress_example`, and
   `karma_prefab_gallery_example`: particle and prefab stress/proof scenes.
 - `karma_laser_example`, `karma_energy_orb_example`,

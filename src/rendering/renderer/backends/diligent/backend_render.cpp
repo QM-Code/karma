@@ -165,7 +165,31 @@ bool isFiniteVec3(const glm::vec3& value) {
 
 }  // namespace
 
-void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) {
+void DiligentBackend::renderLayer(renderer::LayerId layer,
+                                  renderer::RenderTargetId target,
+                                  const renderer::PostProcessSettings& post_process) {
+  const bool startup_layer_diag = [] {
+    if (!startupDiagnosticsEnabled()) {
+      return false;
+    }
+    static int logged_layer_count = 0;
+    if (logged_layer_count >= 4) {
+      return false;
+    }
+    ++logged_layer_count;
+    return true;
+  }();
+  const auto layer_start = core::SteadyClock::now();
+  auto stage_start = layer_start;
+  auto mark_stage = [&](const char* stage) {
+    const auto stage_end = core::SteadyClock::now();
+    if (startup_layer_diag) {
+      logStartupDiag("diligent_render_layer", stage, stage_start, stage_end);
+    }
+    stage_start = stage_end;
+  };
+
+  applyPostProcessSettingsForPass(post_process);
   if (!context_ || !swap_chain_) {
     return;
   }
@@ -212,6 +236,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   if (!active_rtv || render_width <= 0 || render_height <= 0) {
     return;
   }
+  mark_stage("target setup");
 
   auto present_active_target = [&]() {
     if (!rendering_to_default_target || !present_source_texture || !present_destination_texture) {
@@ -257,16 +282,25 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     clear_active_target(black, true);
     present_active_target();
+    mark_stage("clear inactive camera");
+    if (startup_layer_diag) {
+      logStartupDiag("diligent_render_layer", "total", layer_start, core::SteadyClock::now());
+    }
     return;
   }
 
   clear_active_target(clear_color_, true);
+  mark_stage("clear target");
 
   if (!constants_ || !pipeline_state_ || !shader_resources_) {
     if (!warned_no_draws_) {
       warned_no_draws_ = true;
     }
     present_active_target();
+    mark_stage("missing draw resources");
+    if (startup_layer_diag) {
+      logStartupDiag("diligent_render_layer", "total", layer_start, core::SteadyClock::now());
+    }
     return;
   }
   bool use_custom_shader_override = !camera_.shader_override_fragment_path.empty();
@@ -335,8 +369,10 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     cam_right = glm::normalize(cam_right);
   }
   cam_up = glm::normalize(glm::cross(cam_right, cam_forward));
+  mark_stage("camera setup");
 
   ensureEnvironmentResources();
+  mark_stage("environment resources");
   bind_active_target();
   float env_max_mip = 0.0f;
   if (env_prefilter_tex_) {
@@ -351,6 +387,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   }
 
   renderSkybox(projection, view);
+  mark_stage("skybox");
 
   const glm::mat4 camera_view_proj = projection * view;
   const Diligent::Uint32 forward_plus_tile_size =
@@ -709,6 +746,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     bind_shadow_to_srb(entry.second.additive_srb);
     bind_shadow_to_srb(entry.second.additive_double_sided_srb);
   }
+  mark_stage("forward plus setup");
 
   const float shadow_map_extent =
       shadow_map_tex_ ? static_cast<float>(shadow_map_tex_->GetDesc().Width)
@@ -740,6 +778,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                     point_shadow_texel_size,
                     forward_plus_light_source_index,
                     shadow_state);
+  mark_stage("shadow layer");
 
   auto& cascade_light_view_proj = shadow_state.cascade_light_view_proj;
   auto& cascade_shadow_uv_proj = shadow_state.cascade_shadow_uv_proj;
@@ -817,6 +856,16 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
 
   const glm::mat4 view_proj = depth_fix * projection * view;
   DrawConstants base_constants{};
+  for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
+    base_constants.texcoord_row0[slot][0] = 1.0f;
+    base_constants.texcoord_row0[slot][1] = 0.0f;
+    base_constants.texcoord_row0[slot][2] = 0.0f;
+    base_constants.texcoord_row0[slot][3] = 0.0f;
+    base_constants.texcoord_row1[slot][0] = 0.0f;
+    base_constants.texcoord_row1[slot][1] = 1.0f;
+    base_constants.texcoord_row1[slot][2] = 0.0f;
+    base_constants.texcoord_row1[slot][3] = 0.0f;
+  }
   copyMat4(base_constants.mvp, view_proj);
   copyMat4(base_constants.light_view_proj, light_view_proj);
   copyMat4(base_constants.shadow_uv_proj, shadow_uv_proj);
@@ -938,7 +987,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
   base_constants.env_params[0] = environment_intensity_;
   base_constants.env_params[1] = env_max_mip;
   base_constants.env_params[2] = static_cast<float>(env_debug_mode_);
-  base_constants.env_params[3] = lighting_exposure_;
+  base_constants.env_params[3] =
+      post_process_settings_.tone_mapping_enabled ? -lighting_exposure_ : lighting_exposure_;
 
   ForwardLayerState forward_state{};
   ForwardLayerStats forward_stats{};
@@ -949,6 +999,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                            is_gl,
                            forward_state,
                            forward_stats);
+  mark_stage("collect forward state");
   skipped_hidden += forward_stats.skipped_hidden;
   skipped_missing_vb += forward_stats.skipped_missing_vb;
   skipped_missing_mesh += forward_stats.skipped_missing_mesh;
@@ -962,23 +1013,16 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                                          dsv,
                                          render_width,
                                          render_height);
-  draw_count += renderTransparentForwardDraws(forward_state.transparent_draws,
-                                              base_constants,
-                                              active_forward_pipeline,
-                                              use_custom_shader_override,
-                                              rtv,
-                                              dsv,
-                                              particle_dsv,
-                                              render_width,
-                                              render_height,
-                                              nullptr,
-                                              nullptr);
+  mark_stage("opaque pass");
 
   ensureParticleResources();
+  mark_stage("particle resources prewarm");
   ensureLineResources();
+  mark_stage("line resources ensure");
 
   bool allow_distortion_particles = false;
-  bool require_scene_color_copy = !forward_state.pre_particle_scene_sample_draws.empty();
+  bool require_scene_color_copy = !forward_state.scene_reflection_draws.empty() ||
+                                  !forward_state.pre_particle_scene_sample_draws.empty();
   Diligent::ITextureView* particle_scene_color_sample_srv = particle_scene_color_srv;
   particle_pass_stats_.pre_particle_scene_sample_draws += static_cast<uint32_t>(
       std::min<std::size_t>(forward_state.pre_particle_scene_sample_draws.size(),
@@ -1027,6 +1071,20 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
     }
   }
 
+  if (!forward_state.scene_reflection_draws.empty()) {
+    draw_count += renderTransparentForwardDraws(forward_state.scene_reflection_draws,
+                                                base_constants,
+                                                active_forward_pipeline,
+                                                use_custom_shader_override,
+                                                rtv,
+                                                dsv,
+                                                particle_dsv,
+                                                render_width,
+                                                render_height,
+                                                particle_scene_color_sample_srv,
+                                                particle_scene_depth_srv);
+  }
+
   if (!forward_state.pre_particle_scene_sample_draws.empty()) {
     draw_count += renderTransparentForwardDraws(forward_state.pre_particle_scene_sample_draws,
                                                 base_constants,
@@ -1040,6 +1098,19 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                                                 particle_scene_color_sample_srv,
                                                 particle_scene_depth_srv);
   }
+
+  draw_count += renderTransparentForwardDraws(forward_state.transparent_draws,
+                                              base_constants,
+                                              active_forward_pipeline,
+                                              use_custom_shader_override,
+                                              rtv,
+                                              dsv,
+                                              particle_dsv,
+                                              render_width,
+                                              render_height,
+                                              nullptr,
+                                              nullptr);
+  mark_stage("transparent pre-particle pass");
 
   ParticlePassContext particle_pass{};
   particle_pass.view_proj = view_proj;
@@ -1058,6 +1129,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                              : Diligent::TEX_FORMAT_UNKNOWN;
   particle_pass.allow_distortion_particles = allow_distortion_particles;
   renderParticlePasses(layer, particle_pass);
+  mark_stage("particle pass");
 
   auto draw_lines = [&](const std::vector<LineVertex>& lines,
                         Diligent::RefCntAutoPtr<Diligent::IPipelineState>& pso,
@@ -1169,10 +1241,25 @@ void DiligentBackend::renderLayer(renderer::LayerId layer, renderer::RenderTarge
                                               render_height,
                                               post_particle_scene_color_sample_srv,
                                               particle_scene_depth_srv);
+  mark_stage("transparent post-particle pass");
+  if (particle_scene_texture) {
+    applyPostProcessChain(particle_scene_texture,
+                          active_rtv,
+                          particle_scene_depth_srv,
+                          render_width,
+                          render_height,
+                          particle_scene_texture->GetDesc().Format);
+  }
+  mark_stage("post process");
   draw_lines(line_vertices_depth_, line_pipeline_state_depth_, line_srb_depth_);
   draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
+  mark_stage("line draw");
 
   present_active_target();
+  mark_stage("present copy");
+  if (startup_layer_diag) {
+    logStartupDiag("diligent_render_layer", "total", layer_start, core::SteadyClock::now());
+  }
 
   if (particle_stats_log_enabled_) {
     const double frame_seconds =

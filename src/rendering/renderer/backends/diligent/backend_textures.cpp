@@ -20,7 +20,9 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
     bool generate_mips,
     const char* name,
     Diligent::RefCntAutoPtr<Diligent::ITexture>& out_texture) {
+  const auto total_start = core::SteadyClock::now();
   if (!device_ || !data || width <= 0 || height <= 0) {
+    logRenderResourceDiag("texture_upload", name ? name : "unnamed invalid", total_start, core::SteadyClock::now());
     return {};
   }
 
@@ -44,8 +46,11 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
 
   Diligent::RefCntAutoPtr<Diligent::ITexture> texture;
   if (should_gen_mips) {
+    auto stage_start = core::SteadyClock::now();
     device_->CreateTexture(desc, nullptr, &texture);
+    logRenderResourceDiag("texture_upload", "create empty texture", stage_start, core::SteadyClock::now());
     if (texture && context_) {
+      stage_start = core::SteadyClock::now();
       Diligent::TextureSubResData subres{};
       subres.pData = upload_data;
       subres.Stride = static_cast<Diligent::Uint64>(upload_width * 4);
@@ -63,8 +68,10 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
                               subres,
                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      logRenderResourceDiag("texture_upload", "update base mip", stage_start, core::SteadyClock::now());
     }
   } else {
+    const auto stage_start = core::SteadyClock::now();
     Diligent::TextureData init_data{};
     Diligent::TextureSubResData subres{};
     subres.pData = upload_data;
@@ -72,8 +79,10 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
     init_data.pSubResources = &subres;
     init_data.NumSubresources = 1;
     device_->CreateTexture(desc, &init_data, &texture);
+    logRenderResourceDiag("texture_upload", "create initialized texture", stage_start, core::SteadyClock::now());
   }
   if (!texture) {
+    logRenderResourceDiag("texture_upload", name ? name : "unnamed failed", total_start, core::SteadyClock::now());
     return {};
   }
   out_texture = texture;
@@ -84,8 +93,11 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
   Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
   srv = raw_view;
   if (should_gen_mips && context_) {
+    const auto stage_start = core::SteadyClock::now();
     context_->GenerateMips(srv);
+    logRenderResourceDiag("texture_upload", "generate mips", stage_start, core::SteadyClock::now());
   }
+  logRenderResourceDiag("texture_upload", name ? name : "unnamed total", total_start, core::SteadyClock::now());
   return srv;
 }
 
@@ -108,6 +120,7 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
     const aiString& tex_path,
     bool srgb,
     const char* label) {
+  const auto total_start = core::SteadyClock::now();
   if (tex_path.length == 0) {
     return {};
   }
@@ -125,11 +138,13 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   if (cache_it != texture_cache_.end()) {
     auto tex_it = textures_.find(cache_it->second);
     if (tex_it != textures_.end()) {
+      logRenderResourceDiag("assimp_texture", "cache hit", total_start, core::SteadyClock::now());
       return tex_it->second.srv;
     }
   }
 
   LoadedImage image{};
+  auto stage_start = core::SteadyClock::now();
   if (is_embedded) {
     const int index = std::atoi(raw_key.c_str() + 1);
     if (index >= 0 && index < static_cast<int>(scene.mNumTextures)) {
@@ -148,14 +163,18 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
         }
       }
     }
+    logRenderResourceDiag("assimp_texture", "embedded decode", stage_start, core::SteadyClock::now());
   } else {
     image = loadImageFromFile(resolved_path);
+    logRenderResourceDiag("assimp_texture", "file decode", stage_start, core::SteadyClock::now());
   }
 
   if (image.pixels.empty()) {
+    logRenderResourceDiag("assimp_texture", "total", total_start, core::SteadyClock::now());
     return {};
   }
 
+  stage_start = core::SteadyClock::now();
   const renderer::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.srv = createTextureSRV(image.pixels.data(),
@@ -165,8 +184,10 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
                                 generate_mips_enabled_,
                                 label,
                                 record.texture);
+  logRenderResourceDiag("assimp_texture", "gpu upload", stage_start, core::SteadyClock::now());
   textures_[id] = record;
   texture_cache_[key] = id;
+  logRenderResourceDiag("assimp_texture", "total", total_start, core::SteadyClock::now());
   return record.srv;
 }
 

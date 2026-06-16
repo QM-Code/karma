@@ -49,6 +49,17 @@ struct MaterialDesc {
   float roughness = 1.0f;
   float normal_scale = 1.0f;
   float occlusion_strength = 1.0f;
+  float emissive_strength = 1.0f;
+  float clearcoat = 0.0f;
+  float clearcoat_roughness = 0.0f;
+  math::Color sheen_color{0.0f, 0.0f, 0.0f, 1.0f};
+  float sheen_roughness = 0.0f;
+  float anisotropy = 0.0f;
+  float transmission = 0.0f;
+  float ior = 1.5f;
+  float thickness = 0.0f;
+  float attenuation_distance = std::numeric_limits<float>::infinity();
+  math::Color attenuation_color{1.0f, 1.0f, 1.0f, 1.0f};
   ShadingModel shading_model = ShadingModel::Standard;
   float shell_fresnel_power = 5.0f;
   float shell_fresnel_strength = 1.0f;

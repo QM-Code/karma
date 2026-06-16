@@ -1,18 +1,15 @@
 #include "karma/rendering/renderer/render_system.h"
 
-#include <glm/gtc/matrix_access.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 #include <algorithm>
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <unordered_set>
 #include <vector>
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/glm.h"
 #include "karma/core/time.h"
+#include "render_system/debug_draw.h"
+#include "render_system/extractors.h"
 #include "karma/world/components/camera.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/environment.h"
@@ -23,6 +20,14 @@
 namespace karma::renderer {
 
 namespace {
+using render_system::drawBoxWire;
+using render_system::drawCapsuleWire;
+using render_system::drawSphereWire;
+using render_system::toCameraData;
+using render_system::toDirectionalLight;
+using render_system::toLightData;
+using render_system::toTransform;
+
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
     return false;
@@ -66,214 +71,13 @@ std::string makeMaterialVariantCacheKey(const std::string& mesh_key,
   return key;
 }
 
-glm::vec3 transformPoint(const components::TransformComponent& transform,
-                         const math::Vec3& local,
-                         float interpolation_alpha) {
-  const glm::vec3 pos = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::vec3 scale = math::toGlm(transform.getScale());
-  const glm::vec3 scaled{local.x * scale.x, local.y * scale.y, local.z * scale.z};
-  return pos + glm::mat3_cast(rot) * scaled;
-}
-
-void drawCircle(GraphicsDevice& device,
-                const glm::vec3& center,
-                const glm::vec3& axis_x,
-                const glm::vec3& axis_y,
-                float radius,
-                const math::Color& color,
-                int segments = 24) {
-  constexpr float kPi = 3.14159265358979323846f;
-  const float step = static_cast<float>(2.0f * kPi) / static_cast<float>(segments);
-  glm::vec3 prev = center + radius * axis_x;
-  for (int i = 1; i <= segments; ++i) {
-    const float angle = step * static_cast<float>(i);
-    const glm::vec3 next = center + radius * (std::cos(angle) * axis_x + std::sin(angle) * axis_y);
-    device.drawLine({prev.x, prev.y, prev.z}, {next.x, next.y, next.z}, color, true, 1.0f);
-    prev = next;
+renderer::PostProcessSettings resolvePostProcessSettings(
+    const renderer::PostProcessProfileLibrary* profiles,
+    const std::string& key) {
+  if (profiles == nullptr) {
+    return {};
   }
-}
-
-void drawBoxWire(GraphicsDevice& device,
-                 const components::TransformComponent& transform,
-                 const math::Vec3& center,
-                 const math::Vec3& half_extents,
-                 const math::Color& color,
-                 float interpolation_alpha) {
-  const math::Vec3 c = center;
-  const math::Vec3 h = half_extents;
-  const math::Vec3 corners[8] = {
-      {c.x - h.x, c.y - h.y, c.z - h.z},
-      {c.x + h.x, c.y - h.y, c.z - h.z},
-      {c.x + h.x, c.y + h.y, c.z - h.z},
-      {c.x - h.x, c.y + h.y, c.z - h.z},
-      {c.x - h.x, c.y - h.y, c.z + h.z},
-      {c.x + h.x, c.y - h.y, c.z + h.z},
-      {c.x + h.x, c.y + h.y, c.z + h.z},
-      {c.x - h.x, c.y + h.y, c.z + h.z},
-  };
-
-  const int edges[12][2] = {
-      {0, 1}, {1, 2}, {2, 3}, {3, 0},
-      {4, 5}, {5, 6}, {6, 7}, {7, 4},
-      {0, 4}, {1, 5}, {2, 6}, {3, 7},
-  };
-
-  glm::vec3 world_corners[8];
-  for (int i = 0; i < 8; ++i) {
-    world_corners[i] = transformPoint(transform, corners[i], interpolation_alpha);
-  }
-
-  for (const auto& edge : edges) {
-    const glm::vec3 a = world_corners[edge[0]];
-    const glm::vec3 b = world_corners[edge[1]];
-    device.drawLine({a.x, a.y, a.z}, {b.x, b.y, b.z}, color, true, 1.0f);
-  }
-}
-
-void drawSphereWire(GraphicsDevice& device,
-                    const components::TransformComponent& transform,
-                    const math::Vec3& center,
-                    float radius,
-                    const math::Color& color,
-                    float interpolation_alpha) {
-  const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
-  const glm::vec3 scale = math::toGlm(transform.getScale());
-  const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
-  const float r = radius * max_scale;
-  drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, r, color);
-  drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, r, color);
-  drawCircle(device, world_center, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, r, color);
-}
-
-void drawCapsuleWire(GraphicsDevice& device,
-                     const components::TransformComponent& transform,
-                     const math::Vec3& center,
-                     float radius,
-                     float height,
-                     const math::Color& color,
-                     float interpolation_alpha) {
-  const glm::vec3 scale = math::toGlm(transform.getScale());
-  const float r = radius * std::max(scale.x, scale.z);
-  const float half_height = (height * 0.5f) * scale.y;
-  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::mat3 basis = glm::mat3_cast(rot);
-  const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
-  const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
-  const glm::vec3 forward = basis * glm::vec3(0.0f, 0.0f, 1.0f);
-  const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
-  const glm::vec3 top = world_center + up * half_height;
-  const glm::vec3 bottom = world_center - up * half_height;
-
-  drawCircle(device, top, right, forward, r, color);
-  drawCircle(device, bottom, right, forward, r, color);
-
-  const glm::vec3 offsets[4] = {right * r, -right * r, forward * r, -forward * r};
-  for (const auto& offset : offsets) {
-    const glm::vec3 a = top + offset;
-    const glm::vec3 b = bottom + offset;
-    device.drawLine({a.x, a.y, a.z}, {b.x, b.y, b.z}, color, true, 1.0f);
-  }
-}
-
-renderer::DirectionalLightData toDirectionalLight(const components::LightComponent& light,
-                                                  const components::TransformComponent& transform,
-                                                  float interpolation_alpha) {
-  renderer::DirectionalLightData out{};
-  out.color = light.color;
-  out.intensity = light.intensity;
-  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::mat3 basis = glm::mat3_cast(rot);
-  out.direction = basis * glm::vec3(0.0f, 0.0f, -1.0f);
-  out.position = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  out.shadow_extent = light.shadow_extent;
-  out.casts_shadows = light.casts_shadows;
-  return out;
-}
-
-renderer::LightData toLightData(const components::LightComponent& light,
-                                const components::TransformComponent& transform,
-                                float interpolation_alpha) {
-  renderer::LightData out{};
-  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::mat3 basis = glm::mat3_cast(rot);
-  glm::vec3 dir = basis * glm::vec3(0.0f, 0.0f, -1.0f);
-  if (glm::length(dir) < 1e-5f) {
-    dir = glm::vec3(0.0f, -1.0f, 0.0f);
-  } else {
-    dir = glm::normalize(dir);
-  }
-  out.position = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  out.direction = dir;
-  out.color = light.color;
-  out.intensity = light.intensity;
-  out.range = std::max(light.range, 0.0f);
-  out.casts_shadows = light.casts_shadows;
-
-  const float inner_rad = glm::radians(light.inner_cone_degrees);
-  const float outer_rad = glm::radians(light.outer_cone_degrees);
-  float inner_cos = std::cos(inner_rad);
-  float outer_cos = std::cos(outer_rad);
-  if (inner_cos < outer_cos) {
-    std::swap(inner_cos, outer_cos);
-  }
-  out.inner_cone_cos = inner_cos;
-  out.outer_cone_cos = outer_cos;
-
-  switch (light.type) {
-    case components::LightComponent::Type::Directional:
-      out.type = renderer::LightType::Directional;
-      out.range = 0.0f;
-      break;
-    case components::LightComponent::Type::Point:
-      out.type = renderer::LightType::Point;
-      break;
-    case components::LightComponent::Type::Spot:
-      out.type = renderer::LightType::Spot;
-      break;
-  }
-  return out;
-}
-
-glm::mat4 toTransform(const components::TransformComponent& transform, float interpolation_alpha) {
-  const glm::vec3 pos = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  const glm::quat rot = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::vec3 scale = math::toGlm(transform.getScale());
-  glm::mat4 matrix(1.0f);
-  matrix = glm::translate(matrix, pos);
-  matrix *= glm::mat4_cast(rot);
-  matrix = glm::scale(matrix, scale);
-  return matrix;
-}
-
-renderer::CameraData toCameraData(const components::CameraComponent& camera,
-                                  const components::TransformComponent& transform,
-                                  float interpolation_alpha) {
-  renderer::CameraData out{};
-  out.position = math::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  out.rotation = math::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  out.perspective = camera.perspective;
-  out.render_shadows = camera.render_shadows;
-  out.fov_y_degrees = camera.fov_y_degrees;
-  out.aspect = 16.0f / 9.0f;
-  out.near_clip = camera.near_clip;
-  out.far_clip = camera.far_clip;
-  out.ortho_left = camera.ortho_left;
-  out.ortho_right = camera.ortho_right;
-  out.ortho_top = camera.ortho_top;
-  out.ortho_bottom = camera.ortho_bottom;
-  out.shader_override_vertex_path = camera.shader_override_vertex_path;
-  out.shader_override_fragment_path = camera.shader_override_fragment_path;
-  out.shader_user_param_count = 0u;
-  for (const auto& [key, value] : camera.shader_user_params) {
-    if (out.shader_user_param_count >= renderer::kCameraShaderUserParamCapacity) {
-      break;
-    }
-    auto& dst = out.shader_user_params[out.shader_user_param_count++];
-    dst.key_hash = renderer::cameraShaderParamKeyHash(key);
-    dst.value = value;
-  }
-  return out;
+  return profiles->resolve(key);
 }
 
 }
@@ -486,9 +290,11 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
   bool has_camera = false;
   renderer::CameraData primary_camera{};
+  renderer::PostProcessSettings primary_post_process{};
   struct OffscreenPass {
     renderer::CameraData camera;
     renderer::RenderTargetId target = renderer::kDefaultRenderTarget;
+    renderer::PostProcessSettings post_process;
   };
   std::vector<OffscreenPass> offscreen_passes;
   std::unordered_set<std::string> active_render_target_keys;
@@ -497,6 +303,8 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     const auto& camera = world.get<components::CameraComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
     const renderer::CameraData cam = toCameraData(camera, transform, interpolation_alpha);
+    const renderer::PostProcessSettings post_process =
+        resolvePostProcessSettings(post_process_profiles_, camera.post_process_profile_key);
 
     if (camera.render_to_texture) {
       renderer::RenderTargetId target_id = camera.render_target;
@@ -518,12 +326,17 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
         }
       }
       if (target_id != renderer::kDefaultRenderTarget) {
-        offscreen_passes.push_back(OffscreenPass{.camera = cam, .target = target_id});
+        offscreen_passes.push_back(OffscreenPass{
+            .camera = cam,
+            .target = target_id,
+            .post_process = post_process,
+        });
       }
     }
 
     if (!has_camera && camera.is_primary) {
       primary_camera = cam;
+      primary_post_process = post_process;
       has_camera = true;
     }
     return true;
@@ -552,6 +365,9 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       warned_no_camera_ = true;
     }
     device_.setCameraActive(false);
+    device_.renderLayer(0,
+                        renderer::kDefaultRenderTarget,
+                        resolvePostProcessSettings(post_process_profiles_, {}));
     logRenderSystemStage(diag_enabled, "total", update_start, core::SteadyClock::now());
     return;
   }
@@ -801,10 +617,11 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   for (const auto& pass : offscreen_passes) {
     device_.setCamera(pass.camera);
     device_.setCameraActive(true);
-    device_.renderLayer(0, pass.target);
+    device_.renderLayer(0, pass.target, pass.post_process);
   }
   device_.setCamera(primary_camera);
   device_.setCameraActive(true);
+  device_.renderLayer(0, renderer::kDefaultRenderTarget, primary_post_process);
   section_end = core::SteadyClock::now();
   logRenderSystemStage(diag_enabled, "offscreen passes", section_start, section_end);
   logRenderSystemStage(diag_enabled, "total", update_start, section_end);

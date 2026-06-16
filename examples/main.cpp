@@ -243,7 +243,8 @@ class DemoGame : public app::GameInterface {
     world->add(light, components::LightComponent{
         .type = components::LightComponent::Type::Directional,
         .color = {1.0f, 1.0f, 1.0f, 1.0f},
-        .intensity = 0.8f,
+        .intensity = 1.6f,
+        .casts_shadows = true,
         .shadow_extent = 60.0f});
 
     auto point_warm = world->createEntity();

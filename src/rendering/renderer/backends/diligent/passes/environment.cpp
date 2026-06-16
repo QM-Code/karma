@@ -14,6 +14,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -24,6 +29,120 @@ struct alignas(16) EnvConstants {
   float view_proj[16];
   float params[4];
 };
+
+struct KtxCubeData {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t mip_levels = 0;
+  std::vector<unsigned char> bytes;
+  std::vector<size_t> subresource_offsets;
+  std::vector<uint32_t> mip_widths;
+  std::vector<uint32_t> mip_heights;
+
+  bool valid() const {
+    return width > 0 && height > 0 && mip_levels > 0 &&
+           subresource_offsets.size() == static_cast<size_t>(mip_levels) * 6u;
+  }
+};
+
+uint32_t readLe32(const std::vector<unsigned char>& bytes, size_t offset) {
+  if (offset + sizeof(uint32_t) > bytes.size()) {
+    return 0;
+  }
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data() + offset, sizeof(uint32_t));
+  return value;
+}
+
+size_t align4(size_t value) {
+  return (value + 3u) & ~static_cast<size_t>(3u);
+}
+
+bool hasExtension(const std::filesystem::path& path, const char* expected) {
+  std::string ext = path.extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return ext == expected;
+}
+
+KtxCubeData loadRgba16fKtxCube(const std::filesystem::path& path) {
+  static constexpr unsigned char kIdentifier[12] = {
+      0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
+  static constexpr uint32_t kLittleEndian = 0x04030201u;
+  static constexpr uint32_t kGlHalfFloat = 0x140Bu;
+  static constexpr uint32_t kGlRgba = 0x1908u;
+  static constexpr uint32_t kGlRgba16f = 0x881Au;
+  static constexpr size_t kHeaderSize = 64u;
+
+  KtxCubeData result{};
+  std::vector<unsigned char> bytes = readFileBytes(path);
+  if (bytes.size() < kHeaderSize ||
+      std::memcmp(bytes.data(), kIdentifier, sizeof(kIdentifier)) != 0 ||
+      readLe32(bytes, 12) != kLittleEndian) {
+    return result;
+  }
+
+  const uint32_t gl_type = readLe32(bytes, 16);
+  const uint32_t gl_type_size = readLe32(bytes, 20);
+  const uint32_t gl_format = readLe32(bytes, 24);
+  const uint32_t gl_internal_format = readLe32(bytes, 28);
+  const uint32_t gl_base_internal_format = readLe32(bytes, 32);
+  const uint32_t width = readLe32(bytes, 36);
+  const uint32_t height = readLe32(bytes, 40);
+  const uint32_t depth = readLe32(bytes, 44);
+  const uint32_t array_elements = readLe32(bytes, 48);
+  const uint32_t faces = readLe32(bytes, 52);
+  const uint32_t mip_levels = readLe32(bytes, 56);
+  const uint32_t key_value_bytes = readLe32(bytes, 60);
+  if (gl_type != kGlHalfFloat || gl_type_size != 2u || gl_format != kGlRgba ||
+      gl_internal_format != kGlRgba16f || gl_base_internal_format != kGlRgba ||
+      width == 0u || height == 0u || depth != 0u || array_elements != 0u ||
+      faces != 6u || mip_levels == 0u) {
+    return result;
+  }
+
+  size_t offset = kHeaderSize + key_value_bytes;
+  if (offset > bytes.size()) {
+    return result;
+  }
+
+  result.width = width;
+  result.height = height;
+  result.mip_levels = mip_levels;
+  result.subresource_offsets.reserve(static_cast<size_t>(mip_levels) * faces);
+  result.mip_widths.reserve(mip_levels);
+  result.mip_heights.reserve(mip_levels);
+
+  for (uint32_t mip = 0; mip < mip_levels; ++mip) {
+    if (offset + sizeof(uint32_t) > bytes.size()) {
+      return {};
+    }
+    const uint32_t image_size = readLe32(bytes, offset);
+    offset += sizeof(uint32_t);
+
+    const uint32_t mip_width = std::max(1u, width >> mip);
+    const uint32_t mip_height = std::max(1u, height >> mip);
+    const size_t expected_size =
+        static_cast<size_t>(mip_width) * static_cast<size_t>(mip_height) * 4u * 2u;
+    if (image_size < expected_size) {
+      return {};
+    }
+    result.mip_widths.push_back(mip_width);
+    result.mip_heights.push_back(mip_height);
+
+    for (uint32_t face = 0; face < faces; ++face) {
+      if (offset + image_size > bytes.size()) {
+        return {};
+      }
+      result.subresource_offsets.push_back(offset);
+      offset += align4(image_size);
+    }
+  }
+
+  result.bytes = std::move(bytes);
+  return result;
+}
 
 static constexpr const char* kEnvCubeVS = R"(
 cbuffer Constants
@@ -373,6 +492,13 @@ void DiligentBackend::ensureEnvironmentResources() {
   if (!env_dirty_ && env_cubemap_srv_ && skybox_pso_) {
     return;
   }
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
+  auto mark_stage = [&](const char* stage) {
+    const auto stage_end = core::SteadyClock::now();
+    logStartupDiag("diligent_environment", stage, stage_start, stage_end);
+    stage_start = stage_end;
+  };
 
   if (!env_cb_) {
     Diligent::BufferDesc cb_desc{};
@@ -395,6 +521,7 @@ void DiligentBackend::ensureEnvironmentResources() {
     vb_data.DataSize = vb_desc.Size;
     device_->CreateBuffer(vb_desc, &vb_data, &env_cube_vb_);
   }
+  mark_stage("base buffers");
 
   if (!env_equirect_pso_ || !skybox_pso_ || !env_irradiance_pso_ || !env_prefilter_pso_ ||
       !brdf_lut_pso_) {
@@ -565,6 +692,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       brdf_lut_pso_ = device_with_cache_.CreateGraphicsPipelineState(pso);
     }
   }
+  mark_stage("pipeline setup");
 
   if (environment_map_.empty()) {
     if (!env_cubemap_tex_) {
@@ -594,20 +722,82 @@ void DiligentBackend::ensureEnvironmentResources() {
     env_prefilter_srv_ = env_cubemap_srv_;
     env_brdf_lut_srv_ = default_base_color_;
     env_dirty_ = false;
+    mark_stage("default environment");
+    logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
     return;
   }
 
-  LoadedImageHDR hdr = loadImageFromFileHDR(environment_map_);
-  if (hdr.pixels.empty()) {
-    env_cubemap_srv_ = default_env_;
-    env_irradiance_srv_ = default_env_;
-    env_prefilter_srv_ = default_env_;
-    env_brdf_lut_srv_ = default_base_color_;
-    env_dirty_ = false;
-    return;
-  }
+  const bool source_is_ktx_cube = hasExtension(environment_map_, ".ktx");
+  if (source_is_ktx_cube) {
+    KtxCubeData ktx = loadRgba16fKtxCube(environment_map_);
+    mark_stage("ktx file load");
+    if (!ktx.valid()) {
+      env_cubemap_srv_ = default_env_;
+      env_irradiance_srv_ = default_env_;
+      env_prefilter_srv_ = default_env_;
+      env_brdf_lut_srv_ = default_base_color_;
+      env_dirty_ = false;
+      mark_stage("ktx fallback");
+      logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
+      return;
+    }
 
-  {
+    std::vector<Diligent::TextureSubResData> subresources(
+        static_cast<size_t>(ktx.mip_levels) * 6u);
+    for (uint32_t face = 0; face < 6u; ++face) {
+      for (uint32_t mip = 0; mip < ktx.mip_levels; ++mip) {
+        const size_t ktx_index = static_cast<size_t>(mip) * 6u + face;
+        const size_t subresource_index = static_cast<size_t>(face) * ktx.mip_levels + mip;
+        subresources[subresource_index].pData =
+            ktx.bytes.data() + ktx.subresource_offsets[ktx_index];
+        subresources[subresource_index].Stride =
+            static_cast<Diligent::Uint64>(ktx.mip_widths[mip]) * 4u * 2u;
+      }
+    }
+
+    Diligent::TextureDesc desc{};
+    desc.Name = "Karma Env KTX Cubemap";
+    desc.Type = Diligent::RESOURCE_DIM_TEX_CUBE;
+    desc.Width = ktx.width;
+    desc.Height = ktx.height;
+    desc.ArraySize = 6;
+    desc.MipLevels = ktx.mip_levels;
+    desc.Format = Diligent::TEX_FORMAT_RGBA16_FLOAT;
+    desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+    Diligent::TextureData init{};
+    init.pSubResources = subresources.data();
+    init.NumSubresources = static_cast<Diligent::Uint32>(subresources.size());
+    Diligent::RefCntAutoPtr<Diligent::ITexture> next_env_cubemap_tex;
+    device_->CreateTexture(desc, &init, &next_env_cubemap_tex);
+    if (!next_env_cubemap_tex) {
+      env_cubemap_srv_ = default_env_;
+      env_irradiance_srv_ = default_env_;
+      env_prefilter_srv_ = default_env_;
+      env_brdf_lut_srv_ = default_base_color_;
+      env_dirty_ = false;
+      mark_stage("ktx fallback");
+      logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
+      return;
+    }
+    env_equirect_tex_.Release();
+    env_equirect_srv_.Release();
+    env_cubemap_tex_ = std::move(next_env_cubemap_tex);
+    env_cubemap_srv_ = env_cubemap_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+    mark_stage("ktx texture upload");
+  } else {
+    LoadedImageHDR hdr = loadImageFromFileHDR(environment_map_);
+    mark_stage("hdr file load");
+    if (hdr.pixels.empty()) {
+      env_cubemap_srv_ = default_env_;
+      env_irradiance_srv_ = default_env_;
+      env_prefilter_srv_ = default_env_;
+      env_brdf_lut_srv_ = default_base_color_;
+      env_dirty_ = false;
+      mark_stage("hdr fallback");
+      logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
+      return;
+    }
+
     Diligent::TextureDesc desc{};
     desc.Name = "Karma Env Equirect";
     desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
@@ -628,12 +818,13 @@ void DiligentBackend::ensureEnvironmentResources() {
       env_equirect_tex_ = std::move(next_env_equirect_tex);
       env_equirect_srv_ = env_equirect_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
     }
+    mark_stage("hdr texture upload");
   }
 
   const int cube_size = 512;
   const int irradiance_size = 32;
   const int prefilter_size = 128;
-  if (!env_cubemap_tex_) {
+  if (!source_is_ktx_cube && !env_cubemap_tex_) {
     Diligent::TextureDesc desc{};
     desc.Name = "Karma Env Cubemap";
     desc.Type = Diligent::RESOURCE_DIM_TEX_CUBE;
@@ -756,6 +947,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       context_->GenerateMips(env_cubemap_srv_);
     }
   }
+  mark_stage("equirect cubemap render");
 
   if (env_cubemap_tex_ && env_irradiance_tex_ && env_irradiance_pso_ && env_irradiance_srb_) {
     const glm::mat4 capture_proj = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
@@ -823,6 +1015,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       context_->Draw(draw);
     }
   }
+  mark_stage("irradiance render");
 
   if (env_cubemap_tex_ && env_prefilter_tex_ && env_prefilter_pso_ && env_prefilter_srb_) {
     const glm::mat4 capture_proj = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
@@ -896,6 +1089,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       }
     }
   }
+  mark_stage("prefilter render");
 
   if (!env_brdf_lut_tex_) {
     const int lut_size = 256;
@@ -934,6 +1128,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       context_->Draw(draw);
     }
   }
+  mark_stage("brdf lut render");
 
   if (restore_main_targets && context_ && swap_chain_) {
     auto* rtv = swap_chain_->GetCurrentBackBufferRTV();
@@ -953,6 +1148,7 @@ void DiligentBackend::ensureEnvironmentResources() {
   }
 
   env_dirty_ = false;
+  logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
 }
 
 void DiligentBackend::renderSkybox(const glm::mat4& projection, const glm::mat4& view) {

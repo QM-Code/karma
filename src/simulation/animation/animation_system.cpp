@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "karma/core/math/quat.h"
@@ -11,6 +12,7 @@
 #include "karma/simulation/animation/pose.h"
 #include "karma/world/components/animation_player.h"
 #include "karma/world/components/animator.h"
+#include "karma/world/components/morph_target.h"
 #include "karma/world/components/transform.h"
 
 namespace karma::animation {
@@ -32,6 +34,11 @@ struct AccumulatedTransform {
   float position_weight = 0.0f;
   float rotation_weight = 0.0f;
   float scale_weight = 0.0f;
+};
+
+struct AccumulatedMorphWeights {
+  std::vector<float> values;
+  std::vector<float> weights;
 };
 
 float clipDuration(const components::AnimatorComponent& animator, uint32_t clip_index) {
@@ -264,6 +271,91 @@ SampledTransform finalizeTransform(const AccumulatedTransform& accumulated) {
   return out;
 }
 
+void accumulateMorphWeights(AccumulatedMorphWeights& dst,
+                            const std::vector<float>& weights,
+                            float sample_weight) {
+  if (sample_weight <= 0.0f || weights.empty()) {
+    return;
+  }
+  if (dst.values.size() < weights.size()) {
+    dst.values.resize(weights.size(), 0.0f);
+    dst.weights.resize(weights.size(), 0.0f);
+  }
+  for (size_t i = 0; i < weights.size(); ++i) {
+    dst.values[i] += weights[i] * sample_weight;
+    dst.weights[i] += sample_weight;
+  }
+}
+
+std::vector<float> finalizeMorphWeights(const AccumulatedMorphWeights& accumulated) {
+  std::vector<float> out(accumulated.values.size(), 0.0f);
+  for (size_t i = 0; i < accumulated.values.size(); ++i) {
+    out[i] = accumulated.weights[i] > 0.0f
+                 ? accumulated.values[i] / accumulated.weights[i]
+                 : 0.0f;
+  }
+  return out;
+}
+
+bool morphWeightsChanged(const std::vector<float>& a, const std::vector<float>& b) {
+  if (a.size() != b.size()) {
+    return true;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (std::abs(a[i] - b[i]) > 0.000001f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void setMorphWeights(components::MorphTargetComponent& morph,
+                     const std::vector<float>& sampled_weights) {
+  const size_t target_count = morph.bind_mesh.morph_targets.size();
+  std::vector<float> next = morph.base_weights;
+  next.resize(target_count, 0.0f);
+  const size_t count = std::min(target_count, sampled_weights.size());
+  for (size_t i = 0; i < count; ++i) {
+    next[i] = sampled_weights[i];
+  }
+  if (morphWeightsChanged(morph.weights, next)) {
+    morph.weights = std::move(next);
+    morph.weights_dirty = true;
+  }
+}
+
+void applyMorphWeightsToEntities(
+    ecs::World& world,
+    const std::vector<std::vector<ecs::Entity>>& morph_entities_by_node_index,
+    const std::unordered_map<uint32_t, AccumulatedMorphWeights>& accumulated) {
+  for (const auto& [target_node_index, value] : accumulated) {
+    if (target_node_index >= morph_entities_by_node_index.size()) {
+      continue;
+    }
+    const std::vector<float> weights = finalizeMorphWeights(value);
+    for (const ecs::Entity entity : morph_entities_by_node_index[target_node_index]) {
+      if (!world.isAlive(entity) || !world.has<components::MorphTargetComponent>(entity)) {
+        continue;
+      }
+      setMorphWeights(world.get<components::MorphTargetComponent>(entity), weights);
+    }
+  }
+}
+
+std::vector<float> baseMorphWeightsForNode(ecs::World& world,
+                                           const std::vector<ecs::Entity>& entities) {
+  for (const ecs::Entity entity : entities) {
+    if (!world.isAlive(entity) || !world.has<components::MorphTargetComponent>(entity)) {
+      continue;
+    }
+    const auto& morph = world.get<components::MorphTargetComponent>(entity);
+    std::vector<float> weights = morph.base_weights;
+    weights.resize(morph.bind_mesh.morph_targets.size(), 0.0f);
+    return weights;
+  }
+  return {};
+}
+
 void applyLocalPoseToEntities(ecs::World& world,
                               const std::vector<ecs::Entity>& node_entities_by_index,
                               const LocalPose& pose) {
@@ -288,30 +380,53 @@ void applyLocalPoseToEntities(ecs::World& world,
 }
 
 void applyWeightedClipSamples(ecs::World& world,
-                              components::AnimatorComponent& animator,
+                              const std::vector<AnimationClip>& clips,
+                              const std::vector<ecs::Entity>& node_entities_by_index,
+                              const std::vector<std::vector<ecs::Entity>>&
+                                  morph_entities_by_node_index,
                               const std::vector<WeightedClipSample>& samples) {
   std::unordered_map<uint32_t, AccumulatedTransform> accumulated;
+  std::unordered_map<uint32_t, AccumulatedMorphWeights> accumulated_morphs;
   for (const WeightedClipSample& sample : samples) {
-    if (sample.clip_index >= animator.clips.size() || sample.weight <= 0.0f) {
+    if (sample.clip_index >= clips.size() || sample.weight <= 0.0f) {
       continue;
     }
-    const AnimationClip& clip = animator.clips[sample.clip_index];
+    const AnimationClip& clip = clips[sample.clip_index];
+    std::unordered_set<uint32_t> sampled_morph_nodes;
     sampleAnimationClip(
         clip,
         sample.time_seconds,
         sample.loop,
         [&](uint32_t target_node_index, const SampledTransform& sampled) {
           accumulateTransform(accumulated[target_node_index], sampled, sample.weight);
+        },
+        [&](uint32_t target_node_index, const std::vector<float>& weights) {
+          sampled_morph_nodes.insert(target_node_index);
+          accumulateMorphWeights(accumulated_morphs[target_node_index], weights, sample.weight);
         });
+    for (uint32_t node_index = 0;
+         node_index < morph_entities_by_node_index.size();
+         ++node_index) {
+      if (sampled_morph_nodes.find(node_index) != sampled_morph_nodes.end() ||
+          morph_entities_by_node_index[node_index].empty()) {
+        continue;
+      }
+      const std::vector<float> base_weights =
+          baseMorphWeightsForNode(world, morph_entities_by_node_index[node_index]);
+      if (!base_weights.empty()) {
+        accumulateMorphWeights(accumulated_morphs[node_index], base_weights, sample.weight);
+      }
+    }
   }
 
   LocalPose pose{};
-  pose.nodes.resize(animator.node_entities_by_index.size());
+  pose.nodes.resize(node_entities_by_index.size());
   for (const auto& [target_node_index, value] : accumulated) {
     const SampledTransform sampled = finalizeTransform(value);
     applySampleToLocalPose(pose, target_node_index, sampled);
   }
-  applyLocalPoseToEntities(world, animator.node_entities_by_index, pose);
+  applyLocalPoseToEntities(world, node_entities_by_index, pose);
+  applyMorphWeightsToEntities(world, morph_entities_by_node_index, accumulated_morphs);
 }
 
 void appendStateSamples(const components::AnimatorComponent& animator,
@@ -556,7 +671,11 @@ void updateSimpleAnimator(ecs::World& world,
         .weight = 1.0f,
     });
   }
-  applyWeightedClipSamples(world, animator, samples);
+  applyWeightedClipSamples(world,
+                           animator.clips,
+                           animator.node_entities_by_index,
+                           animator.morph_entities_by_node_index,
+                           samples);
 }
 
 void updateStateMachineAnimator(ecs::World& world,
@@ -687,7 +806,11 @@ void updateStateMachineAnimator(ecs::World& world,
   } else {
     appendStateSamples(animator, animator.current_state_index, animator.state_time_seconds, 1.0f, samples);
   }
-  applyWeightedClipSamples(world, animator, samples);
+  applyWeightedClipSamples(world,
+                           animator.clips,
+                           animator.node_entities_by_index,
+                           animator.morph_entities_by_node_index,
+                           samples);
 }
 
 }  // namespace
@@ -711,16 +834,19 @@ void AnimationSystem::update(ecs::World& world, scene::Scene& scene, float dt) {
       player.time_seconds = normalizeAnimationTime(clip, player.time_seconds, player.loop);
     }
 
-    LocalPose pose{};
-    pose.nodes.resize(player.node_entities_by_index.size());
-    sampleAnimationClip(
-        clip,
-        player.time_seconds,
-        player.loop,
-        [&](uint32_t target_node_index, const SampledTransform& sampled) {
-          applySampleToLocalPose(pose, target_node_index, sampled);
-        });
-    applyLocalPoseToEntities(world, player.node_entities_by_index, pose);
+    const std::vector<WeightedClipSample> samples{
+        WeightedClipSample{
+            .clip_index = static_cast<uint32_t>(player.current_clip_index),
+            .time_seconds = player.time_seconds,
+            .loop = player.loop,
+            .weight = 1.0f,
+        },
+    };
+    applyWeightedClipSamples(world,
+                             player.clips,
+                             player.node_entities_by_index,
+                             player.morph_entities_by_node_index,
+                             samples);
   }
 
   const std::vector<ecs::Entity> animators = world.view<components::AnimatorComponent>();

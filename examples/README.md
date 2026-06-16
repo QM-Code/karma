@@ -5,8 +5,15 @@ Karma ECS + scene graph from game code.
 
 - `GameInit.cpp`: builds a simple scene with a player, camera, environment, and audio.
 - `GameLoop.cpp`: engine-owned loop with a game interface.
+- `main.cpp`: `karma_example`, the base tank/world movement demo. It uses WASD
+  or arrow-key movement, a follow camera, a radar render-target camera, a
+  shadow-casting directional sun at intensity `1.6`, local point lights, HDR
+  skybox lighting, and a small ImGui radar overlay.
 - `collision_events_example.cpp`: drivable trigger/contact demo built on the same tank/world setup as `karma_example`. It adds named trigger spheres, a `CollisionListenerComponent` on the player, backend-driven `ContactListenerComponent` solid contacts, `GroundContactComponent` floor/support state, jump, and an overlay that shows active overlaps, ground enter/exit, support info, and solid-contact normals.
 - `glb_scene_import_example.cpp`: minimal authored-scene import example using `world-with-lights.glb`.
+- `diligent_gltf_viewer_example.cpp`: Karma-native equivalent of the Diligent GLTFViewer sample using copied Diligent GLTFViewer assets under `examples/assets/diligent_gltf_viewer`, imported materials, the `papermill.ktx` environment, local inspection lights, right-mouse orbit, WASD/QE pan, Z/X zoom, and R reset. An optional first command-line argument can point at another glTF/GLB model.
+- `diligentfx_postprocess_example.cpp`: DiligentFX-inspired postprocess showcase using the same copied GLTFViewer helmet and `papermill.ktx` assets, with Karma-native bloom, tone/color controls, SSAO, screen-space reflections, TAA, and depth of field enabled through a camera-selected post-process profile.
+- `diligentfx_bloom_example.cpp`: focused DiligentFX Bloom-style scene using assets under `examples/assets/diligentfx_bloom`, the copied Bloom reference media, the local city GLB, emissive Karma materials, HDR local lights, right-mouse free camera, B bloom toggle, `-`/`=` intensity, and `[`/`]` radius controls.
 - `postwar_city_example.cpp`: free-fly graphics inspection scene for `postwar_city_-_exterior_scene.glb`, with explicit sun lighting, HDR skybox, right-mouse look, WASD movement, and Q/E vertical movement.
 - `navmesh_example.cpp`: click-to-move navigation sample using the same `world.glb`, `tank_final.glb`, HDR environment, and lighting style as `karma_example`. It marks the visible world with ECS `NavMeshComponent`/`NavMeshSurfaceComponent`, queues left-click movement through the engine-owned async `NavigationSystem`, and moves the tank with debug lines.
 - `light_stress_example.cpp`: local-light probe sample. By default it starts as a single obvious moving shadowed point light with a matching colored marker sphere, plus one receiver mesh over the demo world. Pass `--lights N` to scale the safe-mode grid up gradually for `1-16` moving shadowed lights, pass `--stats` (or set `KARMA_LIGHT_PROBE_STATS=1`) to log Forward+ renderer stats after startup, or pass `--unsafe` / set `KARMA_LIGHT_STRESS_UNSAFE=1` to switch back to the dense non-shadowed stress layout and aggressive Forward+ profile.

@@ -194,6 +194,7 @@ RuntimeModuleContext EngineApp::makeRuntimeModuleContext() {
       .scene = &scene_,
       .graphics = graphics_.get(),
       .materials = &materials_,
+      .post_process_profiles = &post_process_profiles_,
       .particle_effects = &particle_effects_,
   };
 }
@@ -209,7 +210,21 @@ void EngineApp::addRuntimeModule(std::unique_ptr<RuntimeModule> module) {
 }
 
 void EngineApp::initSubsystems() {
+  const bool startup_diag = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  const auto init_start = core::SteadyClock::now();
+  auto stage_start = init_start;
+  auto log_init_stage = [&](const char* name, core::SteadyClock::time_point end) {
+    if (startup_diag) {
+      spdlog::info("Engine startup diag: area=runtime_init stage={} ms={:.2f}",
+                   name,
+                   core::elapsedMilliseconds(stage_start, end));
+    }
+    stage_start = end;
+  };
+
   window_ = platform::CreateWindow(config_.window);
+  log_init_stage("window create", core::SteadyClock::now());
+
   if (window_) {
     window_->setVsync(config_.vsync);
     window_->setFullscreen(config_.fullscreen);
@@ -218,26 +233,45 @@ void EngineApp::initSubsystems() {
       window_->setIcon(config_.window.icon_path);
     }
   }
+  log_init_stage("window configure", core::SteadyClock::now());
 
   input_.setWindow(window_.get());
+  log_init_stage("input bind window", core::SteadyClock::now());
 
   if (window_) {
     graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
+    log_init_stage("graphics device create", core::SteadyClock::now());
+
     graphics_->setVsync(config_.vsync);
-    render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_, materials_);
+    log_init_stage("graphics vsync apply", core::SteadyClock::now());
+
+    render_system_ =
+        std::make_unique<renderer::RenderSystem>(*graphics_, materials_, post_process_profiles_);
+    log_init_stage("render system create", core::SteadyClock::now());
+
     particle_system_ =
         std::make_unique<particles::ParticleSystem>(graphics_.get(), &particle_effects_);
+    log_init_stage("particle system create", core::SteadyClock::now());
   }
 
   const auto physics_system_id = systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
+  log_init_stage("physics system create", core::SteadyClock::now());
+
   const auto collision_system_id =
       systems_.addSystem(std::make_unique<collision::CollisionEventSystem>());
   systems_.addDependency(collision_system_id, physics_system_id);
+  log_init_stage("collision system create", core::SteadyClock::now());
 #if defined(KARMA_ENABLE_NAVIGATION)
   systems_.addSystem(std::make_unique<navigation::NavigationSystem>());
+  log_init_stage("navigation system create", core::SteadyClock::now());
 #endif
   audio_system_ = std::make_unique<audio::AudioSystem>(audio_);
+  log_init_stage("audio system create", core::SteadyClock::now());
   // Register other systems here (PhysicsSystem, AudioSystem, etc.).
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=runtime_init stage=total ms={:.2f}",
+                 core::elapsedMillisecondsSince(init_start));
+  }
 }
 
 void EngineApp::warmUpRenderer() {
@@ -296,7 +330,7 @@ void EngineApp::warmUpRenderer() {
   section_start = section_end;
   cpu_skinning_system_.update(world_, scene_, *graphics_);
   section_end = core::SteadyClock::now();
-  log_stage("cpu skinning", section_start, section_end);
+  log_stage("mesh deformation", section_start, section_end);
 
   if (particle_system_) {
     section_start = section_end;
@@ -323,11 +357,6 @@ void EngineApp::warmUpRenderer() {
   render_system_->update(world_, scene_, 0.0f, 1.0f);
   section_end = core::SteadyClock::now();
   log_stage("render system update", section_start, section_end);
-
-  section_start = section_end;
-  graphics_->renderLayer(0);
-  section_end = core::SteadyClock::now();
-  log_stage("render layer", section_start, section_end);
 
   section_start = section_end;
   graphics_->endFrame();
@@ -388,11 +417,19 @@ bool EngineApp::ensureLoadingSplashTexture() {
     return false;
   }
 
+  const bool startup_diag = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
   int width = 0;
   int height = 0;
   int comp = 0;
   unsigned char* pixels =
       stbi_load(config_.loading_splash.image_path.string().c_str(), &width, &height, &comp, 4);
+  auto stage_end = core::SteadyClock::now();
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=image decode ms={:.2f}",
+                 core::elapsedMilliseconds(stage_start, stage_end));
+  }
   if (!pixels || width <= 0 || height <= 0) {
     if (pixels) {
       stbi_image_free(pixels);
@@ -402,7 +439,13 @@ bool EngineApp::ensureLoadingSplashTexture() {
     return false;
   }
 
+  stage_start = stage_end;
   const renderer::TextureId texture = graphics_->createTextureRGBA8(width, height, pixels);
+  stage_end = core::SteadyClock::now();
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=texture upload ms={:.2f}",
+                 core::elapsedMilliseconds(stage_start, stage_end));
+  }
   stbi_image_free(pixels);
   if (texture == renderer::kInvalidTexture) {
     spdlog::warn("Loading splash image '{}' could not be uploaded",
@@ -413,6 +456,10 @@ bool EngineApp::ensureLoadingSplashTexture() {
   loading_splash_texture_ = texture;
   loading_splash_texture_width_ = width;
   loading_splash_texture_height_ = height;
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=texture total ms={:.2f}",
+                 core::elapsedMillisecondsSince(total_start));
+  }
   return true;
 }
 
@@ -432,16 +479,35 @@ bool EngineApp::renderLoadingSplash(float progress) {
     return true;
   }
 
+  const bool startup_diag_requested = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  static int startup_splash_diag_frames = 0;
+  const bool startup_diag = startup_diag_requested && startup_splash_diag_frames < 8;
+  if (startup_diag_requested) {
+    ++startup_splash_diag_frames;
+  }
+  const auto frame_start = core::SteadyClock::now();
+  auto stage_start = frame_start;
   window_->pollEvents();
   const bool close_requested = window_->shouldClose();
   window_->clearEvents();
+  auto stage_end = core::SteadyClock::now();
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=poll events ms={:.2f}",
+                 core::elapsedMilliseconds(stage_start, stage_end));
+  }
   if (close_requested) {
     return false;
   }
 
+  stage_start = stage_end;
   int fb_width = 0;
   int fb_height = 0;
   window_->getFramebufferSize(fb_width, fb_height);
+  stage_end = core::SteadyClock::now();
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=framebuffer query ms={:.2f}",
+                 core::elapsedMilliseconds(stage_start, stage_end));
+  }
   if (fb_width <= 0 || fb_height <= 0) {
     return true;
   }
@@ -451,7 +517,15 @@ bool EngineApp::renderLoadingSplash(float progress) {
   const float width = static_cast<float>(fb_width);
   const float height = static_cast<float>(fb_height);
   const float clamped_progress = std::clamp(progress, 0.0f, 1.0f);
+  stage_start = stage_end;
   const bool has_splash_image = ensureLoadingSplashTexture();
+  stage_end = core::SteadyClock::now();
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=ensure texture ms={:.2f}",
+                 core::elapsedMilliseconds(stage_start, stage_end));
+  }
+
+  stage_start = stage_end;
   const float unit = std::clamp(height / 160.0f, 3.0f, 7.0f);
   const float center_x = width * 0.5f;
   const float image_max_w = width * 0.48f;
@@ -513,18 +587,33 @@ bool EngineApp::renderLoadingSplash(float progress) {
             bar_h,
             splash.accent);
   append_command(0);
+  stage_end = core::SteadyClock::now();
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=build ui ms={:.2f}",
+                 core::elapsedMilliseconds(stage_start, stage_end));
+  }
 
   renderer::FrameInfo frame{};
   frame.width = fb_width;
   frame.height = fb_height;
   frame.delta_time = 0.0f;
+  stage_start = stage_end;
   graphics_->beginFrame(frame);
   graphics_->renderUi(draw_data);
   graphics_->endFrame();
+  stage_end = core::SteadyClock::now();
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=graphics frame ms={:.2f}",
+                 core::elapsedMilliseconds(stage_start, stage_end));
+  }
   loading_splash_presented_ = true;
 #if !defined(KARMA_RENDER_BACKEND_DILIGENT)
   window_->swapBuffers();
 #endif
+  if (startup_diag) {
+    spdlog::info("Engine startup diag: area=loading_splash stage=frame total ms={:.2f}",
+                 core::elapsedMillisecondsSince(frame_start));
+  }
   return true;
 }
 
@@ -552,6 +641,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
   spdlog::set_level(spdlog::level::trace);
   config_ = config;
+  post_process_profiles_.setDefaultProfile(config_.post_process);
   loading_splash_presented_ = false;
   config_.loading_splash.image_path = resolveStartupPath(config_.loading_splash.image_path);
   if (const char* vsync_env = std::getenv("KARMA_ENGINE_VSYNC")) {
@@ -636,6 +726,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      physics_,
                      graphics_.get(),
                      materials_,
+                     post_process_profiles_,
                      particle_effects_,
                      systems_);
   section_end = core::SteadyClock::now();
@@ -973,7 +1064,7 @@ void EngineApp::tick() {
     cpu_skinning_system_.update(world_, scene_, *graphics_);
   }
   section_end = core::SteadyClock::now();
-  const double skinning_ms = core::elapsedMilliseconds(section_start, section_end);
+  const double mesh_deformation_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
   if (audio_system_) {
@@ -1058,11 +1149,6 @@ void EngineApp::tick() {
     render_system_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
-    graphics_->renderLayer(0);
-    section_end = core::SteadyClock::now();
-    render_layer_ms = core::elapsedMilliseconds(section_start, section_end);
-
-    section_start = section_end;
     if (user_ui_) {
       graphics_->renderUi(user_ui_context_.draw_data_);
     }
@@ -1106,7 +1192,7 @@ void EngineApp::tick() {
         "events={:.3f}[poll={:.3f} ui={:.3f} input={:.3f} clear={:.3f} close={:.3f} "
         "count={} mb={} mm={} focus={} resize={}] "
         "fixed={:.3f}({}) game={:.3f} light_pulse={:.3f} "
-        "sync_scene={:.3f} animation={:.3f} scene_xform={:.3f} skinning={:.3f} audio={:.3f} "
+        "sync_scene={:.3f} animation={:.3f} scene_xform={:.3f} mesh_deform={:.3f} audio={:.3f} "
         "fb={:.3f} ui_frame={:.3f} begin={:.3f} particles={:.3f} modules={:.3f} "
         "render_system={:.3f} render_layer={:.3f} render_ui={:.3f} end_frame={:.3f} "
         "swap={:.3f} alpha={:.3f} accumulator={:.3f}",
@@ -1131,7 +1217,7 @@ void EngineApp::tick() {
         sync_scene_ms,
         animation_ms,
         scene_transforms_ms,
-        skinning_ms,
+        mesh_deformation_ms,
         audio_ms,
         framebuffer_ms,
         ui_frame_ms,

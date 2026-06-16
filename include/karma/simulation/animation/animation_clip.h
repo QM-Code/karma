@@ -177,12 +177,24 @@ std::optional<std::vector<float>> sampleMorphWeightKeyframes(
     const std::vector<MorphWeightKeyframe>& keys,
     float time_seconds,
     InterpolationMode interpolation = InterpolationMode::Linear);
-/// Samples a clip and invokes `on_sample` for each target node.
+/// Samples a clip and invokes `on_sample` for each transform target node.
 void sampleAnimationClip(
     const AnimationClip& clip,
     float time_seconds,
     bool loop,
     const std::function<void(uint32_t target_node_index, const SampledTransform& transform)>&
         on_sample);
+/// Samples a clip and invokes callbacks for transform and morph-weight targets.
+///
+/// `on_sample` receives node transform channels. `on_morph_weights` receives
+/// glTF `weights` channels keyed by the target node index.
+void sampleAnimationClip(
+    const AnimationClip& clip,
+    float time_seconds,
+    bool loop,
+    const std::function<void(uint32_t target_node_index, const SampledTransform& transform)>&
+        on_sample,
+    const std::function<void(uint32_t target_node_index, const std::vector<float>& weights)>&
+        on_morph_weights);
 
 }  // namespace karma::animation

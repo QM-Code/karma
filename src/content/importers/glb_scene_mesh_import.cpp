@@ -160,6 +160,14 @@ bool buildMeshDataFromGltfPrimitive(const GltfDocument& doc,
       uv.y = 1.0f - uv.y;
     }
   }
+  if (!readVec2Attribute(doc, attributes, "TEXCOORD_1", mesh.uvs1) ||
+      mesh.uvs1.size() != mesh.vertices.size()) {
+    mesh.uvs1 = mesh.uvs;
+  } else {
+    for (glm::vec2& uv : mesh.uvs1) {
+      uv.y = 1.0f - uv.y;
+    }
+  }
   bool has_tangents =
       readVec4Attribute(doc, attributes, "TANGENT", mesh.tangents) &&
       mesh.tangents.size() == mesh.vertices.size();
@@ -184,8 +192,54 @@ bool buildMeshDataFromGltfPrimitive(const GltfDocument& doc,
     mesh.tangents = generateTangents(mesh);
   }
 
+  if (source_primitive.contains("targets") && source_primitive["targets"].is_array()) {
+    mesh.morph_targets.reserve(source_primitive["targets"].size());
+    for (const Json& target_json : source_primitive["targets"]) {
+      if (!target_json.is_object()) {
+        continue;
+      }
+      geometry::MeshData::MorphTarget target{};
+      bool has_target_data = false;
+      if (readVec3Attribute(doc, target_json, "POSITION", target.position_deltas) &&
+          target.position_deltas.size() == mesh.vertices.size()) {
+        has_target_data = true;
+      } else {
+        target.position_deltas.clear();
+      }
+      if (readVec3Attribute(doc, target_json, "NORMAL", target.normal_deltas) &&
+          target.normal_deltas.size() == mesh.vertices.size()) {
+        has_target_data = true;
+      } else {
+        target.normal_deltas.clear();
+      }
+      if (readVec3Attribute(doc, target_json, "TANGENT", target.tangent_deltas) &&
+          target.tangent_deltas.size() == mesh.vertices.size()) {
+        has_target_data = true;
+      } else {
+        target.tangent_deltas.clear();
+      }
+      if (has_target_data) {
+        mesh.morph_targets.push_back(std::move(target));
+      }
+    }
+  }
+
   out = std::move(mesh);
   return true;
+}
+
+std::vector<float> readMorphWeights(const Json& source_mesh, size_t target_count) {
+  std::vector<float> weights(target_count, 0.0f);
+  if (!source_mesh.contains("weights") || !source_mesh["weights"].is_array()) {
+    return weights;
+  }
+  const size_t count = std::min(target_count, source_mesh["weights"].size());
+  for (size_t i = 0; i < count; ++i) {
+    if (source_mesh["weights"][i].is_number()) {
+      weights[i] = source_mesh["weights"][i].get<float>();
+    }
+  }
+  return weights;
 }
 
 }  // namespace
@@ -205,9 +259,6 @@ void populateGltfMeshData(const GltfDocument& doc,
   for (size_t gltf_node_index = 0; gltf_node_index < doc.json["nodes"].size(); ++gltf_node_index) {
     const Json& node = doc.json["nodes"][gltf_node_index];
     if (!node.contains("mesh") || !node["mesh"].is_number_unsigned()) {
-      continue;
-    }
-    if (!node.contains("skin") || !node["skin"].is_number_unsigned()) {
       continue;
     }
     const uint32_t gltf_mesh_index = node["mesh"].get<uint32_t>();
@@ -235,6 +286,8 @@ void populateGltfMeshData(const GltfDocument& doc,
       const Json& source_primitive = mesh["primitives"][primitive_index];
       geometry::MeshData mesh_data{};
       if (buildMeshDataFromGltfPrimitive(doc, source_primitive, mesh_data)) {
+        primitives[primitive_index].morph_weights =
+            readMorphWeights(mesh, mesh_data.morph_targets.size());
         primitives[primitive_index].mesh = std::move(mesh_data);
         if (source_primitive.contains("material") &&
             source_primitive["material"].is_number_unsigned()) {

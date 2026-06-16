@@ -9,6 +9,7 @@
 #include "karma/rendering/renderer/material.h"
 #include "karma/world/geometry/mesh_data.h"
 #include "karma/rendering/renderer/particles.h"
+#include "karma/rendering/renderer/post_process.h"
 #include "karma/rendering/renderer/render_target.h"
 #include "karma/rendering/renderer/stats.h"
 #include "karma/rendering/renderer/texture.h"
@@ -31,7 +32,8 @@ namespace karma::renderer_backend {
 ///
 /// `GraphicsDevice` owns an implementation and exposes the same operations to
 /// runtime code. Backends should keep API resources opaque and validate handles
-/// defensively.
+/// defensively. Post-process state is supplied per `renderLayer` call after
+/// cameras resolve profile intent through `RenderSystem`.
 class Backend {
  public:
   virtual ~Backend() = default;
@@ -68,7 +70,10 @@ class Backend {
   virtual void submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) = 0;
   virtual void setParticleSystemStats(const renderer::ParticlePassStats& stats) = 0;
   virtual void retireInstance(renderer::InstanceId instance) = 0;
-  virtual void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) = 0;
+  /// Renders one extracted layer into a target using per-pass post settings.
+  virtual void renderLayer(renderer::LayerId layer,
+                           renderer::RenderTargetId target,
+                           const renderer::PostProcessSettings& post_process) = 0;
   virtual void drawLine(const math::Vec3& start, const math::Vec3& end,
                         const math::Color& color, bool depth_test, float thickness) = 0;
 
@@ -88,6 +93,7 @@ class Backend {
                                       int max_local_lights) = 0;
   virtual renderer::ForwardPlusStats getForwardPlusStats() const = 0;
   virtual renderer::ParticlePassStats getParticlePassStats() const = 0;
+  virtual renderer::RendererCommandStats getRendererCommandStats() const = 0;
   virtual void setShadowSettings(float bias,
                                  int map_size,
                                  int pcf_radius,

@@ -13,7 +13,7 @@ API constraints:
 - Keep `AnimationClip` data renderer-agnostic.
 - Channels currently target imported GLB node indices. If adding skeleton-level
   APIs, make the mapping explicit rather than overloading node animation fields.
-- `skinMesh(...)` is exposed for unit tests and CPU fallback behavior; avoid
-  growing it into a full renderer abstraction.
+- `skinMesh(...)` and `morphMesh(...)` are exposed for unit tests and CPU
+  fallback behavior; avoid growing them into renderer abstractions.
 - Helper behavior for clip switching, play, pause, and stop should remain
   documented in tests.

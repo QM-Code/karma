@@ -55,6 +55,8 @@ struct GlbScenePrefabPrimitive {
   uint32_t source_gltf_material_index = kInvalidGlbSceneMaterial;
   uint32_t source_mesh_index = kInvalidGlbSceneNode;
   uint32_t skin_index = animation::kInvalidAnimationIndex;
+  /// Default morph target weights authored on the source glTF mesh.
+  std::vector<float> morph_weights;
   std::vector<components::VertexSkinInfluence> vertex_influences;
   std::vector<uint32_t> joint_node_indices;
   std::vector<glm::mat4> inverse_bind_matrices;
@@ -62,6 +64,11 @@ struct GlbScenePrefabPrimitive {
   /// Returns true when the primitive has skinning payloads.
   bool skinned() const {
     return !joint_node_indices.empty() && vertex_influences.size() == mesh.vertices.size();
+  }
+
+  /// Returns true when the primitive has morph target payloads.
+  bool morphable() const {
+    return !mesh.morph_targets.empty();
   }
 };
 
@@ -105,6 +112,8 @@ struct GlbSceneImportResult {
   scene::NodeId root_node = scene::Node::kInvalidId;
   std::vector<ecs::Entity> entities;
   std::vector<ecs::Entity> node_entities_by_index;
+  /// Renderable morph primitive entities keyed by imported GLB node index.
+  std::vector<std::vector<ecs::Entity>> morph_entities_by_node_index;
 
   /// Returns true when a root ECS entity and scene node were created.
   bool valid() const {

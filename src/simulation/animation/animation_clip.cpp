@@ -190,27 +190,50 @@ void sampleAnimationClip(
     float time_seconds,
     bool loop,
     const std::function<void(uint32_t target_node_index, const SampledTransform& transform)>&
-        on_sample) {
-  if (!on_sample) {
+        on_sample,
+    const std::function<void(uint32_t target_node_index, const std::vector<float>& weights)>&
+        on_morph_weights) {
+  if (!on_sample && !on_morph_weights) {
     return;
   }
 
   const float sample_time = normalizeAnimationTime(clip, time_seconds, loop);
-  for (const AnimationChannel& channel : clip.channels) {
-    SampledTransform transform{};
-    transform.position = sampleVec3Keyframes(channel.position_keys,
-                                             sample_time,
-                                             channel.position_interpolation);
-    transform.rotation = sampleQuatKeyframes(channel.rotation_keys,
-                                             sample_time,
-                                             channel.rotation_interpolation);
-    transform.scale = sampleVec3Keyframes(channel.scale_keys,
-                                          sample_time,
-                                          channel.scale_interpolation);
-    if (transform.position || transform.rotation || transform.scale) {
-      on_sample(channel.target_node_index, transform);
+  if (on_sample) {
+    for (const AnimationChannel& channel : clip.channels) {
+      SampledTransform transform{};
+      transform.position = sampleVec3Keyframes(channel.position_keys,
+                                               sample_time,
+                                               channel.position_interpolation);
+      transform.rotation = sampleQuatKeyframes(channel.rotation_keys,
+                                               sample_time,
+                                               channel.rotation_interpolation);
+      transform.scale = sampleVec3Keyframes(channel.scale_keys,
+                                            sample_time,
+                                            channel.scale_interpolation);
+      if (transform.position || transform.rotation || transform.scale) {
+        on_sample(channel.target_node_index, transform);
+      }
     }
   }
+
+  if (on_morph_weights) {
+    for (const MorphTargetTrack& track : clip.morph_target_tracks) {
+      const std::optional<std::vector<float>> weights =
+          sampleMorphWeightKeyframes(track.weight_keys, sample_time, track.interpolation);
+      if (weights) {
+        on_morph_weights(track.target_node_index, *weights);
+      }
+    }
+  }
+}
+
+void sampleAnimationClip(
+    const AnimationClip& clip,
+    float time_seconds,
+    bool loop,
+    const std::function<void(uint32_t target_node_index, const SampledTransform& transform)>&
+        on_sample) {
+  sampleAnimationClip(clip, time_seconds, loop, on_sample, {});
 }
 
 }  // namespace karma::animation

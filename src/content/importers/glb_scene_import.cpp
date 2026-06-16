@@ -20,6 +20,7 @@
 #include "glb_scene_skinning.h"
 #include "karma/world/components/animator.h"
 #include "karma/world/components/mesh.h"
+#include "karma/world/components/morph_target.h"
 #include "karma/world/components/skinned_mesh.h"
 #include "karma/world/components/tag.h"
 #include "karma/world/components/transform.h"
@@ -46,6 +47,7 @@ geometry::MeshData buildMeshData(const aiMesh& mesh) {
   out.vertices.reserve(mesh.mNumVertices);
   out.normals.reserve(mesh.mNumVertices);
   out.uvs.reserve(mesh.mNumVertices);
+  out.uvs1.reserve(mesh.mNumVertices);
   out.tangents.reserve(mesh.mNumVertices);
 
   for (unsigned int v = 0; v < mesh.mNumVertices; ++v) {
@@ -64,6 +66,13 @@ geometry::MeshData buildMeshData(const aiMesh& mesh) {
       out.uvs.emplace_back(uv.x, uv.y);
     } else {
       out.uvs.emplace_back(0.0f, 0.0f);
+    }
+
+    if (mesh.HasTextureCoords(1)) {
+      const auto& uv = mesh.mTextureCoords[1][v];
+      out.uvs1.emplace_back(uv.x, uv.y);
+    } else {
+      out.uvs1.emplace_back(out.uvs.back());
     }
 
     if (mesh.HasTangentsAndBitangents()) {
@@ -375,6 +384,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
   }
 
   result.node_entities_by_index.resize(prefab.nodes.size());
+  result.morph_entities_by_node_index.resize(prefab.nodes.size());
 
   struct PendingSkin {
     ecs::Entity entity{};
@@ -470,6 +480,20 @@ GlbSceneImportResult instantiateGlbScenePrefab(
                                      .mesh_key = mesh_id != renderer::kInvalidMesh ? mesh_key : "",
                                      .material_key = materials != nullptr ? material_key : "",
                                      .visible = true});
+      if (primitive.morphable()) {
+        std::vector<float> morph_weights = primitive.morph_weights;
+        morph_weights.resize(primitive.mesh.morph_targets.size(), 0.0f);
+        world.add(primitive_entity, components::MorphTargetComponent{
+                                        .bind_mesh = primitive.mesh,
+                                        .deformed_mesh = primitive.mesh,
+                                        .base_weights = morph_weights,
+                                        .weights = morph_weights,
+                                        .weights_dirty = true,
+                                        .enabled = true});
+        if (prefab_node_index < result.morph_entities_by_node_index.size()) {
+          result.morph_entities_by_node_index[prefab_node_index].push_back(primitive_entity);
+        }
+      }
       if (primitive.skinned()) {
         pending_skins.push_back(PendingSkin{.entity = primitive_entity, .primitive = &primitive});
       }
@@ -504,6 +528,8 @@ GlbSceneImportResult instantiateGlbScenePrefab(
       world.add(root_entity, components::AnimatorComponent{
                                  .clips = prefab.animations,
                                  .node_entities_by_index = result.node_entities_by_index,
+                                 .morph_entities_by_node_index =
+                                     result.morph_entities_by_node_index,
                                  .skeletons = prefab.skeletons,
                                  .skins = prefab.skins,
                                  .current_clip_index = 0,
@@ -525,6 +551,8 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     world.add(root_entity, components::AnimatorComponent{
                                .clips = prefab.animations,
                                .node_entities_by_index = result.node_entities_by_index,
+                               .morph_entities_by_node_index =
+                                   result.morph_entities_by_node_index,
                                .skeletons = prefab.skeletons,
                                .skins = prefab.skins,
                                .current_clip_index = 0,

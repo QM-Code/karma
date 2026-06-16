@@ -64,12 +64,18 @@ karma_add_static(karma_world
 target_link_libraries(karma_world PUBLIC karma_core)
 list(APPEND KARMA_INSTALL_TARGETS karma_world)
 
+set(KARMA_RENDERER_CORE_SOURCES
+  src/rendering/renderer/backend_factory.cpp
+  src/rendering/renderer/camera_picking.cpp
+  src/rendering/renderer/device.cpp
+  src/rendering/renderer/render_system.cpp
+  src/rendering/renderer/render_system/debug_draw.cpp
+  src/rendering/renderer/render_system/extractors.cpp
+)
+
 if (KARMA_BUILD_HEADLESS_PROFILE)
   karma_add_static(karma_rendering_headless
-    src/rendering/renderer/backend_factory.cpp
-    src/rendering/renderer/camera_picking.cpp
-    src/rendering/renderer/device.cpp
-    src/rendering/renderer/render_system.cpp
+    ${KARMA_RENDERER_CORE_SOURCES}
   )
   target_link_libraries(karma_rendering_headless PUBLIC karma_core karma_world)
   list(APPEND KARMA_INSTALL_TARGETS karma_rendering_headless)
@@ -77,10 +83,7 @@ endif()
 
 if (KARMA_BUILD_GRAPHICAL_PROFILE)
   set(KARMA_RENDERING_GRAPHICAL_SOURCES
-    src/rendering/renderer/backend_factory.cpp
-    src/rendering/renderer/camera_picking.cpp
-    src/rendering/renderer/device.cpp
-    src/rendering/renderer/render_system.cpp
+    ${KARMA_RENDERER_CORE_SOURCES}
   )
 
   if (KARMA_RENDER_BACKEND_DILIGENT)
@@ -98,6 +101,11 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       src/rendering/renderer/backends/diligent/passes/line.cpp
       src/rendering/renderer/backends/diligent/passes/particle_draw.cpp
       src/rendering/renderer/backends/diligent/passes/particles.cpp
+      src/rendering/renderer/backends/diligent/passes/post_process/chain.cpp
+      src/rendering/renderer/backends/diligent/passes/post_process/common.cpp
+      src/rendering/renderer/backends/diligent/passes/post_process/pipelines.cpp
+      src/rendering/renderer/backends/diligent/passes/post_process/resources.cpp
+      src/rendering/renderer/backends/diligent/passes/post_process/shader_source.cpp
       src/rendering/renderer/backends/diligent/passes/render_state.cpp
       src/rendering/renderer/backends/diligent/passes/shadows.cpp
       src/rendering/renderer/backends/diligent/resources/materials.cpp
@@ -114,6 +122,9 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_link_build_and_install(karma_rendering_graphical PUBLIC KARMA_RENDER_LINK_LIBS KARMA_INSTALL_LINK_LIBS)
   if (KARMA_RENDER_BACKEND_DILIGENT)
     target_compile_definitions(karma_rendering_graphical PUBLIC KARMA_RENDER_BACKEND_DILIGENT)
+    target_compile_definitions(karma_rendering_graphical PRIVATE
+      KARMA_DILIGENT_SHADER_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders/post_process"
+    )
     if (KARMA_WINDOW_BACKEND_SDL)
       target_compile_definitions(karma_rendering_graphical PUBLIC KARMA_WINDOW_BACKEND_SDL)
     endif()

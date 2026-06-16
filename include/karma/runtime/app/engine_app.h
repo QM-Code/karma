@@ -27,6 +27,8 @@
 #include "karma/simulation/physics/physics_system.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/rendering/renderer/material_library.h"
+#include "karma/rendering/renderer/post_process.h"
+#include "karma/rendering/renderer/post_process_profile_library.h"
 #include "karma/rendering/renderer/render_system.h"
 #include "karma/world/scene/scene.h"
 #include "karma/world/systems/system_graph.h"
@@ -89,6 +91,8 @@ struct EngineConfig {
   bool ao_affects_local_lights = false;
   float local_light_directional_shadow_lift_strength = 0.0f;
   float lighting_exposure = 1.0f;
+  /// Startup default post-process profile used by cameras with empty keys.
+  renderer::PostProcessSettings post_process{};
 };
 
 /// \ingroup karma_runtime
@@ -156,6 +160,7 @@ class EngineApp {
   ecs::World world_;
   scene::Scene scene_;
   renderer::MaterialLibrary materials_;
+  renderer::PostProcessProfileLibrary post_process_profiles_;
   particles::ParticleLibrary particle_effects_;
   renderer::TextureId loading_splash_texture_ = renderer::kInvalidTexture;
   int loading_splash_texture_width_ = 0;

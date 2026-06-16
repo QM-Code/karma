@@ -1,6 +1,6 @@
 # Animation Runtime Notes
 
-This directory owns runtime animation sampling and CPU skinning.
+This directory owns runtime animation sampling and CPU mesh deformation.
 
 Before changing behavior, read:
 
@@ -8,6 +8,7 @@ Before changing behavior, read:
 - `docs/RIGGED_GLB_AUTHORING.md`
 - `include/karma/simulation/animation/animation_clip.h`
 - `include/karma/world/components/animation_player.h`
+- `include/karma/world/components/morph_target.h`
 - `include/karma/world/components/skinned_mesh.h`
 - `include/karma/world/scene/transform_hierarchy.h`
 
@@ -17,11 +18,11 @@ Rules for changes:
   consume final world transforms and mesh buffers, not clips.
 - `AnimationSystem` writes local transforms; `scene::updateWorldTransforms(...)`
   writes world transforms.
-- `CpuSkinningSystem` is a first-pass correctness path. Do not optimize it by
-  changing renderer vertex formats unless you are intentionally implementing GPU
-  skinning across forward and shadow passes.
+- `CpuSkinningSystem` is the CPU deformation upload point. It applies morph
+  targets, builds joint palettes for GPU skinning, and performs CPU skinning
+  fallback when needed.
 - Keep tests in `tests/animation_tests.cpp` updated with any sampling, hierarchy,
-  or skinning behavior change.
+  morph, or skinning behavior change.
 
 Common validation targets:
 

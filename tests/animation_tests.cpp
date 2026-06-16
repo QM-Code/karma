@@ -9,12 +9,14 @@
 #include "karma/simulation/animation/pose.h"
 #include "karma/world/components/animation_player.h"
 #include "karma/world/components/animator.h"
+#include "karma/world/components/morph_target.h"
 #include "karma/world/components/skinned_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
 #include "karma/content/importers/glb_scene_import.h"
 #include "karma/world/scene/scene.h"
 #include "karma/world/scene/transform_hierarchy.h"
+#include "../src/content/importers/glb_scene_animation_import.h"
 #include "../src/content/importers/glb_scene_mesh_import.h"
 
 #include <algorithm>
@@ -673,6 +675,101 @@ void testCpuSkinning() {
   assert(near(skinned.vertices[0].z, 0.0f));
 }
 
+void testMorphTargets() {
+  karma::geometry::MeshData bind_mesh{};
+  bind_mesh.vertices.push_back({1.0f, 0.0f, 0.0f});
+  bind_mesh.normals.push_back({1.0f, 0.0f, 0.0f});
+  bind_mesh.tangents.push_back({1.0f, 0.0f, 0.0f, 1.0f});
+  bind_mesh.indices.push_back(0);
+  bind_mesh.morph_targets.push_back(karma::geometry::MeshData::MorphTarget{
+      .position_deltas = {{2.0f, 0.0f, 0.0f}},
+      .normal_deltas = {{0.0f, 1.0f, 0.0f}},
+      .tangent_deltas = {{0.0f, 1.0f, 0.0f}},
+  });
+
+  const karma::geometry::MeshData morphed =
+      karma::animation::morphMesh(bind_mesh, {0.25f});
+  assert(morphed.vertices.size() == 1);
+  assert(near(morphed.vertices[0].x, 1.5f));
+  assert(near(glm::length(morphed.normals[0]), 1.0f));
+  assert(near(glm::length(glm::vec3(morphed.tangents[0])), 1.0f));
+
+  std::vector<karma::components::VertexSkinInfluence> influences{
+      {.joints = {0u, 0u, 0u, 0u}, .weights = {1.0f, 0.0f, 0.0f, 0.0f}},
+  };
+  const std::vector<glm::mat4> skin_matrices{
+      glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
+  };
+  const karma::geometry::MeshData morphed_then_skinned =
+      karma::animation::skinMesh(morphed, influences, skin_matrices);
+  assert(near(morphed_then_skinned.vertices[0].x, 2.5f));
+}
+
+void testAnimationSystemUpdatesMorphWeights() {
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+
+  const auto root = world.createEntity();
+  world.add(root, karma::components::TransformComponent{});
+  world.add(root, karma::components::LocalTransformComponent{});
+  scene.createNode(root);
+
+  karma::geometry::MeshData bind_mesh{};
+  bind_mesh.vertices.push_back({0.0f, 0.0f, 0.0f});
+  bind_mesh.morph_targets.push_back(karma::geometry::MeshData::MorphTarget{
+      .position_deltas = {{1.0f, 0.0f, 0.0f}},
+  });
+
+  const auto primitive = world.createEntity();
+  world.add(primitive, karma::components::MorphTargetComponent{
+                           .bind_mesh = bind_mesh,
+                           .deformed_mesh = bind_mesh,
+                           .base_weights = {0.0f},
+                           .weights = {0.0f},
+                           .weights_dirty = false,
+                           .enabled = true});
+
+  karma::animation::AnimationClip clip{};
+  clip.name = "Morph";
+  clip.duration_seconds = 1.0f;
+  clip.morph_target_tracks.push_back(karma::animation::MorphTargetTrack{
+      .target_node_index = 0,
+      .interpolation = karma::animation::InterpolationMode::Linear,
+      .weight_keys = {
+          {.time_seconds = 0.0f, .values = {0.0f}},
+          {.time_seconds = 1.0f, .values = {1.0f}},
+      },
+  });
+  world.add(root, karma::components::AnimationPlayerComponent{
+                      .clips = {clip},
+                      .node_entities_by_index = {root},
+                      .morph_entities_by_node_index = {{primitive}},
+                      .current_clip_index = 0,
+                      .time_seconds = 0.0f,
+                      .speed = 1.0f,
+                      .loop = true,
+                      .playing = true});
+
+  karma::animation::AnimationSystem animation_system;
+  animation_system.update(world, scene, 0.5f);
+
+  auto& morph = world.get<karma::components::MorphTargetComponent>(primitive);
+  assert(morph.weights.size() == 1);
+  assert(near(morph.weights[0], 0.5f));
+  assert(morph.weights_dirty);
+
+  karma::animation::AnimationClip base_clip{};
+  base_clip.name = "Base";
+  base_clip.duration_seconds = 1.0f;
+  auto& player = world.get<karma::components::AnimationPlayerComponent>(root);
+  player.clips.push_back(base_clip);
+  assert(karma::components::setAnimationClip(player, 1, true));
+  morph.weights_dirty = false;
+  animation_system.update(world, scene, 0.0f);
+  assert(near(morph.weights[0], 0.0f));
+  assert(morph.weights_dirty);
+}
+
 void testPoseCompositionAndPalette() {
   karma::animation::PoseHierarchy hierarchy{};
   hierarchy.parent_indices = {
@@ -767,7 +864,7 @@ void testSplitWeightGlbImport() {
   assert(found_skinned_primitive);
 }
 
-void testGltfMeshReplacementIsSkinnedOnly() {
+void testGltfMeshReplacementImportsAllMeshNodes() {
   karma::scene::GltfDocument doc{};
   for (int i = 0; i < 3; ++i) {
     appendFloat(doc.bin, static_cast<float>(i));
@@ -820,13 +917,110 @@ void testGltfMeshReplacementIsSkinnedOnly() {
   };
   karma::scene::populateGltfMeshData(doc, node_indices_by_name, prefab);
 
-  assert(prefab.nodes[0].primitives.front().mesh.vertices.size() == 1);
+  assert(prefab.nodes[0].primitives.front().mesh.vertices.size() == 3);
   assert(prefab.nodes[0].primitives.front().source_material_index == 10u);
-  assert(prefab.nodes[0].primitives.front().source_gltf_material_index ==
-         karma::scene::kInvalidGlbSceneMaterial);
+  assert(prefab.nodes[0].primitives.front().source_gltf_material_index == 1u);
   assert(prefab.nodes[1].primitives.front().mesh.vertices.size() == 3);
   assert(prefab.nodes[1].primitives.front().source_material_index == 11u);
   assert(prefab.nodes[1].primitives.front().source_gltf_material_index == 2u);
+}
+
+void testGltfMorphTargetImport() {
+  karma::scene::GltfDocument doc{};
+  const std::uint32_t position_offset = static_cast<std::uint32_t>(doc.bin.size());
+  appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f);
+  appendFloat(doc.bin, 1.0f); appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f);
+  appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 1.0f); appendFloat(doc.bin, 0.0f);
+
+  const std::uint32_t morph_offset = static_cast<std::uint32_t>(doc.bin.size());
+  appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 1.0f);
+  appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 1.0f);
+  appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 1.0f);
+
+  const std::uint32_t time_offset = static_cast<std::uint32_t>(doc.bin.size());
+  appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 1.0f);
+
+  const std::uint32_t weight_offset = static_cast<std::uint32_t>(doc.bin.size());
+  appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 1.0f);
+
+  doc.json = karma::scene::Json{
+      {"asset", {{"version", "2.0"}}},
+      {"nodes", karma::scene::Json::array({
+                    {{"name", "MorphNode"}, {"mesh", 0u}},
+                })},
+      {"meshes",
+       karma::scene::Json::array({
+           {{"weights", karma::scene::Json::array({0.25f})},
+            {"primitives",
+             karma::scene::Json::array({
+                 {{"attributes", {{"POSITION", 0u}}},
+                  {"targets", karma::scene::Json::array({
+                                  {{"POSITION", 1u}},
+                              })}},
+             })}},
+       })},
+      {"animations",
+       karma::scene::Json::array({
+           {{"samplers",
+             karma::scene::Json::array({
+                 {{"input", 2u}, {"output", 3u}},
+             })},
+            {"channels",
+             karma::scene::Json::array({
+                 {{"sampler", 0u}, {"target", {{"node", 0u}, {"path", "weights"}}}},
+             })}},
+       })},
+      {"bufferViews",
+       karma::scene::Json::array({
+           {{"buffer", 0u}, {"byteOffset", position_offset}, {"byteLength", 36u}},
+           {{"buffer", 0u}, {"byteOffset", morph_offset}, {"byteLength", 36u}},
+           {{"buffer", 0u}, {"byteOffset", time_offset}, {"byteLength", 8u}},
+           {{"buffer", 0u}, {"byteOffset", weight_offset}, {"byteLength", 8u}},
+       })},
+      {"accessors",
+       karma::scene::Json::array({
+           {{"bufferView", 0u}, {"componentType", 5126}, {"count", 3u}, {"type", "VEC3"}},
+           {{"bufferView", 1u}, {"componentType", 5126}, {"count", 3u}, {"type", "VEC3"}},
+           {{"bufferView", 2u}, {"componentType", 5126}, {"count", 2u}, {"type", "SCALAR"}},
+           {{"bufferView", 3u}, {"componentType", 5126}, {"count", 2u}, {"type", "SCALAR"}},
+       })},
+  };
+
+  karma::scene::GlbScenePrefab prefab{};
+  prefab.nodes.resize(1);
+  prefab.nodes[0].name = "MorphNode";
+  prefab.nodes[0].primitives.push_back(karma::scene::GlbScenePrefabPrimitive{});
+
+  const std::unordered_map<std::string, uint32_t> node_indices_by_name{{"MorphNode", 0u}};
+  karma::scene::populateGltfMeshData(doc, node_indices_by_name, prefab);
+  const auto& primitive = prefab.nodes[0].primitives.front();
+  assert(primitive.morphable());
+  assert(primitive.mesh.morph_targets.size() == 1);
+  assert(primitive.mesh.morph_targets.front().position_deltas.size() == 3);
+  assert(near(primitive.mesh.morph_targets.front().position_deltas.front().z, 1.0f));
+  assert(primitive.morph_weights.size() == 1);
+  assert(near(primitive.morph_weights[0], 0.25f));
+
+  const std::vector<karma::animation::AnimationClip> clips =
+      karma::scene::loadGltfAnimationClips(doc, node_indices_by_name, prefab);
+  assert(clips.size() == 1);
+  assert(clips.front().morph_target_tracks.size() == 1);
+  assert(clips.front().morph_target_tracks.front().target_node_index == 0u);
+  assert(clips.front().morph_target_tracks.front().target_mesh_index == 0u);
+
+  bool sampled_morph = false;
+  karma::animation::sampleAnimationClip(
+      clips.front(),
+      0.5f,
+      true,
+      [&](uint32_t, const karma::animation::SampledTransform&) {},
+      [&](uint32_t target_node_index, const std::vector<float>& weights) {
+        sampled_morph = true;
+        assert(target_node_index == 0u);
+        assert(weights.size() == 1);
+        assert(near(weights[0], 0.5f));
+      });
+  assert(sampled_morph);
 }
 
 void testWalkingGlbImportSmoke() {
@@ -1085,10 +1279,13 @@ int main() {
   testAnimatorStateMachineAndEvents();
   testAnimatorBlendTreeAndRootMotion();
   testCpuSkinning();
+  testMorphTargets();
+  testAnimationSystemUpdatesMorphWeights();
   testPoseCompositionAndPalette();
   testSkinnedGlbImport();
   testSplitWeightGlbImport();
-  testGltfMeshReplacementIsSkinnedOnly();
+  testGltfMeshReplacementImportsAllMeshNodes();
+  testGltfMorphTargetImport();
   testWalkingGlbImportSmoke();
   return 0;
 }

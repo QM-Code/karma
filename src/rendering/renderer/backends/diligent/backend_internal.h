@@ -1,5 +1,6 @@
 #pragma once
 
+#include "karma/core/time.h"
 #include "karma/rendering/renderer/camera.h"
 #include "karma/world/geometry/mesh_data.h"
 
@@ -72,6 +73,9 @@ struct DrawConstants {
   float material_params3[4];
   float material_params4[4];
   float material_params5[4];
+  float material_params6[4];
+  float texcoord_row0[12][4];
+  float texcoord_row1[12][4];
 };
 
 struct SkinningConstants {
@@ -92,6 +96,16 @@ struct alignas(16) CameraOverrideUserConstants {
 };
 
 bool isValidSize(int width, int height);
+bool startupDiagnosticsEnabled();
+bool renderResourceDiagnosticsEnabled();
+void logStartupDiag(const char* area,
+                    const char* stage,
+                    core::SteadyClock::time_point start,
+                    core::SteadyClock::time_point end);
+void logRenderResourceDiag(const char* area,
+                           const char* stage,
+                           core::SteadyClock::time_point start,
+                           core::SteadyClock::time_point end);
 std::vector<unsigned char> readFileBytes(const std::filesystem::path& path);
 LoadedImage loadImageFromMemory(const unsigned char* data, size_t size);
 LoadedImage loadImageFromFile(const std::filesystem::path& path);

@@ -15,7 +15,8 @@ namespace karma::renderer {
 ///
 /// `GraphicsDevice` forwards resource creation, scene submission, UI rendering,
 /// diagnostics, and frame lifecycle calls to the configured backend. Game code
-/// generally reaches it through `GameInterface::graphics`.
+/// generally reaches it through `GameInterface::graphics`; ordinary scene
+/// rendering is driven by `RenderSystem`.
 class GraphicsDevice {
  public:
   /// Creates the configured graphics backend for `window`.
@@ -86,8 +87,14 @@ class GraphicsDevice {
   void setParticleSystemStats(const ParticlePassStats& stats);
   /// Retires a renderer instance id.
   void retireInstance(InstanceId instance);
-  /// Renders one layer into a target.
-  void renderLayer(LayerId layer, RenderTargetId target = kDefaultRenderTarget);
+  /// Renders one layer into a target with resolved post-process settings.
+  ///
+  /// Normal applications let `RenderSystem` call this after resolving the
+  /// active camera profile. Custom render paths must pass the settings for that
+  /// specific camera pass; there is no backend-global post-process state API.
+  void renderLayer(LayerId layer,
+                   RenderTargetId target,
+                   const PostProcessSettings& post_process);
   /// Queues a debug line.
   void drawLine(const math::Vec3& start, const math::Vec3& end, const math::Color& color,
                 bool depth_test = true, float thickness = 1.0f);
@@ -117,6 +124,8 @@ class GraphicsDevice {
   ForwardPlusStats getForwardPlusStats() const;
   /// Returns latest particle-pass diagnostics.
   ParticlePassStats getParticlePassStats() const;
+  /// Returns renderer backend command counters.
+  RendererCommandStats getRendererCommandStats() const;
   /// Configures directional shadow bias/map settings.
   void setShadowSettings(float bias,
                          int map_size,

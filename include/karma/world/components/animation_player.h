@@ -19,6 +19,8 @@ namespace karma::components {
 struct AnimationPlayerComponent : ecs::ComponentTag {
   std::vector<animation::AnimationClip> clips;
   std::vector<ecs::Entity> node_entities_by_index;
+  /// Renderable morph primitive entities keyed by imported GLB node index.
+  std::vector<std::vector<ecs::Entity>> morph_entities_by_node_index;
   size_t current_clip_index = 0;
   float time_seconds = 0.0f;
   float speed = 1.0f;

@@ -213,6 +213,35 @@ Typical crash or hang triage run:
 KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/karma_laser_example
 ```
 
+### Startup And Resource Timing
+
+Use the Diligent glTF viewer as the renderer startup benchmark:
+
+```bash
+cmake --build build --target karma_diligent_gltf_viewer_example --parallel $(nproc)
+timeout 12s env \
+  KARMA_ENGINE_STARTUP_DIAG=1 \
+  KARMA_RENDER_SYSTEM_DIAG=1 \
+  KARMA_RENDER_RESOURCE_DIAG=1 \
+  ./build/karma_diligent_gltf_viewer_example
+```
+
+Useful startup diagnostics:
+
+- `KARMA_ENGINE_STARTUP_DIAG=1`: logs runtime subsystem creation, loading
+  splash work, renderer warm-up, and Diligent startup stages.
+- `KARMA_RENDER_STARTUP_DIAG=1`: enables Diligent backend startup timing without
+  the broader runtime startup log.
+- `KARMA_RENDER_RESOURCE_DIAG=1`: logs renderer resource creation/import timing.
+  It is also enabled by `KARMA_ENGINE_STARTUP_DIAG=1`.
+- `KARMA_RENDER_SYSTEM_DIAG=1`: logs `RenderSystem` extraction, binding, and
+  submission stages during startup.
+- `KARMA_RENDER_SYSTEM_DIAG_EVERY_FRAME=1`: keeps `RenderSystem` timing active
+  after startup; use only for short profiling runs.
+
+The current rendering startup optimization record is
+[RENDERING_STARTUP_OPTIMIZATION.md](RENDERING_STARTUP_OPTIMIZATION.md).
+
 ### Vulkan Adapter Selection
 On startup, the Diligent Vulkan backend enumerates compatible adapters and
 chooses a hardware adapter explicitly. The default preference order is:
@@ -308,6 +337,60 @@ KARMA_ENGINE_VSYNC=1 ./build/karma_navmesh_example
 
 Use this when tear-free pacing is more important than input latency, or when the
 target driver/compositor does not exhibit FIFO present stalls.
+
+## Post-Process Profiles
+Cameras select post-processing by name through
+`CameraComponent::post_process_profile_key`. An empty key uses the engine
+default profile. Missing named profiles also fall back to the default profile so
+camera authoring errors do not stop rendering.
+
+`EngineConfig::post_process` seeds the startup default profile. Games can
+register named profiles during `onStart()` or update them at runtime through the
+borrowed `post_process_profiles` registry:
+
+```cpp
+constexpr const char* kCinematicProfile = "camera/cinematic";
+
+renderer::PostProcessSettings cinematic{};
+cinematic.bloom_enabled = true;
+cinematic.bloom_threshold = 0.7f;
+cinematic.bloom_intensity = 0.35f;
+cinematic.tone_mapping_enabled = true;
+cinematic.tone_exposure = 1.1f;
+post_process_profiles->registerProfile(kCinematicProfile, cinematic);
+
+world->add(camera_entity, components::CameraComponent{
+    .is_primary = true,
+    .post_process_profile_key = kCinematicProfile,
+});
+```
+
+Offscreen render-target cameras resolve their own profile in the same way as the
+primary camera. Cameras only select profile intent; Diligent-owned post-process
+passes, render targets, bloom mip textures, and history resources stay inside
+the renderer backend.
+
+`RenderSystem` resolves the active `PostProcessSettings` immediately before
+each camera pass and passes those settings to `GraphicsDevice::renderLayer`.
+There is no global `GraphicsDevice::setPostProcessSettings` or backend-wide
+post-process state. Custom render paths that bypass `RenderSystem` must pass
+the resolved settings explicitly for each layer/target render.
+
+The Diligent backend loads built-in post-process HLSL assets from
+`src/rendering/renderer/backends/diligent/shaders/post_process/` in source-tree
+builds and installs them under `share/karma/shaders/diligent/post_process/`.
+`KARMA_DILIGENT_SHADER_DIR` can override the shader directory for local
+experiments. A minimal embedded fallback is used only if a required shader file
+cannot be found.
+
+Current Diligent pass layout:
+
+- shared fullscreen triangle vertex shader
+- bloom prefilter, downsample, and upsample/combine passes over a mip chain
+- final composite/tone/color pass
+- temporal resolve/history pass
+- SSAO, SSR, and DOF controls are still evaluated in the composite path until
+  the renderer grows dedicated G-buffer and motion-vector inputs
 
 ## Loading Splash
 Windowed apps show a lightweight engine-owned loading splash by default:
@@ -824,12 +907,36 @@ auto imported = karma::scene::instantiateGlbScenePrefab(
 Current behavior:
 
 - one structural ECS entity is created for each imported GLB node
+- imported local transforms are preserved and `scene::updateWorldTransforms(...)`
+  composes final world transforms
 - imported lights become `LightComponent`s on those node entities
 - imported point and spot lights are created with `casts_shadows = true`
 - mesh primitives become child render entities with key-only `MeshComponent`s backed by renderer-owned runtime mesh registrations
 - imported primitive materials preserve the source asset's PBR textures and scalar factors through registered material keys
-- optional GLB animation, skeleton, skin, joint-weight, and morph-target payloads are imported for rigged animation workflows
+- animation clips import transform and morph-weight channels
+- skinned primitives import joint indices, weights, skins, skeletons, and inverse
+  bind matrices
+- imported animation roots get an `AnimatorComponent` and can autoplay clip `0`
+- GPU skinning is the default for imported skinned meshes; CPU skinning remains
+  the fallback/reference path
+- morph target deltas and default weights import from GLB mesh primitives and
+  morph-weight animation updates runtime morph components
 - the full node tree is recreated in `scene::Scene`
+
+Animation runtime flow:
+
+- `AnimationSystem` samples imported clips on the root `AnimatorComponent`
+- transform channels write `LocalTransformComponent` values on imported node
+  entities
+- morph-weight channels write `MorphTargetComponent::weights` on the matching
+  renderable primitive entities
+- `scene::updateWorldTransforms(...)` composes final world transforms after
+  animation sampling
+- `CpuSkinningSystem` is the mesh deformation upload stage: it applies morph
+  targets on CPU, builds skinning palettes, leaves GPU-skinned meshes in bind or
+  morphed-bind pose, and uploads CPU-skinned fallback meshes when needed
+- `RenderSystem` submits visible meshes and GPU skinning palettes to the
+  renderer
 
 Imported light assumptions:
 
@@ -842,18 +949,22 @@ Imported light assumptions:
 
 Current v1 limitations:
 
-- imported node transforms are instantiated as baked world transforms
-- scene hierarchy is preserved, but parent-driven transform propagation is not implemented yet
 - imported material alpha/double-sided metadata is preserved, but the runtime still does not specialize draw state per material
 - GLB light scaling is currently importer-defined, not configurable per asset
 - cameras are not imported yet
-- imported skinned meshes currently use the CPU skinning fallback path until the GPU skinning renderer path is complete
+- retargeting clips between different skeletons is not implemented
+- glTF sparse accessors and external `.bin` buffers are not imported by the
+  explicit GLB metadata reader
+- morph target deformation is currently CPU-applied before GPU skinning; a pure
+  GPU morph path is still future renderer work
 
 ## Rendering Features
 - Directional light with shadows (PCF supported)
 - Cascaded shadow maps (CSM)
 - Point and spot lights via Forward+ tiled local lights (GPU light culling per screen tile)
 - Point-light shadows for `LightComponent::Type::Point` lights with `casts_shadows = true`
+- Camera-selected post-process profiles with Diligent bloom, tone/color,
+  SSAO, SSR, TAA, and DOF controls
 - Optional anisotropy + mip generation
 
 ## Shadow Defaults
@@ -884,6 +995,9 @@ Point-light shadow setup:
 
 Reference sample:
 
+- [../examples/main.cpp](../examples/main.cpp) is the tank/world movement
+  sample. It uses a shadow-casting directional sun with intensity `1.6`, plus
+  local point lights and a radar render-target camera.
 - [../examples/light_stress_example.cpp](../examples/light_stress_example.cpp) provides the current local-light probe workflow for `1-16` safe-mode shadowed point lights.
 - [../NEXT_AGENT.md](../NEXT_AGENT.md) carries active renderer/local-light handoff notes.
 

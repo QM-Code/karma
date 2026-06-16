@@ -2,6 +2,7 @@
 
 #include "../backend_internal.h"
 
+#include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
 #include <Graphics/GraphicsEngine/interface/Sampler.h>
 #include <Graphics/GraphicsEngine/interface/ShaderResourceBinding.h>
@@ -57,6 +58,7 @@ void DiligentBackend::setLights(const std::vector<renderer::LightData>& lights) 
 
 void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float intensity,
                                         bool draw_skybox) {
+  const bool path_changed = environment_map_ != path;
   if (environment_map_ == path &&
       environment_intensity_ == intensity &&
       draw_skybox_ == draw_skybox &&
@@ -68,6 +70,12 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
   environment_map_ = path;
   draw_skybox_ = draw_skybox;
   env_dirty_ = true;
+  if (path_changed) {
+    env_equirect_tex_.Release();
+    env_equirect_srv_.Release();
+    env_cubemap_tex_.Release();
+    env_cubemap_srv_.Release();
+  }
   if (!device_) {
     return;
   }
@@ -230,6 +238,50 @@ renderer::ParticlePassStats DiligentBackend::getParticlePassStats() const {
   return particle_pass_stats_;
 }
 
+renderer::RendererCommandStats DiligentBackend::getRendererCommandStats() const {
+  renderer::RendererCommandStats out{};
+  if (!context_) {
+    return out;
+  }
+
+  const auto& stats = context_->GetStats();
+  const auto& counters = stats.CommandCounters;
+  out.set_pipeline_state = counters.SetPipelineState;
+  out.commit_shader_resources = counters.CommitShaderResources;
+  out.set_vertex_buffers = counters.SetVertexBuffers;
+  out.set_index_buffer = counters.SetIndexBuffer;
+  out.set_render_targets = counters.SetRenderTargets;
+  out.set_viewports = counters.SetViewports;
+  out.set_scissor_rects = counters.SetScissorRects;
+  out.clear_render_target = counters.ClearRenderTarget;
+  out.clear_depth_stencil = counters.ClearDepthStencil;
+  out.draw = counters.Draw;
+  out.draw_indexed = counters.DrawIndexed;
+  out.draw_indirect = counters.DrawIndirect;
+  out.draw_indexed_indirect = counters.DrawIndexedIndirect;
+  out.multi_draw = counters.MultiDraw;
+  out.multi_draw_indexed = counters.MultiDrawIndexed;
+  out.dispatch_compute = counters.DispatchCompute;
+  out.dispatch_compute_indirect = counters.DispatchComputeIndirect;
+  out.draw_mesh = counters.DrawMesh;
+  out.draw_mesh_indirect = counters.DrawMeshIndirect;
+  out.trace_rays = counters.TraceRays;
+  out.trace_rays_indirect = counters.TraceRaysIndirect;
+  out.update_buffer = counters.UpdateBuffer;
+  out.copy_buffer = counters.CopyBuffer;
+  out.map_buffer = counters.MapBuffer;
+  out.update_texture = counters.UpdateTexture;
+  out.copy_texture = counters.CopyTexture;
+  out.map_texture_subresource = counters.MapTextureSubresource;
+  out.begin_query = counters.BeginQuery;
+  out.generate_mips = counters.GenerateMips;
+  out.resolve_texture_subresource = counters.ResolveTextureSubresource;
+  out.total_triangles = stats.GetTotalTriangleCount();
+  out.total_lines = stats.GetTotalLineCount();
+  out.total_points = stats.GetTotalPointCount();
+  return out;
+}
+
 void DiligentBackend::setParticleSystemStats(const renderer::ParticlePassStats& stats) {
   particle_pass_stats_.effect_binding_updates = stats.effect_binding_updates;
   particle_pass_stats_.simulated_emitters = stats.simulated_emitters;
@@ -344,6 +396,33 @@ void DiligentBackend::setLocalLightingSettings(float distance_damping,
 
 void DiligentBackend::setExposure(float exposure) {
   lighting_exposure_ = std::clamp(exposure, 0.01f, 32.0f);
+}
+
+void DiligentBackend::applyPostProcessSettingsForPass(
+    const renderer::PostProcessSettings& settings) {
+  renderer::PostProcessSettings clamped = settings;
+  clamped.bloom_threshold = std::clamp(clamped.bloom_threshold, 0.0f, 16.0f);
+  clamped.bloom_intensity = std::clamp(clamped.bloom_intensity, 0.0f, 8.0f);
+  clamped.bloom_radius = std::clamp(clamped.bloom_radius, 0.25f, 8.0f);
+  clamped.tone_exposure = std::clamp(clamped.tone_exposure, 0.01f, 16.0f);
+  clamped.tone_contrast = std::clamp(clamped.tone_contrast, 0.25f, 4.0f);
+  clamped.tone_saturation = std::clamp(clamped.tone_saturation, 0.0f, 4.0f);
+  clamped.ssao_radius = std::clamp(clamped.ssao_radius, 0.1f, 16.0f);
+  clamped.ssao_intensity = std::clamp(clamped.ssao_intensity, 0.0f, 4.0f);
+  clamped.ssao_power = std::clamp(clamped.ssao_power, 0.25f, 8.0f);
+  clamped.ssr_intensity = std::clamp(clamped.ssr_intensity, 0.0f, 2.0f);
+  clamped.ssr_max_roughness = std::clamp(clamped.ssr_max_roughness, 0.0f, 1.0f);
+  clamped.ssr_thickness = std::clamp(clamped.ssr_thickness, 0.001f, 1.0f);
+  clamped.taa_feedback = std::clamp(clamped.taa_feedback, 0.0f, 0.98f);
+  clamped.taa_sharpening = std::clamp(clamped.taa_sharpening, 0.0f, 1.0f);
+  clamped.dof_focus_depth = std::clamp(clamped.dof_focus_depth, 0.01f, 100000.0f);
+  clamped.dof_focus_range = std::clamp(clamped.dof_focus_range, 0.01f, 100000.0f);
+  clamped.dof_intensity = std::clamp(clamped.dof_intensity, 0.0f, 8.0f);
+  if (!clamped.temporal_antialiasing_enabled ||
+      !post_process_settings_.temporal_antialiasing_enabled) {
+    post_process_history_valid_ = false;
+  }
+  post_process_settings_ = clamped;
 }
 
 }  // namespace karma::renderer_backend

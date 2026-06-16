@@ -10,8 +10,12 @@ Start with these modules:
 - \ref karma_runtime for application lifecycle, input, UI, and engine wiring.
 - \ref karma_world for ECS, components, systems, and scene hierarchy.
 - \ref karma_rendering for renderer-facing APIs and render data contracts.
+- \ref karma_rendering_guide for camera-resolved post-processing, shadows, and
+  render submission boundaries.
 - \ref karma_simulation for animation, physics, collision, and navigation.
 - \ref karma_content for GLB import, mesh import, and prefab runtime APIs.
+- \ref karma_animation_guide for GLB animation, skinning, and morph-target
+  runtime flow.
 - \ref karma_features for optional visual and UI feature modules.
 - \ref karma_media for audio APIs.
 - \ref karma_platform for windows, input events, and networking.
@@ -21,6 +25,8 @@ Handwritten guides live beside this generated reference:
 
 - `docs/ENGINE_USAGE.md`
 - `docs/ARCHITECTURE.md`
+- `docs/ENGINE_USAGE.md#post-process-profiles`
+- `docs/RENDERING_STARTUP_OPTIMIZATION.md`
 - `docs/NAVIGATION.md`
 - `docs/PARTICLE_SYSTEM.md`
 - `docs/EFFECT_PREFABS.md`

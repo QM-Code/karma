@@ -23,6 +23,8 @@ If CMake reports that Doxygen is missing, install `doxygen` and rebuild the
 ## What Belongs Where
 
 - Public API contracts belong in Doxygen comments in `include/karma/**`.
+- Official narrative API pages belong under `docs/api/` and must be listed in
+  `docs/Doxyfile.in`.
 - Durable workflow guides belong under `docs/`.
 - Runnable examples belong under `examples/`.
 - Short-lived continuation notes belong in `NEXT_AGENT.md`.
@@ -44,3 +46,11 @@ When adding or changing public APIs:
 
 Small data-only component fields do not need a paragraph each, but the component
 itself should explain how the fields are interpreted.
+
+Current handwritten generated-reference pages:
+
+- `docs/api/mainpage.md`: generated API entry point.
+- `docs/api/animation.md`: animation, skinning, and morph-target runtime flow.
+- `docs/api/rendering.md`: renderer submission, camera post-process profiles,
+  backend shader assets, and shadow authoring.
+- `docs/api/groups.dox`: Doxygen module/group definitions.

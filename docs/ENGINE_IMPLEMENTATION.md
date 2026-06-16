@@ -10,15 +10,29 @@ Karma is a C++20 client/server 3D game engine with a layered architecture and a 
 - **Backends** are selected at build time (GLFW/SDL, Diligent, Jolt/Bullet, ENet, etc.).
 
 ## Rendering
-- **Renderer entry**: `src/rendering/renderer/render_system.cpp` + `src/rendering/renderer/device.cpp`.
+- **Renderer entry**: `src/rendering/renderer/render_system.cpp` +
+  `src/rendering/renderer/render_system/*` + `src/rendering/renderer/device.cpp`.
 - **Backend abstraction**: `include/karma/rendering/renderer/backend.hpp`.
 - **Diligent backend**: `src/rendering/renderer/backends/diligent/*`.
   - Handles swapchain creation, pipelines, texture uploads, shadow maps, etc.
+- **Diligent post-process passes**:
+  `src/rendering/renderer/backends/diligent/passes/post_process/*`.
+  - Loads backend-owned shader assets from
+    `src/rendering/renderer/backends/diligent/shaders/post_process/`.
+  - Owns fullscreen composite, bloom mip-chain, temporal history, and fallback
+    shader loading.
+
+Post-processing is camera-resolved. `EngineApp` owns a
+`PostProcessProfileLibrary`, `CameraComponent::post_process_profile_key`
+selects a named profile, and `RenderSystem` passes resolved settings into each
+`GraphicsDevice::renderLayer` call. There is no global backend
+`setPostProcessSettings` API.
 
 ### Shadows
 - Directional light and shadow pipeline live in the Diligent backend.
 - Shadow settings are controlled via engine config (bias, map size, pcf radius).
 - Cascaded shadow maps (CSM) are integrated in the renderer.
+- Point-light shadows are budgeted through `point_shadow_max_lights`.
 
 ## UI / Draw Data Integration
 - Core types: `include/karma/runtime/app/ui_draw_data.h` + `include/karma/runtime/app/ui_context.h`.

@@ -7,6 +7,7 @@
 namespace karma::renderer {
 class GraphicsDevice;
 class MaterialLibrary;
+class PostProcessProfileLibrary;
 }  // namespace karma::renderer
 
 namespace karma::particles {
@@ -25,6 +26,8 @@ struct RuntimeModuleContext {
   scene::Scene* scene = nullptr;
   renderer::GraphicsDevice* graphics = nullptr;
   renderer::MaterialLibrary* materials = nullptr;
+  /// Borrowed registry for named camera post-process profiles.
+  renderer::PostProcessProfileLibrary* post_process_profiles = nullptr;
   particles::ParticleLibrary* particle_effects = nullptr;
 };
 

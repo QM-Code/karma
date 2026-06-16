@@ -8,7 +8,9 @@
 #include <Graphics/GraphicsTools/interface/RenderStateCache.hpp>
 #include <filesystem>
 #include <cstdint>
+#include <cstddef>
 #include <array>
+#include <limits>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -41,6 +43,24 @@ struct aiMaterial;
 namespace karma::renderer_backend {
 
 struct DrawConstants;
+
+struct PostProcessTexture {
+  Diligent::RefCntAutoPtr<Diligent::ITexture> texture;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> rtv;
+  int width = 0;
+  int height = 0;
+};
+
+struct PostProcessPassResources {
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
+  Diligent::IShaderResourceVariable* source_var = nullptr;
+  Diligent::IShaderResourceVariable* depth_var = nullptr;
+  Diligent::IShaderResourceVariable* bloom_var = nullptr;
+  Diligent::IShaderResourceVariable* history_var = nullptr;
+  Diligent::IShaderResourceVariable* sampler_var = nullptr;
+};
 
 class DiligentBackend final : public Backend {
  public:
@@ -80,7 +100,9 @@ class DiligentBackend final : public Backend {
   void submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) override;
   void setParticleSystemStats(const renderer::ParticlePassStats& stats) override;
   void retireInstance(renderer::InstanceId instance) override;
-  void renderLayer(renderer::LayerId layer, renderer::RenderTargetId target) override;
+  void renderLayer(renderer::LayerId layer,
+                   renderer::RenderTargetId target,
+                   const renderer::PostProcessSettings& post_process) override;
   void drawLine(const math::Vec3& start, const math::Vec3& end,
                 const math::Color& color, bool depth_test, float thickness) override;
 
@@ -100,6 +122,7 @@ class DiligentBackend final : public Backend {
                               int max_local_lights) override;
   renderer::ForwardPlusStats getForwardPlusStats() const override;
   renderer::ParticlePassStats getParticlePassStats() const override;
+  renderer::RendererCommandStats getRendererCommandStats() const override;
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,
@@ -145,6 +168,8 @@ class DiligentBackend final : public Backend {
   };
 
   struct MaterialRecord {
+    static constexpr size_t kTextureCoordSlotCount = 12;
+
     renderer::MaterialDesc desc;
     glm::vec4 base_color_factor{1.0f, 1.0f, 1.0f, 1.0f};
     glm::vec3 emissive_factor{0.0f, 0.0f, 0.0f};
@@ -152,6 +177,17 @@ class DiligentBackend final : public Backend {
     float roughness_factor = 1.0f;
     float normal_scale = 1.0f;
     float occlusion_strength = 1.0f;
+    float emissive_strength = 1.0f;
+    float clearcoat_factor = 0.0f;
+    float clearcoat_roughness_factor = 0.0f;
+    glm::vec3 sheen_color_factor{0.0f, 0.0f, 0.0f};
+    float sheen_roughness_factor = 0.0f;
+    float anisotropy_factor = 0.0f;
+    float transmission_factor = 0.0f;
+    float ior = 1.5f;
+    float thickness_factor = 0.0f;
+    float attenuation_distance = std::numeric_limits<float>::infinity();
+    glm::vec3 attenuation_color{1.0f, 1.0f, 1.0f};
     renderer::MaterialDesc::ShadingModel shading_model =
         renderer::MaterialDesc::ShadingModel::Standard;
     float shell_fresnel_power = 5.0f;
@@ -190,6 +226,15 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::ITextureView> metallic_roughness_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> occlusion_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> emissive_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> clearcoat_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> clearcoat_roughness_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> clearcoat_normal_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> sheen_color_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> sheen_roughness_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> transmission_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> thickness_srv;
+    std::array<glm::vec4, kTextureCoordSlotCount> texcoord_row0{};
+    std::array<glm::vec4, kTextureCoordSlotCount> texcoord_row1{};
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_double_sided_srb;
@@ -262,10 +307,16 @@ class DiligentBackend final : public Backend {
   };
 
   struct TransparentForwardDraw {
+    enum class SceneSampleMode : uint32_t {
+      None = 0,
+      ReflectionOverlay = 1,
+    };
+
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
     std::vector<glm::mat4> skinning_palette;
     float depth = 0.0f;
+    SceneSampleMode scene_sample_mode = SceneSampleMode::None;
   };
 
   struct SkinnedForwardDraw {
@@ -277,6 +328,7 @@ class DiligentBackend final : public Backend {
   struct ForwardLayerState {
     std::vector<ForwardBatch> opaque_batches;
     std::vector<SkinnedForwardDraw> skinned_opaque_draws;
+    std::vector<TransparentForwardDraw> scene_reflection_draws;
     std::vector<TransparentForwardDraw> transparent_draws;
     std::vector<TransparentForwardDraw> pre_particle_scene_sample_draws;
     std::vector<TransparentForwardDraw> post_particle_draws;
@@ -394,6 +446,30 @@ class DiligentBackend final : public Backend {
                                            int height,
                                            Diligent::TEXTURE_FORMAT format);
   void ensureParticleFallbackDepthResource();
+  void applyPostProcessSettingsForPass(const renderer::PostProcessSettings& settings);
+  void ensurePostProcessResources(int width,
+                                  int height,
+                                  Diligent::TEXTURE_FORMAT format);
+  bool ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format);
+  void applyPostProcessChain(Diligent::ITexture* scene_texture,
+                             Diligent::ITextureView* scene_rtv,
+                             Diligent::ITextureView* scene_depth_srv,
+                             int width,
+                             int height,
+                             Diligent::TEXTURE_FORMAT format);
+  bool runPostProcessPass(PostProcessPassResources& pass,
+                          Diligent::ITextureView* source_srv,
+                          Diligent::ITextureView* depth_srv,
+                          Diligent::ITextureView* bloom_srv,
+                          Diligent::ITextureView* history_srv,
+                          Diligent::ITextureView* target_rtv,
+                          int width,
+                          int height,
+                          bool history_valid);
+  Diligent::ITextureView* runBloomChain(Diligent::ITextureView* source_srv,
+                                        int width,
+                                        int height,
+                                        Diligent::TEXTURE_FORMAT format);
   void uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
                                                                    int width,
@@ -422,6 +498,13 @@ class DiligentBackend final : public Backend {
                                              const aiMaterial& material,
                                              const std::filesystem::path& asset_path);
   void initializeMaterialBindings(MaterialRecord& record);
+  void initializeTextureCoordTransforms(MaterialRecord& record) const;
+  void setTextureCoordTransform(MaterialRecord& record,
+                                const aiMaterial& material,
+                                unsigned int texture_type,
+                                unsigned int texture_index,
+                                unsigned int uv_index,
+                                size_t slot) const;
   void bindShadowResourcesToSrb(Diligent::IShaderResourceBinding* srb) const;
   const ImportedMaterialTemplateCacheEntry* getImportedMaterialTemplates(
       const std::filesystem::path& path);
@@ -436,7 +519,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path render_state_cache_path_;
   bool shader_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 15;
+  std::uint32_t shader_cache_version_ = 18;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
@@ -720,6 +803,29 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_half_res_alpha_rtv_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> particle_fallback_depth_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_fallback_depth_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> post_process_ping_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_ping_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_ping_rtv_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> post_process_pong_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_pong_srv_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_pong_rtv_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITexture>, 2> post_process_history_tex_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, 2> post_process_history_srv_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, 2> post_process_history_rtv_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> post_process_cb_;
+  PostProcessPassResources post_process_bloom_prefilter_pass_;
+  PostProcessPassResources post_process_bloom_downsample_pass_;
+  PostProcessPassResources post_process_bloom_upsample_pass_;
+  PostProcessPassResources post_process_composite_pass_;
+  PostProcessPassResources post_process_temporal_pass_;
+  std::vector<PostProcessTexture> post_process_bloom_mips_;
+  std::vector<PostProcessTexture> post_process_bloom_scratch_mips_;
+  int post_process_width_ = 0;
+  int post_process_height_ = 0;
+  Diligent::TEXTURE_FORMAT post_process_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  Diligent::TEXTURE_FORMAT post_process_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  int post_process_history_index_ = 0;
+  bool post_process_history_valid_ = false;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_base_color_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_normal_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_metallic_roughness_tex_;
@@ -810,6 +916,7 @@ class DiligentBackend final : public Backend {
   bool ao_affects_local_lights_ = false;
   float local_light_directional_shadow_lift_ = 0.0f;
   float lighting_exposure_ = 1.0f;
+  renderer::PostProcessSettings post_process_settings_{};
   int point_shadow_map_size_ = 1024;
   int point_shadow_max_lights_ = 2;
   size_t ui_vb_size_ = 0;

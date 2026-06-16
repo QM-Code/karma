@@ -206,6 +206,10 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
         const size_t morph_target_count = output_count / divisor;
         animation::MorphTargetTrack track{};
         track.target_node_index = target_node_index;
+        const Json& target_node_json = doc.json["nodes"][gltf_target_node];
+        if (target_node_json.contains("mesh") && target_node_json["mesh"].is_number_unsigned()) {
+          track.target_mesh_index = target_node_json["mesh"].get<uint32_t>();
+        }
         track.interpolation = interpolation;
         track.weight_keys.reserve(key_count);
         for (size_t key_index = 0; key_index < key_count; ++key_index) {

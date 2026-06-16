@@ -34,8 +34,8 @@ struct VertexSkinInfluence {
 /// Skinning data for a renderable mesh.
 ///
 /// GLB import fills bind mesh, influences, joint entities, and inverse bind
-/// matrices. `CpuSkinningSystem` currently updates `skinned_mesh` and uploads
-/// it as a correctness/fallback path.
+/// matrices. `CpuSkinningSystem` builds `joint_palette` for GPU skinning and
+/// updates `skinned_mesh` only for CPU fallback paths.
 struct SkinnedMeshComponent : ecs::ComponentTag {
   geometry::MeshData bind_mesh;
   geometry::MeshData skinned_mesh;

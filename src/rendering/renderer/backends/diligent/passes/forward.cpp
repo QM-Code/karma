@@ -155,11 +155,13 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
 
   out_state.opaque_batches.clear();
   out_state.skinned_opaque_draws.clear();
+  out_state.scene_reflection_draws.clear();
   out_state.transparent_draws.clear();
   out_state.pre_particle_scene_sample_draws.clear();
   out_state.post_particle_draws.clear();
   out_state.opaque_batches.reserve(instances_.size());
   out_state.skinned_opaque_draws.reserve(instances_.size() / 4 + 1);
+  out_state.scene_reflection_draws.reserve(instances_.size() / 4 + 1);
   out_state.transparent_draws.reserve(instances_.size());
   out_state.pre_particle_scene_sample_draws.reserve(instances_.size() / 4 + 1);
   out_state.post_particle_draws.reserve(instances_.size() / 4 + 1);
@@ -233,7 +235,17 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
     if (!mat) {
       return false;
     }
-    return mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume;
+    return mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
+           (mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard &&
+            mat->transmission_factor > 0.001f);
+  };
+
+  auto uses_scene_reflection_overlay = [&](const MaterialRecord* mat) {
+    if (!mat || mat->shading_model != renderer::MaterialDesc::ShadingModel::Standard) {
+      return false;
+    }
+    return mat->clearcoat_factor > 0.001f ||
+           (mat->metallic_factor > 0.45f && mat->roughness_factor < 0.82f);
   };
 
   auto resolve_transparent_sort_depth = [&](const MaterialRecord* mat,
@@ -293,7 +305,12 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
             .skinned = instance.skinning_enabled,
         };
         const MaterialRecord* mat = lookup_material(mat_id);
-        const bool transparent = (mat && mat->desc.transparent) || mesh.base_color.a < 0.999f;
+        const bool transparent = (mat &&
+                                  (mat->desc.transparent ||
+                                   (mat->shading_model ==
+                                        renderer::MaterialDesc::ShadingModel::Standard &&
+                                    mat->transmission_factor > 0.001f))) ||
+                                 mesh.base_color.a < 0.999f;
         if (transparent) {
           auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                    ? out_state.pre_particle_scene_sample_draws
@@ -308,6 +325,15 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           });
         } else {
           append_opaque_forward_batch(key, instance.transform, instance.skinning_palette);
+          if (uses_scene_reflection_overlay(mat)) {
+            out_state.scene_reflection_draws.push_back(TransparentForwardDraw{
+                .key = key,
+                .transform = instance.transform,
+                .skinning_palette = instance.skinning_palette,
+                .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
+                .scene_sample_mode = TransparentForwardDraw::SceneSampleMode::ReflectionOverlay,
+            });
+          }
         }
       }
     } else {
@@ -322,7 +348,12 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           .skinned = instance.skinning_enabled,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
-      const bool transparent = (mat && mat->desc.transparent) || mesh.base_color.a < 0.999f;
+      const bool transparent = (mat &&
+                                (mat->desc.transparent ||
+                                 (mat->shading_model ==
+                                      renderer::MaterialDesc::ShadingModel::Standard &&
+                                  mat->transmission_factor > 0.001f))) ||
+                               mesh.base_color.a < 0.999f;
       if (transparent) {
         auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                  ? out_state.pre_particle_scene_sample_draws
@@ -337,6 +368,15 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         });
       } else {
         append_opaque_forward_batch(key, instance.transform, instance.skinning_palette);
+        if (uses_scene_reflection_overlay(mat)) {
+          out_state.scene_reflection_draws.push_back(TransparentForwardDraw{
+              .key = key,
+              .transform = instance.transform,
+              .skinning_palette = instance.skinning_palette,
+              .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
+              .scene_sample_mode = TransparentForwardDraw::SceneSampleMode::ReflectionOverlay,
+          });
+        }
       }
     }
   }
@@ -387,6 +427,9 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
 
   std::sort(out_state.transparent_draws.begin(),
             out_state.transparent_draws.end(),
+            compare_transparent_draws);
+  std::sort(out_state.scene_reflection_draws.begin(),
+            out_state.scene_reflection_draws.end(),
             compare_transparent_draws);
   std::sort(out_state.pre_particle_scene_sample_draws.begin(),
             out_state.pre_particle_scene_sample_draws.end(),
@@ -564,6 +607,50 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params2[1] = mat ? mat->shell_body_strength : 1.0f;
       constants.material_params2[2] = (mat && mat->desc.unlit) ? 1.0f : 0.0f;
       constants.material_params2[3] = 0.0f;
+    }
+    if (!mat || mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard) {
+      constants.material_params3[0] = mat ? mat->clearcoat_factor : 0.0f;
+      constants.material_params3[1] = mat ? mat->clearcoat_roughness_factor : 0.0f;
+      constants.material_params3[2] = mat ? mat->sheen_roughness_factor : 0.0f;
+      constants.material_params3[3] = mat ? mat->anisotropy_factor : 0.0f;
+      const glm::vec3 sheen_color = mat ? mat->sheen_color_factor : glm::vec3(0.0f);
+      constants.material_params4[0] = sheen_color.r;
+      constants.material_params4[1] = sheen_color.g;
+      constants.material_params4[2] = sheen_color.b;
+      constants.material_params4[3] = mat ? mat->transmission_factor : 0.0f;
+      constants.material_params5[0] = mat ? mat->ior : 1.5f;
+      constants.material_params5[1] = mat ? mat->thickness_factor : 0.0f;
+      constants.material_params5[2] =
+          (mat && std::isfinite(mat->attenuation_distance)) ? mat->attenuation_distance : 0.0f;
+      constants.material_params5[3] = 0.0f;
+      const glm::vec3 attenuation_color = mat ? mat->attenuation_color : glm::vec3(1.0f);
+      constants.material_params6[0] = attenuation_color.r;
+      constants.material_params6[1] = attenuation_color.g;
+      constants.material_params6[2] = attenuation_color.b;
+      constants.material_params6[3] = 0.0f;
+      if (mat) {
+        for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
+          constants.texcoord_row0[slot][0] = mat->texcoord_row0[slot].x;
+          constants.texcoord_row0[slot][1] = mat->texcoord_row0[slot].y;
+          constants.texcoord_row0[slot][2] = mat->texcoord_row0[slot].z;
+          constants.texcoord_row0[slot][3] = mat->texcoord_row0[slot].w;
+          constants.texcoord_row1[slot][0] = mat->texcoord_row1[slot].x;
+          constants.texcoord_row1[slot][1] = mat->texcoord_row1[slot].y;
+          constants.texcoord_row1[slot][2] = mat->texcoord_row1[slot].z;
+          constants.texcoord_row1[slot][3] = mat->texcoord_row1[slot].w;
+        }
+      } else {
+        for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
+          constants.texcoord_row0[slot][0] = 1.0f;
+          constants.texcoord_row0[slot][1] = 0.0f;
+          constants.texcoord_row0[slot][2] = 0.0f;
+          constants.texcoord_row0[slot][3] = 0.0f;
+          constants.texcoord_row1[slot][0] = 0.0f;
+          constants.texcoord_row1[slot][1] = 1.0f;
+          constants.texcoord_row1[slot][2] = 0.0f;
+          constants.texcoord_row1[slot][3] = 0.0f;
+        }
+      }
     }
     {
       Diligent::MapHelper<DrawConstants> mapped(
@@ -982,9 +1069,13 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
                                                renderer::MeshId mesh_id,
                                                const MeshRecord& mesh,
                                                const MaterialRecord* mat,
+                                               TransparentForwardDraw::SceneSampleMode scene_sample_mode,
                                                renderer::MaterialId& last_constants_material,
-                                               renderer::MeshId& last_constants_mesh) -> bool {
+                                               renderer::MeshId& last_constants_mesh,
+                                               TransparentForwardDraw::SceneSampleMode&
+                                                   last_constants_scene_sample_mode) -> bool {
     if (material_id == last_constants_material &&
+        scene_sample_mode == last_constants_scene_sample_mode &&
         (material_id != renderer::kInvalidMaterial || mesh_id == last_constants_mesh)) {
       return true;
     }
@@ -1067,6 +1158,51 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params2[2] = (mat && mat->desc.unlit) ? 1.0f : 0.0f;
       constants.material_params2[3] = 0.0f;
     }
+    if (!mat || mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard) {
+      constants.material_params3[0] = mat ? mat->clearcoat_factor : 0.0f;
+      constants.material_params3[1] = mat ? mat->clearcoat_roughness_factor : 0.0f;
+      constants.material_params3[2] = mat ? mat->sheen_roughness_factor : 0.0f;
+      constants.material_params3[3] = mat ? mat->anisotropy_factor : 0.0f;
+      const glm::vec3 sheen_color = mat ? mat->sheen_color_factor : glm::vec3(0.0f);
+      constants.material_params4[0] = sheen_color.r;
+      constants.material_params4[1] = sheen_color.g;
+      constants.material_params4[2] = sheen_color.b;
+      constants.material_params4[3] = mat ? mat->transmission_factor : 0.0f;
+      constants.material_params5[0] = mat ? mat->ior : 1.5f;
+      constants.material_params5[1] = mat ? mat->thickness_factor : 0.0f;
+      constants.material_params5[2] =
+          (mat && std::isfinite(mat->attenuation_distance)) ? mat->attenuation_distance : 0.0f;
+      constants.material_params5[3] = 0.0f;
+      const glm::vec3 attenuation_color = mat ? mat->attenuation_color : glm::vec3(1.0f);
+      constants.material_params6[0] = attenuation_color.r;
+      constants.material_params6[1] = attenuation_color.g;
+      constants.material_params6[2] = attenuation_color.b;
+      constants.material_params6[3] =
+          static_cast<float>(static_cast<uint32_t>(scene_sample_mode));
+      if (mat) {
+        for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
+          constants.texcoord_row0[slot][0] = mat->texcoord_row0[slot].x;
+          constants.texcoord_row0[slot][1] = mat->texcoord_row0[slot].y;
+          constants.texcoord_row0[slot][2] = mat->texcoord_row0[slot].z;
+          constants.texcoord_row0[slot][3] = mat->texcoord_row0[slot].w;
+          constants.texcoord_row1[slot][0] = mat->texcoord_row1[slot].x;
+          constants.texcoord_row1[slot][1] = mat->texcoord_row1[slot].y;
+          constants.texcoord_row1[slot][2] = mat->texcoord_row1[slot].z;
+          constants.texcoord_row1[slot][3] = mat->texcoord_row1[slot].w;
+        }
+      } else {
+        for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
+          constants.texcoord_row0[slot][0] = 1.0f;
+          constants.texcoord_row0[slot][1] = 0.0f;
+          constants.texcoord_row0[slot][2] = 0.0f;
+          constants.texcoord_row0[slot][3] = 0.0f;
+          constants.texcoord_row1[slot][0] = 0.0f;
+          constants.texcoord_row1[slot][1] = 1.0f;
+          constants.texcoord_row1[slot][2] = 0.0f;
+          constants.texcoord_row1[slot][3] = 0.0f;
+        }
+      }
+    }
     {
       Diligent::MapHelper<DrawConstants> mapped(
           context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
@@ -1078,6 +1214,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     }
     last_constants_material = material_id;
     last_constants_mesh = mesh_id;
+    last_constants_scene_sample_mode = scene_sample_mode;
     return true;
   };
 
@@ -1271,6 +1408,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   Diligent::ITextureView* bound_scene_depth = nullptr;
   renderer::MaterialId last_constants_material = renderer::kInvalidMaterial;
   renderer::MeshId last_constants_mesh = renderer::kInvalidMesh;
+  auto last_constants_scene_sample_mode = TransparentForwardDraw::SceneSampleMode::None;
   Diligent::Uint32 draw_count = 0;
   const std::vector<glm::mat4> empty_skinning_palette;
 
@@ -1302,16 +1440,21 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
                                            draw.key.mesh,
                                            mesh,
                                            mat,
+                                           draw.scene_sample_mode,
                                            last_constants_material,
-                                           last_constants_mesh)) {
+                                           last_constants_mesh,
+                                           last_constants_scene_sample_mode)) {
       continue;
     }
 
     Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, pipeline);
-    if (mat &&
-        (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-         mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) &&
-        srb) {
+    if (srb &&
+        (draw.scene_sample_mode != TransparentForwardDraw::SceneSampleMode::None ||
+         (mat &&
+          (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
+           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid ||
+           (mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard &&
+            mat->transmission_factor > 0.001f))))) {
       Diligent::ITextureView* desired_scene_color =
           scene_color_sample_srv ? scene_color_sample_srv : default_base_color_;
       Diligent::ITextureView* desired_scene_depth =

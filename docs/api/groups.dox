@@ -70,8 +70,11 @@ Renderer-facing APIs, material/mesh/texture handles, UI draw submission, scene
 extraction, particle submission, and backend abstractions.
 
 Gameplay code should prefer ECS components and high-level helpers. Use renderer
-types directly for resources, diagnostics, picking, debug drawing, or custom
-runtime modules.
+types directly for resources, diagnostics, picking, debug drawing, custom
+runtime modules, or named post-process profile registration.
+
+See \ref karma_rendering_guide for camera-resolved post-processing and render
+submission details.
 */
 
 /**
@@ -86,11 +89,14 @@ agnostic.
 /**
 \defgroup karma_animation Animation
 \ingroup karma_simulation
-Animation clips, sampling, pose math, and CPU skinning support.
+Animation clips, sampling, pose math, morph targets, and skinning support.
 
 Node animation writes local transforms. Scene hierarchy composition writes
-world transforms. CPU skinning is a correctness/fallback path and not the final
-GPU skinning architecture.
+world transforms. Imported skinned meshes use GPU skinning by default, while CPU
+skinning and CPU morph deformation remain correctness/fallback paths.
+
+See \ref karma_animation_guide for the GLB animation, skinning, and morph-target
+runtime flow.
 */
 
 /**

@@ -7,6 +7,11 @@ hitch before moving work into startup or background warm-up. Use existing
 env-gated logging where possible, add focused renderer/particle resource timing,
 and keep runtime behavior unchanged except for diagnostics overhead when enabled.
 
+Status: the rendering startup portion has been implemented and measured with
+`karma_diligent_gltf_viewer_example`. See
+[RENDERING_STARTUP_OPTIMIZATION.md](RENDERING_STARTUP_OPTIMIZATION.md) for the
+current benchmark commands, results, and remaining hotspots.
+
 ## Key Changes
 
 - Extend `KARMA_ENGINE_STARTUP_DIAG=1` into a complete startup timeline:

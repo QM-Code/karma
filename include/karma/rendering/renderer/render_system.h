@@ -13,6 +13,7 @@
 #include "karma/world/ecs/world.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/rendering/renderer/material_library.h"
+#include "karma/rendering/renderer/post_process_profile_library.h"
 #include "karma/world/scene/scene.h"
 
 namespace karma::renderer {
@@ -21,13 +22,21 @@ namespace karma::renderer {
 /// Extracts ECS render data and submits it to `GraphicsDevice`.
 ///
 /// `RenderSystem` resolves mesh/material keys, maintains shared renderer
-/// resources, extracts cameras/lights/environment, submits skinned and static
-/// meshes, and cleans up renderer resources for destroyed entities.
+/// resources, extracts cameras/lights/environment, resolves camera-selected
+/// post-process profiles, submits offscreen camera passes, submits the primary
+/// camera pass, and cleans up renderer resources for destroyed entities.
 class RenderSystem {
  public:
-  /// Binds a graphics device and material library.
-  RenderSystem(GraphicsDevice& device, const MaterialLibrary& material_library)
-      : device_(device), material_library_(&material_library) {}
+  /// Binds renderer extraction to the device and shared resource registries.
+  ///
+  /// `post_process_profiles` must outlive the render system; `EngineApp` owns
+  /// both and wires this dependency during startup.
+  RenderSystem(GraphicsDevice& device,
+               const MaterialLibrary& material_library,
+               const PostProcessProfileLibrary& post_process_profiles)
+      : device_(device),
+        material_library_(&material_library),
+        post_process_profiles_(&post_process_profiles) {}
 
   /// Extracts the world/scene for one frame and submits render data.
   void update(ecs::World& world, scene::Scene& scene, float dt, float interpolation_alpha);
@@ -85,6 +94,7 @@ class RenderSystem {
 
   GraphicsDevice& device_;
   const MaterialLibrary* material_library_ = nullptr;
+  const PostProcessProfileLibrary* post_process_profiles_ = nullptr;
   std::unordered_map<uint64_t, RenderRecord> records_;
   std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
   std::unordered_map<std::string, SharedMaterialVariant> shared_material_variants_;

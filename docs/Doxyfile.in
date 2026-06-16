@@ -6,6 +6,8 @@ OUTPUT_DIRECTORY       = @KARMA_DOXYGEN_OUTPUT_DIR@
 INPUT                  = @KARMA_DOXYGEN_INPUT_DIR@/include/karma \
                          @KARMA_DOXYGEN_GENERATED_INCLUDE_DIR@/karma \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/api/mainpage.md \
+                         @KARMA_DOXYGEN_INPUT_DIR@/docs/api/animation.md \
+                         @KARMA_DOXYGEN_INPUT_DIR@/docs/api/rendering.md \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/api/groups.dox \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/API.md
 USE_MDFILE_AS_MAINPAGE = @KARMA_DOXYGEN_INPUT_DIR@/docs/api/mainpage.md

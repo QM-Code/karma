@@ -4,6 +4,8 @@
 
 #include "backend_internal.h"
 
+#include "karma/core/time.h"
+
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
@@ -13,6 +15,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdint>
+#include <limits>
 
 #include <Primitives/interface/BasicTypes.h>
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
@@ -32,6 +35,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <spdlog/spdlog.h>
 
 #include "../../../../third_party/stb_image.h"
 #if !defined(KARMA_WINDOW_BACKEND_SDL)
@@ -66,10 +70,58 @@ std::filesystem::path defaultShaderCachePath(std::uint32_t version) {
   const std::string filename = "karma_shader_cache_v" + std::to_string(version) + ".diligentcache";
   return base / "karma" / filename;
 }
+
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 && std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 && std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
 }  // namespace
 
 bool isValidSize(int width, int height) {
   return width > 0 && height > 0;
+}
+
+bool startupDiagnosticsEnabled() {
+  static const bool enabled =
+      envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG")) ||
+      envFlagEnabled(std::getenv("KARMA_RENDER_STARTUP_DIAG"));
+  return enabled;
+}
+
+bool renderResourceDiagnosticsEnabled() {
+  static const bool enabled =
+      startupDiagnosticsEnabled() || envFlagEnabled(std::getenv("KARMA_RENDER_RESOURCE_DIAG"));
+  return enabled;
+}
+
+void logStartupDiag(const char* area,
+                    const char* stage,
+                    core::SteadyClock::time_point start,
+                    core::SteadyClock::time_point end) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info("Engine startup diag: area={} stage={} ms={:.2f}",
+               area ? area : "unknown",
+               stage ? stage : "unknown",
+               core::elapsedMilliseconds(start, end));
+}
+
+void logRenderResourceDiag(const char* area,
+                           const char* stage,
+                           core::SteadyClock::time_point start,
+                           core::SteadyClock::time_point end) {
+  if (!renderResourceDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info("Render resource diag: area={} stage={} ms={:.2f}",
+               area ? area : "unknown",
+               stage ? stage : "unknown",
+               core::elapsedMilliseconds(start, end));
 }
 
 std::vector<unsigned char> readFileBytes(const std::filesystem::path& path) {
@@ -77,7 +129,23 @@ std::vector<unsigned char> readFileBytes(const std::filesystem::path& path) {
   if (!file) {
     return {};
   }
-  return std::vector<unsigned char>(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  file.seekg(0, std::ios::end);
+  const std::streamoff size = file.tellg();
+  if (size <= 0 ||
+      static_cast<unsigned long long>(size) >
+          static_cast<unsigned long long>(std::numeric_limits<size_t>::max()) ||
+      static_cast<unsigned long long>(size) >
+          static_cast<unsigned long long>(std::numeric_limits<std::streamsize>::max())) {
+    return {};
+  }
+  file.seekg(0, std::ios::beg);
+
+  std::vector<unsigned char> bytes(static_cast<size_t>(size));
+  file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  if (!file) {
+    return {};
+  }
+  return bytes;
 }
 
 LoadedImage loadImageFromMemory(const unsigned char* data, size_t size) {
@@ -172,6 +240,7 @@ geometry::MeshData combineMeshes(const aiScene& scene,
     combined.vertices.reserve(base_vertex + mesh->mNumVertices);
     combined.normals.reserve(base_vertex + mesh->mNumVertices);
     combined.uvs.reserve(base_vertex + mesh->mNumVertices);
+    combined.uvs1.reserve(base_vertex + mesh->mNumVertices);
     combined.tangents.reserve(base_vertex + mesh->mNumVertices);
 
     for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
@@ -190,6 +259,13 @@ geometry::MeshData combineMeshes(const aiScene& scene,
         combined.uvs.emplace_back(uv.x, uv.y);
       } else {
         combined.uvs.emplace_back(0.0f, 0.0f);
+      }
+
+      if (mesh->HasTextureCoords(1)) {
+        const auto& uv = mesh->mTextureCoords[1][v];
+        combined.uvs1.emplace_back(uv.x, uv.y);
+      } else {
+        combined.uvs1.emplace_back(combined.uvs.back());
       }
 
       if (mesh->HasTangentsAndBitangents()) {
@@ -237,10 +313,11 @@ void copyMat4(float out[16], const glm::mat4& m) {
 std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh) {
   const bool has_normals = mesh.normals.size() == mesh.vertices.size();
   const bool has_uvs = mesh.uvs.size() == mesh.vertices.size();
+  const bool has_uvs1 = mesh.uvs1.size() == mesh.vertices.size();
   const bool has_tangents = mesh.tangents.size() == mesh.vertices.size();
   const bool has_joint_indices = mesh.joint_indices.size() == mesh.vertices.size();
   const bool has_joint_weights = mesh.joint_weights.size() == mesh.vertices.size();
-  const size_t stride = 20;
+  const size_t stride = 22;
   std::vector<float> data;
   data.reserve(mesh.vertices.size() * stride);
   for (size_t i = 0; i < mesh.vertices.size(); ++i) {
@@ -260,6 +337,9 @@ std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh) {
     const glm::vec2 uv = has_uvs ? mesh.uvs[i] : glm::vec2(0.0f, 0.0f);
     data.push_back(uv.x);
     data.push_back(uv.y);
+    const glm::vec2 uv1 = has_uvs1 ? mesh.uvs1[i] : uv;
+    data.push_back(uv1.x);
+    data.push_back(uv1.y);
     const glm::uvec4 joints = has_joint_indices ? mesh.joint_indices[i] : glm::uvec4(0u);
     data.push_back(static_cast<float>(joints.x));
     data.push_back(static_cast<float>(joints.y));
@@ -276,6 +356,8 @@ std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh) {
 
 DiligentBackend::DiligentBackend(karma::platform::Window& window)
     : window_(&window) {
+  const auto constructor_start = core::SteadyClock::now();
+  auto stage_start = constructor_start;
   if (const char* env = std::getenv("KARMA_ENV_DEBUG")) {
     env_debug_mode_ = std::atoi(env);
   }
@@ -302,6 +384,10 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   if (render_state_cache_path_.empty()) {
     render_state_cache_path_ = defaultShaderCachePath(shader_cache_version_);
   }
+  auto stage_end = core::SteadyClock::now();
+  logStartupDiag("diligent_backend", "constructor env parse", stage_start, stage_end);
+
+  stage_start = stage_end;
   for (auto& m : cached_cascade_light_view_proj_) {
     m = glm::mat4(1.0f);
   }
@@ -314,7 +400,10 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   point_shadow_slot_source_index_.fill(-1);
   point_shadow_slot_valid_.fill(false);
   point_shadow_face_dirty_.fill(1u);
+  stage_end = core::SteadyClock::now();
+  logStartupDiag("diligent_backend", "constructor state init", stage_start, stage_end);
 
+  stage_start = stage_end;
   int fb_width = 800;
   int fb_height = 600;
   window_->getFramebufferSize(fb_width, fb_height);
@@ -323,12 +412,21 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   }
   current_width_ = fb_width;
   current_height_ = fb_height;
+  stage_end = core::SteadyClock::now();
+  logStartupDiag("diligent_backend", "framebuffer query", stage_start, stage_end);
+
+  stage_start = stage_end;
   initializeDevice();
+  stage_end = core::SteadyClock::now();
+  logStartupDiag("diligent_backend", "initialize device", stage_start, stage_end);
+  logStartupDiag("diligent_backend", "constructor total", constructor_start, stage_end);
 }
 
 DiligentBackend::~DiligentBackend() {
   if (shader_cache_enabled_ && !render_state_cache_path_.empty() && device_with_cache_.GetCache()) {
+    const auto start = core::SteadyClock::now();
     device_with_cache_.SaveCache(render_state_cache_path_.string().c_str());
+    logStartupDiag("diligent_backend", "destructor shader cache save", start, core::SteadyClock::now());
   }
 }
 

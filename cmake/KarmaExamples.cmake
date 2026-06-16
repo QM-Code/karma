@@ -66,6 +66,33 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     add_dependencies(karma_postwar_city_example karma_fix_xxhash)
   endif()
 
+  add_executable(karma_diligent_gltf_viewer_example
+    examples/diligent_gltf_viewer_example.cpp
+    examples/scene_helpers.cpp
+  )
+  target_link_libraries(karma_diligent_gltf_viewer_example PRIVATE karma::graphical)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_diligent_gltf_viewer_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_diligentfx_postprocess_example
+    examples/diligentfx_postprocess_example.cpp
+    examples/scene_helpers.cpp
+  )
+  target_link_libraries(karma_diligentfx_postprocess_example PRIVATE karma::graphical)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_diligentfx_postprocess_example karma_fix_xxhash)
+  endif()
+
+  add_executable(karma_diligentfx_bloom_example
+    examples/diligentfx_bloom_example.cpp
+    examples/scene_helpers.cpp
+  )
+  target_link_libraries(karma_diligentfx_bloom_example PRIVATE karma::graphical)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_diligentfx_bloom_example karma_fix_xxhash)
+  endif()
+
   add_executable(karma_glb_animation_example
     examples/glb_animation_example.cpp
     examples/scene_helpers.cpp

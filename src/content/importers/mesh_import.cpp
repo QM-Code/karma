@@ -32,6 +32,7 @@ std::vector<geometry::MeshData> importMeshes(const std::filesystem::path& path) 
     data.vertices.reserve(mesh->mNumVertices);
     data.normals.reserve(mesh->mNumVertices);
     data.uvs.reserve(mesh->mNumVertices);
+    data.uvs1.reserve(mesh->mNumVertices);
     data.tangents.reserve(mesh->mNumVertices);
 
     for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
@@ -50,6 +51,12 @@ std::vector<geometry::MeshData> importMeshes(const std::filesystem::path& path) 
         data.uvs.emplace_back(uv.x, uv.y);
       } else {
         data.uvs.emplace_back(0.0f, 0.0f);
+      }
+      if (mesh->HasTextureCoords(1)) {
+        const aiVector3D& uv = mesh->mTextureCoords[1][v];
+        data.uvs1.emplace_back(uv.x, uv.y);
+      } else {
+        data.uvs1.emplace_back(data.uvs.back());
       }
 
       if (mesh->HasTangentsAndBitangents()) {

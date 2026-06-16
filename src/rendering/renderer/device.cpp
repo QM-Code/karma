@@ -222,10 +222,12 @@ void GraphicsDevice::retireInstance(InstanceId instance) {
   }
 }
 
-void GraphicsDevice::renderLayer(LayerId layer, RenderTargetId target) {
+void GraphicsDevice::renderLayer(LayerId layer,
+                                 RenderTargetId target,
+                                 const PostProcessSettings& post_process) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {
-    backend_->renderLayer(layer, target);
+    backend_->renderLayer(layer, target, post_process);
   }
 }
 
@@ -322,6 +324,14 @@ ParticlePassStats GraphicsDevice::getParticlePassStats() const {
     return {};
   }
   return backend_->getParticlePassStats();
+}
+
+RendererCommandStats GraphicsDevice::getRendererCommandStats() const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (!backend_) {
+    return {};
+  }
+  return backend_->getRendererCommandStats();
 }
 
 void GraphicsDevice::setShadowSettings(float bias,

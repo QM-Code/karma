@@ -847,6 +847,7 @@ void DiligentBackend::initializeDevice() {
     std::fflush(stderr);
   }
   engine_ci.Features.ShaderResourceRuntimeArray = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
+  engine_ci.Features.Tessellation = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
   engine_ci.AdapterId = chooseVulkanAdapter(*factory);
   mark_stage("factory and adapter selection");
 

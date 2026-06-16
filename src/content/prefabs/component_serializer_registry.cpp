@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -18,6 +19,7 @@
 #include "karma/world/components/particle_emitter.h"
 #include "karma/world/components/rigidbody.h"
 #include "karma/world/components/tag.h"
+#include "karma/world/components/terrain.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
 #include "karma/world/components/volumetric.h"
@@ -93,6 +95,23 @@ bool readUint32(const Json& object, std::string_view key, uint32_t& out) {
     return false;
   }
   out = static_cast<uint32_t>(value);
+  return true;
+}
+
+bool readInt32(const Json& object, std::string_view key, int32_t& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_number_integer()) {
+    return false;
+  }
+  const int64_t value = it->get<int64_t>();
+  if (value < static_cast<int64_t>(std::numeric_limits<int32_t>::min()) ||
+      value > static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
+    return false;
+  }
+  out = static_cast<int32_t>(value);
   return true;
 }
 
@@ -938,6 +957,131 @@ std::optional<components::VisibilityComponent> deserializeVisibility(const Json&
   return component;
 }
 
+std::string terrainSourceName(components::TerrainSourceType source) {
+  switch (source) {
+    case components::TerrainSourceType::Procedural:
+      return "procedural";
+    case components::TerrainSourceType::ImageTileDirectory:
+      return "image_tile_directory";
+    case components::TerrainSourceType::SingleImage:
+      return "single_image";
+  }
+  return "procedural";
+}
+
+bool readTerrainSource(const Json& object, components::TerrainSourceType& out) {
+  const auto it = object.find("source");
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "procedural") {
+    out = components::TerrainSourceType::Procedural;
+    return true;
+  }
+  if (value == "image_tile_directory") {
+    out = components::TerrainSourceType::ImageTileDirectory;
+    return true;
+  }
+  if (value == "single_image" || value == "fixed_image") {
+    out = components::TerrainSourceType::SingleImage;
+    return true;
+  }
+  return false;
+}
+
+Json serializeTerrain(const components::TerrainComponent& component) {
+  return Json{
+      {"source", terrainSourceName(component.source)},
+      {"tile_directory", component.tile_directory.string()},
+      {"height_pattern", component.height_pattern},
+      {"color_pattern", component.color_pattern},
+      {"height_image", component.height_image.string()},
+      {"heatmap_image", component.heatmap_image.string()},
+      {"color_image", component.color_image.string()},
+      {"terrain_size", component.terrain_size},
+      {"tile_size", component.tile_size},
+      {"tile_resolution", component.tile_resolution},
+      {"origin_tile_x", component.origin_tile_x},
+      {"origin_tile_z", component.origin_tile_z},
+      {"height_scale", component.height_scale},
+      {"height_offset", component.height_offset},
+      {"view_distance", component.view_distance},
+      {"base_patch_size", component.base_patch_size},
+      {"tessellation_factor", component.tessellation_factor},
+      {"target_tessellated_edge_size", component.target_tessellated_edge_size},
+      {"layer", component.layer},
+      {"visible", component.visible},
+      {"cpu_fallback_enabled", component.cpu_fallback_enabled},
+  };
+}
+
+std::optional<components::TerrainComponent> deserializeTerrain(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::TerrainComponent component{};
+  std::string tile_directory;
+  std::string height_image;
+  std::string heatmap_image;
+  std::string color_image;
+  if (!readTerrainSource(json, component.source) ||
+      !readString(json, "tile_directory", tile_directory) ||
+      !readString(json, "height_pattern", component.height_pattern) ||
+      !readString(json, "color_pattern", component.color_pattern) ||
+      !readString(json, "height_image", height_image) ||
+      !readString(json, "heatmap_image", heatmap_image) ||
+      !readString(json, "color_image", color_image) ||
+      !readFloat(json, "terrain_size", component.terrain_size) ||
+      !readFloat(json, "tile_size", component.tile_size) ||
+      !readUint32(json, "tile_resolution", component.tile_resolution) ||
+      !readInt32(json, "origin_tile_x", component.origin_tile_x) ||
+      !readInt32(json, "origin_tile_z", component.origin_tile_z) ||
+      !readFloat(json, "height_scale", component.height_scale) ||
+      !readFloat(json, "height_offset", component.height_offset) ||
+      !readFloat(json, "view_distance", component.view_distance) ||
+      !readUint32(json, "base_patch_size", component.base_patch_size) ||
+      !readFloat(json, "tessellation_factor", component.tessellation_factor) ||
+      !readFloat(json, "target_tessellated_edge_size",
+                 component.target_tessellated_edge_size) ||
+      !readUint32(json, "layer", component.layer) ||
+      !readBool(json, "visible", component.visible) ||
+      !readBool(json, "cpu_fallback_enabled", component.cpu_fallback_enabled)) {
+    return std::nullopt;
+  }
+  component.tile_directory = std::move(tile_directory);
+  component.height_image = std::move(height_image);
+  component.heatmap_image = std::move(heatmap_image);
+  component.color_image = std::move(color_image);
+  const bool is_single_image =
+      component.source == components::TerrainSourceType::SingleImage;
+  const bool is_tile_directory =
+      component.source == components::TerrainSourceType::ImageTileDirectory;
+  if (component.tile_resolution < 2u ||
+      component.view_distance < 0.0f ||
+      component.base_patch_size == 0u ||
+      component.tessellation_factor < 1.0f ||
+      component.target_tessellated_edge_size <= 0.0f) {
+    return std::nullopt;
+  }
+  if (is_single_image) {
+    if (component.terrain_size <= 0.0f ||
+        (component.height_image.empty() && component.heatmap_image.empty())) {
+      return std::nullopt;
+    }
+  } else if (component.tile_size <= 0.0f) {
+    return std::nullopt;
+  }
+  if (is_tile_directory &&
+      (component.height_pattern.empty() || component.color_pattern.empty())) {
+    return std::nullopt;
+  }
+  return component;
+}
+
 Json serializeRigidbody(const components::RigidbodyComponent& component) {
   return Json{
       {"mass", component.mass},
@@ -1510,6 +1654,8 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "LightPulseComponent", serializeLightPulse, deserializeLightPulse);
   registerComponent<components::VisibilityComponent>(
       registry, "VisibilityComponent", serializeVisibility, deserializeVisibility);
+  registerComponent<components::TerrainComponent>(
+      registry, "TerrainComponent", serializeTerrain, deserializeTerrain);
   registerComponent<components::RigidbodyComponent>(
       registry, "RigidbodyComponent", serializeRigidbody, deserializeRigidbody);
   registerComponent<components::BoxColliderComponent>(

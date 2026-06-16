@@ -172,6 +172,10 @@ void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
   if (!particle_emitter_submissions_.empty()) {
     particle_emitter_submissions_.clear();
   }
+  if (!terrain_submissions_.empty()) {
+    terrain_submissions_.clear();
+  }
+  terrain_stats_ = {};
 }
 
 void DiligentBackend::endFrame() {

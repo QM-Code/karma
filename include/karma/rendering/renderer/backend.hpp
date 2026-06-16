@@ -12,6 +12,7 @@
 #include "karma/rendering/renderer/post_process.h"
 #include "karma/rendering/renderer/render_target.h"
 #include "karma/rendering/renderer/stats.h"
+#include "karma/rendering/renderer/terrain.h"
 #include "karma/rendering/renderer/texture.h"
 #include "karma/rendering/renderer/ui_draw_data.h"
 
@@ -65,6 +66,25 @@ class Backend {
 
   virtual renderer::RenderTargetId createRenderTarget(const renderer::RenderTargetDesc& desc) = 0;
   virtual void destroyRenderTarget(renderer::RenderTargetId target) = 0;
+
+  virtual renderer::TerrainId createTerrain(const renderer::TerrainDesc& desc) {
+    (void)desc;
+    return renderer::kInvalidTerrain;
+  }
+  virtual void destroyTerrain(renderer::TerrainId terrain) { (void)terrain; }
+  virtual void uploadTerrainTile(renderer::TerrainId terrain,
+                                 const renderer::TerrainTileData& tile) {
+    (void)terrain;
+    (void)tile;
+  }
+  virtual void evictTerrainTile(renderer::TerrainId terrain,
+                                renderer::TerrainTileCoord coord) {
+    (void)terrain;
+    (void)coord;
+  }
+  virtual void submitTerrain(const renderer::TerrainDrawItem& item) { (void)item; }
+  virtual renderer::TerrainCapabilities getTerrainCapabilities() const { return {}; }
+  virtual renderer::TerrainStats getTerrainStats() const { return {}; }
 
   virtual void submit(const renderer::DrawItem& item) = 0;
   virtual void submitParticles(renderer::ParticleBatch batch) = 0;

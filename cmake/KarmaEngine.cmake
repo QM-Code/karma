@@ -108,6 +108,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       src/rendering/renderer/backends/diligent/passes/post_process/shader_source.cpp
       src/rendering/renderer/backends/diligent/passes/render_state.cpp
       src/rendering/renderer/backends/diligent/passes/shadows.cpp
+      src/rendering/renderer/backends/diligent/passes/terrain.cpp
       src/rendering/renderer/backends/diligent/resources/materials.cpp
       src/rendering/renderer/backends/diligent/resources/meshes.cpp
       src/rendering/renderer/backends/diligent/resources/render_targets.cpp
@@ -345,10 +346,12 @@ if (KARMA_BUILD_HEADLESS_PROFILE OR KARMA_BUILD_GRAPHICAL_PROFILE)
     src/features/visual/lights/light_pulse_system.cpp
     src/features/visual/particles/effect_library.cpp
     src/features/visual/particles/particle_system.cpp
+    src/features/visual/terrain/terrain_runtime_module.cpp
+    src/features/visual/terrain/terrain_system.cpp
     src/features/visual/volumes/volume_runtime_module.cpp
     src/features/visual/volumes/volume_system.cpp
   )
-  target_link_libraries(karma_features_visual PUBLIC karma_core karma_world)
+  target_link_libraries(karma_features_visual PUBLIC karma_core karma_world karma_content)
   list(APPEND KARMA_INSTALL_TARGETS karma_features_visual)
 endif()
 

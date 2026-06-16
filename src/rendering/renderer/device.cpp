@@ -181,6 +181,49 @@ void GraphicsDevice::destroyRenderTarget(RenderTargetId target) {
   }
 }
 
+TerrainId GraphicsDevice::createTerrain(const TerrainDesc& desc) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->createTerrain(desc) : kInvalidTerrain;
+}
+
+void GraphicsDevice::destroyTerrain(TerrainId terrain) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->destroyTerrain(terrain);
+  }
+}
+
+void GraphicsDevice::uploadTerrainTile(TerrainId terrain, const TerrainTileData& tile) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->uploadTerrainTile(terrain, tile);
+  }
+}
+
+void GraphicsDevice::evictTerrainTile(TerrainId terrain, TerrainTileCoord coord) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->evictTerrainTile(terrain, coord);
+  }
+}
+
+void GraphicsDevice::submitTerrain(const TerrainDrawItem& item) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->submitTerrain(item);
+  }
+}
+
+TerrainCapabilities GraphicsDevice::getTerrainCapabilities() const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->getTerrainCapabilities() : TerrainCapabilities{};
+}
+
+TerrainStats GraphicsDevice::getTerrainStats() const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->getTerrainStats() : TerrainStats{};
+}
+
 void GraphicsDevice::submit(const DrawItem& item) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {

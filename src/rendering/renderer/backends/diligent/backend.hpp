@@ -97,6 +97,16 @@ class DiligentBackend final : public Backend {
   renderer::RenderTargetId createRenderTarget(const renderer::RenderTargetDesc& desc) override;
   void destroyRenderTarget(renderer::RenderTargetId target) override;
 
+  renderer::TerrainId createTerrain(const renderer::TerrainDesc& desc) override;
+  void destroyTerrain(renderer::TerrainId terrain) override;
+  void uploadTerrainTile(renderer::TerrainId terrain,
+                         const renderer::TerrainTileData& tile) override;
+  void evictTerrainTile(renderer::TerrainId terrain,
+                        renderer::TerrainTileCoord coord) override;
+  void submitTerrain(const renderer::TerrainDrawItem& item) override;
+  renderer::TerrainCapabilities getTerrainCapabilities() const override;
+  renderer::TerrainStats getTerrainStats() const override;
+
   void submit(const renderer::DrawItem& item) override;
   void submitParticles(renderer::ParticleBatch batch) override;
   void submitPackedParticles(renderer::PackedParticleBatch batch) override;
@@ -286,6 +296,50 @@ class DiligentBackend final : public Backend {
     bool transform_changed = true;
   };
 
+  struct TerrainTileCoordHash {
+    std::size_t operator()(const renderer::TerrainTileCoord& coord) const noexcept {
+      uint64_t h = 0x517CC1B727220A95ull;
+      h ^= static_cast<uint32_t>(coord.x) + 0x9E3779B97F4A7C15ull + (h << 6u) + (h >> 2u);
+      h ^= static_cast<uint32_t>(coord.z) + 0x9E3779B97F4A7C15ull + (h << 6u) + (h >> 2u);
+      return static_cast<std::size_t>(h);
+    }
+  };
+
+  struct TerrainTileRecord {
+    renderer::TerrainTileCoord coord{};
+    Diligent::RefCntAutoPtr<Diligent::ITexture> height_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> height_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> color_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> color_srv;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> patch_vertex_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> cpu_vertex_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> cpu_index_buffer;
+    std::unordered_map<uint64_t, Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>>
+        tess_srbs;
+    std::unordered_map<uint64_t, Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>>
+        cpu_srbs;
+    Diligent::Uint32 patch_vertex_count = 0u;
+    Diligent::Uint32 cpu_index_count = 0u;
+    float min_height = 0.0f;
+    float max_height = 0.0f;
+  };
+
+  struct TerrainRecord {
+    renderer::TerrainDesc desc{};
+    std::unordered_map<renderer::TerrainTileCoord, TerrainTileRecord, TerrainTileCoordHash> tiles;
+  };
+
+  struct TerrainSubmission {
+    renderer::TerrainDrawItem item{};
+  };
+
+  struct TerrainPipelineSet {
+    Diligent::TEXTURE_FORMAT rtv_format = Diligent::TEX_FORMAT_UNKNOWN;
+    Diligent::TEXTURE_FORMAT dsv_format = Diligent::TEX_FORMAT_UNKNOWN;
+    Diligent::RefCntAutoPtr<Diligent::IPipelineState> tess_pipeline_state;
+    Diligent::RefCntAutoPtr<Diligent::IPipelineState> cpu_pipeline_state;
+  };
+
   struct ForwardBatchKey {
     renderer::MeshId mesh = renderer::kInvalidMesh;
     renderer::MaterialId material = renderer::kInvalidMaterial;
@@ -449,6 +503,8 @@ class DiligentBackend final : public Backend {
   void updateCameraOverrideUserConstants(const renderer::CameraData& camera);
   void ensureUiResources();
   void ensureLineResources();
+  TerrainPipelineSet* ensureTerrainResources(Diligent::TEXTURE_FORMAT rtv_format,
+                                             Diligent::TEXTURE_FORMAT dsv_format);
   void ensureParticleResources();
   Diligent::IPipelineState* ensureForwardPipeline(ForwardPipelineVariant variant);
   void bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const;
@@ -581,6 +637,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBuffer> skinning_constants_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_color_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_data_;
+  Diligent::RefCntAutoPtr<Diligent::ISampler> terrain_color_sampler_;
+  Diligent::RefCntAutoPtr<Diligent::ISampler> terrain_height_sampler_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> shadow_sampler_;
   static constexpr int kShadowCascadeCount = 4;
   static constexpr int kMaxPointShadowLights = 16;
@@ -642,6 +700,14 @@ class DiligentBackend final : public Backend {
   bool forwardDrawsRequireSceneColorCopy(
       const std::vector<TransparentForwardDraw>& draws) const;
   void renderParticlePasses(renderer::LayerId layer, const ParticlePassContext& context);
+  Diligent::Uint32 renderTerrainLayer(renderer::LayerId layer,
+                                      const DrawConstants& base_constants,
+                                      const glm::mat4& view_proj,
+                                      bool is_gl,
+                                      Diligent::ITextureView* active_rtv,
+                                      Diligent::ITextureView* active_dsv,
+                                      int render_width,
+                                      int render_height);
   Diligent::RefCntAutoPtr<Diligent::ITexture> shadow_map_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> shadow_map_dsv_;
@@ -686,6 +752,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> line_srb_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> line_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> line_cb_;
+  std::unordered_map<uint64_t, TerrainPipelineSet> terrain_pipeline_sets_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> terrain_cb_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_additive_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_additive_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_alpha_depth_;
@@ -904,6 +972,7 @@ class DiligentBackend final : public Backend {
   renderer::MaterialSetId nextMaterialSetId_ = 1;
   renderer::TextureId nextTextureId_ = 1;
   renderer::RenderTargetId nextTargetId_ = 1;
+  renderer::TerrainId nextTerrainId_ = 1;
 
   std::unordered_map<renderer::MeshId, MeshRecord> meshes_;
   std::unordered_map<renderer::MaterialId, MaterialRecord> materials_;
@@ -913,7 +982,9 @@ class DiligentBackend final : public Backend {
   std::unordered_map<renderer::TextureId, TextureRecord> textures_;
   std::unordered_map<std::string, renderer::TextureId> texture_cache_;
   std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;
+  std::unordered_map<renderer::TerrainId, TerrainRecord> terrains_;
   std::unordered_map<renderer::InstanceId, InstanceRecord> instances_;
+  std::vector<TerrainSubmission> terrain_submissions_;
   std::vector<ParticleBatchRecord> particle_batches_;
   std::vector<ParticleEmitterSubmission> particle_emitter_submissions_;
   std::unordered_map<uint64_t, ParticleEmitterRuntimeState> particle_emitter_runtime_states_;
@@ -997,6 +1068,7 @@ class DiligentBackend final : public Backend {
   int forward_plus_max_lights_per_tile_ = 128;
   renderer::ForwardPlusStats forward_plus_stats_{};
   renderer::ParticlePassStats particle_pass_stats_{};
+  renderer::TerrainStats terrain_stats_{};
   renderer::ParticlePassStats particle_stats_log_totals_{};
   double particle_stats_log_elapsed_seconds_ = 0.0;
   float last_frame_delta_seconds_ = 0.0f;

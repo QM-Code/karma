@@ -166,6 +166,14 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     add_dependencies(karma_volumetric_sphere_prefab_example karma_fix_xxhash)
   endif()
 
+  add_executable(karma_terrain_example
+    examples/terrain_example.cpp
+  )
+  target_link_libraries(karma_terrain_example PRIVATE karma::graphical)
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(karma_terrain_example karma_fix_xxhash)
+  endif()
+
   add_executable(karma_prefab_gallery_example
     examples/prefab_gallery_example.cpp
   )

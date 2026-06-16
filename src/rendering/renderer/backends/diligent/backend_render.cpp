@@ -990,6 +990,16 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
   base_constants.env_params[3] =
       post_process_settings_.tone_mapping_enabled ? -lighting_exposure_ : lighting_exposure_;
 
+  draw_count += renderTerrainLayer(layer,
+                                   base_constants,
+                                   view_proj,
+                                   is_gl,
+                                   rtv,
+                                   dsv,
+                                   render_width,
+                                   render_height);
+  mark_stage("terrain pass");
+
   ForwardLayerState forward_state{};
   ForwardLayerStats forward_stats{};
   collectForwardLayerState(layer,

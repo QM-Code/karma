@@ -24,6 +24,7 @@
 #include "karma/world/components/particle_effect_override.h"
 #include "karma/world/components/particle_emitter.h"
 #include "karma/world/components/tag.h"
+#include "karma/world/components/terrain.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
 #include "karma/world/components/volumetric.h"
@@ -473,6 +474,120 @@ void testVolumetricComponentValidation(const std::filesystem::path& dir) {
                        .has_value());
     KARMA_REQUIRE(invalid_world.entities().empty());
   }
+}
+
+void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+  const karma::ecs::Entity root = world.createEntity();
+  scene.createNode(root);
+  world.setName(root, "Terrain");
+  world.add(root, karma::components::TransformComponent{});
+
+  karma::components::TerrainComponent authored{};
+  authored.source = karma::components::TerrainSourceType::ImageTileDirectory;
+  authored.tile_directory = "terrain_tiles";
+  authored.height_pattern = "dem_{x}_{z}.png";
+  authored.color_pattern = "ortho_{x}_{z}.png";
+  authored.tile_size = 750.0f;
+  authored.tile_resolution = 129u;
+  authored.origin_tile_x = -3;
+  authored.origin_tile_z = 7;
+  authored.height_scale = 220.0f;
+  authored.height_offset = -12.0f;
+  authored.view_distance = 2500.0f;
+  authored.base_patch_size = 8u;
+  authored.tessellation_factor = 24.0f;
+  authored.target_tessellated_edge_size = 12.5f;
+  authored.layer = 2u;
+  authored.visible = false;
+  authored.cpu_fallback_enabled = false;
+  world.add(root, authored);
+
+  const std::filesystem::path path = dir / "terrain.json";
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+  const Json saved = readJson(path);
+  const Json& terrain_json = saved["nodes"][0]["components"]["TerrainComponent"];
+  KARMA_REQUIRE(terrain_json["source"] == "image_tile_directory");
+  KARMA_REQUIRE(terrain_json["height_pattern"] == "dem_{x}_{z}.png");
+  KARMA_REQUIRE(terrain_json["layer"] == 2u);
+
+  karma::ecs::World loaded_world;
+  karma::scene::Scene loaded_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  KARMA_REQUIRE(loaded_world.has<karma::components::TerrainComponent>(instance->root));
+  const auto& loaded =
+      loaded_world.get<karma::components::TerrainComponent>(instance->root);
+  KARMA_REQUIRE(loaded.source == karma::components::TerrainSourceType::ImageTileDirectory);
+  KARMA_REQUIRE(loaded.tile_directory == std::filesystem::path("terrain_tiles"));
+  KARMA_REQUIRE(loaded.height_pattern == "dem_{x}_{z}.png");
+  KARMA_REQUIRE(loaded.color_pattern == "ortho_{x}_{z}.png");
+  KARMA_REQUIRE(nearly(loaded.tile_size, 750.0f));
+  KARMA_REQUIRE(loaded.tile_resolution == 129u);
+  KARMA_REQUIRE(loaded.origin_tile_x == -3);
+  KARMA_REQUIRE(loaded.origin_tile_z == 7);
+  KARMA_REQUIRE(nearly(loaded.height_scale, 220.0f));
+  KARMA_REQUIRE(nearly(loaded.height_offset, -12.0f));
+  KARMA_REQUIRE(nearly(loaded.view_distance, 2500.0f));
+  KARMA_REQUIRE(loaded.base_patch_size == 8u);
+  KARMA_REQUIRE(nearly(loaded.tessellation_factor, 24.0f));
+  KARMA_REQUIRE(nearly(loaded.target_tessellated_edge_size, 12.5f));
+  KARMA_REQUIRE(loaded.layer == 2u);
+  KARMA_REQUIRE(!loaded.visible);
+  KARMA_REQUIRE(!loaded.cpu_fallback_enabled);
+}
+
+void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+  const karma::ecs::Entity root = world.createEntity();
+  scene.createNode(root);
+  world.setName(root, "FixedTerrain");
+  world.add(root, karma::components::TransformComponent{});
+
+  karma::components::TerrainComponent authored{};
+  authored.source = karma::components::TerrainSourceType::SingleImage;
+  authored.height_image = "terrain/fixed_height.png";
+  authored.heatmap_image = "terrain/fixed_heatmap.png";
+  authored.color_image = "terrain/fixed_color.png";
+  authored.terrain_size = 2048.0f;
+  authored.tile_resolution = 513u;
+  authored.origin_tile_x = 5;
+  authored.origin_tile_z = -8;
+  authored.height_scale = 90.0f;
+  authored.height_offset = 3.5f;
+  authored.layer = 3u;
+  world.add(root, authored);
+
+  const std::filesystem::path path = dir / "terrain_single_image.json";
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+  const Json saved = readJson(path);
+  const Json& terrain_json = saved["nodes"][0]["components"]["TerrainComponent"];
+  KARMA_REQUIRE(terrain_json["source"] == "single_image");
+  KARMA_REQUIRE(terrain_json["height_image"] == "terrain/fixed_height.png");
+  KARMA_REQUIRE(terrain_json["heatmap_image"] == "terrain/fixed_heatmap.png");
+  KARMA_REQUIRE(terrain_json["color_image"] == "terrain/fixed_color.png");
+  KARMA_REQUIRE(nearly(terrain_json["terrain_size"].get<float>(), 2048.0f));
+
+  karma::ecs::World loaded_world;
+  karma::scene::Scene loaded_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  KARMA_REQUIRE(loaded_world.has<karma::components::TerrainComponent>(instance->root));
+  const auto& loaded =
+      loaded_world.get<karma::components::TerrainComponent>(instance->root);
+  KARMA_REQUIRE(loaded.source == karma::components::TerrainSourceType::SingleImage);
+  KARMA_REQUIRE(loaded.height_image == std::filesystem::path("terrain/fixed_height.png"));
+  KARMA_REQUIRE(loaded.heatmap_image == std::filesystem::path("terrain/fixed_heatmap.png"));
+  KARMA_REQUIRE(loaded.color_image == std::filesystem::path("terrain/fixed_color.png"));
+  KARMA_REQUIRE(nearly(loaded.terrain_size, 2048.0f));
+  KARMA_REQUIRE(loaded.tile_resolution == 513u);
+  KARMA_REQUIRE(loaded.origin_tile_x == 5);
+  KARMA_REQUIRE(loaded.origin_tile_z == -8);
+  KARMA_REQUIRE(nearly(loaded.height_scale, 90.0f));
+  KARMA_REQUIRE(nearly(loaded.height_offset, 3.5f));
+  KARMA_REQUIRE(loaded.layer == 3u);
 }
 
 void testMigratedPrefabAssetsDoNotUseVolumeSphereComponent() {
@@ -1189,6 +1304,8 @@ int main() {
   testMalformedAndInvalidPayloads(dir);
   testVolumetricComponentPrefabRoundTrip(dir);
   testVolumetricComponentValidation(dir);
+  testTerrainComponentPrefabRoundTrip(dir);
+  testSingleImageTerrainComponentPrefabRoundTrip(dir);
   testMigratedPrefabAssetsDoNotUseVolumeSphereComponent();
   testDestroyPrefab(dir);
   testMissingSidecarKeepsPrefabLoad(dir);

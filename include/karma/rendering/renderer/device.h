@@ -75,6 +75,21 @@ class GraphicsDevice {
   /// Destroys a render target.
   void destroyRenderTarget(RenderTargetId target);
 
+  /// Creates a streamed terrain resource.
+  TerrainId createTerrain(const TerrainDesc& desc);
+  /// Destroys a streamed terrain resource.
+  void destroyTerrain(TerrainId terrain);
+  /// Uploads or replaces one decoded terrain tile.
+  void uploadTerrainTile(TerrainId terrain, const TerrainTileData& tile);
+  /// Evicts one terrain tile from a streamed terrain resource.
+  void evictTerrainTile(TerrainId terrain, TerrainTileCoord coord);
+  /// Submits one streamed terrain tile draw.
+  void submitTerrain(const TerrainDrawItem& item);
+  /// Returns active backend terrain capabilities.
+  TerrainCapabilities getTerrainCapabilities() const;
+  /// Returns active backend terrain diagnostics.
+  TerrainStats getTerrainStats() const;
+
   /// Submits one mesh draw item.
   void submit(const DrawItem& item);
   /// Submits a compatibility particle batch.

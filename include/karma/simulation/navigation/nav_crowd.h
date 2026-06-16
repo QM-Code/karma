@@ -117,6 +117,58 @@ struct NavCrowdAgentInfo {
 };
 
 /// \ingroup karma_navigation
+/// Crowd corner point with Detour straight-path flags and polygon reference.
+struct NavCrowdDebugCorner {
+  math::Vec3 position{};
+  uint8_t flags = 0;
+  uint64_t poly_ref = 0;
+};
+
+/// \ingroup karma_navigation
+/// Crowd local-boundary collision segment.
+struct NavCrowdDebugSegment {
+  math::Vec3 start{};
+  math::Vec3 end{};
+};
+
+/// \ingroup karma_navigation
+/// Crowd neighbour link.
+struct NavCrowdDebugNeighbour {
+  int agent_id = -1;
+  float distance = 0.0f;
+};
+
+/// \ingroup karma_navigation
+/// Per-agent DetourCrowd debug data.
+struct NavCrowdDebugAgent {
+  int agent_id = -1;
+  std::vector<uint64_t> corridor_polys;
+  std::vector<NavCrowdDebugCorner> corners;
+  std::vector<NavCrowdDebugSegment> boundary_segments;
+  std::vector<NavCrowdDebugNeighbour> neighbours;
+};
+
+/// \ingroup karma_navigation
+/// Debug capture request for crowd diagnostics.
+struct NavCrowdDebugRequest {
+  bool enabled = false;
+  bool all_agents = true;
+  int selected_agent_id = -1;
+  bool include_corridor = true;
+  bool include_corners = true;
+  bool include_collision_segments = true;
+  bool include_neighbours = true;
+};
+
+/// \ingroup karma_navigation
+/// Snapshot of requested DetourCrowd debug data.
+struct NavCrowdDebugSnapshot {
+  std::vector<NavCrowdDebugAgent> agents;
+
+  bool empty() const { return agents.empty(); }
+};
+
+/// \ingroup karma_navigation
 /// DetourCrowd wrapper for local steering and dynamic avoidance over a `NavMesh`.
 class NavCrowd {
  public:
@@ -157,6 +209,8 @@ class NavCrowd {
   bool resetMoveTarget(int agent_id);
   /// Advances crowd steering.
   void update(float dt);
+  /// Captures debug data from active agents.
+  NavCrowdDebugSnapshot debugSnapshot(const NavCrowdDebugRequest& request = {}) const;
   /// Returns current state for one agent.
   bool agentInfo(int agent_id, NavCrowdAgentInfo& out_info) const;
   /// Returns all active agents.

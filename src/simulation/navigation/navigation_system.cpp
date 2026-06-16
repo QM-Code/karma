@@ -17,6 +17,7 @@
 #include "karma/world/components/nav_mesh.h"
 #include "karma/world/components/nav_mesh_agent.h"
 #include "karma/world/components/nav_tile_cache.h"
+#include "karma/world/components/player_controller.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
 #include "karma/simulation/navigation/nav_geometry.h"
@@ -582,6 +583,9 @@ void updateCrowds(ecs::World& world, float dt) {
         }
 
         crowd.crowd.update(update_dt);
+        crowd.debug_snapshot = crowd.debug_request.enabled
+            ? crowd.crowd.debugSnapshot(crowd.debug_request)
+            : NavCrowdDebugSnapshot{};
         world.forEach<components::NavCrowdAgentComponent, components::TransformComponent>(
             [&](ecs::Entity agent_entity) {
               auto& agent = world.get<components::NavCrowdAgentComponent>(agent_entity);
@@ -607,7 +611,12 @@ void updateCrowds(ecs::World& world, float dt) {
                     horizontalDistance(info.position, agent.destination) <= agent.stopping_distance;
               }
 
-              if (agent.update_transform) {
+              if (agent.movement_mode == components::NavCrowdMovementMode::PlayerControllerVelocity) {
+                if (world.has<components::PlayerControllerComponent>(agent_entity)) {
+                  auto& controller = world.get<components::PlayerControllerComponent>(agent_entity);
+                  controller.setDesiredVelocity({info.velocity.x, 0.0f, info.velocity.z});
+                }
+              } else {
                 auto& transform = world.get<components::TransformComponent>(agent_entity);
                 transform.setPosition(crowdWorldPosition(info.position, agent));
               }

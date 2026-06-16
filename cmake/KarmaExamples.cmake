@@ -270,6 +270,34 @@ if (KARMA_ENABLE_NAVIGATION AND KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_recast_sample(karma_recast_debug_example
     examples/recast_debug_example.cpp)
 
+  function(karma_add_navigation_example target source)
+    add_executable(${target}
+      ${source}
+      examples/navigation/navigation_examples.cpp
+      examples/scene_helpers.cpp
+    )
+    target_link_libraries(${target} PRIVATE karma::graphical)
+    set_target_properties(${target} PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples/navigation"
+    )
+    if (TARGET karma_fix_xxhash)
+      add_dependencies(${target} karma_fix_xxhash)
+    endif()
+  endfunction()
+
+  karma_add_navigation_example(point_click
+    examples/navigation/point_click.cpp)
+  karma_add_navigation_example(crowds
+    examples/navigation/crowds.cpp)
+  karma_add_navigation_example(tile_cache
+    examples/navigation/tile_cache.cpp)
+  karma_add_navigation_example(query_lab
+    examples/navigation/query_lab.cpp)
+  karma_add_navigation_example(offmesh_areas
+    examples/navigation/offmesh_areas.cpp)
+  karma_add_navigation_example(physics_bridge
+    examples/navigation/physics_bridge.cpp)
+
   add_executable(karma_recast_navigation_graphical_example
     examples/recast_navigation_graphical_example.cpp
     examples/scene_helpers.cpp

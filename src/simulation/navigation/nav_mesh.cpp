@@ -1594,6 +1594,137 @@ bool NavMesh::getPolyFlags(uint64_t poly_ref, uint16_t& out_flags) const {
   return true;
 }
 
+bool NavMesh::setPolyArea(uint64_t poly_ref, unsigned char area) {
+  if (nav_mesh_ == nullptr || poly_ref == 0 || area > kNavAreaMax) {
+    return false;
+  }
+  if (!succeeded(nav_mesh_->setPolyArea(static_cast<dtPolyRef>(poly_ref), area))) {
+    return false;
+  }
+  refreshSnapshot();
+  return true;
+}
+
+bool NavMesh::getPolyArea(uint64_t poly_ref, unsigned char& out_area) const {
+  if (nav_mesh_ == nullptr || poly_ref == 0) {
+    return false;
+  }
+  unsigned char area = 0;
+  if (failed(nav_mesh_->getPolyArea(static_cast<dtPolyRef>(poly_ref), &area))) {
+    return false;
+  }
+  out_area = area;
+  return true;
+}
+
+bool NavMesh::decodePolyRef(uint64_t poly_ref, NavPolyRefParts& out_parts) const {
+  if (nav_mesh_ == nullptr || poly_ref == 0) {
+    return false;
+  }
+  unsigned int salt = 0;
+  unsigned int tile = 0;
+  unsigned int poly = 0;
+  nav_mesh_->decodePolyId(static_cast<dtPolyRef>(poly_ref), salt, tile, poly);
+  out_parts.salt = salt;
+  out_parts.tile = tile;
+  out_parts.poly = poly;
+  return true;
+}
+
+std::vector<NavTileInfo> NavMesh::tiles() const {
+  std::vector<NavTileInfo> out;
+  if (nav_mesh_ == nullptr) {
+    return out;
+  }
+  const dtNavMesh* nav = nav_mesh_;
+  for (int i = 0; i < nav->getMaxTiles(); ++i) {
+    const dtMeshTile* tile = nav->getTile(i);
+    if (tile == nullptr || tile->header == nullptr) {
+      continue;
+    }
+    out.push_back({
+        .ref = static_cast<uint64_t>(nav->getTileRef(tile)),
+        .index = i,
+        .x = tile->header->x,
+        .y = tile->header->y,
+        .layer = tile->header->layer,
+        .poly_count = tile->header->polyCount,
+        .vert_count = tile->header->vertCount,
+    });
+  }
+  return out;
+}
+
+uint64_t NavMesh::tileRefAt(int x, int y, int layer) const {
+  if (nav_mesh_ == nullptr) {
+    return 0;
+  }
+  return static_cast<uint64_t>(nav_mesh_->getTileRefAt(x, y, layer));
+}
+
+bool NavMesh::storeTileState(uint64_t tile_ref, NavTileStateSnapshot& out_state) const {
+  if (nav_mesh_ == nullptr || tile_ref == 0) {
+    return false;
+  }
+  const dtMeshTile* tile = nav_mesh_->getTileByRef(static_cast<dtTileRef>(tile_ref));
+  if (tile == nullptr || tile->header == nullptr) {
+    return false;
+  }
+  const int size = nav_mesh_->getTileStateSize(tile);
+  if (size <= 0) {
+    return false;
+  }
+  out_state.tile_ref = tile_ref;
+  out_state.data.assign(static_cast<size_t>(size), uint8_t{0});
+  if (failed(nav_mesh_->storeTileState(tile,
+                                       out_state.data.data(),
+                                       static_cast<int>(out_state.data.size())))) {
+    out_state = {};
+    return false;
+  }
+  return true;
+}
+
+bool NavMesh::restoreTileState(const NavTileStateSnapshot& state) {
+  if (nav_mesh_ == nullptr || !state.valid()) {
+    return false;
+  }
+  dtMeshTile* tile = const_cast<dtMeshTile*>(
+      nav_mesh_->getTileByRef(static_cast<dtTileRef>(state.tile_ref)));
+  if (tile == nullptr || tile->header == nullptr) {
+    return false;
+  }
+  if (failed(nav_mesh_->restoreTileState(tile,
+                                         state.data.data(),
+                                         static_cast<int>(state.data.size())))) {
+    return false;
+  }
+  refreshSnapshot();
+  refreshDetourDebugDraw();
+  return true;
+}
+
+bool NavMesh::offMeshConnectionEndpoints(
+    uint64_t previous_poly_ref,
+    uint64_t off_mesh_poly_ref,
+    NavOffMeshConnectionEndpoints& out_endpoints) const {
+  if (nav_mesh_ == nullptr || previous_poly_ref == 0 || off_mesh_poly_ref == 0) {
+    return false;
+  }
+  float start[3]{};
+  float end[3]{};
+  if (failed(nav_mesh_->getOffMeshConnectionPolyEndPoints(
+          static_cast<dtPolyRef>(previous_poly_ref),
+          static_cast<dtPolyRef>(off_mesh_poly_ref),
+          start,
+          end))) {
+    return false;
+  }
+  out_endpoints.start = toVec3(start);
+  out_endpoints.end = toVec3(end);
+  return true;
+}
+
 bool NavMesh::polyCenter(uint64_t poly_ref, math::Vec3& out_center) const {
   if (nav_mesh_ == nullptr || poly_ref == 0) {
     return false;
@@ -2097,6 +2228,154 @@ NavPath NavQuery::raycast(const math::Vec3& start,
     result.points.push_back(hit);
   }
   result.point_flags.push_back(NavPathPointFlagEnd);
+  return result;
+}
+
+NavRaycastResult NavQuery::raycastDetailed(const math::Vec3& start,
+                                           const math::Vec3& end,
+                                           const math::Vec3& search_extents,
+                                           int max_polys,
+                                           const NavQueryFilter& filter) const {
+  NavRaycastResult result{};
+  if (!isValid()) {
+    result.status = NavStatus::NoNavMesh;
+    return result;
+  }
+
+  dtQueryFilter detour_filter = makeDetourFilter(filter);
+  dtPolyRef start_ref = 0;
+  float nearest_start[3]{};
+  if (!succeeded(query_->findNearestPoly(ptr(start),
+                                         ptr(search_extents),
+                                         &detour_filter,
+                                         &start_ref,
+                                         nearest_start)) ||
+      start_ref == 0) {
+    result.status = NavStatus::InvalidStart;
+    return result;
+  }
+
+  const int capacity = std::clamp(max_polys, 1, kMaxPathPolys);
+  std::vector<dtPolyRef> polys(static_cast<size_t>(capacity));
+  int poly_count = 0;
+  float t = 0.0f;
+  float hit_normal[3]{};
+  const dtStatus status = query_->raycast(start_ref,
+                                          nearest_start,
+                                          ptr(end),
+                                          &detour_filter,
+                                          &t,
+                                          hit_normal,
+                                          polys.data(),
+                                          &poly_count,
+                                          capacity);
+  if (!succeeded(status)) {
+    result.status = NavStatus::QueryFailed;
+    return result;
+  }
+
+  result.status = NavStatus::Success;
+  result.hit_fraction = t;
+  result.hit_normal = toVec3(hit_normal);
+  result.hit_position = (t > 1.0f || t == FLT_MAX)
+      ? end
+      : math::Vec3{nearest_start[0] + (end.x - nearest_start[0]) * t,
+                   nearest_start[1] + (end.y - nearest_start[1]) * t,
+                   nearest_start[2] + (end.z - nearest_start[2]) * t};
+  result.visited_polys.reserve(static_cast<size_t>(poly_count));
+  for (int i = 0; i < poly_count; ++i) {
+    result.visited_polys.push_back(static_cast<uint64_t>(polys[static_cast<size_t>(i)]));
+  }
+  result.path_cost = 0.0f;
+  for (size_t i = 1; i < result.visited_polys.size(); ++i) {
+    math::Vec3 a{};
+    math::Vec3 b{};
+    if (nav_mesh_ != nullptr &&
+        nav_mesh_->polyCenter(result.visited_polys[i - 1], a) &&
+        nav_mesh_->polyCenter(result.visited_polys[i], b)) {
+      const float dx = b.x - a.x;
+      const float dy = b.y - a.y;
+      const float dz = b.z - a.z;
+      result.path_cost += std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+  }
+  return result;
+}
+
+NavPolyQueryResult NavQuery::queryPolygons(const math::Vec3& center,
+                                           const math::Vec3& half_extents,
+                                           int max_polys,
+                                           const NavQueryFilter& filter) const {
+  NavPolyQueryResult result{};
+  if (!isValid()) {
+    result.status = NavStatus::NoNavMesh;
+    return result;
+  }
+  if (half_extents.x < 0.0f || half_extents.y < 0.0f || half_extents.z < 0.0f) {
+    result.status = NavStatus::InvalidConfig;
+    return result;
+  }
+
+  dtQueryFilter detour_filter = makeDetourFilter(filter);
+  const int capacity = std::max(max_polys, 1);
+  std::vector<dtPolyRef> polys(static_cast<size_t>(capacity));
+  int count = 0;
+  if (!succeeded(query_->queryPolygons(ptr(center),
+                                       ptr(half_extents),
+                                       &detour_filter,
+                                       polys.data(),
+                                       &count,
+                                       capacity))) {
+    result.status = NavStatus::QueryFailed;
+    return result;
+  }
+  result.status = NavStatus::Success;
+  result.polys.reserve(static_cast<size_t>(count));
+  for (int i = 0; i < count; ++i) {
+    result.polys.push_back(static_cast<uint64_t>(polys[static_cast<size_t>(i)]));
+  }
+  return result;
+}
+
+NavClosestPointResult NavQuery::closestPointOnPoly(uint64_t poly_ref,
+                                                   const math::Vec3& point) const {
+  NavClosestPointResult result{};
+  if (!isValid() || poly_ref == 0) {
+    result.status = isValid() ? NavStatus::InvalidStart : NavStatus::NoNavMesh;
+    return result;
+  }
+  float closest[3]{};
+  bool over_poly = false;
+  if (!succeeded(query_->closestPointOnPoly(static_cast<dtPolyRef>(poly_ref),
+                                           ptr(point),
+                                           closest,
+                                           &over_poly))) {
+    result.status = NavStatus::QueryFailed;
+    return result;
+  }
+  result.status = NavStatus::Success;
+  result.point = toVec3(closest);
+  result.position_over_poly = over_poly;
+  return result;
+}
+
+NavClosestPointResult NavQuery::closestPointOnPolyBoundary(uint64_t poly_ref,
+                                                           const math::Vec3& point) const {
+  NavClosestPointResult result{};
+  if (!isValid() || poly_ref == 0) {
+    result.status = isValid() ? NavStatus::InvalidStart : NavStatus::NoNavMesh;
+    return result;
+  }
+  float closest[3]{};
+  if (!succeeded(query_->closestPointOnPolyBoundary(static_cast<dtPolyRef>(poly_ref),
+                                                   ptr(point),
+                                                   closest))) {
+    result.status = NavStatus::QueryFailed;
+    return result;
+  }
+  result.status = NavStatus::Success;
+  result.point = toVec3(closest);
+  result.position_over_poly = false;
   return result;
 }
 
@@ -2606,6 +2885,144 @@ NavPath NavQuery::finalizeSlicedPath(int max_points) {
     result.point_flags.push_back(mapStraightPathFlags(flags[static_cast<size_t>(i)]));
   }
   return result;
+}
+
+NavPath NavQuery::finalizeSlicedPathPartial(const std::vector<uint64_t>& existing_path,
+                                            int max_points) {
+  NavPath result{};
+  if (!isValid() || !sliced_active_ || existing_path.empty()) {
+    result.status = NavStatus::QueryFailed;
+    return result;
+  }
+
+  std::vector<dtPolyRef> existing;
+  existing.reserve(existing_path.size());
+  for (uint64_t ref : existing_path) {
+    if (ref != 0) {
+      existing.push_back(static_cast<dtPolyRef>(ref));
+    }
+  }
+  if (existing.empty()) {
+    result.status = NavStatus::InvalidConfig;
+    return result;
+  }
+
+  std::vector<dtPolyRef> polys(static_cast<size_t>(kMaxPathPolys));
+  int poly_count = 0;
+  const dtStatus status = query_->finalizeSlicedFindPathPartial(
+      existing.data(),
+      static_cast<int>(existing.size()),
+      polys.data(),
+      &poly_count,
+      static_cast<int>(polys.size()));
+  const dtPolyRef end_ref = static_cast<dtPolyRef>(sliced_end_ref_);
+  const math::Vec3 sliced_start = sliced_start_;
+  const math::Vec3 sliced_end = sliced_end_;
+  cancelSlicedPath();
+  if (!succeeded(status) || poly_count <= 0) {
+    result.status = failed(status) ? NavStatus::QueryFailed : NavStatus::NoPath;
+    return result;
+  }
+
+  const int clamped_max_points = std::max(max_points, 2);
+  std::vector<float> straight(static_cast<size_t>(clamped_max_points) * 3u);
+  std::vector<unsigned char> flags(static_cast<size_t>(clamped_max_points));
+  std::vector<dtPolyRef> straight_polys(static_cast<size_t>(clamped_max_points));
+  int point_count = 0;
+  if (!succeeded(query_->findStraightPath(ptr(sliced_start),
+                                          ptr(sliced_end),
+                                          polys.data(),
+                                          poly_count,
+                                          straight.data(),
+                                          flags.data(),
+                                          straight_polys.data(),
+                                          &point_count,
+                                          clamped_max_points)) ||
+      point_count <= 0) {
+    result.status = NavStatus::QueryFailed;
+    return result;
+  }
+
+  result.partial = dtStatusDetail(status, DT_PARTIAL_RESULT) ||
+                   polys[static_cast<size_t>(poly_count - 1)] != end_ref;
+  result.status = result.partial ? NavStatus::PartialPath : NavStatus::Success;
+  for (int i = 0; i < point_count; ++i) {
+    result.points.push_back(toVec3(&straight[static_cast<size_t>(i) * 3u]));
+    result.point_flags.push_back(mapStraightPathFlags(flags[static_cast<size_t>(i)]));
+  }
+  return result;
+}
+
+NavPolyQueryResult NavQuery::pathFromDijkstraSearch(uint64_t end_poly_ref, int max_polys) const {
+  NavPolyQueryResult result{};
+  if (!isValid() || end_poly_ref == 0) {
+    result.status = isValid() ? NavStatus::InvalidEnd : NavStatus::NoNavMesh;
+    return result;
+  }
+  const int capacity = std::max(max_polys, 1);
+  std::vector<dtPolyRef> path(static_cast<size_t>(capacity));
+  int count = 0;
+  const dtStatus status = query_->getPathFromDijkstraSearch(static_cast<dtPolyRef>(end_poly_ref),
+                                                            path.data(),
+                                                            &count,
+                                                            capacity);
+  if (!succeeded(status)) {
+    result.status = NavStatus::QueryFailed;
+    return result;
+  }
+  result.status = dtStatusDetail(status, DT_PARTIAL_RESULT) ? NavStatus::PartialPath : NavStatus::Success;
+  for (int i = 0; i < count; ++i) {
+    result.polys.push_back(static_cast<uint64_t>(path[static_cast<size_t>(i)]));
+  }
+  return result;
+}
+
+bool NavQuery::isInClosedList(uint64_t poly_ref) const {
+  return isValid() && poly_ref != 0 && query_->isInClosedList(static_cast<dtPolyRef>(poly_ref));
+}
+
+NavPortalPoints NavQuery::portalPoints(uint64_t from_poly_ref, uint64_t to_poly_ref) const {
+  NavPortalPoints result{};
+  if (!isValid() || from_poly_ref == 0 || to_poly_ref == 0) {
+    result.status = isValid() ? NavStatus::InvalidConfig : NavStatus::NoNavMesh;
+    return result;
+  }
+  if (nav_mesh_ != nullptr) {
+    math::Vec3 center{};
+    if (nav_mesh_->polyCenter(from_poly_ref, center)) {
+      const NavWallSegments segments = getPolyWallSegments(center);
+      if (segments.success()) {
+        for (const NavWallSegment& segment : segments.segments) {
+          if (segment.neighbor_ref == to_poly_ref) {
+            result.status = NavStatus::Success;
+            result.left = segment.start;
+            result.right = segment.end;
+            result.from_type = 0;
+            result.to_type = 0;
+            return result;
+          }
+        }
+      }
+    }
+  }
+  result.status = NavStatus::QueryFailed;
+  return result;
+}
+
+bool NavQuery::edgeMidPoint(uint64_t from_poly_ref,
+                            uint64_t to_poly_ref,
+                            math::Vec3& out_midpoint) const {
+  if (!isValid() || from_poly_ref == 0 || to_poly_ref == 0) {
+    return false;
+  }
+  const NavPortalPoints portal = portalPoints(from_poly_ref, to_poly_ref);
+  if (!portal.success()) {
+    return false;
+  }
+  out_midpoint = {(portal.left.x + portal.right.x) * 0.5f,
+                  (portal.left.y + portal.right.y) * 0.5f,
+                  (portal.left.z + portal.right.z) * 0.5f};
+  return true;
 }
 
 void NavQuery::cancelSlicedPath() {

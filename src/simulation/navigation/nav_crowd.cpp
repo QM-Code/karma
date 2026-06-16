@@ -67,6 +67,20 @@ bool failed(dtStatus status) {
   return dtStatusFailed(status) != 0;
 }
 
+uint8_t mapStraightPathFlags(unsigned char flags) {
+  uint8_t out = NavPathPointFlagNone;
+  if ((flags & DT_STRAIGHTPATH_START) != 0) {
+    out |= NavPathPointFlagStart;
+  }
+  if ((flags & DT_STRAIGHTPATH_END) != 0) {
+    out |= NavPathPointFlagEnd;
+  }
+  if ((flags & DT_STRAIGHTPATH_OFFMESH_CONNECTION) != 0) {
+    out |= NavPathPointFlagOffMeshConnection;
+  }
+  return out;
+}
+
 void setResult(NavCrowdBuildResult* result,
                NavStatus status,
                std::string message,
@@ -387,6 +401,65 @@ void NavCrowd::update(float dt) {
     return;
   }
   impl_->crowd->update(dt, nullptr);
+}
+
+NavCrowdDebugSnapshot NavCrowd::debugSnapshot(const NavCrowdDebugRequest& request) const {
+  NavCrowdDebugSnapshot snapshot;
+  if (!isValid()) {
+    return snapshot;
+  }
+  for (int i = 0; i < impl_->crowd->getAgentCount(); ++i) {
+    if (!request.all_agents && i != request.selected_agent_id) {
+      continue;
+    }
+    const dtCrowdAgent* agent = impl_->crowd->getAgent(i);
+    if (agent == nullptr || !agent->active) {
+      continue;
+    }
+
+    NavCrowdDebugAgent debug_agent;
+    debug_agent.agent_id = i;
+    if (request.include_corridor) {
+      const dtPolyRef* path = agent->corridor.getPath();
+      const int path_count = agent->corridor.getPathCount();
+      debug_agent.corridor_polys.reserve(static_cast<size_t>(path_count));
+      for (int path_index = 0; path_index < path_count; ++path_index) {
+        debug_agent.corridor_polys.push_back(static_cast<uint64_t>(path[path_index]));
+      }
+    }
+    if (request.include_corners) {
+      debug_agent.corners.reserve(static_cast<size_t>(agent->ncorners));
+      for (int corner_index = 0; corner_index < agent->ncorners; ++corner_index) {
+        debug_agent.corners.push_back({
+            .position = toVec3(&agent->cornerVerts[corner_index * 3]),
+            .flags = mapStraightPathFlags(agent->cornerFlags[corner_index]),
+            .poly_ref = static_cast<uint64_t>(agent->cornerPolys[corner_index]),
+        });
+      }
+    }
+    if (request.include_collision_segments) {
+      const int segment_count = agent->boundary.getSegmentCount();
+      debug_agent.boundary_segments.reserve(static_cast<size_t>(segment_count));
+      for (int segment_index = 0; segment_index < segment_count; ++segment_index) {
+        const float* segment = agent->boundary.getSegment(segment_index);
+        debug_agent.boundary_segments.push_back({
+            .start = {segment[0], segment[1], segment[2]},
+            .end = {segment[3], segment[4], segment[5]},
+        });
+      }
+    }
+    if (request.include_neighbours) {
+      debug_agent.neighbours.reserve(static_cast<size_t>(agent->nneis));
+      for (int neighbour_index = 0; neighbour_index < agent->nneis; ++neighbour_index) {
+        debug_agent.neighbours.push_back({
+            .agent_id = agent->neis[neighbour_index].idx,
+            .distance = agent->neis[neighbour_index].dist,
+        });
+      }
+    }
+    snapshot.agents.push_back(std::move(debug_agent));
+  }
+  return snapshot;
 }
 
 bool NavCrowd::agentInfo(int agent_id, NavCrowdAgentInfo& out_info) const {

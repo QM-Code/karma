@@ -16,12 +16,20 @@ class GraphicsDevice;
 namespace karma::navigation {
 
 /// \ingroup karma_navigation
+/// Tile-cache layer compression mode for serialized and built cache data.
+enum class NavTileCacheCompression : uint8_t {
+  None,
+  FastLz,
+};
+
+/// \ingroup karma_navigation
 /// Build-time settings for Detour's dynamic obstacle tile cache.
 struct NavTileCacheBuildConfig {
   int expected_layers_per_tile = 4;
   int max_obstacles = 128;
   int max_layers_per_tile = 32;
   size_t allocator_size = 32000;
+  NavTileCacheCompression compression = NavTileCacheCompression::FastLz;
 };
 
 /// \ingroup karma_navigation
@@ -34,6 +42,14 @@ struct NavTileCacheBuildResult {
   uint32_t compressed_bytes = 0;
   uint32_t raw_bytes = 0;
   uint32_t navmesh_bytes = 0;
+};
+
+/// \ingroup karma_navigation
+/// Serialized tile-cache asset payload.
+struct NavTileCacheSnapshot {
+  std::vector<uint8_t> data;
+
+  bool valid() const { return !data.empty(); }
 };
 
 /// \ingroup karma_navigation
@@ -96,6 +112,12 @@ class NavTileCache {
              const NavMeshBuildConfig& nav_config,
              const NavTileCacheBuildConfig& cache_config = {},
              NavTileCacheBuildResult* result = nullptr);
+  /// Serializes tile-cache layers, build inputs, and the current navmesh snapshot.
+  NavTileCacheSnapshot snapshot(const NavMesh& nav_mesh) const;
+  /// Rehydrates tile-cache state and navmesh data from a serialized snapshot.
+  bool loadSnapshot(NavMesh& nav_mesh,
+                    const NavTileCacheSnapshot& snapshot,
+                    NavTileCacheBuildResult* result = nullptr);
   /// Releases tile-cache state.
   void reset();
   /// Returns true after a successful tile-cache build.

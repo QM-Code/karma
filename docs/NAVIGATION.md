@@ -79,7 +79,9 @@ partitioning is selected with `NavMeshPartitionType::Watershed`, `Monotone`, or
 
 `NavMesh::snapshot()` serializes solo or tiled navmeshes for worker-thread
 queries. `NavMesh::loadSnapshot()` rehydrates the snapshot into a live Detour
-mesh.
+mesh. Low-level state helpers expose polygon flags/areas, polygon reference
+decoding, active tile metadata, tile state store/restore, and off-mesh
+connection endpoint lookup without exposing Detour types.
 
 ## ECS Request Pipeline
 
@@ -135,9 +137,11 @@ Build config area flags control which polygons a filter can traverse, while
 query, path agent, or crowd filter slot. Use `navigation::makeQueryFilter(config)`
 to seed a query filter from `NavMeshBuildConfig::area_configs`.
 
-`NavQuery` exposes Detour path, raycast, sliced path, nearest-point, height,
-wall-distance, random-point, smooth-path, local-neighbourhood,
-polys-around-circle, polys-around-shape, and wall-segment helpers.
+`NavQuery` exposes Detour path, raycast, detailed raycast, AABB polygon query,
+sliced path, partial sliced finalization, Dijkstra path extraction,
+closed-list checks, nearest-point, closest-point, height, wall-distance,
+random-point, smooth-path, local-neighbourhood, polys-around-circle,
+polys-around-shape, wall-segment, portal, and edge-midpoint helpers.
 
 Set `NavMeshBuildConfig::collect_build_debug_draw` when tools need RecastDemo
 build-intermediate views. Successful builds then populate `NavMeshDebugDrawMode`
@@ -170,6 +174,23 @@ if (tile_cache.build(nav_mesh, geometry, nav_config, {}, &result)) {
 }
 ```
 
+Tile caches can be persisted as opaque `.kntc` assets:
+
+```cpp
+navigation::NavTileCacheSnapshot snapshot = tile_cache.snapshot(nav_mesh);
+content::saveNavTileCacheSnapshot("level.kntc", snapshot);
+
+navigation::NavMesh loaded_mesh;
+navigation::NavTileCache loaded_cache;
+loaded_cache.loadSnapshot(loaded_mesh,
+                          content::loadNavTileCacheSnapshot("level.kntc"));
+```
+
+`NavTileCacheBuildConfig::compression` accepts `NavTileCacheCompression::FastLz`
+or `None`. The serialized asset stores the mode, compressed tile layers, cache
+params, navmesh params, build geometry needed for later tile rebuilds, and a
+navmesh snapshot for immediate queries after load.
+
 In ECS, put `NavTileCacheComponent` on the navmesh entity and
 `NavTileCacheObstacleComponent` on obstacle entities. The system owns obstacle
 handles and refreshes navmesh snapshots after tile updates.
@@ -179,7 +200,11 @@ handles and refreshes navmesh snapshots after tile updates.
 `NavCrowd` wraps DetourCrowd local steering. It supports per-agent radius,
 height, speed, acceleration, collision range, optimization range, separation,
 update flags, query filter slots, obstacle avoidance quality slots, move
-targets, velocity targets, and per-agent diagnostics.
+targets, velocity targets, and per-agent diagnostics. `NavCrowd::debugSnapshot`
+captures requested corridor polygons, corners, collision segments, and
+neighbour links from active Detour agents. `NavCrowdComponent::debug_request`
+enables the same capture through ECS and stores the latest result in
+`debug_snapshot`.
 
 ```cpp
 navigation::NavCrowd crowd;
@@ -195,9 +220,12 @@ if (crowd.init(nav_mesh, crowd_config)) {
 ```
 
 For ECS, put `NavCrowdComponent` on the navmesh entity and
-`NavCrowdAgentComponent` on controlled entities. Crowd agents are intended for
-local avoidance and steering; use the existing async `NavMeshAgentComponent`
-when you only need point-to-point path following.
+`NavCrowdAgentComponent` on controlled entities. `NavCrowdMovementMode::Transform`
+writes DetourCrowd positions to entity transforms. `PlayerControllerVelocity`
+leaves transforms under physics authority and writes horizontal crowd velocity
+to `PlayerControllerComponent::setDesiredVelocity`. The current physics world
+still owns one default player controller, so multi-controller backend ownership
+is not yet generalized.
 
 `NavMesh::debugDraw()` and `NavQuery::debugDrawPath()` draw the baked mesh,
 captured Recast debug layers, and paths through

@@ -267,6 +267,78 @@ struct NavWallSegments {
 };
 
 /// \ingroup karma_navigation
+/// Decoded Detour polygon reference fields.
+struct NavPolyRefParts {
+  uint32_t salt = 0;
+  uint32_t tile = 0;
+  uint32_t poly = 0;
+};
+
+/// \ingroup karma_navigation
+/// Detour tile reference and coordinate metadata.
+struct NavTileInfo {
+  uint64_t ref = 0;
+  int index = -1;
+  int x = 0;
+  int y = 0;
+  int layer = 0;
+  int poly_count = 0;
+  int vert_count = 0;
+};
+
+/// \ingroup karma_navigation
+/// Mutable Detour tile state payload from `storeTileState`.
+struct NavTileStateSnapshot {
+  uint64_t tile_ref = 0;
+  std::vector<uint8_t> data;
+
+  bool valid() const { return tile_ref != 0 && !data.empty(); }
+};
+
+/// \ingroup karma_navigation
+/// Endpoints for a Detour off-mesh connection polygon.
+struct NavOffMeshConnectionEndpoints {
+  math::Vec3 start{};
+  math::Vec3 end{};
+};
+
+/// \ingroup karma_navigation
+/// Detailed Detour raycast result.
+struct NavRaycastResult {
+  NavStatus status = NavStatus::QueryFailed;
+  float hit_fraction = 0.0f;
+  float path_cost = 0.0f;
+  math::Vec3 hit_position{};
+  math::Vec3 hit_normal{};
+  std::vector<uint64_t> visited_polys;
+
+  bool hit() const { return hit_fraction >= 0.0f && hit_fraction <= 1.0f; }
+  bool success() const { return status == NavStatus::Success; }
+};
+
+/// \ingroup karma_navigation
+/// Closest point query result for a polygon.
+struct NavClosestPointResult {
+  NavStatus status = NavStatus::QueryFailed;
+  math::Vec3 point{};
+  bool position_over_poly = false;
+
+  bool success() const { return status == NavStatus::Success; }
+};
+
+/// \ingroup karma_navigation
+/// Portal edge endpoints between adjacent polygons.
+struct NavPortalPoints {
+  NavStatus status = NavStatus::QueryFailed;
+  math::Vec3 left{};
+  math::Vec3 right{};
+  unsigned char from_type = 0;
+  unsigned char to_type = 0;
+
+  bool success() const { return status == NavStatus::Success; }
+};
+
+/// \ingroup karma_navigation
 /// Options for smooth path sampling over a Detour corridor.
 struct NavSmoothPathConfig {
   float step_size = 0.5f;
@@ -314,6 +386,24 @@ class NavMesh {
   bool setPolyFlags(uint64_t poly_ref, uint16_t flags);
   /// Reads Detour flags for one polygon reference.
   bool getPolyFlags(uint64_t poly_ref, uint16_t& out_flags) const;
+  /// Sets Detour area id for one polygon reference.
+  bool setPolyArea(uint64_t poly_ref, unsigned char area);
+  /// Reads Detour area id for one polygon reference.
+  bool getPolyArea(uint64_t poly_ref, unsigned char& out_area) const;
+  /// Decodes a Detour polygon reference into salt/tile/poly indices.
+  bool decodePolyRef(uint64_t poly_ref, NavPolyRefParts& out_parts) const;
+  /// Returns all active Detour tiles.
+  std::vector<NavTileInfo> tiles() const;
+  /// Returns the Detour tile reference at tile coordinates.
+  uint64_t tileRefAt(int x, int y, int layer = 0) const;
+  /// Stores mutable tile state such as polygon flags and areas.
+  bool storeTileState(uint64_t tile_ref, NavTileStateSnapshot& out_state) const;
+  /// Restores mutable tile state and refreshes snapshots/debug data.
+  bool restoreTileState(const NavTileStateSnapshot& state);
+  /// Returns off-mesh connection endpoints for a previous and off-mesh polygon pair.
+  bool offMeshConnectionEndpoints(uint64_t previous_poly_ref,
+                                  uint64_t off_mesh_poly_ref,
+                                  NavOffMeshConnectionEndpoints& out_endpoints) const;
   /// Computes the center of one Detour polygon reference.
   bool polyCenter(uint64_t poly_ref, math::Vec3& out_center) const;
   /// Marks polygons unreachable from `start` with `disabled_flags`.
@@ -407,6 +497,22 @@ class NavQuery {
                   const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
                   int max_points = 256,
                   const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Performs a Detour raycast and exposes hit normal, visited polys, cost, and fraction.
+  NavRaycastResult raycastDetailed(const math::Vec3& start,
+                                   const math::Vec3& end,
+                                   const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
+                                   int max_polys = 256,
+                                   const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Finds polygon refs overlapping an AABB.
+  NavPolyQueryResult queryPolygons(const math::Vec3& center,
+                                   const math::Vec3& half_extents,
+                                   int max_polys = 256,
+                                   const NavQueryFilter& filter = NavQueryFilter{}) const;
+  /// Finds the closest point on a polygon.
+  NavClosestPointResult closestPointOnPoly(uint64_t poly_ref, const math::Vec3& point) const;
+  /// Finds the closest point on a polygon boundary.
+  NavClosestPointResult closestPointOnPolyBoundary(uint64_t poly_ref,
+                                                   const math::Vec3& point) const;
   /// Finds the nearest navigable point around `point`.
   bool findNearestPoint(const math::Vec3& point,
                         math::Vec3& out_point,
@@ -478,6 +584,17 @@ class NavQuery {
   NavStatus updateSlicedPath(int max_iterations, bool& out_done);
   /// Finalizes a sliced path request and returns the path.
   NavPath finalizeSlicedPath(int max_points = 256);
+  /// Finalizes a sliced path request constrained by an existing corridor.
+  NavPath finalizeSlicedPathPartial(const std::vector<uint64_t>& existing_path,
+                                    int max_points = 256);
+  /// Extracts a path from the last Dijkstra-style neighbourhood search.
+  NavPolyQueryResult pathFromDijkstraSearch(uint64_t end_poly_ref, int max_polys = 256) const;
+  /// Returns true when the polygon is in the query object's Detour closed list.
+  bool isInClosedList(uint64_t poly_ref) const;
+  /// Returns portal endpoints between adjacent polygons.
+  NavPortalPoints portalPoints(uint64_t from_poly_ref, uint64_t to_poly_ref) const;
+  /// Returns the midpoint of the portal edge between adjacent polygons.
+  bool edgeMidPoint(uint64_t from_poly_ref, uint64_t to_poly_ref, math::Vec3& out_midpoint) const;
   /// Cancels any active sliced path request.
   void cancelSlicedPath();
   /// Returns true while a sliced path request is active.

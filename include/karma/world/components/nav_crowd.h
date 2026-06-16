@@ -10,6 +10,13 @@
 namespace karma::components {
 
 /// \ingroup karma_components
+/// How `NavigationSystem` applies DetourCrowd movement to an entity.
+enum class NavCrowdMovementMode {
+  Transform,
+  PlayerControllerVelocity,
+};
+
+/// \ingroup karma_components
 /// Owns a DetourCrowd instance for a navmesh entity.
 struct NavCrowdComponent : ecs::ComponentTag {
   bool enabled = true;
@@ -23,6 +30,8 @@ struct NavCrowdComponent : ecs::ComponentTag {
   uint64_t nav_mesh_build_version = 0;
   navigation::NavCrowdConfig config{};
   navigation::NavCrowdBuildResult last_build_result{};
+  navigation::NavCrowdDebugRequest debug_request{};
+  navigation::NavCrowdDebugSnapshot debug_snapshot{};
   navigation::NavCrowd crowd{};
 };
 
@@ -45,7 +54,7 @@ struct NavCrowdAgentComponent : ecs::ComponentTag {
   bool velocity_requested = false;
   bool params_dirty = false;
   bool remove_requested = false;
-  bool update_transform = true;
+  NavCrowdMovementMode movement_mode = NavCrowdMovementMode::Transform;
   navigation::NavCrowdAgentState state = navigation::NavCrowdAgentState::Invalid;
   navigation::NavCrowdTargetState target_state = navigation::NavCrowdTargetState::None;
   navigation::NavStatus last_request_status = navigation::NavStatus::QueryFailed;

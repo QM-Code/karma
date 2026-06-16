@@ -189,8 +189,10 @@ if (KARMA_ENABLE_NAVIGATION)
     src/simulation/navigation/nav_tile_cache.cpp
     src/simulation/navigation/navigation_diagnostics.cpp
     src/simulation/navigation/navigation_system.cpp
+    src/simulation/navigation/third_party/fastlz/fastlz.c
   )
   target_link_libraries(karma_simulation_navigation PUBLIC karma_core karma_world)
+  target_include_directories(karma_simulation_navigation PRIVATE src/simulation/navigation/third_party/fastlz)
   karma_link_build_and_install(karma_simulation_navigation PUBLIC KARMA_NAVIGATION_LINK_LIBS KARMA_INSTALL_LINK_LIBS)
   target_compile_definitions(karma_simulation_navigation PUBLIC KARMA_ENABLE_NAVIGATION)
   list(APPEND KARMA_INSTALL_TARGETS karma_simulation_navigation)
@@ -257,6 +259,10 @@ target_link_libraries(karma_content
     karma_world
     karma_simulation_animation
 )
+if (KARMA_ENABLE_NAVIGATION)
+  target_sources(karma_content PRIVATE src/content/navigation/nav_tile_cache.cpp)
+  target_link_libraries(karma_content PUBLIC karma_simulation_navigation)
+endif()
 list(APPEND KARMA_INSTALL_TARGETS karma_content)
 
 karma_add_static(karma_platform_network

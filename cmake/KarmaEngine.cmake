@@ -186,13 +186,28 @@ if (KARMA_ENABLE_NAVIGATION)
     src/simulation/navigation/nav_crowd.cpp
     src/simulation/navigation/nav_geometry.cpp
     src/simulation/navigation/nav_mesh.cpp
+    src/simulation/navigation/nav_mesh_build.cpp
+    src/simulation/navigation/nav_mesh_debug.cpp
+    src/simulation/navigation/nav_mesh_snapshot.cpp
+    src/simulation/navigation/nav_mesh_state.cpp
     src/simulation/navigation/nav_query.cpp
     src/simulation/navigation/nav_query_path.cpp
     src/simulation/navigation/nav_query_spatial.cpp
     src/simulation/navigation/nav_query_sliced.cpp
     src/simulation/navigation/nav_tile_cache.cpp
+    src/simulation/navigation/nav_tile_cache_build.cpp
+    src/simulation/navigation/nav_tile_cache_common.cpp
+    src/simulation/navigation/nav_tile_cache_debug.cpp
+    src/simulation/navigation/nav_tile_cache_runtime.cpp
+    src/simulation/navigation/nav_tile_cache_snapshot.cpp
     src/simulation/navigation/navigation_diagnostics.cpp
     src/simulation/navigation/navigation_system.cpp
+    src/simulation/navigation/navigation_system_crowd.cpp
+    src/simulation/navigation/navigation_system_debug.cpp
+    src/simulation/navigation/navigation_system_helpers.cpp
+    src/simulation/navigation/navigation_system_navmesh.cpp
+    src/simulation/navigation/navigation_system_tile_cache.cpp
+    src/simulation/navigation/navigation_system_worker.cpp
     src/simulation/navigation/third_party/fastlz/fastlz.c
   )
   target_link_libraries(karma_simulation_navigation PUBLIC karma_core karma_world)

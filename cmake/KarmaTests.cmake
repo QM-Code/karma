@@ -39,6 +39,12 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
   if (KARMA_ENABLE_NAVIGATION AND TARGET karma::headless)
     add_executable(karma_navmesh_tests
       tests/navmesh_tests.cpp
+      tests/navigation/navigation_system_tests.cpp
+      tests/navigation/navmesh_build_tests.cpp
+      tests/navigation/navmesh_crowd_tests.cpp
+      tests/navigation/navmesh_query_tests.cpp
+      tests/navigation/navmesh_test_utils.cpp
+      tests/navigation/navmesh_tile_cache_tests.cpp
     )
     target_link_libraries(karma_navmesh_tests
       PRIVATE

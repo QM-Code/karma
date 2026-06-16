@@ -281,6 +281,7 @@ if (KARMA_ENABLE_NAVIGATION AND KARMA_BUILD_GRAPHICAL_PROFILE)
   function(karma_add_navigation_example target source)
     add_executable(${target}
       ${source}
+      examples/navigation/navigation_example_scene.cpp
       examples/navigation/navigation_examples.cpp
       examples/scene_helpers.cpp
     )

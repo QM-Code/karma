@@ -22,6 +22,10 @@ class NavCrowd;
 class NavQuery;
 class NavTileCache;
 
+namespace detail {
+struct NavMeshAccess;
+}
+
 /// \ingroup karma_navigation
 /// Result metadata from a navmesh build.
 struct NavMeshBuildResult {
@@ -173,9 +177,7 @@ class NavMesh {
                          bool depth_test = false) const;
 
  private:
-  friend class NavQuery;
-  friend class NavCrowd;
-  friend class NavTileCache;
+  friend struct detail::NavMeshAccess;
   void refreshSnapshot();
   void refreshDetourDebugDraw();
   dtNavMesh* nav_mesh_ = nullptr;

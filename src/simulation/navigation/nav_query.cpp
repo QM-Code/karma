@@ -10,6 +10,7 @@
 
 #include "karma/rendering/renderer/device.h"
 #include "detail/detour_utils.h"
+#include "detail/nav_mesh_access.h"
 
 namespace karma::navigation {
 namespace {
@@ -27,8 +28,9 @@ NavQuery::NavQuery(const NavMesh& nav_mesh, int max_nodes)
     return;
   }
   query_ = dtAllocNavMeshQuery();
+  const dtNavMesh* detour_nav_mesh = detail::NavMeshAccess::detour(nav_mesh);
   if (query_ == nullptr ||
-      !succeeded(query_->init(nav_mesh.nav_mesh_, std::max(max_nodes, 1)))) {
+      !succeeded(query_->init(detour_nav_mesh, std::max(max_nodes, 1)))) {
     dtFreeNavMeshQuery(query_);
     query_ = nullptr;
   }
@@ -39,8 +41,7 @@ NavQuery::NavQuery(const NavMeshSnapshot& snapshot, int max_nodes) {
   if (!loaded.loadSnapshot(snapshot)) {
     return;
   }
-  owned_nav_mesh_ = loaded.nav_mesh_;
-  loaded.nav_mesh_ = nullptr;
+  owned_nav_mesh_ = detail::NavMeshAccess::releaseDetour(loaded);
 
   query_ = dtAllocNavMeshQuery();
   if (query_ == nullptr ||

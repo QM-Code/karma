@@ -15,6 +15,7 @@
 #include "karma/core/math/vec3.h"
 #include "karma/rendering/renderer/device.h"
 #include "detail/detour_utils.h"
+#include "detail/nav_mesh_access.h"
 
 namespace karma::navigation {
 namespace {
@@ -218,7 +219,8 @@ bool NavCrowd::init(NavMesh& nav_mesh,
   }
   impl_->reset();
 
-  if (nav_mesh.nav_mesh_ == nullptr || !nav_mesh.isValid()) {
+  dtNavMesh* detour_nav_mesh = detail::NavMeshAccess::detour(nav_mesh);
+  if (detour_nav_mesh == nullptr || !nav_mesh.isValid()) {
     setResult(result, NavStatus::NoNavMesh, "Cannot initialize crowd without a valid navmesh.");
     impl_->last_result = result != nullptr
         ? *result
@@ -237,7 +239,7 @@ bool NavCrowd::init(NavMesh& nav_mesh,
 
   impl_->crowd = dtAllocCrowd();
   if (impl_->crowd == nullptr ||
-      !impl_->crowd->init(config.max_agents, config.max_agent_radius, nav_mesh.nav_mesh_)) {
+      !impl_->crowd->init(config.max_agents, config.max_agent_radius, detour_nav_mesh)) {
     setResult(result, NavStatus::BuildFailed, "Failed to initialize Detour crowd.");
     impl_->last_result = result != nullptr
         ? *result

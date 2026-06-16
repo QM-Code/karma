@@ -129,7 +129,9 @@ void DiligentBackend::ensureLineResources() {
     pso.PSODesc.ResourceLayout.NumVariables =
         static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
 
+    const auto pso_start = core::SteadyClock::now();
     out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    logRenderPipelineDiag("line", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return false;
     }

@@ -1015,11 +1015,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
                                          render_height);
   mark_stage("opaque pass");
 
-  ensureParticleResources();
-  mark_stage("particle resources prewarm");
-  ensureLineResources();
-  mark_stage("line resources ensure");
-
+  bool has_particle_work = !particle_emitter_runtime_states_.empty();
   bool allow_distortion_particles = false;
   bool require_scene_color_copy = !forward_state.scene_reflection_draws.empty() ||
                                   !forward_state.pre_particle_scene_sample_draws.empty();
@@ -1031,6 +1027,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     if (batch.layer != layer || batch.particles.empty()) {
       continue;
     }
+    has_particle_work = true;
     if (batch.blend_mode == renderer::ParticleBlendMode::Distortion) {
       allow_distortion_particles = true;
       require_scene_color_copy = true;
@@ -1041,8 +1038,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
   }
   for (const auto& submission : particle_emitter_submissions_) {
     const auto& emitter = submission.desc;
-    if (emitter.layer != layer || !emitter.visible || !emitter.enabled ||
-        emitter.max_particles == 0u) {
+    if (emitter.layer != layer || emitter.max_particles == 0u) {
+      continue;
+    }
+    has_particle_work = true;
+    if (!emitter.visible || !emitter.enabled) {
       continue;
     }
     if (emitter.blend_mode == renderer::ParticleBlendMode::Distortion) {
@@ -1053,6 +1053,14 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
       require_scene_color_copy = true;
     }
   }
+
+  if (has_particle_work) {
+    ensureParticleResources();
+  }
+  mark_stage(has_particle_work ? "particle resources prewarm" : "particle resources skipped");
+  ensureLineResources();
+  mark_stage("line resources ensure");
+
   particle_pass_stats_.distortion_present =
       particle_pass_stats_.distortion_present || allow_distortion_particles;
   if (require_scene_color_copy && particle_scene_texture) {
@@ -1128,8 +1136,10 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
       particle_scene_texture ? particle_scene_texture->GetDesc().Format
                              : Diligent::TEX_FORMAT_UNKNOWN;
   particle_pass.allow_distortion_particles = allow_distortion_particles;
-  renderParticlePasses(layer, particle_pass);
-  mark_stage("particle pass");
+  if (has_particle_work) {
+    renderParticlePasses(layer, particle_pass);
+  }
+  mark_stage(has_particle_work ? "particle pass" : "particle pass skipped");
 
   auto draw_lines = [&](const std::vector<LineVertex>& lines,
                         Diligent::RefCntAutoPtr<Diligent::IPipelineState>& pso,

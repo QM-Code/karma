@@ -15,6 +15,7 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -33,6 +34,7 @@ class IShaderResourceBinding;
 class ITexture;
 class ITextureView;
 class ISampler;
+class IShader;
 class IShaderResourceVariable;
 }  // namespace Diligent
 
@@ -70,6 +72,7 @@ class DiligentBackend final : public Backend {
   void beginFrame(const renderer::FrameInfo& frame) override;
   void endFrame() override;
   void resize(int width, int height) override;
+  void flushRenderStateCache() override;
 
   renderer::MeshId createMesh(const geometry::MeshData& mesh) override;
   void updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) override;
@@ -427,6 +430,15 @@ class DiligentBackend final : public Backend {
     Diligent::IShaderResourceVariable* scene_depth_var = nullptr;
   };
 
+  enum class ForwardPipelineVariant {
+    Opaque,
+    DepthPrepass,
+    Transparent,
+    TransparentDoubleSided,
+    Additive,
+    AdditiveDoubleSided,
+  };
+
   void initializeDevice();
   void clearFrame(const float* color, bool clear_depth);
   void recreateShadowMap();
@@ -438,6 +450,12 @@ class DiligentBackend final : public Backend {
   void ensureUiResources();
   void ensureLineResources();
   void ensureParticleResources();
+  Diligent::IPipelineState* ensureForwardPipeline(ForwardPipelineVariant variant);
+  void bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const;
+  void bindForwardPlusResourcesToSrb(Diligent::IShaderResourceBinding* srb) const;
+  void initializeDefaultMaterialBinding(
+      Diligent::IPipelineState* pso,
+      Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb);
   void ensureDefaultSceneResources(int width, int height);
   void ensureParticleSceneCopyResources(int width,
                                         int height,
@@ -491,12 +509,19 @@ class DiligentBackend final : public Backend {
                                                                         const aiString& tex_path,
                                                                         bool srgb,
                                                                         const char* label);
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> loadImportedMaterialTexture(
+      const renderer::ImportedMaterialTexture& texture);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> loadTextureFromFile(const std::filesystem::path& path,
                                                                       bool srgb,
                                                                       const char* label);
+  renderer::MaterialId createMaterialFromImportedPayload(
+      const std::filesystem::path& path,
+      uint32_t material_index,
+      const renderer::ImportedMaterialData& imported);
   MaterialRecord buildImportedMaterialRecord(const aiScene& scene,
                                              const aiMaterial& material,
                                              const std::filesystem::path& asset_path);
+  MaterialRecord buildImportedMaterialRecord(const renderer::ImportedMaterialData& material);
   void initializeMaterialBindings(MaterialRecord& record);
   void initializeTextureCoordTransforms(MaterialRecord& record) const;
   void setTextureCoordTransform(MaterialRecord& record,
@@ -506,10 +531,18 @@ class DiligentBackend final : public Backend {
                                 unsigned int uv_index,
                                 size_t slot) const;
   void bindShadowResourcesToSrb(Diligent::IShaderResourceBinding* srb) const;
+  void preloadAssimpTextures(const aiScene& scene, const std::filesystem::path& asset_path);
+  void preloadImportedMaterialTextures(const renderer::ImportedMaterialData& material);
   const ImportedMaterialTemplateCacheEntry* getImportedMaterialTemplates(
       const std::filesystem::path& path);
   void ensureEnvironmentResources();
   void renderSkybox(const glm::mat4& projection, const glm::mat4& view);
+  struct RenderStateCacheFileInfo {
+    bool exists = false;
+    std::uintmax_t size = 0;
+  };
+  RenderStateCacheFileInfo renderStateCacheFileInfo() const;
+  void saveRenderStateCache(std::string_view reason);
 
   karma::platform::Window* window_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IRenderDevice> device_;
@@ -521,6 +554,8 @@ class DiligentBackend final : public Backend {
   bool shader_cache_log_ = false;
   std::uint32_t shader_cache_version_ = 18;
   bool shader_cache_flush_ = false;
+  Diligent::RefCntAutoPtr<Diligent::IShader> forward_vs_;
+  Diligent::RefCntAutoPtr<Diligent::IShader> forward_ps_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> transparent_pipeline_state_;
@@ -874,6 +909,7 @@ class DiligentBackend final : public Backend {
   std::unordered_map<renderer::MaterialId, MaterialRecord> materials_;
   std::unordered_map<renderer::MaterialSetId, MaterialSetRecord> material_sets_;
   std::unordered_map<std::string, ImportedMaterialTemplateCacheEntry> imported_material_templates_;
+  std::unordered_map<std::string, MaterialRecord> imported_payload_material_templates_;
   std::unordered_map<renderer::TextureId, TextureRecord> textures_;
   std::unordered_map<std::string, renderer::TextureId> texture_cache_;
   std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;

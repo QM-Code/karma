@@ -98,6 +98,8 @@ struct alignas(16) CameraOverrideUserConstants {
 bool isValidSize(int width, int height);
 bool startupDiagnosticsEnabled();
 bool renderResourceDiagnosticsEnabled();
+bool renderPipelineDiagnosticsEnabled();
+bool renderTextureImportDiagnosticsEnabled();
 void logStartupDiag(const char* area,
                     const char* stage,
                     core::SteadyClock::time_point start,
@@ -106,6 +108,14 @@ void logRenderResourceDiag(const char* area,
                            const char* stage,
                            core::SteadyClock::time_point start,
                            core::SteadyClock::time_point end);
+void logRenderPipelineDiag(const char* area,
+                           const char* stage,
+                           core::SteadyClock::time_point start,
+                           core::SteadyClock::time_point end);
+void logRenderTextureImportDiag(const char* area,
+                                const char* stage,
+                                core::SteadyClock::time_point start,
+                                core::SteadyClock::time_point end);
 std::vector<unsigned char> readFileBytes(const std::filesystem::path& path);
 LoadedImage loadImageFromMemory(const unsigned char* data, size_t size);
 LoadedImage loadImageFromFile(const std::filesystem::path& path);

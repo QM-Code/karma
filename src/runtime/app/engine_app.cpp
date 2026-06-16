@@ -363,6 +363,13 @@ void EngineApp::warmUpRenderer() {
   section_end = core::SteadyClock::now();
   log_stage("end frame", section_start, section_end);
 
+  section_start = section_end;
+  if (auto* backend = graphics_->backend()) {
+    backend->flushRenderStateCache();
+  }
+  section_end = core::SteadyClock::now();
+  log_stage("render state cache flush", section_start, section_end);
+
   spdlog::info("Renderer warm-up took {:.2f} ms",
                core::elapsedMillisecondsSince(warmup_start));
 }

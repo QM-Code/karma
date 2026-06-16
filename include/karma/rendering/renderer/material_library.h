@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -40,10 +41,14 @@ class MaterialLibrary {
   void registerImportedAssetMaterial(const std::string& key,
                                      std::filesystem::path path,
                                      uint32_t material_index,
-                                     MaterialDesc fallback = {}) {
+                                     MaterialDesc fallback = {},
+                                     std::shared_ptr<const ImportedMaterialData> imported = {}) {
     registerMaterial(key,
                      MaterialResourceDesc::fromImportedAssetMaterial(
-                         std::move(path), material_index, std::move(fallback)));
+                         std::move(path),
+                         material_index,
+                         std::move(fallback),
+                         std::move(imported)));
   }
 
   /// Removes a material descriptor.

@@ -218,17 +218,37 @@ void RenderSystem::acquireSharedMaterialVariant(const std::string& mesh_key,
   }
 
   const std::string cache_key = makeMaterialVariantCacheKey(mesh_key, material_key);
+  const bool diag_enabled = renderSystemDiagEnabled();
+  const auto cache_start = core::SteadyClock::now();
   auto shared_it = shared_material_variants_.find(cache_key);
   if (shared_it == shared_material_variants_.end()) {
     SharedMaterialVariant shared{};
     shared.material_set = device_.createMaterialSetFromMesh(record.mesh, *desc);
     if (shared.material_set == renderer::kInvalidMaterialSet) {
+      if (diag_enabled) {
+        spdlog::info("RenderSystem material-set cache miss mesh='{}' material='{}' failed in {:.2f} ms",
+                     mesh_key,
+                     material_key,
+                     core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+      }
       return;
     }
     shared.ref_count = 1;
     shared_it = shared_material_variants_.emplace(cache_key, std::move(shared)).first;
+    if (diag_enabled) {
+      spdlog::info("RenderSystem material-set cache miss mesh='{}' material='{}' took {:.2f} ms",
+                   mesh_key,
+                   material_key,
+                   core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
   } else {
     shared_it->second.ref_count += 1;
+    if (diag_enabled) {
+      spdlog::info("RenderSystem material-set cache hit mesh='{}' material='{}' took {:.2f} ms",
+                   mesh_key,
+                   material_key,
+                   core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
   }
 
   record.material_set = shared_it->second.material_set;

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,7 @@ struct GlbScenePrefab {
   std::filesystem::path source_path;
   uint32_t root_node = kInvalidGlbSceneNode;
   std::vector<GlbScenePrefabNode> nodes;
+  std::vector<std::shared_ptr<const renderer::ImportedMaterialData>> imported_materials;
   std::vector<animation::Skeleton> skeletons;
   std::vector<animation::Skin> skins;
   std::vector<animation::AnimationClip> animations;

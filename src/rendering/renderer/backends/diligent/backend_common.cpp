@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <limits>
+#include <string_view>
 
 #include <Primitives/interface/BasicTypes.h>
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
@@ -56,6 +57,11 @@
 namespace karma::renderer_backend {
 
 namespace {
+struct FileInfo {
+  bool exists = false;
+  std::uintmax_t size = 0;
+};
+
 std::filesystem::path defaultShaderCachePath(std::uint32_t version) {
   const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
   const char* home = std::getenv("HOME");
@@ -79,6 +85,23 @@ bool envFlagEnabled(const char* value) {
          std::strcmp(value, "FALSE") != 0 && std::strcmp(value, "off") != 0 &&
          std::strcmp(value, "OFF") != 0;
 }
+
+FileInfo inspectFile(const std::filesystem::path& path) {
+  FileInfo info{};
+  if (path.empty()) {
+    return info;
+  }
+  std::error_code ec;
+  info.exists = std::filesystem::exists(path, ec);
+  if (!info.exists || ec) {
+    return info;
+  }
+  info.size = std::filesystem::file_size(path, ec);
+  if (ec) {
+    info.size = 0;
+  }
+  return info;
+}
 }  // namespace
 
 bool isValidSize(int width, int height) {
@@ -95,6 +118,19 @@ bool startupDiagnosticsEnabled() {
 bool renderResourceDiagnosticsEnabled() {
   static const bool enabled =
       startupDiagnosticsEnabled() || envFlagEnabled(std::getenv("KARMA_RENDER_RESOURCE_DIAG"));
+  return enabled;
+}
+
+bool renderPipelineDiagnosticsEnabled() {
+  static const bool enabled =
+      startupDiagnosticsEnabled() || envFlagEnabled(std::getenv("KARMA_RENDER_PIPELINE_DIAG"));
+  return enabled;
+}
+
+bool renderTextureImportDiagnosticsEnabled() {
+  static const bool enabled =
+      renderResourceDiagnosticsEnabled() ||
+      envFlagEnabled(std::getenv("KARMA_RENDER_TEXTURE_IMPORT_DIAG"));
   return enabled;
 }
 
@@ -119,6 +155,32 @@ void logRenderResourceDiag(const char* area,
     return;
   }
   spdlog::info("Render resource diag: area={} stage={} ms={:.2f}",
+               area ? area : "unknown",
+               stage ? stage : "unknown",
+               core::elapsedMilliseconds(start, end));
+}
+
+void logRenderPipelineDiag(const char* area,
+                           const char* stage,
+                           core::SteadyClock::time_point start,
+                           core::SteadyClock::time_point end) {
+  if (!renderPipelineDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info("Render pipeline diag: area={} stage={} ms={:.2f}",
+               area ? area : "unknown",
+               stage ? stage : "unknown",
+               core::elapsedMilliseconds(start, end));
+}
+
+void logRenderTextureImportDiag(const char* area,
+                                const char* stage,
+                                core::SteadyClock::time_point start,
+                                core::SteadyClock::time_point end) {
+  if (!renderTextureImportDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info("Render texture import diag: area={} stage={} ms={:.2f}",
                area ? area : "unknown",
                stage ? stage : "unknown",
                core::elapsedMilliseconds(start, end));
@@ -153,7 +215,7 @@ LoadedImage loadImageFromMemory(const unsigned char* data, size_t size) {
   int w = 0;
   int h = 0;
   int comp = 0;
-  stbi_set_flip_vertically_on_load(1);
+  stbi_set_flip_vertically_on_load_thread(1);
   stbi_uc* decoded = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
   if (!decoded) {
     return image;
@@ -362,13 +424,13 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
     env_debug_mode_ = std::atoi(env);
   }
   if (const char* env = std::getenv("KARMA_SHADER_CACHE")) {
-    shader_cache_enabled_ = std::string(env) != "0";
+    shader_cache_enabled_ = envFlagEnabled(env);
   }
   if (const char* env = std::getenv("KARMA_SHADER_CACHE_LOG")) {
-    shader_cache_log_ = std::string(env) != "0";
+    shader_cache_log_ = envFlagEnabled(env);
   }
   if (const char* env = std::getenv("KARMA_SHADER_CACHE_FLUSH")) {
-    shader_cache_flush_ = std::string(env) != "0";
+    shader_cache_flush_ = envFlagEnabled(env);
   }
   if (const char* env = std::getenv("KARMA_SHADER_CACHE_VERSION")) {
     const int version = std::atoi(env);
@@ -383,6 +445,13 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   }
   if (render_state_cache_path_.empty()) {
     render_state_cache_path_ = defaultShaderCachePath(shader_cache_version_);
+  }
+  if (shader_cache_log_) {
+    spdlog::info("Render state cache config: enabled={} path='{}' version={} flush={}",
+                 shader_cache_enabled_,
+                 render_state_cache_path_.string(),
+                 shader_cache_version_,
+                 shader_cache_flush_);
   }
   auto stage_end = core::SteadyClock::now();
   logStartupDiag("diligent_backend", "constructor env parse", stage_start, stage_end);
@@ -422,12 +491,45 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   logStartupDiag("diligent_backend", "constructor total", constructor_start, stage_end);
 }
 
-DiligentBackend::~DiligentBackend() {
+DiligentBackend::RenderStateCacheFileInfo DiligentBackend::renderStateCacheFileInfo() const {
+  const FileInfo info = inspectFile(render_state_cache_path_);
+  return RenderStateCacheFileInfo{info.exists, info.size};
+}
+
+void DiligentBackend::saveRenderStateCache(std::string_view reason) {
   if (shader_cache_enabled_ && !render_state_cache_path_.empty() && device_with_cache_.GetCache()) {
+    const std::string stage_name =
+        reason.empty() ? std::string("shader cache save") : std::string(reason);
+    const auto before = renderStateCacheFileInfo();
     const auto start = core::SteadyClock::now();
     device_with_cache_.SaveCache(render_state_cache_path_.string().c_str());
-    logStartupDiag("diligent_backend", "destructor shader cache save", start, core::SteadyClock::now());
+    const auto end = core::SteadyClock::now();
+    const auto after = renderStateCacheFileInfo();
+    logStartupDiag("diligent_backend", stage_name.c_str(), start, end);
+    if (shader_cache_log_) {
+      spdlog::info(
+          "Render state cache save: reason='{}' path='{}' existed_before={} bytes_before={} "
+          "existed_after={} bytes_after={} ms={:.2f}",
+          stage_name,
+          render_state_cache_path_.string(),
+          before.exists,
+          before.size,
+          after.exists,
+          after.size,
+          core::elapsedMilliseconds(start, end));
+    }
   }
+}
+
+void DiligentBackend::flushRenderStateCache() {
+  if (!shader_cache_flush_) {
+    return;
+  }
+  saveRenderStateCache("renderer warm-up shader cache flush");
+}
+
+DiligentBackend::~DiligentBackend() {
+  saveRenderStateCache("destructor shader cache save");
 }
 
 }  // namespace karma::renderer_backend

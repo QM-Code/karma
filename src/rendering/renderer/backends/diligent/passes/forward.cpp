@@ -220,6 +220,16 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
     return mat_it != materials_.end() ? &mat_it->second : nullptr;
   };
 
+  auto uses_transparent_forward_path = [](const MaterialRecord* mat,
+                                          const MeshRecord& mesh) {
+    if (mat) {
+      return mat->desc.transparent ||
+             (mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard &&
+              mat->transmission_factor > 0.001f);
+    }
+    return mesh.base_color.a < 0.999f;
+  };
+
   auto uses_post_particle_transparent_pass = [&](const MaterialRecord* mat) {
     if (!mat) {
       return false;
@@ -305,12 +315,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
             .skinned = instance.skinning_enabled,
         };
         const MaterialRecord* mat = lookup_material(mat_id);
-        const bool transparent = (mat &&
-                                  (mat->desc.transparent ||
-                                   (mat->shading_model ==
-                                        renderer::MaterialDesc::ShadingModel::Standard &&
-                                    mat->transmission_factor > 0.001f))) ||
-                                 mesh.base_color.a < 0.999f;
+        const bool transparent = uses_transparent_forward_path(mat, mesh);
         if (transparent) {
           auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                    ? out_state.pre_particle_scene_sample_draws
@@ -348,12 +353,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           .skinned = instance.skinning_enabled,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
-      const bool transparent = (mat &&
-                                (mat->desc.transparent ||
-                                 (mat->shading_model ==
-                                      renderer::MaterialDesc::ShadingModel::Standard &&
-                                  mat->transmission_factor > 0.001f))) ||
-                               mesh.base_color.a < 0.999f;
+      const bool transparent = uses_transparent_forward_path(mat, mesh);
       if (transparent) {
         auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                  ? out_state.pre_particle_scene_sample_draws
@@ -788,11 +788,15 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     const char* value = std::getenv("KARMA_FORCE_DEPTH_PREPASS");
     return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
   }();
-  const bool run_depth_prepass =
-      depth_prepass_pipeline_state_ && active_dsv && state.opaque_batches.size() > 1 &&
+  const bool depth_prepass_candidate =
+      active_dsv && state.opaque_batches.size() > 1 &&
       (!disable_depth_prepass_for_driver || force_depth_prepass_for_env) &&
       !disable_depth_prepass_for_env &&
       !use_custom_shader_override;
+  if (depth_prepass_candidate) {
+    ensureForwardPipeline(ForwardPipelineVariant::DepthPrepass);
+  }
+  const bool run_depth_prepass = depth_prepass_candidate && depth_prepass_pipeline_state_;
 
   if (run_depth_prepass) {
     context_->SetRenderTargets(0,
@@ -1057,7 +1061,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     return first + count <= total;
   };
 
-  auto lookup_material = [&](renderer::MaterialId material_id) -> const MaterialRecord* {
+  auto lookup_material = [&](renderer::MaterialId material_id) -> MaterialRecord* {
     if (material_id == renderer::kInvalidMaterial) {
       return nullptr;
     }
@@ -1219,30 +1223,55 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   };
 
   auto resolve_forward_pipeline =
-      [&](const MaterialRecord* mat) -> Diligent::IPipelineState* {
+      [&](MaterialRecord* mat) -> Diligent::IPipelineState* {
     if (use_custom_shader_override) {
       return active_forward_pipeline;
     }
     const bool additive = mat && mat->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
     const bool double_sided = mat && mat->desc.double_sided;
-    if (additive) {
-      if (double_sided && additive_double_sided_pipeline_state_) {
-        return additive_double_sided_pipeline_state_;
+    auto refresh_material_bindings = [&]() {
+      if (mat) {
+        initializeMaterialBindings(*mat);
       }
+    };
+    if (additive) {
+      if (double_sided) {
+        ensureForwardPipeline(ForwardPipelineVariant::AdditiveDoubleSided);
+        if (additive_double_sided_pipeline_state_) {
+          if (mat && !mat->additive_double_sided_srb) {
+            refresh_material_bindings();
+          }
+          return additive_double_sided_pipeline_state_;
+        }
+      }
+      ensureForwardPipeline(ForwardPipelineVariant::Additive);
       if (additive_pipeline_state_) {
+        if (mat && !mat->additive_srb) {
+          refresh_material_bindings();
+        }
         return additive_pipeline_state_;
       }
     }
-    if (double_sided && transparent_double_sided_pipeline_state_) {
-      return transparent_double_sided_pipeline_state_;
+    if (double_sided) {
+      ensureForwardPipeline(ForwardPipelineVariant::TransparentDoubleSided);
+      if (transparent_double_sided_pipeline_state_) {
+        if (mat && !mat->transparent_double_sided_srb) {
+          refresh_material_bindings();
+        }
+        return transparent_double_sided_pipeline_state_;
+      }
     }
+    ensureForwardPipeline(ForwardPipelineVariant::Transparent);
     if (transparent_pipeline_state_) {
+      if (mat && !mat->transparent_srb) {
+        refresh_material_bindings();
+      }
       return transparent_pipeline_state_;
     }
     return active_forward_pipeline;
   };
 
-  auto resolve_forward_srb = [&](const MaterialRecord* mat,
+  auto resolve_forward_srb = [&](MaterialRecord* mat,
                                  Diligent::IPipelineState* pipeline) -> Diligent::IShaderResourceBinding* {
     if (use_custom_shader_override) {
       return camera_override_srb_;
@@ -1422,7 +1451,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       continue;
     }
 
-    const MaterialRecord* mat = lookup_material(draw.key.material);
+    MaterialRecord* mat = lookup_material(draw.key.material);
     Diligent::IPipelineState* pipeline = resolve_forward_pipeline(mat);
     if (!pipeline) {
       continue;

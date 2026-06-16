@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
+#include <limits>
+#include <memory>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -103,37 +107,290 @@ geometry::MeshData buildMeshData(const aiMesh& mesh) {
   return out;
 }
 
-renderer::MaterialDesc buildMaterialDesc(const aiScene& scene, const aiMesh& mesh) {
+renderer::MaterialDesc buildMaterialDesc(const aiMaterial& material) {
   renderer::MaterialDesc desc{};
   desc.base_color = {1.0f, 1.0f, 1.0f, 1.0f};
 
-  if (mesh.mMaterialIndex >= scene.mNumMaterials || scene.mMaterials[mesh.mMaterialIndex] == nullptr) {
-    return desc;
-  }
-
-  const aiMaterial* material = scene.mMaterials[mesh.mMaterialIndex];
   aiColor4D base_color(1.0f, 1.0f, 1.0f, 1.0f);
-  if (material->Get(AI_MATKEY_BASE_COLOR, base_color) == AI_SUCCESS) {
+  if (material.Get(AI_MATKEY_BASE_COLOR, base_color) == AI_SUCCESS) {
     desc.base_color = {base_color.r, base_color.g, base_color.b, base_color.a};
   } else {
     aiColor3D diffuse(1.0f, 1.0f, 1.0f);
-    if (material->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS) {
+    if (material.Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS) {
       desc.base_color = {diffuse.r, diffuse.g, diffuse.b, 1.0f};
     }
   }
 
   float opacity = desc.base_color.a;
-  if (material->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) {
+  if (material.Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) {
     desc.base_color.a = opacity;
   }
 
   int two_sided = 0;
-  if (material->Get(AI_MATKEY_TWOSIDED, two_sided) == AI_SUCCESS) {
+  if (material.Get(AI_MATKEY_TWOSIDED, two_sided) == AI_SUCCESS) {
     desc.double_sided = two_sided != 0;
   }
 
   desc.transparent = desc.base_color.a < 0.999f;
   return desc;
+}
+
+renderer::MaterialDesc buildMaterialDesc(const aiScene& scene, const aiMesh& mesh) {
+  if (mesh.mMaterialIndex >= scene.mNumMaterials ||
+      scene.mMaterials[mesh.mMaterialIndex] == nullptr) {
+    return {};
+  }
+  return buildMaterialDesc(*scene.mMaterials[mesh.mMaterialIndex]);
+}
+
+enum ImportedTextureCoordSlot : size_t {
+  kTexCoordBaseColor = 0,
+  kTexCoordNormal = 1,
+  kTexCoordMetallicRoughness = 2,
+  kTexCoordOcclusion = 3,
+  kTexCoordEmissive = 4,
+  kTexCoordClearcoat = 5,
+  kTexCoordClearcoatRoughness = 6,
+  kTexCoordClearcoatNormal = 7,
+  kTexCoordSheenColor = 8,
+  kTexCoordSheenRoughness = 9,
+  kTexCoordTransmission = 10,
+  kTexCoordThickness = 11,
+};
+
+int embeddedTextureIndex(const std::string& raw_key) {
+  if (raw_key.size() < 2 || raw_key[0] != '*') {
+    return -1;
+  }
+  char* end = nullptr;
+  const long parsed = std::strtol(raw_key.c_str() + 1, &end, 10);
+  if (end == nullptr || *end != '\0' || parsed < 0 ||
+      parsed > static_cast<long>(std::numeric_limits<int>::max())) {
+    return -1;
+  }
+  return static_cast<int>(parsed);
+}
+
+void setImportedTextureCoordTransform(renderer::ImportedMaterialData& data,
+                                      const aiMaterial& material,
+                                      unsigned int texture_type,
+                                      unsigned int texture_index,
+                                      unsigned int uv_index,
+                                      size_t slot) {
+  if (slot >= renderer::kImportedMaterialTextureCoordSlotCount) {
+    return;
+  }
+
+  const auto type = static_cast<aiTextureType>(texture_type);
+  aiUVTransform transform;
+  transform.mTranslation = aiVector2D(0.0f, 0.0f);
+  transform.mScaling = aiVector2D(1.0f, 1.0f);
+  transform.mRotation = 0.0f;
+  material.Get(AI_MATKEY_UVTRANSFORM(type, texture_index), transform);
+
+  const float sx = transform.mScaling.x;
+  const float sy = transform.mScaling.y;
+  const float c = std::cos(transform.mRotation);
+  const float s = std::sin(transform.mRotation);
+  const float tx = transform.mTranslation.x;
+  const float ty = transform.mTranslation.y;
+
+  data.texcoord_row0[slot] =
+      glm::vec4(c * sx, -s * sy, -0.5f * c + 0.5f * s + 0.5f + tx,
+                uv_index > 0u ? 1.0f : 0.0f);
+  data.texcoord_row1[slot] =
+      glm::vec4(s * sx, c * sy, -0.5f * s - 0.5f * c + 0.5f + ty, 0.0f);
+}
+
+bool appendImportedTexture(renderer::ImportedMaterialData& data,
+                           const aiScene& scene,
+                           const aiMaterial& material,
+                           const std::filesystem::path& asset_path,
+                           aiTextureType type,
+                           unsigned int texture_index,
+                           renderer::ImportedMaterialTextureSemantic semantic,
+                           bool srgb,
+                           const char* label,
+                           size_t texcoord_slot) {
+  aiString tex_path;
+  aiTextureMapping mapping = aiTextureMapping_UV;
+  unsigned int uv_index = 0;
+  float blend = 1.0f;
+  aiTextureOp op = aiTextureOp_Multiply;
+  aiTextureMapMode mapmode[2] = {aiTextureMapMode_Wrap, aiTextureMapMode_Wrap};
+  if (material.GetTexture(type, texture_index, &tex_path, &mapping, &uv_index, &blend, &op,
+                          mapmode) != AI_SUCCESS ||
+      tex_path.length == 0) {
+    return false;
+  }
+
+  const std::string raw_key = tex_path.C_Str();
+  const bool embedded = !raw_key.empty() && raw_key[0] == '*';
+  renderer::ImportedMaterialTexture texture{};
+  texture.semantic = semantic;
+  texture.raw_name = raw_key;
+  texture.label = label ? label : "importedTexture";
+  texture.embedded = embedded;
+  texture.srgb = srgb;
+
+  if (embedded) {
+    const int texture_idx = embeddedTextureIndex(raw_key);
+    if (texture_idx < 0 || texture_idx >= static_cast<int>(scene.mNumTextures) ||
+        scene.mTextures[texture_idx] == nullptr) {
+      return false;
+    }
+    texture.source_key = asset_path.string() + ":" + raw_key;
+    const aiTexture& embedded_texture = *scene.mTextures[texture_idx];
+    if (embedded_texture.mHeight == 0) {
+      texture.compressed = true;
+      texture.source_bytes.resize(static_cast<size_t>(embedded_texture.mWidth));
+      if (!texture.source_bytes.empty()) {
+        std::memcpy(texture.source_bytes.data(),
+                    embedded_texture.pcData,
+                    texture.source_bytes.size());
+      }
+    } else {
+      texture.compressed = false;
+      texture.width = embedded_texture.mWidth;
+      texture.height = embedded_texture.mHeight;
+      const uint64_t byte_count = static_cast<uint64_t>(texture.width) *
+                                  static_cast<uint64_t>(texture.height) * 4u;
+      if (byte_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+        return false;
+      }
+      texture.source_bytes.resize(static_cast<size_t>(byte_count));
+      if (!texture.source_bytes.empty()) {
+        std::memcpy(texture.source_bytes.data(),
+                    embedded_texture.pcData,
+                    texture.source_bytes.size());
+      }
+    }
+  } else {
+    texture.resolved_path = asset_path.parent_path() / raw_key;
+    texture.source_key = texture.resolved_path.string();
+  }
+
+  setImportedTextureCoordTransform(data, material, type, texture_index, uv_index, texcoord_slot);
+  data.textures.push_back(std::move(texture));
+  return true;
+}
+
+renderer::ImportedMaterialData buildImportedMaterialData(const aiScene& scene,
+                                                         const aiMaterial& material,
+                                                         const std::filesystem::path& asset_path) {
+  renderer::ImportedMaterialData data{};
+  data.material = buildMaterialDesc(material);
+
+  aiColor3D emissive(0.0f, 0.0f, 0.0f);
+  if (material.Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == AI_SUCCESS) {
+    data.material.emissive_color = {emissive.r, emissive.g, emissive.b, 1.0f};
+  }
+  if (float emissive_strength = 1.0f;
+      material.Get(AI_MATKEY_EMISSIVE_INTENSITY, emissive_strength) == AI_SUCCESS) {
+    data.material.emissive_strength = emissive_strength;
+  }
+  if (float metallic = 1.0f;
+      material.Get(AI_MATKEY_METALLIC_FACTOR, metallic) == AI_SUCCESS) {
+    data.material.metallic = metallic;
+  }
+  if (float roughness = 1.0f;
+      material.Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == AI_SUCCESS) {
+    data.material.roughness = roughness;
+  }
+  if (float normal_scale = 1.0f;
+      material.Get(AI_MATKEY_TEXBLEND_NORMALS(0), normal_scale) == AI_SUCCESS) {
+    data.material.normal_scale = normal_scale;
+  }
+  float occlusion_strength = 1.0f;
+  if (material.Get(AI_MATKEY_TEXBLEND(aiTextureType_AMBIENT_OCCLUSION, 0),
+                   occlusion_strength) == AI_SUCCESS ||
+      material.Get(AI_MATKEY_TEXBLEND_LIGHTMAP(0), occlusion_strength) == AI_SUCCESS) {
+    data.material.occlusion_strength = occlusion_strength;
+  }
+  if (float clearcoat = 0.0f;
+      material.Get(AI_MATKEY_CLEARCOAT_FACTOR, clearcoat) == AI_SUCCESS) {
+    data.material.clearcoat = clearcoat;
+  }
+  if (float clearcoat_roughness = 0.0f;
+      material.Get(AI_MATKEY_CLEARCOAT_ROUGHNESS_FACTOR, clearcoat_roughness) == AI_SUCCESS) {
+    data.material.clearcoat_roughness = clearcoat_roughness;
+  }
+  if (aiColor3D sheen_color(0.0f, 0.0f, 0.0f);
+      material.Get(AI_MATKEY_SHEEN_COLOR_FACTOR, sheen_color) == AI_SUCCESS) {
+    data.material.sheen_color = {sheen_color.r, sheen_color.g, sheen_color.b, 1.0f};
+  }
+  if (float sheen_roughness = 0.0f;
+      material.Get(AI_MATKEY_SHEEN_ROUGHNESS_FACTOR, sheen_roughness) == AI_SUCCESS) {
+    data.material.sheen_roughness = sheen_roughness;
+  }
+  if (float anisotropy = 0.0f;
+      material.Get(AI_MATKEY_ANISOTROPY_FACTOR, anisotropy) == AI_SUCCESS) {
+    data.material.anisotropy = anisotropy;
+  }
+  if (float transmission = 0.0f;
+      material.Get(AI_MATKEY_TRANSMISSION_FACTOR, transmission) == AI_SUCCESS) {
+    data.material.transmission = transmission;
+    if (transmission > 0.001f) {
+      data.material.transparent = true;
+    }
+  }
+  if (float ior = 1.5f; material.Get(AI_MATKEY_REFRACTI, ior) == AI_SUCCESS) {
+    data.material.ior = ior;
+  }
+  if (float thickness = 0.0f;
+      material.Get(AI_MATKEY_VOLUME_THICKNESS_FACTOR, thickness) == AI_SUCCESS) {
+    data.material.thickness = thickness;
+  }
+  if (float attenuation_distance = std::numeric_limits<float>::infinity();
+      material.Get(AI_MATKEY_VOLUME_ATTENUATION_DISTANCE, attenuation_distance) == AI_SUCCESS) {
+    data.material.attenuation_distance = attenuation_distance;
+  }
+  if (aiColor3D attenuation_color(1.0f, 1.0f, 1.0f);
+      material.Get(AI_MATKEY_VOLUME_ATTENUATION_COLOR, attenuation_color) == AI_SUCCESS) {
+    data.material.attenuation_color =
+        {attenuation_color.r, attenuation_color.g, attenuation_color.b, 1.0f};
+  }
+
+  using Semantic = renderer::ImportedMaterialTextureSemantic;
+  if (!appendImportedTexture(data, scene, material, asset_path, aiTextureType_BASE_COLOR, 0,
+                             Semantic::BaseColor, true, "baseColor", kTexCoordBaseColor)) {
+    appendImportedTexture(data, scene, material, asset_path, aiTextureType_DIFFUSE, 0,
+                          Semantic::BaseColor, true, "baseColor", kTexCoordBaseColor);
+  }
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_NORMALS, 0,
+                        Semantic::Normal, false, "normal", kTexCoordNormal);
+  if (!appendImportedTexture(data, scene, material, asset_path, aiTextureType_METALNESS, 0,
+                             Semantic::MetallicRoughness, false, "metallicRoughness",
+                             kTexCoordMetallicRoughness)) {
+    appendImportedTexture(data, scene, material, asset_path, aiTextureType_DIFFUSE_ROUGHNESS, 0,
+                          Semantic::MetallicRoughness, false, "metallicRoughness",
+                          kTexCoordMetallicRoughness);
+  }
+  if (!appendImportedTexture(data, scene, material, asset_path, aiTextureType_AMBIENT_OCCLUSION, 0,
+                             Semantic::Occlusion, false, "occlusion", kTexCoordOcclusion)) {
+    appendImportedTexture(data, scene, material, asset_path, aiTextureType_LIGHTMAP, 0,
+                          Semantic::Occlusion, false, "occlusion", kTexCoordOcclusion);
+  }
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_EMISSIVE, 0,
+                        Semantic::Emissive, true, "emissive", kTexCoordEmissive);
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_CLEARCOAT, 0,
+                        Semantic::Clearcoat, false, "clearcoat", kTexCoordClearcoat);
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_CLEARCOAT, 1,
+                        Semantic::ClearcoatRoughness, false, "clearcoatRoughness",
+                        kTexCoordClearcoatRoughness);
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_CLEARCOAT, 2,
+                        Semantic::ClearcoatNormal, false, "clearcoatNormal",
+                        kTexCoordClearcoatNormal);
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_SHEEN, 0,
+                        Semantic::SheenColor, true, "sheenColor", kTexCoordSheenColor);
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_SHEEN, 1,
+                        Semantic::SheenRoughness, false, "sheenRoughness",
+                        kTexCoordSheenRoughness);
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_TRANSMISSION, 0,
+                        Semantic::Transmission, false, "transmission", kTexCoordTransmission);
+  appendImportedTexture(data, scene, material, asset_path, aiTextureType_TRANSMISSION, 1,
+                        Semantic::Thickness, false, "thickness", kTexCoordThickness);
+  return data;
 }
 
 float estimateLightRange(const aiLight& light) {
@@ -252,9 +509,14 @@ uint32_t loadNodePrefab(const aiScene& scene,
       GlbScenePrefabPrimitive primitive{};
       primitive.name = safeName(mesh.mName.C_Str(), "Primitive");
       primitive.mesh = buildMeshData(mesh);
-      primitive.material = buildMaterialDesc(scene, mesh);
       primitive.source_material_index =
           mesh.mMaterialIndex < scene.mNumMaterials ? mesh.mMaterialIndex : kInvalidGlbSceneMaterial;
+      if (primitive.source_material_index < prefab.imported_materials.size() &&
+          prefab.imported_materials[primitive.source_material_index]) {
+        primitive.material = prefab.imported_materials[primitive.source_material_index]->material;
+      } else {
+        primitive.material = buildMaterialDesc(scene, mesh);
+      }
       primitive.source_mesh_index = scene_mesh_index;
       prefab_node.primitives.push_back(std::move(primitive));
     }
@@ -339,6 +601,16 @@ GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
                                            aiProcess_CalcTangentSpace);
   if (scene == nullptr || scene->mRootNode == nullptr) {
     return prefab;
+  }
+
+  prefab.imported_materials.reserve(scene->mNumMaterials);
+  for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
+    if (scene->mMaterials[i] == nullptr) {
+      prefab.imported_materials.push_back({});
+      continue;
+    }
+    prefab.imported_materials.push_back(std::make_shared<renderer::ImportedMaterialData>(
+        buildImportedMaterialData(*scene, *scene->mMaterials[i], path)));
   }
 
   std::unordered_map<std::string, const aiLight*> lights_by_name;
@@ -469,10 +741,15 @@ GlbSceneImportResult instantiateGlbScenePrefab(
       if (primitive.source_material_index != kInvalidGlbSceneMaterial &&
           !prefab.source_path.empty() &&
           materials != nullptr) {
+        std::shared_ptr<const renderer::ImportedMaterialData> imported_material;
+        if (primitive.source_material_index < prefab.imported_materials.size()) {
+          imported_material = prefab.imported_materials[primitive.source_material_index];
+        }
         materials->registerImportedAssetMaterial(material_key,
                                                  prefab.source_path,
                                                  primitive.source_material_index,
-                                                 primitive.material);
+                                                 primitive.material,
+                                                 std::move(imported_material));
       } else if (materials != nullptr) {
         materials->registerMaterialDesc(material_key, primitive.material);
       }

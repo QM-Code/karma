@@ -2041,7 +2041,16 @@ void DiligentBackend::ensureParticleResources() {
     return;
   }
 
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
+  auto mark_stage = [&](const char* stage) {
+    const auto stage_end = core::SteadyClock::now();
+    logRenderResourceDiag("particle_resources", stage, stage_start, stage_end);
+    stage_start = stage_end;
+  };
+
   ensureParticleFallbackDepthResource();
+  mark_stage("fallback textures");
 
   Diligent::ShaderCreateInfo shader_ci{};
   shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
@@ -2091,8 +2100,10 @@ void DiligentBackend::ensureParticleResources() {
   shader_ci.EntryPoint = "main";
   shader_ci.Source = kParticleSimCS;
   sim_cs = device_with_cache_.CreateShader(shader_ci);
+  mark_stage("shader compile");
 
   if (!vs || !ps) {
+    logRenderResourceDiag("particle_resources", "total", total_start, core::SteadyClock::now());
     return;
   }
 
@@ -2186,8 +2197,10 @@ void DiligentBackend::ensureParticleResources() {
     device_->CreateBuffer(cb_desc, nullptr, &particle_cb_);
   }
   if (!particle_cb_) {
+    logRenderResourceDiag("particle_resources", "total", total_start, core::SteadyClock::now());
     return;
   }
+  mark_stage("constant buffers");
 
   if (sim_cs && !particle_sim_compute_pso_) {
     Diligent::ComputePipelineStateCreateInfo sim_pso{};
@@ -2207,7 +2220,9 @@ void DiligentBackend::ensureParticleResources() {
     sim_pso.PSODesc.ResourceLayout.NumVariables =
         static_cast<Diligent::Uint32>(sizeof(sim_vars) / sizeof(sim_vars[0]));
 
+    const auto pso_start = core::SteadyClock::now();
     particle_sim_compute_pso_ = device_with_cache_.CreateComputePipelineState(sim_pso);
+    logRenderPipelineDiag("particle", "Karma Particle Sim Compute Pipeline", pso_start, core::SteadyClock::now());
     if (particle_sim_compute_pso_) {
       if (!particle_sim_cb_) {
         Diligent::BufferDesc cb_desc{};
@@ -2231,6 +2246,7 @@ void DiligentBackend::ensureParticleResources() {
       }
     }
   }
+  mark_stage("legacy sim pso and srb");
 
   if (!particle_gpu_frame_cb_) {
     Diligent::BufferDesc cb_desc{};
@@ -2250,6 +2266,7 @@ void DiligentBackend::ensureParticleResources() {
     cb_desc.Size = sizeof(ParticleGpuSortConstants);
     device_->CreateBuffer(cb_desc, nullptr, &particle_gpu_sort_cb_);
   }
+  mark_stage("gpu constants");
 
   auto create_gpu_compute_pipeline =
       [&](const char* name,
@@ -2282,7 +2299,9 @@ void DiligentBackend::ensureParticleResources() {
     pso.pCS = shader;
     pso.PSODesc.ResourceLayout.Variables = variables;
     pso.PSODesc.ResourceLayout.NumVariables = variable_count;
+    const auto pso_start = core::SteadyClock::now();
     out_pso = device_with_cache_.CreateComputePipelineState(pso);
+    logRenderPipelineDiag("particle", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return;
     }
@@ -2648,6 +2667,7 @@ void DiligentBackend::ensureParticleResources() {
         particle_gpu_indirect_args_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
                                                            "g_Stats");
   }
+  mark_stage("sort and indirect compute resources");
 
   auto create_pipeline = [&](const char* name,
                              bool depth_test,
@@ -2699,7 +2719,9 @@ void DiligentBackend::ensureParticleResources() {
     pso.PSODesc.ResourceLayout.NumImmutableSamplers =
         static_cast<Diligent::Uint32>(sizeof(kParticleSamplers) / sizeof(kParticleSamplers[0]));
 
+    const auto pso_start = core::SteadyClock::now();
     out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    logRenderPipelineDiag("particle", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return false;
     }
@@ -2770,7 +2792,9 @@ void DiligentBackend::ensureParticleResources() {
         static_cast<Diligent::Uint32>(sizeof(kParticleGlobalSamplers) /
                                       sizeof(kParticleGlobalSamplers[0]));
 
+    const auto pso_start = core::SteadyClock::now();
     out_pipeline.pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    logRenderPipelineDiag("particle", name, pso_start, core::SteadyClock::now());
     if (!out_pipeline.pso) {
       return false;
     }
@@ -2871,6 +2895,7 @@ void DiligentBackend::ensureParticleResources() {
                          renderer::ParticleBlendMode::Distortion,
                          false,
                          particle_global_distortion_no_depth_);
+  mark_stage("graphics pso and srb");
 
   auto initialize_particle_bindings = [&](Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb,
                                           Diligent::IShaderResourceVariable*& texture_var,
@@ -2927,6 +2952,7 @@ void DiligentBackend::ensureParticleResources() {
                                particle_texture_var_distortion_no_depth_,
                                particle_scene_color_var_distortion_no_depth_,
                                particle_scene_depth_var_distortion_no_depth_);
+  mark_stage("material tables and fallback bindings");
 
   if (!particle_vb_) {
     Diligent::BufferDesc vb_desc{};
@@ -2937,6 +2963,7 @@ void DiligentBackend::ensureParticleResources() {
     Diligent::BufferData vb_data{kParticleQuadVertices, vb_desc.Size};
     device_->CreateBuffer(vb_desc, &vb_data, &particle_vb_);
   }
+  mark_stage("gpu buffers");
 
   if (!particle_half_res_composite_pipeline_state_) {
     Diligent::ShaderCreateInfo composite_shader_ci{};
@@ -3009,8 +3036,13 @@ void DiligentBackend::ensureParticleResources() {
       composite_pso.PSODesc.ResourceLayout.NumImmutableSamplers = static_cast<Diligent::Uint32>(
           sizeof(kCompositeSamplers) / sizeof(kCompositeSamplers[0]));
 
+      const auto pso_start = core::SteadyClock::now();
       particle_half_res_composite_pipeline_state_ =
           device_with_cache_.CreateGraphicsPipelineState(composite_pso);
+      logRenderPipelineDiag("particle",
+                            "Karma Particle Half Res Composite",
+                            pso_start,
+                            core::SteadyClock::now());
       if (particle_half_res_composite_pipeline_state_) {
         particle_half_res_composite_pipeline_state_->CreateShaderResourceBinding(
             &particle_half_res_composite_srb_,
@@ -3026,6 +3058,8 @@ void DiligentBackend::ensureParticleResources() {
       }
     }
   }
+  mark_stage("half-res composite resources");
+  logRenderResourceDiag("particle_resources", "total", total_start, core::SteadyClock::now());
 }
 
 }  // namespace karma::renderer_backend

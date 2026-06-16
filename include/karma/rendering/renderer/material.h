@@ -1,10 +1,14 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "karma/core/math/types.h"
 #include "karma/rendering/renderer/ids.h"
@@ -101,6 +105,59 @@ struct MaterialDesc {
   bool double_sided = false;
 };
 
+/// Texture transform slot count used by imported glTF-style materials.
+inline constexpr size_t kImportedMaterialTextureCoordSlotCount = 12u;
+
+/// Renderer-facing semantic for an imported material texture.
+enum class ImportedMaterialTextureSemantic : uint32_t {
+  BaseColor = 0,
+  Normal,
+  MetallicRoughness,
+  Occlusion,
+  Emissive,
+  Clearcoat,
+  ClearcoatRoughness,
+  ClearcoatNormal,
+  SheenColor,
+  SheenRoughness,
+  Transmission,
+  Thickness,
+};
+
+/// Source texture reference captured by a content importer for renderer upload.
+struct ImportedMaterialTexture {
+  ImportedMaterialTextureSemantic semantic = ImportedMaterialTextureSemantic::BaseColor;
+  std::string source_key;
+  std::string raw_name;
+  std::filesystem::path resolved_path;
+  std::string label;
+  std::vector<uint8_t> source_bytes;
+  uint32_t width = 0u;
+  uint32_t height = 0u;
+  bool embedded = false;
+  bool compressed = true;
+  bool srgb = false;
+};
+
+/// Imported material data captured while the source scene is already loaded.
+struct ImportedMaterialData {
+  ImportedMaterialData() {
+    resetTextureTransforms();
+  }
+
+  void resetTextureTransforms() {
+    for (size_t i = 0; i < kImportedMaterialTextureCoordSlotCount; ++i) {
+      texcoord_row0[i] = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+      texcoord_row1[i] = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+    }
+  }
+
+  MaterialDesc material{};
+  std::vector<ImportedMaterialTexture> textures;
+  std::array<glm::vec4, kImportedMaterialTextureCoordSlotCount> texcoord_row0{};
+  std::array<glm::vec4, kImportedMaterialTextureCoordSlotCount> texcoord_row1{};
+};
+
 /// \ingroup karma_rendering
 /// Data-driven material resource description registered by key.
 struct MaterialResourceDesc {
@@ -125,6 +182,7 @@ struct MaterialResourceDesc {
   MaterialDesc material{};
   std::filesystem::path material_asset_path;
   uint32_t material_asset_index = std::numeric_limits<uint32_t>::max();
+  std::shared_ptr<const ImportedMaterialData> imported_material;
 
   /// Creates a material resource that tints materials from a mesh asset.
   static MaterialResourceDesc fromMeshTint(std::string source_mesh, Color tint) {
@@ -146,12 +204,15 @@ struct MaterialResourceDesc {
   /// Creates a material resource from an imported asset material index.
   static MaterialResourceDesc fromImportedAssetMaterial(std::filesystem::path path,
                                                        uint32_t material_index,
-                                                       MaterialDesc fallback = {}) {
+                                                       MaterialDesc fallback = {},
+                                                       std::shared_ptr<const ImportedMaterialData>
+                                                           imported = {}) {
     MaterialResourceDesc desc{};
     desc.kind = Kind::ImportedAssetMaterial;
     desc.material_asset_path = std::move(path);
     desc.material_asset_index = material_index;
     desc.material = std::move(fallback);
+    desc.imported_material = std::move(imported);
     return desc;
   }
 };

@@ -35,6 +35,19 @@ timing is needed. `KARMA_RENDER_SYSTEM_DIAG_EVERY_FRAME=1` keeps
 `RenderSystem` stage logging active after startup and should only be used for
 short triage runs.
 
+Additional focused diagnostics:
+
+- `KARMA_RENDER_PIPELINE_DIAG=1` logs individual Diligent PSO creation times.
+- `KARMA_RENDER_TEXTURE_IMPORT_DIAG=1` logs imported texture reference
+  collection, embedded decode, and render-thread upload timings.
+- `KARMA_SHADER_CACHE_LOG=1` logs render-state cache path, load/save size, and
+  loaded content version.
+- `KARMA_SHADER_CACHE_FLUSH=1` saves the render-state cache at device init and
+  after renderer warm-up. This is useful for `timeout` benchmark runs where the
+  process may not reach normal shutdown.
+- `KARMA_SHADER_CACHE_PATH=/path/to/cache.diligentcache` overrides the existing
+  Diligent render-state cache file location for isolated cold/warm validation.
+
 ## Results
 
 Local glTF viewer runs on June 15, 2026 showed:
@@ -82,9 +95,249 @@ The current visible hotspots are:
 - Particle resource prewarm, which is intentional until a better no-hitch
   background or loading-screen prewarm policy exists.
 
-Future passes should prioritize persistent pipeline cache validation, reusable
-decoded texture caches, and loading-screen/background preparation. Particle work
+Future passes should prioritize persistent pipeline cache validation and
+loading-screen/background preparation. Persistent decoded asset caches are not
+part of the current policy; source assets remain authoritative. Particle work
 should remain explicit and completed before first use.
+
+## June 16, 2026 Pass
+
+This pass kept blocking warm-up and avoided persistent or generated decoded
+asset caches. Source glTF embedded textures are still decoded from the original
+model bytes, and all Diligent texture creation/upload remains on the render
+thread.
+
+Local glTF viewer diagnostics on June 16, 2026 showed:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Startup through renderer warm-up | ~4365 ms | 3154.36 ms |
+| Forward pipeline creation | ~1832 ms | 783.13 ms |
+| Imported material/template creation | ~873 ms | 557.81 ms |
+| Embedded texture import preload | included in material creation | 348.96 ms |
+| Particle resource prewarm | ~468 ms | 501.73 ms |
+
+Forward startup now creates only the opaque and standard transparent PSOs during
+device initialization. Depth prepass, additive, additive double-sided, and
+transparent double-sided PSOs are created lazily when warm-up scene content
+requires them. In the DamagedHelmet benchmark, those unused variants were not
+created.
+
+Imported material loading now scans unique Assimp texture references first,
+decodes unique embedded textures in parallel on CPU, uploads the decoded images
+sequentially on the render thread, and then builds material records from the
+existing in-memory texture cache. The measured DamagedHelmet import preloaded 5
+embedded textures: 278.68 ms decode and 69.84 ms upload.
+
+Imported material template records now initialize their texture SRBs once per
+asset-path template. `createMaterialFromAsset()` clones those records instead of
+recreating SRBs for every material clone when the template bindings are already
+available.
+
+Particle resources remain intentionally prewarmed before first gameplay use.
+The new particle timings break prewarm into fallback textures, shader compile,
+constant buffers, compute PSOs, graphics PSOs, SRB/material-table binding, GPU
+buffers, and half-resolution composite resources. No particle work was deferred
+past warm-up in this pass.
+
+## Pipeline Cache Validation Pass
+
+The follow-up pass made the existing Diligent render-state cache observable and
+safe to validate under `timeout` runs. It did not introduce decoded texture/model
+caches or generated optimized assets.
+
+Changes:
+
+- Added render-state cache config/load/save diagnostics with cache path,
+  existence, byte size, content version, load time, and save time.
+- Set Diligent render-state cache verbose logging only when
+  `KARMA_SHADER_CACHE_LOG=1`.
+- Added a backend warm-up cache flush hook and call it once after blocking
+  renderer warm-up when `KARMA_SHADER_CACHE_FLUSH=1`.
+- Kept normal shutdown cache saving for ordinary runs.
+
+Clean glTF viewer run on June 16, 2026, with diagnostics but without explicit
+cache flush:
+
+| Measurement | Result |
+| --- | ---: |
+| Startup through renderer warm-up | 3248.99 ms |
+| Device init total | 1166.20 ms |
+| Forward pipeline creation | 821.88 ms |
+| Imported material/template creation | 594.65 ms |
+| Embedded texture preload | 352.70 ms |
+| Particle resource prewarm | 552.64 ms |
+
+Isolated cache validation used
+`KARMA_SHADER_CACHE_PATH=/tmp/karma_shader_cache_validation.diligentcache`.
+The cold populate run started with no cache, saved 557868 bytes at device init,
+then saved 972680 bytes after renderer warm-up. The warm run loaded that cache
+with content version 18.
+
+| Measurement | Cold Isolated Cache | Warm Isolated Cache |
+| --- | ---: | ---: |
+| Cache load file | 0.01 ms | 0.54 ms |
+| Main shader creation | 4637.87 ms | 9.35 ms |
+| Particle shader creation | 1190.61 ms | 4.39 ms |
+| Particle sort/indirect resources | 1491.78 ms | 138.07 ms |
+| Particle resource prewarm | 3056.61 ms | 512.70 ms |
+| Startup through renderer warm-up | 10576.68 ms | 3089.95 ms |
+
+The cache validation shows shader serialization/loading is working, especially
+for particle warm-up shaders. Forward Vulkan graphics PSO creation remains a
+large cost even with the render-state cache loaded, so future work should focus
+on reducing or moving PSO creation rather than expecting the existing cache to
+remove all pipeline latency.
+
+## Forward Transparent Lazy Pass
+
+The next pass made the standard transparent forward PSO scene-demand lazy
+instead of creating it during device initialization. Transparent, reflection,
+additive, double-sided, and depth-prepass forward PSOs are still created during
+blocking warm-up when the loaded scene queues draws that need them. For the
+opaque DamagedHelmet benchmark, no transparent draw lists were populated, so no
+transparent forward PSO was created before warm-up completed.
+
+Material binding no longer forces transparent forward variants while importing
+opaque material templates. Lazy-created forward PSOs now initialize their default
+material SRB immediately, and material/default SRBs created after forward-plus
+setup bind the current forward-plus light buffers and shadow resources.
+
+Clean glTF viewer run on June 16, 2026, with diagnostics after this pass:
+
+| Measurement | Result |
+| --- | ---: |
+| Startup through renderer warm-up | 2574.39 ms |
+| Device init total | 733.06 ms |
+| Forward pipeline creation | 379.13 ms |
+| Imported material/template creation | 520.40 ms |
+| Embedded texture preload | 317.31 ms |
+| Particle resource prewarm | 483.27 ms |
+
+Relative to the previous clean diagnostic run, startup through warm-up improved
+from 3248.99 ms to 2574.39 ms. Device-init forward pipeline creation dropped
+from two graphics PSOs at 821.88 ms to one opaque graphics PSO at 379.13 ms.
+
+## Particle Scene-Demand Prewarm Pass
+
+The next pass stopped running the full particle resource prewarm for render
+layers that have no particle work. The renderer now checks for submitted CPU
+particle batches, submitted GPU emitters, or existing GPU emitter runtime state
+before creating particle shaders, compute PSOs, graphics PSOs, material tables,
+GPU buffers, and half-resolution composite resources.
+
+This preserves the no-first-visible-frame-hitch policy for particle content:
+when a frame has submitted particles or emitter runtime state, full particle
+resources are still created synchronously before `renderParticlePasses()` draws
+anything. No persistent decoded asset cache or generated optimized asset was
+introduced.
+
+Clean glTF viewer run on June 16, 2026, with diagnostics after this pass:
+
+| Measurement | Result |
+| --- | ---: |
+| Startup through renderer warm-up | 2145.61 ms |
+| Device init total | 741.56 ms |
+| Forward pipeline creation | 364.71 ms |
+| Imported material/template creation | 579.84 ms |
+| Embedded texture preload | 366.28 ms |
+| Particle resource prewarm | skipped, 0.01 ms gate |
+| Renderer warm-up | 582.88 ms |
+
+Relative to the previous clean diagnostic run, startup through warm-up improved
+from 2574.39 ms to 2145.61 ms. The glTF viewer does not submit particle
+batches or GPU emitters, so the particle render-layer stages logged
+`particle resources skipped` and `particle pass skipped`.
+
+The material import path remains the dominant warm-up cost for this benchmark.
+The measured wall time is mostly the second Assimp parse of the glTF plus CPU
+decode and render-thread upload of the five embedded material textures. A
+larger renderer/content API change is needed to avoid that backend Assimp pass
+cleanly by carrying imported material texture references or embedded texture
+payloads from the content importer to the renderer.
+
+Particle prewarm remains blocking for frames that submit particle work. The
+renderer no longer pays that cost for no-particle scenes such as the glTF
+viewer benchmark.
+
+## Imported Material Payload Pass
+
+The follow-up pass carries renderer-facing imported material payloads from the
+content GLB importer to the renderer material library. The content importer
+captures material scalar values, texture semantics, texture-coordinate
+transforms, external texture paths, and encoded embedded texture bytes while the
+Assimp scene is already loaded. The Diligent backend now uses that payload to
+build imported material templates without reopening the glTF through Assimp.
+
+No persistent decoded texture/model cache was added. Embedded glTF textures are
+still sourced from the original model bytes, decoded transiently in memory, and
+uploaded sequentially on the render thread.
+
+Clean glTF viewer run on June 16, 2026, with diagnostics after this pass:
+
+| Measurement | Previous | After |
+| --- | ---: | ---: |
+| Startup through renderer warm-up | 2145.61 ms | 1997.50 ms |
+| Device init total | 741.56 ms | 712.26 ms |
+| Forward pipeline creation | 364.71 ms | 371.70 ms |
+| Imported material backend warm-up | 579.84 ms | 363.48 ms |
+| Embedded texture preload | 366.28 ms | 363.18 ms |
+| Renderer warm-up | 582.88 ms | 366.45 ms |
+| Particle resource prewarm | skipped, 0.01 ms gate | skipped, 0.01 ms gate |
+
+The DamagedHelmet material warm-up used the new
+`material_from_imported_payload` path. The old backend
+`imported_material_templates` Assimp import path was not used for the helmet
+material. Payload texture preload decoded 5 embedded textures in 299.40 ms and
+uploaded 5 textures in 63.46 ms; building the renderer material template after
+texture upload took 0.26 ms and cloning it took 0.01 ms.
+
+Imported payload material templates are cached by asset path and material index,
+then cloned for repeated material descriptors. This preserves the previous
+one-template-per-imported-material behavior while removing the backend Assimp
+reparse from the glTF scene import path.
+
+Particle prewarm policy is unchanged. A particle example diagnostic run still
+created the particle resource stack synchronously before the first particle pass:
+`particle_resources` total was 485.37 ms and the render-layer
+`particle resources prewarm` stage was 485.41 ms.
+
+## Particle Gallery Startup Pass
+
+The particle gallery exposed a different startup profile from the opaque glTF
+viewer: the scene intentionally submits particles, so particle resources still
+prewarm synchronously, but the gallery also forced the standard transparent
+forward PSO through the orb shell mesh and loaded the slower HDR environment
+asset.
+
+This pass did not defer particle prewarm or add any generated asset cache.
+Instead it made two narrow changes:
+
+- Material override draws now use source mesh alpha only as a fallback when no
+  resolved material exists. Explicit opaque material overrides can keep a mesh
+  on the opaque forward path even when the source mesh material was translucent.
+- `karma_particle_gallery_example` uses explicit opaque orb shell tint
+  materials and the existing optimized `papermill.ktx` cubemap instead of the
+  4K HDR environment.
+
+Local particle gallery diagnostics on June 16, 2026 showed:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Startup through renderer warm-up | 4875.69 ms | 1492.99 ms |
+| Environment setup | 545.94 ms | 46.31 ms |
+| Renderer warm-up | 2322.50 ms | 583.86 ms |
+| Transparent pre-particle pass | 1400.16 ms | 0.27 ms |
+| Particle resource prewarm | 829.60 ms | 495.27 ms |
+
+The transparent forward PSO was no longer created for the particle gallery
+warm-up. The particle prewarm still ran before the first particle pass because
+the scene submits beam, orb, and explosion emitters during warm-up.
+
+The glTF viewer benchmark remained on the intended no-particle path after this
+change. A follow-up diagnostic run reported startup through warm-up at
+1953.24 ms, renderer warm-up at 375.96 ms, and particle resources skipped by the
+scene-demand gate.
 
 ## Visual Correctness Guard
 

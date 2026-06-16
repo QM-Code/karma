@@ -41,6 +41,8 @@ class Backend {
   virtual void beginFrame(const renderer::FrameInfo& frame) = 0;
   virtual void endFrame() = 0;
   virtual void resize(int width, int height) = 0;
+  /// Allows backends with explicit render-state caches to persist warm-up work.
+  virtual void flushRenderStateCache() {}
 
   virtual renderer::MeshId createMesh(const geometry::MeshData& mesh) = 0;
   virtual void updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) = 0;

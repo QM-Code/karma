@@ -1,6 +1,8 @@
 #include "common.h"
 #include "shader_source.h"
 
+#include "../../backend_internal.h"
+
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/PipelineState.h>
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
@@ -129,7 +131,9 @@ bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format
     graphics.DepthStencilDesc.DepthWriteEnable = false;
     graphics.BlendDesc.RenderTargets[0].RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
 
+    const auto pso_start = core::SteadyClock::now();
     out_pass.pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    logRenderPipelineDiag("post_process", pipeline_name, pso_start, core::SteadyClock::now());
     if (!out_pass.pso) {
       return false;
     }

@@ -16,6 +16,11 @@ enum class ColliderShape {
   Box,
   Sphere,
   Capsule,
+  Cylinder,
+  TaperedCapsule,
+  ConvexHull,
+  Triangle,
+  HeightField,
   Mesh,
 };
 

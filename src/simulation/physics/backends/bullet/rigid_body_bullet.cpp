@@ -53,6 +53,10 @@ glm::vec3 PhysicsRigidBodyBullet::getForwardVector() const {
     return glm::normalize(rot * glm::vec3(0, 0, -1));
 }
 
+bool PhysicsRigidBodyBullet::isActive() const {
+    return body_ ? body_->isActive() : false;
+}
+
 void PhysicsRigidBodyBullet::setPosition(const glm::vec3& position) {
     if (!body_) return;
     btTransform transform = body_->getWorldTransform();
@@ -75,6 +79,24 @@ void PhysicsRigidBodyBullet::setRotation(const glm::quat& rotation) {
     body_->activate(true);
 }
 
+void PhysicsRigidBodyBullet::setPositionAndRotation(const glm::vec3& position, const glm::quat& rotation) {
+    if (!body_) return;
+    btTransform transform = body_->getWorldTransform();
+    transform.setOrigin(toBt(position));
+    transform.setRotation(btQuaternion(rotation.x, rotation.y, rotation.z, rotation.w));
+    body_->setWorldTransform(transform);
+    if (body_->getMotionState()) {
+        body_->getMotionState()->setWorldTransform(transform);
+    }
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::moveKinematic(const glm::vec3& targetPosition,
+                                           const glm::quat& targetRotation,
+                                           float /*deltaTime*/) {
+    setPositionAndRotation(targetPosition, targetRotation);
+}
+
 void PhysicsRigidBodyBullet::setVelocity(const glm::vec3& velocity) {
     if (!body_) return;
     body_->setLinearVelocity(toBt(velocity));
@@ -85,6 +107,34 @@ void PhysicsRigidBodyBullet::setAngularVelocity(const glm::vec3& angularVelocity
     if (!body_) return;
     body_->setAngularVelocity(toBt(angularVelocity));
     body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::setLinearAndAngularVelocity(const glm::vec3& linearVelocity,
+                                                         const glm::vec3& angularVelocity) {
+    if (!body_) return;
+    body_->setLinearVelocity(toBt(linearVelocity));
+    body_->setAngularVelocity(toBt(angularVelocity));
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::addLinearVelocity(const glm::vec3& velocity) {
+    if (!body_) return;
+    body_->setLinearVelocity(body_->getLinearVelocity() + toBt(velocity));
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::addLinearAndAngularVelocity(const glm::vec3& linearVelocity,
+                                                         const glm::vec3& angularVelocity) {
+    if (!body_) return;
+    body_->setLinearVelocity(body_->getLinearVelocity() + toBt(linearVelocity));
+    body_->setAngularVelocity(body_->getAngularVelocity() + toBt(angularVelocity));
+    body_->activate(true);
+}
+
+glm::vec3 PhysicsRigidBodyBullet::getPointVelocity(const glm::vec3& point) const {
+    if (!body_) return glm::vec3(0.0f);
+    const btVector3 rel_pos = toBt(point) - body_->getCenterOfMassPosition();
+    return toGlm(body_->getVelocityInLocalPoint(rel_pos));
 }
 
 void PhysicsRigidBodyBullet::setKinematic(bool kinematic) {
@@ -100,6 +150,8 @@ void PhysicsRigidBodyBullet::setKinematic(bool kinematic) {
     body_->setCollisionFlags(flags);
 }
 
+void PhysicsRigidBodyBullet::setMotionQuality(karma::physics::PhysicsMotionQuality /*quality*/) {}
+
 void PhysicsRigidBodyBullet::setUseGravity(bool useGravity) {
     if (!body_ || !world_ || !world_->world()) return;
     if (useGravity) {
@@ -108,6 +160,16 @@ void PhysicsRigidBodyBullet::setUseGravity(bool useGravity) {
         body_->setGravity(btVector3(0.0f, 0.0f, 0.0f));
     }
     body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::setGravityFactor(float gravityFactor) {
+    if (!body_ || !world_ || !world_->world()) return;
+    body_->setGravity(world_->world()->getGravity() * gravityFactor);
+    body_->activate(true);
+}
+
+float PhysicsRigidBodyBullet::getGravityFactor() const {
+    return 1.0f;
 }
 
 void PhysicsRigidBodyBullet::setTrigger(bool trigger) {
@@ -120,6 +182,96 @@ void PhysicsRigidBodyBullet::setTrigger(bool trigger) {
     }
     body_->setCollisionFlags(flags);
     body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::setFriction(float friction) {
+    if (body_) body_->setFriction(friction);
+}
+
+float PhysicsRigidBodyBullet::getFriction() const {
+    return body_ ? body_->getFriction() : 0.0f;
+}
+
+void PhysicsRigidBodyBullet::setRestitution(float restitution) {
+    if (body_) body_->setRestitution(restitution);
+}
+
+float PhysicsRigidBodyBullet::getRestitution() const {
+    return body_ ? body_->getRestitution() : 0.0f;
+}
+
+void PhysicsRigidBodyBullet::setUseManifoldReduction(bool /*enabled*/) {}
+
+bool PhysicsRigidBodyBullet::getUseManifoldReduction() const {
+    return false;
+}
+
+void PhysicsRigidBodyBullet::setUserData(uint64_t userData) {
+    if (body_) body_->setUserPointer(reinterpret_cast<void*>(static_cast<std::uintptr_t>(userData)));
+}
+
+uint64_t PhysicsRigidBodyBullet::getUserData() const {
+    return body_ ? reinterpret_cast<std::uintptr_t>(body_->getUserPointer()) : 0;
+}
+
+void PhysicsRigidBodyBullet::activate() {
+    if (body_) body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::deactivate() {
+    if (body_) body_->forceActivationState(ISLAND_SLEEPING);
+}
+
+void PhysicsRigidBodyBullet::resetSleepTimer() {
+    if (body_) body_->activate(true);
+}
+
+bool PhysicsRigidBodyBullet::setShape(const karma::physics::PhysicsShapeDesc& /*shape*/,
+                                      bool /*updateMassProperties*/,
+                                      bool /*activate*/) {
+    return false;
+}
+
+void PhysicsRigidBodyBullet::addForce(const glm::vec3& force) {
+    if (!body_) return;
+    body_->applyCentralForce(toBt(force));
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::addForceAtPosition(const glm::vec3& force, const glm::vec3& position) {
+    if (!body_) return;
+    const btVector3 rel_pos = toBt(position) - body_->getCenterOfMassPosition();
+    body_->applyForce(toBt(force), rel_pos);
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::addTorque(const glm::vec3& torque) {
+    if (!body_) return;
+    body_->applyTorque(toBt(torque));
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::addImpulse(const glm::vec3& impulse) {
+    if (!body_) return;
+    body_->applyCentralImpulse(toBt(impulse));
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::addImpulseAtPosition(const glm::vec3& impulse, const glm::vec3& position) {
+    if (!body_) return;
+    const btVector3 rel_pos = toBt(position) - body_->getCenterOfMassPosition();
+    body_->applyImpulse(toBt(impulse), rel_pos);
+    body_->activate(true);
+}
+
+void PhysicsRigidBodyBullet::addAngularImpulse(const glm::vec3& impulse) {
+    if (!body_) return;
+    body_->applyTorqueImpulse(toBt(impulse));
+    body_->activate(true);
+}
+
+bool PhysicsRigidBodyBullet::applyBuoyancyImpulse(const karma::physics::PhysicsBuoyancyDesc& /*desc*/) {
+    return false;
 }
 
 bool PhysicsRigidBodyBullet::isGrounded(const glm::vec3& dimensions) const {

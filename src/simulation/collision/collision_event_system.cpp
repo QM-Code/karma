@@ -22,6 +22,21 @@ bool colliderIsTrigger(const ecs::World& world, ecs::Entity entity) {
   if (world.has<components::CapsuleColliderComponent>(entity)) {
     return world.get<components::CapsuleColliderComponent>(entity).is_trigger;
   }
+  if (world.has<components::CylinderColliderComponent>(entity)) {
+    return world.get<components::CylinderColliderComponent>(entity).is_trigger;
+  }
+  if (world.has<components::TaperedCapsuleColliderComponent>(entity)) {
+    return world.get<components::TaperedCapsuleColliderComponent>(entity).is_trigger;
+  }
+  if (world.has<components::ConvexHullColliderComponent>(entity)) {
+    return world.get<components::ConvexHullColliderComponent>(entity).is_trigger;
+  }
+  if (world.has<components::TriangleColliderComponent>(entity)) {
+    return world.get<components::TriangleColliderComponent>(entity).is_trigger;
+  }
+  if (world.has<components::HeightFieldColliderComponent>(entity)) {
+    return world.get<components::HeightFieldColliderComponent>(entity).is_trigger;
+  }
   if (world.has<components::MeshColliderComponent>(entity)) {
     return world.get<components::MeshColliderComponent>(entity).is_trigger;
   }

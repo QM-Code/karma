@@ -21,6 +21,11 @@ public:
 
     void update(float deltaTime) override;
     void setGravity(float gravity) override;
+    std::unique_ptr<PhysicsRigidBodyBackend> createBody(const karma::physics::PhysicsBodyDesc& desc) override;
+    std::unique_ptr<PhysicsConstraintBackend> createConstraint(
+        const karma::physics::PhysicsConstraintDesc& desc,
+        std::uintptr_t bodyA,
+        std::uintptr_t bodyB) override;
     std::unique_ptr<PhysicsRigidBodyBackend> createBoxBody(const glm::vec3& halfExtents,
                                                            float mass,
                                                            const glm::vec3& position,
@@ -31,6 +36,17 @@ public:
     bool raycastDetailed(const glm::vec3& from,
                          const glm::vec3& to,
                          karma::physics::PhysicsGroundContact& outHit) const override;
+    bool castRay(const karma::physics::PhysicsRaycastDesc& desc,
+                 karma::physics::PhysicsQueryHit& outHit) const override;
+    void castRayAll(const karma::physics::PhysicsRaycastDesc& desc,
+                    std::vector<karma::physics::PhysicsQueryHit>& outHits) const override;
+    void collidePoint(const glm::vec3& point,
+                      const karma::physics::PhysicsQueryFilter& filter,
+                      std::vector<karma::physics::PhysicsQueryHit>& outHits) const override;
+    void collideShape(const karma::physics::PhysicsShapeQueryDesc& desc,
+                      std::vector<karma::physics::PhysicsQueryHit>& outHits) const override;
+    void castShape(const karma::physics::PhysicsShapeCastDesc& desc,
+                   std::vector<karma::physics::PhysicsQueryHit>& outHits) const override;
     void collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const override;
 
     btDiscreteDynamicsWorld* world() { return dynamicsWorld_.get(); }

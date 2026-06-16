@@ -4,8 +4,21 @@
 #include "karma/simulation/physics/backends/bullet/static_body_bullet.hpp"
 #include <btBulletDynamicsCommon.h>
 #include <BulletCollision/CollisionDispatch/btGhostObject.h>
+#include <cmath>
 
 namespace karma::physics_backend {
+
+namespace {
+
+class NullConstraintBackend final : public PhysicsConstraintBackend {
+public:
+    bool isValid() const override { return false; }
+    void setEnabled(bool) override {}
+    void destroy() override {}
+    std::uintptr_t nativeHandle() const override { return 0; }
+};
+
+}  // namespace
 
 PhysicsWorldBullet::PhysicsWorldBullet() {
     collisionConfig_ = std::make_unique<btDefaultCollisionConfiguration>();
@@ -43,31 +56,88 @@ void PhysicsWorldBullet::setGravity(float gravity) {
     }
 }
 
-std::unique_ptr<PhysicsRigidBodyBackend> PhysicsWorldBullet::createBoxBody(const glm::vec3& halfExtents,
-                                                                           float mass,
-                                                                           const glm::vec3& position,
-                                                                           const karma::physics::PhysicsMaterial& material) {
+std::unique_ptr<PhysicsRigidBodyBackend> PhysicsWorldBullet::createBody(
+    const karma::physics::PhysicsBodyDesc& desc) {
     if (!dynamicsWorld_) return std::make_unique<PhysicsRigidBodyBullet>();
 
-    auto shape = std::make_unique<btBoxShape>(btVector3(halfExtents.x, halfExtents.y, halfExtents.z));
+    std::unique_ptr<btCollisionShape> shape;
+    switch (desc.shape.type) {
+    case karma::physics::PhysicsShapeType::Sphere:
+        shape = std::make_unique<btSphereShape>(std::max(desc.shape.radius, 0.001f));
+        break;
+    case karma::physics::PhysicsShapeType::Capsule:
+        shape = std::make_unique<btCapsuleShape>(
+            std::max(desc.shape.radius, 0.001f),
+            std::max(desc.shape.height - desc.shape.radius * 2.0f, 0.0f));
+        break;
+    case karma::physics::PhysicsShapeType::Cylinder:
+        shape = std::make_unique<btCylinderShape>(
+            btVector3(std::max(desc.shape.radius, 0.001f),
+                      std::max(desc.shape.height * 0.5f, 0.001f),
+                      std::max(desc.shape.radius, 0.001f)));
+        break;
+    case karma::physics::PhysicsShapeType::Box:
+    default:
+        shape = std::make_unique<btBoxShape>(
+            btVector3(std::max(std::abs(desc.shape.half_extents.x), 0.001f),
+                      std::max(std::abs(desc.shape.half_extents.y), 0.001f),
+                      std::max(std::abs(desc.shape.half_extents.z), 0.001f)));
+        break;
+    }
+
     btTransform transform;
     transform.setIdentity();
-    transform.setOrigin(btVector3(position.x, position.y, position.z));
+    transform.setOrigin(btVector3(desc.position.x, desc.position.y, desc.position.z));
+    transform.setRotation(btQuaternion(desc.rotation.x, desc.rotation.y, desc.rotation.z, desc.rotation.w));
     auto motionState = std::make_unique<btDefaultMotionState>(transform);
 
+    const bool dynamic = desc.motion == karma::physics::PhysicsMotionType::Dynamic && desc.mass > 0.0f;
+    const float mass = dynamic ? desc.mass : 0.0f;
     btVector3 inertia(0, 0, 0);
     if (mass > 0.0f) {
         shape->calculateLocalInertia(mass, inertia);
     }
 
     btRigidBody::btRigidBodyConstructionInfo info(mass, motionState.get(), shape.get(), inertia);
-    info.m_friction = material.friction;
-    info.m_restitution = material.restitution;
+    info.m_friction = desc.material.friction;
+    info.m_restitution = desc.material.restitution;
+    info.m_linearDamping = desc.linear_damping;
+    info.m_angularDamping = desc.angular_damping;
 
     auto body = std::make_unique<btRigidBody>(info);
+    body->setLinearVelocity(btVector3(desc.linear_velocity.x, desc.linear_velocity.y, desc.linear_velocity.z));
+    body->setAngularVelocity(btVector3(desc.angular_velocity.x, desc.angular_velocity.y, desc.angular_velocity.z));
+    body->setGravity(btVector3(0.0f, gravity_ * desc.gravity_factor, 0.0f));
+    if (desc.motion == karma::physics::PhysicsMotionType::Kinematic) {
+        body->setCollisionFlags(body->getCollisionFlags() | btCollisionObject::CF_KINEMATIC_OBJECT);
+        body->setActivationState(DISABLE_DEACTIVATION);
+    }
+    if (desc.sensor) {
+        body->setCollisionFlags(body->getCollisionFlags() | btCollisionObject::CF_NO_CONTACT_RESPONSE);
+    }
     dynamicsWorld_->addRigidBody(body.get());
 
     return std::make_unique<PhysicsRigidBodyBullet>(this, std::move(body), std::move(shape), std::move(motionState));
+}
+
+std::unique_ptr<PhysicsConstraintBackend> PhysicsWorldBullet::createConstraint(
+    const karma::physics::PhysicsConstraintDesc& /*desc*/,
+    std::uintptr_t /*bodyA*/,
+    std::uintptr_t /*bodyB*/) {
+    return std::make_unique<NullConstraintBackend>();
+}
+
+std::unique_ptr<PhysicsRigidBodyBackend> PhysicsWorldBullet::createBoxBody(const glm::vec3& halfExtents,
+                                                                           float mass,
+                                                                           const glm::vec3& position,
+                                                                           const karma::physics::PhysicsMaterial& material) {
+    karma::physics::PhysicsBodyDesc desc;
+    desc.shape.type = karma::physics::PhysicsShapeType::Box;
+    desc.shape.half_extents = halfExtents;
+    desc.position = position;
+    desc.mass = mass;
+    desc.material = material;
+    return createBody(desc);
 }
 
 std::unique_ptr<PhysicsPlayerControllerBackend> PhysicsWorldBullet::createPlayer(const glm::vec3& size) {
@@ -121,6 +191,40 @@ bool PhysicsWorldBullet::raycastDetailed(const glm::vec3& from,
     outHit.support_handle = reinterpret_cast<std::uintptr_t>(callback.m_collisionObject);
     return true;
 }
+
+bool PhysicsWorldBullet::castRay(const karma::physics::PhysicsRaycastDesc& desc,
+                                 karma::physics::PhysicsQueryHit& outHit) const {
+    glm::vec3 point{};
+    glm::vec3 normal{};
+    if (!raycast(desc.from, desc.to, point, normal)) {
+        return false;
+    }
+    outHit.point = point;
+    outHit.point_on_body = point;
+    outHit.normal = normal;
+    const glm::vec3 ray = desc.to - desc.from;
+    const float len_sq = glm::dot(ray, ray);
+    outHit.fraction = len_sq > 0.0f ? glm::dot(point - desc.from, ray) / len_sq : 0.0f;
+    return true;
+}
+
+void PhysicsWorldBullet::castRayAll(const karma::physics::PhysicsRaycastDesc& desc,
+                                    std::vector<karma::physics::PhysicsQueryHit>& outHits) const {
+    karma::physics::PhysicsQueryHit hit{};
+    if (castRay(desc, hit)) {
+        outHits.push_back(hit);
+    }
+}
+
+void PhysicsWorldBullet::collidePoint(const glm::vec3& /*point*/,
+                                      const karma::physics::PhysicsQueryFilter& /*filter*/,
+                                      std::vector<karma::physics::PhysicsQueryHit>& /*outHits*/) const {}
+
+void PhysicsWorldBullet::collideShape(const karma::physics::PhysicsShapeQueryDesc& /*desc*/,
+                                      std::vector<karma::physics::PhysicsQueryHit>& /*outHits*/) const {}
+
+void PhysicsWorldBullet::castShape(const karma::physics::PhysicsShapeCastDesc& /*desc*/,
+                                   std::vector<karma::physics::PhysicsQueryHit>& /*outHits*/) const {}
 
 void PhysicsWorldBullet::collectContacts(std::vector<karma::physics::PhysicsContact>& outContacts) const {
     if (!dynamicsWorld_ || !dispatcher_) {

@@ -153,6 +153,7 @@ list(APPEND KARMA_INSTALL_TARGETS karma_simulation_collision)
 
 karma_add_static(karma_simulation_physics
   src/simulation/physics/backend_factory.cpp
+  src/simulation/physics/constraint.cpp
   src/simulation/physics/rigid_body.cpp
   src/simulation/physics/static_body.cpp
   src/simulation/physics/player_controller.cpp
@@ -164,9 +165,12 @@ karma_link_build_and_install(karma_simulation_physics PUBLIC KARMA_PHYSICS_LINK_
 if (KARMA_PHYSICS_BACKEND_JOLT)
   target_compile_definitions(karma_simulation_physics PUBLIC KARMA_PHYSICS_BACKEND_JOLT)
   target_sources(karma_simulation_physics PRIVATE
+    src/simulation/physics/backends/jolt/constraint_jolt.cpp
     src/simulation/physics/backends/jolt/physics_world_jolt.cpp
+    src/simulation/physics/backends/jolt/query_jolt.cpp
     src/simulation/physics/backends/jolt/rigid_body_jolt.cpp
     src/simulation/physics/backends/jolt/player_controller_jolt.cpp
+    src/simulation/physics/backends/jolt/shape_factory.cpp
     src/simulation/physics/backends/jolt/static_body_jolt.cpp
   )
 endif()

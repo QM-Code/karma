@@ -17,6 +17,12 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     )
     target_link_libraries(karma_rendering_tests PRIVATE karma::headless)
     add_test(NAME karma_rendering_tests COMMAND karma_rendering_tests)
+
+    add_executable(karma_physics_tests
+      tests/physics_tests.cpp
+    )
+    target_link_libraries(karma_physics_tests PRIVATE karma::headless)
+    add_test(NAME karma_physics_tests COMMAND karma_physics_tests)
   endif()
 
   set(KARMA_NETWORK_TEST_PROFILE "")

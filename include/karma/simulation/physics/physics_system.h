@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string_view>
 #include <unordered_map>
 
@@ -7,10 +8,14 @@
 #include "karma/world/components/contact_events.h"
 #include "karma/world/components/ground_contact.h"
 #include "karma/world/components/player_controller.h"
+#include "karma/world/components/physics_collision_filter.h"
+#include "karma/world/components/physics_constraint.h"
+#include "karma/world/components/physics_material.h"
 #include "karma/world/components/rigidbody.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/collider_queries.h"
 #include "karma/world/ecs/world.h"
+#include "karma/simulation/physics/constraint.hpp"
 #include "karma/simulation/physics/physics_world.hpp"
 #include "karma/world/systems/system.h"
 
@@ -36,6 +41,8 @@ class PhysicsSystem : public systems::ISystem {
   }
 
   void syncRigidBodies(ecs::World& world);
+  void syncConstraints(ecs::World& world);
+  void applyBodyForces(ecs::World& world);
   void syncDynamicBodies(ecs::World& world);
   void syncPlayerController(ecs::World& world, float dt);
   void syncContactEvents(ecs::World& world);
@@ -53,12 +60,13 @@ class PhysicsSystem : public systems::ISystem {
 
   World& physics_;
   std::unordered_map<uint64_t, RigidBody> rigid_bodies_;
-  struct BoxColliderState {
-    math::Vec3 center{};
-    math::Vec3 half_extents{};
+  struct BodyState {
+    std::size_t signature = 0;
   };
-  std::unordered_map<uint64_t, BoxColliderState> box_collider_state_;
-  std::unordered_map<uint64_t, StaticBody> static_bodies_;
+  std::unordered_map<uint64_t, BodyState> body_state_;
+  std::unordered_map<uint64_t, RigidBody> static_bodies_;
+  std::unordered_map<uint64_t, Constraint> constraints_;
+  std::unordered_map<uint64_t, std::size_t> constraint_signatures_;
   std::unordered_map<std::uintptr_t, ecs::Entity> physics_entities_by_handle_;
   std::unordered_map<uint64_t, ContactMap> previous_contacts_;
   ecs::Entity player_entity_{};

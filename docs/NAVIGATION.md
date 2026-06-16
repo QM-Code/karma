@@ -19,6 +19,19 @@ ECS path requests submitted through `NavigationSystem` are resolved from immutab
 navmesh snapshots on a worker thread, while tile-cache and crowd updates run on
 the main thread because they mutate live Detour state and entity transforms.
 
+Public headers are split by API role:
+
+- `karma/simulation/navigation/nav_types.h`: shared status, flags, area config,
+  query filters, build config, and debug draw mode contracts.
+- `karma/simulation/navigation/nav_geometry_types.h`: authored triangle input,
+  off-mesh links, and convex area volumes.
+- `karma/simulation/navigation/nav_mesh.h`: baked Detour navmesh ownership,
+  snapshots, mutable polygon/tile state, and debug draw access.
+- `karma/simulation/navigation/nav_query.h`: path, raycast, spatial query, and
+  sliced query result types plus `NavQuery`.
+- `karma/simulation/navigation/nav_tile_cache.h` and `nav_crowd.h`: dynamic
+  obstacle tile-cache and crowd steering APIs.
+
 ## Build Flow
 
 1. Collect world-space triangles into `navigation::NavMeshInputGeometry`.

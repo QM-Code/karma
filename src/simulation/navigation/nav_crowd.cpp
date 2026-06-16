@@ -1,4 +1,5 @@
 #include "karma/simulation/navigation/nav_crowd.h"
+#include "karma/simulation/navigation/nav_mesh.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,19 +14,18 @@
 
 #include "karma/core/math/vec3.h"
 #include "karma/rendering/renderer/device.h"
+#include "detail/detour_utils.h"
 
 namespace karma::navigation {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-const float* ptr(const math::Vec3& v) {
-  return &v.x;
-}
-
-math::Vec3 toVec3(const float* v) {
-  return {v[0], v[1], v[2]};
-}
+using detail::applyDetourFilter;
+using detail::failed;
+using detail::mapStraightPathFlags;
+using detail::ptr;
+using detail::toVec3;
 
 void drawCircle(renderer::GraphicsDevice& graphics,
                 const math::Vec3& center,
@@ -63,24 +63,6 @@ void drawCross(renderer::GraphicsDevice& graphics,
                     1.0f);
 }
 
-bool failed(dtStatus status) {
-  return dtStatusFailed(status) != 0;
-}
-
-uint8_t mapStraightPathFlags(unsigned char flags) {
-  uint8_t out = NavPathPointFlagNone;
-  if ((flags & DT_STRAIGHTPATH_START) != 0) {
-    out |= NavPathPointFlagStart;
-  }
-  if ((flags & DT_STRAIGHTPATH_END) != 0) {
-    out |= NavPathPointFlagEnd;
-  }
-  if ((flags & DT_STRAIGHTPATH_OFFMESH_CONNECTION) != 0) {
-    out |= NavPathPointFlagOffMeshConnection;
-  }
-  return out;
-}
-
 void setResult(NavCrowdBuildResult* result,
                NavStatus status,
                std::string message,
@@ -91,14 +73,6 @@ void setResult(NavCrowdBuildResult* result,
   result->status = status;
   result->message = std::move(message);
   result->agent_capacity = agent_capacity;
-}
-
-void applyFilter(dtQueryFilter& out, const NavQueryFilter& filter) {
-  out.setIncludeFlags(filter.include_flags);
-  out.setExcludeFlags(filter.exclude_flags);
-  for (size_t i = 0; i < filter.area_costs.size(); ++i) {
-    out.setAreaCost(static_cast<int>(i), filter.area_costs[i]);
-  }
 }
 
 dtCrowdAgentParams toDetourParams(const NavCrowdAgentParams& params) {
@@ -278,7 +252,7 @@ bool NavCrowd::init(NavMesh& nav_mesh,
   for (size_t i = 0; i < filters.size() && i < DT_CROWD_MAX_QUERY_FILTER_TYPE; ++i) {
     dtQueryFilter* filter = impl_->crowd->getEditableFilter(static_cast<int>(i));
     if (filter != nullptr) {
-      applyFilter(*filter, filters[i]);
+      applyDetourFilter(*filter, filters[i]);
     }
   }
 
@@ -510,7 +484,7 @@ bool NavCrowd::setQueryFilter(uint8_t filter_index, const NavQueryFilter& filter
   if (detour_filter == nullptr) {
     return false;
   }
-  applyFilter(*detour_filter, filter);
+  applyDetourFilter(*detour_filter, filter);
   if (impl_->config.query_filters.size() <= filter_index) {
     impl_->config.query_filters.resize(static_cast<size_t>(filter_index) + 1u);
   }

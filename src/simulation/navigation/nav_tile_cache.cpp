@@ -1,4 +1,5 @@
 #include "karma/simulation/navigation/nav_tile_cache.h"
+#include "karma/simulation/navigation/nav_mesh.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <Recast.h>
 
 #include "karma/rendering/renderer/device.h"
+#include "detail/detour_utils.h"
 
 #include "fastlz.h"
 
@@ -26,6 +28,13 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr uint32_t kTileCacheSnapshotMagic = 0x4b4e5443u;  // KNTC
 constexpr uint32_t kTileCacheSnapshotVersion = 1;
+
+using detail::failed;
+using detail::flagsForArea;
+using detail::ptr;
+using detail::sanitizeArea;
+using detail::succeeded;
+using detail::toVec3;
 
 struct TileCacheSnapshotHeader {
   uint32_t magic = kTileCacheSnapshotMagic;
@@ -87,14 +96,6 @@ struct TileCacheSnapshotTileHeader {
   uint32_t data_size = 0;
 };
 
-const float* ptr(const math::Vec3& v) {
-  return &v.x;
-}
-
-math::Vec3 toVec3(const float* v) {
-  return {v[0], v[1], v[2]};
-}
-
 math::Vec3 add(const math::Vec3& a, const math::Vec3& b) {
   return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
@@ -153,14 +154,6 @@ void drawBox(renderer::GraphicsDevice& graphics,
   for (const auto& edge : edges) {
     graphics.drawLine(corners[edge[0]], corners[edge[1]], color, depth_test, 1.0f);
   }
-}
-
-bool succeeded(dtStatus status) {
-  return dtStatusSucceed(status) != 0;
-}
-
-bool failed(dtStatus status) {
-  return dtStatusFailed(status) != 0;
 }
 
 template <class T>
@@ -300,25 +293,6 @@ NavTileCacheBuildResult fromPod(const NavTileCacheBuildResultPod& pod) {
   result.raw_bytes = pod.raw_bytes;
   result.navmesh_bytes = pod.navmesh_bytes;
   return result;
-}
-
-unsigned char sanitizeArea(unsigned char area) {
-  if (area > kNavAreaMax) {
-    return kNavAreaDefault;
-  }
-  return area;
-}
-
-uint16_t flagsForArea(const NavMeshBuildConfig& config, unsigned char area) {
-  if (area == kNavAreaNull) {
-    return 0;
-  }
-  for (const NavAreaConfig& area_config : config.area_configs) {
-    if (area_config.area == area) {
-      return area_config.flags;
-    }
-  }
-  return config.default_poly_flags;
 }
 
 void setResult(NavTileCacheBuildResult* result,

@@ -1,4 +1,5 @@
 #include "karma/simulation/navigation/navigation_system.h"
+#include "karma/simulation/navigation/nav_query.h"
 
 #include <algorithm>
 #include <cmath>

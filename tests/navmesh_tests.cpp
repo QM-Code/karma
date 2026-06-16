@@ -19,6 +19,7 @@
 #include "karma/simulation/navigation/nav_geometry.h"
 #include "karma/simulation/navigation/nav_crowd.h"
 #include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/simulation/navigation/nav_query.h"
 #include "karma/simulation/navigation/nav_tile_cache.h"
 #include "karma/simulation/navigation/navigation_system.h"
 #include "karma/content/importers/glb_scene_import.h"

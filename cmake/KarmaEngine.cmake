@@ -186,6 +186,10 @@ if (KARMA_ENABLE_NAVIGATION)
     src/simulation/navigation/nav_crowd.cpp
     src/simulation/navigation/nav_geometry.cpp
     src/simulation/navigation/nav_mesh.cpp
+    src/simulation/navigation/nav_query.cpp
+    src/simulation/navigation/nav_query_path.cpp
+    src/simulation/navigation/nav_query_spatial.cpp
+    src/simulation/navigation/nav_query_sliced.cpp
     src/simulation/navigation/nav_tile_cache.cpp
     src/simulation/navigation/navigation_diagnostics.cpp
     src/simulation/navigation/navigation_system.cpp

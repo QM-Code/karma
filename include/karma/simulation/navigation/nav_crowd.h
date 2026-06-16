@@ -6,13 +6,15 @@
 #include <vector>
 
 #include "karma/core/math/types.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/simulation/navigation/nav_types.h"
 
 namespace karma::renderer {
 class GraphicsDevice;
 }
 
 namespace karma::navigation {
+
+class NavMesh;
 
 /// \ingroup karma_navigation
 /// Crowd steering feature bits mirroring DetourCrowd update flags.

@@ -7,13 +7,16 @@
 #include <vector>
 
 #include "karma/core/math/types.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/simulation/navigation/nav_geometry_types.h"
+#include "karma/simulation/navigation/nav_types.h"
 
 namespace karma::renderer {
 class GraphicsDevice;
 }
 
 namespace karma::navigation {
+
+class NavMesh;
 
 /// \ingroup karma_navigation
 /// Tile-cache layer compression mode for serialized and built cache data.

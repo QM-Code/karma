@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/simulation/navigation/nav_geometry_types.h"
 #include "karma/world/geometry/mesh_data.h"
 
 namespace karma::ecs {

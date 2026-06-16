@@ -6,7 +6,7 @@
 
 #include "karma/world/ecs/entity.h"
 #include "karma/core/math/types.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/simulation/navigation/nav_types.h"
 #include "karma/world/systems/system.h"
 
 namespace karma::renderer {

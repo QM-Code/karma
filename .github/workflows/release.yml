@@ -1,0 +1,122 @@
+name: Release Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  package:
+    name: Package ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/release-package/_deps
+          key: release-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**/*.cmake', '.github/workflows/*.yml') }}
+          restore-keys: |
+            release-fetchcontent-${{ runner.os }}-
+
+      - name: Configure minimal headless package
+        run: >
+          cmake -S . -B build/release-package
+          -DKARMA_FETCH_DEPS=ON
+          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_TESTS=OFF
+          -DBUILD_TESTING=OFF
+          -DKARMA_HEADLESS=ON
+          -DKARMA_ENABLE_AUDIO=OFF
+          -DKARMA_ENABLE_NAVIGATION=OFF
+          -DKARMA_NETWORK_BACKEND_ENET=OFF
+          -DKARMA_PHYSICS_BACKEND_JOLT=OFF
+          -DKARMA_PHYSICS_BACKEND_BULLET=OFF
+          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build/release-install
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/release-package --config Release --parallel 2
+
+      - name: Install
+        run: cmake --install build/release-package --config Release
+
+      - name: Configure installed-package consumer smoke
+        run: >
+          cmake -S tests/consumer/install -B build/release-consumer
+          -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/release-install
+          -DKARMA_CONFIG_FETCH_DEPS=OFF
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build installed-package consumer smoke
+        run: cmake --build build/release-consumer --config Release --parallel 2
+
+      - name: Test installed-package consumer smoke
+        run: ctest --test-dir build/release-consumer --build-config Release --output-on-failure
+
+      - name: Set package filename
+        id: package
+        shell: pwsh
+        run: |
+          $refName = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
+          "filename=karma-$refName-${{ runner.os }}.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Archive package
+        run: >
+          cmake -E tar cfv
+          build/${{ steps.package.outputs.filename }}
+          --format=zip
+          -- build/release-install
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: karma-package-${{ runner.os }}
+          path: build/${{ steps.package.outputs.filename }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish release assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Karma $GITHUB_REF_NAME" \
+              --notes "Automated minimal headless package artifacts."
+          fi
+          find dist -type f -name '*.zip' -print0 |
+            xargs -0 -r gh release upload "$GITHUB_REF_NAME" --clobber

@@ -1,0 +1,100 @@
+name: Docs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  build:
+    name: Build API docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/docs/_deps
+          key: docs-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**/*.cmake', 'docs/Doxyfile.in', 'docs/api/**', '.github/workflows/*.yml') }}
+          restore-keys: |
+            docs-fetchcontent-${{ runner.os }}-
+
+      - name: Configure docs build
+        run: >
+          cmake -S . -B build/docs
+          -DKARMA_FETCH_DEPS=ON
+          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_TESTS=OFF
+          -DBUILD_TESTING=OFF
+          -DKARMA_HEADLESS=ON
+          -DKARMA_ENABLE_AUDIO=OFF
+          -DKARMA_ENABLE_NAVIGATION=OFF
+          -DKARMA_NETWORK_BACKEND_ENET=OFF
+          -DKARMA_PHYSICS_BACKEND_JOLT=OFF
+          -DKARMA_PHYSICS_BACKEND_BULLET=OFF
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build docs
+        run: cmake --build build/docs --target karma_docs_api --config Release --parallel 2
+
+      - name: Prepare Pages content
+        run: |
+          test -f build/docs/docs/api/html/index.html
+          touch build/docs/docs/api/html/.nojekyll
+
+      - name: Upload docs artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: karma-api-docs-html
+          path: build/docs/docs/api/html
+          if-no-files-found: error
+
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v6
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/docs/docs/api/html
+
+  deploy:
+    name: Deploy API docs
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

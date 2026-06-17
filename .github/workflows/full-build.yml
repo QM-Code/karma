@@ -2,14 +2,27 @@ name: Full Build
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   pull_request:
     types: [opened, reopened, synchronize, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  CTEST_OUTPUT_ON_FAILURE: 1
 
 jobs:
   build:
     if: >-
       ${{
-        github.event_name == 'workflow_dispatch' ||
+        github.event_name != 'pull_request' ||
         contains(github.event.pull_request.labels.*.name, 'ci/full-build')
       }}
     name: ${{ matrix.os }}
@@ -23,11 +36,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/ci-headless/_deps
+            build/ci-graphical/_deps
+            build/ci-minimal-headless/_deps
+            build/consumer-source/karma-build/_deps
+            build/consumer-source-graphical/karma-build/_deps
+          key: full-build-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**/*.cmake', '.github/workflows/*.yml') }}
+          restore-keys: |
+            full-build-fetchcontent-${{ runner.os }}-
+
       - name: Configure headless
         run: >
           cmake -S . -B build/ci-headless
           -DKARMA_FETCH_DEPS=ON
-          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_EXAMPLES=ON
           -DKARMA_BUILD_TESTS=ON
           -DBUILD_TESTING=ON
           -DKARMA_HEADLESS=ON
@@ -43,7 +69,7 @@ jobs:
         run: >
           cmake -S . -B build/ci-graphical
           -DKARMA_FETCH_DEPS=ON
-          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_EXAMPLES=ON
           -DKARMA_BUILD_TESTS=OFF
           -DBUILD_TESTING=OFF
           -DKARMA_BUILD_HEADLESS_PROFILE=OFF
@@ -74,6 +100,13 @@ jobs:
 
       - name: Install minimal headless
         run: cmake --install build/ci-minimal-headless --config Release
+
+      - name: Upload minimal headless package
+        uses: actions/upload-artifact@v4
+        with:
+          name: karma-minimal-headless-${{ runner.os }}
+          path: build/ci-install
+          if-no-files-found: error
 
       - name: Configure installed-package consumer smoke
         run: >

@@ -54,3 +54,10 @@ Current handwritten generated-reference pages:
 - `docs/api/rendering.md`: renderer submission, camera post-process profiles,
   backend shader assets, and shadow authoring.
 - `docs/api/groups.dox`: Doxygen module/group definitions.
+
+## Publish To GitHub Pages
+
+The `.github/workflows/docs.yml` workflow builds this target on pull requests
+and deploys the generated HTML to GitHub Pages from `main`. The repository's
+Pages source must be set to **GitHub Actions** under Settings > Pages before
+the deploy job can publish the uploaded Pages artifact.

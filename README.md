@@ -267,14 +267,28 @@ Common CMake switches:
 - `KARMA_BUILD_IMGUI_DEMO`, `KARMA_BUILD_RMLUI_DEMO`, `KARMA_ENABLE_RMLUI`:
   optional UI demos/adapters.
 
-## CI
+## CI/CD
 
-The full cross-platform workflow lives at `.github/workflows/full-build.yml`.
-It runs on Linux, macOS, and Windows only when manually dispatched or when a pull
-request has the `ci/full-build` label. The workflow builds headless profiles,
-runs CTest, builds the graphical profile without launching a window, installs
-the minimal headless package, and builds source/installed consumer smoke
-projects.
+Default pull-request and `main` validation lives at `.github/workflows/ci.yml`.
+It builds the Ubuntu headless profile with examples and tests enabled, runs
+CTest, and runs a separate AddressSanitizer/UBSan debug test job.
+
+The heavier cross-platform workflow lives at
+`.github/workflows/full-build.yml`. It runs on Linux, macOS, and Windows for
+manual dispatches, pushes to `main`, and pull requests labeled
+`ci/full-build`. The workflow builds headless profiles with examples, runs
+CTest, builds the graphical profile and graphical examples without launching a
+window, installs the minimal headless package, uploads that install tree as a
+workflow artifact, and builds source/installed consumer smoke projects.
+
+Code scanning lives at `.github/workflows/codeql.yml` and runs CodeQL for C/C++
+on pull requests, pushes to `main`, weekly schedule, and manual dispatches.
+API docs publishing lives at `.github/workflows/docs.yml`; it builds the
+Doxygen API docs on pull requests and deploys them to GitHub Pages from `main`
+when the repository Pages source is set to GitHub Actions.
+Release packaging lives at `.github/workflows/release.yml`; pushing a `v*` tag
+builds minimal headless packages on Linux, macOS, and Windows, uploads workflow
+artifacts, and publishes them to the matching GitHub release.
 
 ## Versioning
 

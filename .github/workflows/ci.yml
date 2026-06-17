@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  CTEST_OUTPUT_ON_FAILURE: 1
+
+jobs:
+  headless:
+    name: Headless tests and examples
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/ci-headless/_deps
+          key: ci-headless-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**/*.cmake', '.github/workflows/*.yml') }}
+          restore-keys: |
+            ci-headless-fetchcontent-${{ runner.os }}-
+
+      - name: Configure
+        run: >
+          cmake -S . -B build/ci-headless
+          -DKARMA_FETCH_DEPS=ON
+          -DKARMA_BUILD_EXAMPLES=ON
+          -DKARMA_BUILD_TESTS=ON
+          -DBUILD_TESTING=ON
+          -DKARMA_HEADLESS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/ci-headless --config Release --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build/ci-headless --build-config Release --output-on-failure
+
+  sanitizers:
+    name: Address/UB sanitizer
+    runs-on: ubuntu-latest
+
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/ci-sanitizers/_deps
+          key: ci-sanitizers-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**/*.cmake', '.github/workflows/*.yml') }}
+          restore-keys: |
+            ci-sanitizers-fetchcontent-${{ runner.os }}-
+
+      - name: Configure
+        run: >
+          cmake -S . -B build/ci-sanitizers
+          -DKARMA_FETCH_DEPS=ON
+          -DKARMA_BUILD_EXAMPLES=OFF
+          -DKARMA_BUILD_TESTS=ON
+          -DBUILD_TESTING=ON
+          -DKARMA_HEADLESS=ON
+          -DKARMA_ENABLE_NAVIGATION=OFF
+          -DKARMA_NETWORK_BACKEND_ENET=OFF
+          -DKARMA_PHYSICS_BACKEND_JOLT=OFF
+          -DKARMA_PHYSICS_BACKEND_BULLET=OFF
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=Debug
+          "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer"
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build/ci-sanitizers --config Debug --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build/ci-sanitizers --build-config Debug --output-on-failure

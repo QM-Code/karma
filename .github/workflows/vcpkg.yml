@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 75
 
     env:
-      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg-root
+      VCPKG_ROOT: ${{ github.workspace }}/../vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-linux
       VCPKG_DISABLE_METRICS: 1
 
@@ -76,7 +76,7 @@ jobs:
     timeout-minutes: 120
 
     env:
-      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg-root
+      VCPKG_ROOT: ${{ github.workspace }}/../vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-linux
       VCPKG_DISABLE_METRICS: 1
 

@@ -49,6 +49,7 @@ jobs:
             build/ci-headless/_deps
             build/ci-graphical/_deps
             build/ci-minimal-headless/_deps
+            build/consumer-install/_deps
             build/consumer-source/karma-build/_deps
             build/consumer-source-graphical/karma-build/_deps
           key: full-build-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**/*.cmake', '.github/workflows/*.yml') }}
@@ -118,7 +119,7 @@ jobs:
         run: >
           cmake -S tests/consumer/install -B build/consumer-install
           -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/ci-install
-          -DKARMA_CONFIG_FETCH_DEPS=OFF
+          -DKARMA_CONFIG_FETCH_DEPS=ON
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build installed-package consumer smoke

@@ -32,7 +32,9 @@ jobs:
       - name: Cache fetched dependencies
         uses: actions/cache@v4
         with:
-          path: build/release-package/_deps
+          path: |
+            build/release-package/_deps
+            build/release-consumer/_deps
           key: release-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**/*.cmake', '.github/workflows/*.yml') }}
           restore-keys: |
             release-fetchcontent-${{ runner.os }}-
@@ -63,7 +65,7 @@ jobs:
         run: >
           cmake -S tests/consumer/install -B build/release-consumer
           -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/release-install
-          -DKARMA_CONFIG_FETCH_DEPS=OFF
+          -DKARMA_CONFIG_FETCH_DEPS=ON
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build installed-package consumer smoke

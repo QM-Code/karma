@@ -13,6 +13,8 @@ static library plus examples, with a layered runtime, Diligent/Vulkan rendering,
 prefabs, particles, GLB import, animation/skinning, physics/collision,
 navigation, audio, networking, and UI adapters.
 
+Published API docs: <https://qm-code.github.io/karma/>
+
 ## Current State
 
 Karma is organized as layered engine code under `include/karma/<layer>` and

@@ -15,6 +15,8 @@ navigation, audio, networking, and UI adapters.
 
 Published API docs: <https://qm-code.github.io/karma/>
 
+License: [MIT](LICENSE)
+
 ## Current State
 
 Karma is organized as layered engine code under `include/karma/<layer>` and
@@ -140,6 +142,8 @@ Current consumer import status:
 - Installed packages do not fetch missing third-party dependency targets during
   `find_package(karma)` by default. Set `KARMA_CONFIG_FETCH_DEPS=ON` before
   `find_package(karma)` if package-time dependency fetching is desired.
+- Package-manager support is available through the root vcpkg manifest and the
+  local `ports/karma` overlay port. See [Packaging](docs/PACKAGING.md).
 
 For source-vendored use, add Karma as a subdirectory and link the namespaced
 target:
@@ -330,7 +334,7 @@ Start with:
 - [Implementation Notes](docs/ENGINE_IMPLEMENTATION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Examples](examples/README.md)
-- [Current Agent Handoff](NEXT_AGENT.md)
+- [Current Agent Handoff](docs/NEXT_AGENT.md)
 
 Focused references:
 
@@ -350,5 +354,5 @@ Focused references:
 Check `git status` before editing; the worktree is often intentionally dirty
 while engine tasks are in progress. Follow [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for module placement and dependency direction. Active continuation notes belong
-in [NEXT_AGENT.md](NEXT_AGENT.md); durable usage, authoring, and diagnostic
+in [NEXT_AGENT.md](docs/NEXT_AGENT.md); durable usage, authoring, and diagnostic
 material belongs under `docs/`.

@@ -38,7 +38,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <spdlog/spdlog.h>
 
-#include "../../../../third_party/stb_image.h"
+#include "../../../../../third_party/stb_image.h"
 #if !defined(KARMA_WINDOW_BACKEND_SDL)
   #if defined(PLATFORM_WIN32)
     #define GLFW_EXPOSE_NATIVE_WIN32

@@ -1,0 +1,7 @@
+diligentcore provides Diligent's Vulkan CMake targets used by Karma:
+
+  find_package(DiligentCore CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Diligent-GraphicsEngineVk-static)
+
+This overlay port is Linux-only and packages DiligentCore v2.5.5 with Vulkan,
+HLSL/SPIR-V shader compilation, and render-state cache support enabled.

@@ -4,7 +4,7 @@ This directory owns runtime animation sampling and CPU mesh deformation.
 
 Before changing behavior, read:
 
-- `NEXT_AGENT.md`
+- `docs/NEXT_AGENT.md`
 - `docs/RIGGED_GLB_AUTHORING.md`
 - `include/karma/simulation/animation/animation_clip.h`
 - `include/karma/world/components/animation_player.h`

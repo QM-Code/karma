@@ -23,6 +23,6 @@ Particle optimization guidance:
 
 Relevant docs:
 
-- `NEXT_AGENT.md`
+- `docs/NEXT_AGENT.md`
 - `docs/PARTICLE_SYSTEM.md`
 - `docs/EXPLOSION_STRESS_PERF.md`

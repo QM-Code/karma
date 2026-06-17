@@ -392,7 +392,7 @@ Updated interpretation:
 
 The current engineering handoff and prefab authoring notes live in:
 
-- [../NEXT_AGENT.md](../NEXT_AGENT.md)
+- [NEXT_AGENT.md](NEXT_AGENT.md)
 - [EXPLOSION_PREFAB.md](EXPLOSION_PREFAB.md)
 
 ## Environment Note

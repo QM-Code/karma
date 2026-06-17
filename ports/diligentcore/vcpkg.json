@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "diligentcore",
+  "version-string": "2.5.5",
+  "description": "DiligentCore Vulkan backend packaged for Karma's graphical vcpkg profile.",
+  "homepage": "https://github.com/DiligentGraphics/DiligentCore",
+  "license": "Apache-2.0",
+  "supports": "linux",
+  "dependencies": [
+    "vulkan-headers",
+    "xxhash",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    }
+  ]
+}

@@ -124,7 +124,7 @@ void PhysicsWorldJolt::castRayAll(const karma::physics::PhysicsRaycastDesc& desc
     JPH::RRayCast ray(origin, direction);
 
     JPH::RayCastSettings settings;
-    settings.mBackFaceMode = toJph(desc.back_face_mode);
+    settings.SetBackFaceMode(toJph(desc.back_face_mode));
     settings.mTreatConvexAsSolid = desc.treat_convex_as_solid;
 
     PhysicsWorldJoltQueryBodyFilter body_filter(*this, desc.filter);

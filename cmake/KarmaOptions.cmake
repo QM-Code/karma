@@ -38,6 +38,7 @@ option(KARMA_ENABLE_RMLUI "Build RmlUi UI adapter" OFF)
 option(KARMA_DILIGENT_REPACK_XXHASH
   "Repack Diligent's bundled xxHash archive on affected Unix toolchains" OFF)
 set(KARMA_DILIGENT_TAG "v2.5.5" CACHE STRING "DiligentCore git tag/branch to fetch")
+set(KARMA_JOLT_TAG "v5.5.0" CACHE STRING "JoltPhysics git tag/branch to fetch")
 
 if (KARMA_HEADLESS)
   set(KARMA_BUILD_HEADLESS_PROFILE ON CACHE BOOL "Build the karma::headless profile target" FORCE)

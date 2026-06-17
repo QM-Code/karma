@@ -15,4 +15,4 @@ Relevant docs:
 - `docs/EFFECT_PREFABS.md`
 - `docs/PARTICLE_SYSTEM.md`
 - `docs/EXPLOSION_PREFAB.md`
-- `NEXT_AGENT.md`
+- `docs/NEXT_AGENT.md`

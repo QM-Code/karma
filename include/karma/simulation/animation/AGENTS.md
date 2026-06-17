@@ -4,7 +4,7 @@ This directory exposes public animation APIs.
 
 Before changing headers, read:
 
-- `NEXT_AGENT.md`
+- `docs/NEXT_AGENT.md`
 - `docs/RIGGED_GLB_AUTHORING.md`
 - `src/simulation/animation/AGENTS.md`
 

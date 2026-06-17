@@ -1,0 +1,71 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "karma",
+  "version": "0.1.0",
+  "description": "C++20 ECS-driven 3D game engine. This overlay port packages Karma profiles from the local checkout.",
+  "homepage": "https://github.com/QM-Code/karma",
+  "license": "MIT",
+  "supports": "!uwp",
+  "dependencies": [
+    "assimp",
+    "glm",
+    "nlohmann-json",
+    "spdlog",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ],
+  "default-features": [
+    "server",
+    "headless",
+    "network",
+    "physics-jolt",
+    "navigation"
+  ],
+  "features": {
+    "headless": {
+      "description": "Build and install the karma::headless non-visual runtime profile."
+    },
+    "graphical": {
+      "description": "Build and install the karma::graphical Vulkan runtime profile.",
+      "dependencies": [
+        "diligentcore",
+        "glfw3",
+        "imgui",
+        "miniaudio"
+      ]
+    },
+    "navigation": {
+      "description": "Enable Recast/Detour navigation support.",
+      "dependencies": [
+        "recastnavigation"
+      ]
+    },
+    "network": {
+      "description": "Enable the ENet network backend.",
+      "dependencies": [
+        "enet"
+      ]
+    },
+    "physics-bullet": {
+      "description": "Enable the Bullet physics backend. Do not combine with physics-jolt.",
+      "dependencies": [
+        "bullet3"
+      ]
+    },
+    "physics-jolt": {
+      "description": "Enable the Jolt physics backend.",
+      "dependencies": [
+        "joltphysics"
+      ]
+    },
+    "server": {
+      "description": "Build and install the karma::server minimal server profile."
+    }
+  }
+}

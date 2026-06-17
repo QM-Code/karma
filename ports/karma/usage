@@ -1,0 +1,10 @@
+karma provides CMake targets:
+
+  find_package(karma CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE karma::server)
+  target_link_libraries(main PRIVATE karma::headless)
+  target_link_libraries(main PRIVATE karma::graphical)
+
+This overlay port packages the server, headless, and graphical profiles from
+the local checkout. The graphical feature depends on the local diligentcore
+overlay port.

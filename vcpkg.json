@@ -1,0 +1,71 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "karma",
+  "version": "0.1.0",
+  "description": "C++20 ECS-driven 3D game engine.",
+  "homepage": "https://github.com/QM-Code/karma",
+  "license": "MIT",
+  "dependencies": [
+    "assimp",
+    "glm",
+    "nlohmann-json",
+    "spdlog"
+  ],
+  "default-features": [
+    "network",
+    "physics-jolt",
+    "navigation"
+  ],
+  "features": {
+    "graphical": {
+      "description": "Install graphical dependencies for Karma source builds, including the local DiligentCore overlay port.",
+      "dependencies": [
+        "diligentcore",
+        "glfw3",
+        "imgui",
+        "miniaudio"
+      ]
+    },
+    "navigation": {
+      "description": "Install Recast/Detour navigation dependencies.",
+      "dependencies": [
+        "recastnavigation"
+      ]
+    },
+    "network": {
+      "description": "Install ENet networking dependencies.",
+      "dependencies": [
+        "enet"
+      ]
+    },
+    "physics-bullet": {
+      "description": "Install Bullet physics dependencies. Do not combine this with physics-jolt in one Karma build.",
+      "dependencies": [
+        "bullet3"
+      ]
+    },
+    "physics-jolt": {
+      "description": "Install Jolt physics dependencies.",
+      "dependencies": [
+        "joltphysics"
+      ]
+    },
+    "rmlui": {
+      "description": "Install RmlUi dependencies for the optional RmlUi adapter.",
+      "dependencies": [
+        {
+          "name": "rmlui",
+          "features": [
+            "svg"
+          ]
+        }
+      ]
+    },
+    "sdl": {
+      "description": "Install SDL3 for source builds that select SDL window or audio backends.",
+      "dependencies": [
+        "sdl3"
+      ]
+    }
+  }
+}

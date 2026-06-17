@@ -1,0 +1,111 @@
+name: vcpkg
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/vcpkg.yml"
+      - "CMakeLists.txt"
+      - "VERSION"
+      - "cmake/**"
+      - "include/**"
+      - "ports/**"
+      - "src/**"
+      - "tests/consumer/**"
+      - "vcpkg-configuration.json"
+      - "vcpkg.json"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/vcpkg.yml"
+      - "CMakeLists.txt"
+      - "VERSION"
+      - "cmake/**"
+      - "include/**"
+      - "ports/**"
+      - "src/**"
+      - "tests/consumer/**"
+      - "vcpkg-configuration.json"
+      - "vcpkg.json"
+  workflow_dispatch:
+
+jobs:
+  overlay-headless:
+    name: Overlay Port Headless
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    env:
+      VCPKG_ROOT: ${{ runner.temp }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-linux
+      VCPKG_DISABLE_METRICS: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config
+
+      - name: Bootstrap vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" checkout 5d35de2ee8b13d0bcec328153605638a74fbbf84
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Install Karma overlay port
+        run: |
+          "$VCPKG_ROOT/vcpkg" install karma \
+            --classic \
+            --overlay-ports="${{ github.workspace }}/ports" \
+            --triplet "$VCPKG_DEFAULT_TRIPLET"
+
+      - name: Smoke-test installed package
+        run: |
+          cmake -S tests/consumer/install -B build/vcpkg-consumer -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_PREFIX_PATH="$VCPKG_ROOT/installed/$VCPKG_DEFAULT_TRIPLET" \
+            -DKARMA_CONFIG_FETCH_DEPS=OFF
+          cmake --build build/vcpkg-consumer --parallel
+
+  overlay-graphical:
+    name: Overlay Port Graphical
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      VCPKG_ROOT: ${{ runner.temp }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-linux
+      VCPKG_DISABLE_METRICS: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config xorg-dev libglu1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+      - name: Bootstrap vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" checkout 5d35de2ee8b13d0bcec328153605638a74fbbf84
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Install Karma graphical overlay port
+        run: |
+          "$VCPKG_ROOT/vcpkg" install "karma[graphical,network,physics-jolt,navigation]" \
+            --classic \
+            --overlay-ports="${{ github.workspace }}/ports" \
+            --triplet "$VCPKG_DEFAULT_TRIPLET"
+
+      - name: Smoke-test installed graphical package
+        run: |
+          cmake -S tests/consumer/install-graphical -B build/vcpkg-graphical-consumer -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_PREFIX_PATH="$VCPKG_ROOT/installed/$VCPKG_DEFAULT_TRIPLET" \
+            -DKARMA_CONFIG_FETCH_DEPS=OFF
+          cmake --build build/vcpkg-graphical-consumer --parallel

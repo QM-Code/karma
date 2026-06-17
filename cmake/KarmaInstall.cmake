@@ -25,6 +25,10 @@ if (EXISTS "${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shade
   )
 endif()
 
+install(FILES ${PROJECT_SOURCE_DIR}/LICENSE
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/karma
+)
+
 configure_package_config_file(
   ${PROJECT_SOURCE_DIR}/cmake/karmaConfig.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/karmaConfig.cmake

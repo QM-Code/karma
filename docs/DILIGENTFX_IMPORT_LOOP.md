@@ -22,7 +22,7 @@ Current checkout:
 
 ## Operating Rules
 
-- Read `AGENTS.md`, `src/AGENTS.md`, `include/karma/AGENTS.md`, and
+- Read `docs/AGENTS.md`, `src/AGENTS.md`, `include/karma/AGENTS.md`, and
   `docs/ARCHITECTURE.md` before changing engine code.
 - If a change touches the runtime debug editor, read `docs/DEBUG_EDITOR.md`.
 - Do not add new top-level engine subsystems under `src/` or `include/karma/`.
@@ -146,7 +146,7 @@ Engine headers, components, configs, and examples should use engine concepts.
 Use this prompt in a fresh Codex turn for each DiligentFX loop pass:
 
 ```text
-You are working in the Karma engine repo. Follow all AGENTS.md instructions.
+You are working in the Karma engine repo. Follow all docs/AGENTS.md instructions.
 Read docs/ARCHITECTURE.md before changing engine code. Do not add new top-level
 engine subsystems, forwarding headers, backward compatibility shims, legacy API,
 or DiligentFX-named public API.

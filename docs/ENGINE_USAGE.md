@@ -421,7 +421,7 @@ Local-light / point-shadow sanity check:
 
 For current renderer/sample implementation notes, see:
 
-- [../NEXT_AGENT.md](../NEXT_AGENT.md)
+- [NEXT_AGENT.md](NEXT_AGENT.md)
 - [VOLUMETRIC_SPHERE_TRANSPARENCY.md](VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 - [BEAM_PATHS.md](BEAM_PATHS.md)
 - [EFFECT_PREFABS.md](EFFECT_PREFABS.md)
@@ -999,7 +999,7 @@ Reference sample:
   sample. It uses a shadow-casting directional sun with intensity `1.6`, plus
   local point lights and a radar render-target camera.
 - [../examples/light_stress_example.cpp](../examples/light_stress_example.cpp) provides the current local-light probe workflow for `1-16` safe-mode shadowed point lights.
-- [../NEXT_AGENT.md](../NEXT_AGENT.md) carries active renderer/local-light handoff notes.
+- [NEXT_AGENT.md](NEXT_AGENT.md) carries active renderer/local-light handoff notes.
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.

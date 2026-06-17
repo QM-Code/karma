@@ -1,6 +1,10 @@
 #include "karma/platform/network/enet_transport.h"
 
+#if __has_include(<enet/enet.h>)
+#include <enet/enet.h>
+#else
 #include <enet.h>
+#endif
 #include <spdlog/spdlog.h>
 
 #include <array>
@@ -226,6 +230,7 @@ class EnetClientTransport final : public IClientTransport {
           remote_endpoint_.reset();
           break;
         }
+#ifdef ENET_EVENT_TYPE_DISCONNECT_TIMEOUT
         case ENET_EVENT_TYPE_DISCONNECT_TIMEOUT: {
           TransportEvent e;
           e.type = TransportEvent::Type::Disconnect;
@@ -237,6 +242,7 @@ class EnetClientTransport final : public IClientTransport {
           remote_endpoint_.reset();
           break;
         }
+#endif
         default:
           break;
       }
@@ -360,6 +366,7 @@ class EnetServerTransport final : public IServerTransport {
           event.peer->data = nullptr;
           break;
         }
+#ifdef ENET_EVENT_TYPE_DISCONNECT_TIMEOUT
         case ENET_EVENT_TYPE_DISCONNECT_TIMEOUT: {
           const PeerId peer_id = peerIdFromData(event.peer->data);
           TransportEvent e;
@@ -372,6 +379,7 @@ class EnetServerTransport final : public IServerTransport {
           event.peer->data = nullptr;
           break;
         }
+#endif
         default:
           break;
       }

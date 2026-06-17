@@ -197,6 +197,7 @@ if (KARMA_RENDER_BACKEND_DILIGENT)
     set(DILIGENT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
     set(DILIGENT_BUILD_FX OFF CACHE BOOL "" FORCE)
     set(DILIGENT_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(DILIGENT_NO_FORMAT_VALIDATION ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
       diligentcore
       GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentCore.git

@@ -23,6 +23,7 @@
 
 namespace karma::renderer {
 class GraphicsDevice;
+class MaterialLibrary;
 }
 
 namespace karma::terrain {
@@ -42,9 +43,14 @@ TileCoord terrainTileCoordForWorldPosition(
     const glm::vec3& terrain_origin,
     const components::TerrainComponent& terrain);
 renderer::TerrainDesc terrainDescFromComponent(const components::TerrainComponent& terrain);
-std::string formatTerrainTilePattern(std::string pattern, TileCoord coord);
+std::string formatTerrainTilePattern(std::string pattern,
+                                     TileCoord coord,
+                                     int32_t index_base = 0);
 std::vector<float> convertHeightImageToNormalizedHeights(
     const content::Rgba8Image& image,
+    uint32_t output_resolution);
+std::vector<float> convertScalarImageToNormalizedHeights(
+    const content::ScalarImage& image,
     uint32_t output_resolution);
 renderer::TerrainTileData generateProceduralTerrainTile(
     const components::TerrainComponent& terrain,
@@ -54,16 +60,25 @@ std::optional<renderer::TerrainTileData> loadSingleImageTerrainTile(
 std::optional<renderer::TerrainTileData> loadImageTerrainTile(
     const components::TerrainComponent& terrain,
     TileCoord coord);
+std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
+    const components::TerrainMaterialLayer& layer,
+    uint32_t layer_index);
+std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
+    const components::TerrainMaterialLayer& layer,
+    uint32_t layer_index,
+    const renderer::MaterialLibrary* materials);
 
 /// Streams terrain chunks around the primary camera and submits loaded tiles.
 class TerrainSystem {
  public:
-  explicit TerrainSystem(renderer::GraphicsDevice* device);
+  explicit TerrainSystem(renderer::GraphicsDevice* device,
+                         const renderer::MaterialLibrary* materials = nullptr);
   ~TerrainSystem();
 
   TerrainSystem(const TerrainSystem&) = delete;
   TerrainSystem& operator=(const TerrainSystem&) = delete;
 
+  void syncTerrainColliders(ecs::World& world);
   void update(ecs::World& world, float dt, float interpolation_alpha);
 
  private:
@@ -86,9 +101,22 @@ class TerrainSystem {
     std::filesystem::path tile_directory;
     std::string height_pattern;
     std::string color_pattern;
+    std::string control_pattern;
     std::filesystem::path height_image;
     std::filesystem::path heatmap_image;
     std::filesystem::path color_image;
+    std::filesystem::path control_image;
+    components::TerrainHeightFormat height_format = components::TerrainHeightFormat::Auto;
+    uint32_t raw_width = 0u;
+    uint32_t raw_height = 0u;
+    bool raw_little_endian = true;
+    bool flip_y = false;
+    float height_value_min = 0.0f;
+    float height_value_max = 1.0f;
+    int32_t tile_index_base = 0;
+    uint64_t material_library_version = 0u;
+    std::vector<components::TerrainMaterialLayer> material_layers;
+    std::vector<components::TerrainDataMapBinding> data_maps;
 
     friend bool operator==(const TerrainSourceSettings& lhs,
                            const TerrainSourceSettings& rhs) = default;
@@ -127,7 +155,9 @@ class TerrainSystem {
   void stopWorker();
 
   renderer::GraphicsDevice* device_ = nullptr;
+  const renderer::MaterialLibrary* materials_ = nullptr;
   std::unordered_map<uint64_t, TerrainState> states_;
+  std::unordered_map<uint64_t, std::size_t> generated_collider_signatures_;
   std::mutex queue_mutex_;
   std::mutex completed_mutex_;
   std::condition_variable queue_cv_;

@@ -11,68 +11,114 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kTerrainSize = 2400.0f;
+constexpr float kTerrainHeightScale = 420.0f * 0.25f;
+constexpr float kTerrainHeightOffset = -80.0f * 0.25f;
+constexpr math::Vec3 kPlayerStart{0.0f, 120.0f, 0.0f};
+constexpr math::Vec3 kPlayerEyeOffset{0.0f, 1.78f, 0.0f};
+constexpr float kPlayerHalfWidth = 0.42f;
+constexpr float kPlayerHalfHeight = 1.0f;
+constexpr float kWalkSpeed = 28.0f;
+constexpr float kSprintSpeed = 95.0f;
+constexpr float kJumpSpeed = 15.0f;
+constexpr float kLookSensitivity = 0.00105f;
+constexpr const char* kTerrainGroundMaterial = "terrain/example_ground";
 
 }  // namespace
 
 class TerrainExample final : public app::GameInterface {
  public:
   void onStart() override {
-    input->bindKey("cam_forward", platform::Key::W);
-    input->bindKey("cam_backward", platform::Key::S);
-    input->bindKey("cam_left", platform::Key::A);
-    input->bindKey("cam_right", platform::Key::D);
-    input->bindKey("cam_up", platform::Key::E);
-    input->bindKey("cam_down", platform::Key::Q);
-    input->bindMouse("cam_look", platform::MouseButton::Right);
+    input->bindKey("player_forward", platform::Key::W);
+    input->bindKey("player_forward", platform::Key::Up);
+    input->bindKey("player_backward", platform::Key::S);
+    input->bindKey("player_backward", platform::Key::Down);
+    input->bindKey("player_left", platform::Key::A);
+    input->bindKey("player_left", platform::Key::Left);
+    input->bindKey("player_right", platform::Key::D);
+    input->bindKey("player_right", platform::Key::Right);
+    input->bindKey("player_jump", platform::Key::Space);
+    input->bindKey("player_sprint", platform::Key::LeftShift);
+    input->bindKey("player_reset", platform::Key::R);
 
+    yaw_ = 0.72f;
+    pitch_ = -0.22f;
+
+    registerTerrainMaterials();
     spawnTerrain();
     spawnLighting();
+    spawnPlayer();
     spawnPrimaryCamera();
     spawnOffscreenCamera();
   }
 
-  void onFixedUpdate(float) override {}
-
-  void onUpdate(float dt) override {
-    if (!world->isAlive(camera_entity_)) {
+  void onFixedUpdate(float) override {
+    if (!world->isAlive(player_entity_)) {
       return;
     }
 
-    if (input->actionDown("cam_look")) {
-      target_yaw_ -= input->mouseDeltaX() * 0.0008f;
-      target_pitch_ -= input->mouseDeltaY() * 0.0008f;
-    }
-    target_pitch_ = std::clamp(target_pitch_, -1.45f, 1.1f);
-
-    const float alpha = 1.0f - std::exp(-18.0f * dt);
-    yaw_ += (target_yaw_ - yaw_) * alpha;
-    pitch_ += (target_pitch_ - pitch_) * alpha;
-
-    auto& camera_transform = world->get<components::TransformComponent>(camera_entity_);
-    const math::Quat camera_rotation = math::fromYawPitch(yaw_, pitch_);
-    const math::Vec3 forward =
-        math::normalize(math::rotateVec(camera_rotation, {0.0f, 0.0f, -1.0f}));
-    const math::Vec3 up{0.0f, 1.0f, 0.0f};
-    const math::Vec3 right = math::normalize(math::cross(forward, up));
+    auto& player_input = world->get<components::CharacterControllerComponent>(player_entity_);
 
     float forward_input = 0.0f;
     float right_input = 0.0f;
-    float up_input = 0.0f;
-    if (input->actionDown("cam_forward")) forward_input += 1.0f;
-    if (input->actionDown("cam_backward")) forward_input -= 1.0f;
-    if (input->actionDown("cam_right")) right_input += 1.0f;
-    if (input->actionDown("cam_left")) right_input -= 1.0f;
-    if (input->actionDown("cam_up")) up_input += 1.0f;
-    if (input->actionDown("cam_down")) up_input -= 1.0f;
+    if (input->actionDown("player_forward")) forward_input += 1.0f;
+    if (input->actionDown("player_backward")) forward_input -= 1.0f;
+    if (input->actionDown("player_right")) right_input += 1.0f;
+    if (input->actionDown("player_left")) right_input -= 1.0f;
 
-    math::Vec3 position = camera_transform.getPosition();
-    const float speed = input->actionDown("cam_look") ? 850.0f : 430.0f;
-    position.x += (forward.x * forward_input + right.x * right_input) * speed * dt;
-    position.y += (forward.y * forward_input + up.y * up_input) * speed * dt;
-    position.z += (forward.z * forward_input + right.z * right_input) * speed * dt;
-    position.y = std::max(position.y, 45.0f);
+    const math::Quat yaw_rotation = math::fromYawPitch(yaw_, 0.0f);
+    const math::Vec3 forward =
+        math::normalize(math::rotateVec(yaw_rotation, {0.0f, 0.0f, -1.0f}));
+    const math::Vec3 right = math::normalize(math::cross(forward, {0.0f, 1.0f, 0.0f}));
 
-    camera_transform.setPosition(position);
+    math::Vec3 move{
+        forward.x * forward_input + right.x * right_input,
+        0.0f,
+        forward.z * forward_input + right.z * right_input,
+    };
+    if (math::lengthSquared(move) > 0.0001f) {
+      move = math::normalize(move);
+    }
+
+    float vertical_velocity = player_input.velocity.y;
+    const bool grounded = player_input.grounded;
+    auto& player_transform = world->get<components::TransformComponent>(player_entity_);
+    player_transform.setRotation(math::fromYawPitch(yaw_, 0.0f));
+
+    const bool jump_down = input->actionDown("player_jump");
+    if (jump_down && !jump_down_prev_ && grounded) {
+      vertical_velocity = kJumpSpeed;
+    }
+    jump_down_prev_ = jump_down;
+
+    const float speed = input->actionDown("player_sprint") ? kSprintSpeed : kWalkSpeed;
+    player_input.setDesiredVelocity({
+        move.x * speed,
+        vertical_velocity,
+        move.z * speed,
+    });
+
+    const bool reset_down = input->actionDown("player_reset");
+    if (reset_down && !reset_down_prev_) {
+      resetPlayer();
+    }
+    reset_down_prev_ = reset_down;
+  }
+
+  void onUpdate(float dt) override {
+    if (!world->isAlive(camera_entity_) || !world->isAlive(player_entity_)) {
+      return;
+    }
+
+    (void)dt;
+    yaw_ -= input->mouseDeltaX() * kLookSensitivity;
+    pitch_ = std::clamp(pitch_ - input->mouseDeltaY() * kLookSensitivity, -1.45f, 1.25f);
+
+    auto& camera_transform = world->get<components::TransformComponent>(camera_entity_);
+    const math::Quat camera_rotation = math::fromYawPitch(yaw_, pitch_);
+    const auto& player_transform = world->get<components::TransformComponent>(player_entity_);
+    const math::Vec3 player_position =
+        player_transform.getInterpolatedPosition(renderInterpolationAlpha());
+    camera_transform.setPosition(math::add(player_position, kPlayerEyeOffset));
     camera_transform.setRotation(camera_rotation);
   }
 
@@ -84,28 +130,67 @@ class TerrainExample final : public app::GameInterface {
   }
 
  private:
+  void registerTerrainMaterials() {
+    if (!materials) {
+      return;
+    }
+
+    renderer::MaterialDesc ground{};
+    ground.base_color = math::Color{0.32f, 0.45f, 0.28f, 1.0f};
+    ground.roughness = 0.92f;
+    ground.metallic = 0.0f;
+    materials->registerMaterialDesc(kTerrainGroundMaterial, ground);
+  }
+
   void spawnTerrain() {
     const ecs::Entity terrain = world->createEntity();
     world->setName(terrain, "Heightmap Terrain");
     components::TransformComponent terrain_transform{};
     terrain_transform.setPosition({-kTerrainSize * 0.5f, 0.0f, -kTerrainSize * 0.5f});
     world->add(terrain, terrain_transform);
+    world->add(terrain, components::ColliderComponent{});
     world->add(terrain, components::TerrainComponent{
                             .source = components::TerrainSourceType::SingleImage,
                             .heatmap_image = resolveExampleAssetPath("Heightmap.png"),
+                            .height_format = components::TerrainHeightFormat::ImageFile,
+                            .material_layers =
+                                {
+                                    components::TerrainMaterialLayer{
+                                        .name = "ground",
+                                        .material_key = kTerrainGroundMaterial,
+                                        .uv_scale = 32.0f,
+                                    },
+                                },
                             .terrain_size = kTerrainSize,
                             .tile_resolution = 257u,
                             .origin_tile_x = 0,
                             .origin_tile_z = 0,
-                            .height_scale = 420.0f,
-                            .height_offset = -80.0f,
+                            .height_scale = kTerrainHeightScale,
+                            .height_offset = kTerrainHeightOffset,
                             .base_patch_size = 16u,
                             .tessellation_factor = 32.0f,
-                            .target_tessellated_edge_size = 18.0f,
+                            .target_tessellated_edge_size = 10.0f,
                             .layer = 0u,
                             .visible = true,
                             .cpu_fallback_enabled = true,
                         });
+  }
+
+  void spawnPlayer() {
+    player_entity_ = world->createEntity();
+    world->setName(player_entity_, "Terrain Player");
+
+    components::TransformComponent player_transform{};
+    player_transform.setPosition(kPlayerStart);
+    player_transform.setRotation(math::fromYawPitch(yaw_, 0.0f));
+    world->add(player_entity_, player_transform);
+    world->add(player_entity_,
+               components::ColliderComponent::box(components::BoxColliderShape{
+                   .center = {0.0f, kPlayerHalfHeight, 0.0f},
+                   .half_extents = {kPlayerHalfWidth, kPlayerHalfHeight, kPlayerHalfWidth},
+               }));
+    world->add(player_entity_, components::CharacterControllerComponent{});
+    world->add(player_entity_, components::GroundContactComponent{});
   }
 
   void spawnLighting() {
@@ -132,19 +217,14 @@ class TerrainExample final : public app::GameInterface {
 
   void spawnPrimaryCamera() {
     camera_entity_ = world->createEntity();
-    world->setName(camera_entity_, "Primary Flyover Camera");
-
-    yaw_ = 0.72f;
-    pitch_ = -0.22f;
-    target_yaw_ = yaw_;
-    target_pitch_ = pitch_;
+    world->setName(camera_entity_, "Player Camera");
 
     components::TransformComponent camera_transform{};
-    camera_transform.setPosition({-760.0f, 360.0f, 920.0f});
+    camera_transform.setPosition(math::add(kPlayerStart, kPlayerEyeOffset));
     camera_transform.setRotation(math::fromYawPitch(yaw_, pitch_));
     world->add(camera_entity_, camera_transform);
     world->add(camera_entity_, components::CameraComponent{
-                                  .near_clip = 2.0f,
+                                  .near_clip = 0.08f,
                                   .far_clip = 12000.0f,
                                   .is_primary = true,
                               });
@@ -182,12 +262,33 @@ class TerrainExample final : public app::GameInterface {
                        });
   }
 
+  void resetPlayer() {
+    if (!world->isAlive(player_entity_)) {
+      return;
+    }
+
+    auto& player_input = world->get<components::CharacterControllerComponent>(player_entity_);
+    player_input.setDesiredVelocity({});
+    player_input.setAddVelocity({});
+    player_input.setDesiredAngularVelocity({});
+
+    const math::Quat player_rotation = math::fromYawPitch(yaw_, 0.0f);
+    auto& player_transform = world->get<components::TransformComponent>(player_entity_);
+    player_transform.setPosition(kPlayerStart);
+    player_transform.setRotation(player_rotation);
+
+    player_input.velocity = {};
+    player_input.angular_velocity = {};
+    player_input.grounded = false;
+  }
+
+  ecs::Entity player_entity_{};
   ecs::Entity camera_entity_{};
   renderer::RenderTargetId offscreen_target_ = renderer::kDefaultRenderTarget;
   float yaw_ = 0.0f;
   float pitch_ = 0.0f;
-  float target_yaw_ = 0.0f;
-  float target_pitch_ = 0.0f;
+  bool jump_down_prev_ = false;
+  bool reset_down_prev_ = false;
 };
 
 }  // namespace karma::demo
@@ -200,7 +301,7 @@ int main() {
   karma::app::EngineConfig config;
   config.window.title = "Karma Terrain Example";
   config.window.samples = 1;
-  config.cursor_visible = true;
+  config.cursor_visible = false;
   config.enable_anisotropy = true;
   config.anisotropy_level = 16;
   config.generate_mipmaps = true;

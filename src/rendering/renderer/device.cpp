@@ -203,6 +203,21 @@ void GraphicsDevice::uploadTerrainTile(TerrainId terrain, const TerrainTileData&
   }
 }
 
+void GraphicsDevice::uploadTerrainMaterialLayer(TerrainId terrain,
+                                                const TerrainMaterialLayerData& layer) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->uploadTerrainMaterialLayer(terrain, layer);
+  }
+}
+
+void GraphicsDevice::clearTerrainMaterialLayers(TerrainId terrain) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->clearTerrainMaterialLayers(terrain);
+  }
+}
+
 void GraphicsDevice::evictTerrainTile(TerrainId terrain, TerrainTileCoord coord) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {

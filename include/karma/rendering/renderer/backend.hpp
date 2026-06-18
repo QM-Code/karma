@@ -78,6 +78,15 @@ class Backend {
     (void)terrain;
     (void)tile;
   }
+  virtual void uploadTerrainMaterialLayer(
+      renderer::TerrainId terrain,
+      const renderer::TerrainMaterialLayerData& layer) {
+    (void)terrain;
+    (void)layer;
+  }
+  virtual void clearTerrainMaterialLayers(renderer::TerrainId terrain) {
+    (void)terrain;
+  }
   virtual void evictTerrainTile(renderer::TerrainId terrain,
                                 renderer::TerrainTileCoord coord) {
     (void)terrain;

@@ -988,6 +988,7 @@ Current semantics:
 - registered material asset: shared by every entity that binds the key
 - registered material instance: inherits its parent asset and overrides only specified params or textures
 - unknown key: log once and fall back to the mesh slot's default material
+- terrain material layers can also bind the same material keys through `TerrainMaterialLayer::material_key`; terrain resolves the key before upload and uses explicit terrain image fields only as a fallback
 - `.mat` texture entries for known semantics such as `base_color`, `normal`, `metallic_roughness`, `occlusion`, and `emissive` bind to the matching renderer texture slots
 - custom pipelines can name vertex and fragment HLSL paths, entry points, and defines; v1 custom materials still use the engine vertex layout and draw constants contract
 - custom shaders can receive packed vector params through `.mat` params named `material_params0` through `material_params6`

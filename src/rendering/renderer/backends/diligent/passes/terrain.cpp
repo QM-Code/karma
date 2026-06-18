@@ -14,6 +14,7 @@
 #include <Graphics/GraphicsTools/interface/MapHelper.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -35,11 +36,17 @@ struct alignas(16) TerrainConstants {
   float camera_pos[4];
   float tile_info[4];
   float render_params[4];
+  float material_scales[4];
 };
 
 struct TerrainVertex {
   float position[3] = {0.0f, 0.0f, 0.0f};
   float uv[2] = {0.0f, 0.0f};
+};
+
+struct FrustumPlane {
+  glm::vec3 normal{0.0f};
+  float distance = 0.0f;
 };
 
 template <typename T, bool KeepStrongReferences = false>
@@ -79,6 +86,7 @@ cbuffer TerrainConstants
     float4 g_CameraPos;
     float4 g_TileInfo;
     float4 g_RenderParams;
+    float4 g_MaterialScales;
 };
 
 struct HSInput
@@ -153,6 +161,7 @@ cbuffer TerrainConstants
     float4 g_CameraPos;
     float4 g_TileInfo;
     float4 g_RenderParams;
+    float4 g_MaterialScales;
 };
 
 Texture2D<float> g_HeightTexture;
@@ -205,6 +214,7 @@ cbuffer TerrainConstants
     float4 g_CameraPos;
     float4 g_TileInfo;
     float4 g_RenderParams;
+    float4 g_MaterialScales;
 };
 
 struct VSInput
@@ -241,10 +251,25 @@ cbuffer TerrainConstants
     float4 g_CameraPos;
     float4 g_TileInfo;
     float4 g_RenderParams;
+    float4 g_MaterialScales;
 };
 
 Texture2D<float4> g_ColorTexture;
+Texture2D<float4> g_ControlTexture;
+Texture2D<float4> g_MaterialAlbedo0;
+Texture2D<float4> g_MaterialAlbedo1;
+Texture2D<float4> g_MaterialAlbedo2;
+Texture2D<float4> g_MaterialAlbedo3;
+Texture2D<float4> g_MaterialNormal0;
+Texture2D<float4> g_MaterialNormal1;
+Texture2D<float4> g_MaterialNormal2;
+Texture2D<float4> g_MaterialNormal3;
+Texture2D<float4> g_MaterialRoughness0;
+Texture2D<float4> g_MaterialRoughness1;
+Texture2D<float4> g_MaterialRoughness2;
+Texture2D<float4> g_MaterialRoughness3;
 SamplerState g_ColorSampler;
+SamplerState g_MaterialSampler;
 
 struct PSInput
 {
@@ -255,9 +280,69 @@ struct PSInput
 
 float4 main(PSInput input) : SV_TARGET
 {
-    float4 albedo = g_ColorTexture.Sample(g_ColorSampler, input.UV);
-    float light = saturate(dot(normalize(float3(0.0, 1.0, 0.0)), normalize(-g_LightDir.xyz)));
-    float3 color = albedo.rgb * (0.30 + light * g_LightColor.rgb * 0.70);
+    float4 macro = g_ColorTexture.Sample(g_ColorSampler, input.UV);
+    float4 albedo = macro;
+    float roughness = 1.0;
+    float3 normal = normalize(cross(ddy(input.WorldPos), ddx(input.WorldPos)));
+    if (normal.y < 0.0)
+    {
+        normal = -normal;
+    }
+
+    float layer_count = floor(g_RenderParams.w + 0.5);
+    if (layer_count > 0.5)
+    {
+        float4 weights = g_ControlTexture.Sample(g_ColorSampler, input.UV);
+        if (layer_count < 3.5) weights.a = 0.0;
+        if (layer_count < 2.5) weights.b = 0.0;
+        if (layer_count < 1.5) weights.g = 0.0;
+        float weight_sum = max(weights.r + weights.g + weights.b + weights.a, 0.0001);
+        weights /= weight_sum;
+
+        float2 detail_uv = (input.WorldPos.xz / max(g_TileInfo.x, 0.001));
+        float2 uv0 = detail_uv * max(g_MaterialScales.x, 0.001);
+        float2 uv1 = detail_uv * max(g_MaterialScales.y, 0.001);
+        float2 uv2 = detail_uv * max(g_MaterialScales.z, 0.001);
+        float2 uv3 = detail_uv * max(g_MaterialScales.w, 0.001);
+
+        float4 a0 = g_MaterialAlbedo0.Sample(g_MaterialSampler, uv0);
+        float4 a1 = g_MaterialAlbedo1.Sample(g_MaterialSampler, uv1);
+        float4 a2 = g_MaterialAlbedo2.Sample(g_MaterialSampler, uv2);
+        float4 a3 = g_MaterialAlbedo3.Sample(g_MaterialSampler, uv3);
+        albedo = a0 * weights.r + a1 * weights.g + a2 * weights.b + a3 * weights.a;
+        albedo.rgb *= macro.rgb;
+        albedo.a *= macro.a;
+
+        float3 n0 = g_MaterialNormal0.Sample(g_MaterialSampler, uv0).xyz * 2.0 - 1.0;
+        float3 n1 = g_MaterialNormal1.Sample(g_MaterialSampler, uv1).xyz * 2.0 - 1.0;
+        float3 n2 = g_MaterialNormal2.Sample(g_MaterialSampler, uv2).xyz * 2.0 - 1.0;
+        float3 n3 = g_MaterialNormal3.Sample(g_MaterialSampler, uv3).xyz * 2.0 - 1.0;
+        float3 blended_tangent_normal =
+            normalize(n0 * weights.r + n1 * weights.g + n2 * weights.b + n3 * weights.a);
+        normal = normalize(float3(blended_tangent_normal.x,
+                                  blended_tangent_normal.z,
+                                  blended_tangent_normal.y));
+        if (normal.y < 0.0)
+        {
+            normal = -normal;
+        }
+
+        float r0 = g_MaterialRoughness0.Sample(g_MaterialSampler, uv0).r;
+        float r1 = g_MaterialRoughness1.Sample(g_MaterialSampler, uv1).r;
+        float r2 = g_MaterialRoughness2.Sample(g_MaterialSampler, uv2).r;
+        float r3 = g_MaterialRoughness3.Sample(g_MaterialSampler, uv3).r;
+        roughness = saturate(r0 * weights.r + r1 * weights.g + r2 * weights.b + r3 * weights.a);
+    }
+
+    float3 light_dir = normalize(-g_LightDir.xyz);
+    float light = saturate(dot(normal, light_dir));
+    float3 view_dir = normalize(g_CameraPos.xyz - input.WorldPos);
+    float3 half_dir = normalize(light_dir + view_dir);
+    float spec_power = lerp(96.0, 8.0, roughness);
+    float specular = pow(saturate(dot(normal, half_dir)), spec_power) *
+                     (1.0 - roughness) * 0.18;
+    float3 color = albedo.rgb * (0.30 + light * g_LightColor.rgb * 0.70) +
+                   specular * g_LightColor.rgb;
     return float4(color, albedo.a);
 }
 )";
@@ -268,30 +353,54 @@ bool terrainTessellationEnabled(Diligent::IRenderDevice* device) {
              Diligent::DEVICE_FEATURE_STATE_ENABLED;
 }
 
-bool sphereIntersectsClipVolume(const glm::mat4& clip_from_world,
-                                const glm::vec4& sphere,
-                                bool is_gl_ndc) {
+glm::vec4 matrixRow(const glm::mat4& matrix, int row) {
+  return {
+      matrix[0][row],
+      matrix[1][row],
+      matrix[2][row],
+      matrix[3][row],
+  };
+}
+
+FrustumPlane normalizePlane(const glm::vec4& plane) {
+  const glm::vec3 normal{plane.x, plane.y, plane.z};
+  const float len = glm::length(normal);
+  if (len <= 1.0e-6f) {
+    return {};
+  }
+  return {.normal = normal / len, .distance = plane.w / len};
+}
+
+std::array<FrustumPlane, 6> extractFrustumPlanes(const glm::mat4& clip_from_world,
+                                                 bool is_gl_ndc) {
+  const glm::vec4 row0 = matrixRow(clip_from_world, 0);
+  const glm::vec4 row1 = matrixRow(clip_from_world, 1);
+  const glm::vec4 row2 = matrixRow(clip_from_world, 2);
+  const glm::vec4 row3 = matrixRow(clip_from_world, 3);
+  return {
+      normalizePlane(row3 + row0),
+      normalizePlane(row3 - row0),
+      normalizePlane(row3 + row1),
+      normalizePlane(row3 - row1),
+      normalizePlane(is_gl_ndc ? row3 + row2 : row2),
+      normalizePlane(row3 - row2),
+  };
+}
+
+bool sphereIntersectsFrustum(const std::array<FrustumPlane, 6>& planes,
+                             const glm::vec4& sphere,
+                             float guard_band) {
   if (sphere.w <= 0.0f) {
     return true;
   }
-  const glm::vec4 clip = clip_from_world * glm::vec4(sphere.x, sphere.y, sphere.z, 1.0f);
-  if (std::abs(clip.w) <= 1e-5f) {
-    return true;
+  const glm::vec3 center{sphere.x, sphere.y, sphere.z};
+  const float radius = sphere.w + std::max(guard_band, 0.0f);
+  for (const FrustumPlane& plane : planes) {
+    if (glm::dot(plane.normal, center) + plane.distance < -radius) {
+      return false;
+    }
   }
-  const float sx = glm::length(glm::vec3(clip_from_world[0]));
-  const float sy = glm::length(glm::vec3(clip_from_world[1]));
-  const float sz = glm::length(glm::vec3(clip_from_world[2]));
-  const float r = sphere.w * std::max(sx, std::max(sy, sz));
-  if (clip.x < -clip.w - r || clip.x > clip.w + r) {
-    return false;
-  }
-  if (clip.y < -clip.w - r || clip.y > clip.w + r) {
-    return false;
-  }
-  if (is_gl_ndc) {
-    return clip.z >= -clip.w - r && clip.z <= clip.w + r;
-  }
-  return clip.z >= -r && clip.z <= clip.w + r;
+  return true;
 }
 
 float maxTransformScale(const glm::mat4& transform) {
@@ -501,6 +610,17 @@ void DiligentBackend::uploadTerrainTile(renderer::TerrainId terrain,
           record.color_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
     }
 
+    if (!tile.control_rgba8.empty() && tile.control_width > 0u && tile.control_height > 0u) {
+      record.control_srv =
+          createTextureSRV(tile.control_rgba8.data(),
+                           static_cast<int>(tile.control_width),
+                           static_cast<int>(tile.control_height),
+                           false,
+                           false,
+                           "Karma Terrain Control Tile",
+                           record.control_texture);
+    }
+
     const auto patch_vertices = buildPatchVertices(terrain_it->second.desc, tile.resolution);
     record.patch_vertex_count = static_cast<Diligent::Uint32>(std::min<std::size_t>(
         patch_vertices.size(), std::numeric_limits<Diligent::Uint32>::max()));
@@ -543,6 +663,75 @@ void DiligentBackend::uploadTerrainTile(renderer::TerrainId terrain,
 
   terrain_it->second.tiles[tile.coord] = std::move(record);
   terrain_stats_.upload_count += 1u;
+}
+
+void DiligentBackend::uploadTerrainMaterialLayer(
+    renderer::TerrainId terrain,
+    const renderer::TerrainMaterialLayerData& layer) {
+  auto terrain_it = terrains_.find(terrain);
+  if (terrain_it == terrains_.end() || !layer.valid()) {
+    return;
+  }
+  TerrainRecord& terrain_record = terrain_it->second;
+  TerrainMaterialLayerRecord record{};
+  record.name = layer.name;
+  record.uv_scale = std::max(layer.uv_scale, 0.001f);
+  record.enabled = true;
+
+  if (device_) {
+    record.albedo_srv =
+        createTextureSRV(layer.albedo.rgba8.data(),
+                         static_cast<int>(layer.albedo.width),
+                         static_cast<int>(layer.albedo.height),
+                         true,
+                         true,
+                         "Karma Terrain Material Albedo",
+                         record.albedo_texture);
+    if (layer.normal.valid()) {
+      record.normal_srv =
+          createTextureSRV(layer.normal.rgba8.data(),
+                           static_cast<int>(layer.normal.width),
+                           static_cast<int>(layer.normal.height),
+                           false,
+                           true,
+                           "Karma Terrain Material Normal",
+                           record.normal_texture);
+    }
+    if (layer.roughness.valid()) {
+      record.roughness_srv =
+          createTextureSRV(layer.roughness.rgba8.data(),
+                           static_cast<int>(layer.roughness.width),
+                           static_cast<int>(layer.roughness.height),
+                           false,
+                           true,
+                           "Karma Terrain Material Roughness",
+                           record.roughness_texture);
+    }
+  }
+
+  terrain_record.material_layers[layer.layer] = std::move(record);
+  terrain_record.material_layer_count =
+      std::max(terrain_record.material_layer_count, layer.layer + 1u);
+  for (auto& [coord, tile] : terrain_record.tiles) {
+    (void)coord;
+    tile.tess_srbs.clear();
+    tile.cpu_srbs.clear();
+  }
+}
+
+void DiligentBackend::clearTerrainMaterialLayers(renderer::TerrainId terrain) {
+  auto terrain_it = terrains_.find(terrain);
+  if (terrain_it == terrains_.end()) {
+    return;
+  }
+  TerrainRecord& terrain_record = terrain_it->second;
+  terrain_record.material_layers = {};
+  terrain_record.material_layer_count = 0u;
+  for (auto& [coord, tile] : terrain_record.tiles) {
+    (void)coord;
+    tile.tess_srbs.clear();
+    tile.cpu_srbs.clear();
+  }
 }
 
 void DiligentBackend::evictTerrainTile(renderer::TerrainId terrain,
@@ -628,6 +817,25 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
     sampler.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
     device_->CreateSampler(sampler, &terrain_height_sampler_);
   }
+  if (!terrain_material_sampler_) {
+    Diligent::SamplerDesc sampler{};
+    sampler.MinFilter = Diligent::FILTER_TYPE_LINEAR;
+    sampler.MagFilter = Diligent::FILTER_TYPE_LINEAR;
+    sampler.MipFilter = Diligent::FILTER_TYPE_LINEAR;
+    sampler.AddressU = Diligent::TEXTURE_ADDRESS_WRAP;
+    sampler.AddressV = Diligent::TEXTURE_ADDRESS_WRAP;
+    sampler.AddressW = Diligent::TEXTURE_ADDRESS_WRAP;
+    device_->CreateSampler(sampler, &terrain_material_sampler_);
+  }
+  if (!terrain_default_control_) {
+    terrain_default_control_ = createSolidTextureSRV(255,
+                                                     0,
+                                                     0,
+                                                     255,
+                                                     false,
+                                                     "Karma Terrain Default Control",
+                                                     terrain_default_control_tex_);
+  }
 
   const uint64_t pipeline_key = terrainPipelineKey(rtv_format, dsv_format);
   TerrainPipelineSet& pipelines = terrain_pipeline_sets_[pipeline_key];
@@ -697,7 +905,35 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
           {Diligent::SHADER_TYPE_PIXEL, "g_ColorTexture",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ControlTexture",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSampler",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       };
       pso.PSODesc.ResourceLayout.Variables = vars;
@@ -775,7 +1011,35 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_ColorTexture",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ControlTexture",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialAlbedo3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSampler",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       };
       pso.PSODesc.ResourceLayout.Variables = vars;
@@ -795,20 +1059,88 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
     }
   }
 
-  auto initialize_tile_srb = [&](TerrainTileRecord& tile) {
+  auto bind_pixel_resources = [&](Diligent::IShaderResourceBinding* srb,
+                                  TerrainRecord& terrain,
+                                  TerrainTileRecord& tile) {
+    if (!srb) {
+      return;
+    }
+    auto set_texture = [&](const char* name, Diligent::ITextureView* srv) {
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, name)) {
+        var->Set(srv);
+      }
+    };
+    set_texture("g_ColorTexture", tile.color_srv);
+    set_texture("g_ControlTexture",
+                tile.control_srv ? tile.control_srv.RawPtr()
+                                 : terrain_default_control_.RawPtr());
+
+    const auto layer_srv = [&](uint32_t index,
+                               Diligent::RefCntAutoPtr<Diligent::ITextureView>
+                                   TerrainMaterialLayerRecord::*member,
+                               Diligent::ITextureView* fallback) -> Diligent::ITextureView* {
+      if (index >= terrain.material_layers.size()) {
+        return fallback;
+      }
+      const TerrainMaterialLayerRecord& layer = terrain.material_layers[index];
+      Diligent::ITextureView* const value = (layer.*member).RawPtr();
+      return layer.enabled && value != nullptr ? value : fallback;
+    };
+    set_texture("g_MaterialAlbedo0",
+                layer_srv(0u, &TerrainMaterialLayerRecord::albedo_srv,
+                          default_base_color_.RawPtr()));
+    set_texture("g_MaterialAlbedo1",
+                layer_srv(1u, &TerrainMaterialLayerRecord::albedo_srv,
+                          default_base_color_.RawPtr()));
+    set_texture("g_MaterialAlbedo2",
+                layer_srv(2u, &TerrainMaterialLayerRecord::albedo_srv,
+                          default_base_color_.RawPtr()));
+    set_texture("g_MaterialAlbedo3",
+                layer_srv(3u, &TerrainMaterialLayerRecord::albedo_srv,
+                          default_base_color_.RawPtr()));
+    set_texture("g_MaterialNormal0",
+                layer_srv(0u, &TerrainMaterialLayerRecord::normal_srv,
+                          default_normal_.RawPtr()));
+    set_texture("g_MaterialNormal1",
+                layer_srv(1u, &TerrainMaterialLayerRecord::normal_srv,
+                          default_normal_.RawPtr()));
+    set_texture("g_MaterialNormal2",
+                layer_srv(2u, &TerrainMaterialLayerRecord::normal_srv,
+                          default_normal_.RawPtr()));
+    set_texture("g_MaterialNormal3",
+                layer_srv(3u, &TerrainMaterialLayerRecord::normal_srv,
+                          default_normal_.RawPtr()));
+    set_texture("g_MaterialRoughness0",
+                layer_srv(0u, &TerrainMaterialLayerRecord::roughness_srv,
+                          default_base_color_.RawPtr()));
+    set_texture("g_MaterialRoughness1",
+                layer_srv(1u, &TerrainMaterialLayerRecord::roughness_srv,
+                          default_base_color_.RawPtr()));
+    set_texture("g_MaterialRoughness2",
+                layer_srv(2u, &TerrainMaterialLayerRecord::roughness_srv,
+                          default_base_color_.RawPtr()));
+    set_texture("g_MaterialRoughness3",
+                layer_srv(3u, &TerrainMaterialLayerRecord::roughness_srv,
+                          default_base_color_.RawPtr()));
+
+    if (auto* var =
+            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler")) {
+      var->Set(terrain_color_sampler_ ? terrain_color_sampler_.RawPtr()
+                                      : sampler_color_.RawPtr());
+    }
+    if (auto* var =
+            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MaterialSampler")) {
+      var->Set(terrain_material_sampler_ ? terrain_material_sampler_.RawPtr()
+                                         : sampler_color_.RawPtr());
+    }
+  };
+
+  auto initialize_tile_srb = [&](TerrainRecord& terrain, TerrainTileRecord& tile) {
     auto& cpu_srb = tile.cpu_srbs[pipeline_key];
     if (!cpu_srb && pipelines.cpu_pipeline_state) {
       pipelines.cpu_pipeline_state->CreateShaderResourceBinding(&cpu_srb, true);
       if (cpu_srb) {
-        if (auto* var =
-                cpu_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ColorTexture")) {
-          var->Set(tile.color_srv);
-        }
-        if (auto* var =
-                cpu_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler")) {
-          var->Set(terrain_color_sampler_ ? terrain_color_sampler_.RawPtr()
-                                          : sampler_color_.RawPtr());
-        }
+        bind_pixel_resources(cpu_srb.RawPtr(), terrain, tile);
       }
     }
 
@@ -825,15 +1157,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
           var->Set(terrain_height_sampler_ ? terrain_height_sampler_.RawPtr()
                                            : sampler_data_.RawPtr());
         }
-        if (auto* var =
-                tess_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ColorTexture")) {
-          var->Set(tile.color_srv);
-        }
-        if (auto* var =
-                tess_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler")) {
-          var->Set(terrain_color_sampler_ ? terrain_color_sampler_.RawPtr()
-                                          : sampler_color_.RawPtr());
-        }
+        bind_pixel_resources(tess_srb.RawPtr(), terrain, tile);
       }
     }
   };
@@ -842,7 +1166,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
     (void)terrain_id;
     for (auto& [coord, tile] : terrain.tiles) {
       (void)coord;
-      initialize_tile_srb(tile);
+      initialize_tile_srb(terrain, tile);
     }
   }
   return &pipelines;
@@ -892,6 +1216,7 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(renderer::LayerId layer,
                          static_cast<Diligent::Uint32>(render_width),
                          static_cast<Diligent::Uint32>(render_height));
 
+  const auto frustum_planes = extractFrustumPlanes(view_proj, is_gl);
   Diligent::Uint32 draw_count = 0u;
   for (const TerrainSubmission& submission : terrain_submissions_) {
     const auto& item = submission.item;
@@ -926,7 +1251,8 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(renderer::LayerId layer,
                   half_y * half_y);
     const glm::vec3 world_center = glm::vec3(model * glm::vec4(local_center, 1.0f));
     const glm::vec4 sphere(world_center, local_radius * maxTransformScale(model));
-    if (!sphereIntersectsClipVolume(view_proj, sphere, is_gl)) {
+    const float cull_guard_band = sphere.w * 0.12f;
+    if (!sphereIntersectsFrustum(frustum_planes, sphere, cull_guard_band)) {
       terrain_stats_.culled_tiles += 1u;
       continue;
     }
@@ -969,7 +1295,14 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(renderer::LayerId layer,
     constants.render_params[0] = terrain.desc.target_tessellated_edge_size;
     constants.render_params[1] = static_cast<float>(std::max(render_width, 1));
     constants.render_params[2] = static_cast<float>(std::max(render_height, 1));
-    constants.render_params[3] = 0.0f;
+    constants.render_params[3] = static_cast<float>(std::min<uint32_t>(
+        terrain.material_layer_count, static_cast<uint32_t>(terrain.material_layers.size())));
+    for (uint32_t i = 0u; i < terrain.material_layers.size(); ++i) {
+      constants.material_scales[i] =
+          terrain.material_layers[i].enabled
+              ? std::max(terrain.material_layers[i].uv_scale, 0.001f)
+              : 1.0f;
+    }
     {
       Diligent::MapHelper<TerrainConstants> mapped(
           context_, terrain_cb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);

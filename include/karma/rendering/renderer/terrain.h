@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <glm/mat4x4.hpp>
@@ -29,15 +30,58 @@ struct TerrainDesc {
   float height_offset = 0.0f;
   uint32_t base_patch_size = 16u;
   float max_tessellation_factor = 16.0f;
-  float target_tessellated_edge_size = 18.0f;
+  float target_tessellated_edge_size = 12.0f;
   bool cpu_fallback_enabled = true;
+};
+
+/// Decoded RGBA8 terrain texture payload.
+struct TerrainTextureData {
+  uint32_t width = 0u;
+  uint32_t height = 0u;
+  std::vector<uint8_t> rgba8;
+
+  bool valid() const {
+    const std::size_t byte_count =
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
+    return width > 0u && height > 0u && rgba8.size() == byte_count;
+  }
+};
+
+/// Shared repeated material layer uploaded to a terrain resource.
+struct TerrainMaterialLayerData {
+  uint32_t layer = 0u;
+  std::string name;
+  float uv_scale = 16.0f;
+  bool enabled = true;
+  TerrainTextureData albedo;
+  TerrainTextureData normal;
+  TerrainTextureData roughness;
+
+  bool valid() const {
+    return enabled && layer < 4u && uv_scale > 0.0f && albedo.valid();
+  }
+};
+
+/// Optional decoded terrain data map payload carried with a tile.
+struct TerrainDataMapTileData {
+  std::string name;
+  uint32_t width = 0u;
+  uint32_t height = 0u;
+  std::vector<float> values;
+
+  bool valid() const {
+    return width > 0u && height > 0u &&
+           values.size() == static_cast<std::size_t>(width) *
+                                static_cast<std::size_t>(height);
+  }
 };
 
 /// Decoded tile payload uploaded to the renderer backend.
 ///
 /// `heights` are normalized scalar samples. Backends apply `height_scale` and
 /// `height_offset` from `TerrainDesc`. `color_rgba8` is an orthophoto/albedo
-/// tile in top-left row order.
+/// tile in top-left row order. `control_rgba8`, when provided, packs up to four
+/// material-layer weights in RGBA channels.
 struct TerrainTileData {
   TerrainTileCoord coord{};
   uint32_t resolution = 0u;
@@ -45,17 +89,30 @@ struct TerrainTileData {
   uint32_t color_width = 0u;
   uint32_t color_height = 0u;
   std::vector<uint8_t> color_rgba8;
+  uint32_t control_width = 0u;
+  uint32_t control_height = 0u;
+  std::vector<uint8_t> control_rgba8;
+  std::vector<TerrainDataMapTileData> data_maps;
 
   bool valid() const {
     const std::size_t sample_count =
         static_cast<std::size_t>(resolution) * static_cast<std::size_t>(resolution);
     const std::size_t color_count =
         static_cast<std::size_t>(color_width) * static_cast<std::size_t>(color_height) * 4u;
+    const std::size_t control_count =
+        static_cast<std::size_t>(control_width) *
+        static_cast<std::size_t>(control_height) * 4u;
+    const bool control_valid =
+        control_rgba8.empty() ||
+        (control_width > 0u &&
+         control_height > 0u &&
+         control_rgba8.size() == control_count);
     return resolution >= 2u &&
            heights.size() == sample_count &&
            color_width > 0u &&
            color_height > 0u &&
-           color_rgba8.size() == color_count;
+           color_rgba8.size() == color_count &&
+           control_valid;
   }
 };
 

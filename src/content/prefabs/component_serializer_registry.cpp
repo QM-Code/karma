@@ -1009,15 +1009,235 @@ bool readTerrainSource(const Json& object, components::TerrainSourceType& out) {
   return false;
 }
 
+std::string terrainHeightFormatName(components::TerrainHeightFormat format) {
+  switch (format) {
+    case components::TerrainHeightFormat::Auto:
+      return "auto";
+    case components::TerrainHeightFormat::ImageFile:
+      return "image_file";
+    case components::TerrainHeightFormat::Raw16Unsigned:
+      return "raw16_unsigned";
+    case components::TerrainHeightFormat::R32Float:
+      return "r32_float";
+  }
+  return "auto";
+}
+
+bool readTerrainHeightFormat(const Json& object,
+                             std::string_view key,
+                             components::TerrainHeightFormat& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "auto") {
+    out = components::TerrainHeightFormat::Auto;
+    return true;
+  }
+  if (value == "image_file" || value == "image") {
+    out = components::TerrainHeightFormat::ImageFile;
+    return true;
+  }
+  if (value == "raw16_unsigned" || value == "raw16" || value == "raw") {
+    out = components::TerrainHeightFormat::Raw16Unsigned;
+    return true;
+  }
+  if (value == "r32_float" || value == "r32") {
+    out = components::TerrainHeightFormat::R32Float;
+    return true;
+  }
+  return false;
+}
+
+std::string terrainDataMapKindName(components::TerrainDataMapKind kind) {
+  switch (kind) {
+    case components::TerrainDataMapKind::Custom:
+      return "custom";
+    case components::TerrainDataMapKind::Flow:
+      return "flow";
+    case components::TerrainDataMapKind::Wear:
+      return "wear";
+    case components::TerrainDataMapKind::Deposit:
+      return "deposit";
+    case components::TerrainDataMapKind::Slope:
+      return "slope";
+    case components::TerrainDataMapKind::Curvature:
+      return "curvature";
+  }
+  return "custom";
+}
+
+bool readTerrainDataMapKind(const Json& object, components::TerrainDataMapKind& out) {
+  const auto it = object.find("kind");
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "custom") {
+    out = components::TerrainDataMapKind::Custom;
+    return true;
+  }
+  if (value == "flow") {
+    out = components::TerrainDataMapKind::Flow;
+    return true;
+  }
+  if (value == "wear") {
+    out = components::TerrainDataMapKind::Wear;
+    return true;
+  }
+  if (value == "deposit") {
+    out = components::TerrainDataMapKind::Deposit;
+    return true;
+  }
+  if (value == "slope") {
+    out = components::TerrainDataMapKind::Slope;
+    return true;
+  }
+  if (value == "curvature") {
+    out = components::TerrainDataMapKind::Curvature;
+    return true;
+  }
+  return false;
+}
+
+Json serializeTerrainMaterialLayers(
+    const std::vector<components::TerrainMaterialLayer>& layers) {
+  Json array = Json::array();
+  for (const auto& layer : layers) {
+    array.push_back(Json{
+        {"name", layer.name},
+        {"material_key", layer.material_key},
+        {"albedo_image", layer.albedo_image.string()},
+        {"normal_image", layer.normal_image.string()},
+        {"roughness_image", layer.roughness_image.string()},
+        {"uv_scale", layer.uv_scale},
+        {"enabled", layer.enabled},
+    });
+  }
+  return array;
+}
+
+bool readTerrainMaterialLayers(const Json& object,
+                               std::vector<components::TerrainMaterialLayer>& out) {
+  const auto it = object.find("material_layers");
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_array()) {
+    return false;
+  }
+  std::vector<components::TerrainMaterialLayer> layers;
+  layers.reserve(it->size());
+  for (const Json& layer_json : *it) {
+    if (!layer_json.is_object()) {
+      return false;
+    }
+    components::TerrainMaterialLayer layer{};
+    std::string material_key;
+    std::string albedo_image;
+    std::string normal_image;
+    std::string roughness_image;
+    if (!readString(layer_json, "name", layer.name) ||
+        !readString(layer_json, "material_key", material_key) ||
+        !readString(layer_json, "albedo_image", albedo_image) ||
+        !readString(layer_json, "normal_image", normal_image) ||
+        !readString(layer_json, "roughness_image", roughness_image) ||
+        !readFloat(layer_json, "uv_scale", layer.uv_scale) ||
+        !readBool(layer_json, "enabled", layer.enabled)) {
+      return false;
+    }
+    layer.material_key = std::move(material_key);
+    layer.albedo_image = std::move(albedo_image);
+    layer.normal_image = std::move(normal_image);
+    layer.roughness_image = std::move(roughness_image);
+    layers.push_back(std::move(layer));
+  }
+  out = std::move(layers);
+  return true;
+}
+
+Json serializeTerrainDataMaps(
+    const std::vector<components::TerrainDataMapBinding>& data_maps) {
+  Json array = Json::array();
+  for (const auto& map : data_maps) {
+    array.push_back(Json{
+        {"name", map.name},
+        {"kind", terrainDataMapKindName(map.kind)},
+        {"image", map.image.string()},
+        {"pattern", map.pattern},
+        {"format", terrainHeightFormatName(map.format)},
+        {"raw_width", map.raw_width},
+        {"raw_height", map.raw_height},
+        {"channel", map.channel},
+        {"enabled", map.enabled},
+    });
+  }
+  return array;
+}
+
+bool readTerrainDataMaps(const Json& object,
+                         std::vector<components::TerrainDataMapBinding>& out) {
+  const auto it = object.find("data_maps");
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_array()) {
+    return false;
+  }
+  std::vector<components::TerrainDataMapBinding> maps;
+  maps.reserve(it->size());
+  for (const Json& map_json : *it) {
+    if (!map_json.is_object()) {
+      return false;
+    }
+    components::TerrainDataMapBinding map{};
+    std::string image;
+    if (!readString(map_json, "name", map.name) ||
+        !readTerrainDataMapKind(map_json, map.kind) ||
+        !readString(map_json, "image", image) ||
+        !readString(map_json, "pattern", map.pattern) ||
+        !readTerrainHeightFormat(map_json, "format", map.format) ||
+        !readUint32(map_json, "raw_width", map.raw_width) ||
+        !readUint32(map_json, "raw_height", map.raw_height) ||
+        !readUint32(map_json, "channel", map.channel) ||
+        !readBool(map_json, "enabled", map.enabled)) {
+      return false;
+    }
+    map.image = std::move(image);
+    maps.push_back(std::move(map));
+  }
+  out = std::move(maps);
+  return true;
+}
+
 Json serializeTerrain(const components::TerrainComponent& component) {
   return Json{
       {"source", terrainSourceName(component.source)},
       {"tile_directory", component.tile_directory.string()},
       {"height_pattern", component.height_pattern},
       {"color_pattern", component.color_pattern},
+      {"control_pattern", component.control_pattern},
       {"height_image", component.height_image.string()},
       {"heatmap_image", component.heatmap_image.string()},
       {"color_image", component.color_image.string()},
+      {"control_image", component.control_image.string()},
+      {"height_format", terrainHeightFormatName(component.height_format)},
+      {"raw_width", component.raw_width},
+      {"raw_height", component.raw_height},
+      {"raw_little_endian", component.raw_little_endian},
+      {"flip_y", component.flip_y},
+      {"height_value_min", component.height_value_min},
+      {"height_value_max", component.height_value_max},
+      {"tile_index_base", component.tile_index_base},
+      {"material_layers", serializeTerrainMaterialLayers(component.material_layers)},
+      {"data_maps", serializeTerrainDataMaps(component.data_maps)},
       {"terrain_size", component.terrain_size},
       {"tile_size", component.tile_size},
       {"tile_resolution", component.tile_resolution},
@@ -1044,13 +1264,26 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
   std::string height_image;
   std::string heatmap_image;
   std::string color_image;
+  std::string control_image;
   if (!readTerrainSource(json, component.source) ||
       !readString(json, "tile_directory", tile_directory) ||
       !readString(json, "height_pattern", component.height_pattern) ||
       !readString(json, "color_pattern", component.color_pattern) ||
+      !readString(json, "control_pattern", component.control_pattern) ||
       !readString(json, "height_image", height_image) ||
       !readString(json, "heatmap_image", heatmap_image) ||
       !readString(json, "color_image", color_image) ||
+      !readString(json, "control_image", control_image) ||
+      !readTerrainHeightFormat(json, "height_format", component.height_format) ||
+      !readUint32(json, "raw_width", component.raw_width) ||
+      !readUint32(json, "raw_height", component.raw_height) ||
+      !readBool(json, "raw_little_endian", component.raw_little_endian) ||
+      !readBool(json, "flip_y", component.flip_y) ||
+      !readFloat(json, "height_value_min", component.height_value_min) ||
+      !readFloat(json, "height_value_max", component.height_value_max) ||
+      !readInt32(json, "tile_index_base", component.tile_index_base) ||
+      !readTerrainMaterialLayers(json, component.material_layers) ||
+      !readTerrainDataMaps(json, component.data_maps) ||
       !readFloat(json, "terrain_size", component.terrain_size) ||
       !readFloat(json, "tile_size", component.tile_size) ||
       !readUint32(json, "tile_resolution", component.tile_resolution) ||
@@ -1072,6 +1305,7 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
   component.height_image = std::move(height_image);
   component.heatmap_image = std::move(heatmap_image);
   component.color_image = std::move(color_image);
+  component.control_image = std::move(control_image);
   const bool is_single_image =
       component.source == components::TerrainSourceType::SingleImage;
   const bool is_tile_directory =
@@ -1080,7 +1314,36 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
       component.view_distance < 0.0f ||
       component.base_patch_size == 0u ||
       component.tessellation_factor < 1.0f ||
-      component.target_tessellated_edge_size <= 0.0f) {
+      component.target_tessellated_edge_size <= 0.0f ||
+      component.height_value_max <= component.height_value_min) {
+    return std::nullopt;
+  }
+  if ((component.height_format == components::TerrainHeightFormat::Raw16Unsigned ||
+       component.height_format == components::TerrainHeightFormat::R32Float) &&
+      (component.raw_width == 0u || component.raw_height == 0u)) {
+    return std::nullopt;
+  }
+  for (const auto& layer : component.material_layers) {
+    if (layer.uv_scale <= 0.0f ||
+        (layer.enabled &&
+         layer.material_key.empty() &&
+         layer.albedo_image.empty())) {
+      return std::nullopt;
+    }
+  }
+  for (const auto& map : component.data_maps) {
+    if (map.channel > 3u ||
+        (map.enabled && map.image.empty() && map.pattern.empty())) {
+      return std::nullopt;
+    }
+    if ((map.format == components::TerrainHeightFormat::Raw16Unsigned ||
+         map.format == components::TerrainHeightFormat::R32Float) &&
+        ((map.raw_width == 0u && component.raw_width == 0u) ||
+         (map.raw_height == 0u && component.raw_height == 0u))) {
+      return std::nullopt;
+    }
+  }
+  if (component.material_layers.size() > 4u) {
     return std::nullopt;
   }
   if (is_single_image) {
@@ -1091,8 +1354,7 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
   } else if (component.tile_size <= 0.0f) {
     return std::nullopt;
   }
-  if (is_tile_directory &&
-      (component.height_pattern.empty() || component.color_pattern.empty())) {
+  if (is_tile_directory && component.height_pattern.empty()) {
     return std::nullopt;
   }
   return component;

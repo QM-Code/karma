@@ -82,6 +82,10 @@ class GraphicsDevice {
   void destroyTerrain(TerrainId terrain);
   /// Uploads or replaces one decoded terrain tile.
   void uploadTerrainTile(TerrainId terrain, const TerrainTileData& tile);
+  /// Uploads or replaces one shared repeated terrain material layer.
+  void uploadTerrainMaterialLayer(TerrainId terrain, const TerrainMaterialLayerData& layer);
+  /// Removes all shared repeated material layers from a terrain resource.
+  void clearTerrainMaterialLayers(TerrainId terrain);
   /// Evicts one terrain tile from a streamed terrain resource.
   void evictTerrainTile(TerrainId terrain, TerrainTileCoord coord);
   /// Submits one streamed terrain tile draw.

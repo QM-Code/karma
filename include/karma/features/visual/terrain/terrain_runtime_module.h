@@ -19,6 +19,7 @@ class TerrainRuntimeModule final : public app::RuntimeModule {
 
   void onAttach(const app::RuntimeModuleContext& context) override;
   void onDetach() override;
+  void onFrameBegin(ecs::World& world, float dt) override;
   void onUpdate(ecs::World& world, float dt, float interpolation_alpha) override;
 
  private:

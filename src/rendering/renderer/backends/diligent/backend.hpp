@@ -99,6 +99,9 @@ class DiligentBackend final : public Backend {
   void destroyTerrain(renderer::TerrainId terrain) override;
   void uploadTerrainTile(renderer::TerrainId terrain,
                          const renderer::TerrainTileData& tile) override;
+  void uploadTerrainMaterialLayer(renderer::TerrainId terrain,
+                                  const renderer::TerrainMaterialLayerData& layer) override;
+  void clearTerrainMaterialLayers(renderer::TerrainId terrain) override;
   void evictTerrainTile(renderer::TerrainId terrain,
                         renderer::TerrainTileCoord coord) override;
   void submitTerrain(const renderer::TerrainDrawItem& item) override;
@@ -333,6 +336,8 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::ITextureView> height_srv;
     Diligent::RefCntAutoPtr<Diligent::ITexture> color_texture;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> color_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> control_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> control_srv;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> patch_vertex_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> cpu_vertex_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> cpu_index_buffer;
@@ -346,9 +351,23 @@ class DiligentBackend final : public Backend {
     float max_height = 0.0f;
   };
 
+  struct TerrainMaterialLayerRecord {
+    std::string name;
+    float uv_scale = 16.0f;
+    bool enabled = false;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> albedo_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> albedo_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> normal_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> roughness_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> roughness_srv;
+  };
+
   struct TerrainRecord {
     renderer::TerrainDesc desc{};
     std::unordered_map<renderer::TerrainTileCoord, TerrainTileRecord, TerrainTileCoordHash> tiles;
+    std::array<TerrainMaterialLayerRecord, 4> material_layers{};
+    uint32_t material_layer_count = 0u;
   };
 
   struct TerrainSubmission {

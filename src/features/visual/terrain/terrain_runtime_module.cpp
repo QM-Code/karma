@@ -10,13 +10,17 @@ TerrainRuntimeModule::~TerrainRuntimeModule() = default;
 
 void TerrainRuntimeModule::onAttach(const app::RuntimeModuleContext& context) {
   system_.reset();
-  if (context.graphics != nullptr) {
-    system_ = std::make_unique<TerrainSystem>(context.graphics);
-  }
+  system_ = std::make_unique<TerrainSystem>(context.graphics, context.materials);
 }
 
 void TerrainRuntimeModule::onDetach() {
   system_.reset();
+}
+
+void TerrainRuntimeModule::onFrameBegin(ecs::World& world, float) {
+  if (system_) {
+    system_->syncTerrainColliders(world);
+  }
 }
 
 void TerrainRuntimeModule::onUpdate(ecs::World& world,

@@ -740,8 +740,28 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   karma::components::TerrainComponent authored{};
   authored.source = karma::components::TerrainSourceType::ImageTileDirectory;
   authored.tile_directory = "terrain_tiles";
-  authored.height_pattern = "dem_{x}_{z}.png";
+  authored.height_pattern = "dem_{x}_{z}.r32";
   authored.color_pattern = "ortho_{x}_{z}.png";
+  authored.control_pattern = "splat_{x}_{y}.png";
+  authored.height_format = karma::components::TerrainHeightFormat::R32Float;
+  authored.raw_width = 513u;
+  authored.raw_height = 513u;
+  authored.flip_y = true;
+  authored.tile_index_base = 1;
+  authored.material_layers.push_back(karma::components::TerrainMaterialLayer{
+      .name = "grass",
+      .material_key = "terrain/grass",
+      .albedo_image = "terrain/materials/grass_albedo.png",
+      .normal_image = "terrain/materials/grass_normal.png",
+      .roughness_image = "terrain/materials/grass_roughness.png",
+      .uv_scale = 24.0f,
+  });
+  authored.data_maps.push_back(karma::components::TerrainDataMapBinding{
+      .name = "flow",
+      .kind = karma::components::TerrainDataMapKind::Flow,
+      .pattern = "flow_{x}_{y}.png",
+      .channel = 0u,
+  });
   authored.tile_size = 750.0f;
   authored.tile_resolution = 129u;
   authored.origin_tile_x = -3;
@@ -762,7 +782,11 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   const Json saved = readJson(path);
   const Json& terrain_json = saved["nodes"][0]["components"]["TerrainComponent"];
   KARMA_REQUIRE(terrain_json["source"] == "image_tile_directory");
-  KARMA_REQUIRE(terrain_json["height_pattern"] == "dem_{x}_{z}.png");
+  KARMA_REQUIRE(terrain_json["height_pattern"] == "dem_{x}_{z}.r32");
+  KARMA_REQUIRE(terrain_json["height_format"] == "r32_float");
+  KARMA_REQUIRE(terrain_json["material_layers"].size() == 1u);
+  KARMA_REQUIRE(terrain_json["material_layers"][0]["material_key"] == "terrain/grass");
+  KARMA_REQUIRE(terrain_json["data_maps"].size() == 1u);
   KARMA_REQUIRE(terrain_json["layer"] == 2u);
 
   karma::ecs::World loaded_world;
@@ -774,8 +798,24 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
       loaded_world.get<karma::components::TerrainComponent>(instance->root);
   KARMA_REQUIRE(loaded.source == karma::components::TerrainSourceType::ImageTileDirectory);
   KARMA_REQUIRE(loaded.tile_directory == std::filesystem::path("terrain_tiles"));
-  KARMA_REQUIRE(loaded.height_pattern == "dem_{x}_{z}.png");
+  KARMA_REQUIRE(loaded.height_pattern == "dem_{x}_{z}.r32");
   KARMA_REQUIRE(loaded.color_pattern == "ortho_{x}_{z}.png");
+  KARMA_REQUIRE(loaded.control_pattern == "splat_{x}_{y}.png");
+  KARMA_REQUIRE(loaded.height_format == karma::components::TerrainHeightFormat::R32Float);
+  KARMA_REQUIRE(loaded.raw_width == 513u);
+  KARMA_REQUIRE(loaded.raw_height == 513u);
+  KARMA_REQUIRE(loaded.flip_y);
+  KARMA_REQUIRE(loaded.tile_index_base == 1);
+  KARMA_REQUIRE(loaded.material_layers.size() == 1u);
+  KARMA_REQUIRE(loaded.material_layers[0].name == "grass");
+  KARMA_REQUIRE(loaded.material_layers[0].material_key == "terrain/grass");
+  KARMA_REQUIRE(loaded.material_layers[0].albedo_image ==
+                std::filesystem::path("terrain/materials/grass_albedo.png"));
+  KARMA_REQUIRE(nearly(loaded.material_layers[0].uv_scale, 24.0f));
+  KARMA_REQUIRE(loaded.data_maps.size() == 1u);
+  KARMA_REQUIRE(loaded.data_maps[0].kind ==
+                karma::components::TerrainDataMapKind::Flow);
+  KARMA_REQUIRE(loaded.data_maps[0].pattern == "flow_{x}_{y}.png");
   KARMA_REQUIRE(nearly(loaded.tile_size, 750.0f));
   KARMA_REQUIRE(loaded.tile_resolution == 129u);
   KARMA_REQUIRE(loaded.origin_tile_x == -3);
@@ -804,6 +844,7 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   authored.height_image = "terrain/fixed_height.png";
   authored.heatmap_image = "terrain/fixed_heatmap.png";
   authored.color_image = "terrain/fixed_color.png";
+  authored.control_image = "terrain/fixed_splat.png";
   authored.terrain_size = 2048.0f;
   authored.tile_resolution = 513u;
   authored.origin_tile_x = 5;
@@ -812,6 +853,10 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   authored.height_offset = 3.5f;
   authored.layer = 3u;
   world.add(root, authored);
+  world.add(root, karma::components::ColliderComponent{
+                      .is_trigger = true,
+                      .debug_draw = true,
+                  });
 
   const std::filesystem::path path = dir / "terrain_single_image.json";
   KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
@@ -821,7 +866,11 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   KARMA_REQUIRE(terrain_json["height_image"] == "terrain/fixed_height.png");
   KARMA_REQUIRE(terrain_json["heatmap_image"] == "terrain/fixed_heatmap.png");
   KARMA_REQUIRE(terrain_json["color_image"] == "terrain/fixed_color.png");
+  KARMA_REQUIRE(terrain_json["control_image"] == "terrain/fixed_splat.png");
   KARMA_REQUIRE(nearly(terrain_json["terrain_size"].get<float>(), 2048.0f));
+  const Json& collider_json = saved["nodes"][0]["components"]["ColliderComponent"];
+  KARMA_REQUIRE(collider_json["is_trigger"] == true);
+  KARMA_REQUIRE(collider_json["debug_draw"] == true);
 
   karma::ecs::World loaded_world;
   karma::scene::Scene loaded_scene;
@@ -834,6 +883,7 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   KARMA_REQUIRE(loaded.height_image == std::filesystem::path("terrain/fixed_height.png"));
   KARMA_REQUIRE(loaded.heatmap_image == std::filesystem::path("terrain/fixed_heatmap.png"));
   KARMA_REQUIRE(loaded.color_image == std::filesystem::path("terrain/fixed_color.png"));
+  KARMA_REQUIRE(loaded.control_image == std::filesystem::path("terrain/fixed_splat.png"));
   KARMA_REQUIRE(nearly(loaded.terrain_size, 2048.0f));
   KARMA_REQUIRE(loaded.tile_resolution == 513u);
   KARMA_REQUIRE(loaded.origin_tile_x == 5);
@@ -841,6 +891,11 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   KARMA_REQUIRE(nearly(loaded.height_scale, 90.0f));
   KARMA_REQUIRE(nearly(loaded.height_offset, 3.5f));
   KARMA_REQUIRE(loaded.layer == 3u);
+  KARMA_REQUIRE(loaded_world.has<karma::components::ColliderComponent>(instance->root));
+  const auto& collider =
+      loaded_world.get<karma::components::ColliderComponent>(instance->root);
+  KARMA_REQUIRE(collider.is_trigger);
+  KARMA_REQUIRE(collider.debug_draw);
 }
 
 void testMigratedPrefabAssetsDoNotUseLegacyComponentNames() {

@@ -8,8 +8,10 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <variant>
 #include <vector>
 
+#include "karma/features/visual/terrain/terrain_system.h"
 #include "karma/simulation/physics/physics_system.h"
 #include "karma/simulation/physics/physics_world.hpp"
 #include "karma/world/components/character_controller.h"
@@ -18,6 +20,7 @@
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/physics_collision_filter.h"
 #include "karma/world/components/rigidbody.h"
+#include "karma/world/components/terrain.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
 #include "karma/world/scene/scene.h"
@@ -522,6 +525,42 @@ void softBodyCreatesAndReportsState() {
 #endif
 }
 
+void terrainColliderMarkerCreatesPhysicsHeightfield() {
+#if defined(KARMA_PHYSICS_BACKEND_JOLT)
+  karma::ecs::World world;
+  karma::physics::World physics_world;
+  physics_world.setGravity(0.0f);
+  karma::physics::PhysicsSystem physics_system(physics_world);
+  karma::terrain::TerrainSystem terrain_system(nullptr);
+
+  const karma::ecs::Entity terrain = world.createEntity();
+  world.add(terrain, karma::components::TransformComponent{});
+  world.add(terrain, karma::components::ColliderComponent{});
+  world.add(terrain, karma::components::TerrainComponent{
+                         .source = karma::components::TerrainSourceType::Procedural,
+                         .tile_size = 16.0f,
+                         .tile_resolution = 17u,
+                         .height_scale = 2.0f,
+                         .height_offset = 0.0f,
+                     });
+
+  terrain_system.syncTerrainColliders(world);
+  assert(world.has<karma::components::ColliderComponent>(terrain));
+  const auto& collider = world.get<karma::components::ColliderComponent>(terrain);
+  assert(collider.type == karma::components::ColliderShapeType::HeightField);
+  assert(std::get_if<karma::components::HeightFieldColliderShape>(&collider.shape) != nullptr);
+
+  physics_system.update(world, 1.0f / 60.0f);
+
+  karma::physics::PhysicsQueryHit hit{};
+  karma::physics::PhysicsRaycastDesc ray{};
+  ray.from = {8.0f, 20.0f, 8.0f};
+  ray.to = {8.0f, -20.0f, 8.0f};
+  assert(physics_world.castRay(ray, hit));
+  assert(hit.body != 0u);
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -537,6 +576,7 @@ int main() {
   rigidBodyRuntimeControlsWork();
   vehicleConstraintCreatesAndReportsState();
   softBodyCreatesAndReportsState();
+  terrainColliderMarkerCreatesPhysicsHeightfield();
 #endif
   return 0;
 }

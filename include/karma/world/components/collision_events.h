@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "karma/world/ecs/collider_queries.h"
+#include "karma/world/components/collider.h"
 #include "karma/world/ecs/component.h"
 #include "karma/world/ecs/entity.h"
 
@@ -21,7 +21,7 @@ enum class CollisionListenMode : uint8_t {
 /// Overlap/trigger contact against another entity.
 struct CollisionContact {
   ecs::Entity other{};
-  ecs::queries::ColliderShape other_shape = ecs::queries::ColliderShape::Box;
+  ColliderShapeType other_shape = ColliderShapeType::Box;
   bool other_is_trigger = false;
 };
 

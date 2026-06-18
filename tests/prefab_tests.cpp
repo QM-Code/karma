@@ -1,11 +1,14 @@
 #include <chrono>
 #include <cstdlib>
+#include <array>
 #include <cstdint>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -17,6 +20,7 @@
 #include "karma/features/visual/particles/particle_system.h"
 #include "karma/rendering/renderer/ids.h"
 #include "karma/rendering/renderer/particle_stats_report.h"
+#include "karma/world/components/collider.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/light_pulse.h"
 #include "karma/world/components/mesh.h"
@@ -68,6 +72,123 @@ Json readJson(const std::filesystem::path& path) {
 bool nearly(float a, float b) {
   const float diff = a > b ? a - b : b - a;
   return diff < 0.0001f;
+}
+
+bool nearlyVec3(const karma::math::Vec3& a, const karma::math::Vec3& b) {
+  return nearly(a.x, b.x) && nearly(a.y, b.y) && nearly(a.z, b.z);
+}
+
+void requireVec3VectorEquals(const std::vector<karma::math::Vec3>& actual,
+                             const std::vector<karma::math::Vec3>& expected) {
+  KARMA_REQUIRE(actual.size() == expected.size());
+  for (size_t i = 0; i < actual.size(); ++i) {
+    KARMA_REQUIRE(nearlyVec3(actual[i], expected[i]));
+  }
+}
+
+template <typename Shape>
+const Shape& requireShape(const karma::components::ColliderComponent& component) {
+  const Shape* shape = std::get_if<Shape>(&component.shape);
+  KARMA_REQUIRE(shape != nullptr);
+  return *shape;
+}
+
+void requireColliderEquals(const karma::components::ColliderComponent& actual,
+                           const karma::components::ColliderComponent& expected) {
+  KARMA_REQUIRE(actual.type == expected.type);
+  KARMA_REQUIRE(actual.is_trigger == expected.is_trigger);
+  KARMA_REQUIRE(actual.debug_draw == expected.debug_draw);
+  KARMA_REQUIRE(karma::components::colliderTypeMatchesShape(actual));
+
+  using Type = karma::components::ColliderShapeType;
+  switch (expected.type) {
+    case Type::Box: {
+      const auto& actual_shape = requireShape<karma::components::BoxColliderShape>(actual);
+      const auto& expected_shape = requireShape<karma::components::BoxColliderShape>(expected);
+      KARMA_REQUIRE(nearlyVec3(actual_shape.center, expected_shape.center));
+      KARMA_REQUIRE(nearlyVec3(actual_shape.half_extents, expected_shape.half_extents));
+      break;
+    }
+    case Type::Sphere: {
+      const auto& actual_shape = requireShape<karma::components::SphereColliderShape>(actual);
+      const auto& expected_shape = requireShape<karma::components::SphereColliderShape>(expected);
+      KARMA_REQUIRE(nearlyVec3(actual_shape.center, expected_shape.center));
+      KARMA_REQUIRE(nearly(actual_shape.radius, expected_shape.radius));
+      break;
+    }
+    case Type::Capsule: {
+      const auto& actual_shape = requireShape<karma::components::CapsuleColliderShape>(actual);
+      const auto& expected_shape =
+          requireShape<karma::components::CapsuleColliderShape>(expected);
+      KARMA_REQUIRE(nearlyVec3(actual_shape.center, expected_shape.center));
+      KARMA_REQUIRE(nearly(actual_shape.radius, expected_shape.radius));
+      KARMA_REQUIRE(nearly(actual_shape.height, expected_shape.height));
+      break;
+    }
+    case Type::Cylinder: {
+      const auto& actual_shape = requireShape<karma::components::CylinderColliderShape>(actual);
+      const auto& expected_shape =
+          requireShape<karma::components::CylinderColliderShape>(expected);
+      KARMA_REQUIRE(nearlyVec3(actual_shape.center, expected_shape.center));
+      KARMA_REQUIRE(nearly(actual_shape.radius, expected_shape.radius));
+      KARMA_REQUIRE(nearly(actual_shape.height, expected_shape.height));
+      KARMA_REQUIRE(nearly(actual_shape.convex_radius, expected_shape.convex_radius));
+      break;
+    }
+    case Type::TaperedCapsule: {
+      const auto& actual_shape =
+          requireShape<karma::components::TaperedCapsuleColliderShape>(actual);
+      const auto& expected_shape =
+          requireShape<karma::components::TaperedCapsuleColliderShape>(expected);
+      KARMA_REQUIRE(nearlyVec3(actual_shape.center, expected_shape.center));
+      KARMA_REQUIRE(nearly(actual_shape.top_radius, expected_shape.top_radius));
+      KARMA_REQUIRE(nearly(actual_shape.bottom_radius, expected_shape.bottom_radius));
+      KARMA_REQUIRE(nearly(actual_shape.height, expected_shape.height));
+      break;
+    }
+    case Type::ConvexHull: {
+      const auto& actual_shape = requireShape<karma::components::ConvexHullColliderShape>(actual);
+      const auto& expected_shape =
+          requireShape<karma::components::ConvexHullColliderShape>(expected);
+      KARMA_REQUIRE(nearlyVec3(actual_shape.center, expected_shape.center));
+      requireVec3VectorEquals(actual_shape.points, expected_shape.points);
+      KARMA_REQUIRE(nearly(actual_shape.convex_radius, expected_shape.convex_radius));
+      break;
+    }
+    case Type::Triangle: {
+      const auto& actual_shape = requireShape<karma::components::TriangleColliderShape>(actual);
+      const auto& expected_shape =
+          requireShape<karma::components::TriangleColliderShape>(expected);
+      for (size_t i = 0; i < actual_shape.points.size(); ++i) {
+        KARMA_REQUIRE(nearlyVec3(actual_shape.points[i], expected_shape.points[i]));
+      }
+      KARMA_REQUIRE(nearly(actual_shape.convex_radius, expected_shape.convex_radius));
+      break;
+    }
+    case Type::HeightField: {
+      const auto& actual_shape = requireShape<karma::components::HeightFieldColliderShape>(actual);
+      const auto& expected_shape =
+          requireShape<karma::components::HeightFieldColliderShape>(expected);
+      KARMA_REQUIRE(actual_shape.samples.size() == expected_shape.samples.size());
+      for (size_t i = 0; i < actual_shape.samples.size(); ++i) {
+        KARMA_REQUIRE(nearly(actual_shape.samples[i], expected_shape.samples[i]));
+      }
+      KARMA_REQUIRE(actual_shape.sample_count == expected_shape.sample_count);
+      KARMA_REQUIRE(nearlyVec3(actual_shape.offset, expected_shape.offset));
+      KARMA_REQUIRE(nearlyVec3(actual_shape.scale, expected_shape.scale));
+      KARMA_REQUIRE(actual_shape.block_size == expected_shape.block_size);
+      KARMA_REQUIRE(actual_shape.bits_per_sample == expected_shape.bits_per_sample);
+      break;
+    }
+    case Type::Mesh: {
+      const auto& actual_shape = requireShape<karma::components::MeshColliderShape>(actual);
+      const auto& expected_shape = requireShape<karma::components::MeshColliderShape>(expected);
+      KARMA_REQUIRE(actual_shape.mesh_path == expected_shape.mesh_path);
+      requireVec3VectorEquals(actual_shape.vertices, expected_shape.vertices);
+      KARMA_REQUIRE(actual_shape.indices == expected_shape.indices);
+      break;
+    }
+  }
 }
 
 Json validParticleEffectJson() {
@@ -201,8 +322,10 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
                   });
   world.add(root, karma::components::MeshComponent{
                       .mesh_key = "assets/crate.glb",
-                      .material_key = "crate",
-                      .texture_key = "crate_albedo",
+                      .materials = {karma::components::MeshMaterialBinding{
+                          .slot = 0,
+                          .material_key = "crate",
+                      }},
                       .visible = true,
                       .shadow_visible = false,
                   });
@@ -218,6 +341,11 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
 
   const Json saved = readJson(path);
   KARMA_REQUIRE(saved["nodes"][0]["components"]["MeshComponent"]["mesh_key"] == "assets/crate.glb");
+  KARMA_REQUIRE(saved["nodes"][0]["components"]["MeshComponent"]["materials"].is_array());
+  KARMA_REQUIRE(saved["nodes"][0]["components"]["MeshComponent"]["materials"][0]["slot"] == 0);
+  KARMA_REQUIRE(saved["nodes"][0]["components"]["MeshComponent"]["materials"][0]["material_key"] == "crate");
+  KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("material_key"));
+  KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("texture_key"));
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("mesh_id"));
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("material_id"));
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("owns_mesh_id"));
@@ -240,8 +368,9 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
 
   const auto& mesh = loaded_world.get<karma::components::MeshComponent>(instance->root);
   KARMA_REQUIRE(mesh.mesh_key == "assets/crate.glb");
-  KARMA_REQUIRE(mesh.material_key == "crate");
-  KARMA_REQUIRE(mesh.texture_key == "crate_albedo");
+  KARMA_REQUIRE(mesh.materials.size() == 1);
+  KARMA_REQUIRE(mesh.materials[0].slot == 0);
+  KARMA_REQUIRE(mesh.materials[0].material_key == "crate");
   KARMA_REQUIRE(!mesh.shadow_visible);
 
   const auto& light = loaded_world.get<karma::components::LightComponent>(instance->root);
@@ -249,6 +378,140 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
   KARMA_REQUIRE(nearly(light.color.r, 0.5f));
   KARMA_REQUIRE(nearly(light.intensity, 4.0f));
   KARMA_REQUIRE(nearly(light.range, 12.0f));
+}
+
+void testColliderComponentPrefabRoundTrips(const std::filesystem::path& dir) {
+  struct ColliderCase {
+    std::string name;
+    karma::components::ColliderComponent component;
+  };
+
+  std::vector<ColliderCase> cases;
+  cases.push_back({"box",
+                   karma::components::ColliderComponent::box(
+                       karma::components::BoxColliderShape{
+                           .center = {0.1f, 0.2f, 0.3f},
+                           .half_extents = {1.0f, 2.0f, 3.0f},
+                       },
+                       true,
+                       false)});
+  cases.push_back({"sphere",
+                   karma::components::ColliderComponent::sphere(
+                       karma::components::SphereColliderShape{
+                           .center = {0.4f, 0.5f, 0.6f},
+                           .radius = 1.25f,
+                       },
+                       false,
+                       true)});
+  cases.push_back({"capsule",
+                   karma::components::ColliderComponent::capsule(
+                       karma::components::CapsuleColliderShape{
+                           .center = {0.7f, 0.8f, 0.9f},
+                           .radius = 0.35f,
+                           .height = 2.4f,
+                       },
+                       true,
+                       true)});
+  cases.push_back({"cylinder",
+                   karma::components::ColliderComponent::cylinder(
+                       karma::components::CylinderColliderShape{
+                           .center = {1.0f, 1.1f, 1.2f},
+                           .radius = 0.75f,
+                           .height = 3.5f,
+                           .convex_radius = 0.05f,
+                       })});
+  cases.push_back({"tapered_capsule",
+                   karma::components::ColliderComponent::taperedCapsule(
+                       karma::components::TaperedCapsuleColliderShape{
+                           .center = {1.3f, 1.4f, 1.5f},
+                           .top_radius = 0.2f,
+                           .bottom_radius = 0.45f,
+                           .height = 2.2f,
+                       })});
+  cases.push_back({"convex_hull",
+                   karma::components::ColliderComponent::convexHull(
+                       karma::components::ConvexHullColliderShape{
+                           .center = {1.6f, 1.7f, 1.8f},
+                           .points = {{0.0f, 0.0f, 0.0f},
+                                      {1.0f, 0.0f, 0.0f},
+                                      {0.0f, 1.0f, 0.0f},
+                                      {0.0f, 0.0f, 1.0f}},
+                           .convex_radius = 0.02f,
+                       })});
+  karma::components::TriangleColliderShape triangle{};
+  triangle.points = {karma::math::Vec3{0.0f, 0.0f, 0.0f},
+                     karma::math::Vec3{1.0f, 0.0f, 0.0f},
+                     karma::math::Vec3{0.0f, 1.0f, 0.0f}};
+  triangle.convex_radius = 0.01f;
+  cases.push_back({"triangle", karma::components::ColliderComponent::triangle(triangle)});
+  cases.push_back({"height_field",
+                   karma::components::ColliderComponent::heightField(
+                       karma::components::HeightFieldColliderShape{
+                           .samples = {0.0f, 0.25f, 0.5f, 0.75f},
+                           .sample_count = 2,
+                           .offset = {-1.0f, 0.0f, -1.0f},
+                           .scale = {2.0f, 0.5f, 2.0f},
+                           .block_size = 4,
+                           .bits_per_sample = 16,
+                       })});
+  cases.push_back({"mesh",
+                   karma::components::ColliderComponent::mesh(
+                       karma::components::MeshColliderShape{
+                           .mesh_path = "assets/collision_mesh.glb",
+                           .vertices = {{0.0f, 0.0f, 0.0f},
+                                        {1.0f, 0.0f, 0.0f},
+                                        {0.0f, 1.0f, 0.0f}},
+                           .indices = {0, 1, 2},
+                       })});
+
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+  const karma::ecs::Entity root = world.createEntity();
+  const auto root_node = scene.createNode(root);
+  world.setName(root, "ColliderRoot");
+  world.add(root, karma::components::TransformComponent{});
+
+  for (const ColliderCase& collider_case : cases) {
+    const karma::ecs::Entity entity = world.createEntity();
+    const auto node = scene.createNode(entity);
+    scene.reparent(node, root_node);
+    world.setName(entity, collider_case.name);
+    world.add(entity, karma::components::TransformComponent{});
+    world.add(entity, collider_case.component);
+  }
+
+  const std::filesystem::path path = dir / "colliders.json";
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+
+  const Json saved = readJson(path);
+  size_t serialized_colliders = 0;
+  for (const Json& node : saved["nodes"]) {
+    const Json& components = node["components"];
+    KARMA_REQUIRE(!components.contains("BoxColliderComponent"));
+    KARMA_REQUIRE(!components.contains("SphereColliderComponent"));
+    KARMA_REQUIRE(!components.contains("CapsuleColliderComponent"));
+    KARMA_REQUIRE(!components.contains("MeshColliderComponent"));
+    if (components.contains("ColliderComponent")) {
+      ++serialized_colliders;
+      KARMA_REQUIRE(components["ColliderComponent"].contains("type"));
+      KARMA_REQUIRE(components["ColliderComponent"].contains("is_trigger"));
+      KARMA_REQUIRE(components["ColliderComponent"].contains("debug_draw"));
+      KARMA_REQUIRE(components["ColliderComponent"].contains("shape"));
+    }
+  }
+  KARMA_REQUIRE(serialized_colliders == cases.size());
+
+  karma::ecs::World loaded_world;
+  karma::scene::Scene loaded_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  for (const ColliderCase& collider_case : cases) {
+    const karma::ecs::Entity entity = instance->find(collider_case.name);
+    KARMA_REQUIRE(entity.isValid());
+    KARMA_REQUIRE(loaded_world.has<karma::components::ColliderComponent>(entity));
+    requireColliderEquals(loaded_world.get<karma::components::ColliderComponent>(entity),
+                          collider_case.component);
+  }
 }
 
 void testHierarchyRoundTrip(const std::filesystem::path& dir) {
@@ -263,12 +526,6 @@ void testHierarchyRoundTrip(const std::filesystem::path& dir) {
   world.setName(root, "Root");
   world.add(root, karma::components::TransformComponent{});
   world.setName(child, "Child");
-  world.add(child,
-            karma::components::LocalTransformComponent{
-                {2.0f, 0.0f, 0.0f},
-                {0.0f, 0.0f, 0.0f, 1.0f},
-                {1.0f, 1.0f, 1.0f},
-            });
   world.add(child,
             karma::components::TransformComponent{
                 {2.0f, 0.0f, 0.0f},
@@ -295,15 +552,13 @@ void testHierarchyRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(loaded_scene.isAlive(loaded_child_node));
   KARMA_REQUIRE(loaded_scene.get(loaded_child_node).parent == loaded_root_node);
 
-  const auto& child_local =
-      loaded_world.get<karma::components::LocalTransformComponent>(loaded_child);
-  KARMA_REQUIRE(nearly(child_local.position.x, 2.0f));
   const auto& child_transform =
       loaded_world.get<karma::components::TransformComponent>(loaded_child);
+  KARMA_REQUIRE(nearly(child_transform.localPosition().x, 2.0f));
   KARMA_REQUIRE(nearly(child_transform.getPosition().x, 12.0f));
 }
 
-void testUnknownComponentSkips(const std::filesystem::path& dir) {
+void testUnknownComponentFails(const std::filesystem::path& dir) {
   const std::filesystem::path path = dir / "unknown.json";
   writeText(path,
             R"({
@@ -325,9 +580,7 @@ void testUnknownComponentSkips(const std::filesystem::path& dir) {
   karma::ecs::World world;
   karma::scene::Scene scene;
   const auto instance = karma::prefabs::instantiatePrefab(world, scene, path);
-  KARMA_REQUIRE(instance.has_value());
-  KARMA_REQUIRE(world.isAlive(instance->root));
-  KARMA_REQUIRE(world.has<karma::components::TransformComponent>(instance->root));
+  KARMA_REQUIRE(!instance.has_value());
 }
 
 void testMalformedAndInvalidPayloads(const std::filesystem::path& dir) {
@@ -590,10 +843,19 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   KARMA_REQUIRE(loaded.layer == 3u);
 }
 
-void testMigratedPrefabAssetsDoNotUseVolumeSphereComponent() {
+void testMigratedPrefabAssetsDoNotUseLegacyComponentNames() {
   const std::filesystem::path repo_root = findRepoRoot();
   KARMA_REQUIRE(!repo_root.empty());
   const std::filesystem::path prefab_root = repo_root / "examples/assets/prefabs";
+  const std::array<std::string, 7> legacy_names{
+      "LocalTransformComponent",
+      "BoxColliderComponent",
+      "SphereColliderComponent",
+      "CapsuleColliderComponent",
+      "MeshColliderComponent",
+      "CharacterControllerComponent",
+      "VolumeSphereComponent",
+  };
   for (const auto& entry : std::filesystem::recursive_directory_iterator(prefab_root)) {
     if (!entry.is_regular_file() || entry.path().filename() != "prefab.json") {
       continue;
@@ -601,7 +863,9 @@ void testMigratedPrefabAssetsDoNotUseVolumeSphereComponent() {
     std::ifstream stream(entry.path());
     const std::string text((std::istreambuf_iterator<char>(stream)),
                            std::istreambuf_iterator<char>());
-    KARMA_REQUIRE(text.find("VolumeSphereComponent") == std::string::npos);
+    for (const std::string& legacy_name : legacy_names) {
+      KARMA_REQUIRE(text.find(legacy_name) == std::string::npos);
+    }
   }
 }
 
@@ -625,7 +889,7 @@ void testDestroyPrefab(const std::filesystem::path& dir) {
       "name": "Child",
       "parent": 0,
       "components": {
-        "LocalTransformComponent": { "position": [1, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] }
+        "TransformComponent": { "position": [1, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] }
       }
     }
   ]
@@ -1141,11 +1405,11 @@ void testEnergyOrbPrefabDirectLoad() {
   KARMA_REQUIRE(world.has<karma::components::MeshComponent>(shell));
   KARMA_REQUIRE(world.get<karma::components::MeshComponent>(shell).mesh_key ==
          "examples/assets/orb_shell.glb");
-  KARMA_REQUIRE(world.has<karma::components::LocalTransformComponent>(shell));
-  const auto& shell_local = world.get<karma::components::LocalTransformComponent>(shell);
-  KARMA_REQUIRE(nearly(shell_local.scale.x, 0.28875f));
-  KARMA_REQUIRE(nearly(shell_local.scale.y, 0.28875f));
-  KARMA_REQUIRE(nearly(shell_local.scale.z, 0.28875f));
+  KARMA_REQUIRE(world.has<karma::components::TransformComponent>(shell));
+  const auto& shell_transform = world.get<karma::components::TransformComponent>(shell);
+  KARMA_REQUIRE(nearly(shell_transform.localScale().x, 0.28875f));
+  KARMA_REQUIRE(nearly(shell_transform.localScale().y, 0.28875f));
+  KARMA_REQUIRE(nearly(shell_transform.localScale().z, 0.28875f));
 
   const karma::ecs::Entity core = instance->find("core");
   KARMA_REQUIRE(world.has<karma::components::ParticleEffectComponent>(core));
@@ -1299,14 +1563,15 @@ void testParticleStatsReportFormatting() {
 int main() {
   const std::filesystem::path dir = makeTempDir();
   testSaveLoadSingleEntity(dir);
+  testColliderComponentPrefabRoundTrips(dir);
   testHierarchyRoundTrip(dir);
-  testUnknownComponentSkips(dir);
+  testUnknownComponentFails(dir);
   testMalformedAndInvalidPayloads(dir);
   testVolumetricComponentPrefabRoundTrip(dir);
   testVolumetricComponentValidation(dir);
   testTerrainComponentPrefabRoundTrip(dir);
   testSingleImageTerrainComponentPrefabRoundTrip(dir);
-  testMigratedPrefabAssetsDoNotUseVolumeSphereComponent();
+  testMigratedPrefabAssetsDoNotUseLegacyComponentNames();
   testDestroyPrefab(dir);
   testMissingSidecarKeepsPrefabLoad(dir);
   testSidecarParsingSuccessAndFailure(dir);

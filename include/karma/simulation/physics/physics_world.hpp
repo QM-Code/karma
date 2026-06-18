@@ -2,9 +2,11 @@
 
 #include "karma/simulation/physics/types.h"
 #include "karma/simulation/physics/constraint.hpp"
-#include "karma/simulation/physics/player_controller.hpp"
+#include "karma/simulation/physics/character_controller.hpp"
 #include "karma/simulation/physics/rigid_body.hpp"
+#include "karma/simulation/physics/soft_body.hpp"
 #include "karma/simulation/physics/static_body.hpp"
+#include "karma/simulation/physics/vehicle.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
@@ -40,6 +42,10 @@ public:
     Constraint createConstraint(const PhysicsConstraintDesc& desc,
                                 std::uintptr_t bodyA,
                                 std::uintptr_t bodyB);
+    /// Creates a vehicle constraint/controller attached to a rigid body handle.
+    Vehicle createVehicle(const PhysicsVehicleDesc& desc, std::uintptr_t body);
+    /// Creates a soft body from backend-neutral creation settings.
+    SoftBody createSoftBody(const PhysicsSoftBodyDesc& desc);
 
     /// Creates a dynamic box body.
     RigidBody createBoxBody(const glm::vec3& halfExtents,
@@ -47,13 +53,8 @@ public:
                             const glm::vec3& position,
                             const PhysicsMaterial& material);
 
-    /// Creates or returns the default player controller.
-    PlayerController& createPlayer();
-    /// Creates or returns the default player controller with an explicit size.
-    PlayerController& createPlayer(const glm::vec3& size);
-
-    /// Returns the default player controller if one exists.
-    PlayerController* playerController() { return playerController_.get(); }
+    /// Creates a character-controller body with an explicit size.
+    CharacterController createCharacterController(const glm::vec3& size);
 
     /// Creates static mesh collision geometry.
     StaticBody createStaticMesh(const std::string& meshPath);
@@ -79,7 +80,6 @@ public:
 
 private:
     std::unique_ptr<karma::physics_backend::PhysicsWorldBackend> backend_;
-    std::unique_ptr<PlayerController> playerController_;
 };
 
 } // namespace karma::physics

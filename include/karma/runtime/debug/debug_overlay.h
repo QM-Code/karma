@@ -20,6 +20,7 @@ class Scene;
 
 namespace karma::renderer {
 class GraphicsDevice;
+class MaterialLibrary;
 }
 
 namespace karma::systems {
@@ -39,6 +40,7 @@ class DebugOverlayLayer final : public app::UiLayer {
                     scene::Scene* scene,
                     systems::SystemGraph* systems,
                     renderer::GraphicsDevice* graphics,
+                    renderer::MaterialLibrary* materials,
                     int shadow_map_size,
                     float shadow_bias,
                     int shadow_pcf_radius,
@@ -77,6 +79,7 @@ class DebugOverlayLayer final : public app::UiLayer {
   scene::Scene* scene_ = nullptr;
   systems::SystemGraph* systems_ = nullptr;
   renderer::GraphicsDevice* graphics_ = nullptr;
+  renderer::MaterialLibrary* materials_ = nullptr;
   ImGuiContext* imgui_context_ = nullptr;
   app::UITextureHandle font_texture_ = 0;
   app::UIContext* pending_ctx_ = nullptr;

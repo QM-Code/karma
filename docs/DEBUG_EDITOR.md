@@ -39,9 +39,9 @@ This guide applies to the runtime debug editor in
 
 ## Verification
 
-- Build `karma_example` after changes.
-- Run `KARMA_ENGINE_EDITOR_DEBUG=1 ./build/karma_example` from the repository
-  root, or run `KARMA_ENGINE_EDITOR_DEBUG=1 ./karma_example` from `build/`.
+- Build `gameplay_tank` after changes.
+- Run `KARMA_ENGINE_EDITOR_DEBUG=1 ./build/examples/gameplay/tank` from the
+  repository root.
 - Check that edited controls still mutate the same runtime state and that the
   debug overlay survives renderer warm-up.
 - Avoid committing or intentionally editing `imgui.ini` as part of debug editor

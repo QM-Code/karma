@@ -130,12 +130,13 @@ writes agent positions/velocities back to transforms.
 `NavigationSystem::stats()` exposes lightweight diagnostics for this pipeline:
 main-thread update/rebuild/submit/move/apply timings, worker queue/solve timing,
 request counters, stale-result count, last path status, and whether the worker
-had to rebuild its cached Detour query. `karma_navmesh_example` logs these values
+had to rebuild its cached Detour query. `navigation_navmesh` logs these values
 whenever a path request is submitted or completed.
 
 If no explicit `NavMeshSurfaceComponent` exists, the collector keeps the legacy
-fallback for entities with `MeshColliderComponent`, `MeshComponent`, and
-`TransformComponent`, loading mesh data from `MeshComponent::mesh_key`.
+fallback for entities with a mesh `ColliderComponent`, `MeshComponent`, and
+`TransformComponent`, using vertices and indices embedded in the mesh collider
+shape.
 
 Procedural or renderer-owned mesh data can be appended directly:
 
@@ -234,11 +235,11 @@ if (crowd.init(nav_mesh, crowd_config)) {
 
 For ECS, put `NavCrowdComponent` on the navmesh entity and
 `NavCrowdAgentComponent` on controlled entities. `NavCrowdMovementMode::Transform`
-writes DetourCrowd positions to entity transforms. `PlayerControllerVelocity`
-leaves transforms under physics authority and writes horizontal crowd velocity
-to `PlayerControllerComponent::setDesiredVelocity`. The current physics world
-still owns one default player controller, so multi-controller backend ownership
-is not yet generalized.
+writes DetourCrowd positions to entity transforms.
+`NavCrowdMovementMode::CharacterControllerVelocity` leaves transforms under
+physics authority and writes horizontal crowd velocity
+to `CharacterControllerComponent::setDesiredVelocity`. Physics owns one backend
+character controller per ECS `CharacterControllerComponent`.
 
 `NavMesh::debugDraw()` and `NavQuery::debugDrawPath()` draw the baked mesh,
 captured Recast debug layers, and paths through
@@ -246,9 +247,9 @@ captured Recast debug layers, and paths through
 
 ## Example
 
-`karma_navmesh_example` is a rendered click-to-move scene using the same
+`navigation_navmesh` is a rendered click-to-move scene using the same
 `world.glb`, `tank_final.glb`, HDR environment, and lighting style as
-`karma_example`. It bakes the world mesh through an ECS `NavMeshComponent` and
+`gameplay_tank`. It bakes the world mesh through an ECS `NavMeshComponent` and
 lets left-clicks request async movement on the tank's `NavMeshAgentComponent`. It
 renders:
 
@@ -271,7 +272,7 @@ cell size so the central-hole layout produces a clean visible detour.
 
 ## Recast Examples
 
-`karma_recast_navigation_examples` is a headless parity runner for the upstream
+`navigation_samples_headless` is a headless parity runner for the upstream
 RecastDemo samples and tools. It uses copied assets in
 `examples/assets/navigation/recast` and exposes scenarios through Karma's public
 navigation API rather than RecastDemo internals:
@@ -286,17 +287,17 @@ navigation API rather than RecastDemo internals:
 Run all scenarios with:
 
 ```bash
-cmake --build build/headless --target karma_recast_navigation_examples --parallel 1
-./build/headless/karma_recast_navigation_examples all
+cmake --build build/headless --target navigation_samples_headless --parallel 1
+./build/headless/examples/navigation/samples/headless all
 ```
 
 The graphical RecastDemo recreations are split into one Karma binary per
 upstream sample class:
 
-- `karma_recast_solo_mesh_example`
-- `karma_recast_tile_mesh_example`
-- `karma_recast_temp_obstacles_example`
-- `karma_recast_debug_example`
+- `navigation_solo_mesh`
+- `navigation_tile_mesh`
+- `navigation_temp_obstacles`
+- `navigation_debug`
 
 Each binary renders the matching copied OBJ asset, owns its own ECS scene, and
 uses Karma's ImGui adapter for the sample settings, tools, debug draw modes,
@@ -306,11 +307,16 @@ agents, and Recast build-debug layers exposed by that sample.
 Build them with:
 
 ```bash
-cmake --build build/portable --target karma_recast_solo_mesh_example karma_recast_tile_mesh_example karma_recast_temp_obstacles_example karma_recast_debug_example --parallel 1
+cmake --build build/portable --target \
+  navigation_solo_mesh \
+  navigation_tile_mesh \
+  navigation_temp_obstacles \
+  navigation_debug \
+  --parallel 1
 ```
 
-`karma_recast_navigation_graphical_example` remains as an extra combined gallery
-for quick side-by-side smoke checks. Run it with `all`, `solo`, `tile`,
+`navigation_samples_gallery` remains as an extra combined gallery for quick
+side-by-side smoke checks. Run it with `all`, `solo`, `tile`,
 `temp-obstacles`, `crowd`, or `debug`.
 
 ## Tests

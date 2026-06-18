@@ -17,9 +17,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <future>
+#include <initializer_list>
 #include <limits>
+#include <memory>
 #include <string>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 namespace karma::renderer_backend {
@@ -293,6 +296,85 @@ void DiligentBackend::bindForwardPlusResourcesToSrb(Diligent::IShaderResourceBin
   }
 }
 
+void DiligentBackend::initializeMaterialBindingForPipeline(
+    MaterialRecord& record,
+    Diligent::IPipelineState* pso,
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb) {
+  srb.Release();
+  if (!pso) {
+    return;
+  }
+
+  pso->CreateShaderResourceBinding(&srb, true);
+  if (!srb) {
+    return;
+  }
+
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
+    var->Set(sampler_color_);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
+    var->Set(sampler_data_);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
+    var->Set(record.base_color_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
+    var->Set(record.normal_srv);
+  }
+  if (auto* var =
+          srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
+    var->Set(record.metallic_roughness_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
+    var->Set(record.occlusion_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
+    var->Set(record.emissive_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatTex")) {
+    var->Set(record.clearcoat_srv);
+  }
+  if (auto* var =
+          srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatRoughnessTex")) {
+    var->Set(record.clearcoat_roughness_srv);
+  }
+  if (auto* var =
+          srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatNormalTex")) {
+    var->Set(record.clearcoat_normal_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SheenColorTex")) {
+    var->Set(record.sheen_color_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SheenRoughnessTex")) {
+    var->Set(record.sheen_roughness_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_TransmissionTex")) {
+    var->Set(record.transmission_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ThicknessTex")) {
+    var->Set(record.thickness_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+    var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+    var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+    var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneColor")) {
+    var->Set(default_base_color_);
+  }
+  ensureParticleFallbackDepthResource();
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth")) {
+    var->Set(particle_fallback_depth_srv_);
+  }
+  bindForwardPlusResourcesToSrb(srb);
+  bindShadowResourcesToSrb(srb);
+}
+
 void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   const auto total_start = core::SteadyClock::now();
   auto stage_start = total_start;
@@ -349,80 +431,7 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
                             const char* label,
                             Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb) {
     const auto srb_start = core::SteadyClock::now();
-    srb.Release();
-    if (!pso) {
-      logRenderResourceDiag("material_bindings", label, srb_start, core::SteadyClock::now());
-      return;
-    }
-
-    pso->CreateShaderResourceBinding(&srb, true);
-    if (!srb) {
-      logRenderResourceDiag("material_bindings", label, srb_start, core::SteadyClock::now());
-      return;
-    }
-
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
-      var->Set(sampler_color_);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
-      var->Set(sampler_data_);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex")) {
-      var->Set(record.base_color_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_NormalTex")) {
-      var->Set(record.normal_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex")) {
-      var->Set(record.metallic_roughness_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex")) {
-      var->Set(record.occlusion_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex")) {
-      var->Set(record.emissive_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatTex")) {
-      var->Set(record.clearcoat_srv);
-    }
-    if (auto* var =
-            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatRoughnessTex")) {
-      var->Set(record.clearcoat_roughness_srv);
-    }
-    if (auto* var =
-            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatNormalTex")) {
-      var->Set(record.clearcoat_normal_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SheenColorTex")) {
-      var->Set(record.sheen_color_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SheenRoughnessTex")) {
-      var->Set(record.sheen_roughness_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_TransmissionTex")) {
-      var->Set(record.transmission_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ThicknessTex")) {
-      var->Set(record.thickness_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
-      var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
-      var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-      var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneColor")) {
-      var->Set(default_base_color_);
-    }
-    ensureParticleFallbackDepthResource();
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth")) {
-      var->Set(particle_fallback_depth_srv_);
-    }
-    bindForwardPlusResourcesToSrb(srb);
-    bindShadowResourcesToSrb(srb);
+    initializeMaterialBindingForPipeline(record, pso, srb);
     logRenderResourceDiag("material_bindings", label, srb_start, core::SteadyClock::now());
   };
 
@@ -449,7 +458,87 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   } else {
     record.additive_double_sided_srb.Release();
   }
+  record.custom_srb.Release();
+  record.custom_transparent_srb.Release();
+  record.custom_transparent_double_sided_srb.Release();
+  record.custom_additive_srb.Release();
+  record.custom_additive_double_sided_srb.Release();
   logRenderResourceDiag("material_bindings", "total", total_start, core::SteadyClock::now());
+}
+
+bool DiligentBackend::materialUsesCustomForwardPipeline(const MaterialRecord& material) const {
+  if (material.pipeline.type == renderer::MaterialPipelineDesc::Type::Custom) {
+    return !material.pipeline.vertex_shader_path.empty() &&
+           !material.pipeline.fragment_shader_path.empty();
+  }
+
+  if (!material.pipeline.vertex_shader_path.empty() ||
+      !material.pipeline.fragment_shader_path.empty()) {
+    return false;
+  }
+
+  return !material.desc.vertex_shader_path.empty() &&
+         !material.desc.fragment_shader_path.empty();
+}
+
+Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
+    MaterialRecord& material,
+    ForwardPipelineVariant variant,
+    bool custom_pipeline) {
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>* target = nullptr;
+  Diligent::IPipelineState* pso = nullptr;
+
+  if (custom_pipeline) {
+    pso = ensureCustomForwardPipeline(material, variant);
+    switch (variant) {
+      case ForwardPipelineVariant::Opaque:
+        target = std::addressof(material.custom_srb);
+        break;
+      case ForwardPipelineVariant::Transparent:
+        target = std::addressof(material.custom_transparent_srb);
+        break;
+      case ForwardPipelineVariant::TransparentDoubleSided:
+        target = std::addressof(material.custom_transparent_double_sided_srb);
+        break;
+      case ForwardPipelineVariant::Additive:
+        target = std::addressof(material.custom_additive_srb);
+        break;
+      case ForwardPipelineVariant::AdditiveDoubleSided:
+        target = std::addressof(material.custom_additive_double_sided_srb);
+        break;
+      case ForwardPipelineVariant::DepthPrepass:
+        return nullptr;
+    }
+  } else {
+    pso = ensureForwardPipeline(variant);
+    switch (variant) {
+      case ForwardPipelineVariant::Opaque:
+        target = std::addressof(material.srb);
+        break;
+      case ForwardPipelineVariant::Transparent:
+        target = std::addressof(material.transparent_srb);
+        break;
+      case ForwardPipelineVariant::TransparentDoubleSided:
+        target = std::addressof(material.transparent_double_sided_srb);
+        break;
+      case ForwardPipelineVariant::Additive:
+        target = std::addressof(material.additive_srb);
+        break;
+      case ForwardPipelineVariant::AdditiveDoubleSided:
+        target = std::addressof(material.additive_double_sided_srb);
+        break;
+      case ForwardPipelineVariant::DepthPrepass:
+        return nullptr;
+    }
+  }
+
+  if (target == nullptr || pso == nullptr) {
+    return nullptr;
+  }
+  if (!*target) {
+    initializeMaterialBindingForPipeline(material, pso, *target);
+  }
+  return target->RawPtr();
 }
 
 void DiligentBackend::initializeDefaultMaterialBinding(
@@ -1308,10 +1397,38 @@ const DiligentBackend::ImportedMaterialTemplateCacheEntry* DiligentBackend::getI
   return &it->second;
 }
 
-renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDesc& material) {
+renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMaterialDesc& resolved) {
+  if (resolved.imported_material &&
+      resolved.material_asset_index != std::numeric_limits<uint32_t>::max()) {
+    const renderer::MaterialId imported =
+        createMaterialFromImportedPayload(resolved.material_asset_path,
+                                          resolved.material_asset_index,
+                                          *resolved.imported_material);
+    if (imported != renderer::kInvalidMaterial) {
+      return imported;
+    }
+  }
+  if (!resolved.material_asset_path.empty() &&
+      resolved.material_asset_index != std::numeric_limits<uint32_t>::max()) {
+    const renderer::MaterialId imported =
+        createMaterialFromAsset(resolved.material_asset_path, resolved.material_asset_index);
+    if (imported != renderer::kInvalidMaterial) {
+      return imported;
+    }
+  }
+
+  renderer::MaterialDesc material = resolved.surface;
+  if (!resolved.pipeline.vertex_shader_path.empty()) {
+    material.vertex_shader_path = resolved.pipeline.vertex_shader_path;
+  }
+  if (!resolved.pipeline.fragment_shader_path.empty()) {
+    material.fragment_shader_path = resolved.pipeline.fragment_shader_path;
+  }
+
   const renderer::MaterialId id = nextMaterialId_++;
   MaterialRecord record{};
   initializeTextureCoordTransforms(record);
+  record.pipeline = resolved.pipeline;
   record.desc = material;
   record.base_color_factor = glm::vec4(material.base_color.r,
                                        material.base_color.g,
@@ -1370,6 +1487,39 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
   record.volume_absorption = material.volume_absorption;
   record.volume_distortion_strength = material.volume_distortion_strength;
   record.volume_noise_strength = material.volume_noise_strength;
+  auto assign_custom_material_param =
+      [&](size_t index, const renderer::MaterialParameterValue& value) {
+    glm::vec4 parsed{0.0f};
+    if (const auto* f = std::get_if<float>(&value)) {
+      parsed.x = *f;
+    } else if (const auto* i = std::get_if<int32_t>(&value)) {
+      parsed.x = static_cast<float>(*i);
+    } else if (const auto* u = std::get_if<uint32_t>(&value)) {
+      parsed.x = static_cast<float>(*u);
+    } else if (const auto* b = std::get_if<bool>(&value)) {
+      parsed.x = *b ? 1.0f : 0.0f;
+    } else if (const auto* color = std::get_if<renderer::Color>(&value)) {
+      parsed = glm::vec4(color->r, color->g, color->b, color->a);
+    } else if (const auto* v = std::get_if<glm::vec2>(&value)) {
+      parsed = glm::vec4(*v, 0.0f, 0.0f);
+    } else if (const auto* v = std::get_if<glm::vec3>(&value)) {
+      parsed = glm::vec4(*v, 0.0f);
+    } else if (const auto* v = std::get_if<glm::vec4>(&value)) {
+      parsed = *v;
+    } else {
+      return;
+    }
+    if (index < record.custom_material_params.size()) {
+      record.custom_material_params[index] = parsed;
+      record.custom_material_param_overrides[index] = true;
+    }
+  };
+  for (size_t index = 0; index < record.custom_material_params.size(); ++index) {
+    const std::string key = "material_params" + std::to_string(index);
+    if (const auto param_it = resolved.params.find(key); param_it != resolved.params.end()) {
+      assign_custom_material_param(index, param_it->second);
+    }
+  }
   record.blend_mode = material.blend_mode;
   if (material.base_color_texture != renderer::kInvalidTexture) {
     auto tex_it = textures_.find(material.base_color_texture);
@@ -1377,6 +1527,61 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::MaterialDes
       record.base_color_srv = tex_it->second.srv;
     }
   }
+  auto assign_texture_path =
+      [&](std::initializer_list<const char*> keys,
+          Diligent::RefCntAutoPtr<Diligent::ITextureView>& target,
+          bool srgb,
+          const char* label) {
+    for (const char* key : keys) {
+      const auto texture_it = resolved.textures.find(key);
+      if (texture_it == resolved.textures.end()) {
+        continue;
+      }
+      if (auto srv = loadTextureFromFile(texture_it->second, srgb, label)) {
+        target = std::move(srv);
+      }
+      return;
+    }
+  };
+  assign_texture_path({"base_color", "baseColor", "albedo", "diffuse"},
+                      record.base_color_srv,
+                      true,
+                      "materialBaseColor");
+  assign_texture_path({"normal", "normal_map", "normalMap"},
+                      record.normal_srv,
+                      false,
+                      "materialNormal");
+  assign_texture_path({"metallic_roughness", "metallicRoughness"},
+                      record.metallic_roughness_srv,
+                      false,
+                      "materialMetallicRoughness");
+  assign_texture_path({"occlusion", "ao"},
+                      record.occlusion_srv,
+                      false,
+                      "materialOcclusion");
+  assign_texture_path({"emissive"}, record.emissive_srv, true, "materialEmissive");
+  assign_texture_path({"clearcoat"}, record.clearcoat_srv, false, "materialClearcoat");
+  assign_texture_path({"clearcoat_roughness", "clearcoatRoughness"},
+                      record.clearcoat_roughness_srv,
+                      false,
+                      "materialClearcoatRoughness");
+  assign_texture_path({"clearcoat_normal", "clearcoatNormal"},
+                      record.clearcoat_normal_srv,
+                      false,
+                      "materialClearcoatNormal");
+  assign_texture_path({"sheen_color", "sheenColor"},
+                      record.sheen_color_srv,
+                      true,
+                      "materialSheenColor");
+  assign_texture_path({"sheen_roughness", "sheenRoughness"},
+                      record.sheen_roughness_srv,
+                      false,
+                      "materialSheenRoughness");
+  assign_texture_path({"transmission"},
+                      record.transmission_srv,
+                      false,
+                      "materialTransmission");
+  assign_texture_path({"thickness"}, record.thickness_srv, false, "materialThickness");
   initializeMaterialBindings(record);
 
   materials_[id] = std::move(record);
@@ -1472,122 +1677,6 @@ renderer::MaterialId DiligentBackend::createMaterialFromImportedPayload(
   return id;
 }
 
-renderer::MaterialSetId DiligentBackend::createMaterialSetFromMesh(
-    renderer::MeshId mesh,
-    const renderer::MaterialResourceDesc& desc) {
-  const auto total_start = core::SteadyClock::now();
-  auto mesh_it = meshes_.find(mesh);
-  if (mesh_it == meshes_.end()) {
-    logRenderResourceDiag("material_set", "total", total_start, core::SteadyClock::now());
-    return renderer::kInvalidMaterialSet;
-  }
-
-  const auto& mesh_record = mesh_it->second;
-  const glm::vec4 tint(desc.base_color_tint.r,
-                       desc.base_color_tint.g,
-                       desc.base_color_tint.b,
-                       desc.base_color_tint.a);
-
-  auto clone_material = [&](const MaterialRecord& source) -> renderer::MaterialId {
-    const renderer::MaterialId id = nextMaterialId_++;
-    MaterialRecord clone = source;
-    clone.base_color_factor *= tint;
-    clone.desc.base_color = math::Color{clone.base_color_factor.r,
-                                        clone.base_color_factor.g,
-                                        clone.base_color_factor.b,
-                                        clone.base_color_factor.a};
-    materials_[id] = std::move(clone);
-    return id;
-  };
-
-  auto create_default_tinted_material = [&]() -> renderer::MaterialId {
-    renderer::MaterialDesc material_desc{};
-    material_desc.base_color = math::Color{mesh_record.base_color.r * tint.r,
-                                           mesh_record.base_color.g * tint.g,
-                                           mesh_record.base_color.b * tint.b,
-                                           mesh_record.base_color.a * tint.a};
-    return createMaterial(material_desc);
-  };
-
-  MaterialSetRecord set_record{};
-  set_record.source_mesh = mesh;
-
-  switch (desc.kind) {
-    case renderer::MaterialResourceDesc::Kind::MeshTint:
-      break;
-    case renderer::MaterialResourceDesc::Kind::Explicit: {
-      const std::size_t material_count =
-          mesh_record.submeshes.empty() ? 1u : mesh_record.submeshes.size();
-      set_record.materials.reserve(material_count);
-      for (std::size_t i = 0; i < material_count; ++i) {
-        set_record.materials.push_back(createMaterial(desc.material));
-      }
-      break;
-    }
-    case renderer::MaterialResourceDesc::Kind::ImportedAssetMaterial: {
-      const std::size_t material_count =
-          mesh_record.submeshes.empty() ? 1u : mesh_record.submeshes.size();
-      set_record.materials.reserve(material_count);
-      for (std::size_t i = 0; i < material_count; ++i) {
-        renderer::MaterialId material = renderer::kInvalidMaterial;
-        if (desc.imported_material) {
-          material = createMaterialFromImportedPayload(desc.material_asset_path,
-                                                       desc.material_asset_index,
-                                                       *desc.imported_material);
-        } else {
-          material = createMaterialFromAsset(desc.material_asset_path, desc.material_asset_index);
-        }
-        if (material == renderer::kInvalidMaterial) {
-          material = createMaterial(desc.material);
-        }
-        set_record.materials.push_back(material);
-      }
-      break;
-    }
-  }
-
-  if (desc.kind == renderer::MaterialResourceDesc::Kind::Explicit ||
-      desc.kind == renderer::MaterialResourceDesc::Kind::ImportedAssetMaterial) {
-    if (set_record.materials.empty()) {
-      logRenderResourceDiag("material_set", "total", total_start, core::SteadyClock::now());
-      return renderer::kInvalidMaterialSet;
-    }
-    const renderer::MaterialSetId set_id = nextMaterialSetId_++;
-    material_sets_[set_id] = std::move(set_record);
-    logRenderResourceDiag("material_set", "total", total_start, core::SteadyClock::now());
-    return set_id;
-  }
-
-  if (!mesh_record.submeshes.empty()) {
-    set_record.materials.reserve(mesh_record.submeshes.size());
-    for (const auto& submesh : mesh_record.submeshes) {
-      renderer::MaterialId material_id = renderer::kInvalidMaterial;
-      if (submesh.material != renderer::kInvalidMaterial) {
-        auto material_it = materials_.find(submesh.material);
-        if (material_it != materials_.end()) {
-          material_id = clone_material(material_it->second);
-        }
-      }
-      if (material_id == renderer::kInvalidMaterial) {
-        material_id = create_default_tinted_material();
-      }
-      set_record.materials.push_back(material_id);
-    }
-  } else {
-    set_record.materials.push_back(create_default_tinted_material());
-  }
-
-  if (set_record.materials.empty()) {
-    logRenderResourceDiag("material_set", "total", total_start, core::SteadyClock::now());
-    return renderer::kInvalidMaterialSet;
-  }
-
-  const renderer::MaterialSetId set_id = nextMaterialSetId_++;
-  material_sets_[set_id] = std::move(set_record);
-  logRenderResourceDiag("material_set", "total", total_start, core::SteadyClock::now());
-  return set_id;
-}
-
 void DiligentBackend::updateMaterial(renderer::MaterialId material,
                                      const renderer::MaterialDesc& desc) {
   auto it = materials_.find(material);
@@ -1666,19 +1755,6 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material,
 
 void DiligentBackend::destroyMaterial(renderer::MaterialId material) {
   materials_.erase(material);
-}
-
-void DiligentBackend::destroyMaterialSet(renderer::MaterialSetId set) {
-  auto it = material_sets_.find(set);
-  if (it == material_sets_.end()) {
-    return;
-  }
-  for (renderer::MaterialId material : it->second.materials) {
-    if (material != renderer::kInvalidMaterial) {
-      materials_.erase(material);
-    }
-  }
-  material_sets_.erase(it);
 }
 
 void DiligentBackend::setMaterialFloat(renderer::MaterialId material,

@@ -38,24 +38,6 @@
         "TagComponent": {
           "name": "beam"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0,
@@ -83,24 +65,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_light_0"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            -7.9555,
-            4.0975,
-            -3.4132
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -142,24 +106,6 @@
         "TagComponent": {
           "name": "beam_light_1"
         },
-        "LocalTransformComponent": {
-          "position": [
-            -4.8736,
-            2.277,
-            -2.8742
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             -4.8736,
@@ -199,24 +145,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_light_2"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            -1.2182,
-            2.8607,
-            -4.6603
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -258,24 +186,6 @@
         "TagComponent": {
           "name": "beam_light_3"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0.6275,
-            1.9098,
-            -0.4058
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0.6275,
@@ -315,24 +225,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_light_4"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            4.0246,
-            3.073,
-            -1.7853
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -374,24 +266,6 @@
         "TagComponent": {
           "name": "beam_light_5"
         },
-        "LocalTransformComponent": {
-          "position": [
-            8.5249,
-            1.7081,
-            0.9211
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             8.5249,
@@ -431,24 +305,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_volume_0"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            -6.41455,
-            3.18725,
-            -3.1437
-          ],
-          "rotation": [
-            0.0,
-            -0.077382,
-            -0.261362,
-            0.962134
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -505,24 +361,6 @@
         "TagComponent": {
           "name": "beam_volume_1"
         },
-        "LocalTransformComponent": {
-          "position": [
-            -3.0459,
-            2.56885,
-            -3.76725
-          ],
-          "rotation": [
-            0.0,
-            0.223553,
-            0.073058,
-            0.97195
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             -3.0459,
@@ -577,24 +415,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_volume_2"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            -0.29535,
-            2.38525,
-            -2.53305
-          ],
-          "rotation": [
-            0.0,
-            -0.539026,
-            -0.120475,
-            0.833629
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -651,24 +471,6 @@
         "TagComponent": {
           "name": "beam_volume_3"
         },
-        "LocalTransformComponent": {
-          "position": [
-            2.32605,
-            2.4914,
-            -1.09555
-          ],
-          "rotation": [
-            0.0,
-            0.184794,
-            0.155819,
-            0.970346
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             2.32605,
@@ -723,24 +525,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_volume_4"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            6.27475,
-            2.39055,
-            -0.4321
-          ],
-          "rotation": [
-            0.0,
-            -0.260766,
-            -0.13151,
-            0.956403
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -797,24 +581,6 @@
         "TagComponent": {
           "name": "beam_flare_0"
         },
-        "LocalTransformComponent": {
-          "position": [
-            -7.9555,
-            4.0975,
-            -3.4132
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             -7.9555,
@@ -869,24 +635,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_flare_1"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            -4.8736,
-            2.277,
-            -2.8742
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -943,24 +691,6 @@
         "TagComponent": {
           "name": "beam_flare_2"
         },
-        "LocalTransformComponent": {
-          "position": [
-            -1.2182,
-            2.8607,
-            -4.6603
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             -1.2182,
@@ -1015,24 +745,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_flare_3"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            0.6275,
-            1.9098,
-            -0.4058
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -1089,24 +801,6 @@
         "TagComponent": {
           "name": "beam_flare_4"
         },
-        "LocalTransformComponent": {
-          "position": [
-            4.0246,
-            3.073,
-            -1.7853
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             4.0246,
@@ -1161,24 +855,6 @@
       "components": {
         "TagComponent": {
           "name": "beam_flare_5"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            8.5249,
-            1.7081,
-            0.9211
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [

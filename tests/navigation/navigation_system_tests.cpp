@@ -179,7 +179,7 @@ void testNavigationSystemCrowdAgentComponent() {
   assert(std::abs(transform.getPosition().x - 4.0f) < 0.75f);
 }
 
-void testCrowdAgentPlayerControllerVelocityMode() {
+void testCrowdAgentCharacterControllerVelocityMode() {
   karma::ecs::World world;
 
   const auto surface = world.createEntity();
@@ -200,11 +200,12 @@ void testCrowdAgentPlayerControllerVelocityMode() {
   const auto agent_entity = world.createEntity();
   const karma::math::Vec3 start{-4.0f, 0.1f, 0.0f};
   world.add(agent_entity, karma::components::TransformComponent{start});
-  world.add(agent_entity, karma::components::BoxColliderComponent{});
-  world.add(agent_entity, karma::components::PlayerControllerComponent{});
+  world.add(agent_entity, karma::components::ColliderComponent::box());
+  world.add(agent_entity, karma::components::CharacterControllerComponent{});
   karma::components::NavCrowdAgentComponent crowd_agent;
   crowd_agent.crowd_entity = nav_entity;
-  crowd_agent.movement_mode = karma::components::NavCrowdMovementMode::PlayerControllerVelocity;
+  crowd_agent.movement_mode =
+      karma::components::NavCrowdMovementMode::CharacterControllerVelocity;
   crowd_agent.params.radius = 0.2f;
   crowd_agent.params.height = 1.0f;
   crowd_agent.params.max_speed = 2.5f;
@@ -220,7 +221,7 @@ void testCrowdAgentPlayerControllerVelocityMode() {
   }
 
   const auto& transform = world.get<karma::components::TransformComponent>(agent_entity);
-  const auto& controller = world.get<karma::components::PlayerControllerComponent>(agent_entity);
+  const auto& controller = world.get<karma::components::CharacterControllerComponent>(agent_entity);
   assert(std::abs(transform.getPosition().x - start.x) < 0.001f);
   assert(std::abs(transform.getPosition().z - start.z) < 0.001f);
   assert(std::abs(controller.desiredVelocity().x) > 0.001f ||
@@ -298,7 +299,12 @@ void testExampleWorldGlbCanBake() {
   karma::ecs::World world;
   const auto world_entity = world.createEntity();
   world.add(world_entity, karma::components::TransformComponent{});
+  const std::vector<karma::geometry::MeshData> meshes =
+      karma::content::importMeshes(world_path);
+  assert(!meshes.empty());
   world.add(world_entity, karma::components::NavMeshSurfaceComponent{
+                              .mesh_data =
+                                  std::make_shared<karma::geometry::MeshData>(combineMeshes(meshes)),
                               .mesh_key = world_path.string(),
                           });
 

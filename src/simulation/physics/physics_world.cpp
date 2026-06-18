@@ -1,6 +1,6 @@
 #include "karma/simulation/physics/physics_world.hpp"
 #include "karma/simulation/physics/backend.hpp"
-#include "karma/simulation/physics/player_controller.hpp"
+#include "karma/simulation/physics/character_controller.hpp"
 
 namespace karma::physics {
 
@@ -12,9 +12,6 @@ World::~World() = default;
 void World::update(float deltaTime) {
     if (backend_) {
         backend_->update(deltaTime);
-    }
-    if (playerController_) {
-        playerController_->update(deltaTime);
     }
 }
 
@@ -40,6 +37,20 @@ Constraint World::createConstraint(const PhysicsConstraintDesc& desc,
     return Constraint(backend_->createConstraint(desc, bodyA, bodyB));
 }
 
+Vehicle World::createVehicle(const PhysicsVehicleDesc& desc, std::uintptr_t body) {
+    if (!backend_) {
+        return Vehicle();
+    }
+    return Vehicle(backend_->createVehicle(desc, body));
+}
+
+SoftBody World::createSoftBody(const PhysicsSoftBodyDesc& desc) {
+    if (!backend_) {
+        return SoftBody();
+    }
+    return SoftBody(backend_->createSoftBody(desc));
+}
+
 RigidBody World::createBoxBody(const glm::vec3& halfExtents,
                                float mass,
                                const glm::vec3& position,
@@ -53,17 +64,11 @@ RigidBody World::createBoxBody(const glm::vec3& halfExtents,
     return createBody(desc);
 }
 
-PlayerController& World::createPlayer(const glm::vec3& size) {
+CharacterController World::createCharacterController(const glm::vec3& size) {
     if (!backend_) {
-        playerController_ = std::make_unique<PlayerController>();
-        return *playerController_;
+        return CharacterController();
     }
-    playerController_ = std::make_unique<PlayerController>(backend_->createPlayer(size));
-    return *playerController_;
-}
-
-PlayerController& World::createPlayer() {
-    return createPlayer(glm::vec3(1.0f, 2.0f, 1.0f));
+    return CharacterController(backend_->createCharacterController(size));
 }
 
 StaticBody World::createStaticMesh(const std::string& meshPath) {

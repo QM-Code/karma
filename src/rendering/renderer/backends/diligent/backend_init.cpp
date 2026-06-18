@@ -807,6 +807,261 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   return out_pso->RawPtr();
 }
 
+Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
+    const MaterialRecord& material,
+    ForwardPipelineVariant variant) {
+  if (variant == ForwardPipelineVariant::DepthPrepass ||
+      !materialUsesCustomForwardPipeline(material)) {
+    return nullptr;
+  }
+
+  const bool pipeline_desc_custom =
+      material.pipeline.type == renderer::MaterialPipelineDesc::Type::Custom;
+  const std::filesystem::path vertex_path =
+      pipeline_desc_custom ? material.pipeline.vertex_shader_path
+                           : material.desc.vertex_shader_path;
+  const std::filesystem::path fragment_path =
+      pipeline_desc_custom ? material.pipeline.fragment_shader_path
+                           : material.desc.fragment_shader_path;
+  const std::string vertex_entry =
+      pipeline_desc_custom && !material.pipeline.vertex_entry_point.empty()
+          ? material.pipeline.vertex_entry_point
+          : std::string("main");
+  const std::string fragment_entry =
+      pipeline_desc_custom && !material.pipeline.fragment_entry_point.empty()
+          ? material.pipeline.fragment_entry_point
+          : std::string("main");
+
+  std::string cache_key = std::to_string(static_cast<uint32_t>(variant));
+  cache_key.push_back('|');
+  cache_key.append(vertex_path.string());
+  cache_key.push_back('|');
+  cache_key.append(fragment_path.string());
+  cache_key.push_back('|');
+  cache_key.append(vertex_entry);
+  cache_key.push_back('|');
+  cache_key.append(fragment_entry);
+  cache_key.append("|depth_test=");
+  cache_key.append(material.desc.depth_test ? "1" : "0");
+  cache_key.append("|depth_write=");
+  cache_key.append(material.desc.depth_write ? "1" : "0");
+  cache_key.append("|double_sided=");
+  cache_key.append(material.desc.double_sided ? "1" : "0");
+  for (const std::string& define : material.pipeline.defines) {
+    cache_key.push_back('|');
+    cache_key.append(define);
+  }
+
+  auto& cached = custom_forward_pipelines_[cache_key];
+  if (cached.attempted) {
+    return cached.pso.RawPtr();
+  }
+  cached.attempted = true;
+
+  if (!device_ || vertex_path.empty() || fragment_path.empty()) {
+    return nullptr;
+  }
+
+  const std::vector<unsigned char> vs_bytes = readFileBytes(vertex_path);
+  const std::vector<unsigned char> ps_bytes = readFileBytes(fragment_path);
+  if (vs_bytes.empty() || ps_bytes.empty()) {
+    spdlog::warn("Failed to load custom material shaders: vertex='{}' fragment='{}'",
+                 vertex_path.string(),
+                 fragment_path.string());
+    return nullptr;
+  }
+  std::string vs_source(vs_bytes.begin(), vs_bytes.end());
+  std::string ps_source(ps_bytes.begin(), ps_bytes.end());
+
+  struct ParsedDefine {
+    std::string name;
+    std::string value;
+  };
+  std::vector<ParsedDefine> parsed_defines;
+  parsed_defines.reserve(material.pipeline.defines.size() + 1u);
+  parsed_defines.push_back(ParsedDefine{.name = "KARMA_CUSTOM_MATERIAL", .value = "1"});
+  for (const std::string& define : material.pipeline.defines) {
+    if (define.empty()) {
+      continue;
+    }
+    const size_t equals = define.find('=');
+    if (equals == std::string::npos) {
+      parsed_defines.push_back(ParsedDefine{.name = define, .value = "1"});
+    } else if (equals > 0) {
+      parsed_defines.push_back(ParsedDefine{
+          .name = define.substr(0, equals),
+          .value = define.substr(equals + 1),
+      });
+    }
+  }
+  std::vector<Diligent::ShaderMacro> macros;
+  macros.reserve(parsed_defines.size());
+  for (const ParsedDefine& define : parsed_defines) {
+    macros.push_back(Diligent::ShaderMacro{define.name.c_str(), define.value.c_str()});
+  }
+  Diligent::ShaderMacroArray macro_array{
+      macros.empty() ? nullptr : macros.data(),
+      static_cast<Diligent::Uint32>(macros.size()),
+  };
+
+  Diligent::ShaderCreateInfo shader_ci{};
+  shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
+  shader_ci.Macros = macro_array;
+
+  Diligent::RefCntAutoPtr<Diligent::IShader> vs;
+  shader_ci.Desc.Name = "Karma Custom Material VS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
+  shader_ci.EntryPoint = vertex_entry.c_str();
+  shader_ci.Source = vs_source.c_str();
+  vs = device_with_cache_.CreateShader(shader_ci);
+
+  Diligent::RefCntAutoPtr<Diligent::IShader> ps;
+  shader_ci.Desc.Name = "Karma Custom Material PS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+  shader_ci.EntryPoint = fragment_entry.c_str();
+  shader_ci.Source = ps_source.c_str();
+  ps = device_with_cache_.CreateShader(shader_ci);
+  if (!vs || !ps) {
+    spdlog::warn("Failed to compile custom material shaders: vertex='{}' fragment='{}'",
+                 vertex_path.string(),
+                 fragment_path.string());
+    return nullptr;
+  }
+
+  const bool double_sided = material.desc.double_sided ||
+                            variant == ForwardPipelineVariant::TransparentDoubleSided ||
+                            variant == ForwardPipelineVariant::AdditiveDoubleSided;
+  const bool transparent = variant == ForwardPipelineVariant::Transparent ||
+                           variant == ForwardPipelineVariant::TransparentDoubleSided ||
+                           variant == ForwardPipelineVariant::Additive ||
+                           variant == ForwardPipelineVariant::AdditiveDoubleSided;
+  const bool additive = variant == ForwardPipelineVariant::Additive ||
+                        variant == ForwardPipelineVariant::AdditiveDoubleSided;
+
+  std::string pso_name = "Karma Custom Material Pipeline";
+  if (transparent) {
+    pso_name.append(additive ? " Additive" : " Transparent");
+  }
+  if (double_sided) {
+    pso_name.append(" DoubleSided");
+  }
+
+  Diligent::GraphicsPipelineStateCreateInfo pso_ci{};
+  pso_ci.PSODesc.Name = pso_name.c_str();
+  pso_ci.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
+  pso_ci.pVS = vs;
+  pso_ci.pPS = ps;
+
+  auto& graphics = pso_ci.GraphicsPipeline;
+  graphics.NumRenderTargets = 1u;
+  graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
+                                       : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+  graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
+                                   : Diligent::TEX_FORMAT_D32_FLOAT;
+  graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  graphics.RasterizerDesc.CullMode =
+      double_sided ? Diligent::CULL_MODE_NONE : Diligent::CULL_MODE_BACK;
+  graphics.RasterizerDesc.FrontCounterClockwise = true;
+  graphics.DepthStencilDesc.DepthEnable = material.desc.depth_test;
+  graphics.DepthStencilDesc.DepthWriteEnable = transparent ? false : material.desc.depth_write;
+  graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
+  if (transparent) {
+    auto& blend = graphics.BlendDesc.RenderTargets[0];
+    blend.BlendEnable = true;
+    blend.SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
+    blend.DestBlend = additive ? Diligent::BLEND_FACTOR_ONE
+                               : Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+    blend.BlendOp = Diligent::BLEND_OPERATION_ADD;
+    blend.SrcBlendAlpha = Diligent::BLEND_FACTOR_ONE;
+    blend.DestBlendAlpha = additive ? Diligent::BLEND_FACTOR_ONE
+                                    : Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
+    blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
+  }
+
+  constexpr Diligent::Uint32 kInstanceStride =
+      static_cast<Diligent::Uint32>(sizeof(float) * 16);
+  Diligent::LayoutElement layout_elems[] = {
+      Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{2, 0, 4, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{3, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{10, 0, 2, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{8, 0, 4, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{9, 0, 4, Diligent::VT_FLOAT32, false},
+      Diligent::LayoutElement{4, 1, 4, Diligent::VT_FLOAT32, false,
+                              0u,
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 4),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 8),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
+                              static_cast<Diligent::Uint32>(sizeof(float) * 12),
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE}
+  };
+  graphics.InputLayout.LayoutElements = layout_elems;
+  graphics.InputLayout.NumElements =
+      static_cast<Diligent::Uint32>(sizeof(layout_elems) / sizeof(layout_elems[0]));
+
+  Diligent::ShaderResourceVariableDesc vars[] = {
+      {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_VERTEX, "SkinningConstants",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightIndices", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SamplerData", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SceneColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_PIXEL, "g_BaseColorTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_NormalTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_MetallicRoughnessTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_OcclusionTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_EmissiveTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatRoughnessTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ClearcoatNormalTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SheenColorTex", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SheenRoughnessTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_TransmissionTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_ThicknessTex",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE}
+  };
+  pso_ci.PSODesc.ResourceLayout.Variables = vars;
+  pso_ci.PSODesc.ResourceLayout.NumVariables =
+      static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
+
+  const auto pso_start = core::SteadyClock::now();
+  cached.pso = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
+  logRenderPipelineDiag("custom_forward", pso_name.c_str(), pso_start, core::SteadyClock::now());
+  if (!cached.pso) {
+    spdlog::warn("Failed to create custom material pipeline: vertex='{}' fragment='{}'",
+                 vertex_path.string(),
+                 fragment_path.string());
+    return nullptr;
+  }
+  bindForwardPipelineStaticResources(cached.pso.RawPtr());
+  return cached.pso.RawPtr();
+}
+
 void DiligentBackend::initializeDevice() {
 #if defined(ENGINE_FORCE_VULKAN)
   (void)window_;

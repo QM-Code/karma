@@ -491,18 +491,20 @@ void testHierarchyAndPlayback() {
   karma::scene::Scene scene;
 
   const auto root = world.createEntity();
-  world.add(root, karma::components::TransformComponent{});
-  world.add(root, karma::components::LocalTransformComponent{{10.0f, 0.0f, 0.0f}});
+  world.add(root, karma::components::TransformComponent{{10.0f, 0.0f, 0.0f}});
   const auto root_node = scene.createNode(root);
 
   const auto child = world.createEntity();
-  world.add(child, karma::components::TransformComponent{});
-  world.add(child, karma::components::LocalTransformComponent{{2.0f, 0.0f, 0.0f}});
+  world.add(child, karma::components::TransformComponent{{2.0f, 0.0f, 0.0f}});
   const auto child_node = scene.createNode(child);
   scene.reparent(child_node, root_node);
 
   karma::scene::updateWorldTransforms(world, scene);
-  assert(near(world.get<karma::components::TransformComponent>(child).getPosition().x, 12.0f));
+  const auto& initial_child_transform =
+      world.get<karma::components::TransformComponent>(child);
+  assert(near(initial_child_transform.getPosition().x, 12.0f));
+  assert(near(initial_child_transform.getInterpolatedPosition(0.0f).x, 12.0f));
+  assert(near(initial_child_transform.getInterpolatedPosition(0.5f).x, 12.0f));
 
   world.add(root, karma::components::AnimationPlayerComponent{
                       .clips = {makeMoveClip(4.0f)},
@@ -536,12 +538,10 @@ void testAnimatorStateMachineAndEvents() {
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{});
-  world.add(root, karma::components::LocalTransformComponent{});
   const auto root_node = scene.createNode(root);
 
   const auto child = world.createEntity();
   world.add(child, karma::components::TransformComponent{});
-  world.add(child, karma::components::LocalTransformComponent{});
   const auto child_node = scene.createNode(child);
   scene.reparent(child_node, root_node);
 
@@ -589,7 +589,7 @@ void testAnimatorStateMachineAndEvents() {
   animation_system.update(world, scene, 0.25f);
   assert(live_animator.event_queue.size() == 1);
   assert(live_animator.event_queue.front().name == "Footstep");
-  assert(near(world.get<karma::components::LocalTransformComponent>(child).position.x, 2.5f));
+  assert(near(world.get<karma::components::TransformComponent>(child).localPosition().x, 2.5f));
 
   animation_system.update(world, scene, 0.1f);
   assert(live_animator.event_queue.empty());
@@ -601,12 +601,10 @@ void testAnimatorBlendTreeAndRootMotion() {
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{});
-  world.add(root, karma::components::LocalTransformComponent{});
   const auto root_node = scene.createNode(root);
 
   const auto child = world.createEntity();
   world.add(child, karma::components::TransformComponent{});
-  world.add(child, karma::components::LocalTransformComponent{});
   const auto child_node = scene.createNode(child);
   scene.reparent(child_node, root_node);
 
@@ -649,7 +647,7 @@ void testAnimatorBlendTreeAndRootMotion() {
   animation_system.update(world, scene, 0.5f);
 
   auto& live_animator = world.get<karma::components::AnimatorComponent>(root);
-  assert(near(world.get<karma::components::LocalTransformComponent>(child).position.x, 3.0f));
+  assert(near(world.get<karma::components::TransformComponent>(child).localPosition().x, 3.0f));
   assert(live_animator.root_motion_delta.position);
   assert(near(live_animator.root_motion_delta.position->x, 2.0f));
 }
@@ -711,7 +709,6 @@ void testAnimationSystemUpdatesMorphWeights() {
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{});
-  world.add(root, karma::components::LocalTransformComponent{});
   scene.createNode(root);
 
   karma::geometry::MeshData bind_mesh{};
@@ -1148,11 +1145,6 @@ void testWalkingGlbImportSmoke() {
         runtime_world.setName(entity, prefab_node.name);
         runtime_world.add(entity,
                           karma::components::TransformComponent{
-                              prefab_node.world_position,
-                              prefab_node.world_rotation,
-                              prefab_node.world_scale});
-        runtime_world.add(entity,
-                          karma::components::LocalTransformComponent{
                               prefab_node.local_position,
                               prefab_node.local_rotation,
                               prefab_node.local_scale});

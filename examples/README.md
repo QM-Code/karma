@@ -1,41 +1,134 @@
-# Karma examples
+# Karma Examples
 
-This folder contains small, self-contained snippets that show how to use the
-Karma ECS + scene graph from game code.
+The built examples are grouped by domain. CMake target names use the category as
+the prefix, and executable names are normalized inside matching output
+directories under `build/examples/<category>/`.
 
-- `GameInit.cpp`: builds a simple scene with a player, camera, environment, and audio.
-- `GameLoop.cpp`: engine-owned loop with a game interface.
-- `main.cpp`: `karma_example`, the base tank/world movement demo. It uses WASD
-  or arrow-key movement, a follow camera, a radar render-target camera, a
-  shadow-casting directional sun at intensity `1.6`, local point lights, HDR
-  skybox lighting, and a small ImGui radar overlay.
-- `collision_events_example.cpp`: drivable trigger/contact demo built on the same tank/world setup as `karma_example`. It adds named trigger spheres, a `CollisionListenerComponent` on the player, backend-driven `ContactListenerComponent` solid contacts, `GroundContactComponent` floor/support state, jump, and an overlay that shows active overlaps, ground enter/exit, support info, and solid-contact normals.
-- `glb_scene_import_example.cpp`: minimal authored-scene import example using `world-with-lights.glb`.
-- `diligent_gltf_viewer_example.cpp`: Karma-native equivalent of the Diligent GLTFViewer sample using copied Diligent GLTFViewer assets under `examples/assets/diligent_gltf_viewer`, imported materials, the `papermill.ktx` environment, local inspection lights, right-mouse orbit, WASD/QE pan, Z/X zoom, and R reset. An optional first command-line argument can point at another glTF/GLB model.
-- `diligentfx_postprocess_example.cpp`: DiligentFX-inspired postprocess showcase using the same copied GLTFViewer helmet and `papermill.ktx` assets, with Karma-native bloom, tone/color controls, SSAO, screen-space reflections, TAA, and depth of field enabled through a camera-selected post-process profile.
-- `diligentfx_bloom_example.cpp`: focused DiligentFX Bloom-style scene using assets under `examples/assets/diligentfx_bloom`, the copied Bloom reference media, the local city GLB, emissive Karma materials, HDR local lights, right-mouse free camera, B bloom toggle, `-`/`=` intensity, and `[`/`]` radius controls.
-- `postwar_city_example.cpp`: free-fly graphics inspection scene for `postwar_city_-_exterior_scene.glb`, with explicit sun lighting, HDR skybox, right-mouse look, WASD movement, and Q/E vertical movement.
-- `navmesh_example.cpp`: click-to-move navigation sample using the same `world.glb`, `tank_final.glb`, HDR environment, and lighting style as `karma_example`. It marks the visible world with ECS `NavMeshComponent`/`NavMeshSurfaceComponent`, queues left-click movement through the engine-owned async `NavigationSystem`, and moves the tank with debug lines.
-- `recast_navigation_examples.cpp`: headless RecastDemo parity runner using copied Recast assets under `examples/assets/navigation/recast`. Build `karma_recast_navigation_examples` and run it with `all`, `solo`, `tile`, `temp-obstacles`, `crowd`, or `debug` to exercise Karma's public navigation API for solo/tiled bakes, Recast test-case path/raycast queries, tile rebuild/removal, DetourTileCache obstacles, DetourCrowd agents, partition modes, convex volumes, off-mesh links, pruning, snapshots, and advanced Detour query helpers.
-- `recast_solo_mesh_example.cpp`, `recast_tile_mesh_example.cpp`, `recast_temp_obstacles_example.cpp`, and `recast_debug_example.cpp`: one graphical Karma binary per upstream RecastDemo sample class. They share `recast_navigation_sample_app.cpp`, render the same copied Recast OBJ assets, expose sample settings/tools through Karma's ImGui adapter, and drive Karma ECS navigation components instead of RecastDemo internals.
-- `recast_navigation_graphical_example.cpp`: extra combined RecastDemo gallery built from ECS panels and Karma navigation components. Build `karma_recast_navigation_graphical_example` and run it with `all`, `solo`, `tile`, `temp-obstacles`, `crowd`, or `debug`.
-- `light_stress_example.cpp`: local-light probe sample. By default it starts as a single obvious moving shadowed point light with a matching colored marker sphere, plus one receiver mesh over the demo world. Pass `--lights N` to scale the safe-mode grid up gradually for `1-16` moving shadowed lights, pass `--stats` (or set `KARMA_LIGHT_PROBE_STATS=1`) to log Forward+ renderer stats after startup, or pass `--unsafe` / set `KARMA_LIGHT_STRESS_UNSAFE=1` to switch back to the dense non-shadowed stress layout and aggressive Forward+ profile.
-- `laser_example.cpp`: interactive camera laser scene that instantiates [../examples/assets/prefabs/beam/prefab.json](../examples/assets/prefabs/beam/prefab.json) directly. The beam visual is radial-falloff volumetric capsules and point flares, while any lights remain normal prefab components. Set `KARMA_LASER_EFFECT=impostor` for the generic path-sourced particle impostor variant. See [../docs/BEAM_PATHS.md](../docs/BEAM_PATHS.md) and [../docs/EFFECT_PREFABS.md](../docs/EFFECT_PREFABS.md).
-- `laser_prefab_example.cpp`: movable-camera minimal prefab-only laser scene. It creates a simple world, camera, and light setup, then instantiates [../examples/assets/prefabs/beam/prefab.json](../examples/assets/prefabs/beam/prefab.json) directly. Set `KARMA_LASER_EFFECT=impostor` to use [../examples/assets/prefabs/beam_impostor/prefab.json](../examples/assets/prefabs/beam_impostor/prefab.json), a generic path-sourced particle composition that recreates the older hot-core/glow/electric beam style without restoring a beam-specific ECS component.
-- `material_override_example.cpp`: minimal runtime material override example with side-by-side GLB tints.
-- `energy_orb_example.cpp`: hybrid orb sample that instantiates [../examples/assets/prefabs/energy_orb/prefab.json](../examples/assets/prefabs/energy_orb/prefab.json) directly. The prefab sidecar registers local orb atlas textures and particle effects, and the prefab uses a real `shot.glb` sphere mesh for the shell plus particle-driven plasma core, electric arcs, halo glow, distortion, and a point light. See [../docs/EFFECT_PREFABS.md](../docs/EFFECT_PREFABS.md).
-- `particle_gallery_example.cpp`: focused particle prefab gallery using the existing beam impostor, energy orb, and explosion prefab packages with the optimized KTX environment path. It lays them out in a camera-friendly scene, replays the explosion row on a staggered timer, supports Space to toggle persistent beam/orb emitters and R to restart the cadence, and emits opt-in renderer particle-pass stats with `KARMA_PARTICLE_GALLERY_STATS=1`.
-- `explosion_stress_example.cpp`: focused staged-explosion stress scene built on the direct-load explosion prefab. It instantiates a configurable grid of explosion roots, replays them in succession, can emit periodic perf and renderer particle-pass stats with `--stats` or `KARMA_EXPLOSION_STRESS_STATS=1`, and lets you selectively disable explosion layers with `--disable` or `KARMA_EXPLOSION_STRESS_DISABLE=...`. Set `KARMA_PARTICLE_STATS=1` for comparable once-per-second renderer particle diagnostics. See [../docs/EXPLOSION_PREFAB.md](../docs/EXPLOSION_PREFAB.md) and [../docs/EXPLOSION_STRESS_PERF.md](../docs/EXPLOSION_STRESS_PERF.md).
-- `prefab_gallery_example.cpp`: prefab showcase scene. It registers the volume runtime module, then instantiates beam, orb, wave, and staged explosion prefabs in a grid; beam and wave color variants are separate JSON prefab assets instead of post-load component rewrites. The explosion row replays on a staggered timer so it also acts as a sanity check for direct one-shot prefab loading. Set `KARMA_PREFAB_GALLERY_STATS=1` to emit opt-in FPS / frame-time / explosion-activity perf logs while debugging the current gallery perf issue, and set `KARMA_PARTICLE_STATS=1` for renderer particle diagnostics. See [../docs/EFFECT_PREFABS.md](../docs/EFFECT_PREFABS.md), [../docs/EXPLOSION_PREFAB.md](../docs/EXPLOSION_PREFAB.md), and [../docs/EXPLOSION_STRESS_PERF.md](../docs/EXPLOSION_STRESS_PERF.md).
-- `prefab_particle_isolation_example.cpp`: minimal prefab isolation scene with one gallery beam, useful for checking the volumetric beam without the full gallery load.
-- `wave_example.cpp`: transparent sphere-volume sample built on `wave.glb`, using a dedicated wave shading mode that tints and shimmers scene content seen through the sphere, keeps a glassy polished edge, and still works when the camera moves through the volume.
-- `volumetric_sphere_example.cpp`: interactive camera analytic volumetric-solid sphere prefab scene. It registers `VolumeRuntimeModule` and instantiates [../examples/assets/prefabs/volumetric_sphere/prefab.json](../examples/assets/prefabs/volumetric_sphere/prefab.json) from its prefab directory.
-- `volumetric_sphere_prefab_example.cpp`: fixed-camera minimal prefab-only volumetric-solid sphere scene. It creates a simple world, camera, and sunlight setup, registers `VolumeRuntimeModule`, then instantiates the volumetric sphere prefab directory directly.
-- `terrain_example.cpp`: fixed-size heightmap terrain renderer sample using `examples/assets/Heightmap.png`. It registers `TerrainRuntimeModule`, uploads the grayscale PNG as a single terrain tile, uses GPU tessellation when available with CPU grid fallback, and creates an offscreen overview camera/render target.
-- `particle_example.cpp`: minimal billboard particle example with file-backed `.kpeffect` assets, live hot reload, additive sparks, alpha-sorted smoke, soft-particle depth fading, heat distortion, ground-aligned particles, simple ground-colliding debris, and a staged replayable explosion with authored fire and smoke flipbooks from EXR sequences, bright shock rings, extra debris, hotter ember particles that settle and fade, a dust ring, a scorch mark, radial spherical emission, curve-shaped smoke bloom, and a short-lived point light. See [../docs/PARTICLE_SYSTEM.md](../docs/PARTICLE_SYSTEM.md) for the ECS-facing workflow.
-- `imgui_ui_demo.cpp`: minimal ImGui app code using Karma's built-in ImGui adapter.
-- `rmlui_ui_demo.cpp`: minimal RmlUi app code using Karma's built-in RmlUi adapter.
-- `network_server_demo.cpp` and `network_client_demo.cpp`: split ENet-backed
-  multiplayer smoke demos. The server links `karma::server`, owns authority,
-  and exercises session groups, targeted custom messages, input commands, and
-  replication. The graphical-linked client is log-based for now.
+Shared example helpers live in `examples/common/`.
+
+## Gameplay
+
+- `gameplay/tank.cpp`: target `gameplay_tank`, output `examples/gameplay/tank`.
+  Base tank/world movement demo with follow camera, radar camera, HDR lighting,
+  local lights, and a small ImGui overlay.
+
+## Physics
+
+- `physics/collision_events.cpp`: target `physics_collision_events`, output
+  `examples/physics/collision_events`. Drivable trigger/contact demo with
+  contact listeners, ground/support state, jump, and collision overlays.
+- `physics/shape_gallery.cpp`: target `physics_shape_gallery`, output
+  `examples/physics/shape_gallery`. Rigid-body shape gallery for dynamic
+  primitives, static mesh/height-field surfaces, materials, CCD, sleeping,
+  triggers, collision filters, impulses, continuous forces, and grounded state.
+- `physics/body_controls.cpp`: target `physics_body_controls`, output
+  `examples/physics/body_controls`. Body-control lab for shape replacement,
+  kinematic toggling, motion quality, gravity, activation/sleep, velocity,
+  forces, torque, impulses, teleport, material/user data, and buoyancy.
+- `physics/query_lab.cpp`: target `physics_query_lab`, output
+  `examples/physics/query_lab`. Ray, all-ray, point-overlap, shape-overlap, and
+  shape-cast lab with masks, ignored handles, back-face modes, scale, and
+  shrunken/deepest casts.
+- `physics/constraint_lab.cpp`: target `physics_constraint_lab`, output
+  `examples/physics/constraint_lab`. ECS constraint editor for fixed, point,
+  distance, hinge, slider, cone, swing-twist, and six-DOF constraints.
+- `physics/car.cpp`: target `physics_car`, output `examples/physics/car`.
+  Vehicle sample with ImGui tuning, wheel/contact/suspension telemetry, road
+  obstacles, chase/free camera, drive modes, and collision tester selection.
+
+## Rendering
+
+- `rendering/gltf_viewer.cpp`: target `rendering_gltf_viewer`, output
+  `examples/rendering/gltf_viewer`. Karma-native GLTFViewer-style inspection
+  sample using local copied assets and imported materials.
+- `rendering/postprocess.cpp`: target `rendering_postprocess`, output
+  `examples/rendering/postprocess`. Bloom, tone/color controls, SSAO,
+  screen-space reflections, TAA, and depth of field.
+- `rendering/bloom.cpp`: target `rendering_bloom`, output
+  `examples/rendering/bloom`. Focused bloom scene using local reference media,
+  emissive materials, HDR lights, and free camera controls.
+- `rendering/postwar_city.cpp`: target `rendering_postwar_city`, output
+  `examples/rendering/postwar_city`. Free-fly inspection scene for the postwar
+  city GLB.
+- `rendering/light_stress.cpp`: target `rendering_light_stress`, output
+  `examples/rendering/light_stress`. Forward+ local-light and point-shadow
+  probe with `--lights`, `--stats`, and unsafe stress modes.
+- `rendering/material_override.cpp`: target `rendering_material_override`,
+  output `examples/rendering/material_override`. Runtime material binding
+  example with side-by-side GLB tints.
+- `rendering/terrain.cpp`: target `rendering_terrain`, output
+  `examples/rendering/terrain`. Fixed-size heightmap terrain renderer sample
+  using `examples/assets/Heightmap.png`, with GPU tessellation when available
+  and CPU grid fallback.
+
+## Scene And Animation
+
+- `scene/glb_import.cpp`: target `scene_glb_import`, output
+  `examples/scene/glb_import`. Minimal authored-scene import example.
+- `animation/glb.cpp`: target `animation_glb`, output `examples/animation/glb`.
+  GLB animation and skinning example.
+
+## Particles, Effects, And Prefabs
+
+- `particles/billboard.cpp`: target `particles_billboard`, output
+  `examples/particles/billboard`. Minimal billboard particle example with
+  file-backed `.kpeffect` assets and hot reload.
+- `particles/gallery.cpp`: target `particles_gallery`, output
+  `examples/particles/gallery`. Particle prefab gallery for beam impostors,
+  energy orbs, and explosions.
+- `particles/explosion_stress.cpp`: target `particles_explosion_stress`, output
+  `examples/particles/explosion_stress`. Configurable staged-explosion stress
+  scene.
+- `effects/laser.cpp`: target `effects_laser`, output `examples/effects/laser`.
+- `effects/energy_orb.cpp`: target `effects_energy_orb`, output
+  `examples/effects/energy_orb`.
+- `effects/wave.cpp`: target `effects_wave`, output `examples/effects/wave`.
+- `effects/volumetric_sphere.cpp`: target `effects_volumetric_sphere`, output
+  `examples/effects/volumetric_sphere`.
+- `prefabs/laser.cpp`: target `prefabs_laser`, output `examples/prefabs/laser`.
+- `prefabs/volumetric_sphere.cpp`: target `prefabs_volumetric_sphere`, output
+  `examples/prefabs/volumetric_sphere`.
+- `prefabs/gallery.cpp`: target `prefabs_gallery`, output
+  `examples/prefabs/gallery`.
+- `prefabs/particle_isolation.cpp`: target `prefabs_particle_isolation`, output
+  `examples/prefabs/particle_isolation`.
+
+## Navigation
+
+- `navigation/navmesh.cpp`: target `navigation_navmesh`, output
+  `examples/navigation/navmesh`. Click-to-move sample over the GLB world.
+- `navigation/samples/headless.cpp`: target `navigation_samples_headless`,
+  output `examples/navigation/samples/headless`. Headless parity runner for the
+  copied upstream navigation sample assets.
+- `navigation/samples/solo_mesh.cpp`: target `navigation_solo_mesh`, output
+  `examples/navigation/samples/solo_mesh`.
+- `navigation/samples/tile_mesh.cpp`: target `navigation_tile_mesh`, output
+  `examples/navigation/samples/tile_mesh`.
+- `navigation/samples/temp_obstacles.cpp`: target `navigation_temp_obstacles`,
+  output `examples/navigation/samples/temp_obstacles`.
+- `navigation/samples/debug.cpp`: target `navigation_debug`, output
+  `examples/navigation/samples/debug`.
+- `navigation/samples/gallery.cpp`: target `navigation_samples_gallery`, output
+  `examples/navigation/samples/gallery`.
+- `navigation/point_click.cpp`: target `navigation_point_click`, output
+  `examples/navigation/point_click`.
+- `navigation/crowds.cpp`: target `navigation_crowds`, output
+  `examples/navigation/crowds`.
+- `navigation/tile_cache.cpp`: target `navigation_tile_cache`, output
+  `examples/navigation/tile_cache`.
+- `navigation/query_lab.cpp`: target `navigation_query_lab`, output
+  `examples/navigation/query_lab`.
+- `navigation/offmesh_areas.cpp`: target `navigation_offmesh_areas`, output
+  `examples/navigation/offmesh_areas`.
+- `navigation/physics_bridge.cpp`: target `navigation_physics_bridge`, output
+  `examples/navigation/physics_bridge`.
+
+## UI And Network
+
+- `ui/imgui.cpp`: target `ui_imgui`, output `examples/ui/imgui`.
+- `ui/rmlui.cpp`: target `ui_rmlui`, output `examples/ui/rmlui` when RmlUi is
+  enabled.
+- `network/server.cpp`: target `network_server`, output
+  `examples/network/server`.
+- `network/client.cpp`: target `network_client`, output
+  `examples/network/client`.

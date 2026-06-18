@@ -29,26 +29,12 @@ components::TransformComponent composeTransform(
     const components::TransformComponent& parent,
     const components::TransformComponent& local) {
   components::TransformComponent transform{};
-  const math::Vec3 scaled_local = math::multiply(local.getPosition(), parent.getScale());
-  const math::Vec3 rotated_local = math::rotateVec(parent.getRotation(), scaled_local);
-  transform.setPosition(math::add(parent.getPosition(), rotated_local));
-  transform.setRotation(math::mul(parent.getRotation(), local.getRotation()));
-  transform.setScale(math::multiply(parent.getScale(), local.getScale()));
+  const math::Vec3 scaled_local = math::multiply(local.localPosition(), parent.worldScale());
+  const math::Vec3 rotated_local = math::rotateVec(parent.worldRotation(), scaled_local);
+  transform.setLocalPosition(math::add(parent.worldPosition(), rotated_local));
+  transform.setLocalRotation(math::mul(parent.worldRotation(), local.localRotation()));
+  transform.setLocalScale(math::multiply(parent.worldScale(), local.localScale()));
   return transform;
-}
-
-components::TransformComponent toTransform(
-    const components::LocalTransformComponent& local) {
-  return components::TransformComponent{local.position, local.rotation, local.scale};
-}
-
-components::LocalTransformComponent toLocalTransform(
-    const components::TransformComponent& transform) {
-  return components::LocalTransformComponent{
-      transform.getPosition(),
-      transform.getRotation(),
-      transform.getScale(),
-  };
 }
 
 std::filesystem::path resolvePrefabPath(const std::filesystem::path& path) {
@@ -380,21 +366,40 @@ bool deserializeComponents(ecs::World& world,
                            const PrefabNode& node,
                            const std::filesystem::path& path) {
   ComponentSerializerRegistry& registry = componentSerializerRegistry();
+  std::unordered_set<std::string> consumed;
+  consumed.reserve(node.components.size());
+
+  for (const ComponentSerializer& serializer : registry.serializers()) {
+    const auto component_it = node.components.find(serializer.type_name);
+    if (component_it == node.components.end()) {
+      continue;
+    }
+    try {
+      if (!serializer.deserialize(world, entity, *component_it)) {
+        spdlog::error("Prefab '{}' node '{}' has invalid '{}' component payload",
+                      path.string(),
+                      node.name,
+                      serializer.type_name);
+        return false;
+      }
+    } catch (const std::exception& e) {
+      spdlog::error("Prefab '{}' node '{}' failed to add '{}' component: {}",
+                    path.string(),
+                    node.name,
+                    serializer.type_name,
+                    e.what());
+      return false;
+    }
+    consumed.insert(serializer.type_name);
+  }
+
   for (auto it = node.components.begin(); it != node.components.end(); ++it) {
     const std::string type_name = it.key();
-    const ComponentSerializer* serializer = registry.find(type_name);
-    if (serializer == nullptr) {
-      spdlog::warn("Prefab '{}' node '{}' has unknown component '{}'; skipping",
+    if (consumed.find(type_name) == consumed.end()) {
+      spdlog::error("Prefab '{}' node '{}' has unknown component '{}'",
                    path.string(),
                    node.name,
                    type_name);
-      continue;
-    }
-    if (!serializer->deserialize(world, entity, it.value())) {
-      spdlog::error("Prefab '{}' node '{}' has invalid '{}' component payload",
-                    path.string(),
-                    node.name,
-                    type_name);
       return false;
     }
   }
@@ -407,22 +412,16 @@ void applyRootTransform(ecs::World& world,
   components::TransformComponent saved{};
   if (world.has<components::TransformComponent>(root)) {
     saved = world.get<components::TransformComponent>(root);
-  } else if (world.has<components::LocalTransformComponent>(root)) {
-    saved = toTransform(world.get<components::LocalTransformComponent>(root));
   }
 
   const components::TransformComponent final_transform =
       composeTransform(root_transform, saved);
   world.add(root, final_transform);
-  if (world.has<components::LocalTransformComponent>(root)) {
-    world.add(root, toLocalTransform(final_transform));
-  }
 }
 
 void ensureTransformsForHierarchy(ecs::World& world, ecs::Entity entity) {
-  if (!world.has<components::TransformComponent>(entity) &&
-      world.has<components::LocalTransformComponent>(entity)) {
-    world.add(entity, toTransform(world.get<components::LocalTransformComponent>(entity)));
+  if (!world.has<components::TransformComponent>(entity)) {
+    world.add(entity, components::TransformComponent{});
   }
 }
 

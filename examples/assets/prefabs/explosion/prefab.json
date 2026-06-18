@@ -38,24 +38,6 @@
         "TagComponent": {
           "name": "flash"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.8,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0,
@@ -100,24 +82,6 @@
       "components": {
         "TagComponent": {
           "name": "fireball"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.75,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -164,24 +128,6 @@
         "TagComponent": {
           "name": "heat"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.82,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0,
@@ -226,24 +172,6 @@
       "components": {
         "TagComponent": {
           "name": "core_flipbook"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.88,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -290,24 +218,6 @@
         "TagComponent": {
           "name": "smoke_flipbook"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.92,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0,
@@ -352,24 +262,6 @@
       "components": {
         "TagComponent": {
           "name": "embers"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.9,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -416,24 +308,6 @@
         "TagComponent": {
           "name": "shock_ring"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.09,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0,
@@ -478,24 +352,6 @@
       "components": {
         "TagComponent": {
           "name": "debris"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.86,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -542,24 +398,6 @@
         "TagComponent": {
           "name": "dust_ring"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.04,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0,
@@ -604,24 +442,6 @@
       "components": {
         "TagComponent": {
           "name": "smoke"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.85,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [
@@ -668,24 +488,6 @@
         "TagComponent": {
           "name": "scorch"
         },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            0.03,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
-        },
         "TransformComponent": {
           "position": [
             0,
@@ -730,24 +532,6 @@
       "components": {
         "TagComponent": {
           "name": "glow"
-        },
-        "LocalTransformComponent": {
-          "position": [
-            0,
-            1.35,
-            0
-          ],
-          "rotation": [
-            0,
-            0,
-            0,
-            1
-          ],
-          "scale": [
-            1,
-            1,
-            1
-          ]
         },
         "TransformComponent": {
           "position": [

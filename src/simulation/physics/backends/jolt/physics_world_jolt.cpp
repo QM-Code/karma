@@ -1,5 +1,5 @@
 #include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
-#include "karma/simulation/physics/backends/jolt/player_controller_jolt.hpp"
+#include "karma/simulation/physics/backends/jolt/character_controller_jolt.hpp"
 #include "karma/simulation/physics/backends/jolt/constraint_jolt.hpp"
 #include "karma/simulation/physics/backends/jolt/rigid_body_jolt.hpp"
 #include "shape_factory.h"
@@ -536,13 +536,13 @@ std::unique_ptr<PhysicsRigidBodyBackend> PhysicsWorldJolt::createBoxBody(const g
     return createBody(desc);
 }
 
-std::unique_ptr<PhysicsPlayerControllerBackend> PhysicsWorldJolt::createPlayer(const glm::vec3& size) {
+std::unique_ptr<PhysicsCharacterControllerBackend> PhysicsWorldJolt::createCharacterController(const glm::vec3& size) {
     const glm::vec3 halfExtents = size * 0.5f;
-    auto controller = std::make_unique<PhysicsPlayerControllerJolt>(this, halfExtents, glm::vec3(0.0f, 2.0f, 0.0f));
+    auto controller = std::make_unique<PhysicsCharacterControllerJolt>(this, halfExtents, glm::vec3(0.0f, 2.0f, 0.0f));
     controller->setRotation(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
     controller->setVelocity(glm::vec3(0.0f));
     controller->setAngularVelocity(glm::vec3(0.0f));
-    spdlog::info("Created kinematic player controller");
+    spdlog::info("Created kinematic character controller");
     return controller;
 }
 

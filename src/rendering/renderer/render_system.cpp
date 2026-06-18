@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 #include <spdlog/spdlog.h>
 
@@ -61,16 +62,6 @@ void logRenderSystemStage(const bool enabled,
   }
 }
 
-std::string makeMaterialVariantCacheKey(const std::string& mesh_key,
-                                        const std::string& material_key) {
-  std::string key;
-  key.reserve(mesh_key.size() + material_key.size() + 1);
-  key.append(mesh_key);
-  key.push_back('\n');
-  key.append(material_key);
-  return key;
-}
-
 renderer::PostProcessSettings resolvePostProcessSettings(
     const renderer::PostProcessProfileLibrary* profiles,
     const std::string& key) {
@@ -106,6 +97,7 @@ void RenderSystem::cleanupStaleRecords(ecs::World& world) {
 void RenderSystem::releaseMeshBinding(RenderRecord& record) {
   releaseSharedMesh(record.mesh_key);
   record.mesh_key.clear();
+  record.material_slots.clear();
 
   record.mesh = renderer::kInvalidMesh;
   record.bounds_center = glm::vec3(0.0f);
@@ -114,24 +106,73 @@ void RenderSystem::releaseMeshBinding(RenderRecord& record) {
 }
 
 void RenderSystem::releaseMaterialBinding(RenderRecord& record) {
-  releaseSharedMaterialVariant(record.mesh_key, record.material_key);
-  record.material_key.clear();
-
-  record.material = renderer::kInvalidMaterial;
-  record.material_set = renderer::kInvalidMaterialSet;
+  for (const std::string& material_key : record.acquired_material_keys) {
+    releaseSharedMaterial(material_key);
+  }
+  record.acquired_material_keys.clear();
+  record.material_bindings.clear();
 }
 
 void RenderSystem::bindMesh(const components::MeshComponent& mesh, RenderRecord& record) {
   record.mesh_key = mesh.mesh_key;
   acquireSharedMesh(mesh.mesh_key, record);
+  record.material_slots.clear();
+  if (record.mesh != renderer::kInvalidMesh) {
+    device_.getMeshMaterialSlots(record.mesh, record.material_slots);
+  }
 }
 
 void RenderSystem::bindMaterial(const components::MeshComponent& mesh, RenderRecord& record) {
-  record.material = renderer::kInvalidMaterial;
-  record.material_set = renderer::kInvalidMaterialSet;
+  record.component_materials = mesh.materials;
+  record.material_bindings.clear();
+  record.acquired_material_keys.clear();
 
-  record.material_key = mesh.material_key;
-  acquireSharedMaterialVariant(record.mesh_key, mesh.material_key, record);
+  uint32_t slot_count = static_cast<uint32_t>(record.material_slots.size());
+  for (const auto& binding : mesh.materials) {
+    slot_count = std::max(slot_count, binding.slot + 1u);
+  }
+
+  auto override_for_slot = [&](uint32_t slot) -> const std::string* {
+    for (const auto& binding : mesh.materials) {
+      if (binding.slot == slot && !binding.material_key.empty()) {
+        return &binding.material_key;
+      }
+    }
+    return nullptr;
+  };
+
+  for (uint32_t slot = 0; slot < slot_count; ++slot) {
+    const std::string* material_key = override_for_slot(slot);
+    const std::string* fallback_key =
+        slot < record.material_slots.size() &&
+                !record.material_slots[slot].default_material_key.empty()
+            ? &record.material_slots[slot].default_material_key
+            : nullptr;
+
+    renderer::MaterialId material = renderer::kInvalidMaterial;
+    const std::string* acquired_key = nullptr;
+    if (material_key != nullptr) {
+      material = acquireSharedMaterial(*material_key);
+      if (material != renderer::kInvalidMaterial) {
+        acquired_key = material_key;
+      }
+    }
+    if (material == renderer::kInvalidMaterial && fallback_key != nullptr &&
+        (material_key == nullptr || *fallback_key != *material_key)) {
+      material = acquireSharedMaterial(*fallback_key);
+      if (material != renderer::kInvalidMaterial) {
+        acquired_key = fallback_key;
+      }
+    }
+    if (material == renderer::kInvalidMaterial) {
+      continue;
+    }
+    record.acquired_material_keys.push_back(*acquired_key);
+    record.material_bindings.push_back(renderer::DrawMaterialBinding{
+        .slot = slot,
+        .material = material,
+    });
+  }
 }
 
 void RenderSystem::acquireSharedMesh(const std::string& mesh_key, RenderRecord& record) {
@@ -187,92 +228,71 @@ void RenderSystem::releaseSharedMesh(const std::string& mesh_key) {
   }
 }
 
-void RenderSystem::acquireSharedMaterialVariant(const std::string& mesh_key,
-                                                const std::string& material_key,
-                                                RenderRecord& record) {
-  record.material_set = renderer::kInvalidMaterialSet;
-  if (mesh_key.empty() || material_key.empty() || record.mesh == renderer::kInvalidMesh ||
-      material_library_ == nullptr) {
-    return;
+renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& material_key) {
+  if (material_key.empty() || material_library_ == nullptr) {
+    return renderer::kInvalidMaterial;
   }
 
-  const auto* desc = material_library_->find(material_key);
-  if (desc == nullptr) {
-    if (!warned_missing_material_keys_.contains(material_key)) {
-      spdlog::warn("Karma: material key '{}' was not registered; using source mesh materials",
-                   material_key);
-      warned_missing_material_keys_.emplace(material_key, true);
-    }
-    return;
-  }
-
-  if (!desc->source_mesh_key.empty() && desc->source_mesh_key != mesh_key) {
-    const std::string warning_key = makeMaterialVariantCacheKey(mesh_key, material_key);
-    if (!warned_material_mesh_mismatch_keys_.contains(warning_key)) {
-      spdlog::warn(
-          "Karma: material key '{}' was registered for mesh '{}' but applied to '{}'; using source mesh materials",
-          material_key, desc->source_mesh_key, mesh_key);
-      warned_material_mesh_mismatch_keys_.emplace(warning_key, true);
-    }
-    return;
-  }
-
-  const std::string cache_key = makeMaterialVariantCacheKey(mesh_key, material_key);
   const bool diag_enabled = renderSystemDiagEnabled();
   const auto cache_start = core::SteadyClock::now();
-  auto shared_it = shared_material_variants_.find(cache_key);
-  if (shared_it == shared_material_variants_.end()) {
-    SharedMaterialVariant shared{};
-    shared.material_set = device_.createMaterialSetFromMesh(record.mesh, *desc);
-    if (shared.material_set == renderer::kInvalidMaterialSet) {
+  auto shared_it = shared_materials_.find(material_key);
+  if (shared_it == shared_materials_.end()) {
+    auto resolved = material_library_->resolve(material_key);
+    if (!resolved.has_value()) {
+      if (!warned_missing_material_keys_.contains(material_key)) {
+        spdlog::warn("Karma: material key '{}' was not registered; using mesh slot default",
+                     material_key);
+        warned_missing_material_keys_.emplace(material_key, true);
+      }
+      return renderer::kInvalidMaterial;
+    }
+
+    SharedMaterialResource shared{};
+    shared.material = device_.createMaterial(*resolved);
+    if (shared.material == renderer::kInvalidMaterial) {
       if (diag_enabled) {
-        spdlog::info("RenderSystem material-set cache miss mesh='{}' material='{}' failed in {:.2f} ms",
-                     mesh_key,
+        spdlog::info("RenderSystem material cache miss material='{}' failed in {:.2f} ms",
                      material_key,
                      core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
       }
-      return;
+      return renderer::kInvalidMaterial;
     }
     shared.ref_count = 1;
-    shared_it = shared_material_variants_.emplace(cache_key, std::move(shared)).first;
+    shared_it = shared_materials_.emplace(material_key, std::move(shared)).first;
     if (diag_enabled) {
-      spdlog::info("RenderSystem material-set cache miss mesh='{}' material='{}' took {:.2f} ms",
-                   mesh_key,
+      spdlog::info("RenderSystem material cache miss material='{}' took {:.2f} ms",
                    material_key,
                    core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
     }
   } else {
     shared_it->second.ref_count += 1;
     if (diag_enabled) {
-      spdlog::info("RenderSystem material-set cache hit mesh='{}' material='{}' took {:.2f} ms",
-                   mesh_key,
+      spdlog::info("RenderSystem material cache hit material='{}' took {:.2f} ms",
                    material_key,
                    core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
     }
   }
 
-  record.material_set = shared_it->second.material_set;
+  return shared_it->second.material;
 }
 
-void RenderSystem::releaseSharedMaterialVariant(const std::string& mesh_key,
-                                                const std::string& material_key) {
-  if (mesh_key.empty() || material_key.empty()) {
+void RenderSystem::releaseSharedMaterial(const std::string& material_key) {
+  if (material_key.empty()) {
     return;
   }
 
-  const std::string cache_key = makeMaterialVariantCacheKey(mesh_key, material_key);
-  auto shared_it = shared_material_variants_.find(cache_key);
-  if (shared_it == shared_material_variants_.end()) {
+  auto shared_it = shared_materials_.find(material_key);
+  if (shared_it == shared_materials_.end()) {
     return;
   }
   if (shared_it->second.ref_count > 0) {
     shared_it->second.ref_count -= 1;
   }
   if (shared_it->second.ref_count == 0) {
-    if (shared_it->second.material_set != renderer::kInvalidMaterialSet) {
-      device_.destroyMaterialSet(shared_it->second.material_set);
+    if (shared_it->second.material != renderer::kInvalidMaterial) {
+      device_.destroyMaterial(shared_it->second.material);
     }
-    shared_material_variants_.erase(shared_it);
+    shared_materials_.erase(shared_it);
   }
 }
 
@@ -293,10 +313,11 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       material_library_->version() != last_material_library_version_) {
     for (auto& [key, record] : records_) {
       (void)key;
-      if (!record.material_key.empty()) {
-        releaseSharedMaterialVariant(record.mesh_key, record.material_key);
-        record.material_set = renderer::kInvalidMaterialSet;
-      }
+      components::MeshComponent mesh_binding{};
+      mesh_binding.mesh_key = record.mesh_key;
+      mesh_binding.materials = record.component_materials;
+      releaseMaterialBinding(record);
+      bindMaterial(mesh_binding, record);
     }
     last_material_library_version_ = material_library_->version();
   }
@@ -501,10 +522,10 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       const auto bind_material_end = core::SteadyClock::now();
       if (diag_enabled) {
         spdlog::info(
-            "RenderSystem new record entity={}:{} material='{}' bindMaterial took {:.2f} ms",
+            "RenderSystem new record entity={}:{} material_slots={} bindMaterial took {:.2f} ms",
             entity.index,
             entity.generation,
-            mesh.material_key.empty() ? "<source mesh>" : mesh.material_key,
+            mesh.materials.size(),
             core::elapsedMilliseconds(bind_material_start, bind_material_end));
       }
       it = records_.emplace(key, std::move(record)).first;
@@ -518,7 +539,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
         bindMesh(mesh, it->second);
         bindMaterial(mesh, it->second);
       } else {
-        const bool material_binding_changed = it->second.material_key != mesh.material_key;
+        const bool material_binding_changed = it->second.component_materials != mesh.materials;
         if (material_binding_changed) {
           releaseMaterialBinding(it->second);
           bindMaterial(mesh, it->second);
@@ -545,8 +566,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     DrawItem item{};
     item.instance = static_cast<InstanceId>(key);
     item.mesh = it->second.mesh;
-    item.material = it->second.material;
-    item.material_set = it->second.material_set;
+    item.materials = it->second.material_bindings;
     item.transform = world_matrix;
     item.layer = 0;
     item.visible = visible;
@@ -576,48 +596,30 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   section_start = section_end;
 
   const math::Color debug_color{0.1f, 1.0f, 0.1f, 1.0f};
-  world.forEach<components::TransformComponent, components::BoxColliderComponent>(
+  world.forEach<components::TransformComponent, components::ColliderComponent>(
       [&](const ecs::Entity entity) {
-    const auto& collider = world.get<components::BoxColliderComponent>(entity);
+    const auto& collider = world.get<components::ColliderComponent>(entity);
     if (!collider.debug_draw) {
       return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    drawBoxWire(device_, transform, collider.center, collider.half_extents, debug_color,
-                interpolation_alpha);
-  });
-
-  world.forEach<components::TransformComponent, components::SphereColliderComponent>(
-      [&](const ecs::Entity entity) {
-    const auto& collider = world.get<components::SphereColliderComponent>(entity);
-    if (!collider.debug_draw) {
+    if (const auto* box = std::get_if<components::BoxColliderShape>(&collider.shape)) {
+      drawBoxWire(device_, transform, box->center, box->half_extents, debug_color,
+                  interpolation_alpha);
       return;
     }
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    drawSphereWire(device_, transform, collider.center, collider.radius, debug_color,
-                   interpolation_alpha);
-  });
-
-  world.forEach<components::TransformComponent, components::CapsuleColliderComponent>(
-      [&](const ecs::Entity entity) {
-    const auto& collider = world.get<components::CapsuleColliderComponent>(entity);
-    if (!collider.debug_draw) {
+    if (const auto* sphere = std::get_if<components::SphereColliderShape>(&collider.shape)) {
+      drawSphereWire(device_, transform, sphere->center, sphere->radius, debug_color,
+                     interpolation_alpha);
       return;
     }
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    drawCapsuleWire(device_, transform, collider.center, collider.radius, collider.height,
-                    debug_color, interpolation_alpha);
-  });
-
-  world.forEach<components::TransformComponent, components::MeshColliderComponent, components::MeshComponent>(
-      [&](const ecs::Entity entity) {
-    const auto& collider = world.get<components::MeshColliderComponent>(entity);
-    if (!collider.debug_draw) {
+    if (const auto* capsule = std::get_if<components::CapsuleColliderShape>(&collider.shape)) {
+      drawCapsuleWire(device_, transform, capsule->center, capsule->radius, capsule->height,
+                      debug_color, interpolation_alpha);
       return;
     }
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    const auto& mesh = world.get<components::MeshComponent>(entity);
-    if (mesh.mesh_key.empty()) {
+    if (!std::holds_alternative<components::MeshColliderShape>(collider.shape) ||
+        !world.has<components::MeshComponent>(entity)) {
       return;
     }
     const uint64_t key = entityKey(entity);

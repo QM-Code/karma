@@ -7,9 +7,11 @@
 #include <optional>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "karma/world/components/animator.h"
+#include "karma/world/components/character_controller.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/light_pulse.h"
@@ -576,9 +578,9 @@ bool readOptionalColor(const Json& object,
 
 Json serializeTransform(const components::TransformComponent& component) {
   return Json{
-      {"position", toJson(component.getPosition())},
-      {"rotation", toJson(component.getRotation())},
-      {"scale", toJson(component.getScale())},
+      {"position", toJson(component.localPosition())},
+      {"rotation", toJson(component.localRotation())},
+      {"scale", toJson(component.localScale())},
   };
 }
 
@@ -597,28 +599,6 @@ std::optional<components::TransformComponent> deserializeTransform(const Json& j
   return components::TransformComponent{position, rotation, scale};
 }
 
-Json serializeLocalTransform(const components::LocalTransformComponent& component) {
-  return Json{
-      {"position", toJson(component.position)},
-      {"rotation", toJson(component.rotation)},
-      {"scale", toJson(component.scale)},
-  };
-}
-
-std::optional<components::LocalTransformComponent> deserializeLocalTransform(
-    const Json& json) {
-  if (!json.is_object()) {
-    return std::nullopt;
-  }
-  components::LocalTransformComponent component{};
-  if (!readVec3(json, "position", component.position) ||
-      !readQuat(json, "rotation", component.rotation) ||
-      !readVec3(json, "scale", component.scale)) {
-    return std::nullopt;
-  }
-  return component;
-}
-
 Json serializeTag(const components::TagComponent& component) {
   return Json{{"name", component.name}};
 }
@@ -635,10 +615,16 @@ std::optional<components::TagComponent> deserializeTag(const Json& json) {
 }
 
 Json serializeMesh(const components::MeshComponent& component) {
+  Json materials = Json::array();
+  for (const auto& binding : component.materials) {
+    materials.push_back(Json{
+        {"slot", binding.slot},
+        {"material_key", binding.material_key},
+    });
+  }
   return Json{
       {"mesh_key", component.mesh_key},
-      {"material_key", component.material_key},
-      {"texture_key", component.texture_key},
+      {"materials", std::move(materials)},
       {"visible", component.visible},
       {"shadow_visible", component.shadow_visible},
   };
@@ -650,11 +636,41 @@ std::optional<components::MeshComponent> deserializeMesh(const Json& json) {
   }
   components::MeshComponent component{};
   if (!readString(json, "mesh_key", component.mesh_key) ||
-      !readString(json, "material_key", component.material_key) ||
-      !readString(json, "texture_key", component.texture_key) ||
       !readBool(json, "visible", component.visible) ||
       !readBool(json, "shadow_visible", component.shadow_visible)) {
     return std::nullopt;
+  }
+
+  if (const auto materials_it = json.find("materials"); materials_it != json.end()) {
+    if (!materials_it->is_array()) {
+      return std::nullopt;
+    }
+    component.materials.reserve(materials_it->size());
+    for (const Json& material_json : *materials_it) {
+      if (!material_json.is_object()) {
+        return std::nullopt;
+      }
+      components::MeshMaterialBinding binding{};
+      if (!readUint32(material_json, "slot", binding.slot) ||
+          !readString(material_json, "material_key", binding.material_key)) {
+        return std::nullopt;
+      }
+      if (!binding.material_key.empty()) {
+        component.materials.push_back(std::move(binding));
+      }
+    }
+  } else if (const auto old_material_it = json.find("material_key");
+             old_material_it != json.end()) {
+    if (!old_material_it->is_string()) {
+      return std::nullopt;
+    }
+    const std::string material_key = old_material_it->get<std::string>();
+    if (!material_key.empty()) {
+      component.materials.push_back(components::MeshMaterialBinding{
+          .slot = 0,
+          .material_key = material_key,
+      });
+    }
   }
   return component;
 }
@@ -1109,78 +1125,330 @@ std::optional<components::RigidbodyComponent> deserializeRigidbody(const Json& j
   return component;
 }
 
-Json serializeColliderBase(const components::ColliderComponent& component) {
+std::string colliderShapeName(components::ColliderShapeType type) {
+  switch (type) {
+    case components::ColliderShapeType::Box:
+      return "box";
+    case components::ColliderShapeType::Sphere:
+      return "sphere";
+    case components::ColliderShapeType::Capsule:
+      return "capsule";
+    case components::ColliderShapeType::Cylinder:
+      return "cylinder";
+    case components::ColliderShapeType::TaperedCapsule:
+      return "tapered_capsule";
+    case components::ColliderShapeType::ConvexHull:
+      return "convex_hull";
+    case components::ColliderShapeType::Triangle:
+      return "triangle";
+    case components::ColliderShapeType::HeightField:
+      return "height_field";
+    case components::ColliderShapeType::Mesh:
+      return "mesh";
+  }
+  return "box";
+}
+
+std::optional<components::ColliderShapeType> parseColliderShapeType(std::string_view value) {
+  if (value == "box") return components::ColliderShapeType::Box;
+  if (value == "sphere") return components::ColliderShapeType::Sphere;
+  if (value == "capsule") return components::ColliderShapeType::Capsule;
+  if (value == "cylinder") return components::ColliderShapeType::Cylinder;
+  if (value == "tapered_capsule") return components::ColliderShapeType::TaperedCapsule;
+  if (value == "convex_hull") return components::ColliderShapeType::ConvexHull;
+  if (value == "triangle") return components::ColliderShapeType::Triangle;
+  if (value == "height_field") return components::ColliderShapeType::HeightField;
+  if (value == "mesh") return components::ColliderShapeType::Mesh;
+  return std::nullopt;
+}
+
+Json serializeColliderShape(const components::BoxColliderShape& shape) {
+  return Json{{"center", toJson(shape.center)}, {"half_extents", toJson(shape.half_extents)}};
+}
+
+Json serializeColliderShape(const components::SphereColliderShape& shape) {
+  return Json{{"center", toJson(shape.center)}, {"radius", shape.radius}};
+}
+
+Json serializeColliderShape(const components::CapsuleColliderShape& shape) {
+  return Json{{"center", toJson(shape.center)}, {"radius", shape.radius}, {"height", shape.height}};
+}
+
+Json serializeColliderShape(const components::CylinderColliderShape& shape) {
+  return Json{{"center", toJson(shape.center)},
+              {"radius", shape.radius},
+              {"height", shape.height},
+              {"convex_radius", shape.convex_radius}};
+}
+
+Json serializeColliderShape(const components::TaperedCapsuleColliderShape& shape) {
+  return Json{{"center", toJson(shape.center)},
+              {"top_radius", shape.top_radius},
+              {"bottom_radius", shape.bottom_radius},
+              {"height", shape.height}};
+}
+
+Json serializeColliderShape(const components::ConvexHullColliderShape& shape) {
+  Json points = Json::array();
+  for (const math::Vec3& point : shape.points) {
+    points.push_back(toJson(point));
+  }
+  return Json{{"center", toJson(shape.center)},
+              {"points", std::move(points)},
+              {"convex_radius", shape.convex_radius}};
+}
+
+Json serializeColliderShape(const components::TriangleColliderShape& shape) {
+  Json points = Json::array();
+  for (const math::Vec3& point : shape.points) {
+    points.push_back(toJson(point));
+  }
+  return Json{{"points", std::move(points)}, {"convex_radius", shape.convex_radius}};
+}
+
+Json serializeColliderShape(const components::HeightFieldColliderShape& shape) {
+  return Json{{"samples", shape.samples},
+              {"sample_count", shape.sample_count},
+              {"offset", toJson(shape.offset)},
+              {"scale", toJson(shape.scale)},
+              {"block_size", shape.block_size},
+              {"bits_per_sample", shape.bits_per_sample}};
+}
+
+Json serializeColliderShape(const components::MeshColliderShape& shape) {
+  Json vertices = Json::array();
+  for (const math::Vec3& vertex : shape.vertices) {
+    vertices.push_back(toJson(vertex));
+  }
+  return Json{{"mesh_path", shape.mesh_path},
+              {"vertices", std::move(vertices)},
+              {"indices", shape.indices}};
+}
+
+Json serializeCollider(const components::ColliderComponent& component) {
   return Json{
+      {"type", colliderShapeName(component.type)},
       {"is_trigger", component.is_trigger},
       {"debug_draw", component.debug_draw},
+      {"shape", std::visit([](const auto& shape) { return serializeColliderShape(shape); },
+                           component.shape)},
   };
 }
 
-bool readColliderBase(const Json& json, components::ColliderComponent& component) {
-  return readBool(json, "is_trigger", component.is_trigger) &&
-         readBool(json, "debug_draw", component.debug_draw);
+bool readVec3Array(const Json& json, std::vector<math::Vec3>& out) {
+  if (!json.is_array()) {
+    return false;
+  }
+  out.clear();
+  out.reserve(json.size());
+  for (const Json& item : json) {
+    math::Vec3 value{};
+    if (!readVec3Value(item, value)) {
+      return false;
+    }
+    out.push_back(value);
+  }
+  return true;
 }
 
-Json serializeBoxCollider(const components::BoxColliderComponent& component) {
-  Json json = serializeColliderBase(component);
-  json["center"] = toJson(component.center);
-  json["half_extents"] = toJson(component.half_extents);
-  return json;
+bool readUint32Array(const Json& json, std::vector<uint32_t>& out) {
+  if (!json.is_array()) {
+    return false;
+  }
+  out.clear();
+  out.reserve(json.size());
+  for (const Json& item : json) {
+    if (!item.is_number_unsigned() && !item.is_number_integer()) {
+      return false;
+    }
+    const int64_t value = item.get<int64_t>();
+    if (value < 0 || value > static_cast<int64_t>(UINT32_MAX)) {
+      return false;
+    }
+    out.push_back(static_cast<uint32_t>(value));
+  }
+  return true;
 }
 
-std::optional<components::BoxColliderComponent> deserializeBoxCollider(const Json& json) {
+bool readFloatArray(const Json& json, std::vector<float>& out) {
+  if (!json.is_array()) {
+    return false;
+  }
+  out.clear();
+  out.reserve(json.size());
+  for (const Json& item : json) {
+    float value = 0.0f;
+    if (!readFloatValue(item, value)) {
+      return false;
+    }
+    out.push_back(value);
+  }
+  return true;
+}
+
+std::optional<components::ColliderComponent> deserializeCollider(const Json& json) {
   if (!json.is_object()) {
     return std::nullopt;
   }
-  components::BoxColliderComponent component{};
-  if (!readColliderBase(json, component) ||
-      !readVec3(json, "center", component.center) ||
-      !readVec3(json, "half_extents", component.half_extents)) {
+
+  std::string type_name;
+  if (!readString(json, "type", type_name)) {
     return std::nullopt;
   }
+  const auto type = parseColliderShapeType(type_name);
+  if (!type) {
+    return std::nullopt;
+  }
+
+  components::ColliderComponent component{};
+  component.type = *type;
+  if (!readBool(json, "is_trigger", component.is_trigger) ||
+      !readBool(json, "debug_draw", component.debug_draw)) {
+    return std::nullopt;
+  }
+
+  const auto shape_it = json.find("shape");
+  if (shape_it == json.end() || !shape_it->is_object()) {
+    return std::nullopt;
+  }
+  const Json& shape_json = *shape_it;
+
+  switch (*type) {
+    case components::ColliderShapeType::Box: {
+      components::BoxColliderShape shape{};
+      if (!readVec3(shape_json, "center", shape.center) ||
+          !readVec3(shape_json, "half_extents", shape.half_extents)) {
+        return std::nullopt;
+      }
+      component.shape = std::move(shape);
+      break;
+    }
+    case components::ColliderShapeType::Sphere: {
+      components::SphereColliderShape shape{};
+      if (!readVec3(shape_json, "center", shape.center) ||
+          !readFloat(shape_json, "radius", shape.radius)) {
+        return std::nullopt;
+      }
+      component.shape = shape;
+      break;
+    }
+    case components::ColliderShapeType::Capsule: {
+      components::CapsuleColliderShape shape{};
+      if (!readVec3(shape_json, "center", shape.center) ||
+          !readFloat(shape_json, "radius", shape.radius) ||
+          !readFloat(shape_json, "height", shape.height)) {
+        return std::nullopt;
+      }
+      component.shape = shape;
+      break;
+    }
+    case components::ColliderShapeType::Cylinder: {
+      components::CylinderColliderShape shape{};
+      if (!readVec3(shape_json, "center", shape.center) ||
+          !readFloat(shape_json, "radius", shape.radius) ||
+          !readFloat(shape_json, "height", shape.height) ||
+          !readFloat(shape_json, "convex_radius", shape.convex_radius)) {
+        return std::nullopt;
+      }
+      component.shape = shape;
+      break;
+    }
+    case components::ColliderShapeType::TaperedCapsule: {
+      components::TaperedCapsuleColliderShape shape{};
+      if (!readVec3(shape_json, "center", shape.center) ||
+          !readFloat(shape_json, "top_radius", shape.top_radius) ||
+          !readFloat(shape_json, "bottom_radius", shape.bottom_radius) ||
+          !readFloat(shape_json, "height", shape.height)) {
+        return std::nullopt;
+      }
+      component.shape = shape;
+      break;
+    }
+    case components::ColliderShapeType::ConvexHull: {
+      components::ConvexHullColliderShape shape{};
+      const auto points_it = shape_json.find("points");
+      if (!readVec3(shape_json, "center", shape.center) ||
+          points_it == shape_json.end() ||
+          !readVec3Array(*points_it, shape.points) ||
+          !readFloat(shape_json, "convex_radius", shape.convex_radius)) {
+        return std::nullopt;
+      }
+      component.shape = std::move(shape);
+      break;
+    }
+    case components::ColliderShapeType::Triangle: {
+      components::TriangleColliderShape shape{};
+      const auto points_it = shape_json.find("points");
+      if (points_it == shape_json.end() || !points_it->is_array() ||
+          points_it->size() != shape.points.size() ||
+          !readFloat(shape_json, "convex_radius", shape.convex_radius)) {
+        return std::nullopt;
+      }
+      for (size_t i = 0; i < shape.points.size(); ++i) {
+        if (!readVec3Value((*points_it)[i], shape.points[i])) {
+          return std::nullopt;
+        }
+      }
+      component.shape = shape;
+      break;
+    }
+    case components::ColliderShapeType::HeightField: {
+      components::HeightFieldColliderShape shape{};
+      const auto samples_it = shape_json.find("samples");
+      if (samples_it == shape_json.end() ||
+          !readFloatArray(*samples_it, shape.samples) ||
+          !readUint32(shape_json, "sample_count", shape.sample_count) ||
+          !readVec3(shape_json, "offset", shape.offset) ||
+          !readVec3(shape_json, "scale", shape.scale) ||
+          !readUint32(shape_json, "block_size", shape.block_size) ||
+          !readUint32(shape_json, "bits_per_sample", shape.bits_per_sample)) {
+        return std::nullopt;
+      }
+      component.shape = std::move(shape);
+      break;
+    }
+    case components::ColliderShapeType::Mesh: {
+      components::MeshColliderShape shape{};
+      const auto vertices_it = shape_json.find("vertices");
+      const auto indices_it = shape_json.find("indices");
+      if (!readString(shape_json, "mesh_path", shape.mesh_path) ||
+          (vertices_it != shape_json.end() && !readVec3Array(*vertices_it, shape.vertices)) ||
+          (indices_it != shape_json.end() && !readUint32Array(*indices_it, shape.indices))) {
+        return std::nullopt;
+      }
+      component.shape = std::move(shape);
+      break;
+    }
+  }
+
   return component;
 }
 
-Json serializeSphereCollider(const components::SphereColliderComponent& component) {
-  Json json = serializeColliderBase(component);
-  json["center"] = toJson(component.center);
-  json["radius"] = component.radius;
-  return json;
+Json serializeCharacterController(const components::CharacterControllerComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"desired_velocity", toJson(component.desiredVelocity())},
+              {"desired_angular_velocity", toJson(component.desiredAngularVelocity())},
+              {"add_velocity", toJson(component.addVelocity())}};
 }
 
-std::optional<components::SphereColliderComponent> deserializeSphereCollider(const Json& json) {
-  if (!json.is_object()) {
-    return std::nullopt;
-  }
-  components::SphereColliderComponent component{};
-  if (!readColliderBase(json, component) ||
-      !readVec3(json, "center", component.center) ||
-      !readFloat(json, "radius", component.radius)) {
-    return std::nullopt;
-  }
-  return component;
-}
-
-Json serializeCapsuleCollider(const components::CapsuleColliderComponent& component) {
-  Json json = serializeColliderBase(component);
-  json["center"] = toJson(component.center);
-  json["radius"] = component.radius;
-  json["height"] = component.height;
-  return json;
-}
-
-std::optional<components::CapsuleColliderComponent> deserializeCapsuleCollider(
+std::optional<components::CharacterControllerComponent> deserializeCharacterController(
     const Json& json) {
   if (!json.is_object()) {
     return std::nullopt;
   }
-  components::CapsuleColliderComponent component{};
-  if (!readColliderBase(json, component) ||
-      !readVec3(json, "center", component.center) ||
-      !readFloat(json, "radius", component.radius) ||
-      !readFloat(json, "height", component.height)) {
+  components::CharacterControllerComponent component{};
+  math::Vec3 desired{};
+  math::Vec3 desired_angular{};
+  math::Vec3 add{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readVec3(json, "desired_velocity", desired) ||
+      !readVec3(json, "desired_angular_velocity", desired_angular) ||
+      !readVec3(json, "add_velocity", add)) {
     return std::nullopt;
   }
+  component.setDesiredVelocity(desired);
+  component.setDesiredAngularVelocity(desired_angular);
+  component.setAddVelocity(add);
   return component;
 }
 
@@ -1642,8 +1910,6 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "TagComponent", serializeTag, deserializeTag);
   registerComponent<components::TransformComponent>(
       registry, "TransformComponent", serializeTransform, deserializeTransform);
-  registerComponent<components::LocalTransformComponent>(
-      registry, "LocalTransformComponent", serializeLocalTransform, deserializeLocalTransform);
   registerComponent<components::MeshComponent>(
       registry, "MeshComponent", serializeMesh, deserializeMesh);
   registerComponent<components::AnimatorComponent>(
@@ -1656,14 +1922,15 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "VisibilityComponent", serializeVisibility, deserializeVisibility);
   registerComponent<components::TerrainComponent>(
       registry, "TerrainComponent", serializeTerrain, deserializeTerrain);
+  registerComponent<components::ColliderComponent>(
+      registry, "ColliderComponent", serializeCollider, deserializeCollider);
   registerComponent<components::RigidbodyComponent>(
       registry, "RigidbodyComponent", serializeRigidbody, deserializeRigidbody);
-  registerComponent<components::BoxColliderComponent>(
-      registry, "BoxColliderComponent", serializeBoxCollider, deserializeBoxCollider);
-  registerComponent<components::SphereColliderComponent>(
-      registry, "SphereColliderComponent", serializeSphereCollider, deserializeSphereCollider);
-  registerComponent<components::CapsuleColliderComponent>(
-      registry, "CapsuleColliderComponent", serializeCapsuleCollider, deserializeCapsuleCollider);
+  registerComponent<components::CharacterControllerComponent>(
+      registry,
+      "CharacterControllerComponent",
+      serializeCharacterController,
+      deserializeCharacterController);
   registerComponent<components::ParticleEffectComponent>(
       registry, "ParticleEffectComponent", serializeParticleEffect, deserializeParticleEffect);
   registerComponent<components::ParticleEffectOverrideComponent>(

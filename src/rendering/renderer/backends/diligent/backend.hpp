@@ -79,16 +79,14 @@ class DiligentBackend final : public Backend {
   renderer::MeshId createMeshFromFile(const std::filesystem::path& path) override;
   void destroyMesh(renderer::MeshId mesh) override;
   bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const override;
+  bool getMeshMaterialSlots(renderer::MeshId mesh,
+                            std::vector<geometry::MeshMaterialSlot>& out_slots) const override;
 
-  renderer::MaterialId createMaterial(const renderer::MaterialDesc& material) override;
+  renderer::MaterialId createMaterial(const renderer::ResolvedMaterialDesc& material) override;
   renderer::MaterialId createMaterialFromAsset(const std::filesystem::path& path,
                                                uint32_t material_index) override;
   void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) override;
   void destroyMaterial(renderer::MaterialId material) override;
-  renderer::MaterialSetId createMaterialSetFromMesh(
-      renderer::MeshId mesh,
-      const renderer::MaterialResourceDesc& desc) override;
-  void destroyMaterialSet(renderer::MaterialSetId set) override;
   void setMaterialFloat(renderer::MaterialId material, std::string_view name, float value) override;
 
   renderer::TextureId createTexture(const renderer::TextureDesc& desc) override;
@@ -174,15 +172,19 @@ class DiligentBackend final : public Backend {
     struct Submesh {
       Diligent::Uint32 index_offset = 0;
       Diligent::Uint32 index_count = 0;
+      uint32_t material_slot = 0;
       renderer::MaterialId material = renderer::kInvalidMaterial;
     };
     std::vector<Submesh> submeshes;
     std::vector<renderer::MaterialId> owned_materials;
   };
 
+  void refreshSubmeshesFromMeshData(MeshRecord& record);
+
   struct MaterialRecord {
     static constexpr size_t kTextureCoordSlotCount = 12;
 
+    renderer::MaterialPipelineDesc pipeline;
     renderer::MaterialDesc desc;
     glm::vec4 base_color_factor{1.0f, 1.0f, 1.0f, 1.0f};
     glm::vec3 emissive_factor{0.0f, 0.0f, 0.0f};
@@ -233,6 +235,8 @@ class DiligentBackend final : public Backend {
     float volume_absorption = 0.0f;
     float volume_distortion_strength = 0.0f;
     float volume_noise_strength = 1.0f;
+    std::array<glm::vec4, 7> custom_material_params{};
+    std::array<bool, 7> custom_material_param_overrides{};
     renderer::MaterialDesc::BlendMode blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> base_color_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_srv;
@@ -253,11 +257,11 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_double_sided_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> additive_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> additive_double_sided_srb;
-  };
-
-  struct MaterialSetRecord {
-    renderer::MeshId source_mesh = renderer::kInvalidMesh;
-    std::vector<renderer::MaterialId> materials;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_srb;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_transparent_srb;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_transparent_double_sided_srb;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_additive_srb;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_additive_double_sided_srb;
   };
 
   struct ImportedMaterialTemplateCacheEntry {
@@ -287,7 +291,7 @@ class DiligentBackend final : public Backend {
     renderer::LayerId layer = 0;
     renderer::MeshId mesh = renderer::kInvalidMesh;
     renderer::MaterialId material = renderer::kInvalidMaterial;
-    renderer::MaterialSetId material_set = renderer::kInvalidMaterialSet;
+    std::vector<renderer::DrawMaterialBinding> materials;
     glm::mat4 transform{1.0f};
     std::vector<glm::mat4> skinning_palette;
     bool visible = true;
@@ -493,6 +497,11 @@ class DiligentBackend final : public Backend {
     AdditiveDoubleSided,
   };
 
+  struct CustomForwardPipeline {
+    Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
+    bool attempted = false;
+  };
+
   void initializeDevice();
   void clearFrame(const float* color, bool clear_depth);
   void recreateShadowMap();
@@ -507,7 +516,17 @@ class DiligentBackend final : public Backend {
                                              Diligent::TEXTURE_FORMAT dsv_format);
   void ensureParticleResources();
   Diligent::IPipelineState* ensureForwardPipeline(ForwardPipelineVariant variant);
+  Diligent::IPipelineState* ensureCustomForwardPipeline(const MaterialRecord& material,
+                                                        ForwardPipelineVariant variant);
   void bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const;
+  bool materialUsesCustomForwardPipeline(const MaterialRecord& material) const;
+  Diligent::IShaderResourceBinding* ensureMaterialForwardSrb(MaterialRecord& material,
+                                                             ForwardPipelineVariant variant,
+                                                             bool custom_pipeline);
+  void initializeMaterialBindingForPipeline(
+      MaterialRecord& record,
+      Diligent::IPipelineState* pso,
+      Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb);
   void bindForwardPlusResourcesToSrb(Diligent::IShaderResourceBinding* srb) const;
   void initializeDefaultMaterialBinding(
       Diligent::IPipelineState* pso,
@@ -618,6 +637,7 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> transparent_double_sided_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> additive_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> additive_double_sided_pipeline_state_;
+  std::unordered_map<std::string, CustomForwardPipeline> custom_forward_pipelines_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> camera_override_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> camera_override_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> camera_override_user_constants_;
@@ -969,14 +989,12 @@ class DiligentBackend final : public Backend {
 
   renderer::MeshId nextMeshId_ = 1;
   renderer::MaterialId nextMaterialId_ = 1;
-  renderer::MaterialSetId nextMaterialSetId_ = 1;
   renderer::TextureId nextTextureId_ = 1;
   renderer::RenderTargetId nextTargetId_ = 1;
   renderer::TerrainId nextTerrainId_ = 1;
 
   std::unordered_map<renderer::MeshId, MeshRecord> meshes_;
   std::unordered_map<renderer::MaterialId, MaterialRecord> materials_;
-  std::unordered_map<renderer::MaterialSetId, MaterialSetRecord> material_sets_;
   std::unordered_map<std::string, ImportedMaterialTemplateCacheEntry> imported_material_templates_;
   std::unordered_map<std::string, MaterialRecord> imported_payload_material_templates_;
   std::unordered_map<renderer::TextureId, TextureRecord> textures_;

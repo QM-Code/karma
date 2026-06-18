@@ -5,14 +5,14 @@ Build and run the default sample:
 
 ```bash
 ./build.sh
-./build/portable/karma_example
+./build/portable/examples/gameplay/tank
 ```
 
 On Windows:
 
 ```bat
 build.bat
-build\portable\Release\karma_example.exe
+build\portable\examples\gameplay\Release\tank.exe
 ```
 
 Useful script options:
@@ -29,7 +29,7 @@ Equivalent manual CMake commands:
 cmake -S . -B build \
   -DKARMA_FETCH_DEPS=ON
 cmake --build build --parallel
-./build/karma_example
+./build/examples/gameplay/tank
 ```
 
 You can use the equivalent preset for fresh checkouts:
@@ -109,14 +109,14 @@ disable graphics demos:
 ```bash
 cmake -B build-headless \
   -DKARMA_HEADLESS=ON
-cmake --build build-headless --target karma_network_server_demo
+cmake --build build-headless --target network_server
 ```
 
 Or use the preset:
 
 ```bash
 cmake --preset headless
-cmake --build --preset headless --target karma_network_server_demo
+cmake --build --preset headless --target network_server
 ```
 
 This profile is build-supported for non-visual programs such as network/server
@@ -196,6 +196,30 @@ runtime code, and examples. GLM conversions for engine math types should go
 through `karma/core/math/glm.h`; backend-specific conversions such as Bullet,
 Jolt, or Assimp native types can stay local to those backend/importer files.
 
+## ECS Component Validation
+
+`ecs::World::add` throws when adding a component to a dead or invalid entity.
+Components that declare composition requirements validate before insertion, so
+invalid gameplay objects fail at authoring/deserialization time instead of
+being repaired later by runtime systems.
+
+Current physics-facing requirements include:
+
+- `ColliderComponent` requires `TransformComponent`.
+- `RigidbodyComponent` requires `TransformComponent` and `ColliderComponent`.
+- `CharacterControllerComponent` requires `TransformComponent`, a
+  `ColliderComponent`, and that collider must be a box.
+
+Add components in dependency order in gameplay code and prefabs:
+
+```cpp
+auto entity = world->createEntity();
+world->add(entity, karma::components::TransformComponent{});
+world->add(entity, karma::components::ColliderComponent::box(
+    karma::components::BoxColliderShape{.half_extents = {0.5f, 1.0f, 0.5f}}));
+world->add(entity, karma::components::CharacterControllerComponent{});
+```
+
 ## Renderer Diagnostics
 For Vulkan-side renderer debugging, Karma exposes two environment variables:
 
@@ -210,7 +234,7 @@ KARMA_DILIGENT_DEBUG=1
 Typical crash or hang triage run:
 
 ```bash
-KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/karma_laser_example
+KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/examples/effects/laser
 ```
 
 ### Startup And Resource Timing
@@ -218,12 +242,12 @@ KARMA_VK_VALIDATION=1 KARMA_DILIGENT_DEBUG=1 ./build/karma_laser_example
 Use the Diligent glTF viewer as the renderer startup benchmark:
 
 ```bash
-cmake --build build --target karma_diligent_gltf_viewer_example --parallel $(nproc)
+cmake --build build --target rendering_gltf_viewer --parallel $(nproc)
 timeout 12s env \
   KARMA_ENGINE_STARTUP_DIAG=1 \
   KARMA_RENDER_SYSTEM_DIAG=1 \
   KARMA_RENDER_RESOURCE_DIAG=1 \
-  ./build/karma_diligent_gltf_viewer_example
+  ./build/examples/rendering/gltf_viewer
 ```
 
 Useful startup diagnostics:
@@ -259,21 +283,21 @@ To force a specific enumerated adapter for triage, set `KARMA_VK_ADAPTER` to the
 adapter index printed at startup:
 
 ```bash
-KARMA_VK_ADAPTER=0 ./build/karma_navmesh_example
+KARMA_VK_ADAPTER=0 ./build/examples/navigation/navmesh
 ```
 
 To allow the backend to choose a software Vulkan adapter on systems without
 hardware Vulkan support, opt in explicitly:
 
 ```bash
-KARMA_ALLOW_SOFTWARE_VULKAN=1 ./build/karma_navmesh_example
+KARMA_ALLOW_SOFTWARE_VULKAN=1 ./build/examples/navigation/navmesh
 ```
 
 For one-off host debugging outside Karma's adapter selection, you can still
 force a Vulkan ICD through the loader:
 
 ```bash
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json ./build/karma_navmesh_example
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json ./build/examples/navigation/navmesh
 ```
 
 ### Forward Draw Diagnostics
@@ -281,7 +305,7 @@ Set `KARMA_DRAW_DEBUG=1` to print forward-pass draw submissions immediately
 before `Draw` or `DrawIndexed` reaches Diligent:
 
 ```bash
-KARMA_DRAW_DEBUG=1 ./build/karma_prefab_gallery_example
+KARMA_DRAW_DEBUG=1 ./build/examples/prefabs/gallery
 ```
 
 Each line includes the pass, mesh/material IDs, vertex and index counts, first
@@ -292,13 +316,13 @@ The forward depth prepass is skipped by default on Vulkan drivers where it has
 shown driver-specific instability. To disable it explicitly during triage:
 
 ```bash
-KARMA_DISABLE_DEPTH_PREPASS=1 ./build/karma_prefab_gallery_example
+KARMA_DISABLE_DEPTH_PREPASS=1 ./build/examples/prefabs/gallery
 ```
 
 To force the depth prepass even on guarded drivers:
 
 ```bash
-KARMA_FORCE_DEPTH_PREPASS=1 ./build/karma_prefab_gallery_example
+KARMA_FORCE_DEPTH_PREPASS=1 ./build/examples/prefabs/gallery
 ```
 
 For frame pacing and input-latency triage, enable engine frame diagnostics:
@@ -306,7 +330,7 @@ For frame pacing and input-latency triage, enable engine frame diagnostics:
 ```bash
 KARMA_ENGINE_FRAME_DIAG=1 \
 KARMA_ENGINE_FRAME_DIAG_THRESHOLD_MS=18 \
-./build/karma_navmesh_example
+./build/examples/navigation/navmesh
 ```
 
 The frame log splits event handling into poll, UI dispatch, input update, event
@@ -332,7 +356,7 @@ Set `config.vsync = true` or use `KARMA_ENGINE_VSYNC=1` to opt into
 FIFO/FIFO_RELAXED vblank pacing:
 
 ```bash
-KARMA_ENGINE_VSYNC=1 ./build/karma_navmesh_example
+KARMA_ENGINE_VSYNC=1 ./build/examples/navigation/navmesh
 ```
 
 Use this when tear-free pacing is more important than input latency, or when the
@@ -415,8 +439,8 @@ time as splash rendering.
 Local-light / point-shadow sanity check:
 
 ```bash
-./build/karma_light_stress_example
-./build/karma_light_stress_example --lights 16 --stats
+./build/examples/rendering/light_stress
+./build/examples/rendering/light_stress --lights 16 --stats
 ```
 
 For current renderer/sample implementation notes, see:
@@ -587,9 +611,8 @@ class MyGame : public karma::app::GameInterface {
   void onStart() override {
     sensor_ = world->createEntity();
     world->add(sensor_, karma::components::TransformComponent{});
-    world->add(sensor_, karma::components::SphereColliderComponent{
-        .center = {},
-        .radius = 2.0f});
+    world->add(sensor_, karma::components::ColliderComponent::sphere(
+        karma::components::SphereColliderShape{.radius = 2.0f}));
     world->add(sensor_, karma::components::CollisionListenerComponent{
         .enabled = true,
         .mode = karma::components::CollisionListenMode::TriggersOnly,
@@ -650,8 +673,8 @@ class MyGame : public karma::app::GameInterface {
   void onStart() override {
     actor_ = world->createEntity();
     world->add(actor_, karma::components::TransformComponent{});
-    world->add(actor_, karma::components::BoxColliderComponent{
-        .half_extents = {0.5f, 0.5f, 0.5f}});
+    world->add(actor_, karma::components::ColliderComponent::box(
+        karma::components::BoxColliderShape{.half_extents = {0.5f, 0.5f, 0.5f}}));
     world->add(actor_, karma::components::RigidbodyComponent{});
     world->add(actor_, karma::components::ContactListenerComponent{
         .enabled = true,
@@ -675,7 +698,81 @@ Notes:
 
 - This is intended for solid physical contacts, not trigger zones.
 - `normal` is reported in the listener entity's frame of reference, i.e. it points away from the contacted surface and into the listener.
-- The current runtime supports `RigidbodyComponent` bodies, and on the default Jolt backend the built-in player controller path as used in `collision_events_example.cpp`.
+- The current runtime supports `RigidbodyComponent` bodies, and on the default physics backend the ECS `CharacterControllerComponent` path as used in `examples/physics/collision_events.cpp`.
+
+## Character Controllers
+
+Character controllers are authored by adding `TransformComponent`, a box
+`ColliderComponent`, and `CharacterControllerComponent` to each controlled
+entity. The physics system creates one backend controller per ECS component;
+there is no global default controller.
+
+The component is the gameplay command/status bridge:
+
+- Game code writes commands through `setDesiredVelocity`,
+  `setDesiredAngularVelocity`, `addImpulse`, `setAddVelocity`, and
+  `clearImpulse`.
+- The physics system writes `velocity`, `angular_velocity`, `forward`, and
+  `grounded` after fixed-step simulation.
+- Reset or teleport by setting `TransformComponent`; dirty transform state is
+  pushed into the backend at the start of the next fixed physics step.
+
+Example:
+
+```cpp
+class MyGame : public karma::app::GameInterface {
+ public:
+  void onStart() override {
+    player_ = world->createEntity();
+    world->add(player_, karma::components::TransformComponent{});
+    world->add(player_, karma::components::ColliderComponent::box(
+        karma::components::BoxColliderShape{.half_extents = {0.5f, 1.0f, 0.5f}}));
+    world->add(player_, karma::components::CharacterControllerComponent{});
+  }
+
+  void onFixedUpdate(float /*dt*/) override {
+    auto& controller = world->get<karma::components::CharacterControllerComponent>(player_);
+
+    karma::math::Vec3 forward = controller.forward;
+    forward.y = 0.0f;
+    if (karma::math::length(forward) > 0.0001f) {
+      forward = karma::math::normalize(forward);
+    }
+
+    controller.setDesiredVelocity(
+        {forward.x * move_speed_, controller.velocity.y, forward.z * move_speed_});
+    controller.setDesiredAngularVelocity({0.0f, turn_speed_, 0.0f});
+
+    if (jump_pressed_ && controller.grounded) {
+      controller.addImpulse({0.0f, jump_speed_, 0.0f});
+    }
+  }
+
+  void resetPlayer() {
+    auto& transform = world->get<karma::components::TransformComponent>(player_);
+    auto& controller = world->get<karma::components::CharacterControllerComponent>(player_);
+    transform.setPosition({0.0f, 8.0f, 0.0f});
+    transform.setRotation({});
+    controller.setDesiredVelocity({});
+    controller.setDesiredAngularVelocity({});
+    controller.setAddVelocity({});
+  }
+
+ private:
+  karma::ecs::Entity player_{};
+  float move_speed_ = 6.0f;
+  float turn_speed_ = 0.0f;
+  float jump_speed_ = 7.0f;
+  bool jump_pressed_ = false;
+};
+```
+
+Prefab `CharacterControllerComponent` entries use strict field names:
+
+- `enabled`
+- `desired_velocity`
+- `desired_angular_velocity`
+- `add_velocity`
 
 ## Ground Contact
 
@@ -699,9 +796,9 @@ class MyGame : public karma::app::GameInterface {
   void onStart() override {
     player_ = world->createEntity();
     world->add(player_, karma::components::TransformComponent{});
-    world->add(player_, karma::components::BoxColliderComponent{
-        .half_extents = {0.5f, 1.0f, 0.5f}});
-    world->add(player_, karma::components::PlayerControllerComponent{});
+    world->add(player_, karma::components::ColliderComponent::box(
+        karma::components::BoxColliderShape{.half_extents = {0.5f, 1.0f, 0.5f}}));
+    world->add(player_, karma::components::CharacterControllerComponent{});
     world->add(player_, karma::components::GroundContactComponent{});
   }
 
@@ -725,8 +822,8 @@ class MyGame : public karma::app::GameInterface {
 
 Current support:
 
-- `PlayerControllerComponent`
-- `RigidbodyComponent` with `BoxColliderComponent`
+- `CharacterControllerComponent`
+- `RigidbodyComponent` with a box `ColliderComponent`
 
 For box rigid bodies, the engine now also runs a short downward support probe after physics so `support_entity`, `point`, and `normal` can be resolved for common "what am I standing on?" gameplay logic.
 
@@ -759,9 +856,9 @@ auto hits = karma::ecs::queries::findContainingColliders(
 
 Current support:
 
-- `BoxColliderComponent`
-- `SphereColliderComponent`
-- `CapsuleColliderComponent`
+- box `ColliderComponent`
+- sphere `ColliderComponent`
+- capsule `ColliderComponent`
 
 Overlap queries:
 
@@ -798,7 +895,7 @@ Assumption:
 
 Current limitation:
 
-- `MeshColliderComponent` is not included in point containment or overlap queries yet. Point-inside-mesh semantics are only sensible for closed volume meshes, and the current ECS query path intentionally leaves that undefined.
+- mesh `ColliderComponent` shapes are not included in point containment or overlap queries yet. Point-inside-mesh semantics are only sensible for closed volume meshes, and the current ECS query path intentionally leaves that undefined.
 
 Trigger pattern:
 
@@ -809,11 +906,12 @@ Trigger pattern:
 `GameInterface` now exposes a runtime material library through the `materials` pointer.
 The intended workflow is:
 
-- register a material variant from game code, usually in `onStart()`
-- assign its key to `MeshComponent.material_key`
-- let the renderer clone the mesh's imported material set and apply the override
+- register a shared material asset from game code or a JSON `.mat` file
+- optionally register per-object material instances that inherit from a shared asset
+- bind material keys to `MeshComponent.materials` slots
+- let missing slot bindings fall back to the mesh asset's default material for that slot
 
-Tinting a GLB while preserving its existing textures and PBR data:
+Assigning a material to slot `0`:
 
 ```cpp
 #include "karma/karma.h"
@@ -823,48 +921,88 @@ class MyGame : public karma::app::GameInterface {
   void onStart() override {
     const std::string tank_mesh = "assets/tank_final.glb";
 
-    materials->registerFromMeshTint(
-        "tank_blue",
-        tank_mesh,
-        karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f});
+    karma::renderer::MaterialDesc blue{};
+    blue.base_color = karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f};
+    blue.roughness = 0.65f;
+    blue.metallic = 0.0f;
+    materials->registerMaterialDesc("tank_blue", blue);
 
     auto tank = world->createEntity();
     world->add(tank, karma::components::TransformComponent{});
     world->add(tank, karma::components::MeshComponent{
         .mesh_key = tank_mesh,
-        .material_key = "tank_blue",
+        .materials = {
+            karma::components::MeshMaterialBinding{
+                .slot = 0,
+                .material_key = "tank_blue",
+            },
+        },
         .visible = true});
   }
 };
 ```
 
-The lower-level form uses `MaterialResourceDesc` directly:
+Use a material instance when one object should diverge from a shared asset:
 
 ```cpp
-materials->registerMaterial(
+karma::renderer::MaterialInstanceDesc local{};
+local.parent_material_key = "tank_blue";
+local.params["base_color"] = karma::math::Color{1.0f, 0.35f, 0.25f, 1.0f};
+materials->registerMaterialInstance("tank_blue/local_red", std::move(local));
+```
+
+JSON `.mat` files are versioned material documents. Relative shader and texture
+paths resolve from the `.mat` file location:
+
+```json
+{
+  "version": 1,
+  "pipeline": { "type": "standard" },
+  "surface": {
+    "base_color": [0.35, 0.55, 1.0, 1.0],
+    "roughness": 0.65,
+    "metallic": 0.0
+  },
+  "render_state": {
+    "double_sided": false,
+    "transparent": false
+  },
+  "textures": {
+    "base_color": "textures/tank_albedo.png"
+  }
+}
+```
+
+Load and register a `.mat` file:
+
+```cpp
+const auto loaded = karma::content::loadMaterialFile(
+    *materials,
     "tank_blue",
-    karma::renderer::MaterialResourceDesc::fromMeshTint(
-        tank_mesh,
-        karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f}));
+    "assets/materials/tank_blue.mat");
 ```
 
 Current semantics:
 
-- empty `material_key`: use the mesh's original imported materials
-- registered tint material: clone the mesh's imported material set and multiply each base color by the tint
-- unknown key: log once and fall back to the mesh's original imported materials
-- mismatched mesh/material pairing: log once and fall back to the mesh's original imported materials
+- unbound slot: use the mesh asset's default material for that slot
+- registered material asset: shared by every entity that binds the key
+- registered material instance: inherits its parent asset and overrides only specified params or textures
+- unknown key: log once and fall back to the mesh slot's default material
+- `.mat` texture entries for known semantics such as `base_color`, `normal`, `metallic_roughness`, `occlusion`, and `emissive` bind to the matching renderer texture slots
+- custom pipelines can name vertex and fragment HLSL paths, entry points, and defines; v1 custom materials still use the engine vertex layout and draw constants contract
+- custom shaders can receive packed vector params through `.mat` params named `material_params0` through `material_params6`
 
 Current scope:
 
 - runtime registration from game code is supported now
-- descriptors are shaped so `.mat` file loading can be added later without changing `MeshComponent.material_key`
-- overrides are whole-mesh material-set variants, not per-submesh authoring APIs
+- JSON `.mat` asset and instance loading is supported now
+- mesh assets carry material slots and submesh-to-slot ranges
+- `MeshComponent.materials` stores per-slot material bindings
 
 Current limitation:
 
-- the tint workflow assumes one logical mesh asset per `MeshComponent`
-- it preserves imported submesh materials, but does not yet expose per-submesh override selection to gameplay code
+- custom material pipelines do not support arbitrary vertex layouts, geometry or tessellation stages, compute materials, or material graphs
+- hot reload is not implemented for `.mat` files
 
 ## GLB Scene Import
 Karma now has a separate GLB scene-import path for authored scenes.
@@ -911,8 +1049,9 @@ Current behavior:
   composes final world transforms
 - imported lights become `LightComponent`s on those node entities
 - imported point and spot lights are created with `casts_shadows = true`
-- mesh primitives become child render entities with key-only `MeshComponent`s backed by renderer-owned runtime mesh registrations
-- imported primitive materials preserve the source asset's PBR textures and scalar factors through registered material keys
+- ordinary mesh primitives on the same source node are combined into one runtime mesh with submesh material slots where possible
+- skinned or morphable primitives remain separate render entities so their runtime deformation components can target one mesh payload
+- imported primitive materials become generated material asset keys, and mesh slots use those keys as defaults
 - animation clips import transform and morph-weight channels
 - skinned primitives import joint indices, weights, skins, skeletons, and inverse
   bind matrices
@@ -926,8 +1065,8 @@ Current behavior:
 Animation runtime flow:
 
 - `AnimationSystem` samples imported clips on the root `AnimatorComponent`
-- transform channels write `LocalTransformComponent` values on imported node
-  entities
+- transform channels write local values on imported node `TransformComponent`
+  instances
 - morph-weight channels write `MorphTargetComponent::weights` on the matching
   renderable primitive entities
 - `scene::updateWorldTransforms(...)` composes final world transforms after
@@ -949,7 +1088,7 @@ Imported light assumptions:
 
 Current v1 limitations:
 
-- imported material alpha/double-sided metadata is preserved, but the runtime still does not specialize draw state per material
+- imported material alpha and double-sided metadata are preserved in generated material assets
 - GLB light scaling is currently importer-defined, not configurable per asset
 - cameras are not imported yet
 - retargeting clips between different skeletons is not implemented
@@ -995,21 +1134,21 @@ Point-light shadow setup:
 
 Reference sample:
 
-- [../examples/main.cpp](../examples/main.cpp) is the tank/world movement
+- [../examples/gameplay/tank.cpp](../examples/gameplay/tank.cpp) is the tank/world movement
   sample. It uses a shadow-casting directional sun with intensity `1.6`, plus
   local point lights and a radar render-target camera.
-- [../examples/light_stress_example.cpp](../examples/light_stress_example.cpp) provides the current local-light probe workflow for `1-16` safe-mode shadowed point lights.
-- [NEXT_AGENT.md](NEXT_AGENT.md) carries active renderer/local-light handoff notes.
+- [../examples/rendering/light_stress.cpp](../examples/rendering/light_stress.cpp) provides the current local-light probe workflow for `1-16` safe-mode shadowed point lights.
+- [../NEXT_AGENT.md](../NEXT_AGENT.md) carries active renderer/local-light handoff notes.
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.
 Use `KARMA_DATA_DIR` at runtime when needed:
 
 ```bash
-KARMA_DATA_DIR="$PWD/data" ./build/karma_example
+KARMA_DATA_DIR="$PWD/data" ./build/examples/gameplay/tank
 ```
 
 ## Demos
-- `karma_example` (default scene)
-- `karma_imgui_ui_demo` (ImGui draw data bridge)
-- `karma_rmlui_ui_demo` (RmlUi draw data bridge)
+- `gameplay_tank` (default scene)
+- `ui_imgui` (ImGui draw data bridge)
+- `ui_rmlui` (RmlUi draw data bridge)

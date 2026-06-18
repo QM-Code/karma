@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -12,8 +14,6 @@
 #include "karma/world/ecs/component_storage.h"
 #include "karma/world/ecs/entity_registry.h"
 
-#include "karma/world/components/rigidbody.h"
-#include "karma/world/components/transform.h"
 #include "karma/world/components/tag.h"
 
 namespace karma::ecs {
@@ -65,6 +65,9 @@ class World {
   /// the component is inserted.
   template <typename T>
   void add(Entity entity, T component) {
+    if (!entity.isValid() || !isAlive(entity)) {
+      throw std::runtime_error("Cannot add component to a dead or invalid entity.");
+    }
     if constexpr (HasValidate<T>::value) {
       T::Validate(*this, entity);
     }

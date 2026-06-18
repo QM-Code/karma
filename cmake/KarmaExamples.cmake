@@ -1,12 +1,46 @@
-if (KARMA_BUILD_GRAPHICAL_PROFILE)
-  add_executable(karma_example
-    examples/main.cpp
+set(KARMA_EXAMPLES_COMMON_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/examples/common")
+
+function(karma_configure_example target output_subdir output_name)
+  target_include_directories(${target} PRIVATE
+    "${KARMA_EXAMPLES_COMMON_INCLUDE_DIR}"
   )
+  set_target_properties(${target} PROPERTIES
+    OUTPUT_NAME "${output_name}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples/${output_subdir}"
+  )
+  if (TARGET karma_fix_xxhash)
+    add_dependencies(${target} karma_fix_xxhash)
+  endif()
+endfunction()
 
-  target_link_libraries(karma_example PRIVATE karma::graphical)
+function(karma_add_graphical_example target output_subdir output_name)
+  add_executable(${target}
+    ${ARGN}
+  )
+  target_link_libraries(${target} PRIVATE karma::graphical)
+  karma_configure_example(${target} "${output_subdir}" "${output_name}")
+endfunction()
 
+function(karma_add_physics_example target output_name)
+  add_executable(${target}
+    ${ARGN}
+    examples/physics/physics_example_common.cpp
+  )
+  if (UNIX AND NOT APPLE)
+    target_link_libraries(${target} PRIVATE
+      "-Wl,--start-group"
+      ${KARMA_GRAPHICAL_PROFILE_LIBS}
+      "-Wl,--end-group")
+  else()
+    target_link_libraries(${target} PRIVATE karma::graphical)
+  endif()
+  karma_configure_example(${target} "physics" "${output_name}")
+endfunction()
+
+if (KARMA_BUILD_GRAPHICAL_PROFILE)
   if (KARMA_DILIGENT_REPACK_XXHASH
       AND KARMA_XXHASH_ARCHIVE
+      AND KARMA_XXHASH_OBJECT
       AND CMAKE_AR
       AND CMAKE_RANLIB
       AND CMAKE_C_COMPILER
@@ -22,305 +56,163 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       COMMENT "Rebuilding xxhash static archive"
       VERBATIM)
     add_custom_target(karma_fix_xxhash DEPENDS ${KARMA_XXHASH_STAMP})
-    add_dependencies(karma_example karma_fix_xxhash)
   endif()
 
-  add_executable(karma_collision_events_example
-    examples/collision_events_example.cpp
-  )
-  target_link_libraries(karma_collision_events_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_collision_events_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(gameplay_tank gameplay tank
+    examples/gameplay/tank.cpp)
+  karma_add_graphical_example(physics_collision_events physics collision_events
+    examples/physics/collision_events.cpp)
 
-  add_executable(karma_light_stress_example
-    examples/light_stress_example.cpp
-  )
-  target_link_libraries(karma_light_stress_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_light_stress_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(rendering_light_stress rendering light_stress
+    examples/rendering/light_stress.cpp)
+  karma_add_graphical_example(rendering_material_override rendering material_override
+    examples/rendering/material_override.cpp)
+  karma_add_graphical_example(rendering_postwar_city rendering postwar_city
+    examples/rendering/postwar_city.cpp
+    examples/common/scene_helpers.cpp)
+  karma_add_graphical_example(rendering_gltf_viewer rendering gltf_viewer
+    examples/rendering/gltf_viewer.cpp
+    examples/common/scene_helpers.cpp)
+  karma_add_graphical_example(rendering_postprocess rendering postprocess
+    examples/rendering/postprocess.cpp
+    examples/common/scene_helpers.cpp)
+  karma_add_graphical_example(rendering_bloom rendering bloom
+    examples/rendering/bloom.cpp
+    examples/common/scene_helpers.cpp)
 
-  add_executable(karma_material_override_example
-    examples/material_override_example.cpp
-  )
-  target_link_libraries(karma_material_override_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_material_override_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(scene_glb_import scene glb_import
+    examples/scene/glb_import.cpp)
+  karma_add_graphical_example(animation_glb animation glb
+    examples/animation/glb.cpp
+    examples/common/scene_helpers.cpp)
 
-  add_executable(karma_glb_scene_import_example
-    examples/glb_scene_import_example.cpp
-  )
-  target_link_libraries(karma_glb_scene_import_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_glb_scene_import_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(particles_billboard particles billboard
+    examples/particles/billboard.cpp)
+  karma_add_graphical_example(particles_gallery particles gallery
+    examples/particles/gallery.cpp)
+  karma_add_graphical_example(particles_explosion_stress particles explosion_stress
+    examples/particles/explosion_stress.cpp)
 
-  add_executable(karma_postwar_city_example
-    examples/postwar_city_example.cpp
-    examples/scene_helpers.cpp
-  )
-  target_link_libraries(karma_postwar_city_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_postwar_city_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(effects_energy_orb effects energy_orb
+    examples/effects/energy_orb.cpp)
+  karma_add_graphical_example(effects_laser effects laser
+    examples/effects/laser.cpp)
+  karma_add_graphical_example(effects_wave effects wave
+    examples/effects/wave.cpp)
+  karma_add_graphical_example(effects_volumetric_sphere effects volumetric_sphere
+    examples/effects/volumetric_sphere.cpp)
 
-  add_executable(karma_diligent_gltf_viewer_example
-    examples/diligent_gltf_viewer_example.cpp
-    examples/scene_helpers.cpp
-  )
-  target_link_libraries(karma_diligent_gltf_viewer_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_diligent_gltf_viewer_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(rendering_terrain rendering terrain
+    examples/rendering/terrain.cpp)
 
-  add_executable(karma_diligentfx_postprocess_example
-    examples/diligentfx_postprocess_example.cpp
-    examples/scene_helpers.cpp
-  )
-  target_link_libraries(karma_diligentfx_postprocess_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_diligentfx_postprocess_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_diligentfx_bloom_example
-    examples/diligentfx_bloom_example.cpp
-    examples/scene_helpers.cpp
-  )
-  target_link_libraries(karma_diligentfx_bloom_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_diligentfx_bloom_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_glb_animation_example
-    examples/glb_animation_example.cpp
-    examples/scene_helpers.cpp
-  )
-  target_link_libraries(karma_glb_animation_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_glb_animation_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_particle_example
-    examples/particle_example.cpp
-  )
-  target_link_libraries(karma_particle_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_particle_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_energy_orb_example
-    examples/energy_orb_example.cpp
-  )
-  target_link_libraries(karma_energy_orb_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_energy_orb_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_particle_gallery_example
-    examples/particle_gallery_example.cpp
-  )
-  target_link_libraries(karma_particle_gallery_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_particle_gallery_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_laser_example
-    examples/laser_example.cpp
-  )
-  target_link_libraries(karma_laser_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_laser_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_laser_prefab_example
-    examples/laser_prefab_example.cpp
-  )
-  target_link_libraries(karma_laser_prefab_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_laser_prefab_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_wave_example
-    examples/wave_example.cpp
-  )
-  target_link_libraries(karma_wave_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_wave_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_volumetric_sphere_example
-    examples/volumetric_sphere_example.cpp
-  )
-  target_link_libraries(karma_volumetric_sphere_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_volumetric_sphere_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_volumetric_sphere_prefab_example
-    examples/volumetric_sphere_prefab_example.cpp
-  )
-  target_link_libraries(karma_volumetric_sphere_prefab_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_volumetric_sphere_prefab_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_terrain_example
-    examples/terrain_example.cpp
-  )
-  target_link_libraries(karma_terrain_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_terrain_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_prefab_gallery_example
-    examples/prefab_gallery_example.cpp
-  )
-  target_link_libraries(karma_prefab_gallery_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_prefab_gallery_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_prefab_particle_isolation_example
-    examples/prefab_particle_isolation_example.cpp
-  )
-  target_link_libraries(karma_prefab_particle_isolation_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_prefab_particle_isolation_example karma_fix_xxhash)
-  endif()
-
-  add_executable(karma_explosion_stress_example
-    examples/explosion_stress_example.cpp
-  )
-  target_link_libraries(karma_explosion_stress_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_explosion_stress_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(prefabs_laser prefabs laser
+    examples/prefabs/laser.cpp)
+  karma_add_graphical_example(prefabs_volumetric_sphere prefabs volumetric_sphere
+    examples/prefabs/volumetric_sphere.cpp)
+  karma_add_graphical_example(prefabs_gallery prefabs gallery
+    examples/prefabs/gallery.cpp)
+  karma_add_graphical_example(prefabs_particle_isolation prefabs particle_isolation
+    examples/prefabs/particle_isolation.cpp)
 
   if (KARMA_BUILD_IMGUI_DEMO)
-    add_executable(karma_imgui_ui_demo
-      examples/imgui_ui_demo.cpp
-    )
-    target_link_libraries(karma_imgui_ui_demo PRIVATE karma::graphical)
-    if (TARGET karma_fix_xxhash)
-      add_dependencies(karma_imgui_ui_demo karma_fix_xxhash)
-    endif()
+    karma_add_graphical_example(ui_imgui ui imgui
+      examples/ui/imgui.cpp)
   endif()
 
   if (KARMA_BUILD_RMLUI_DEMO)
-    add_executable(karma_rmlui_ui_demo
-      examples/rmlui_ui_demo.cpp
-    )
-    target_link_libraries(karma_rmlui_ui_demo PRIVATE karma::graphical)
-    if (TARGET karma_fix_xxhash)
-      add_dependencies(karma_rmlui_ui_demo karma_fix_xxhash)
-    endif()
+    karma_add_graphical_example(ui_rmlui ui rmlui
+      examples/ui/rmlui.cpp)
   endif()
+
+  karma_add_physics_example(physics_shape_gallery shape_gallery
+    examples/physics/shape_gallery.cpp)
+  karma_add_physics_example(physics_constraint_lab constraint_lab
+    examples/physics/constraint_lab.cpp)
+  karma_add_physics_example(physics_query_lab query_lab
+    examples/physics/query_lab.cpp)
+  karma_add_physics_example(physics_body_controls body_controls
+    examples/physics/body_controls.cpp)
+  karma_add_physics_example(physics_car car
+    examples/physics/car.cpp)
 endif()
 
 if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_SERVER_PROFILE)
-  add_executable(karma_network_server_demo
-    examples/network_server_demo.cpp
-    examples/network_demo_shared.cpp
+  add_executable(network_server
+    examples/network/server.cpp
+    examples/network/shared.cpp
   )
-
-  target_link_libraries(karma_network_server_demo PRIVATE karma::server)
+  target_link_libraries(network_server PRIVATE karma::server)
+  karma_configure_example(network_server "network" "server")
 endif()
 
 if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_GRAPHICAL_PROFILE)
-  add_executable(karma_network_client_demo
-    examples/network_client_demo.cpp
-    examples/network_demo_shared.cpp
-  )
-
-  target_link_libraries(karma_network_client_demo PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_network_client_demo karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(network_client network client
+    examples/network/client.cpp
+    examples/network/shared.cpp)
 endif()
 
 if (KARMA_ENABLE_NAVIGATION AND TARGET karma::headless)
-  add_executable(karma_recast_navigation_examples
-    examples/recast_navigation_examples.cpp
+  add_executable(navigation_samples_headless
+    examples/navigation/samples/headless.cpp
   )
-  target_link_libraries(karma_recast_navigation_examples
+  target_link_libraries(navigation_samples_headless
     PRIVATE
       karma_content
       karma_simulation_navigation
       karma_rendering_headless
       karma::headless
   )
+  karma_configure_example(navigation_samples_headless "navigation/samples" "headless")
   if (BUILD_TESTING)
-    add_test(NAME karma_recast_navigation_examples
-      COMMAND karma_recast_navigation_examples all
+    add_test(NAME navigation_samples_headless
+      COMMAND navigation_samples_headless all
     )
   endif()
 endif()
 
 if (KARMA_ENABLE_NAVIGATION AND KARMA_BUILD_GRAPHICAL_PROFILE)
-  add_executable(karma_navmesh_example
-    examples/navmesh_example.cpp
-    examples/scene_helpers.cpp
-  )
-  target_link_libraries(karma_navmesh_example PRIVATE karma::graphical)
+  karma_add_graphical_example(navigation_navmesh navigation navmesh
+    examples/navigation/navmesh.cpp
+    examples/common/scene_helpers.cpp)
 
-  function(karma_add_recast_sample target source)
-    add_executable(${target}
+  function(karma_add_navigation_sample target output_name source)
+    karma_add_graphical_example(${target} "navigation/samples" "${output_name}"
       ${source}
-      examples/recast_navigation_sample_app.cpp
-      examples/scene_helpers.cpp
-    )
-    target_link_libraries(${target} PRIVATE karma::graphical)
-    if (TARGET karma_fix_xxhash)
-      add_dependencies(${target} karma_fix_xxhash)
-    endif()
+      examples/navigation/samples/sample_app.cpp
+      examples/common/scene_helpers.cpp)
   endfunction()
 
-  karma_add_recast_sample(karma_recast_solo_mesh_example
-    examples/recast_solo_mesh_example.cpp)
-  karma_add_recast_sample(karma_recast_tile_mesh_example
-    examples/recast_tile_mesh_example.cpp)
-  karma_add_recast_sample(karma_recast_temp_obstacles_example
-    examples/recast_temp_obstacles_example.cpp)
-  karma_add_recast_sample(karma_recast_debug_example
-    examples/recast_debug_example.cpp)
+  karma_add_navigation_sample(navigation_solo_mesh solo_mesh
+    examples/navigation/samples/solo_mesh.cpp)
+  karma_add_navigation_sample(navigation_tile_mesh tile_mesh
+    examples/navigation/samples/tile_mesh.cpp)
+  karma_add_navigation_sample(navigation_temp_obstacles temp_obstacles
+    examples/navigation/samples/temp_obstacles.cpp)
+  karma_add_navigation_sample(navigation_debug debug
+    examples/navigation/samples/debug.cpp)
 
-  function(karma_add_navigation_example target source)
-    add_executable(${target}
+  function(karma_add_navigation_example target output_name source)
+    karma_add_graphical_example(${target} "navigation" "${output_name}"
       ${source}
       examples/navigation/navigation_example_scene.cpp
       examples/navigation/navigation_examples.cpp
-      examples/scene_helpers.cpp
-    )
-    target_link_libraries(${target} PRIVATE karma::graphical)
-    set_target_properties(${target} PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples/navigation"
-    )
-    if (TARGET karma_fix_xxhash)
-      add_dependencies(${target} karma_fix_xxhash)
-    endif()
+      examples/common/scene_helpers.cpp)
   endfunction()
 
-  karma_add_navigation_example(point_click
+  karma_add_navigation_example(navigation_point_click point_click
     examples/navigation/point_click.cpp)
-  karma_add_navigation_example(crowds
+  karma_add_navigation_example(navigation_crowds crowds
     examples/navigation/crowds.cpp)
-  karma_add_navigation_example(tile_cache
+  karma_add_navigation_example(navigation_tile_cache tile_cache
     examples/navigation/tile_cache.cpp)
-  karma_add_navigation_example(query_lab
+  karma_add_navigation_example(navigation_query_lab query_lab
     examples/navigation/query_lab.cpp)
-  karma_add_navigation_example(offmesh_areas
+  karma_add_navigation_example(navigation_offmesh_areas offmesh_areas
     examples/navigation/offmesh_areas.cpp)
-  karma_add_navigation_example(physics_bridge
+  karma_add_navigation_example(navigation_physics_bridge physics_bridge
     examples/navigation/physics_bridge.cpp)
 
-  add_executable(karma_recast_navigation_graphical_example
-    examples/recast_navigation_graphical_example.cpp
-    examples/scene_helpers.cpp
-  )
-  target_link_libraries(karma_recast_navigation_graphical_example PRIVATE karma::graphical)
-  if (TARGET karma_fix_xxhash)
-    add_dependencies(karma_recast_navigation_graphical_example karma_fix_xxhash)
-  endif()
+  karma_add_graphical_example(navigation_samples_gallery "navigation/samples" gallery
+    examples/navigation/samples/gallery.cpp
+    examples/common/scene_helpers.cpp)
 endif()

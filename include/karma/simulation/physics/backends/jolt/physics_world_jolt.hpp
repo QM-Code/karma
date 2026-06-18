@@ -10,6 +10,7 @@
 namespace JPH {
 class Body;
 class Constraint;
+class VehicleConstraint;
 class PhysicsSystem;
 class JobSystem;
 class TempAllocator;
@@ -35,11 +36,16 @@ public:
         const karma::physics::PhysicsConstraintDesc& desc,
         std::uintptr_t bodyA,
         std::uintptr_t bodyB) override;
+    std::unique_ptr<PhysicsVehicleBackend> createVehicle(
+        const karma::physics::PhysicsVehicleDesc& desc,
+        std::uintptr_t body) override;
+    std::unique_ptr<PhysicsSoftBodyBackend> createSoftBody(
+        const karma::physics::PhysicsSoftBodyDesc& desc) override;
     std::unique_ptr<PhysicsRigidBodyBackend> createBoxBody(const glm::vec3& halfExtents,
                                                            float mass,
                                                            const glm::vec3& position,
                                                            const karma::physics::PhysicsMaterial& material) override;
-    std::unique_ptr<PhysicsPlayerControllerBackend> createPlayer(const glm::vec3& size) override;
+    std::unique_ptr<PhysicsCharacterControllerBackend> createCharacterController(const glm::vec3& size) override;
     std::unique_ptr<PhysicsStaticBodyBackend> createStaticMesh(const std::string& meshPath) override;
     bool raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const override;
     bool raycastDetailed(const glm::vec3& from,
@@ -63,6 +69,7 @@ public:
     JPH::TempAllocator* tempAllocator() { return tempAllocator_.get(); }
     void removeBody(const JPH::BodyID& id);
     void removeConstraint(JPH::Constraint* constraint) const;
+    void removeVehicle(JPH::VehicleConstraint* constraint);
 
 private:
     friend class PhysicsWorldJoltContactListener;

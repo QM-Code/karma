@@ -90,7 +90,7 @@ These items are intentionally deferred rather than forgotten.
 - Verification: inspected `Components/README.md`,
   `Components/interface/ShadowMapManager.hpp`, `Components/src/ShadowMapManager.cpp`,
   and `Shaders/Common/public/Shadows.fxh`; built
-  `karma_diligentfx_postprocess_example`; launched the example under `timeout`
+  `rendering_postprocess`; launched the example under `timeout`
   without Diligent shader errors.
 - Follow-up: compare VSM/EVSM and cross-cascade filtering as a focused shadow
   quality pass if shadow artifacts become a priority.
@@ -119,7 +119,7 @@ These items are intentionally deferred rather than forgotten.
   - `src/rendering/renderer/backends/diligent/backend_render.cpp`
   - `src/rendering/renderer/backends/diligent/passes/post_process/`
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
-- Verification: built `karma_diligentfx_postprocess_example`; launched the
+- Verification: built `rendering_postprocess`; launched the
   example under `timeout` without Diligent shader errors.
 - Follow-up: add explicit normal, material roughness, and motion-vector outputs
   when Karma moves beyond forward-only rendering.
@@ -140,7 +140,7 @@ These items are intentionally deferred rather than forgotten.
   - `src/rendering/renderer/backends/diligent/passes/post_process/`
   - `examples/diligentfx_postprocess_example.cpp`
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
-- Verification: built `karma_diligentfx_postprocess_example`; launched the
+- Verification: built `rendering_postprocess`; launched the
   example under `timeout` without Diligent shader errors.
 - Follow-up: move the default scene color path to an HDR format before removing
   inline forward tone mapping entirely.
@@ -255,7 +255,7 @@ These items are intentionally deferred rather than forgotten.
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
 - Verification: inspected `PostProcess/Common/interface`,
   `PostProcess/Common/src`, and `Shaders/Common/private` postprocess utilities;
-  built `karma_diligentfx_postprocess_example`; launched the example under
+  built `rendering_postprocess`; launched the example under
   `timeout` without Diligent shader errors.
 - Follow-up: add projection jitter and motion-vector inputs when the render
   graph grows a stable G-buffer path.
@@ -267,7 +267,7 @@ These items are intentionally deferred rather than forgotten.
   radius, downsample/upsample chain, and Karis-average firefly reduction.
 - Karma capability: bloom postprocess effect.
 - Engine owner: rendering
-- Existing Karma coverage: `karma_diligentfx_bloom_example`
+- Existing Karma coverage: `rendering_bloom`
 - Decision: integrate
 - Reason: Karma now has opt-in bloom threshold, intensity, and radius settings
   backed by a Diligent prefilter/downsample/upsample pass chain.
@@ -280,8 +280,8 @@ These items are intentionally deferred rather than forgotten.
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
 - Verification: inspected `PostProcess/Bloom/README.md`,
   `PostProcess/Bloom/interface/Bloom.hpp`, `PostProcess/Bloom/src/Bloom.cpp`,
-  and `Shaders/PostProcess/Bloom`; built `karma_diligentfx_postprocess_example`
-  and `karma_diligentfx_bloom_example`; launched both examples under `timeout`
+  and `Shaders/PostProcess/Bloom`; built `rendering_postprocess`
+  and `rendering_bloom`; launched both examples under `timeout`
   without Diligent shader errors.
 - Follow-up: switch the scene buffer to HDR before matching DiligentFX bloom
   quality more closely.
@@ -304,7 +304,7 @@ These items are intentionally deferred rather than forgotten.
   - `examples/diligentfx_postprocess_example.cpp`
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
 - Verification: inspected README and shader/source inventory; built
-  `karma_diligentfx_postprocess_example`; launched the example under `timeout`
+  `rendering_postprocess`; launched the example under `timeout`
   without Diligent shader errors.
 - Follow-up: upgrade to normal-buffer and bilateral-filtered SSAO when a full
   G-buffer exists.
@@ -329,7 +329,7 @@ These items are intentionally deferred rather than forgotten.
   - `examples/diligentfx_postprocess_example.cpp`
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
 - Verification: inspected README and shader/source inventory; built
-  `karma_diligentfx_postprocess_example`; launched the example under `timeout`
+  `rendering_postprocess`; launched the example under `timeout`
   without Diligent shader errors.
 - Follow-up: add Hi-Z tracing and material-aware resolve when normal/material
   buffers exist.
@@ -355,7 +355,7 @@ These items are intentionally deferred rather than forgotten.
   - `examples/diligentfx_postprocess_example.cpp`
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
 - Verification: inspected README and shader/source inventory; built
-  `karma_diligentfx_postprocess_example`; launched the example under `timeout`
+  `rendering_postprocess`; launched the example under `timeout`
   without Diligent shader errors.
 - Follow-up: add camera jitter and motion vectors before making this the
   default antialiasing path.
@@ -378,7 +378,7 @@ These items are intentionally deferred rather than forgotten.
   - `examples/diligentfx_postprocess_example.cpp`
   - `docs/DILIGENTFX_IMPORT_LEDGER.md`
 - Verification: inspected README and shader/source inventory; built
-  `karma_diligentfx_postprocess_example`; launched the example under `timeout`
+  `rendering_postprocess`; launched the example under `timeout`
   without Diligent shader errors.
 - Follow-up: add separate near/far bokeh layers if cinematic DOF becomes a
   priority.

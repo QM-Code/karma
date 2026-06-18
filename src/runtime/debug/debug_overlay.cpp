@@ -7,6 +7,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include <imgui.h>
 
@@ -21,7 +22,7 @@
 #include "karma/world/components/layers.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/mesh.h"
-#include "karma/world/components/player_controller.h"
+#include "karma/world/components/character_controller.h"
 #include "karma/world/components/rigidbody.h"
 #include "karma/world/components/script.h"
 #include "karma/world/components/skinned_mesh.h"
@@ -31,6 +32,7 @@
 #include "karma/world/scene/node.h"
 #include "karma/world/systems/system_graph.h"
 #include "karma/rendering/renderer/device.h"
+#include "karma/rendering/renderer/material_library.h"
 
 namespace karma::debug {
 
@@ -175,6 +177,19 @@ const char* skinningPathName(components::SkinningPath path) {
     case components::SkinningPath::GpuUnavailableCpuFallback: return "CPU fallback";
   }
   return "Unknown";
+}
+
+std::string debugMaterialInstanceKey(ecs::Entity entity,
+                                     uint32_t slot,
+                                     std::string_view parent_key) {
+  std::string key(parent_key.empty() ? "material" : parent_key);
+  key.append("#debug_entity=");
+  key.append(std::to_string(entity.index));
+  key.push_back('.');
+  key.append(std::to_string(entity.generation));
+  key.append("#slot=");
+  key.append(std::to_string(slot));
+  return key;
 }
 
 const char* rendererMeshStateName(const components::SkinnedMeshComponent& skin) {
@@ -382,6 +397,7 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
                                      scene::Scene* scene,
                                      systems::SystemGraph* systems,
                                      renderer::GraphicsDevice* graphics,
+                                     renderer::MaterialLibrary* materials,
                                      int shadow_map_size,
                                      float shadow_bias,
                                      int shadow_pcf_radius,
@@ -403,6 +419,7 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
       scene_(scene),
       systems_(systems),
       graphics_(graphics),
+      materials_(materials),
       shadow_map_size_(shadow_map_size),
       shadow_bias_(shadow_bias),
       shadow_pcf_radius_(shadow_pcf_radius),
@@ -728,7 +745,6 @@ void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
     components += label;
   };
   if (world_->has<components::TransformComponent>(node.entity)) append_component("Transform");
-  if (world_->has<components::LocalTransformComponent>(node.entity)) append_component("LocalTransform");
   if (world_->has<components::TagComponent>(node.entity)) append_component("Tag");
   if (world_->has<components::MeshComponent>(node.entity)) append_component("Mesh");
   if (world_->has<components::AnimatorComponent>(node.entity)) append_component("Animator");
@@ -737,11 +753,8 @@ void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
   if (world_->has<components::LightComponent>(node.entity)) append_component("Light");
   if (world_->has<components::CameraComponent>(node.entity)) append_component("Camera");
   if (world_->has<components::RigidbodyComponent>(node.entity)) append_component("Rigidbody");
-  if (world_->has<components::BoxColliderComponent>(node.entity)) append_component("BoxCollider");
-  if (world_->has<components::SphereColliderComponent>(node.entity)) append_component("SphereCollider");
-  if (world_->has<components::CapsuleColliderComponent>(node.entity)) append_component("CapsuleCollider");
-  if (world_->has<components::MeshColliderComponent>(node.entity)) append_component("MeshCollider");
-  if (world_->has<components::PlayerControllerComponent>(node.entity)) append_component("PlayerController");
+  if (world_->has<components::ColliderComponent>(node.entity)) append_component("Collider");
+  if (world_->has<components::CharacterControllerComponent>(node.entity)) append_component("CharacterController");
   if (world_->has<components::AudioListenerComponent>(node.entity)) append_component("AudioListener");
   if (world_->has<components::AudioSourceComponent>(node.entity)) append_component("AudioSource");
   if (world_->has<components::ScriptComponent>(node.entity)) append_component("Script");
@@ -761,35 +774,31 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
   if (world_->has<components::TransformComponent>(node.entity)) {
     if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
       const auto& c = world_->get<components::TransformComponent>(node.entity);
-      math::Vec3 pos = c.getPosition();
-      if (editVec3("Position", pos)) {
-        world_->get<components::TransformComponent>(node.entity).setPosition(pos);
+      math::Vec3 pos = c.localPosition();
+      if (editVec3("Local Position", pos)) {
+        world_->get<components::TransformComponent>(node.entity).setLocalPosition(pos);
       }
-      math::Quat rot = c.getRotation();
-      if (editQuat("Rotation (Quat)", rot)) {
-        world_->get<components::TransformComponent>(node.entity).setRotation(rot);
+      math::Quat rot = c.localRotation();
+      if (editQuat("Local Rotation (Quat)", rot)) {
+        world_->get<components::TransformComponent>(node.entity).setLocalRotation(rot);
       }
-      math::Vec3 euler = quatToEulerDegrees(c.getRotation());
-      if (editVec3("Rotation (Euler)", euler)) {
-        world_->get<components::TransformComponent>(node.entity)
-            .setRotation(eulerDegreesToQuat(euler));
-      }
-      math::Vec3 scale = c.getScale();
-      if (editVec3("Scale", scale)) {
-        world_->get<components::TransformComponent>(node.entity).setScale(scale);
-      }
-    }
-  }
-  if (world_->has<components::LocalTransformComponent>(node.entity)) {
-    if (ImGui::CollapsingHeader("Local Transform")) {
-      auto& c = world_->get<components::LocalTransformComponent>(node.entity);
-      editVec3("Local Position", c.position);
-      editQuat("Local Rotation (Quat)", c.rotation);
-      math::Vec3 euler = quatToEulerDegrees(c.rotation);
+      math::Vec3 euler = quatToEulerDegrees(c.localRotation());
       if (editVec3("Local Rotation (Euler)", euler)) {
-        c.rotation = eulerDegreesToQuat(euler);
+        world_->get<components::TransformComponent>(node.entity)
+            .setLocalRotation(eulerDegreesToQuat(euler));
       }
-      editVec3("Local Scale", c.scale);
+      math::Vec3 scale = c.localScale();
+      if (editVec3("Local Scale", scale)) {
+        world_->get<components::TransformComponent>(node.entity).setLocalScale(scale);
+      }
+      ImGui::Text("World Position: %.3f %.3f %.3f",
+                  c.worldPosition().x,
+                  c.worldPosition().y,
+                  c.worldPosition().z);
+      ImGui::Text("World Scale: %.3f %.3f %.3f",
+                  c.worldScale().x,
+                  c.worldScale().y,
+                  c.worldScale().z);
     }
   }
   if (world_->has<components::TagComponent>(node.entity)) {
@@ -805,18 +814,67 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
     if (ImGui::CollapsingHeader("Mesh")) {
       auto& c = world_->get<components::MeshComponent>(node.entity);
       std::string mesh_key = c.mesh_key;
-      std::string material_key = c.material_key;
-      std::string texture_key = c.texture_key;
       if (inputTextString("Mesh", mesh_key)) {
         c.mesh_key = std::move(mesh_key);
       }
-      if (inputTextString("Material", material_key)) {
-        c.material_key = std::move(material_key);
+
+      ImGui::Separator();
+      ImGui::TextUnformatted("Material Slots");
+      int remove_index = -1;
+      for (size_t i = 0; i < c.materials.size(); ++i) {
+        auto& binding = c.materials[i];
+        ImGui::PushID(static_cast<int>(i));
+        int slot = static_cast<int>(binding.slot);
+        if (editInt("Slot", slot)) {
+          binding.slot = static_cast<uint32_t>(std::max(slot, 0));
+        }
+        auto bind_instance = [&](const std::string& parent_key) {
+          if (materials_ == nullptr || parent_key.empty() ||
+              materials_->findAsset(parent_key) == nullptr) {
+            return false;
+          }
+          renderer::MaterialInstanceDesc instance{};
+          instance.parent_material_key = parent_key;
+          const std::string instance_key =
+              debugMaterialInstanceKey(node.entity, binding.slot, parent_key);
+          materials_->registerMaterialInstance(instance_key, std::move(instance));
+          binding.material_key = instance_key;
+          return true;
+        };
+        std::string material_key = binding.material_key;
+        if (inputTextString("Material", material_key)) {
+          if (!bind_instance(material_key)) {
+            binding.material_key = std::move(material_key);
+          }
+        }
+        if (materials_ != nullptr && !binding.material_key.empty()) {
+          if (const auto* instance = materials_->findInstance(binding.material_key)) {
+            ImGui::Text("Parent: %s", instance->parent_material_key.c_str());
+            if (!instance->parent_material_key.empty() && ImGui::Button("Bind Shared")) {
+              binding.material_key = instance->parent_material_key;
+            }
+          } else if (materials_->findAsset(binding.material_key) != nullptr) {
+            if (ImGui::Button("Make Instance")) {
+              bind_instance(binding.material_key);
+            }
+          }
+        }
+        if (ImGui::Button("Remove")) {
+          remove_index = static_cast<int>(i);
+        }
+        ImGui::PopID();
       }
-      if (inputTextString("Texture", texture_key)) {
-        c.texture_key = std::move(texture_key);
+      if (remove_index >= 0 && static_cast<size_t>(remove_index) < c.materials.size()) {
+        c.materials.erase(c.materials.begin() + remove_index);
+      }
+      if (ImGui::Button("Add Slot")) {
+        c.materials.push_back(components::MeshMaterialBinding{
+            .slot = static_cast<uint32_t>(c.materials.size()),
+            .material_key = {},
+        });
       }
       editBool("Visible", c.visible);
+      editBool("Shadow Visible", c.shadow_visible);
     }
   }
   if (world_->has<components::AnimatorComponent>(node.entity)) {
@@ -1051,53 +1109,61 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
       }
     }
   }
-  if (world_->has<components::BoxColliderComponent>(node.entity)) {
-    if (ImGui::CollapsingHeader("BoxCollider")) {
-      auto& c = world_->get<components::BoxColliderComponent>(node.entity);
-      editVec3("Center", c.center);
-      editVec3("Half Extents", c.half_extents);
+  if (world_->has<components::ColliderComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Collider")) {
+      auto& c = world_->get<components::ColliderComponent>(node.entity);
       editBool("Trigger", c.is_trigger);
       editBool("Debug Draw", c.debug_draw);
+      const char* shape_name = "Unsupported";
+      switch (components::colliderShapeType(c.shape)) {
+        case components::ColliderShapeType::Box: shape_name = "Box"; break;
+        case components::ColliderShapeType::Sphere: shape_name = "Sphere"; break;
+        case components::ColliderShapeType::Capsule: shape_name = "Capsule"; break;
+        case components::ColliderShapeType::Cylinder: shape_name = "Cylinder"; break;
+        case components::ColliderShapeType::TaperedCapsule: shape_name = "Tapered Capsule"; break;
+        case components::ColliderShapeType::ConvexHull: shape_name = "Convex Hull"; break;
+        case components::ColliderShapeType::Triangle: shape_name = "Triangle"; break;
+        case components::ColliderShapeType::HeightField: shape_name = "Height Field"; break;
+        case components::ColliderShapeType::Mesh: shape_name = "Mesh"; break;
+      }
+      ImGui::Text("Shape: %s", shape_name);
+      if (auto* box = std::get_if<components::BoxColliderShape>(&c.shape)) {
+        editVec3("Center", box->center);
+        editVec3("Half Extents", box->half_extents);
+      } else if (auto* sphere = std::get_if<components::SphereColliderShape>(&c.shape)) {
+        editVec3("Center", sphere->center);
+        editFloat("Radius", sphere->radius);
+      } else if (auto* capsule = std::get_if<components::CapsuleColliderShape>(&c.shape)) {
+        editVec3("Center", capsule->center);
+        editFloat("Radius", capsule->radius);
+        editFloat("Height", capsule->height);
+      } else if (auto* mesh = std::get_if<components::MeshColliderShape>(&c.shape)) {
+        std::string mesh_path = mesh->mesh_path;
+        if (inputTextString("Mesh Path", mesh_path)) {
+          mesh->mesh_path = std::move(mesh_path);
+        }
+      }
     }
   }
-  if (world_->has<components::SphereColliderComponent>(node.entity)) {
-    if (ImGui::CollapsingHeader("SphereCollider")) {
-      auto& c = world_->get<components::SphereColliderComponent>(node.entity);
-      editVec3("Center", c.center);
-      editFloat("Radius", c.radius);
-      editBool("Trigger", c.is_trigger);
-      editBool("Debug Draw", c.debug_draw);
-    }
-  }
-  if (world_->has<components::CapsuleColliderComponent>(node.entity)) {
-    if (ImGui::CollapsingHeader("CapsuleCollider")) {
-      auto& c = world_->get<components::CapsuleColliderComponent>(node.entity);
-      editVec3("Center", c.center);
-      editFloat("Radius", c.radius);
-      editFloat("Height", c.height);
-      editBool("Trigger", c.is_trigger);
-      editBool("Debug Draw", c.debug_draw);
-    }
-  }
-  if (world_->has<components::MeshColliderComponent>(node.entity)) {
-    if (ImGui::CollapsingHeader("MeshCollider")) {
-      auto& c = world_->get<components::MeshColliderComponent>(node.entity);
-      editBool("Trigger", c.is_trigger);
-      editBool("Debug Draw", c.debug_draw);
-    }
-  }
-  if (world_->has<components::PlayerControllerComponent>(node.entity)) {
-    if (ImGui::CollapsingHeader("PlayerController")) {
-      auto& c = world_->get<components::PlayerControllerComponent>(node.entity);
+  if (world_->has<components::CharacterControllerComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("CharacterController")) {
+      auto& c = world_->get<components::CharacterControllerComponent>(node.entity);
       editBool("Enabled", c.enabled);
       math::Vec3 desired = c.desiredVelocity();
       if (editVec3("Desired Velocity", desired)) {
         c.setDesiredVelocity(desired);
       }
+      math::Vec3 desired_angular = c.desiredAngularVelocity();
+      if (editVec3("Desired Angular Velocity", desired_angular)) {
+        c.setDesiredAngularVelocity(desired_angular);
+      }
       math::Vec3 add = c.addVelocity();
       if (editVec3("Add Velocity", add)) {
         c.setAddVelocity(add);
       }
+      ImGui::Text("Velocity: %.2f %.2f %.2f", c.velocity.x, c.velocity.y, c.velocity.z);
+      ImGui::Text("Forward: %.2f %.2f %.2f", c.forward.x, c.forward.y, c.forward.z);
+      ImGui::Text("Grounded: %s", c.grounded ? "true" : "false");
     }
   }
   if (world_->has<components::AudioListenerComponent>(node.entity)) {

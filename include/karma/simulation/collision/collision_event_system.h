@@ -20,7 +20,7 @@ class CollisionEventSystem : public systems::ISystem {
   /// Persisted overlap used to compute enter/stay/exit transitions.
   struct TrackedContact {
     ecs::Entity other{};
-    ecs::queries::ColliderShape other_shape = ecs::queries::ColliderShape::Box;
+    components::ColliderShapeType other_shape = components::ColliderShapeType::Box;
     bool other_is_trigger = false;
   };
 

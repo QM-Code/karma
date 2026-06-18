@@ -29,6 +29,19 @@ karma::geometry::MeshData makePlaneMesh(float half_extent) {
   return mesh;
 }
 
+karma::geometry::MeshData combineMeshes(const std::vector<karma::geometry::MeshData>& meshes) {
+  karma::geometry::MeshData combined;
+  for (const karma::geometry::MeshData& mesh : meshes) {
+    const uint32_t base = static_cast<uint32_t>(combined.vertices.size());
+    combined.vertices.insert(combined.vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
+    combined.indices.reserve(combined.indices.size() + mesh.indices.size());
+    for (const uint32_t index : mesh.indices) {
+      combined.indices.push_back(base + index);
+    }
+  }
+  return combined;
+}
+
 karma::navigation::NavMeshInputGeometry makePlaneGeometry(float half_extent) {
   karma::navigation::NavMeshInputGeometry geometry;
   karma::navigation::appendGeometry(geometry, makePlaneMesh(half_extent));

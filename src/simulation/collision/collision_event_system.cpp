@@ -1,46 +1,26 @@
 #include "karma/simulation/collision/collision_event_system.h"
 
 #include "karma/world/components/collider.h"
+#include "karma/world/ecs/collider_queries.h"
 
 namespace karma::collision {
 
 namespace {
 
 bool hasQuerySourceCollider(const ecs::World& world, ecs::Entity entity) {
-  return world.has<components::BoxColliderComponent>(entity) ||
-         world.has<components::SphereColliderComponent>(entity) ||
-         world.has<components::CapsuleColliderComponent>(entity);
+  if (!world.has<components::ColliderComponent>(entity)) {
+    return false;
+  }
+  const auto& collider = world.get<components::ColliderComponent>(entity);
+  const components::ColliderShapeType type = components::colliderShapeType(collider.shape);
+  return type == components::ColliderShapeType::Box ||
+         type == components::ColliderShapeType::Sphere ||
+         type == components::ColliderShapeType::Capsule;
 }
 
 bool colliderIsTrigger(const ecs::World& world, ecs::Entity entity) {
-  if (world.has<components::BoxColliderComponent>(entity)) {
-    return world.get<components::BoxColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::SphereColliderComponent>(entity)) {
-    return world.get<components::SphereColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::CapsuleColliderComponent>(entity)) {
-    return world.get<components::CapsuleColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::CylinderColliderComponent>(entity)) {
-    return world.get<components::CylinderColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::TaperedCapsuleColliderComponent>(entity)) {
-    return world.get<components::TaperedCapsuleColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::ConvexHullColliderComponent>(entity)) {
-    return world.get<components::ConvexHullColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::TriangleColliderComponent>(entity)) {
-    return world.get<components::TriangleColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::HeightFieldColliderComponent>(entity)) {
-    return world.get<components::HeightFieldColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::MeshColliderComponent>(entity)) {
-    return world.get<components::MeshColliderComponent>(entity).is_trigger;
-  }
-  return false;
+  return world.has<components::ColliderComponent>(entity) &&
+         world.get<components::ColliderComponent>(entity).is_trigger;
 }
 
 bool includeContact(components::CollisionListenMode mode, bool other_is_trigger) {

@@ -1,8 +1,8 @@
 #include "navigation_examples.h"
 #include "navigation_example_scene.h"
 
-#include "../demo_asset_paths.h"
-#include "../scene_helpers.h"
+#include "demo_asset_paths.h"
+#include "scene_helpers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,7 +26,7 @@
 #include "karma/world/components/nav_mesh.h"
 #include "karma/world/components/nav_mesh_agent.h"
 #include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/components/player_controller.h"
+#include "karma/world/components/character_controller.h"
 #include "karma/world/components/transform.h"
 
 namespace karma::demo::navigation_examples {
@@ -282,8 +282,8 @@ class NavigationExampleApp final : public app::GameInterface {
                                                       start_,
                                                       {0.28f, 0.5f, 0.28f},
                                                       true);
-        world->add(actor_entity_, components::BoxColliderComponent{});
-        world->add(actor_entity_, components::PlayerControllerComponent{});
+        world->add(actor_entity_, components::ColliderComponent::box());
+        world->add(actor_entity_, components::CharacterControllerComponent{});
         components::NavCrowdAgentComponent agent;
         agent.crowd_entity = nav_mesh_entity_;
         agent.params.radius = 0.28f;
@@ -291,7 +291,7 @@ class NavigationExampleApp final : public app::GameInterface {
         agent.params.max_speed = crowd_speed_;
         agent.params.max_acceleration = 12.0f;
         agent.movement_mode = bridge_velocity_mode_
-            ? components::NavCrowdMovementMode::PlayerControllerVelocity
+            ? components::NavCrowdMovementMode::CharacterControllerVelocity
             : components::NavCrowdMovementMode::Transform;
         world->add(actor_entity_, agent);
       }
@@ -430,7 +430,7 @@ class NavigationExampleApp final : public app::GameInterface {
       agent.params.max_speed = crowd_speed_;
       agent.params_dirty = true;
       agent.movement_mode = bridge_velocity_mode_
-          ? components::NavCrowdMovementMode::PlayerControllerVelocity
+          ? components::NavCrowdMovementMode::CharacterControllerVelocity
           : components::NavCrowdMovementMode::Transform;
     }
   }
@@ -787,10 +787,10 @@ class NavigationExampleApp final : public app::GameInterface {
   }
 
   void drawPhysicsBridgeUi() {
-    ImGui::Checkbox("PlayerController velocity mode", &bridge_velocity_mode_);
+    ImGui::Checkbox("CharacterController velocity mode", &bridge_velocity_mode_);
     ImGui::SliderFloat("Crowd Speed", &crowd_speed_, 0.5f, 8.0f, "%.1f");
-    if (actor_entity_.isValid() && world->has<components::PlayerControllerComponent>(actor_entity_)) {
-      const auto& controller = world->get<components::PlayerControllerComponent>(actor_entity_);
+    if (actor_entity_.isValid() && world->has<components::CharacterControllerComponent>(actor_entity_)) {
+      const auto& controller = world->get<components::CharacterControllerComponent>(actor_entity_);
       ImGui::Text("Desired velocity: %.2f %.2f %.2f",
                   controller.desiredVelocity().x,
                   controller.desiredVelocity().y,

@@ -70,70 +70,30 @@ bool matchesCollisionLayerMask(const ecs::World& world,
   return (visibility.collision_layer_mask & collision_layer_mask) != 0u;
 }
 
-std::optional<ColliderShape> colliderShapeForEntity(const ecs::World& world, ecs::Entity entity) {
-  if (world.has<components::BoxColliderComponent>(entity)) {
-    return ColliderShape::Box;
+const components::ColliderComponent* colliderForEntity(const ecs::World& world,
+                                                       ecs::Entity entity) {
+  if (!world.has<components::ColliderComponent>(entity)) {
+    return nullptr;
   }
-  if (world.has<components::SphereColliderComponent>(entity)) {
-    return ColliderShape::Sphere;
+  return &world.get<components::ColliderComponent>(entity);
+}
+
+std::optional<components::ColliderShapeType> colliderShapeForEntity(const ecs::World& world,
+                                                                    ecs::Entity entity) {
+  const auto* collider = colliderForEntity(world, entity);
+  if (collider == nullptr) {
+    return std::nullopt;
   }
-  if (world.has<components::CapsuleColliderComponent>(entity)) {
-    return ColliderShape::Capsule;
-  }
-  if (world.has<components::CylinderColliderComponent>(entity)) {
-    return ColliderShape::Cylinder;
-  }
-  if (world.has<components::TaperedCapsuleColliderComponent>(entity)) {
-    return ColliderShape::TaperedCapsule;
-  }
-  if (world.has<components::ConvexHullColliderComponent>(entity)) {
-    return ColliderShape::ConvexHull;
-  }
-  if (world.has<components::TriangleColliderComponent>(entity)) {
-    return ColliderShape::Triangle;
-  }
-  if (world.has<components::HeightFieldColliderComponent>(entity)) {
-    return ColliderShape::HeightField;
-  }
-  if (world.has<components::MeshColliderComponent>(entity)) {
-    return ColliderShape::Mesh;
-  }
-  return std::nullopt;
+  return components::colliderShapeType(collider->shape);
 }
 
 bool colliderIsTrigger(const ecs::World& world, ecs::Entity entity) {
-  if (world.has<components::BoxColliderComponent>(entity)) {
-    return world.get<components::BoxColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::SphereColliderComponent>(entity)) {
-    return world.get<components::SphereColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::CapsuleColliderComponent>(entity)) {
-    return world.get<components::CapsuleColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::CylinderColliderComponent>(entity)) {
-    return world.get<components::CylinderColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::TaperedCapsuleColliderComponent>(entity)) {
-    return world.get<components::TaperedCapsuleColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::ConvexHullColliderComponent>(entity)) {
-    return world.get<components::ConvexHullColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::TriangleColliderComponent>(entity)) {
-    return world.get<components::TriangleColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::HeightFieldColliderComponent>(entity)) {
-    return world.get<components::HeightFieldColliderComponent>(entity).is_trigger;
-  }
-  if (world.has<components::MeshColliderComponent>(entity)) {
-    return world.get<components::MeshColliderComponent>(entity).is_trigger;
-  }
-  return false;
+  const auto* collider = colliderForEntity(world, entity);
+  return collider != nullptr && collider->is_trigger;
 }
 
 OrientedBox makeWorldBox(const components::TransformComponent& transform,
-                         const components::BoxColliderComponent& collider) {
+                         const components::BoxColliderShape& collider) {
   const math::Quat rotation = transform.getRotation();
   const math::Vec3 scale = transform.getScale();
   return OrientedBox{
@@ -151,7 +111,7 @@ OrientedBox makeWorldBox(const components::TransformComponent& transform,
 }
 
 WorldSphere makeWorldSphere(const components::TransformComponent& transform,
-                            const components::SphereColliderComponent& collider) {
+                            const components::SphereColliderShape& collider) {
   return WorldSphere{
       .center = worldPointFromLocal(transform, collider.center),
       .radius = collider.radius * maxAbs3(transform.getScale()),
@@ -159,7 +119,7 @@ WorldSphere makeWorldSphere(const components::TransformComponent& transform,
 }
 
 WorldCapsule makeWorldCapsule(const components::TransformComponent& transform,
-                              const components::CapsuleColliderComponent& collider) {
+                              const components::CapsuleColliderShape& collider) {
   const math::Vec3 center = worldPointFromLocal(transform, collider.center);
   const math::Vec3 scale = transform.getScale();
   const math::Vec3 axis =
@@ -419,7 +379,7 @@ bool overlapsBoxBox(const OrientedBox& a, const OrientedBox& b) {
 }
 
 bool containsPointBox(const components::TransformComponent& transform,
-                      const components::BoxColliderComponent& collider,
+                      const components::BoxColliderShape& collider,
                       const math::Vec3& world_point) {
   const math::Vec3 center = worldPointFromLocal(transform, collider.center);
   const math::Quat rotation = transform.getRotation();
@@ -439,7 +399,7 @@ bool containsPointBox(const components::TransformComponent& transform,
 }
 
 bool containsPointSphere(const components::TransformComponent& transform,
-                         const components::SphereColliderComponent& collider,
+                         const components::SphereColliderShape& collider,
                          const math::Vec3& world_point) {
   const math::Vec3 center = worldPointFromLocal(transform, collider.center);
   const float radius = collider.radius * maxAbs3(transform.getScale());
@@ -448,11 +408,26 @@ bool containsPointSphere(const components::TransformComponent& transform,
 }
 
 bool containsPointCapsule(const components::TransformComponent& transform,
-                          const components::CapsuleColliderComponent& collider,
+                          const components::CapsuleColliderShape& collider,
                           const math::Vec3& world_point) {
   const WorldCapsule capsule = makeWorldCapsule(transform, collider);
   return pointSegmentDistanceSquared(world_point, capsule.a, capsule.b) <=
          capsule.radius * capsule.radius + kContainmentEpsilon;
+}
+
+bool containsPointCollider(const components::TransformComponent& transform,
+                           const components::ColliderComponent& collider,
+                           const math::Vec3& world_point) {
+  if (const auto* box = std::get_if<components::BoxColliderShape>(&collider.shape)) {
+    return containsPointBox(transform, *box, world_point);
+  }
+  if (const auto* sphere = std::get_if<components::SphereColliderShape>(&collider.shape)) {
+    return containsPointSphere(transform, *sphere, world_point);
+  }
+  if (const auto* capsule = std::get_if<components::CapsuleColliderShape>(&collider.shape)) {
+    return containsPointCapsule(transform, *capsule, world_point);
+  }
+  return false;
 }
 
 bool overlapsColliderPair(const ecs::World& world, ecs::Entity a_entity, ecs::Entity b_entity) {
@@ -464,62 +439,120 @@ bool overlapsColliderPair(const ecs::World& world, ecs::Entity a_entity, ecs::En
 
   const auto a_shape = colliderShapeForEntity(world, a_entity);
   const auto b_shape = colliderShapeForEntity(world, b_entity);
-  if (!a_shape || !b_shape || *a_shape == ColliderShape::Mesh || *b_shape == ColliderShape::Mesh) {
+  if (!a_shape || !b_shape ||
+      *a_shape == components::ColliderShapeType::Mesh ||
+      *b_shape == components::ColliderShapeType::Mesh) {
     return false;
   }
 
   const auto& a_transform = world.get<components::TransformComponent>(a_entity);
   const auto& b_transform = world.get<components::TransformComponent>(b_entity);
+  const auto& a_collider = world.get<components::ColliderComponent>(a_entity);
+  const auto& b_collider = world.get<components::ColliderComponent>(b_entity);
 
-  if (*a_shape == ColliderShape::Sphere && *b_shape == ColliderShape::Sphere) {
+  if (*a_shape == components::ColliderShapeType::Sphere &&
+      *b_shape == components::ColliderShapeType::Sphere) {
+    const auto* a_sphere = std::get_if<components::SphereColliderShape>(&a_collider.shape);
+    const auto* b_sphere = std::get_if<components::SphereColliderShape>(&b_collider.shape);
+    if (a_sphere == nullptr || b_sphere == nullptr) {
+      return false;
+    }
     return overlapsSphereSphere(
-        makeWorldSphere(a_transform, world.get<components::SphereColliderComponent>(a_entity)),
-        makeWorldSphere(b_transform, world.get<components::SphereColliderComponent>(b_entity)));
+        makeWorldSphere(a_transform, *a_sphere),
+        makeWorldSphere(b_transform, *b_sphere));
   }
 
-  if (*a_shape == ColliderShape::Sphere && *b_shape == ColliderShape::Box) {
+  if (*a_shape == components::ColliderShapeType::Sphere &&
+      *b_shape == components::ColliderShapeType::Box) {
+    const auto* a_sphere = std::get_if<components::SphereColliderShape>(&a_collider.shape);
+    const auto* b_box = std::get_if<components::BoxColliderShape>(&b_collider.shape);
+    if (a_sphere == nullptr || b_box == nullptr) {
+      return false;
+    }
     return overlapsSphereBox(
-        makeWorldSphere(a_transform, world.get<components::SphereColliderComponent>(a_entity)),
-        makeWorldBox(b_transform, world.get<components::BoxColliderComponent>(b_entity)));
+        makeWorldSphere(a_transform, *a_sphere),
+        makeWorldBox(b_transform, *b_box));
   }
-  if (*a_shape == ColliderShape::Box && *b_shape == ColliderShape::Sphere) {
+  if (*a_shape == components::ColliderShapeType::Box &&
+      *b_shape == components::ColliderShapeType::Sphere) {
+    const auto* a_box = std::get_if<components::BoxColliderShape>(&a_collider.shape);
+    const auto* b_sphere = std::get_if<components::SphereColliderShape>(&b_collider.shape);
+    if (a_box == nullptr || b_sphere == nullptr) {
+      return false;
+    }
     return overlapsSphereBox(
-        makeWorldSphere(b_transform, world.get<components::SphereColliderComponent>(b_entity)),
-        makeWorldBox(a_transform, world.get<components::BoxColliderComponent>(a_entity)));
+        makeWorldSphere(b_transform, *b_sphere),
+        makeWorldBox(a_transform, *a_box));
   }
 
-  if (*a_shape == ColliderShape::Sphere && *b_shape == ColliderShape::Capsule) {
+  if (*a_shape == components::ColliderShapeType::Sphere &&
+      *b_shape == components::ColliderShapeType::Capsule) {
+    const auto* a_sphere = std::get_if<components::SphereColliderShape>(&a_collider.shape);
+    const auto* b_capsule = std::get_if<components::CapsuleColliderShape>(&b_collider.shape);
+    if (a_sphere == nullptr || b_capsule == nullptr) {
+      return false;
+    }
     return overlapsSphereCapsule(
-        makeWorldSphere(a_transform, world.get<components::SphereColliderComponent>(a_entity)),
-        makeWorldCapsule(b_transform, world.get<components::CapsuleColliderComponent>(b_entity)));
+        makeWorldSphere(a_transform, *a_sphere),
+        makeWorldCapsule(b_transform, *b_capsule));
   }
-  if (*a_shape == ColliderShape::Capsule && *b_shape == ColliderShape::Sphere) {
+  if (*a_shape == components::ColliderShapeType::Capsule &&
+      *b_shape == components::ColliderShapeType::Sphere) {
+    const auto* a_capsule = std::get_if<components::CapsuleColliderShape>(&a_collider.shape);
+    const auto* b_sphere = std::get_if<components::SphereColliderShape>(&b_collider.shape);
+    if (a_capsule == nullptr || b_sphere == nullptr) {
+      return false;
+    }
     return overlapsSphereCapsule(
-        makeWorldSphere(b_transform, world.get<components::SphereColliderComponent>(b_entity)),
-        makeWorldCapsule(a_transform, world.get<components::CapsuleColliderComponent>(a_entity)));
+        makeWorldSphere(b_transform, *b_sphere),
+        makeWorldCapsule(a_transform, *a_capsule));
   }
 
-  if (*a_shape == ColliderShape::Capsule && *b_shape == ColliderShape::Capsule) {
+  if (*a_shape == components::ColliderShapeType::Capsule &&
+      *b_shape == components::ColliderShapeType::Capsule) {
+    const auto* a_capsule = std::get_if<components::CapsuleColliderShape>(&a_collider.shape);
+    const auto* b_capsule = std::get_if<components::CapsuleColliderShape>(&b_collider.shape);
+    if (a_capsule == nullptr || b_capsule == nullptr) {
+      return false;
+    }
     return overlapsCapsuleCapsule(
-        makeWorldCapsule(a_transform, world.get<components::CapsuleColliderComponent>(a_entity)),
-        makeWorldCapsule(b_transform, world.get<components::CapsuleColliderComponent>(b_entity)));
+        makeWorldCapsule(a_transform, *a_capsule),
+        makeWorldCapsule(b_transform, *b_capsule));
   }
 
-  if (*a_shape == ColliderShape::Box && *b_shape == ColliderShape::Box) {
+  if (*a_shape == components::ColliderShapeType::Box &&
+      *b_shape == components::ColliderShapeType::Box) {
+    const auto* a_box = std::get_if<components::BoxColliderShape>(&a_collider.shape);
+    const auto* b_box = std::get_if<components::BoxColliderShape>(&b_collider.shape);
+    if (a_box == nullptr || b_box == nullptr) {
+      return false;
+    }
     return overlapsBoxBox(
-        makeWorldBox(a_transform, world.get<components::BoxColliderComponent>(a_entity)),
-        makeWorldBox(b_transform, world.get<components::BoxColliderComponent>(b_entity)));
+        makeWorldBox(a_transform, *a_box),
+        makeWorldBox(b_transform, *b_box));
   }
 
-  if (*a_shape == ColliderShape::Box && *b_shape == ColliderShape::Capsule) {
+  if (*a_shape == components::ColliderShapeType::Box &&
+      *b_shape == components::ColliderShapeType::Capsule) {
+    const auto* a_box = std::get_if<components::BoxColliderShape>(&a_collider.shape);
+    const auto* b_capsule = std::get_if<components::CapsuleColliderShape>(&b_collider.shape);
+    if (a_box == nullptr || b_capsule == nullptr) {
+      return false;
+    }
     return overlapsBoxCapsule(
-        makeWorldBox(a_transform, world.get<components::BoxColliderComponent>(a_entity)),
-        makeWorldCapsule(b_transform, world.get<components::CapsuleColliderComponent>(b_entity)));
+        makeWorldBox(a_transform, *a_box),
+        makeWorldCapsule(b_transform, *b_capsule));
   }
-  if (*a_shape == ColliderShape::Capsule && *b_shape == ColliderShape::Box) {
+  if (*a_shape == components::ColliderShapeType::Capsule &&
+      *b_shape == components::ColliderShapeType::Box) {
+    const auto* a_capsule = std::get_if<components::CapsuleColliderShape>(&a_collider.shape);
+    const auto* b_box = std::get_if<components::BoxColliderShape>(&b_collider.shape);
+    if (a_capsule == nullptr || b_box == nullptr) {
+      return false;
+    }
     return overlapsBoxCapsule(
-        makeWorldBox(b_transform, world.get<components::BoxColliderComponent>(b_entity)),
-        makeWorldCapsule(a_transform, world.get<components::CapsuleColliderComponent>(a_entity)));
+        makeWorldBox(b_transform, *b_box),
+        makeWorldCapsule(a_transform, *a_capsule));
   }
 
   return false;
@@ -528,24 +561,14 @@ bool overlapsColliderPair(const ecs::World& world, ecs::Entity a_entity, ecs::En
 }  // namespace
 
 bool containsPoint(const ecs::World& world, ecs::Entity entity, const math::Vec3& world_point) {
-  if (!world.isAlive(entity) || !world.has<components::TransformComponent>(entity)) {
+  if (!world.isAlive(entity) || !world.has<components::TransformComponent>(entity) ||
+      !world.has<components::ColliderComponent>(entity)) {
     return false;
   }
 
   const auto& transform = world.get<components::TransformComponent>(entity);
-  if (world.has<components::BoxColliderComponent>(entity) &&
-      containsPointBox(transform, world.get<components::BoxColliderComponent>(entity), world_point)) {
-    return true;
-  }
-  if (world.has<components::SphereColliderComponent>(entity) &&
-      containsPointSphere(transform, world.get<components::SphereColliderComponent>(entity), world_point)) {
-    return true;
-  }
-  if (world.has<components::CapsuleColliderComponent>(entity) &&
-      containsPointCapsule(transform, world.get<components::CapsuleColliderComponent>(entity), world_point)) {
-    return true;
-  }
-  return false;
+  const auto& collider = world.get<components::ColliderComponent>(entity);
+  return containsPointCollider(transform, collider, world_point);
 }
 
 std::optional<PointContainmentHit> findContainingCollider(
@@ -554,60 +577,20 @@ std::optional<PointContainmentHit> findContainingCollider(
     const PointContainmentFilter& filter) {
   std::optional<PointContainmentHit> hit;
 
-  world.forEach<components::BoxColliderComponent, components::TransformComponent>(
+  world.forEach<components::ColliderComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
     if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
       return true;
     }
-    const auto& collider = world.get<components::BoxColliderComponent>(entity);
+    const auto& collider = world.get<components::ColliderComponent>(entity);
     if (filter.only_triggers && !collider.is_trigger) {
       return true;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    if (!containsPointBox(transform, collider, world_point)) {
+    if (!containsPointCollider(transform, collider, world_point)) {
       return true;
     }
-    hit = PointContainmentHit{.entity = entity, .shape = ColliderShape::Box};
-    return false;
-  });
-  if (hit) {
-    return hit;
-  }
-
-  world.forEach<components::SphereColliderComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
-    if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
-      return true;
-    }
-    const auto& collider = world.get<components::SphereColliderComponent>(entity);
-    if (filter.only_triggers && !collider.is_trigger) {
-      return true;
-    }
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    if (!containsPointSphere(transform, collider, world_point)) {
-      return true;
-    }
-    hit = PointContainmentHit{.entity = entity, .shape = ColliderShape::Sphere};
-    return false;
-  });
-  if (hit) {
-    return hit;
-  }
-
-  world.forEach<components::CapsuleColliderComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
-    if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
-      return true;
-    }
-    const auto& collider = world.get<components::CapsuleColliderComponent>(entity);
-    if (filter.only_triggers && !collider.is_trigger) {
-      return true;
-    }
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    if (!containsPointCapsule(transform, collider, world_point)) {
-      return true;
-    }
-    hit = PointContainmentHit{.entity = entity, .shape = ColliderShape::Capsule};
+    hit = PointContainmentHit{.entity = entity, .shape = components::colliderShapeType(collider.shape)};
     return false;
   });
 
@@ -620,48 +603,21 @@ std::vector<PointContainmentHit> findContainingColliders(
     const PointContainmentFilter& filter) {
   std::vector<PointContainmentHit> hits;
 
-  world.forEach<components::BoxColliderComponent, components::TransformComponent>(
+  world.forEach<components::ColliderComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
     if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
       return;
     }
-    const auto& collider = world.get<components::BoxColliderComponent>(entity);
+    const auto& collider = world.get<components::ColliderComponent>(entity);
     if (filter.only_triggers && !collider.is_trigger) {
       return;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    if (containsPointBox(transform, collider, world_point)) {
-      hits.push_back(PointContainmentHit{.entity = entity, .shape = ColliderShape::Box});
-    }
-  });
-
-  world.forEach<components::SphereColliderComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
-    if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
-      return;
-    }
-    const auto& collider = world.get<components::SphereColliderComponent>(entity);
-    if (filter.only_triggers && !collider.is_trigger) {
-      return;
-    }
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    if (containsPointSphere(transform, collider, world_point)) {
-      hits.push_back(PointContainmentHit{.entity = entity, .shape = ColliderShape::Sphere});
-    }
-  });
-
-  world.forEach<components::CapsuleColliderComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
-    if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
-      return;
-    }
-    const auto& collider = world.get<components::CapsuleColliderComponent>(entity);
-    if (filter.only_triggers && !collider.is_trigger) {
-      return;
-    }
-    const auto& transform = world.get<components::TransformComponent>(entity);
-    if (containsPointCapsule(transform, collider, world_point)) {
-      hits.push_back(PointContainmentHit{.entity = entity, .shape = ColliderShape::Capsule});
+    if (containsPointCollider(transform, collider, world_point)) {
+      hits.push_back(PointContainmentHit{
+          .entity = entity,
+          .shape = components::colliderShapeType(collider.shape),
+      });
     }
   });
 
@@ -697,7 +653,8 @@ std::optional<OverlapHit> findOverlappingCollider(
       continue;
     }
     return OverlapHit{.entity = entity,
-                      .shape = colliderShapeForEntity(world, entity).value_or(ColliderShape::Box)};
+                      .shape = colliderShapeForEntity(world, entity)
+                                   .value_or(components::ColliderShapeType::Box)};
   }
 
   return std::nullopt;
@@ -730,7 +687,8 @@ std::vector<OverlapHit> findOverlappingColliders(
     }
     hits.push_back(
         OverlapHit{.entity = entity,
-                   .shape = colliderShapeForEntity(world, entity).value_or(ColliderShape::Box)});
+                   .shape = colliderShapeForEntity(world, entity)
+                                .value_or(components::ColliderShapeType::Box)});
   }
 
   return hits;

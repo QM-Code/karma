@@ -31,6 +31,6 @@ Renderer behavior:
 Build and run the procedural sample with:
 
 ```sh
-cmake --build build --target karma_terrain_example
-./build/karma_terrain_example
+cmake --build build --target rendering_terrain
+./build/examples/rendering/terrain
 ```

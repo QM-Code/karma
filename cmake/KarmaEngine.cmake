@@ -159,10 +159,20 @@ karma_add_static(karma_simulation_physics
   src/simulation/physics/backend_factory.cpp
   src/simulation/physics/constraint.cpp
   src/simulation/physics/rigid_body.cpp
+  src/simulation/physics/soft_body.cpp
   src/simulation/physics/static_body.cpp
-  src/simulation/physics/player_controller.cpp
+  src/simulation/physics/vehicle.cpp
+  src/simulation/physics/character_controller.cpp
   src/simulation/physics/physics_world.cpp
   src/simulation/physics/physics_system.cpp
+  src/simulation/physics/physics_system_bodies.cpp
+  src/simulation/physics/physics_system_character.cpp
+  src/simulation/physics/physics_system_cleanup.cpp
+  src/simulation/physics/physics_system_constraints.cpp
+  src/simulation/physics/physics_system_conversions.cpp
+  src/simulation/physics/physics_system_events.cpp
+  src/simulation/physics/physics_system_soft_bodies.cpp
+  src/simulation/physics/physics_system_vehicles.cpp
 )
 target_link_libraries(karma_simulation_physics PUBLIC karma_core karma_world)
 karma_link_build_and_install(karma_simulation_physics PUBLIC KARMA_PHYSICS_LINK_LIBS KARMA_INSTALL_LINK_LIBS)
@@ -173,9 +183,11 @@ if (KARMA_PHYSICS_BACKEND_JOLT)
     src/simulation/physics/backends/jolt/physics_world_jolt.cpp
     src/simulation/physics/backends/jolt/query_jolt.cpp
     src/simulation/physics/backends/jolt/rigid_body_jolt.cpp
-    src/simulation/physics/backends/jolt/player_controller_jolt.cpp
+    src/simulation/physics/backends/jolt/character_controller_jolt.cpp
     src/simulation/physics/backends/jolt/shape_factory.cpp
+    src/simulation/physics/backends/jolt/soft_body_jolt.cpp
     src/simulation/physics/backends/jolt/static_body_jolt.cpp
+    src/simulation/physics/backends/jolt/vehicle_jolt.cpp
   )
 endif()
 if (KARMA_PHYSICS_BACKEND_BULLET)
@@ -183,7 +195,7 @@ if (KARMA_PHYSICS_BACKEND_BULLET)
   target_sources(karma_simulation_physics PRIVATE
     src/simulation/physics/backends/bullet/physics_world_bullet.cpp
     src/simulation/physics/backends/bullet/rigid_body_bullet.cpp
-    src/simulation/physics/backends/bullet/player_controller_bullet.cpp
+    src/simulation/physics/backends/bullet/character_controller_bullet.cpp
     src/simulation/physics/backends/bullet/static_body_bullet.cpp
   )
 endif()
@@ -276,6 +288,7 @@ karma_add_static(karma_content
   src/content/importers/glb_scene_skinning.cpp
   src/content/importers/glb_scene_import.cpp
   src/content/image/stb_image.cpp
+  src/content/materials/material_loader.cpp
   src/content/prefabs/component_serializer_registry.cpp
   src/content/prefabs/prefab_resources.cpp
   src/content/prefabs/prefab_runtime.cpp
@@ -287,7 +300,10 @@ target_link_libraries(karma_content
     karma_simulation_animation
 )
 if (KARMA_ENABLE_NAVIGATION)
-  target_sources(karma_content PRIVATE src/content/navigation/nav_tile_cache.cpp)
+  target_sources(karma_content PRIVATE
+    src/content/navigation/nav_geometry.cpp
+    src/content/navigation/nav_tile_cache.cpp
+  )
   target_link_libraries(karma_content PUBLIC karma_simulation_navigation)
 endif()
 list(APPEND KARMA_INSTALL_TARGETS karma_content)

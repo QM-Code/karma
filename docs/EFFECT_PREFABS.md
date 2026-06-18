@@ -7,7 +7,6 @@ Component map keys use the real component struct names, for example:
 
 - `TagComponent`
 - `TransformComponent`
-- `LocalTransformComponent`
 - `MeshComponent`
 - `LightComponent`
 - `ParticleEffectComponent`
@@ -38,7 +37,12 @@ Directory prefabs are loaded from `prefab.json`:
         },
         "MeshComponent": {
           "mesh_key": "assets/crate.glb",
-          "material_key": "crate"
+          "materials": [
+            {
+              "slot": 0,
+              "material_key": "crate"
+            }
+          ]
         }
       }
     }

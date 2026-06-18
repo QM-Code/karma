@@ -27,11 +27,11 @@ glm::mat4 toMatrix(const components::TransformComponent& transform) {
   return matrix;
 }
 
-glm::mat4 toMatrix(const components::LocalTransformComponent& transform) {
+glm::mat4 toLocalMatrix(const components::TransformComponent& transform) {
   glm::mat4 matrix(1.0f);
-  matrix = glm::translate(matrix, math::toGlm(transform.position));
-  matrix *= glm::mat4_cast(math::toGlm(transform.rotation));
-  matrix = glm::scale(matrix, math::toGlm(transform.scale));
+  matrix = glm::translate(matrix, math::toGlm(transform.localPosition()));
+  matrix *= glm::mat4_cast(math::toGlm(transform.localRotation()));
+  matrix = glm::scale(matrix, math::toGlm(transform.localScale()));
   return matrix;
 }
 
@@ -73,10 +73,13 @@ class SceneMatrixResolver {
     const scene::Node& node = scene_.get(node_id);
     glm::mat4 world = scene_.isAlive(node.parent) ? nodeWorld(node.parent) : glm::mat4(1.0f);
     if (node.entity.isValid() && world_.isAlive(node.entity)) {
-      if (world_.has<components::LocalTransformComponent>(node.entity)) {
-        world *= toMatrix(world_.get<components::LocalTransformComponent>(node.entity));
-      } else if (world_.has<components::TransformComponent>(node.entity)) {
-        world = toMatrix(world_.get<components::TransformComponent>(node.entity));
+      if (world_.has<components::TransformComponent>(node.entity)) {
+        const auto& transform = world_.get<components::TransformComponent>(node.entity);
+        if (scene_.isAlive(node.parent)) {
+          world *= toLocalMatrix(transform);
+        } else {
+          world = toLocalMatrix(transform);
+        }
       }
     }
 

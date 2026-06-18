@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <stdexcept>
 
+#include "karma/world/components/collider.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/component.h"
+#include "karma/world/ecs/world.h"
 
 namespace karma::components {
 
@@ -64,6 +67,15 @@ class RigidbodyComponent : public ecs::ComponentTag {
   bool use_manifold_reduction = true;
   bool apply_gyroscopic_force = false;
   bool enhanced_internal_edge_removal = false;
+
+  static void Validate(ecs::World& world, ecs::Entity entity) {
+    if (!world.has<TransformComponent>(entity)) {
+      throw std::runtime_error("RigidbodyComponent requires TransformComponent on the same entity.");
+    }
+    if (!world.has<ColliderComponent>(entity)) {
+      throw std::runtime_error("RigidbodyComponent requires ColliderComponent on the same entity.");
+    }
+  }
 };
 
 /// \ingroup karma_components

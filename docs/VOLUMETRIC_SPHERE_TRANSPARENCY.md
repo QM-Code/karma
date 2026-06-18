@@ -103,17 +103,17 @@ The affected examples were rebuilt:
 
 ```bash
 cmake --build build --target \
-  karma_prefab_gallery_example \
-  karma_volumetric_sphere_example \
-  karma_volumetric_sphere_prefab_example
+  prefabs_gallery \
+  effects_volumetric_sphere \
+  prefabs_volumetric_sphere
 ```
 
 The smoke checks used:
 
 ```bash
-timeout 6s ./build/karma_volumetric_sphere_example
-timeout 6s ./build/karma_volumetric_sphere_prefab_example
-timeout 8s env KARMA_PARTICLE_STATS=1 KARMA_PREFAB_GALLERY_STATS=1 ./build/karma_prefab_gallery_example
+timeout 6s ./build/examples/effects/volumetric_sphere
+timeout 6s ./build/examples/prefabs/volumetric_sphere
+timeout 8s env KARMA_PARTICLE_STATS=1 KARMA_PREFAB_GALLERY_STATS=1 ./build/examples/prefabs/gallery
 ```
 
 The examples are interactive, so timeout exit code `124` is expected when they

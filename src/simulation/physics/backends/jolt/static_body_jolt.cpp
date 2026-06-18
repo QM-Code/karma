@@ -16,7 +16,7 @@ namespace karma::physics_backend {
 
 std::unique_ptr<PhysicsStaticBodyBackend> PhysicsStaticBodyJolt::fromMesh(PhysicsWorldJolt* world, const std::string& meshPath) {
     (void)world;
-    spdlog::warn("PhysicsStaticBodyJolt::fromMesh no longer imports '{}'; use MeshColliderComponent geometry or PhysicsShapeDesc mesh data", meshPath);
+    spdlog::warn("PhysicsStaticBodyJolt::fromMesh no longer imports '{}'; use ColliderComponent mesh geometry or PhysicsShapeDesc mesh data", meshPath);
     return std::make_unique<PhysicsStaticBodyJolt>();
 }
 

@@ -8,7 +8,7 @@ env-gated logging where possible, add focused renderer/particle resource timing,
 and keep runtime behavior unchanged except for diagnostics overhead when enabled.
 
 Status: the rendering startup portion has been implemented and measured with
-`karma_diligent_gltf_viewer_example`. See
+`rendering_gltf_viewer`. See
 [RENDERING_STARTUP_OPTIMIZATION.md](RENDERING_STARTUP_OPTIMIZATION.md) for the
 current benchmark commands, results, and remaining hotspots.
 
@@ -39,7 +39,7 @@ current benchmark commands, results, and remaining hotspots.
     dispatch, culling, sort, global sort/grouped fallback, and indirect draw.
   - Reuse existing async particle stats; do not add blocking GPU readback.
 - Add explosion example correlation diagnostics:
-  - In `karma_explosion_stress_example`, when `KARMA_EXPLOSION_STRESS_STATS=1`
+  - In `particles_explosion_stress`, when `KARMA_EXPLOSION_STRESS_STATS=1`
     is enabled, log the first three explosion trigger windows with trigger index,
     prefab instantiate time, restart/destroy time, first submitted emitter count,
     frame time, and renderer particle stats snapshot.
@@ -65,13 +65,13 @@ current benchmark commands, results, and remaining hotspots.
 ## Test Plan
 
 - Build:
-  - `cmake --build build --target karma_particle_example karma_explosion_stress_example karma_prefab_gallery_example karma_example --parallel $(nproc)`
+  - `cmake --build build --target particles_billboard particles_explosion_stress prefabs_gallery gameplay_tank --parallel $(nproc)`
 - Existing tests:
   - `ctest --test-dir build -R karma_prefab_tests --output-on-failure`
 - Diagnostics smoke:
-  - `timeout 8s env KARMA_ENGINE_STARTUP_DIAG=1 ./build/karma_particle_example`
-  - `timeout 12s env KARMA_ENGINE_STARTUP_DIAG=1 KARMA_PARTICLE_RESOURCE_DIAG=1 KARMA_PARTICLE_STATS=1 ./build/karma_prefab_gallery_example`
-  - `timeout 20s env KARMA_ENGINE_STARTUP_DIAG=1 KARMA_PARTICLE_RESOURCE_DIAG=1 KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 ./build/karma_explosion_stress_example --explosions 128 --stats`
+  - `timeout 8s env KARMA_ENGINE_STARTUP_DIAG=1 ./build/examples/particles/billboard`
+  - `timeout 12s env KARMA_ENGINE_STARTUP_DIAG=1 KARMA_PARTICLE_RESOURCE_DIAG=1 KARMA_PARTICLE_STATS=1 ./build/examples/prefabs/gallery`
+  - `timeout 20s env KARMA_ENGINE_STARTUP_DIAG=1 KARMA_PARTICLE_RESOURCE_DIAG=1 KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 ./build/examples/particles/explosion_stress --explosions 128 --stats`
 - Acceptance:
   - Logs identify startup stage timings, shader cache status, renderer warm-up
     timing, first normal tick timing, and first particle GPU resource growth.

@@ -1,4 +1,4 @@
-#include "demo_asset_paths.h"
+#include "common/demo_asset_paths.h"
 #include "karma/world/ecs/world.h"
 #include "karma/world/scene/scene.h"
 
@@ -31,13 +31,14 @@ GameInitResult BuildDemoScene() {
   result.world.add(result.player, components::TransformComponent{});
   result.world.add(result.player, components::MeshComponent{
       .mesh_key = resolveExampleAssetPath("tank_final.glb").string(),
-      .texture_key = "player_albedo.png",
       .visible = true});
+  result.world.add(result.player,
+                   components::ColliderComponent::capsule(
+                       components::CapsuleColliderShape{
+                           .center = {},
+                           .radius = 0.4f,
+                           .height = 1.6f}));
   result.world.add(result.player, components::RigidbodyComponent{});
-  result.world.add(result.player, components::CapsuleColliderComponent{
-      .center = {},
-      .radius = 0.4f,
-      .height = 1.6f});
   result.world.add(result.player, components::VisibilityComponent{
       .visible = true,
       .render_layer_mask = components::layerBit(components::RenderLayer::World),

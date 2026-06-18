@@ -93,15 +93,15 @@ content must be converted to a runtime atlas format before being referenced by
 
 ## Reference Examples
 
-- [`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp)
-- [`../examples/prefab_gallery_example.cpp`](../examples/prefab_gallery_example.cpp)
+- [`../examples/particles/explosion_stress.cpp`](../examples/particles/explosion_stress.cpp)
+- [`../examples/prefabs/gallery.cpp`](../examples/prefabs/gallery.cpp)
 
 ## Validation
 
 Current validation targets:
 
 ```bash
-cmake --build build --target karma_prefab_tests karma_prefab_gallery_example karma_explosion_stress_example karma_particle_example -j2
+cmake --build build --target karma_prefab_tests prefabs_gallery particles_explosion_stress particles_billboard -j2
 ./build/karma_prefab_tests
 ctest --test-dir build --output-on-failure -R 'karma_prefab_tests|karma_animation_tests'
 ```

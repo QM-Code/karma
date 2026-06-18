@@ -3,23 +3,30 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <optional>
 #include <thread>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 #include <spdlog/spdlog.h>
 
+#include "karma/content/importers/mesh_import.h"
+#include "karma/content/prefabs/prefab_resource_context.h"
+#include "karma/core/math/glm.h"
+#include "karma/core/time.h"
+#include "karma/runtime/debug/debug_overlay.h"
 #include "karma/simulation/collision/collision_event_system.h"
 #if defined(KARMA_ENABLE_NAVIGATION)
 #include "karma/simulation/navigation/navigation_system.h"
 #endif
-#include "karma/content/prefabs/prefab_resource_context.h"
-#include "karma/runtime/debug/debug_overlay.h"
-#include "karma/core/time.h"
+#include "karma/world/geometry/mesh_data.h"
 #include "karma/world/scene/transform_hierarchy.h"
 
 #include "../../../third_party/stb_image.h"
@@ -81,6 +88,45 @@ std::filesystem::path resolveStartupPath(const std::filesystem::path& path) {
   }
 
   return path;
+}
+
+std::optional<physics::MeshColliderGeometry> loadMeshColliderGeometry(std::string_view mesh_key) {
+  if (mesh_key.empty()) {
+    return std::nullopt;
+  }
+
+  const std::vector<geometry::MeshData> meshes =
+      content::importMeshes(std::filesystem::path(std::string(mesh_key)));
+  physics::MeshColliderGeometry geometry;
+  for (const geometry::MeshData& mesh : meshes) {
+    if (mesh.vertices.empty() || mesh.indices.empty()) {
+      continue;
+    }
+
+    const uint32_t base = static_cast<uint32_t>(geometry.vertices.size());
+    geometry.vertices.reserve(geometry.vertices.size() + mesh.vertices.size());
+    for (const glm::vec3& vertex : mesh.vertices) {
+      geometry.vertices.push_back(math::fromGlm(vertex));
+    }
+
+    geometry.indices.reserve(geometry.indices.size() + mesh.indices.size());
+    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+      const uint32_t a = mesh.indices[i];
+      const uint32_t b = mesh.indices[i + 1];
+      const uint32_t c = mesh.indices[i + 2];
+      if (a >= mesh.vertices.size() || b >= mesh.vertices.size() || c >= mesh.vertices.size()) {
+        continue;
+      }
+      geometry.indices.push_back(base + a);
+      geometry.indices.push_back(base + b);
+      geometry.indices.push_back(base + c);
+    }
+  }
+
+  if (geometry.vertices.empty() || geometry.indices.empty()) {
+    return std::nullopt;
+  }
+  return geometry;
 }
 
 uint32_t packUiColor(math::Color color) {
@@ -162,6 +208,7 @@ std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
                                                     &scene_,
                                                     &systems_,
                                                     graphics_.get(),
+                                                    &materials_,
                                                     config_.shadow_map_size,
                                                     config_.shadow_bias,
                                                     config_.shadow_pcf_radius,
@@ -254,7 +301,9 @@ void EngineApp::initSubsystems() {
     log_init_stage("particle system create", core::SteadyClock::now());
   }
 
-  const auto physics_system_id = systems_.addSystem(std::make_unique<physics::PhysicsSystem>(physics_));
+  auto physics_system = std::make_unique<physics::PhysicsSystem>(physics_);
+  physics_system->setMeshColliderGeometryProvider(loadMeshColliderGeometry);
+  const auto physics_system_id = systems_.addSystem(std::move(physics_system));
   log_init_stage("physics system create", core::SteadyClock::now());
 
   const auto collision_system_id =

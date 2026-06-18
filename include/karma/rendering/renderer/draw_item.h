@@ -7,6 +7,12 @@
 
 namespace karma::renderer {
 
+/// Non-owning material binding for one mesh material slot.
+struct DrawMaterialBinding {
+  uint32_t slot = 0;
+  MaterialId material = kInvalidMaterial;
+};
+
 /// \ingroup karma_rendering
 /// One renderable mesh submission.
 ///
@@ -16,7 +22,7 @@ struct DrawItem {
   InstanceId instance = kInvalidInstance;
   MeshId mesh = kInvalidMesh;
   MaterialId material = kInvalidMaterial;
-  MaterialSetId material_set = kInvalidMaterialSet;
+  std::vector<DrawMaterialBinding> materials;
   glm::mat4 transform{1.0f};
   std::vector<glm::mat4> skinning_palette;
   LayerId layer = 0;

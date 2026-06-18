@@ -193,17 +193,12 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
 
   auto resolve_instance_material =
       [&](const InstanceRecord& instance,
-          size_t submesh_index,
+          uint32_t material_slot,
           renderer::MaterialId fallback_material) -> renderer::MaterialId {
-    if (instance.material_set != renderer::kInvalidMaterialSet) {
-      auto set_it = material_sets_.find(instance.material_set);
-      if (set_it != material_sets_.end() &&
-          set_it->second.source_mesh == instance.mesh &&
-          submesh_index < set_it->second.materials.size()) {
-        const renderer::MaterialId set_material = set_it->second.materials[submesh_index];
-        if (set_material != renderer::kInvalidMaterial) {
-          return set_material;
-        }
+    for (const auto& binding : instance.materials) {
+      if (binding.slot == material_slot &&
+          binding.material != renderer::kInvalidMaterial) {
+        return binding.material;
       }
     }
     if (instance.material != renderer::kInvalidMaterial) {
@@ -305,7 +300,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
       for (size_t submesh_index = 0; submesh_index < mesh.submeshes.size(); ++submesh_index) {
         const auto& submesh = mesh.submeshes[submesh_index];
         const renderer::MaterialId mat_id =
-            resolve_instance_material(instance, submesh_index, submesh.material);
+            resolve_instance_material(instance, submesh.material_slot, submesh.material);
         const ForwardBatchKey key{
             .mesh = instance.mesh,
             .material = mat_id,
@@ -496,7 +491,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     return first + count <= total;
   };
 
-  auto lookup_material = [&](renderer::MaterialId material_id) -> const MaterialRecord* {
+  auto lookup_material = [&](renderer::MaterialId material_id) -> MaterialRecord* {
     if (material_id == renderer::kInvalidMaterial) {
       return nullptr;
     }
@@ -652,6 +647,35 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         }
       }
     }
+    if (mat && materialUsesCustomForwardPipeline(*mat)) {
+      auto copy_custom_param = [](const glm::vec4& value, float out[4]) {
+        out[0] = value.x;
+        out[1] = value.y;
+        out[2] = value.z;
+        out[3] = value.w;
+      };
+      if (mat->custom_material_param_overrides[0]) {
+        copy_custom_param(mat->custom_material_params[0], constants.material_params0);
+      }
+      if (mat->custom_material_param_overrides[1]) {
+        copy_custom_param(mat->custom_material_params[1], constants.material_params1);
+      }
+      if (mat->custom_material_param_overrides[2]) {
+        copy_custom_param(mat->custom_material_params[2], constants.material_params2);
+      }
+      if (mat->custom_material_param_overrides[3]) {
+        copy_custom_param(mat->custom_material_params[3], constants.material_params3);
+      }
+      if (mat->custom_material_param_overrides[4]) {
+        copy_custom_param(mat->custom_material_params[4], constants.material_params4);
+      }
+      if (mat->custom_material_param_overrides[5]) {
+        copy_custom_param(mat->custom_material_params[5], constants.material_params5);
+      }
+      if (mat->custom_material_param_overrides[6]) {
+        copy_custom_param(mat->custom_material_params[6], constants.material_params6);
+      }
+    }
     {
       Diligent::MapHelper<DrawConstants> mapped(
           context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
@@ -666,12 +690,34 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     return true;
   };
 
-  auto resolve_forward_srb = [&](const MaterialRecord* mat) -> Diligent::IShaderResourceBinding* {
+  auto resolve_forward_pipeline = [&](MaterialRecord* mat,
+                                      bool& custom_pipeline) -> Diligent::IPipelineState* {
+    custom_pipeline = false;
+    if (use_custom_shader_override) {
+      return active_forward_pipeline;
+    }
+    if (mat && materialUsesCustomForwardPipeline(*mat)) {
+      if (Diligent::IPipelineState* custom =
+              ensureCustomForwardPipeline(*mat, ForwardPipelineVariant::Opaque)) {
+        custom_pipeline = true;
+        return custom;
+      }
+    }
+    return active_forward_pipeline;
+  };
+
+  auto resolve_forward_srb = [&](MaterialRecord* mat,
+                                 bool custom_pipeline) -> Diligent::IShaderResourceBinding* {
     if (use_custom_shader_override) {
       return camera_override_srb_;
     }
-    if (mat && mat->srb) {
-      return mat->srb;
+    if (mat) {
+      if (Diligent::IShaderResourceBinding* srb =
+              ensureMaterialForwardSrb(*mat,
+                                       ForwardPipelineVariant::Opaque,
+                                       custom_pipeline)) {
+        return srb;
+      }
     }
     return default_material_srb_ ? default_material_srb_ : shader_resources_;
   };
@@ -788,11 +834,29 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     const char* value = std::getenv("KARMA_FORCE_DEPTH_PREPASS");
     return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
   }();
+  bool has_custom_opaque_material = false;
+  for (const auto& batch : state.opaque_batches) {
+    if (MaterialRecord* mat = lookup_material(batch.key.material);
+        mat && materialUsesCustomForwardPipeline(*mat)) {
+      has_custom_opaque_material = true;
+      break;
+    }
+  }
+  if (!has_custom_opaque_material) {
+    for (const auto& draw : state.skinned_opaque_draws) {
+      if (MaterialRecord* mat = lookup_material(draw.key.material);
+          mat && materialUsesCustomForwardPipeline(*mat)) {
+        has_custom_opaque_material = true;
+        break;
+      }
+    }
+  }
   const bool depth_prepass_candidate =
       active_dsv && state.opaque_batches.size() > 1 &&
       (!disable_depth_prepass_for_driver || force_depth_prepass_for_env) &&
       !disable_depth_prepass_for_env &&
-      !use_custom_shader_override;
+      !use_custom_shader_override &&
+      !has_custom_opaque_material;
   if (depth_prepass_candidate) {
     ensureForwardPipeline(ForwardPipelineVariant::DepthPrepass);
   }
@@ -883,6 +947,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   }
 
   context_->SetPipelineState(active_forward_pipeline);
+  Diligent::IPipelineState* bound_forward_pipeline = nullptr;
   Diligent::IBuffer* bound_mesh_vb = nullptr;
   Diligent::IBuffer* bound_instance_vb = nullptr;
   Diligent::IBuffer* bound_index_buffer = nullptr;
@@ -918,7 +983,25 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       continue;
     }
 
-    const MaterialRecord* mat = lookup_material(batch.key.material);
+    MaterialRecord* mat = lookup_material(batch.key.material);
+    bool custom_pipeline = false;
+    Diligent::IPipelineState* pipeline = resolve_forward_pipeline(mat, custom_pipeline);
+    if (!pipeline) {
+      continue;
+    }
+    if (pipeline != bound_forward_pipeline) {
+      context_->SetPipelineState(pipeline);
+      bound_forward_pipeline = pipeline;
+      bound_forward_srb = nullptr;
+      bound_mesh_vb = nullptr;
+      bound_instance_vb = nullptr;
+      bound_index_buffer = nullptr;
+      if (use_custom_shader_override && camera_override_srb_) {
+        context_->CommitShaderResources(camera_override_srb_,
+                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        bound_forward_srb = camera_override_srb_;
+      }
+    }
     if (!update_forward_material_constants(batch.key.material,
                                            batch.key.mesh,
                                            mesh,
@@ -929,7 +1012,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
 
     if (!use_custom_shader_override) {
-      Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat);
+      Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, custom_pipeline);
       if (srb && srb != bound_forward_srb) {
         context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         bound_forward_srb = srb;
@@ -959,7 +1042,25 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       continue;
     }
 
-    const MaterialRecord* mat = lookup_material(draw.key.material);
+    MaterialRecord* mat = lookup_material(draw.key.material);
+    bool custom_pipeline = false;
+    Diligent::IPipelineState* pipeline = resolve_forward_pipeline(mat, custom_pipeline);
+    if (!pipeline) {
+      continue;
+    }
+    if (pipeline != bound_forward_pipeline) {
+      context_->SetPipelineState(pipeline);
+      bound_forward_pipeline = pipeline;
+      bound_forward_srb = nullptr;
+      bound_mesh_vb = nullptr;
+      bound_instance_vb = nullptr;
+      bound_index_buffer = nullptr;
+      if (use_custom_shader_override && camera_override_srb_) {
+        context_->CommitShaderResources(camera_override_srb_,
+                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        bound_forward_srb = camera_override_srb_;
+      }
+    }
     if (!update_forward_material_constants(draw.key.material,
                                            draw.key.mesh,
                                            mesh,
@@ -970,7 +1071,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
 
     if (!use_custom_shader_override) {
-      Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat);
+      Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, custom_pipeline);
       if (srb && srb != bound_forward_srb) {
         context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         bound_forward_srb = srb;
@@ -1207,6 +1308,35 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
         }
       }
     }
+    if (mat && materialUsesCustomForwardPipeline(*mat)) {
+      auto copy_custom_param = [](const glm::vec4& value, float out[4]) {
+        out[0] = value.x;
+        out[1] = value.y;
+        out[2] = value.z;
+        out[3] = value.w;
+      };
+      if (mat->custom_material_param_overrides[0]) {
+        copy_custom_param(mat->custom_material_params[0], constants.material_params0);
+      }
+      if (mat->custom_material_param_overrides[1]) {
+        copy_custom_param(mat->custom_material_params[1], constants.material_params1);
+      }
+      if (mat->custom_material_param_overrides[2]) {
+        copy_custom_param(mat->custom_material_params[2], constants.material_params2);
+      }
+      if (mat->custom_material_param_overrides[3]) {
+        copy_custom_param(mat->custom_material_params[3], constants.material_params3);
+      }
+      if (mat->custom_material_param_overrides[4]) {
+        copy_custom_param(mat->custom_material_params[4], constants.material_params4);
+      }
+      if (mat->custom_material_param_overrides[5]) {
+        copy_custom_param(mat->custom_material_params[5], constants.material_params5);
+      }
+      if (mat->custom_material_param_overrides[6]) {
+        copy_custom_param(mat->custom_material_params[6], constants.material_params6);
+      }
+    }
     {
       Diligent::MapHelper<DrawConstants> mapped(
           context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
@@ -1223,101 +1353,99 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   };
 
   auto resolve_forward_pipeline =
-      [&](MaterialRecord* mat) -> Diligent::IPipelineState* {
+      [&](MaterialRecord* mat,
+          ForwardPipelineVariant& variant,
+          bool& custom_pipeline) -> Diligent::IPipelineState* {
+    custom_pipeline = false;
     if (use_custom_shader_override) {
+      variant = ForwardPipelineVariant::Transparent;
       return active_forward_pipeline;
     }
     const bool additive = mat && mat->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
     const bool double_sided = mat && mat->desc.double_sided;
-    auto refresh_material_bindings = [&]() {
-      if (mat) {
-        initializeMaterialBindings(*mat);
+    if (additive && double_sided) {
+      variant = ForwardPipelineVariant::AdditiveDoubleSided;
+    } else if (additive) {
+      variant = ForwardPipelineVariant::Additive;
+    } else if (double_sided) {
+      variant = ForwardPipelineVariant::TransparentDoubleSided;
+    } else {
+      variant = ForwardPipelineVariant::Transparent;
+    }
+
+    if (mat && materialUsesCustomForwardPipeline(*mat)) {
+      if (Diligent::IPipelineState* custom = ensureCustomForwardPipeline(*mat, variant)) {
+        custom_pipeline = true;
+        return custom;
       }
-    };
+    }
+
     if (additive) {
       if (double_sided) {
         ensureForwardPipeline(ForwardPipelineVariant::AdditiveDoubleSided);
         if (additive_double_sided_pipeline_state_) {
-          if (mat && !mat->additive_double_sided_srb) {
-            refresh_material_bindings();
-          }
           return additive_double_sided_pipeline_state_;
         }
       }
       ensureForwardPipeline(ForwardPipelineVariant::Additive);
       if (additive_pipeline_state_) {
-        if (mat && !mat->additive_srb) {
-          refresh_material_bindings();
-        }
         return additive_pipeline_state_;
       }
     }
     if (double_sided) {
       ensureForwardPipeline(ForwardPipelineVariant::TransparentDoubleSided);
       if (transparent_double_sided_pipeline_state_) {
-        if (mat && !mat->transparent_double_sided_srb) {
-          refresh_material_bindings();
-        }
         return transparent_double_sided_pipeline_state_;
       }
     }
     ensureForwardPipeline(ForwardPipelineVariant::Transparent);
     if (transparent_pipeline_state_) {
-      if (mat && !mat->transparent_srb) {
-        refresh_material_bindings();
-      }
       return transparent_pipeline_state_;
     }
     return active_forward_pipeline;
   };
 
   auto resolve_forward_srb = [&](MaterialRecord* mat,
-                                 Diligent::IPipelineState* pipeline) -> Diligent::IShaderResourceBinding* {
+                                 ForwardPipelineVariant variant,
+                                 bool custom_pipeline) -> Diligent::IShaderResourceBinding* {
     if (use_custom_shader_override) {
       return camera_override_srb_;
     }
-    const bool using_transparent_pipeline = pipeline != active_forward_pipeline;
-    if (!using_transparent_pipeline) {
-      if (mat && mat->srb) {
-        return mat->srb;
+    if (mat) {
+      if (Diligent::IShaderResourceBinding* srb =
+              ensureMaterialForwardSrb(*mat, variant, custom_pipeline)) {
+        return srb;
       }
-      return default_material_srb_ ? default_material_srb_ : shader_resources_;
     }
 
-    const bool double_sided = mat && mat->desc.double_sided;
-    const bool additive = mat && mat->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
-    if (double_sided) {
-      if (additive) {
-        if (mat && mat->additive_double_sided_srb) {
-          return mat->additive_double_sided_srb;
-        }
+    switch (variant) {
+      case ForwardPipelineVariant::AdditiveDoubleSided:
         if (additive_double_sided_default_material_srb_) {
           return additive_double_sided_default_material_srb_;
         }
-      }
-      if (mat && mat->transparent_double_sided_srb) {
-        return mat->transparent_double_sided_srb;
-      }
-      if (transparent_double_sided_default_material_srb_) {
-        return transparent_double_sided_default_material_srb_;
-      }
-    }
-    if (additive) {
-      if (mat && mat->additive_srb) {
-        return mat->additive_srb;
-      }
-      if (additive_default_material_srb_) {
-        return additive_default_material_srb_;
-      }
-    }
-    if (mat && mat->transparent_srb) {
-      return mat->transparent_srb;
-    }
-    if (transparent_default_material_srb_) {
-      return transparent_default_material_srb_;
-    }
-    if (mat && mat->srb) {
-      return mat->srb;
+        break;
+      case ForwardPipelineVariant::Additive:
+        if (additive_default_material_srb_) {
+          return additive_default_material_srb_;
+        }
+        break;
+      case ForwardPipelineVariant::TransparentDoubleSided:
+        if (transparent_double_sided_default_material_srb_) {
+          return transparent_double_sided_default_material_srb_;
+        }
+        break;
+      case ForwardPipelineVariant::Transparent:
+        if (transparent_default_material_srb_) {
+          return transparent_default_material_srb_;
+        }
+        break;
+      case ForwardPipelineVariant::Opaque:
+        if (default_material_srb_) {
+          return default_material_srb_;
+        }
+        break;
+      case ForwardPipelineVariant::DepthPrepass:
+        break;
     }
     return default_material_srb_ ? default_material_srb_ : shader_resources_;
   };
@@ -1452,7 +1580,10 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     }
 
     MaterialRecord* mat = lookup_material(draw.key.material);
-    Diligent::IPipelineState* pipeline = resolve_forward_pipeline(mat);
+    ForwardPipelineVariant pipeline_variant = ForwardPipelineVariant::Transparent;
+    bool custom_pipeline = false;
+    Diligent::IPipelineState* pipeline =
+        resolve_forward_pipeline(mat, pipeline_variant, custom_pipeline);
     if (!pipeline) {
       continue;
     }
@@ -1476,7 +1607,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       continue;
     }
 
-    Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, pipeline);
+    Diligent::IShaderResourceBinding* srb =
+        resolve_forward_srb(mat, pipeline_variant, custom_pipeline);
     if (srb &&
         (draw.scene_sample_mode != TransparentForwardDraw::SceneSampleMode::None ||
          (mat &&

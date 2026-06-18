@@ -10,6 +10,7 @@
 #include <memory>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -587,6 +588,123 @@ std::string prefabResourceKey(const GlbScenePrefab& prefab,
   key.append(suffix);
   return key;
 }
+
+std::string materialResourceKey(const GlbScenePrefab& prefab, uint32_t material_index) {
+  std::string key = prefab.source_path.empty() ? std::string("imported_glb")
+                                               : prefab.source_path.string();
+  key.append("#material=");
+  key.append(std::to_string(material_index));
+  return key;
+}
+
+std::string fallbackPrimitiveMaterialKey(const GlbScenePrefab& prefab,
+                                         uint32_t node_index,
+                                         size_t primitive_index) {
+  return prefabResourceKey(prefab, node_index, primitive_index, "material");
+}
+
+std::string primitiveMaterialKey(const GlbScenePrefab& prefab,
+                                 uint32_t node_index,
+                                 size_t primitive_index,
+                                 const GlbScenePrefabPrimitive& primitive) {
+  if (primitive.source_material_index != kInvalidGlbSceneMaterial) {
+    return materialResourceKey(prefab, primitive.source_material_index);
+  }
+  return fallbackPrimitiveMaterialKey(prefab, node_index, primitive_index);
+}
+
+void registerPrimitiveMaterial(const GlbScenePrefab& prefab,
+                               uint32_t node_index,
+                               size_t primitive_index,
+                               const GlbScenePrefabPrimitive& primitive,
+                               const std::string& material_key,
+                               renderer::MaterialLibrary* materials,
+                               std::unordered_set<std::string>& registered_materials) {
+  if (materials == nullptr || material_key.empty() ||
+      !registered_materials.insert(material_key).second) {
+    return;
+  }
+
+  if (primitive.source_material_index != kInvalidGlbSceneMaterial &&
+      !prefab.source_path.empty()) {
+    std::shared_ptr<const renderer::ImportedMaterialData> imported_material;
+    if (primitive.source_material_index < prefab.imported_materials.size()) {
+      imported_material = prefab.imported_materials[primitive.source_material_index];
+    }
+    materials->registerImportedAssetMaterial(material_key,
+                                             prefab.source_path,
+                                             primitive.source_material_index,
+                                             primitive.material,
+                                             std::move(imported_material));
+  } else {
+    (void)node_index;
+    (void)primitive_index;
+    materials->registerMaterialDesc(material_key, primitive.material);
+  }
+}
+
+void appendPrimitiveMesh(geometry::MeshData& out,
+                         const geometry::MeshData& primitive,
+                         uint32_t material_slot) {
+  const uint32_t base_vertex = static_cast<uint32_t>(out.vertices.size());
+  out.vertices.insert(out.vertices.end(), primitive.vertices.begin(), primitive.vertices.end());
+  out.normals.insert(out.normals.end(), primitive.normals.begin(), primitive.normals.end());
+  out.uvs.insert(out.uvs.end(), primitive.uvs.begin(), primitive.uvs.end());
+  out.uvs1.insert(out.uvs1.end(), primitive.uvs1.begin(), primitive.uvs1.end());
+  out.tangents.insert(out.tangents.end(), primitive.tangents.begin(), primitive.tangents.end());
+
+  const uint32_t index_offset = static_cast<uint32_t>(out.indices.size());
+  for (const uint32_t index : primitive.indices) {
+    out.indices.push_back(base_vertex + index);
+  }
+  const uint32_t index_count = static_cast<uint32_t>(out.indices.size()) - index_offset;
+  if (index_count > 0) {
+    out.submeshes.push_back(geometry::MeshSubmesh{
+        .index_offset = index_offset,
+        .index_count = index_count,
+        .material_slot = material_slot,
+    });
+  }
+}
+
+geometry::MeshData buildCombinedNodeMesh(const GlbScenePrefab& prefab,
+                                         uint32_t node_index,
+                                         const GlbScenePrefabNode& node,
+                                         const std::vector<size_t>& primitive_indices,
+                                         renderer::MaterialLibrary* materials,
+                                         std::unordered_set<std::string>& registered_materials) {
+  geometry::MeshData combined{};
+  std::unordered_map<std::string, uint32_t> slots_by_material_key;
+  slots_by_material_key.reserve(primitive_indices.size());
+
+  for (const size_t primitive_index : primitive_indices) {
+    const auto& primitive = node.primitives[primitive_index];
+    const std::string material_key =
+        primitiveMaterialKey(prefab, node_index, primitive_index, primitive);
+    registerPrimitiveMaterial(prefab,
+                              node_index,
+                              primitive_index,
+                              primitive,
+                              material_key,
+                              materials,
+                              registered_materials);
+
+    auto slot_it = slots_by_material_key.find(material_key);
+    if (slot_it == slots_by_material_key.end()) {
+      const uint32_t slot = static_cast<uint32_t>(combined.material_slots.size());
+      std::string slot_name =
+          primitive.name.empty() ? ("Slot " + std::to_string(slot)) : primitive.name;
+      combined.material_slots.push_back(geometry::MeshMaterialSlot{
+          .name = std::move(slot_name),
+          .default_material_key = materials != nullptr ? material_key : std::string{},
+      });
+      slot_it = slots_by_material_key.emplace(material_key, slot).first;
+    }
+    appendPrimitiveMesh(combined, primitive.mesh, slot_it->second);
+  }
+
+  return combined;
+}
 }  // namespace
 
 GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
@@ -664,6 +782,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
   };
   std::vector<PendingSkin> pending_skins;
   ecs::Entity skin_render_transform_entity{};
+  std::unordered_set<std::string> registered_materials;
 
   auto attach_pending_skins = [&]() {
     for (const PendingSkin& pending : pending_skins) {
@@ -702,13 +821,9 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     const ecs::Entity entity = world.createEntity();
     world.setName(entity, nodeDisplayName(prefab_node, prefab_node_index));
     world.add(entity, components::TransformComponent{
-                           prefab_node.world_position,
-                           prefab_node.world_rotation,
-                           prefab_node.world_scale});
-    world.add(entity, components::LocalTransformComponent{
-                          prefab_node.local_position,
-                          prefab_node.local_rotation,
-                          prefab_node.local_scale});
+                           prefab_node.local_position,
+                           prefab_node.local_rotation,
+                           prefab_node.local_scale});
     if (prefab_node.has_light) {
       world.add(entity, prefab_node.light);
     }
@@ -722,47 +837,60 @@ GlbSceneImportResult instantiateGlbScenePrefab(
       result.node_entities_by_index[prefab_node_index] = entity;
     }
 
+    std::vector<size_t> combined_primitive_indices;
+    combined_primitive_indices.reserve(prefab_node.primitives.size());
     for (size_t primitive_index = 0; primitive_index < prefab_node.primitives.size(); ++primitive_index) {
       const auto& primitive = prefab_node.primitives[primitive_index];
+      if (!primitive.skinned() && !primitive.morphable()) {
+        combined_primitive_indices.push_back(primitive_index);
+        continue;
+      }
+
       const ecs::Entity primitive_entity = world.createEntity();
       world.setName(primitive_entity,
                     primitiveDisplayName(prefab_node, prefab_node_index, primitive, primitive_index));
       world.add(primitive_entity, components::TransformComponent{
-                                     prefab_node.world_position,
-                                     prefab_node.world_rotation,
-                                     prefab_node.world_scale});
-      world.add(primitive_entity, components::LocalTransformComponent{});
+                                     {},
+                                     {},
+                                     {1.0f, 1.0f, 1.0f}});
 
       const std::string mesh_key =
           prefabResourceKey(prefab, prefab_node_index, primitive_index, "mesh");
       const std::string material_key =
-          prefabResourceKey(prefab, prefab_node_index, primitive_index, "material");
-      const renderer::MeshId mesh_id = device.registerRuntimeMesh(mesh_key, primitive.mesh);
-      if (primitive.source_material_index != kInvalidGlbSceneMaterial &&
-          !prefab.source_path.empty() &&
-          materials != nullptr) {
-        std::shared_ptr<const renderer::ImportedMaterialData> imported_material;
-        if (primitive.source_material_index < prefab.imported_materials.size()) {
-          imported_material = prefab.imported_materials[primitive.source_material_index];
+          primitiveMaterialKey(prefab, prefab_node_index, primitive_index, primitive);
+      registerPrimitiveMaterial(prefab,
+                                prefab_node_index,
+                                primitive_index,
+                                primitive,
+                                material_key,
+                                materials,
+                                registered_materials);
+      geometry::MeshData mesh_asset = primitive.mesh;
+      mesh_asset.material_slots = {geometry::MeshMaterialSlot{
+          .name = primitive.name.empty() ? std::string("Slot 0") : primitive.name,
+          .default_material_key = materials != nullptr ? material_key : std::string{},
+      }};
+      if (mesh_asset.submeshes.empty() && !mesh_asset.indices.empty()) {
+        mesh_asset.submeshes.push_back(geometry::MeshSubmesh{
+            .index_offset = 0,
+            .index_count = static_cast<uint32_t>(mesh_asset.indices.size()),
+            .material_slot = 0,
+        });
+      } else {
+        for (auto& submesh : mesh_asset.submeshes) {
+          submesh.material_slot = 0;
         }
-        materials->registerImportedAssetMaterial(material_key,
-                                                 prefab.source_path,
-                                                 primitive.source_material_index,
-                                                 primitive.material,
-                                                 std::move(imported_material));
-      } else if (materials != nullptr) {
-        materials->registerMaterialDesc(material_key, primitive.material);
       }
+      const renderer::MeshId mesh_id = device.registerRuntimeMesh(mesh_key, mesh_asset);
       world.add(primitive_entity, components::MeshComponent{
                                      .mesh_key = mesh_id != renderer::kInvalidMesh ? mesh_key : "",
-                                     .material_key = materials != nullptr ? material_key : "",
                                      .visible = true});
       if (primitive.morphable()) {
         std::vector<float> morph_weights = primitive.morph_weights;
-        morph_weights.resize(primitive.mesh.morph_targets.size(), 0.0f);
+        morph_weights.resize(mesh_asset.morph_targets.size(), 0.0f);
         world.add(primitive_entity, components::MorphTargetComponent{
-                                        .bind_mesh = primitive.mesh,
-                                        .deformed_mesh = primitive.mesh,
+                                        .bind_mesh = mesh_asset,
+                                        .deformed_mesh = mesh_asset,
                                         .base_weights = morph_weights,
                                         .weights = morph_weights,
                                         .weights_dirty = true,
@@ -780,6 +908,31 @@ GlbSceneImportResult instantiateGlbScenePrefab(
       result.entities.push_back(primitive_entity);
     }
 
+    if (!combined_primitive_indices.empty()) {
+      const ecs::Entity mesh_entity = world.createEntity();
+      world.setName(mesh_entity, nodeDisplayName(prefab_node, prefab_node_index) + " Mesh");
+      world.add(mesh_entity, components::TransformComponent{
+                               {},
+                               {},
+                               {1.0f, 1.0f, 1.0f}});
+      const std::string mesh_key =
+          prefabResourceKey(prefab, prefab_node_index, 0, "mesh");
+      geometry::MeshData combined_mesh = buildCombinedNodeMesh(prefab,
+                                                               prefab_node_index,
+                                                               prefab_node,
+                                                               combined_primitive_indices,
+                                                               materials,
+                                                               registered_materials);
+      const renderer::MeshId mesh_id = device.registerRuntimeMesh(mesh_key, combined_mesh);
+      world.add(mesh_entity, components::MeshComponent{
+                                 .mesh_key = mesh_id != renderer::kInvalidMesh ? mesh_key : "",
+                                 .visible = true});
+
+      const scene::NodeId mesh_node = scene.createNode(mesh_entity);
+      scene.reparent(mesh_node, node_id);
+      result.entities.push_back(mesh_entity);
+    }
+
     for (const uint32_t child_index : prefab_node.children) {
       instantiate_node(child_index, node_id);
     }
@@ -793,7 +946,6 @@ GlbSceneImportResult instantiateGlbScenePrefab(
         prefab.source_path.stem().empty() ? std::string("Imported GLB") : prefab.source_path.stem().string();
     world.setName(root_entity, root_name);
     world.add(root_entity, components::TransformComponent{});
-    world.add(root_entity, components::LocalTransformComponent{});
     const scene::NodeId root_node = scene.createNode(root_entity);
     result.entities.push_back(root_entity);
     skin_render_transform_entity = root_entity;

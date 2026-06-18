@@ -7,7 +7,7 @@
 namespace karma::components {
 
 /// \ingroup karma_components
-/// Ground/support state written by physics/player-controller integration.
+/// Ground/support state written by physics/character-controller integration.
 ///
 /// `entered` and `exited` are one-frame flags. `support_entity`, point, and
 /// normal describe the current support surface when available.

@@ -3,6 +3,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "karma/rendering/renderer/backend.hpp"
 #include "karma/rendering/renderer/material.h"
@@ -42,6 +43,8 @@ class GraphicsDevice {
   void destroyMesh(MeshId mesh);
   /// Queries cached mesh bounds.
   bool getMeshBounds(MeshId mesh, glm::vec3& center, float& radius) const;
+  /// Queries mesh material-slot metadata.
+  bool getMeshMaterialSlots(MeshId mesh, std::vector<geometry::MeshMaterialSlot>& out_slots) const;
 
   /// Registers or replaces a runtime mesh bound by `MeshComponent::mesh_key`.
   MeshId registerRuntimeMesh(const std::string& key, const geometry::MeshData& mesh);
@@ -50,7 +53,9 @@ class GraphicsDevice {
   /// Returns a registered runtime mesh id, or `kInvalidMesh`.
   MeshId findRuntimeMesh(const std::string& key) const;
 
-  /// Creates a material from explicit parameters.
+  /// Creates a material from resolved material parameters.
+  MaterialId createMaterial(const ResolvedMaterialDesc& material);
+  /// Creates a material from explicit surface parameters.
   MaterialId createMaterial(const MaterialDesc& material);
   /// Creates a material from an imported asset material index.
   MaterialId createMaterialFromAsset(const std::filesystem::path& path, uint32_t material_index);
@@ -58,10 +63,6 @@ class GraphicsDevice {
   void updateMaterial(MaterialId material, const MaterialDesc& desc);
   /// Destroys a material.
   void destroyMaterial(MaterialId material);
-  /// Creates a material set for a mesh asset.
-  MaterialSetId createMaterialSetFromMesh(MeshId mesh, const MaterialResourceDesc& desc);
-  /// Destroys a material set.
-  void destroyMaterialSet(MaterialSetId set);
   /// Sets a named float parameter on a material when supported.
   void setMaterialFloat(MaterialId material, std::string_view name, float value);
 
@@ -176,7 +177,11 @@ class GraphicsDevice {
 
  private:
   std::unique_ptr<renderer_backend::Backend> backend_;
-  std::unordered_map<std::string, MeshId> runtime_meshes_;
+  struct RuntimeMeshRegistration {
+    MeshId mesh = kInvalidMesh;
+    geometry::MeshData data;
+  };
+  std::unordered_map<std::string, RuntimeMeshRegistration> runtime_meshes_;
   mutable std::recursive_mutex mutex_;
   int framebuffer_width_ = 0;
   int framebuffer_height_ = 0;

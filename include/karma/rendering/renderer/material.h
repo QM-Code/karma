@@ -7,7 +7,9 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "karma/core/math/types.h"
@@ -158,61 +160,66 @@ struct ImportedMaterialData {
   std::array<glm::vec4, kImportedMaterialTextureCoordSlotCount> texcoord_row1{};
 };
 
-/// \ingroup karma_rendering
-/// Data-driven material resource description registered by key.
-struct MaterialResourceDesc {
-  /// Material resource construction mode.
-  enum class Kind {
-    MeshTint,
-    Explicit,
-    ImportedAssetMaterial,
+/// Pipeline family for a material asset.
+struct MaterialPipelineDesc {
+  enum class Type : uint32_t {
+    Standard = 0,
+    Custom = 1,
   };
 
-  Kind kind = Kind::MeshTint;
+  Type type = Type::Standard;
+  std::filesystem::path vertex_shader_path;
+  std::filesystem::path fragment_shader_path;
+  std::string vertex_entry_point = "main";
+  std::string fragment_entry_point = "main";
+  std::vector<std::string> defines;
+};
+
+/// Named material parameter value used by material assets and instances.
+using MaterialParameterValue =
+    std::variant<bool,
+                 int32_t,
+                 uint32_t,
+                 float,
+                 Color,
+                 glm::vec2,
+                 glm::vec3,
+                 glm::vec4,
+                 std::string>;
+
+/// Shared material asset definition registered by key.
+struct MaterialAssetDesc {
   std::string material_key;
-  std::string source_mesh_key;
-  std::string shader_key;
-  std::string albedo_texture_key;
-  std::string normal_texture_key;
-  std::string metallic_roughness_texture_key;
-  Color base_color_tint{1.0f, 1.0f, 1.0f, 1.0f};
-  float metallic = 0.0f;
-  float roughness = 0.5f;
-  bool double_sided = false;
-  MaterialDesc material{};
+  MaterialPipelineDesc pipeline{};
+  MaterialDesc surface{};
+  std::unordered_map<std::string, MaterialParameterValue> params;
+  std::unordered_map<std::string, std::filesystem::path> textures;
+  std::filesystem::path material_asset_path;
+  uint32_t material_asset_index = std::numeric_limits<uint32_t>::max();
+  std::shared_ptr<const ImportedMaterialData> imported_material;
+};
+
+/// Per-object material instance definition registered by key.
+struct MaterialInstanceDesc {
+  std::string material_key;
+  std::string parent_material_key;
+  std::unordered_map<std::string, MaterialParameterValue> params;
+  std::unordered_map<std::string, std::filesystem::path> textures;
+};
+
+/// Flattened renderer-facing material after asset/instance inheritance.
+struct ResolvedMaterialDesc {
+  MaterialPipelineDesc pipeline{};
+  MaterialDesc surface{};
+  std::unordered_map<std::string, MaterialParameterValue> params;
+  std::unordered_map<std::string, std::filesystem::path> textures;
   std::filesystem::path material_asset_path;
   uint32_t material_asset_index = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<const ImportedMaterialData> imported_material;
 
-  /// Creates a material resource that tints materials from a mesh asset.
-  static MaterialResourceDesc fromMeshTint(std::string source_mesh, Color tint) {
-    MaterialResourceDesc desc{};
-    desc.kind = Kind::MeshTint;
-    desc.source_mesh_key = std::move(source_mesh);
-    desc.base_color_tint = tint;
-    return desc;
-  }
-
-  /// Creates a material resource from explicit renderer material parameters.
-  static MaterialResourceDesc fromMaterial(MaterialDesc material_desc) {
-    MaterialResourceDesc desc{};
-    desc.kind = Kind::Explicit;
-    desc.material = std::move(material_desc);
-    return desc;
-  }
-
-  /// Creates a material resource from an imported asset material index.
-  static MaterialResourceDesc fromImportedAssetMaterial(std::filesystem::path path,
-                                                       uint32_t material_index,
-                                                       MaterialDesc fallback = {},
-                                                       std::shared_ptr<const ImportedMaterialData>
-                                                           imported = {}) {
-    MaterialResourceDesc desc{};
-    desc.kind = Kind::ImportedAssetMaterial;
-    desc.material_asset_path = std::move(path);
-    desc.material_asset_index = material_index;
-    desc.material = std::move(fallback);
-    desc.imported_material = std::move(imported);
+  static ResolvedMaterialDesc fromSurface(MaterialDesc material) {
+    ResolvedMaterialDesc desc{};
+    desc.surface = std::move(material);
     return desc;
   }
 };

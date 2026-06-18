@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <variant>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -14,8 +15,6 @@
 #include "karma/world/components/nav_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
-#include "karma/content/importers/mesh_import.h"
-#include "karma/content/importers/glb_scene_import.h"
 
 namespace karma::navigation {
 namespace {
@@ -30,6 +29,14 @@ glm::mat4 makeTransform(const math::Vec3& position,
   return transform;
 }
 
+glm::vec3 toGeometryVertex(const glm::vec3& vertex) {
+  return vertex;
+}
+
+glm::vec3 toGeometryVertex(const math::Vec3& vertex) {
+  return math::toGlm(vertex);
+}
+
 template <class Mesh>
 void appendMesh(NavMeshInputGeometry& out,
                 const Mesh& mesh,
@@ -37,8 +44,8 @@ void appendMesh(NavMeshInputGeometry& out,
                 unsigned char area) {
   const uint32_t base_vertex = static_cast<uint32_t>(out.vertices.size());
   out.vertices.reserve(out.vertices.size() + mesh.vertices.size());
-  for (const glm::vec3& vertex : mesh.vertices) {
-    const glm::vec4 world = transform * glm::vec4(vertex, 1.0f);
+  for (const auto& vertex : mesh.vertices) {
+    const glm::vec4 world = transform * glm::vec4(toGeometryVertex(vertex), 1.0f);
     out.vertices.push_back(math::fromGlm(glm::vec3(world)));
   }
 
@@ -137,24 +144,6 @@ void appendGeometry(NavMeshInputGeometry& out,
   appendMesh(out, mesh, makeTransform(position, rotation, scale), area);
 }
 
-NavMeshInputGeometry collectNavMeshGeometry(const scene::GlbScenePrefab& prefab) {
-  NavMeshInputGeometry geometry;
-  if (!prefab.valid()) {
-    return geometry;
-  }
-
-  for (const scene::GlbScenePrefabNode& node : prefab.nodes) {
-    for (const scene::GlbScenePrefabPrimitive& primitive : node.primitives) {
-      appendGeometry(geometry,
-                     primitive.mesh,
-                     node.world_position,
-                     node.world_rotation,
-                     node.world_scale);
-    }
-  }
-  return geometry;
-}
-
 NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t source_mask) {
   NavMeshInputGeometry geometry;
   bool has_explicit_surfaces = false;
@@ -176,19 +165,6 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
           return;
         }
 
-        std::string mesh_key = surface.mesh_key;
-        if (mesh_key.empty() && world.has<components::MeshComponent>(entity)) {
-          mesh_key = world.get<components::MeshComponent>(entity).mesh_key;
-        }
-        if (mesh_key.empty()) {
-          return;
-        }
-
-        const std::vector<karma::geometry::MeshData> meshes =
-            karma::content::importMeshes(mesh_key);
-        for (const auto& mesh : meshes) {
-          appendMesh(geometry, mesh, world_transform, area);
-        }
       });
 
   if (has_explicit_surfaces) {
@@ -197,10 +173,14 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
     return geometry;
   }
 
-  world.forEach<components::MeshColliderComponent, components::MeshComponent, components::TransformComponent>(
+  world.forEach<components::ColliderComponent, components::MeshComponent, components::TransformComponent>(
       [&](const ecs::Entity entity) {
-        const auto& mesh_component = world.get<components::MeshComponent>(entity);
-        if (mesh_component.mesh_key.empty()) {
+        const auto& collider = world.get<components::ColliderComponent>(entity);
+        const auto* mesh_shape = std::get_if<components::MeshColliderShape>(&collider.shape);
+        if (mesh_shape == nullptr) {
+          return;
+        }
+        if (mesh_shape->vertices.empty() || mesh_shape->indices.empty()) {
           return;
         }
 
@@ -208,11 +188,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
         const glm::mat4 world_transform = makeTransform(transform.getPosition(),
                                                         transform.getRotation(),
                                                         transform.getScale());
-        const std::vector<karma::geometry::MeshData> meshes =
-            karma::content::importMeshes(mesh_component.mesh_key);
-        for (const auto& mesh : meshes) {
-          appendMesh(geometry, mesh, world_transform, kNavAreaDefault);
-        }
+        appendMesh(geometry, *mesh_shape, world_transform, kNavAreaDefault);
       });
   appendOffMeshLinks(geometry, world, source_mask);
   appendConvexVolumes(geometry, world, source_mask);

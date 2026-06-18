@@ -11,9 +11,9 @@ namespace karma::scene {
 /// \ingroup karma_scene
 /// Lightweight scene graph that maps ECS entities to parent/child nodes.
 ///
-/// The scene graph owns hierarchy relationships only. Local transforms live in
-/// `LocalTransformComponent`; final world transforms live in `TransformComponent`
-/// and are composed by `updateWorldTransforms(...)`.
+/// The scene graph owns hierarchy relationships only. Authored local transforms
+/// and final world transforms live in `TransformComponent` and are composed by
+/// `updateWorldTransforms(...)`.
 class Scene {
  public:
   /// Creates a node, reusing an existing node for `entity` when one exists.

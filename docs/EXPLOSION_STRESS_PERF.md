@@ -1,7 +1,7 @@
 # Explosion Stress Performance
 
 This document is the practical runbook for the staged explosion stress sample in
-[`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp).
+[`../examples/particles/explosion_stress.cpp`](../examples/particles/explosion_stress.cpp).
 
 ## What This Sample Is For
 
@@ -18,25 +18,25 @@ probe for the direct-load explosion prefab.
 Build:
 
 ```bash
-cmake --build build-local --target karma_explosion_stress_example -j2
+cmake --build build-local --target particles_explosion_stress -j2
 ```
 
 Run with periodic stats:
 
 ```bash
-./build-local/karma_explosion_stress_example --stats
+./build-local/examples/particles/explosion_stress --stats
 ```
 
 Environment equivalent:
 
 ```bash
-KARMA_EXPLOSION_STRESS_STATS=1 ./build-local/karma_explosion_stress_example
+KARMA_EXPLOSION_STRESS_STATS=1 ./build-local/examples/particles/explosion_stress
 ```
 
 Renderer-level particle diagnostics:
 
 ```bash
-KARMA_PARTICLE_STATS=1 ./build-local/karma_explosion_stress_example --stats
+KARMA_PARTICLE_STATS=1 ./build-local/examples/particles/explosion_stress --stats
 ```
 
 `KARMA_PARTICLE_STATS=1` logs averaged final `ParticlePassStats` once per
@@ -78,7 +78,7 @@ Layer tokens:
 
 Primary source:
 
-- [`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp)
+- [`../examples/particles/explosion_stress.cpp`](../examples/particles/explosion_stress.cpp)
 
 ## Current Authored Stress Content
 
@@ -152,7 +152,7 @@ Primary files:
 - [`../src/features/visual/particles/particle_system.cpp`](../src/features/visual/particles/particle_system.cpp)
 - [`../include/karma/rendering/renderer/particles.h`](../include/karma/rendering/renderer/particles.h)
 - [`../src/rendering/renderer/backends/diligent/passes/frame.cpp`](../src/rendering/renderer/backends/diligent/passes/frame.cpp)
-- [`../examples/explosion_stress_example.cpp`](../examples/explosion_stress_example.cpp)
+- [`../examples/particles/explosion_stress.cpp`](../examples/particles/explosion_stress.cpp)
 
 ### Renderer refactor
 
@@ -232,14 +232,14 @@ Key fields:
 Local build target:
 
 ```bash
-cmake --build build --target karma_explosion_stress_example karma_prefab_gallery_example
+cmake --build build --target particles_explosion_stress prefabs_gallery
 ```
 
 Default explosion stress:
 
 ```bash
 timeout 12s env KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 \
-  ./build/karma_explosion_stress_example --stats
+  ./build/examples/particles/explosion_stress --stats
 ```
 
 Representative steady-state averages:
@@ -257,7 +257,7 @@ Prefab gallery:
 
 ```bash
 timeout 12s env KARMA_PARTICLE_STATS=1 KARMA_PREFAB_GALLERY_STATS=1 \
-  ./build/karma_prefab_gallery_example
+  ./build/examples/prefabs/gallery
 ```
 
 Representative active-window averages:
@@ -275,7 +275,7 @@ Heavier stress sweep:
 
 ```bash
 timeout 12s env KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 \
-  ./build/karma_explosion_stress_example --stats --explosions 25 --period 2.0
+  ./build/examples/particles/explosion_stress --stats --explosions 25 --period 2.0
 ```
 
 Representative steady-state averages:
@@ -323,7 +323,7 @@ Heavy stress after the first pass:
 
 ```bash
 timeout 10s env KARMA_PARTICLE_STATS=1 KARMA_EXPLOSION_STRESS_STATS=1 \
-  ./build/karma_explosion_stress_example --stats --explosions 25 --period 2.0
+  ./build/examples/particles/explosion_stress --stats --explosions 25 --period 2.0
 ```
 
 Representative steady-state averages:
@@ -340,7 +340,7 @@ Prefab gallery after the first pass:
 
 ```bash
 timeout 10s env KARMA_PARTICLE_STATS=1 KARMA_PREFAB_GALLERY_STATS=1 \
-  ./build/karma_prefab_gallery_example
+  ./build/examples/prefabs/gallery
 ```
 
 Representative active-window averages:

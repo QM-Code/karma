@@ -454,7 +454,7 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   record.layer = item.layer;
   record.mesh = item.mesh;
   record.material = item.material;
-  record.material_set = item.material_set;
+  record.materials = item.materials;
   record.transform = item.transform;
   record.skinning_palette = item.skinning_palette;
   record.skinning_enabled = item.skinning_enabled && !record.skinning_palette.empty();

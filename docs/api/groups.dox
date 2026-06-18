@@ -102,11 +102,11 @@ runtime flow.
 /**
 \defgroup karma_physics Physics
 \ingroup karma_simulation
-Physics backend interfaces, rigid bodies, player controllers, and physics
+Physics backend interfaces, rigid bodies, character controllers, and physics
 world/system integration.
 
-Karma supports Jolt and Bullet backends through public physics abstractions.
-Choose one backend at configure time.
+Karma supports Jolt through public physics abstractions. The Bullet backend is
+experimental and may lag the ECS physics feature set.
 */
 
 /**

@@ -7,7 +7,7 @@ Karma is a C++20 client/server 3D game engine with a layered architecture and a 
 - **EngineApp** (`src/runtime/app/engine_app.cpp`) manages lifecycle, the main loop, and system updates.
 - **ECS** holds world state and components (transforms, mesh, lights, physics, etc.).
 - **Systems** update and render ECS data each frame.
-- **Backends** are selected at build time (GLFW/SDL, Diligent, Jolt/Bullet, ENet, etc.).
+- **Backends** are selected at build time (GLFW/SDL, Diligent, Jolt with experimental Bullet, ENet, etc.).
 
 ## Rendering
 - **Renderer entry**: `src/rendering/renderer/render_system.cpp` +
@@ -61,9 +61,23 @@ remain controlled by their individual CMake switches.
 ## Backends
 - **Window**: GLFW or SDL
 - **Rendering**: Diligent (Vulkan default)
-- **Physics**: Jolt or Bullet
+- **Physics**: Jolt; Bullet is experimental
 - **Audio**: miniaudio or SDL
 - **Networking**: ENet
+
+## Physics
+- Public physics authoring lives in `include/karma/world/components`; runtime
+  wrappers and backend-neutral descriptors live under
+  `include/karma/simulation/physics`.
+- `src/simulation/physics/physics_system.cpp` owns the high-level fixed-step
+  phases. Neighboring `physics_system_*` files implement body, character,
+  constraint, vehicle, soft-body, event, conversion, and cleanup details.
+- ECS physics components are contracts, not backend object storage. The physics
+  system owns native handles, contact caches, vehicle telemetry, and soft-body
+  snapshots, then writes only small public status fields back to components.
+- Each `CharacterControllerComponent` owns one backend character controller via
+  the physics system. Controllers require `TransformComponent` and a box
+  `ColliderComponent`; movement is driven through component command methods.
 
 ## Notes
 - Clip masks require a stencil-capable depth buffer (D24S8).

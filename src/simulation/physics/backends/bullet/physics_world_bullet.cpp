@@ -1,5 +1,5 @@
 #include "karma/simulation/physics/backends/bullet/physics_world_bullet.hpp"
-#include "karma/simulation/physics/backends/bullet/player_controller_bullet.hpp"
+#include "karma/simulation/physics/backends/bullet/character_controller_bullet.hpp"
 #include "karma/simulation/physics/backends/bullet/rigid_body_bullet.hpp"
 #include "karma/simulation/physics/backends/bullet/static_body_bullet.hpp"
 #include <btBulletDynamicsCommon.h>
@@ -14,6 +14,34 @@ class NullConstraintBackend final : public PhysicsConstraintBackend {
 public:
     bool isValid() const override { return false; }
     void setEnabled(bool) override {}
+    void destroy() override {}
+    std::uintptr_t nativeHandle() const override { return 0; }
+};
+
+class NullVehicleBackend final : public PhysicsVehicleBackend {
+public:
+    bool isValid() const override { return false; }
+    void setInput(const karma::physics::PhysicsVehicleInput&) override {}
+    karma::physics::PhysicsVehicleState getState() const override { return {}; }
+    void setEnabled(bool) override {}
+    void destroy() override {}
+    std::uintptr_t nativeHandle() const override { return 0; }
+};
+
+class NullSoftBodyBackend final : public PhysicsSoftBodyBackend {
+public:
+    bool isValid() const override { return false; }
+    glm::vec3 getPosition() const override { return glm::vec3(0.0f); }
+    glm::quat getRotation() const override { return glm::quat(1.0f, 0.0f, 0.0f, 0.0f); }
+    bool isActive() const override { return false; }
+    void setPressure(float) override {}
+    void setUpdatePosition(bool) override {}
+    void setEnableSkinConstraints(bool) override {}
+    void setSkinnedMaxDistanceMultiplier(float) override {}
+    void setVertexPosition(uint32_t, const glm::vec3&, bool) override {}
+    karma::physics::PhysicsSoftBodyState getState() const override { return {}; }
+    void activate() override {}
+    void deactivate() override {}
     void destroy() override {}
     std::uintptr_t nativeHandle() const override { return 0; }
 };
@@ -127,6 +155,17 @@ std::unique_ptr<PhysicsConstraintBackend> PhysicsWorldBullet::createConstraint(
     return std::make_unique<NullConstraintBackend>();
 }
 
+std::unique_ptr<PhysicsVehicleBackend> PhysicsWorldBullet::createVehicle(
+    const karma::physics::PhysicsVehicleDesc& /*desc*/,
+    std::uintptr_t /*body*/) {
+    return std::make_unique<NullVehicleBackend>();
+}
+
+std::unique_ptr<PhysicsSoftBodyBackend> PhysicsWorldBullet::createSoftBody(
+    const karma::physics::PhysicsSoftBodyDesc& /*desc*/) {
+    return std::make_unique<NullSoftBodyBackend>();
+}
+
 std::unique_ptr<PhysicsRigidBodyBackend> PhysicsWorldBullet::createBoxBody(const glm::vec3& halfExtents,
                                                                            float mass,
                                                                            const glm::vec3& position,
@@ -140,9 +179,9 @@ std::unique_ptr<PhysicsRigidBodyBackend> PhysicsWorldBullet::createBoxBody(const
     return createBody(desc);
 }
 
-std::unique_ptr<PhysicsPlayerControllerBackend> PhysicsWorldBullet::createPlayer(const glm::vec3& size) {
+std::unique_ptr<PhysicsCharacterControllerBackend> PhysicsWorldBullet::createCharacterController(const glm::vec3& size) {
     const glm::vec3 halfExtents = size * 0.5f;
-    return std::make_unique<PhysicsPlayerControllerBullet>(this, halfExtents, glm::vec3(0.0f, 2.0f, 0.0f));
+    return std::make_unique<PhysicsCharacterControllerBullet>(this, halfExtents, glm::vec3(0.0f, 2.0f, 0.0f));
 }
 
 std::unique_ptr<PhysicsStaticBodyBackend> PhysicsWorldBullet::createStaticMesh(const std::string& meshPath) {

@@ -74,6 +74,17 @@ bool GraphicsDevice::getMeshBounds(MeshId mesh, glm::vec3& center, float& radius
   return backend_->getMeshBounds(mesh, center, radius);
 }
 
+bool GraphicsDevice::getMeshMaterialSlots(
+    MeshId mesh,
+    std::vector<geometry::MeshMaterialSlot>& out_slots) const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (!backend_) {
+    out_slots.clear();
+    return false;
+  }
+  return backend_->getMeshMaterialSlots(mesh, out_slots);
+}
+
 MeshId GraphicsDevice::registerRuntimeMesh(const std::string& key,
                                            const geometry::MeshData& mesh) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -83,13 +94,14 @@ MeshId GraphicsDevice::registerRuntimeMesh(const std::string& key,
 
   auto it = runtime_meshes_.find(key);
   if (it != runtime_meshes_.end()) {
-    backend_->updateMesh(it->second, mesh);
-    return it->second;
+    backend_->updateMesh(it->second.mesh, mesh);
+    it->second.data = mesh;
+    return it->second.mesh;
   }
 
   const MeshId id = backend_->createMesh(mesh);
   if (id != kInvalidMesh) {
-    runtime_meshes_.emplace(key, id);
+    runtime_meshes_.emplace(key, RuntimeMeshRegistration{.mesh = id, .data = mesh});
   }
   return id;
 }
@@ -100,8 +112,8 @@ void GraphicsDevice::unregisterRuntimeMesh(const std::string& key) {
   if (it == runtime_meshes_.end()) {
     return;
   }
-  if (backend_ != nullptr && it->second != kInvalidMesh) {
-    backend_->destroyMesh(it->second);
+  if (backend_ != nullptr && it->second.mesh != kInvalidMesh) {
+    backend_->destroyMesh(it->second.mesh);
   }
   runtime_meshes_.erase(it);
 }
@@ -109,12 +121,16 @@ void GraphicsDevice::unregisterRuntimeMesh(const std::string& key) {
 MeshId GraphicsDevice::findRuntimeMesh(const std::string& key) const {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   const auto it = runtime_meshes_.find(key);
-  return it != runtime_meshes_.end() ? it->second : kInvalidMesh;
+  return it != runtime_meshes_.end() ? it->second.mesh : kInvalidMesh;
+}
+
+MaterialId GraphicsDevice::createMaterial(const ResolvedMaterialDesc& material) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->createMaterial(material) : kInvalidMaterial;
 }
 
 MaterialId GraphicsDevice::createMaterial(const MaterialDesc& material) {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
-  return backend_ ? backend_->createMaterial(material) : kInvalidMaterial;
+  return createMaterial(ResolvedMaterialDesc::fromSurface(material));
 }
 
 MaterialId GraphicsDevice::createMaterialFromAsset(const std::filesystem::path& path,
@@ -134,19 +150,6 @@ void GraphicsDevice::destroyMaterial(MaterialId material) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {
     backend_->destroyMaterial(material);
-  }
-}
-
-MaterialSetId GraphicsDevice::createMaterialSetFromMesh(MeshId mesh,
-                                                        const MaterialResourceDesc& desc) {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
-  return backend_ ? backend_->createMaterialSetFromMesh(mesh, desc) : kInvalidMaterialSet;
-}
-
-void GraphicsDevice::destroyMaterialSet(MaterialSetId set) {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
-  if (backend_) {
-    backend_->destroyMaterialSet(set);
   }
 }
 

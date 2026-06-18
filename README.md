@@ -69,7 +69,7 @@ cmake -S . -B build \
   -DKARMA_FETCH_DEPS=ON
 
 cmake --build build --parallel
-./build/karma_example
+./build/examples/gameplay/tank
 ```
 
 The same profile is available as a CMake preset:
@@ -82,9 +82,9 @@ cmake --build --preset portable
 Useful focused targets:
 
 ```bash
-cmake --build build --target karma_navmesh_example --parallel
-cmake --build build --target karma_prefab_gallery_example --parallel
-cmake --build build --target karma_explosion_stress_example --parallel
+cmake --build build --target navigation_navmesh --parallel
+cmake --build build --target prefabs_gallery --parallel
+cmake --build build --target particles_explosion_stress --parallel
 cmake --build build --target karma_animation_tests --parallel
 ctest --test-dir build --output-on-failure
 ```
@@ -93,7 +93,7 @@ For a headless build that skips window/render backends and graphics demos:
 
 ```bash
 cmake --preset headless
-cmake --build --preset headless --target karma_network_server_demo
+cmake --build --preset headless --target network_server
 ```
 
 `KARMA_HEADLESS` builds the non-visual `karma::headless` runtime profile and
@@ -208,33 +208,36 @@ before `find_package(karma)` to allow package-time fetching.
   performance diagnostics.
 - Visual feature modules for particle beam prefabs, analytic volumetric solids,
   light pulses, energy orbs, staged explosions, and prefab gallery scenes.
-- Simulation stack with Jolt or Bullet physics backends, collision/contact ECS
-  events, grounded/support state, player controllers, static navmesh baking, and
-  Detour path queries.
+- Simulation stack with Jolt physics as the production backend and an
+  experimental Bullet backend, collision/contact ECS
+  events, grounded/support state, character controllers, Jolt constraints,
+  filtered queries, vehicles, soft bodies, static navmesh baking, and Detour
+  path queries.
 - UI adapters for ImGui and RmlUi behind `runtime/app/UiLayer`.
 - Audio and networking through miniaudio/SDL and ENet-backed abstractions.
 
 ## Examples
 
-The examples under [examples/](examples/) cover the current engine surface:
+The examples under [examples/](examples/) cover the current engine surface and
+build into category directories under `build/examples/`:
 
-- `karma_example`: tank/world movement demo with a shadow-casting directional
-  sun, local lights, radar render target, and UI overlay.
-- `karma_navmesh_example`: click-to-move navmesh sample over the GLB world.
-- `karma_glb_scene_import_example` and `karma_glb_animation_example`: authored
-  GLB import, animation, and skinning paths.
-- `karma_diligent_gltf_viewer_example`, `karma_diligentfx_postprocess_example`,
-  and `karma_diligentfx_bloom_example`: Diligent sample/Fx-inspired rendering
-  examples built through Karma APIs and copied local example assets.
-- `karma_particle_example`, `karma_explosion_stress_example`, and
-  `karma_prefab_gallery_example`: particle and prefab stress/proof scenes.
-- `karma_laser_example`, `karma_energy_orb_example`,
-  `karma_volumetric_sphere_example`, and `karma_wave_example`: visual feature
-  module samples.
-- `karma_collision_events_example`: trigger, contact, and grounded-state demo.
-- `karma_light_stress_example`: Forward+ local-light and point-shadow probe.
-- `karma_imgui_ui_demo`, `karma_rmlui_ui_demo`,
-  `karma_network_server_demo`, and `karma_network_client_demo`: provider and
+- `gameplay_tank`: tank/world movement demo emitted as
+  `build/examples/gameplay/tank`.
+- `physics_collision_events`, `physics_shape_gallery`,
+  `physics_body_controls`, `physics_query_lab`, `physics_constraint_lab`, and
+  `physics_car`: collision, rigid-body, query, constraint, and vehicle samples
+  emitted under `build/examples/physics`.
+- `rendering_gltf_viewer`, `rendering_postprocess`, `rendering_bloom`,
+  `rendering_postwar_city`, `rendering_light_stress`,
+  `rendering_material_override`, and `rendering_terrain`: rendering inspection
+  and stress samples.
+- `scene_glb_import` and `animation_glb`: authored GLB scene import,
+  animation, and skinning paths.
+- `particles_*`, `effects_*`, and `prefabs_*`: particle, visual effect, and
+  prefab proof/stress scenes.
+- `navigation_*`: click-to-move, sample-gallery, crowd, tile-cache, query,
+  off-mesh, and physics-bridge navigation examples.
+- `ui_imgui`, `ui_rmlui`, `network_server`, and `network_client`: provider and
   platform demos.
 
 See [examples/README.md](examples/README.md) for the full target list and
@@ -262,7 +265,7 @@ Common CMake switches:
 - `KARMA_WINDOW_BACKEND_GLFW` / `KARMA_WINDOW_BACKEND_SDL`: select one window
   backend.
 - `KARMA_PHYSICS_BACKEND_JOLT` / `KARMA_PHYSICS_BACKEND_BULLET`: select one
-  physics backend.
+  physics backend. Jolt is the production backend; Bullet is experimental.
 - `KARMA_ENABLE_AUDIO`: enable or disable runtime audio backend creation.
 - `KARMA_AUDIO_BACKEND_MINIAUDIO` / `KARMA_AUDIO_BACKEND_SDL`: select one audio
   backend.
@@ -339,6 +342,7 @@ Start with:
 Focused references:
 
 - [Navigation](docs/NAVIGATION.md)
+- [Jolt Physics](docs/JOLT_PHYSICS.md)
 - [Particle System](docs/PARTICLE_SYSTEM.md)
 - [Particle Effect Generation](docs/PARTICLE_EFFECT_GENERATION.md)
 - [Effect Prefabs](docs/EFFECT_PREFABS.md)

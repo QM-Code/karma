@@ -21,11 +21,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_warm_glow" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -64,11 +59,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_hot_core" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -107,11 +97,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_electric_glow" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -150,11 +135,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_electric_core" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -193,11 +173,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_heat_distortion" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -236,11 +211,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_endpoint_glow" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -279,11 +249,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_endpoint_core" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -322,11 +287,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_light_0" },
-        "LocalTransformComponent": {
-          "position": [-7.9555, 4.0975, -3.4132],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [-7.9555, 4.0975, -3.4132],
           "rotation": [0, 0, 0, 1],
@@ -347,11 +307,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_light_1" },
-        "LocalTransformComponent": {
-          "position": [-4.8736, 2.277, -2.8742],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [-4.8736, 2.277, -2.8742],
           "rotation": [0, 0, 0, 1],
@@ -372,11 +327,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_light_2" },
-        "LocalTransformComponent": {
-          "position": [-1.2182, 2.8607, -4.6603],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [-1.2182, 2.8607, -4.6603],
           "rotation": [0, 0, 0, 1],
@@ -397,11 +347,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_light_3" },
-        "LocalTransformComponent": {
-          "position": [0.6275, 1.9098, -0.4058],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0.6275, 1.9098, -0.4058],
           "rotation": [0, 0, 0, 1],
@@ -422,11 +367,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_light_4" },
-        "LocalTransformComponent": {
-          "position": [4.0246, 3.073, -1.7853],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [4.0246, 3.073, -1.7853],
           "rotation": [0, 0, 0, 1],
@@ -447,11 +387,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "path_light_5" },
-        "LocalTransformComponent": {
-          "position": [8.5249, 1.7081, 0.9211],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [8.5249, 1.7081, 0.9211],
           "rotation": [0, 0, 0, 1],

@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "karma/core/math/types.h"
 #include "karma/world/ecs/component.h"
 #include "karma/rendering/renderer/ids.h"
 

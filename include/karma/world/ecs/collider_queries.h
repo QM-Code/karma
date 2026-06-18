@@ -4,30 +4,17 @@
 #include <optional>
 #include <vector>
 
+#include "karma/world/components/collider.h"
 #include "karma/world/ecs/entity.h"
 #include "karma/world/ecs/world.h"
 #include "karma/core/math/types.h"
 
 namespace karma::ecs::queries {
 
-/// \ingroup karma_world_ecs
-/// Collider shape kind exposed by ECS query helpers.
-enum class ColliderShape {
-  Box,
-  Sphere,
-  Capsule,
-  Cylinder,
-  TaperedCapsule,
-  ConvexHull,
-  Triangle,
-  HeightField,
-  Mesh,
-};
-
 /// Result from point containment tests.
 struct PointContainmentHit {
   ecs::Entity entity{};
-  ColliderShape shape = ColliderShape::Box;
+  components::ColliderShapeType shape = components::ColliderShapeType::Box;
 };
 
 /// Filter for point containment queries.
@@ -39,7 +26,7 @@ struct PointContainmentFilter {
 /// Result from overlap tests.
 struct OverlapHit {
   ecs::Entity entity{};
-  ColliderShape shape = ColliderShape::Box;
+  components::ColliderShapeType shape = components::ColliderShapeType::Box;
 };
 
 /// Filter for overlap queries.

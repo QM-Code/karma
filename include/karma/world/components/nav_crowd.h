@@ -13,7 +13,7 @@ namespace karma::components {
 /// How `NavigationSystem` applies DetourCrowd movement to an entity.
 enum class NavCrowdMovementMode {
   Transform,
-  PlayerControllerVelocity,
+  CharacterControllerVelocity,
 };
 
 /// \ingroup karma_components

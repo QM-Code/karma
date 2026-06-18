@@ -3,7 +3,7 @@
 ## Scope
 
 This pass focused on Diligent renderer startup latency using
-`karma_diligent_gltf_viewer_example` as the benchmark. The benchmark loads the
+`rendering_gltf_viewer` as the benchmark. The benchmark loads the
 DamagedHelmet glTF sample, imported glTF materials, the `papermill.ktx`
 environment, and the normal engine warm-up path.
 
@@ -17,7 +17,7 @@ first visible frame.
 Build the viewer:
 
 ```bash
-cmake --build build --target karma_diligent_gltf_viewer_example --parallel $(nproc)
+cmake --build build --target rendering_gltf_viewer --parallel $(nproc)
 ```
 
 Run with startup, render-system, and render-resource timing:
@@ -27,7 +27,7 @@ timeout 12s env \
   KARMA_ENGINE_STARTUP_DIAG=1 \
   KARMA_RENDER_SYSTEM_DIAG=1 \
   KARMA_RENDER_RESOURCE_DIAG=1 \
-  ./build/karma_diligent_gltf_viewer_example
+  ./build/examples/rendering/gltf_viewer
 ```
 
 `KARMA_RENDER_STARTUP_DIAG=1` can be used when only Diligent backend startup
@@ -316,7 +316,7 @@ Instead it made two narrow changes:
 - Material override draws now use source mesh alpha only as a fallback when no
   resolved material exists. Explicit opaque material overrides can keep a mesh
   on the opaque forward path even when the source mesh material was translucent.
-- `karma_particle_gallery_example` uses explicit opaque orb shell tint
+- `particles_gallery` uses explicit opaque orb shell tint
   materials and the existing optimized `papermill.ktx` cubemap instead of the
   4K HDR environment.
 

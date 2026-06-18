@@ -3,6 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -15,9 +16,10 @@
 #include "karma/world/components/nav_crowd.h"
 #include "karma/world/components/nav_tile_cache.h"
 #include "karma/world/components/collider.h"
-#include "karma/world/components/player_controller.h"
+#include "karma/world/components/character_controller.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
+#include "karma/content/importers/mesh_import.h"
 #include "karma/simulation/navigation/nav_geometry.h"
 #include "karma/simulation/navigation/nav_crowd.h"
 #include "karma/simulation/navigation/nav_mesh.h"
@@ -43,6 +45,7 @@ namespace karma::tests::navigation {
 
 std::filesystem::path resolveRepoPath(const std::filesystem::path& relative);
 karma::geometry::MeshData makePlaneMesh(float half_extent = 5.0f);
+karma::geometry::MeshData combineMeshes(const std::vector<karma::geometry::MeshData>& meshes);
 karma::navigation::NavMeshInputGeometry makePlaneGeometry(float half_extent = 5.0f);
 void appendQuad(karma::geometry::MeshData& mesh,
                 const karma::math::Vec3& a,
@@ -75,7 +78,7 @@ void testSlicedPathCompletes();
 void testNavigationSystemBuildsAndMovesAgent();
 void testNavigationSystemTileCacheObstacleComponent();
 void testNavigationSystemCrowdAgentComponent();
-void testCrowdAgentPlayerControllerVelocityMode();
+void testCrowdAgentCharacterControllerVelocityMode();
 void testReplacementRequestKeepsCurrentPathMoving();
 void testExampleWorldGlbCanBake();
 

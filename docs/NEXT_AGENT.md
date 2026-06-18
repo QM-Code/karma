@@ -65,7 +65,7 @@ High-signal areas right now:
 - [`src/world/scene/transform_hierarchy.cpp`](../src/world/scene/transform_hierarchy.cpp)
 - [`include/karma/simulation/navigation/`](../include/karma/simulation/navigation)
 - [`src/simulation/navigation/`](../src/simulation/navigation)
-- [`examples/navmesh_example.cpp`](../examples/navmesh_example.cpp)
+- [`examples/navigation/navmesh.cpp`](../examples/navigation/navmesh.cpp)
 - [`tests/navmesh_tests.cpp`](../tests/navmesh_tests.cpp)
 - [`examples/light_stress_example.cpp`](../examples/light_stress_example.cpp)
 - [`examples/collision_events_example.cpp`](../examples/collision_events_example.cpp)
@@ -81,14 +81,14 @@ Verified in this worktree during the renderer split:
 
 ```bash
 cmake -S . -B build-local
-cmake --build build-local --target karma_light_stress_example -j2
+cmake --build build-local --target rendering_light_stress -j2
 ```
 
 Useful smoke checks in this environment:
 
 ```bash
-timeout 5s ./build-local/karma_light_stress_example
-timeout 5s ./build-local/karma_light_stress_example --help
+timeout 5s ./build-local/examples/rendering/light_stress
+timeout 5s ./build-local/examples/rendering/light_stress --help
 ```
 
 Expected headless stop here:
@@ -103,11 +103,11 @@ For the effect API split specifically, this build was also verified:
 
 ```bash
 cmake --build build-local --target \
-  karma_laser_example \
-  karma_laser_prefab_example \
-  karma_volumetric_sphere_example \
-  karma_volumetric_sphere_prefab_example \
-  karma_prefab_gallery_example \
+  effects_laser \
+  prefabs_laser \
+  effects_volumetric_sphere \
+  prefabs_volumetric_sphere \
+  prefabs_gallery \
   -j2
 ```
 
@@ -117,7 +117,7 @@ For GLB animation / skeletal skinning, these were verified:
 cmake --build build --target karma_animation_tests -j2
 ./build/karma_animation_tests
 ctest --test-dir build -R karma_animation_tests --output-on-failure
-cmake --build build --target karma_glb_scene_import_example karma_glb_animation_example -j2
+cmake --build build --target scene_glb_import animation_glb -j2
 ```
 
 `karma_animation_tests` is headless and exits silently on success.
@@ -177,7 +177,7 @@ The fully default build currently fails in this environment before all examples
 complete because RmlUi 6.0 finds `/usr/local/lib/libfreetype.a` version 2.4.9,
 which lacks newer FreeType symbols used by RmlUi. This is unrelated to the
 navigation implementation; disabling only `KARMA_BUILD_RMLUI_DEMO` lets the rest
-of the project, including `karma_navmesh_example`, build.
+of the project, including `navigation_navmesh`, build.
 
 ## Renderer Summary
 
@@ -233,7 +233,7 @@ Recent particle-side work already in the tree:
 - prefab gallery perf logging exists behind `KARMA_PREFAB_GALLERY_STATS=1`
 - direct-load staged explosion prefabs use `prefab.resources.json` sidecars for
   prefab-local atlas textures and effect files
-- `karma_explosion_stress_example` supports up to 128 staged explosion
+- `particles_explosion_stress` supports up to 128 staged explosion
   controllers; 128 is the current stress acceptance target
 - EXR source folders for the explosion are reference assets only, not runtime
   dependencies
@@ -256,7 +256,7 @@ Recent particle-side work already in the tree:
 Validation for that pass:
 
 ```bash
-cmake --build build --target karma_prefab_tests karma_prefab_gallery_example karma_energy_orb_example karma_wave_example karma_volumetric_sphere_prefab_example karma_explosion_stress_example -j2
+cmake --build build --target karma_prefab_tests prefabs_gallery effects_energy_orb effects_wave prefabs_volumetric_sphere particles_explosion_stress -j2
 ctest --test-dir build -R karma_prefab_tests --output-on-failure
 git diff --check
 ```
@@ -315,14 +315,14 @@ Recent navigation work already in the tree:
 - GLB prefab, ECS mesh-collider, and direct mesh geometry collection in `nav_geometry`
 - Detour path, nearest-point, and raycast query wrapper
 - navmesh/path debug drawing through existing renderer line drawing
-- minimal rendered `karma_navmesh_example` with a baked procedural navmesh and visible sample path
+- minimal rendered `navigation_navmesh` with a baked procedural navmesh and visible sample path
 - `karma_navmesh_tests` covering bake/query/failure/transform/detour cases
 - `NavMeshAgentComponent` as a placeholder state container only
 
 If continuing there, start with:
 
 - [docs/NAVIGATION.md](NAVIGATION.md)
-- [examples/navmesh_example.cpp](../examples/navmesh_example.cpp)
+- [examples/navigation/navmesh.cpp](../examples/navigation/navmesh.cpp)
 - [tests/navmesh_tests.cpp](../tests/navmesh_tests.cpp)
 
 ## Good Next Steps
@@ -339,7 +339,7 @@ If continuing particle work:
 1. use [docs/EXPLOSION_STRESS_PERF.md](EXPLOSION_STRESS_PERF.md) as the
    measurement guide
 2. capture `KARMA_PREFAB_GALLERY_STATS=1` output on a stable windowing session
-3. compare against `karma_explosion_stress_example --disable heat` if heat
+3. compare against `particles_explosion_stress --disable heat` if heat
    distortion remains a suspect
 4. inspect grouped GPU sort cost and sort-key counts before changing sort
    strategy

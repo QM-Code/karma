@@ -75,7 +75,7 @@ fields such as `shadow_map_size`, `shadow_bias`, and `shadow_pcf_radius`.
 Point-light shadows additionally use `point_shadow_max_lights` and point-shadow
 bias fields. See `docs/ENGINE_USAGE.md` for recommended baseline values.
 
-The default `karma_example` scene uses a shadow-casting directional sun over the
+The default `gameplay_tank` scene uses a shadow-casting directional sun over the
 tank/world movement scene, plus local point lights.
 
 ## Source Layout

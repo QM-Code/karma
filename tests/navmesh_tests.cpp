@@ -24,7 +24,7 @@ int main() {
   testNavigationSystemBuildsAndMovesAgent();
   testNavigationSystemTileCacheObstacleComponent();
   testNavigationSystemCrowdAgentComponent();
-  testCrowdAgentPlayerControllerVelocityMode();
+  testCrowdAgentCharacterControllerVelocityMode();
   testReplacementRequestKeepsCurrentPathMoving();
   testExampleWorldGlbCanBake();
   std::cout << "navmesh tests passed\n";

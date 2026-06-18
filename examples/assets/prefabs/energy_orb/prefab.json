@@ -21,11 +21,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "shell" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [0.28875, 0.28875, 0.28875]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -33,8 +28,7 @@
         },
         "MeshComponent": {
           "mesh_key": "examples/assets/orb_shell.glb",
-          "material_key": "",
-          "texture_key": "",
+          "materials": [],
           "visible": true,
           "shadow_visible": false
         }
@@ -46,11 +40,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "core" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -86,11 +75,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "arcs" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -126,11 +110,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "halo" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -166,11 +145,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "distortion" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],
@@ -206,11 +180,6 @@
       "parent": 0,
       "components": {
         "TagComponent": { "name": "glow" },
-        "LocalTransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
-        },
         "TransformComponent": {
           "position": [0, 0, 0],
           "rotation": [0, 0, 0, 1],

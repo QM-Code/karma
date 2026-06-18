@@ -231,8 +231,8 @@ For most gameplay code:
 - move those entities by updating their `TransformComponent`;
 - retrigger them with `particles::restartEffect(...)`.
 
-The particle examples in [../examples/particle_example.cpp](../examples/particle_example.cpp)
-and [../examples/energy_orb_example.cpp](../examples/energy_orb_example.cpp)
+The particle examples in [../examples/particles/billboard.cpp](../examples/particles/billboard.cpp)
+and [../examples/effects/energy_orb.cpp](../examples/effects/energy_orb.cpp)
 demonstrate this pattern for both staged one-shot explosions and looping
 ambient effects built from layered particle passes, mesh shells, authored
 `.kpeffect` assets, runtime overrides, hot reload, and file-backed effect
@@ -244,7 +244,7 @@ Set `KARMA_PARTICLE_STATS=1` to print the same particle counters exposed by the
 debug editor `Particles` tab once per second:
 
 ```bash
-KARMA_PARTICLE_STATS=1 ./build/karma_particle_example
+KARMA_PARTICLE_STATS=1 ./build/examples/particles/billboard
 ```
 
 The GPU-first counters to watch are:
@@ -286,5 +286,5 @@ For visual verification, run the particle, explosion stress, and prefab gallery
 examples with both `KARMA_PARTICLE_STATS=1` and the debug editor enabled:
 
 ```bash
-KARMA_ENGINE_EDITOR_DEBUG=1 KARMA_PARTICLE_STATS=1 ./build/karma_prefab_gallery_example
+KARMA_ENGINE_EDITOR_DEBUG=1 KARMA_PARTICLE_STATS=1 ./build/examples/prefabs/gallery
 ```

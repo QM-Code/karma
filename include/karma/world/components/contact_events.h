@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "karma/world/ecs/collider_queries.h"
+#include "karma/world/components/collider.h"
 #include "karma/world/ecs/component.h"
 #include "karma/world/ecs/entity.h"
 #include "karma/core/math/types.h"
@@ -14,7 +14,7 @@ namespace karma::components {
 /// Solid contact point produced by the physics backend.
 struct ContactEvent {
   ecs::Entity other{};
-  ecs::queries::ColliderShape other_shape = ecs::queries::ColliderShape::Box;
+  ColliderShapeType other_shape = ColliderShapeType::Box;
   math::Vec3 point{};
   math::Vec3 normal{0.0f, 1.0f, 0.0f};
 };

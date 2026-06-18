@@ -4,7 +4,7 @@
 
 #include "karma/world/components/nav_crowd.h"
 #include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/player_controller.h"
+#include "karma/world/components/character_controller.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
 
@@ -167,9 +167,10 @@ void updateCrowds(ecs::World& world, float dt) {
                     horizontalDistance(info.position, agent.destination) <= agent.stopping_distance;
               }
 
-              if (agent.movement_mode == components::NavCrowdMovementMode::PlayerControllerVelocity) {
-                if (world.has<components::PlayerControllerComponent>(agent_entity)) {
-                  auto& controller = world.get<components::PlayerControllerComponent>(agent_entity);
+              if (agent.movement_mode ==
+                  components::NavCrowdMovementMode::CharacterControllerVelocity) {
+                if (world.has<components::CharacterControllerComponent>(agent_entity)) {
+                  auto& controller = world.get<components::CharacterControllerComponent>(agent_entity);
                   controller.setDesiredVelocity({info.velocity.x, 0.0f, info.velocity.z});
                 }
               } else {

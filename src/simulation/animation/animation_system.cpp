@@ -362,19 +362,19 @@ void applyLocalPoseToEntities(ecs::World& world,
   const size_t count = std::min(node_entities_by_index.size(), pose.nodes.size());
   for (size_t node_index = 0; node_index < count; ++node_index) {
     const ecs::Entity target = node_entities_by_index[node_index];
-    if (!world.isAlive(target) || !world.has<components::LocalTransformComponent>(target)) {
+    if (!world.isAlive(target) || !world.has<components::TransformComponent>(target)) {
       continue;
     }
     const PoseTransform& sampled = pose.nodes[node_index];
-    auto& local = world.get<components::LocalTransformComponent>(target);
+    auto& transform = world.get<components::TransformComponent>(target);
     if (sampled.has_position) {
-      local.position = sampled.position;
+      transform.setLocalPosition(sampled.position);
     }
     if (sampled.has_rotation) {
-      local.rotation = sampled.rotation;
+      transform.setLocalRotation(sampled.rotation);
     }
     if (sampled.has_scale) {
-      local.scale = sampled.scale;
+      transform.setLocalScale(sampled.scale);
     }
   }
 }
@@ -595,13 +595,15 @@ void updateRootMotion(ecs::World& world,
 
   if (animator.root_motion_mode == components::RootMotionMode::ApplyToLocalTransform &&
       world.isAlive(owner) &&
-      world.has<components::LocalTransformComponent>(owner)) {
-    auto& local = world.get<components::LocalTransformComponent>(owner);
+      world.has<components::TransformComponent>(owner)) {
+    auto& transform = world.get<components::TransformComponent>(owner);
     if (animator.root_motion_delta.position) {
-      local.position = math::add(local.position, *animator.root_motion_delta.position);
+      transform.setLocalPosition(
+          math::add(transform.localPosition(), *animator.root_motion_delta.position));
     }
     if (animator.root_motion_delta.rotation) {
-      local.rotation = math::mul(local.rotation, *animator.root_motion_delta.rotation);
+      transform.setLocalRotation(
+          math::mul(transform.localRotation(), *animator.root_motion_delta.rotation));
     }
   }
 }

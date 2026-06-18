@@ -3,6 +3,7 @@
 #include "../backend_internal.h"
 
 #include <assimp/Importer.hpp>
+#include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
@@ -107,6 +108,29 @@ std::vector<ParticleGpuMeshSample> buildParticleMeshSamples(const geometry::Mesh
 
 }  // namespace
 
+void DiligentBackend::refreshSubmeshesFromMeshData(MeshRecord& record) {
+  record.submeshes.clear();
+  if (!record.data.submeshes.empty()) {
+    record.submeshes.reserve(record.data.submeshes.size());
+    for (const auto& src : record.data.submeshes) {
+      MeshRecord::Submesh submesh{};
+      submesh.index_offset = src.index_offset;
+      submesh.index_count = src.index_count;
+      submesh.material_slot = src.material_slot;
+      record.submeshes.push_back(submesh);
+    }
+    return;
+  }
+
+  if (!record.data.indices.empty()) {
+    MeshRecord::Submesh submesh{};
+    submesh.index_offset = 0;
+    submesh.index_count = static_cast<Diligent::Uint32>(record.data.indices.size());
+    submesh.material_slot = 0;
+    record.submeshes.push_back(submesh);
+  }
+}
+
 void DiligentBackend::uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record) {
   record.vertex_buffer.Release();
   record.index_buffer.Release();
@@ -147,13 +171,7 @@ renderer::MeshId DiligentBackend::createMesh(const geometry::MeshData& mesh) {
   record.particle_source_samples = buildParticleMeshSamples(record.data);
   record.base_color = glm::vec4(1.0f);
   uploadMeshBuffers(mesh, record);
-
-  if (!mesh.indices.empty()) {
-    MeshRecord::Submesh submesh{};
-    submesh.index_offset = 0;
-    submesh.index_count = static_cast<Diligent::Uint32>(mesh.indices.size());
-    record.submeshes.push_back(submesh);
-  }
+  refreshSubmeshesFromMeshData(record);
 
   meshes_[id] = std::move(record);
   return id;
@@ -166,17 +184,19 @@ void DiligentBackend::updateMesh(renderer::MeshId mesh, const geometry::MeshData
   }
 
   MeshRecord& record = it->second;
+  const std::vector<geometry::MeshSubmesh> previous_submeshes = record.data.submeshes;
+  const std::vector<geometry::MeshMaterialSlot> previous_material_slots = record.data.material_slots;
   record.data = data;
+  if (record.data.submeshes.empty()) {
+    record.data.submeshes = previous_submeshes;
+  }
+  if (record.data.material_slots.empty()) {
+    record.data.material_slots = previous_material_slots;
+  }
   computeBounds(data, record.bounds_center, record.bounds_radius);
   record.particle_source_samples = buildParticleMeshSamples(record.data);
   uploadMeshBuffers(data, record);
-  record.submeshes.clear();
-  if (!data.indices.empty()) {
-    MeshRecord::Submesh submesh{};
-    submesh.index_offset = 0;
-    submesh.index_count = static_cast<Diligent::Uint32>(data.indices.size());
-    record.submeshes.push_back(submesh);
-  }
+  refreshSubmeshesFromMeshData(record);
 }
 
 renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path& path) {
@@ -206,7 +226,7 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
   glm::vec4 base_color(1.0f);
   std::vector<SubmeshInfo> submesh_infos;
   section_start = section_end;
-  const auto combined = combineMeshes(*scene, base_color, submesh_infos);
+  auto combined = combineMeshes(*scene, base_color, submesh_infos);
   section_end = core::SteadyClock::now();
   if (diag_enabled) {
     spdlog::info(
@@ -216,6 +236,30 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
         combined.vertices.size(),
         combined.indices.size(),
         submesh_infos.size());
+  }
+
+  combined.material_slots.reserve(scene->mNumMaterials);
+  for (unsigned int mat_index = 0; mat_index < scene->mNumMaterials; ++mat_index) {
+    std::string slot_name = "material_" + std::to_string(mat_index);
+    if (scene->mMaterials[mat_index] != nullptr) {
+      aiString material_name;
+      if (scene->mMaterials[mat_index]->Get(AI_MATKEY_NAME, material_name) == AI_SUCCESS &&
+          material_name.length > 0) {
+        slot_name = material_name.C_Str();
+      }
+    }
+    combined.material_slots.push_back(geometry::MeshMaterialSlot{
+        .name = std::move(slot_name),
+        .default_material_key = {},
+    });
+  }
+  combined.submeshes.reserve(submesh_infos.size());
+  for (const auto& sub : submesh_infos) {
+    combined.submeshes.push_back(geometry::MeshSubmesh{
+        .index_offset = sub.index_offset,
+        .index_count = sub.index_count,
+        .material_slot = sub.material_index,
+    });
   }
 
   MeshRecord record{};
@@ -270,6 +314,7 @@ renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path
     MeshRecord::Submesh submesh{};
     submesh.index_offset = sub.index_offset;
     submesh.index_count = sub.index_count;
+    submesh.material_slot = sub.material_index;
     if (sub.material_index < material_ids.size()) {
       submesh.material = material_ids[sub.material_index];
     } else {
@@ -297,17 +342,6 @@ void DiligentBackend::destroyMesh(renderer::MeshId mesh) {
   auto mesh_it = meshes_.find(mesh);
   if (mesh_it == meshes_.end()) {
     return;
-  }
-
-  std::vector<renderer::MaterialSetId> owned_sets;
-  owned_sets.reserve(material_sets_.size());
-  for (const auto& [set_id, set_record] : material_sets_) {
-    if (set_record.source_mesh == mesh) {
-      owned_sets.push_back(set_id);
-    }
-  }
-  for (renderer::MaterialSetId set_id : owned_sets) {
-    destroyMaterialSet(set_id);
   }
 
   for (const renderer::MaterialId material : mesh_it->second.owned_materials) {
@@ -340,6 +374,18 @@ bool DiligentBackend::getMeshBounds(renderer::MeshId mesh,
 
   center = record.bounds_center;
   radius = record.bounds_radius;
+  return true;
+}
+
+bool DiligentBackend::getMeshMaterialSlots(
+    renderer::MeshId mesh,
+    std::vector<geometry::MeshMaterialSlot>& out_slots) const {
+  auto mesh_it = meshes_.find(mesh);
+  if (mesh_it == meshes_.end()) {
+    out_slots.clear();
+    return false;
+  }
+  out_slots = mesh_it->second.data.material_slots;
   return true;
 }
 

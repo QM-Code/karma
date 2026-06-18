@@ -100,12 +100,11 @@ class GltfSceneImportExample final : public app::GameInterface {
     const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
         *world,
         *scene,
-        *graphics,
+        *assets,
         prefab,
         scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
-        },
-        materials);
+        });
     if (!imported.valid()) {
       spdlog::error("Failed to instantiate gltf scene from {}", scene_path.string());
     }

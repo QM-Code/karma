@@ -37,7 +37,7 @@ enum class TerrainDataMapKind : uint8_t {
 /// Repeated terrain material layer controlled by a packed weight/splat map.
 struct TerrainMaterialLayer {
   std::string name;
-  /// Preferred shared material key resolved through renderer::MaterialLibrary.
+  /// Preferred shared material key resolved through content::AssetRegistry.
   /// Explicit image paths below are used as a direct texture fallback.
   std::string material_key;
   std::filesystem::path albedo_image;

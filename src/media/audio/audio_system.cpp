@@ -5,6 +5,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
+#include "karma/content/assets/asset_registry.h"
+
 namespace karma::audio {
 
 AudioClip& AudioSystem::getClip(const std::string& key, int max_instances) {
@@ -66,8 +68,16 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
 
     const auto& transform = world.get<components::TransformComponent>(entity);
     try {
-      const int max_instances = source.max_instances > 0 ? source.max_instances : 1;
-      auto& clip = getClip(source.clip_key, max_instances);
+      const content::AudioClipAsset* clip_asset =
+          assets_ != nullptr ? assets_->findAudioClip(source.clip_key) : nullptr;
+      if (clip_asset == nullptr) {
+        spdlog::error("Karma: audio clip asset key '{}' was not registered", source.clip_key);
+        return;
+      }
+      const int configured_instances =
+          source.max_instances > 0 ? source.max_instances : clip_asset->max_instances;
+      const int max_instances = configured_instances > 0 ? configured_instances : 1;
+      auto& clip = getClip(clip_asset->path.string(), max_instances);
       const math::Vec3 pos = transform.getPosition();
       clip.setSpatialDefaults(source.spatialized, source.min_distance, source.max_distance);
       if (source.spatialized) {

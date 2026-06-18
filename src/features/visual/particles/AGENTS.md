@@ -13,7 +13,7 @@ Rules for changes:
 
 - Keep `.kpeffect` fields, `ParticleEmitterComponent`, renderer batch fields,
   and docs in sync.
-- Preserve hot reload behavior through `ParticleLibrary::version()`.
+- Preserve asset invalidation behavior through `content::AssetRegistry::version()`.
 - Preserve restart behavior through `ParticleEffectComponent::restart_count`.
 - Measure before replacing simulation architecture; current known hot spots are
   alpha/distortion sorting and CPU simulation.
@@ -23,5 +23,5 @@ Rules for changes:
 Common validation targets:
 
 ```bash
-cmake --build build --target karma_particle_example karma_explosion_stress_example karma_prefab_gallery_example
+cmake --build build --target particles_billboard particles_explosion_stress prefabs_gallery
 ```

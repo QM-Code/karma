@@ -13,8 +13,8 @@
 #include <variant>
 #include <vector>
 
+#include "karma/content/assets/asset_registry.h"
 #include "karma/features/visual/terrain/terrain_system.h"
-#include "karma/rendering/renderer/material_library.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
@@ -385,12 +385,12 @@ void testTerrainMaterialLayerLoading() {
 }
 
 void testTerrainMaterialLayerResolvesMaterialKey() {
-  karma::renderer::MaterialLibrary materials;
+  karma::content::AssetRegistry assets;
   karma::renderer::MaterialDesc ground{};
   ground.base_color = karma::math::Color{0.25f, 0.5f, 0.75f, 1.0f};
   ground.roughness = 0.6f;
   ground.metallic = 0.0f;
-  materials.registerMaterialDesc("terrain/ground", ground);
+  assets.registerMaterialAsset("terrain/ground", ground);
 
   const auto layer = karma::terrain::loadTerrainMaterialLayer(
       karma::components::TerrainMaterialLayer{
@@ -398,7 +398,7 @@ void testTerrainMaterialLayerResolvesMaterialKey() {
           .uv_scale = 18.0f,
       },
       2u,
-      &materials);
+      &assets);
   assert(layer.has_value());
   assert(layer->valid());
   assert(layer->layer == 2u);
@@ -410,6 +410,34 @@ void testTerrainMaterialLayerResolvesMaterialKey() {
   assert(layer->roughness.width == 1u);
   assert(layer->roughness.height == 1u);
   assert((layer->roughness.rgba8 == std::vector<uint8_t>{153u, 153u, 153u, 255u}));
+}
+
+void testTerrainMaterialLayerResolvesAssetRegistryMaterialKey() {
+  karma::content::AssetRegistry assets;
+  karma::renderer::MaterialDesc ground{};
+  ground.base_color = karma::math::Color{0.5f, 0.25f, 0.125f, 1.0f};
+  ground.roughness = 0.25f;
+  ground.metallic = 0.0f;
+  assets.registerMaterialAsset("terrain/asset_ground", ground);
+
+  const auto layer = karma::terrain::loadTerrainMaterialLayer(
+      karma::components::TerrainMaterialLayer{
+          .material_key = "terrain/asset_ground",
+          .uv_scale = 9.0f,
+      },
+      1u,
+      &assets);
+  assert(layer.has_value());
+  assert(layer->valid());
+  assert(layer->layer == 1u);
+  assert(layer->name == "terrain/asset_ground");
+  assert(nearly(layer->uv_scale, 9.0f));
+  assert(layer->albedo.width == 1u);
+  assert(layer->albedo.height == 1u);
+  assert((layer->albedo.rgba8 == std::vector<uint8_t>{128u, 64u, 32u, 255u}));
+  assert(layer->roughness.width == 1u);
+  assert(layer->roughness.height == 1u);
+  assert((layer->roughness.rgba8 == std::vector<uint8_t>{64u, 64u, 64u, 255u}));
 }
 
 void testTerrainColliderSyncCreatesHeightField() {
@@ -497,6 +525,7 @@ int main() {
   testImageTileLoadsControlAndDataMaps();
   testTerrainMaterialLayerLoading();
   testTerrainMaterialLayerResolvesMaterialKey();
+  testTerrainMaterialLayerResolvesAssetRegistryMaterialKey();
   testTerrainColliderSyncCreatesHeightField();
   testTerrainTilePatternFormatting();
   return 0;

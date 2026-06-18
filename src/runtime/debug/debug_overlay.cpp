@@ -11,6 +11,7 @@
 
 #include <imgui.h>
 
+#include "karma/content/assets/asset_registry.h"
 #include "karma/world/ecs/world.h"
 #include "karma/world/components/tag.h"
 #include "karma/world/components/audio_listener.h"
@@ -32,7 +33,6 @@
 #include "karma/world/scene/node.h"
 #include "karma/world/systems/system_graph.h"
 #include "karma/rendering/renderer/device.h"
-#include "karma/rendering/renderer/material_library.h"
 
 namespace karma::debug {
 
@@ -178,10 +178,10 @@ const char* deformationPathName(components::DeformationPath path) {
   return "Unknown";
 }
 
-std::string debugMaterialInstanceKey(ecs::Entity entity,
-                                     uint32_t slot,
-                                     std::string_view parent_key) {
-  std::string key(parent_key.empty() ? "material" : parent_key);
+std::string debugMaterialVariantKey(ecs::Entity entity,
+                                    uint32_t slot,
+                                    std::string_view base_key) {
+  std::string key(base_key.empty() ? "material" : base_key);
   key.append("#debug_entity=");
   key.append(std::to_string(entity.index));
   key.push_back('.');
@@ -396,7 +396,7 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
                                      scene::Scene* scene,
                                      systems::SystemGraph* systems,
                                      renderer::GraphicsDevice* graphics,
-                                     renderer::MaterialLibrary* materials,
+                                     content::AssetRegistry* assets,
                                      int shadow_map_size,
                                      float shadow_bias,
                                      int shadow_pcf_radius,
@@ -418,7 +418,7 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
       scene_(scene),
       systems_(systems),
       graphics_(graphics),
-      materials_(materials),
+      assets_(assets),
       shadow_map_size_(shadow_map_size),
       shadow_bias_(shadow_bias),
       shadow_pcf_radius_(shadow_pcf_radius),
@@ -812,9 +812,9 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
   if (world_->has<components::MeshComponent>(node.entity)) {
     if (ImGui::CollapsingHeader("Mesh")) {
       auto& c = world_->get<components::MeshComponent>(node.entity);
-      std::string mesh_key = c.mesh_key;
+      std::string mesh_key = c.mesh_asset_key;
       if (inputTextString("Mesh", mesh_key)) {
-        c.mesh_key = std::move(mesh_key);
+        c.mesh_asset_key = std::move(mesh_key);
       }
 
       ImGui::Separator();
@@ -827,34 +827,34 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
         if (editInt("Slot", slot)) {
           binding.slot = static_cast<uint32_t>(std::max(slot, 0));
         }
-        auto bind_instance = [&](const std::string& parent_key) {
-          if (materials_ == nullptr || parent_key.empty() ||
-              materials_->findAsset(parent_key) == nullptr) {
+        auto bind_variant = [&](const std::string& base_key) {
+          if (assets_ == nullptr || base_key.empty() ||
+              assets_->findMaterialAsset(base_key) == nullptr) {
             return false;
           }
-          renderer::MaterialInstanceDesc instance{};
-          instance.parent_material_key = parent_key;
-          const std::string instance_key =
-              debugMaterialInstanceKey(node.entity, binding.slot, parent_key);
-          materials_->registerMaterialInstance(instance_key, std::move(instance));
-          binding.material_key = instance_key;
+          renderer::MaterialVariantDesc variant{};
+          variant.base_material_key = base_key;
+          const std::string variant_key =
+              debugMaterialVariantKey(node.entity, binding.slot, base_key);
+          assets_->registerMaterialVariant(variant_key, std::move(variant));
+          binding.material_key = variant_key;
           return true;
         };
         std::string material_key = binding.material_key;
         if (inputTextString("Material", material_key)) {
-          if (!bind_instance(material_key)) {
+          if (!bind_variant(material_key)) {
             binding.material_key = std::move(material_key);
           }
         }
-        if (materials_ != nullptr && !binding.material_key.empty()) {
-          if (const auto* instance = materials_->findInstance(binding.material_key)) {
-            ImGui::Text("Parent: %s", instance->parent_material_key.c_str());
-            if (!instance->parent_material_key.empty() && ImGui::Button("Bind Shared")) {
-              binding.material_key = instance->parent_material_key;
+        if (assets_ != nullptr && !binding.material_key.empty()) {
+          if (const auto* variant = assets_->findMaterialVariant(binding.material_key)) {
+            ImGui::Text("Base: %s", variant->base_material_key.c_str());
+            if (!variant->base_material_key.empty() && ImGui::Button("Assign Base")) {
+              binding.material_key = variant->base_material_key;
             }
-          } else if (materials_->findAsset(binding.material_key) != nullptr) {
-            if (ImGui::Button("Make Instance")) {
-              bind_instance(binding.material_key);
+          } else if (assets_->findMaterialAsset(binding.material_key) != nullptr) {
+            if (ImGui::Button("Make Variant")) {
+              bind_variant(binding.material_key);
             }
           }
         }
@@ -867,7 +867,7 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
         c.materials.erase(c.materials.begin() + remove_index);
       }
       if (ImGui::Button("Add Slot")) {
-        c.materials.push_back(components::MeshMaterialBinding{
+        c.materials.push_back(components::MeshMaterialAssignment{
             .slot = static_cast<uint32_t>(c.materials.size()),
             .material_key = {},
         });
@@ -1051,9 +1051,9 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
   if (world_->has<components::EnvironmentComponent>(node.entity)) {
     if (ImGui::CollapsingHeader("Environment")) {
       auto& c = world_->get<components::EnvironmentComponent>(node.entity);
-      std::string map = c.environment_map;
+      std::string map = c.environment_map_asset_key;
       if (inputTextString("Map", map)) {
-        c.environment_map = std::move(map);
+        c.environment_map_asset_key = std::move(map);
       }
       editFloat("Intensity", c.intensity);
       editBool("Draw Skybox", c.draw_skybox);
@@ -1137,9 +1137,9 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
         editFloat("Radius", capsule->radius);
         editFloat("Height", capsule->height);
       } else if (auto* mesh = std::get_if<components::MeshColliderShape>(&c.shape)) {
-        std::string mesh_path = mesh->mesh_path;
-        if (inputTextString("Mesh Path", mesh_path)) {
-          mesh->mesh_path = std::move(mesh_path);
+        std::string mesh_asset_key = mesh->mesh_asset_key;
+        if (inputTextString("Mesh Asset", mesh_asset_key)) {
+          mesh->mesh_asset_key = std::move(mesh_asset_key);
         }
       }
     }

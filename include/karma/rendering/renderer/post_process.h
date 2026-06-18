@@ -9,8 +9,8 @@ namespace karma::renderer {
 /// different quality/performance tradeoffs, but unsupported features should be
 /// ignored rather than changing scene rendering semantics.
 ///
-/// Settings are normally stored in `PostProcessProfileLibrary` and selected by
-/// `CameraComponent::post_process_profile_key`. `RenderSystem` resolves the
+/// Settings are normally registered in `content::AssetRegistry` and selected
+/// by `CameraComponent::post_process_profile_key`. `RenderSystem` resolves the
 /// active settings per camera pass before calling the backend.
 struct PostProcessSettings {
   /// Master switch for the profile. When false, backends skip post processing.

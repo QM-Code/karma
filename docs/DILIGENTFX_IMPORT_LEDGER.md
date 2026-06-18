@@ -232,12 +232,12 @@ These items are intentionally deferred rather than forgotten.
 - Existing Karma coverage: partial
 - Decision: integrate
 - Reason: Karma now has a renderer-level `PostProcessSettings` contract,
-  a camera-selected `PostProcessProfileLibrary`, runtime startup wiring,
+  camera-selected post-process profiles in `AssetRegistry`, runtime startup wiring,
   Diligent fullscreen pass infrastructure, backend shader assets, ping/pong
   textures, and two history textures for temporal effects.
 - Files changed:
+  - `include/karma/content/assets/asset_registry.h`
   - `include/karma/rendering/renderer/post_process.h`
-  - `include/karma/rendering/renderer/post_process_profile_library.h`
   - `include/karma/world/components/camera.h`
   - `include/karma/rendering/renderer/backend.hpp`
   - `include/karma/rendering/renderer/device.h`

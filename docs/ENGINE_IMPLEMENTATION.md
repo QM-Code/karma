@@ -23,7 +23,7 @@ Karma is a C++20 client/server 3D game engine with a layered architecture and a 
     shader loading.
 
 Post-processing is camera-resolved. `EngineApp` owns a
-`PostProcessProfileLibrary`, `CameraComponent::post_process_profile_key`
+`AssetRegistry`, `CameraComponent::post_process_profile_key`
 selects a named profile, and `RenderSystem` passes resolved settings into each
 `GraphicsDevice::renderLayer` call. There is no global backend
 `setPostProcessSettings` API.

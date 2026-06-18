@@ -594,8 +594,8 @@ ports.
   control should stay in Karma's camera/profile API rather than copied sample
   classes.
 - Files changed:
+  - `include/karma/content/assets/asset_registry.h`
   - `include/karma/rendering/renderer/post_process.h`
-  - `include/karma/rendering/renderer/post_process_profile_library.h`
   - `include/karma/world/components/camera.h`
   - `src/rendering/renderer/backends/diligent/passes/post_process/`
   - `src/rendering/renderer/backends/diligent/shaders/post_process/`

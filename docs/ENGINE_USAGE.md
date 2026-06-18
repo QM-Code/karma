@@ -369,8 +369,8 @@ default profile. Missing named profiles also fall back to the default profile so
 camera authoring errors do not stop rendering.
 
 `EngineConfig::post_process` seeds the startup default profile. Games can
-register named profiles during `onStart()` or update them at runtime through the
-borrowed `post_process_profiles` registry:
+register named profiles during `onStart()` or update them at runtime through
+`assets`:
 
 ```cpp
 constexpr const char* kCinematicProfile = "camera/cinematic";
@@ -381,7 +381,7 @@ cinematic.bloom_threshold = 0.7f;
 cinematic.bloom_intensity = 0.35f;
 cinematic.tone_mapping_enabled = true;
 cinematic.tone_exposure = 1.1f;
-post_process_profiles->registerProfile(kCinematicProfile, cinematic);
+assets->registerPostProcessProfile(kCinematicProfile, cinematic);
 
 world->add(camera_entity, components::CameraComponent{
     .is_primary = true,
@@ -568,7 +568,7 @@ engine.setUi(karma::rmlui::createUiLayer([](Rml::Context& context) {
 
 ## Particle Effects
 
-Particle effects are ECS-driven through `ParticleLibrary`,
+Particle effects are ECS-driven through `content::AssetRegistry`,
 `ParticleEffectComponent`, `ParticleEffectOverrideComponent`, and
 `ParticleSystem`.
 
@@ -584,8 +584,8 @@ component payloads keyed by real component type names such as
 
 Instantiate directly with `prefabs::instantiatePrefab(world, scene, path, desc)`.
 If the path is a directory, Karma loads `prefab.json` from that directory. When
-the directory also contains `prefab.resources.json`, Karma loads prefab-local
-texture aliases and particle effect registrations before creating entities.
+the directory also contains `assets.package.json`, Karma imports prefab-local
+texture assets and particle effect registrations before creating entities.
 
 Runtime-only renderer and particle IDs are not persisted. Prefabs save stable
 keys such as mesh, material, texture, and particle effect keys; the runtime
@@ -903,13 +903,13 @@ Trigger pattern:
 - Use the raw collider query helpers when you need one-off tests, custom filtering, or ad hoc spatial logic outside the engine-owned collision event path.
 
 ## Runtime Materials
-`GameInterface` now exposes a runtime material library through the `materials` pointer.
+`GameInterface` exposes runtime material assets through the `assets` registry.
 The intended workflow is:
 
 - register a shared material asset from game code or a JSON `.mat` file
-- optionally register per-object material instances that inherit from a shared asset
+- optionally register material variants that inherit from a base material asset
 - bind material keys to `MeshComponent.materials` slots
-- let missing slot bindings fall back to the mesh asset's default material for that slot
+- let unassigned slots fall back to the mesh asset's default material for that slot
 
 Assigning a material to slot `0`:
 
@@ -919,20 +919,21 @@ Assigning a material to slot `0`:
 class MyGame : public karma::app::GameInterface {
  public:
   void onStart() override {
-    const std::string tank_mesh = "assets/tank_final.glb";
+    const std::string tank_mesh = "examples/tank";
+    assets->importMeshAsset(tank_mesh, "assets/tank_final.glb");
 
     karma::renderer::MaterialDesc blue{};
     blue.base_color = karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f};
     blue.roughness = 0.65f;
     blue.metallic = 0.0f;
-    materials->registerMaterialDesc("tank_blue", blue);
+    assets->registerMaterialAsset("tank_blue", blue);
 
     auto tank = world->createEntity();
     world->add(tank, karma::components::TransformComponent{});
     world->add(tank, karma::components::MeshComponent{
-        .mesh_key = tank_mesh,
+        .mesh_asset_key = tank_mesh,
         .materials = {
-            karma::components::MeshMaterialBinding{
+            karma::components::MeshMaterialAssignment{
                 .slot = 0,
                 .material_key = "tank_blue",
             },
@@ -942,22 +943,23 @@ class MyGame : public karma::app::GameInterface {
 };
 ```
 
-Use a material instance when one object should diverge from a shared asset:
+Use a material variant when a material should inherit an existing material and
+change only selected params or texture assignments:
 
 ```cpp
-karma::renderer::MaterialInstanceDesc local{};
-local.parent_material_key = "tank_blue";
-local.params["base_color"] = karma::math::Color{1.0f, 0.35f, 0.25f, 1.0f};
-materials->registerMaterialInstance("tank_blue/local_red", std::move(local));
+assets->registerMaterialVariant(
+    "tank_blue/red_variant",
+    "tank_blue",
+    {{"base_color", karma::math::Color{1.0f, 0.35f, 0.25f, 1.0f}}});
 ```
 
-JSON `.mat` files are versioned material documents. Relative shader and texture
-paths resolve from the `.mat` file location:
+JSON `.mat` files are versioned material documents. Built-in pipelines use a
+logical pipeline name, and texture bindings reference texture asset keys:
 
 ```json
 {
-  "version": 1,
-  "pipeline": { "type": "standard" },
+  "version": 2,
+  "pipeline": { "name": "standard" },
   "surface": {
     "base_color": [0.35, 0.55, 1.0, 1.0],
     "roughness": 0.65,
@@ -968,7 +970,7 @@ paths resolve from the `.mat` file location:
     "transparent": false
   },
   "textures": {
-    "base_color": "textures/tank_albedo.png"
+    "base_color": "textures/tank_albedo"
   }
 }
 ```
@@ -977,16 +979,29 @@ Load and register a `.mat` file:
 
 ```cpp
 const auto loaded = karma::content::loadMaterialFile(
-    *materials,
+    *assets,
     "tank_blue",
     "assets/materials/tank_blue.mat");
+```
+
+Variant `.mat` files use `kind: "variant"` and name a base material key:
+
+```json
+{
+  "version": 2,
+  "kind": "variant",
+  "base": "tank_blue",
+  "surface": {
+    "base_color": [1.0, 0.35, 0.25, 1.0]
+  }
+}
 ```
 
 Current semantics:
 
 - unbound slot: use the mesh asset's default material for that slot
 - registered material asset: shared by every entity that binds the key
-- registered material instance: inherits its parent asset and overrides only specified params or textures
+- registered material variant: inherits its base material and changes only specified params or textures
 - unknown key: log once and fall back to the mesh slot's default material
 - terrain material layers can also bind the same material keys through `TerrainMaterialLayer::material_key`; terrain resolves the key before upload and uses explicit terrain image fields only as a fallback
 - `.mat` texture entries for known semantics such as `base_color`, `normal`, `metallic_roughness`, `occlusion`, and `emissive` bind to the matching renderer texture slots
@@ -996,9 +1011,9 @@ Current semantics:
 Current scope:
 
 - runtime registration from game code is supported now
-- JSON `.mat` asset and instance loading is supported now
+- JSON `.mat` asset and variant loading is supported now
 - mesh assets carry material slots and submesh-to-slot ranges
-- `MeshComponent.materials` stores per-slot material bindings
+- `MeshComponent.materials` stores per-slot material assignments
 
 Current limitation:
 
@@ -1007,7 +1022,9 @@ Current limitation:
 
 ## glTF Scene Import
 Karma has a separate glTF scene-import path for authored scenes.
-This is distinct from `MeshComponent.mesh_key = "model.glb"`, which still uses the flat mesh import path.
+This is distinct from flat mesh assets: import a mesh source with
+`assets->importMeshAsset("mesh/key", "model.glb")`, then assign
+`MeshComponent::mesh_asset_key = "mesh/key"`.
 
 Use the convenience import directly:
 

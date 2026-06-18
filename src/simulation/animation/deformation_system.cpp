@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "karma/content/assets/asset_registry.h"
 #include "karma/core/math/glm.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/transform.h"
@@ -145,7 +146,8 @@ bool prepareMorphMesh(components::DeformableMeshComponent& deformation,
 
 void DeformationSystem::update(ecs::World& world,
                                const scene::Scene& scene,
-                               renderer::GraphicsDevice& device) {
+                               renderer::GraphicsDevice& device,
+                               const content::AssetRegistry* assets) {
   const std::vector<ecs::Entity> entities =
       world.view<components::DeformableMeshComponent, components::MeshComponent,
                  components::TransformComponent>();
@@ -186,10 +188,15 @@ void DeformationSystem::update(ecs::World& world,
       deformation.palette_valid = false;
     }
 
-    const renderer::MeshId renderer_mesh = device.findRuntimeMesh(mesh.mesh_key);
+    renderer::MeshId renderer_mesh = device.findRuntimeMesh(mesh.mesh_asset_key);
+    if (renderer_mesh == renderer::kInvalidMesh && assets != nullptr) {
+      if (const geometry::MeshData* mesh_asset = assets->findMeshAsset(mesh.mesh_asset_key)) {
+        renderer_mesh = device.registerRuntimeMesh(mesh.mesh_asset_key, *mesh_asset);
+      }
+    }
     if (renderer_mesh == renderer::kInvalidMesh) {
       deformation.palette_valid = false;
-      deformation.diagnostic = "Deformable mesh key is not registered as a runtime mesh";
+      deformation.diagnostic = "Deformable mesh asset key is not registered";
       continue;
     }
 

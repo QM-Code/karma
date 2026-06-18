@@ -12,8 +12,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include "karma/content/assets/asset_package.h"
 #include "karma/content/prefabs/component_serializer_registry.h"
-#include "karma/content/prefabs/prefab_resource_context.h"
 #include "karma/core/math/quat.h"
 #include "karma/core/math/vec3.h"
 #include "karma/world/components/tag.h"
@@ -258,6 +258,111 @@ Json toJson(const PrefabDocument& document) {
   };
 }
 
+uint64_t entityKey(ecs::Entity entity) {
+  return (static_cast<uint64_t>(entity.index) << 32u) |
+         static_cast<uint64_t>(entity.generation);
+}
+
+struct CachedPrefabPackage {
+  content::AssetRegistry* assets = nullptr;
+  content::AssetPackageHandle handle;
+  uint32_t ref_count = 0u;
+};
+
+std::unordered_map<std::string, CachedPrefabPackage> g_cached_prefab_packages;
+std::unordered_map<uint64_t, std::string> g_package_by_root_entity;
+content::AssetRegistry* g_default_prefab_assets = nullptr;
+
+std::string packageCacheKey(content::AssetRegistry* assets,
+                            const std::filesystem::path& manifest_path) {
+  std::error_code ec;
+  std::filesystem::path absolute = std::filesystem::absolute(manifest_path, ec);
+  if (ec) {
+    absolute = manifest_path;
+  }
+  return std::to_string(reinterpret_cast<std::uintptr_t>(assets)) + "|" +
+         absolute.lexically_normal().string();
+}
+
+struct PackageAcquireResult {
+  bool success = true;
+  std::string cache_key;
+  std::optional<content::AssetPackageHandle> handle;
+};
+
+PackageAcquireResult acquirePrefabPackage(content::AssetRegistry* assets,
+                                          const std::filesystem::path& prefab_path) {
+  PackageAcquireResult result{};
+  if (assets == nullptr) {
+    assets = g_default_prefab_assets;
+  }
+  const std::filesystem::path manifest_path =
+      content::resolveAssetPackagePath(prefab_path.parent_path());
+  std::error_code ec;
+  if (!std::filesystem::exists(manifest_path, ec)) {
+    return result;
+  }
+  if (ec) {
+    spdlog::error("Failed to inspect asset package '{}': {}",
+                  manifest_path.string(),
+                  ec.message());
+    result.success = false;
+    return result;
+  }
+  if (assets == nullptr) {
+    spdlog::error("Prefab '{}' has an asset package but no AssetRegistry was supplied",
+                  prefab_path.string());
+    result.success = false;
+    return result;
+  }
+
+  result.cache_key = packageCacheKey(assets, manifest_path);
+  auto cached_it = g_cached_prefab_packages.find(result.cache_key);
+  if (cached_it != g_cached_prefab_packages.end()) {
+    cached_it->second.ref_count += 1u;
+    result.handle = cached_it->second.handle;
+    return result;
+  }
+
+  std::string diagnostic;
+  std::optional<content::AssetPackageHandle> package =
+      content::importAssetPackage(*assets, manifest_path, &diagnostic);
+  if (!package.has_value()) {
+    spdlog::error("Failed to import prefab asset package '{}': {}",
+                  manifest_path.string(),
+                  diagnostic);
+    result.success = false;
+    return result;
+  }
+
+  CachedPrefabPackage cached{};
+  cached.assets = assets;
+  cached.handle = *package;
+  cached.ref_count = 1u;
+  g_cached_prefab_packages[result.cache_key] = cached;
+  result.handle = std::move(package);
+  return result;
+}
+
+void releasePrefabPackageByKey(const std::string& cache_key) {
+  if (cache_key.empty()) {
+    return;
+  }
+  auto cached_it = g_cached_prefab_packages.find(cache_key);
+  if (cached_it == g_cached_prefab_packages.end()) {
+    return;
+  }
+  if (cached_it->second.ref_count > 0u) {
+    cached_it->second.ref_count -= 1u;
+  }
+  if (cached_it->second.ref_count == 0u) {
+    if (cached_it->second.assets != nullptr) {
+      content::unloadAssetPackage(*cached_it->second.assets, cached_it->second.handle);
+    }
+    g_cached_prefab_packages.erase(cached_it);
+  }
+}
+
 std::string entityName(const ecs::World& world, ecs::Entity entity) {
   if (!world.isAlive(entity) || !world.has<components::TagComponent>(entity)) {
     return {};
@@ -488,7 +593,8 @@ std::optional<PrefabInstance> instantiatePrefab(
   if (!document.has_value()) {
     return std::nullopt;
   }
-  if (!ensurePrefabResourcesLoaded(path)) {
+  PackageAcquireResult package = acquirePrefabPackage(desc.assets, path);
+  if (!package.success) {
     return std::nullopt;
   }
 
@@ -513,6 +619,7 @@ std::optional<PrefabInstance> instantiatePrefab(
   for (size_t index = 0; index < document->nodes.size(); ++index) {
     if (!deserializeComponents(world, created_entities[index], document->nodes[index], path)) {
       destroyCreated(world, scene, created_entities, created_nodes);
+      releasePrefabPackageByKey(package.cache_key);
       return std::nullopt;
     }
     ensureTransformsForHierarchy(world, created_entities[index]);
@@ -541,6 +648,11 @@ std::optional<PrefabInstance> instantiatePrefab(
 
   instance.root = created_entities[document->root];
   instance.root_scene_node = created_nodes[document->root];
+  instance.asset_registry = desc.assets;
+  instance.asset_package = package.handle;
+  if (!package.cache_key.empty()) {
+    g_package_by_root_entity[entityKey(instance.root)] = package.cache_key;
+  }
   applyRootTransform(world, instance.root, desc.root_transform);
   scene::updateWorldTransforms(world, scene);
   return instance;
@@ -551,9 +663,18 @@ bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root) {
     return false;
   }
 
+  const uint64_t root_key = entityKey(root);
+  std::string package_key;
+  if (const auto package_it = g_package_by_root_entity.find(root_key);
+      package_it != g_package_by_root_entity.end()) {
+    package_key = package_it->second;
+    g_package_by_root_entity.erase(package_it);
+  }
+
   const scene::NodeId root_node = scene.findNode(root);
   if (!scene.isAlive(root_node)) {
     world.destroyEntity(root);
+    releasePrefabPackageByKey(package_key);
     return true;
   }
 
@@ -579,7 +700,24 @@ bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root) {
       world.destroyEntity(entity);
     }
   }
+  releasePrefabPackageByKey(package_key);
   return true;
+}
+
+void clearPrefabAssetPackages() {
+  for (auto& [key, cached] : g_cached_prefab_packages) {
+    (void)key;
+    if (cached.assets != nullptr) {
+      content::unloadAssetPackage(*cached.assets, cached.handle);
+    }
+  }
+  g_cached_prefab_packages.clear();
+  g_package_by_root_entity.clear();
+  g_default_prefab_assets = nullptr;
+}
+
+void bindPrefabAssetRegistry(content::AssetRegistry* assets) {
+  g_default_prefab_assets = assets;
 }
 
 }  // namespace karma::prefabs

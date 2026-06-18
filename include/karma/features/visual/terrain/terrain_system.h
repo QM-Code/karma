@@ -23,7 +23,10 @@
 
 namespace karma::renderer {
 class GraphicsDevice;
-class MaterialLibrary;
+}
+
+namespace karma::content {
+class AssetRegistry;
 }
 
 namespace karma::terrain {
@@ -66,13 +69,13 @@ std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
 std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
     const components::TerrainMaterialLayer& layer,
     uint32_t layer_index,
-    const renderer::MaterialLibrary* materials);
+    const content::AssetRegistry* assets);
 
 /// Streams terrain chunks around the primary camera and submits loaded tiles.
 class TerrainSystem {
  public:
   explicit TerrainSystem(renderer::GraphicsDevice* device,
-                         const renderer::MaterialLibrary* materials = nullptr);
+                         const content::AssetRegistry* assets = nullptr);
   ~TerrainSystem();
 
   TerrainSystem(const TerrainSystem&) = delete;
@@ -114,7 +117,7 @@ class TerrainSystem {
     float height_value_min = 0.0f;
     float height_value_max = 1.0f;
     int32_t tile_index_base = 0;
-    uint64_t material_library_version = 0u;
+    uint64_t asset_registry_version = 0u;
     std::vector<components::TerrainMaterialLayer> material_layers;
     std::vector<components::TerrainDataMapBinding> data_maps;
 
@@ -155,7 +158,7 @@ class TerrainSystem {
   void stopWorker();
 
   renderer::GraphicsDevice* device_ = nullptr;
-  const renderer::MaterialLibrary* materials_ = nullptr;
+  const content::AssetRegistry* assets_ = nullptr;
   std::unordered_map<uint64_t, TerrainState> states_;
   std::unordered_map<uint64_t, std::size_t> generated_collider_signatures_;
   std::mutex queue_mutex_;

@@ -202,7 +202,7 @@ before `find_package(karma)` to allow package-time fetching.
   environment/texture/mesh resource management.
 - Content pipeline for glTF/GLB scene import, materials, lights, node animation,
   skeletal animation, GPU skinning with CPU fallback, morph target deformation,
-  JSON prefabs, and prefab-local `prefab.resources.json` registrations.
+  JSON prefabs, and prefab-local `assets.package.json` registrations.
 - Particle tooling with `.kpeffect` files, hot reload, emitter overrides,
   flipbooks, distortion, ground-aligned particles, soft particles, and renderer
   performance diagnostics.
@@ -239,7 +239,7 @@ build into category directories under `build/examples/`:
   emitted under `build/examples/physics`.
 - `rendering_gltf_viewer`, `rendering_postprocess`, `rendering_bloom`,
   `rendering_postwar_city`, `rendering_light_stress`,
-  `rendering_material_override`, and `rendering_terrain`: rendering inspection
+  `rendering_material_assignment`, and `rendering_terrain`: rendering inspection
   and stress samples.
 - `scene_gltf_import` and `animation_gltf`: authored glTF/GLB scene import,
   animation, deformation, and skinning paths.

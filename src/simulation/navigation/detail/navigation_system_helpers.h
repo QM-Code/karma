@@ -14,6 +14,10 @@ namespace karma::ecs {
 class World;
 }
 
+namespace karma::content {
+class AssetRegistry;
+}
+
 namespace karma::navigation::detail {
 
 uint64_t entityKey(ecs::Entity entity);
@@ -68,7 +72,7 @@ math::Vec3 crowdWorldPosition(const math::Vec3& crowd_position,
                               const components::NavCrowdAgentComponent& agent);
 float horizontalDistance(const math::Vec3& a, const math::Vec3& b);
 
-void rebuildNavMeshes(ecs::World& world);
+void rebuildNavMeshes(ecs::World& world, const content::AssetRegistry* assets);
 void syncTileCaches(ecs::World& world, float dt);
 void syncCrowds(ecs::World& world, float dt);
 void moveAgents(ecs::World& world, float dt);

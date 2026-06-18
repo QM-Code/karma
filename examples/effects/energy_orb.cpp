@@ -59,8 +59,8 @@ class EnergyOrbExample final : public app::GameInterface {
     input->bindKey("toggle_orb", platform::Key::Space, input::Trigger::Pressed);
     input->bindKey("restart_orb", platform::Key::R, input::Trigger::Pressed);
 
-    world_mesh_ = resolveExampleAssetPath("world.glb").string();
-    environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
+    world_mesh_ = importExampleMeshAsset(assets, "world.glb");
+    environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
 
     spawnWorld();
     spawnLighting();
@@ -158,13 +158,13 @@ class EnergyOrbExample final : public app::GameInterface {
     const ecs::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
-    world->add(world_entity, components::MeshComponent{.mesh_key = world_mesh_});
+    world->add(world_entity, components::MeshComponent{.mesh_asset_key = world_mesh_});
 
     const ecs::Entity environment_entity = world->createEntity();
     world->setName(environment_entity, "Environment");
     world->add(environment_entity,
                components::EnvironmentComponent{
-                   .environment_map = environment_map_,
+                   .environment_map_asset_key = environment_map_,
                    .intensity = 0.18f,
                    .draw_skybox = false,
                });
@@ -240,7 +240,8 @@ int main() {
   config.local_light_distance_damping = 0.05f;
   config.local_light_range_falloff_exponent = 1.35f;
   config.lighting_exposure = 1.15f;
-  config.environment_map = karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
+  config.environment_map_source_path =
+      karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
   config.environment_intensity = 0.18f;
   config.environment_draw_skybox = false;
 

@@ -302,10 +302,11 @@ void testExampleWorldGlbCanBake() {
   const std::vector<karma::geometry::MeshData> meshes =
       karma::content::importMeshes(world_path);
   assert(!meshes.empty());
+  constexpr const char* kWorldMeshKey = "runtime/navigation/world";
   world.add(world_entity, karma::components::NavMeshSurfaceComponent{
                               .mesh_data =
                                   std::make_shared<karma::geometry::MeshData>(combineMeshes(meshes)),
-                              .mesh_key = world_path.string(),
+                              .mesh_asset_key = kWorldMeshKey,
                           });
 
   const karma::navigation::NavMeshInputGeometry geometry =

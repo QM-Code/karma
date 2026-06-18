@@ -7,14 +7,13 @@
 
 #include <glm/vec3.hpp>
 
+#include "karma/content/assets/asset_registry.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/deformable_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
 #include "karma/world/ecs/world.h"
 #include "karma/rendering/renderer/device.h"
-#include "karma/rendering/renderer/material_library.h"
-#include "karma/rendering/renderer/post_process_profile_library.h"
 #include "karma/world/scene/scene.h"
 
 namespace karma::renderer {
@@ -28,25 +27,18 @@ namespace karma::renderer {
 /// camera pass, and cleans up renderer resources for destroyed entities.
 class RenderSystem {
  public:
-  /// Binds renderer extraction to the device and shared resource registries.
-  ///
-  /// `post_process_profiles` must outlive the render system; `EngineApp` owns
-  /// both and wires this dependency during startup.
-  RenderSystem(GraphicsDevice& device,
-               const MaterialLibrary& material_library,
-               const PostProcessProfileLibrary& post_process_profiles)
-      : device_(device),
-        material_library_(&material_library),
-        post_process_profiles_(&post_process_profiles) {}
+  /// Binds renderer extraction to the device and normalized runtime assets.
+  RenderSystem(GraphicsDevice& device, const content::AssetRegistry& assets)
+      : device_(device), assets_(&assets) {}
 
   /// Extracts the world/scene for one frame and submits render data.
   void update(ecs::World& world, scene::Scene& scene, float dt, float interpolation_alpha);
 
  private:
   struct RenderRecord {
-    std::string mesh_key;
+    std::string mesh_asset_key;
     std::vector<geometry::MeshMaterialSlot> material_slots;
-    std::vector<components::MeshMaterialBinding> component_materials;
+    std::vector<components::MeshMaterialAssignment> component_materials;
     std::vector<std::string> acquired_material_keys;
     std::vector<renderer::DrawMaterialBinding> material_bindings;
     renderer::MeshId mesh = renderer::kInvalidMesh;
@@ -67,6 +59,12 @@ class RenderSystem {
   struct SharedMaterialResource {
     renderer::MaterialId material = renderer::kInvalidMaterial;
     uint32_t ref_count = 0;
+    std::vector<std::string> texture_asset_keys;
+  };
+
+  struct SharedTextureResource {
+    renderer::TextureId texture = renderer::kInvalidTexture;
+    uint32_t ref_count = 0;
   };
 
   static uint64_t entityKey(ecs::Entity entity) {
@@ -86,20 +84,24 @@ class RenderSystem {
   void releaseMaterialBinding(RenderRecord& record);
   void bindMesh(const components::MeshComponent& mesh, RenderRecord& record);
   void bindMaterial(const components::MeshComponent& mesh, RenderRecord& record);
-  void acquireSharedMesh(const std::string& mesh_key, RenderRecord& record);
-  void releaseSharedMesh(const std::string& mesh_key);
+  void acquireSharedMesh(const std::string& mesh_asset_key, RenderRecord& record);
+  void releaseSharedMesh(const std::string& mesh_asset_key);
   renderer::MaterialId acquireSharedMaterial(const std::string& material_key);
   void releaseSharedMaterial(const std::string& material_key);
+  renderer::TextureId acquireSharedTexture(const std::string& texture_key);
+  void releaseSharedTexture(const std::string& texture_key);
 
   GraphicsDevice& device_;
-  const MaterialLibrary* material_library_ = nullptr;
-  const PostProcessProfileLibrary* post_process_profiles_ = nullptr;
+  const content::AssetRegistry* assets_ = nullptr;
   std::unordered_map<uint64_t, RenderRecord> records_;
   std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
   std::unordered_map<std::string, SharedMaterialResource> shared_materials_;
+  std::unordered_map<std::string, SharedTextureResource> shared_textures_;
   std::unordered_map<std::string, renderer::RenderTargetId> render_targets_by_key_;
+  std::unordered_map<std::string, bool> warned_missing_mesh_asset_keys_;
   std::unordered_map<std::string, bool> warned_missing_material_keys_;
-  uint64_t last_material_library_version_ = 0;
+  std::unordered_map<std::string, bool> warned_missing_environment_map_keys_;
+  uint64_t last_asset_registry_version_ = 0;
   std::string last_env_path_;
   float last_env_intensity_ = -1.0f;
   bool last_env_draw_skybox_ = false;

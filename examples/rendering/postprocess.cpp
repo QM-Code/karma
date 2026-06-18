@@ -109,13 +109,12 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
       scene::instantiateGltfScenePrefab(
           *world,
           *scene,
-          *graphics,
+          *assets,
           prefab,
           scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = true,
-          },
-          materials);
+          });
     }
 
     const SceneBounds bounds = prefab.valid() ? computePrefabBounds(prefab) : SceneBounds{};
@@ -199,9 +198,11 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
   }
 
   void spawnEnvironment() {
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Papermill",
-                              resolveExampleAssetPath("diligent_gltf_viewer/textures/papermill.ktx").string(),
+                              registerExampleEnvironmentMap(
+                                  assets,
+                                  "diligent_gltf_viewer/textures/papermill.ktx"),
                               1.0f,
                               true);
   }
@@ -259,8 +260,8 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
     settings.dof_focus_depth = std::max(1.0f, default_distance_ - radius * 0.35f);
     settings.dof_focus_range = std::max(1.0f, radius * 2.2f);
     settings.dof_intensity = 0.35f;
-    if (post_process_profiles) {
-      post_process_profiles->registerProfile(kPostProcessProfileKey, settings);
+    if (assets) {
+      assets->registerPostProcessProfile(kPostProcessProfileKey, settings);
     }
   }
 
@@ -296,7 +297,7 @@ int main() {
   config.forward_plus_max_lights_per_tile = 64;
   config.forward_plus_max_local_lights = 128;
   config.lighting_exposure = 1.02f;
-  config.environment_map =
+  config.environment_map_source_path =
       karma::demo::resolveExampleAssetPath("diligent_gltf_viewer/textures/papermill.ktx");
   config.environment_intensity = 1.0f;
   config.environment_draw_skybox = true;

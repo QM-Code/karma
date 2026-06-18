@@ -1,15 +1,12 @@
-#include "karma/features/visual/particles/effect_library.h"
+#include "karma/features/visual/particles/effect_asset.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <limits>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -591,8 +588,7 @@ bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& 
                             "closed_loop",
                             "sampling",
                             "jitter_radius",
-                            "mesh_key",
-                            "mesh_path",
+                            "mesh_asset_key",
                             "distribution",
                             "radial_speed_min",
                             "radial_speed_max"},
@@ -611,8 +607,7 @@ bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& 
       !readBool(*source, "closed_loop", emitter.source_closed_loop, out_error) ||
       !readSourceSampling(*source, "sampling", emitter.source_sampling, out_error) ||
       !readFloat(*source, "jitter_radius", emitter.source_jitter_radius, out_error) ||
-      !readString(*source, "mesh_key", emitter.source_mesh_key, out_error) ||
-      !readString(*source, "mesh_path", emitter.source_mesh_path, out_error) ||
+      !readString(*source, "mesh_asset_key", emitter.source_mesh_asset_key, out_error) ||
       !readSourceDistribution(*source, "distribution", emitter.source_distribution, out_error) ||
       !readFloat(*source, "radial_speed_min", emitter.radial_speed_min, out_error) ||
       !readFloat(*source, "radial_speed_max", emitter.radial_speed_max, out_error)) {
@@ -691,208 +686,8 @@ bool parseEffectJson(const Json& json, ParticleEffectAsset& out_asset, std::stri
 
 }  // namespace
 
-void ParticleLibrary::registerEffect(const std::string& key, ParticleEffectAsset asset) {
-  effects_[key] = std::move(asset);
-  version_ += 1;
-}
-
-void ParticleLibrary::registerEmitterTemplate(const std::string& key,
-                                              components::ParticleEmitterComponent emitter) {
-  ParticleEffectAsset asset{};
-  asset.emitters.push_back(ParticleEmitterDesc{.emitter = std::move(emitter)});
-  registerEffect(key, std::move(asset));
-}
-
-bool ParticleLibrary::registerEffectFile(const std::string& key,
-                                         const std::filesystem::path& path) {
-  EffectFileRecord& record = effect_files_[key];
-  record.path = path;
-  record.last_write_time = std::filesystem::file_time_type{};
-  return reloadEffectFile(key, record);
-}
-
-void ParticleLibrary::unregisterEffect(const std::string& key) {
-  const size_t erased_effects = effects_.erase(key);
-  const size_t erased_files = effect_files_.erase(key);
-  if (erased_effects > 0 || erased_files > 0) {
-    version_ += 1;
-  }
-}
-
-void ParticleLibrary::clear() {
-  if (!effects_.empty() || !effect_files_.empty()) {
-    effects_.clear();
-    effect_files_.clear();
-    version_ += 1;
-  }
-}
-
-void ParticleLibrary::registerTextureAlias(const std::string& key,
-                                           renderer::TextureId texture) {
-  auto it = texture_aliases_.find(key);
-  if (it != texture_aliases_.end() && it->second == texture) {
-    return;
-  }
-  texture_aliases_[key] = texture;
-  version_ += 1;
-}
-
-void ParticleLibrary::registerTextureAliases(
-    std::initializer_list<ParticleTextureAliasRegistration> aliases) {
-  for (const ParticleTextureAliasRegistration& alias : aliases) {
-    registerTextureAlias(std::string(alias.key), alias.texture);
-  }
-}
-
-void ParticleLibrary::unregisterTextureAlias(const std::string& key) {
-  if (texture_aliases_.erase(key) > 0) {
-    version_ += 1;
-  }
-}
-
-void ParticleLibrary::clearTextureAliases() {
-  if (!texture_aliases_.empty()) {
-    texture_aliases_.clear();
-    version_ += 1;
-  }
-}
-
-renderer::TextureId ParticleLibrary::resolveTextureAlias(const std::string& key) const {
-  auto it = texture_aliases_.find(key);
-  if (it == texture_aliases_.end()) {
-    return renderer::kInvalidTexture;
-  }
-  return it->second;
-}
-
-void ParticleLibrary::registerMeshSourceAlias(const std::string& key,
-                                              renderer::MeshId mesh) {
-  auto it = mesh_source_aliases_.find(key);
-  if (it != mesh_source_aliases_.end() && it->second == mesh) {
-    return;
-  }
-  mesh_source_aliases_[key] = mesh;
-  version_ += 1;
-}
-
-void ParticleLibrary::registerMeshSourceAliases(
-    std::initializer_list<ParticleMeshSourceAliasRegistration> aliases) {
-  for (const ParticleMeshSourceAliasRegistration& alias : aliases) {
-    registerMeshSourceAlias(std::string(alias.key), alias.mesh);
-  }
-}
-
-void ParticleLibrary::unregisterMeshSourceAlias(const std::string& key) {
-  if (mesh_source_aliases_.erase(key) > 0) {
-    version_ += 1;
-  }
-}
-
-void ParticleLibrary::clearMeshSourceAliases() {
-  if (!mesh_source_aliases_.empty()) {
-    mesh_source_aliases_.clear();
-    version_ += 1;
-  }
-}
-
-renderer::MeshId ParticleLibrary::resolveMeshSourceAlias(const std::string& key) const {
-  auto it = mesh_source_aliases_.find(key);
-  if (it == mesh_source_aliases_.end()) {
-    return renderer::kInvalidMesh;
-  }
-  return it->second;
-}
-
-bool ParticleLibrary::registerEffectFiles(
-    std::initializer_list<ParticleEffectFileRegistration> effects) {
-  bool all_ok = true;
-  for (const ParticleEffectFileRegistration& effect : effects) {
-    all_ok = registerEffectFile(std::string(effect.key), effect.path) && all_ok;
-  }
-  return all_ok;
-}
-
-void ParticleLibrary::update() {
-  if (effect_files_.empty()) {
-    return;
-  }
-
-  const auto now = std::chrono::steady_clock::now();
-  if (next_poll_time_ != std::chrono::steady_clock::time_point{} &&
-      now < next_poll_time_) {
-    return;
-  }
-  next_poll_time_ = now + poll_interval_;
-
-  for (auto& [key, record] : effect_files_) {
-    std::error_code ec;
-    const auto write_time = std::filesystem::last_write_time(record.path, ec);
-    if (ec) {
-      continue;
-    }
-    if (record.last_write_time != write_time) {
-      reloadEffectFile(key, record);
-    }
-  }
-}
-
-const ParticleEffectAsset* ParticleLibrary::find(const std::string& key) const {
-  auto it = effects_.find(key);
-  if (it == effects_.end()) {
-    return nullptr;
-  }
-  return &it->second;
-}
-
-const components::ParticleEmitterComponent* ParticleLibrary::findEmitterTemplate(
-    const std::string& key) const {
-  const ParticleEffectAsset* effect = find(key);
-  const ParticleEmitterDesc* primary = effect ? effect->primaryEmitter() : nullptr;
-  return primary ? &primary->emitter : nullptr;
-}
-
-bool ParticleLibrary::instantiateEmitter(const std::string& key,
-                                         components::ParticleEmitterComponent& out_emitter) const {
-  const ParticleEffectAsset* effect = find(key);
-  const ParticleEmitterDesc* primary = effect ? effect->primaryEmitter() : nullptr;
-  if (primary == nullptr) {
-    return false;
-  }
-  out_emitter = primary->emitter;
-  if (!primary->texture_key.empty()) {
-    out_emitter.texture_key = primary->texture_key;
-  }
-  return true;
-}
-
-std::optional<components::ParticleEmitterComponent> ParticleLibrary::instantiateEmitter(
-    const std::string& key) const {
-  components::ParticleEmitterComponent emitter{};
-  if (!instantiateEmitter(key, emitter)) {
-    return std::nullopt;
-  }
-  return emitter;
-}
-
-bool ParticleLibrary::reloadEffectFile(const std::string& key, EffectFileRecord& record) {
-  ParticleEffectAsset asset{};
-  if (!parseEffectFile(record.path, asset)) {
-    return false;
-  }
-
-  std::error_code ec;
-  record.last_write_time = std::filesystem::last_write_time(record.path, ec);
-  if (ec) {
-    record.last_write_time = std::filesystem::file_time_type{};
-  }
-
-  effects_[key] = std::move(asset);
-  version_ += 1;
-  return true;
-}
-
-bool ParticleLibrary::parseEffectFile(const std::filesystem::path& path,
-                                      ParticleEffectAsset& out_asset) const {
+bool loadParticleEffectAsset(const std::filesystem::path& path,
+                             ParticleEffectAsset& out_asset) {
   std::ifstream stream(path);
   if (!stream) {
     spdlog::error("Failed to open particle effect '{}'", path.string());

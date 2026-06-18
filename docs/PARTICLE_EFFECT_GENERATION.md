@@ -9,7 +9,7 @@ or visual reference.
 Particle effects are reusable emitter templates stored as `.kpeffect` files.
 The runtime flow is:
 
-1. Register texture aliases in `ParticleLibrary`.
+1. Register borrowed particle texture handles in `AssetRegistry`.
 2. Register `.kpeffect` files under stable effect keys.
 3. Bind ECS entities to those effect keys with `ParticleEffectComponent`.
 4. Optionally apply `ParticleEffectOverrideComponent` for per-instance scale,
@@ -52,7 +52,7 @@ The engine already has several pieces that make generation practical:
 The best current generation target is a v3 `.kpeffect` JSON file with one or
 more emitter layers. The next best target is a prefab directory containing
 generated `.kpeffect` assets, a `prefab.json` composition file with only effect
-bindings/playback defaults, and a `prefab.resources.json` sidecar for
+bindings/playback defaults, and an `assets.package.json` package for
 texture/effect registration.
 
 ## Current Blockers
@@ -174,8 +174,8 @@ Keep the existing authoring split:
   state, atlas metadata, texture alias, color/size/lifetime/motion.
 - `prefab.json`: composition of multiple layers, transforms, effect bindings,
   playback defaults, and high-level component overrides.
-- `prefab.resources.json`: texture alias registration, effect file
-  registration, and prefab-local resource cleanup.
+- `assets.package.json`: texture asset imports, effect file registration, and
+  prefab-local resource cleanup.
 
 Do not put full emitter authoring into `prefab.json`. If generation needs a
 multi-layer effect, generate multiple `.kpeffect` files and a small prefab JSON

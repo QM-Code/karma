@@ -2,13 +2,13 @@
 
 This engine now has a reusable particle workflow built around five pieces:
 
-- `particles::ParticleLibrary`: stores named effect templates and texture aliases.
+- `content::AssetRegistry`: stores named effect templates and CPU texture assets.
 - `components::ParticleEffectComponent`: binds an entity to a named effect key.
 - `components::ParticleEffectOverrideComponent`: applies per-entity overrides on top of a named effect.
 - `components::ParticleEmitterComponent`: lightweight playback metadata and the in-memory template shape used by code-authored emitters.
 - `particles::ParticleSystem`: resolves effects/overrides and submits emitter descriptors to the renderer.
 
-Most game code should work through `ParticleLibrary` plus the ECS helpers in
+Most game code should work through `AssetRegistry` plus the ECS helpers in
 `karma/features/visual/particles/effect_api.h` rather than manually constructing particle
 components.
 
@@ -17,36 +17,35 @@ references, see [PARTICLE_EFFECT_GENERATION.md](PARTICLE_EFFECT_GENERATION.md).
 
 ## Typical Flow
 
-1. Register texture aliases in `ParticleLibrary`.
+1. Register or import texture assets in `AssetRegistry`.
 2. Register one or more `.kpeffect` files under stable effect keys.
 3. Create ECS entities bound to those effect keys.
 4. Attach `ParticleEffectOverrideComponent` only when a specific instance needs to diverge from the shared template.
 5. Restart or toggle those entities at runtime through the helper API.
 
-The engine polls the effect library every frame, so file-backed effects hot
-reload automatically.
+Register or re-import effect files explicitly when their source changes.
 
 ## Registering Assets
 
 ```cpp
-particle_effects->clear();
-particle_effects->clearTextureAliases();
+content::TextureAsset smoke_texture{};
+smoke_texture.desc.width = smoke_width;
+smoke_texture.desc.height = smoke_height;
+smoke_texture.bytes = smoke_rgba8;
+assets->registerTextureAsset("smoke_atlas", std::move(smoke_texture));
 
-particle_effects->registerTextureAliases({
-    {"smoke_atlas", smoke_texture},
-    {"spark_atlas", spark_texture},
-    {"prefabs/explosion/spark_atlas", spark_texture},
-});
+assets->importTextureAsset("prefabs/explosion/spark_atlas",
+                           "examples/assets/prefabs/explosion/textures/spark_atlas.png");
 
-particle_effects->registerEffectFiles({
-    {"smoke_plume", "examples/assets/particles/smoke_plume.kpeffect"},
-    {"prefabs/explosion/embers",
-     "examples/assets/prefabs/explosion/particles/explosion_embers.kpeffect"},
-});
+assets->importParticleEffect("smoke_plume",
+                             "examples/assets/particles/smoke_plume.kpeffect");
+assets->importParticleEffect(
+    "prefabs/explosion/embers",
+    "examples/assets/prefabs/explosion/particles/explosion_embers.kpeffect");
 ```
 
-Use texture aliases inside v3 `.kpeffect` files with a top-level emitter
-`"texture"` string.
+Use registered texture asset keys inside v3 `.kpeffect` files with a top-level
+emitter `"texture"` string. The particle system owns renderer uploads privately.
 
 ## Binding Effects To ECS Entities
 
@@ -148,8 +147,8 @@ reactivates the emitter, which is the supported way to replay one-shot effects.
 `.kpeffect` files are strict JSON v3 templates with one or more emitters. Each
 emitter has a required `source` block. At runtime the engine:
 
-1. Looks up the effect key in `ParticleLibrary`.
-2. Resolves texture and mesh-source aliases into runtime handles.
+1. Looks up the effect key in `AssetRegistry`.
+2. Resolves texture keys to borrowed renderer handles and mesh-source keys to registered mesh assets.
 3. Keeps the full multi-emitter asset instead of reducing it to the first emitter.
 4. Applies any `ParticleEffectOverrideComponent` on top of each emitter template.
 5. Preserves `enabled`, `playing`, and optionally `start_delay` if requested by the effect component.

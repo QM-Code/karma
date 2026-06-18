@@ -108,7 +108,7 @@ math::Color withAlpha(math::Color color, float alpha) {
 }
 
 void applyOrbAccent(ecs::World& world,
-                    renderer::MaterialLibrary* materials,
+                    content::AssetRegistry* assets,
                     const prefabs::PrefabInstance& instance,
                     const math::Color& color,
                     std::string_view shell_material_key) {
@@ -135,7 +135,7 @@ void applyOrbAccent(ecs::World& world,
                       scaleColor(color, 0.25f, 0.40f, 0.25f, 0.0f));
 
   const ecs::Entity shell_entity = instance.find("shell");
-  if (!shell_material_key.empty() && materials != nullptr && world.isAlive(shell_entity) &&
+  if (!shell_material_key.empty() && assets != nullptr && world.isAlive(shell_entity) &&
       world.has<components::MeshComponent>(shell_entity)) {
     auto& shell_mesh = world.get<components::MeshComponent>(shell_entity);
     const std::string material_key(shell_material_key);
@@ -147,8 +147,8 @@ void applyOrbAccent(ecs::World& world,
     shell_material.emissive_strength = 0.75f;
     shell_material.unlit = true;
     shell_material.roughness = 0.68f;
-    materials->registerMaterialDesc(material_key, shell_material);
-    shell_mesh.materials = {components::MeshMaterialBinding{
+    assets->registerMaterialAsset(material_key, shell_material);
+    shell_mesh.materials = {components::MeshMaterialAssignment{
         .slot = 0,
         .material_key = material_key,
     }};
@@ -202,7 +202,7 @@ class PrefabGalleryExample final : public app::GameInterface {
     input->bindKey("cam_right", platform::Key::D);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    world_mesh_ = resolveExampleAssetPath("world.glb").string();
+    world_mesh_ = importExampleMeshAsset(assets, "world.glb");
 
     {
       ScopedStartupTimer timer("Prefab gallery world spawn");
@@ -380,7 +380,7 @@ class PrefabGalleryExample final : public app::GameInterface {
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-                                 .mesh_key = world_mesh_,
+                                 .mesh_asset_key = world_mesh_,
                                  .visible = true,
                              });
   }
@@ -455,7 +455,7 @@ class PrefabGalleryExample final : public app::GameInterface {
       } else {
         const std::string orb_material_key =
             "gallery_orb_shell_" + std::string(variant.name);
-        applyOrbAccent(*world, materials, *orb, variant.orb_accent, orb_material_key);
+        applyOrbAccent(*world, assets, *orb, variant.orb_accent, orb_material_key);
       }
 
       const auto wave = prefabs::instantiatePrefab(
@@ -560,7 +560,8 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.0f;
   config.lighting_exposure = 1.15f;
-  config.environment_map = karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
+  config.environment_map_source_path =
+      karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
   config.environment_intensity = 0.18f;
   config.environment_draw_skybox = false;
 

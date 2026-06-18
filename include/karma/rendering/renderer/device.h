@@ -9,7 +9,17 @@
 #include "karma/rendering/renderer/material.h"
 #include "karma/world/geometry/mesh_data.h"
 
+namespace karma::animation {
+class DeformationSystem;
+}
+
+namespace karma::particles {
+class ParticleSystem;
+}
+
 namespace karma::renderer {
+
+class RenderSystem;
 
 /// \ingroup karma_rendering
 /// High-level renderer facade owned by `EngineApp`.
@@ -37,21 +47,12 @@ class GraphicsDevice {
   MeshId createMesh(const geometry::MeshData& mesh);
   /// Replaces mesh data for an existing handle.
   void updateMesh(MeshId mesh, const geometry::MeshData& data);
-  /// Loads and uploads mesh data from a file.
-  MeshId createMeshFromFile(const std::filesystem::path& path);
   /// Destroys a mesh handle.
   void destroyMesh(MeshId mesh);
   /// Queries cached mesh bounds.
   bool getMeshBounds(MeshId mesh, glm::vec3& center, float& radius) const;
   /// Queries mesh material-slot metadata.
   bool getMeshMaterialSlots(MeshId mesh, std::vector<geometry::MeshMaterialSlot>& out_slots) const;
-
-  /// Registers or replaces a runtime mesh bound by `MeshComponent::mesh_key`.
-  MeshId registerRuntimeMesh(const std::string& key, const geometry::MeshData& mesh);
-  /// Removes a runtime mesh registration.
-  void unregisterRuntimeMesh(const std::string& key);
-  /// Returns a registered runtime mesh id, or `kInvalidMesh`.
-  MeshId findRuntimeMesh(const std::string& key) const;
 
   /// Creates a material from resolved material parameters.
   MaterialId createMaterial(const ResolvedMaterialDesc& material);
@@ -189,6 +190,17 @@ class GraphicsDevice {
   const renderer_backend::Backend* backend() const { return backend_.get(); }
 
  private:
+  friend class RenderSystem;
+  friend class karma::animation::DeformationSystem;
+  friend class karma::particles::ParticleSystem;
+
+  /// Registers or replaces a runtime mesh backing a content mesh asset.
+  MeshId registerRuntimeMesh(const std::string& key, const geometry::MeshData& mesh);
+  /// Removes a runtime mesh registration.
+  void unregisterRuntimeMesh(const std::string& key);
+  /// Returns a registered runtime mesh id, or `kInvalidMesh`.
+  MeshId findRuntimeMesh(const std::string& key) const;
+
   std::unique_ptr<renderer_backend::Backend> backend_;
   struct RuntimeMeshRegistration {
     MeshId mesh = kInvalidMesh;

@@ -27,7 +27,7 @@
           "scale": [0.28875, 0.28875, 0.28875]
         },
         "MeshComponent": {
-          "mesh_key": "examples/assets/orb_shell.glb",
+          "mesh_asset_key": "prefabs/energy_orb/orb_shell",
           "materials": [],
           "visible": true,
           "shadow_visible": false

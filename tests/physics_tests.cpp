@@ -237,7 +237,7 @@ void meshColliderGeometryProviderBuildsExternalMeshCollider() {
 
   const karma::ecs::Entity terrain = world.createEntity();
   world.add(terrain, karma::components::TransformComponent{});
-  world.add(terrain, karma::components::MeshComponent{.mesh_key = "runtime/quad"});
+  world.add(terrain, karma::components::MeshComponent{.mesh_asset_key = "runtime/quad"});
   world.add(terrain, karma::components::ColliderComponent::mesh());
 
   physics_system.update(world, 1.0f / 60.0f);
@@ -277,7 +277,7 @@ void characterControllerStaysStableOnMeshColliderGround() {
 
   const karma::ecs::Entity ground = world.createEntity();
   world.add(ground, karma::components::TransformComponent{});
-  world.add(ground, karma::components::MeshComponent{.mesh_key = "runtime/ground"});
+  world.add(ground, karma::components::MeshComponent{.mesh_asset_key = "runtime/ground"});
   world.add(ground, karma::components::ColliderComponent::mesh());
 
   const karma::ecs::Entity player = world.createEntity();

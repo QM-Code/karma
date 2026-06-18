@@ -11,9 +11,12 @@
 #include "karma/world/components/light.h"
 #include "karma/world/components/deformable_mesh.h"
 #include "karma/world/ecs/world.h"
-#include "karma/rendering/renderer/device.h"
-#include "karma/rendering/renderer/material_library.h"
+#include "karma/rendering/renderer/material.h"
 #include "karma/world/scene/scene.h"
+
+namespace karma::content {
+class AssetRegistry;
+}  // namespace karma::content
 
 namespace karma::scene {
 
@@ -35,6 +38,10 @@ struct GltfSceneLoadOptions {
 struct GltfSceneInstantiateOptions {
   bool create_synthetic_root = false;
   bool autoplay_animations = true;
+  /// Logical asset key namespace used for meshes/materials created while
+  /// instantiating this scene. When empty, a stable namespace is derived from
+  /// the source model name and source path hash.
+  std::string asset_key_prefix;
 };
 
 /// \ingroup karma_content
@@ -131,17 +138,15 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
 GltfSceneImportResult instantiateGltfScenePrefab(
     ecs::World& world,
     scene::Scene& scene,
-    renderer::GraphicsDevice& device,
+    content::AssetRegistry& assets,
     const GltfScenePrefab& prefab,
-    const GltfSceneInstantiateOptions& options = {},
-    renderer::MaterialLibrary* materials = nullptr);
+    const GltfSceneInstantiateOptions& options = {});
 
 /// Loads and instantiates a glTF scene in one call.
 GltfSceneImportResult importGltfScene(ecs::World& world,
                                       scene::Scene& scene,
-                                      renderer::GraphicsDevice& device,
+                                      content::AssetRegistry& assets,
                                       const std::filesystem::path& path,
-                                      const GltfSceneImportOptions& options = {},
-                                      renderer::MaterialLibrary* materials = nullptr);
+                                      const GltfSceneImportOptions& options = {});
 
 }  // namespace karma::scene

@@ -146,13 +146,12 @@ class DiligentFxBloomExample final : public app::GameInterface {
       const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
           *world,
           *scene,
-          *graphics,
+          *assets,
           prefab,
           scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = false,
-          },
-          materials);
+          });
       if (!imported.valid()) {
         spdlog::error("Failed to instantiate bloom scene GLB from {}", city_path.string());
       }
@@ -239,19 +238,19 @@ class DiligentFxBloomExample final : public app::GameInterface {
 
  private:
   void registerBloomResources() {
-    graphics->registerRuntimeMesh(kPanelMeshKey, helpers::makeBoxMesh({0.5f, 0.5f, 0.025f}));
-    graphics->registerRuntimeMesh(kBoxMeshKey, helpers::makeBoxMesh({0.5f, 0.5f, 0.5f}));
+    assets->registerMeshAsset(kPanelMeshKey, helpers::makeBoxMesh({0.5f, 0.5f, 0.025f}));
+    assets->registerMeshAsset(kBoxMeshKey, helpers::makeBoxMesh({0.5f, 0.5f, 0.5f}));
 
-    materials->registerMaterialDesc(kWarmWindowMaterial,
-                                    emissiveMaterial({1.0f, 0.72f, 0.34f, 1.0f}, 7.5f));
-    materials->registerMaterialDesc(kCoolWindowMaterial,
-                                    emissiveMaterial({0.38f, 0.70f, 1.0f, 1.0f}, 6.5f));
-    materials->registerMaterialDesc(kMagentaSignMaterial,
-                                    emissiveMaterial({1.0f, 0.23f, 0.78f, 1.0f}, 9.0f));
-    materials->registerMaterialDesc(kAmberSignMaterial,
-                                    emissiveMaterial({1.0f, 0.82f, 0.24f, 1.0f}, 10.0f));
-    materials->registerMaterialDesc(kRoadGlowMaterial,
-                                    emissiveMaterial({0.17f, 0.95f, 1.0f, 1.0f}, 7.0f));
+    assets->registerMaterialAsset(kWarmWindowMaterial,
+                                 emissiveMaterial({1.0f, 0.72f, 0.34f, 1.0f}, 7.5f));
+    assets->registerMaterialAsset(kCoolWindowMaterial,
+                                 emissiveMaterial({0.38f, 0.70f, 1.0f, 1.0f}, 6.5f));
+    assets->registerMaterialAsset(kMagentaSignMaterial,
+                                 emissiveMaterial({1.0f, 0.23f, 0.78f, 1.0f}, 9.0f));
+    assets->registerMaterialAsset(kAmberSignMaterial,
+                                 emissiveMaterial({1.0f, 0.82f, 0.24f, 1.0f}, 10.0f));
+    assets->registerMaterialAsset(kRoadGlowMaterial,
+                                 emissiveMaterial({0.17f, 0.95f, 1.0f, 1.0f}, 7.0f));
   }
 
   ecs::Entity spawnScaledMesh(const std::string& name,
@@ -269,8 +268,8 @@ class DiligentFxBloomExample final : public app::GameInterface {
     transform.setScale(toMath(scale));
     world->add(entity, transform);
     world->add(entity, components::MeshComponent{
-                          .mesh_key = mesh_key,
-                          .materials = {components::MeshMaterialBinding{
+                          .mesh_asset_key = mesh_key,
+                          .materials = {components::MeshMaterialAssignment{
                               .slot = 0,
                               .material_key = material_key,
                           }},
@@ -418,9 +417,9 @@ class DiligentFxBloomExample final : public app::GameInterface {
   }
 
   void spawnEnvironment() {
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Dim IBL",
-                              resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
                               0.18f,
                               true);
   }
@@ -489,8 +488,8 @@ class DiligentFxBloomExample final : public app::GameInterface {
 
   void applyPostProcess() {
     post_process_.bloom_enabled = bloom_enabled_;
-    if (post_process_profiles) {
-      post_process_profiles->registerProfile(kBloomPostProcessProfileKey, post_process_);
+    if (assets) {
+      assets->registerPostProcessProfile(kBloomPostProcessProfileKey, post_process_);
     }
   }
 
@@ -565,7 +564,8 @@ int main() {
   config.local_light_range_falloff_exponent = 1.05f;
   config.ao_affects_local_lights = false;
   config.lighting_exposure = 1.25f;
-  config.environment_map = karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
+  config.environment_map_source_path =
+      karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
   config.environment_intensity = 0.18f;
   config.environment_draw_skybox = true;
 

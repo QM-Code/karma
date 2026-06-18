@@ -178,7 +178,7 @@ void hashShape(std::size_t& seed, const PhysicsShapeDesc& shape) {
   for (const glm::vec3& point : shape.points) {
     hashVec3(seed, point);
   }
-  hashCombine(seed, shape.mesh_path);
+  hashCombine(seed, shape.mesh_asset_key);
   for (const glm::vec3& vertex : shape.mesh_vertices) {
     hashVec3(seed, vertex);
   }
@@ -872,17 +872,17 @@ PhysicsShapeDesc buildShapeDesc(const ecs::World& world,
           shape.height_bits_per_sample = collider_shape.bits_per_sample;
         } else if constexpr (std::is_same_v<Shape, components::MeshColliderShape>) {
           shape.type = PhysicsShapeType::Mesh;
-          shape.mesh_path = collider_shape.mesh_path;
-          if (shape.mesh_path.empty() && world.has<components::MeshComponent>(entity)) {
-            shape.mesh_path = world.get<components::MeshComponent>(entity).mesh_key;
+          shape.mesh_asset_key = collider_shape.mesh_asset_key;
+          if (shape.mesh_asset_key.empty() && world.has<components::MeshComponent>(entity)) {
+            shape.mesh_asset_key = world.get<components::MeshComponent>(entity).mesh_asset_key;
           }
 
           const std::vector<math::Vec3>* source_vertices = &collider_shape.vertices;
           const std::vector<uint32_t>* source_indices = &collider_shape.indices;
           if ((source_vertices->empty() || source_indices->empty()) &&
-              !shape.mesh_path.empty() &&
+              !shape.mesh_asset_key.empty() &&
               resolve_mesh_geometry) {
-            if (const MeshColliderGeometry* resolved = resolve_mesh_geometry(shape.mesh_path)) {
+            if (const MeshColliderGeometry* resolved = resolve_mesh_geometry(shape.mesh_asset_key)) {
               source_vertices = &resolved->vertices;
               source_indices = &resolved->indices;
             }

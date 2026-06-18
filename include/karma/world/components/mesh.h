@@ -8,21 +8,23 @@
 
 namespace karma::components {
 
-/// Material asset binding for one mesh material slot.
-struct MeshMaterialBinding {
+/// Assigned material asset or variant for one mesh material slot.
+struct MeshMaterialAssignment {
   uint32_t slot = 0;
   std::string material_key;
 
-  bool operator==(const MeshMaterialBinding&) const = default;
+  bool operator==(const MeshMaterialAssignment&) const = default;
 };
 
 /// \ingroup karma_components
-/// Mesh/material binding data extracted by `RenderSystem`.
+/// Mesh/material assignment data extracted by `RenderSystem`.
 ///
-/// Key fields refer to shared assets or runtime renderer resources registered by key.
+/// Mesh assets may provide default material slots. Entries in `materials`
+/// assign replacement material keys to individual slots for this object.
+/// Key fields refer to normalized assets registered in `content::AssetRegistry`.
 struct MeshComponent : ecs::ComponentTag {
-  std::string mesh_key;
-  std::vector<MeshMaterialBinding> materials;
+  std::string mesh_asset_key;
+  std::vector<MeshMaterialAssignment> materials;
   bool visible = true;
   bool shadow_visible = true;
 };

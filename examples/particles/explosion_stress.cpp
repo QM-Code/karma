@@ -203,8 +203,8 @@ class ExplosionStressExample final : public app::GameInterface {
     input->bindKey("cam_fast", platform::Key::LeftShift);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    world_mesh_ = resolveExampleAssetPath("world.glb").string();
-    environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
+    world_mesh_ = importExampleMeshAsset(assets, "world.glb");
+    environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
 
     spawnWorld();
     spawnLighting();
@@ -529,14 +529,14 @@ class ExplosionStressExample final : public app::GameInterface {
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-                                 .mesh_key = world_mesh_,
+                                 .mesh_asset_key = world_mesh_,
                                  .visible = true,
                              });
 
     const ecs::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
-                                 .environment_map = environment_map_,
+                                 .environment_map_asset_key = environment_map_,
                                  .intensity = 0.16f,
                                  .draw_skybox = false,
                              });

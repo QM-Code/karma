@@ -9,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "karma/content/assets/asset_package.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/entity.h"
 #include "karma/world/ecs/world.h"
@@ -45,6 +46,7 @@ struct PrefabSaveOptions {
 struct PrefabInstantiateDesc {
   components::TransformComponent root_transform{};
   std::string name_override;
+  content::AssetRegistry* assets = nullptr;
 };
 
 /// \ingroup karma_prefabs
@@ -55,6 +57,8 @@ struct PrefabInstance {
   std::vector<ecs::Entity> entities;
   std::unordered_map<std::string, ecs::Entity> named_entities;
   std::unordered_map<uint32_t, ecs::Entity> entities_by_id;
+  std::optional<content::AssetPackageHandle> asset_package;
+  content::AssetRegistry* asset_registry = nullptr;
 
   /// Returns true when a root entity was created.
   bool valid() const { return root.isValid(); }
@@ -94,5 +98,11 @@ std::optional<PrefabInstance> instantiatePrefab(
 
 /// Destroys a prefab instance rooted at `root`.
 bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root);
+
+/// Binds the default registry used when `PrefabInstantiateDesc::assets` is null.
+void bindPrefabAssetRegistry(content::AssetRegistry* assets);
+
+/// Releases all globally cached prefab asset packages.
+void clearPrefabAssetPackages();
 
 }  // namespace karma::prefabs

@@ -10,6 +10,10 @@
 #include "karma/world/ecs/world.h"
 #include "karma/world/systems/system.h"
 
+namespace karma::content {
+class AssetRegistry;
+}  // namespace karma::content
+
 namespace karma::audio {
 
 /// \ingroup karma_media
@@ -19,7 +23,8 @@ namespace karma::audio {
 /// drive backend clip playback.
 class AudioSystem final : public systems::ISystem {
  public:
-  explicit AudioSystem(Audio& audio) : audio_(audio) {}
+  explicit AudioSystem(Audio& audio, const content::AssetRegistry* assets = nullptr)
+      : audio_(audio), assets_(assets) {}
 
   std::string_view name() const override { return "AudioSystem"; }
   void update(ecs::World& world, float dt) override;
@@ -33,6 +38,7 @@ class AudioSystem final : public systems::ISystem {
   AudioClip& getClip(const std::string& key, int max_instances);
 
   Audio& audio_;
+  const content::AssetRegistry* assets_ = nullptr;
   std::unordered_map<std::string, AudioClip> clip_cache_;
   std::unordered_map<uint64_t, bool> played_on_start_;
   bool warned_multiple_listeners_ = false;

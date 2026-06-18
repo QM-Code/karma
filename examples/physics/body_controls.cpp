@@ -224,7 +224,7 @@ class BodyControlsGame final : public app::GameInterface {
 
   void onStart() override {
     bindFlyCameraControls(*input);
-    addDefaultLighting(*world);
+    addDefaultLighting(*world, assets);
     createFlyCamera(*world, camera_, {0.0f, 8.0f, 22.0f}, 3.14159f, -0.34f);
     recreateStatics();
     recreatePrimary();

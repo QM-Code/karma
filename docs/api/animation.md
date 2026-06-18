@@ -89,5 +89,5 @@ authored above the current explicit maps.
 
 - Humanoid semantic retarget profiles are not implemented; retargeting uses
   explicit skeleton maps.
-- `MeshComponent::mesh_key` flat mesh loading does not use the glTF scene
+- `MeshComponent::mesh_asset_key` asset-key mesh loading does not use the glTF scene
   animation, skinning, or morph-target path.

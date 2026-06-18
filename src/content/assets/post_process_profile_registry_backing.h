@@ -15,15 +15,15 @@ namespace karma::renderer {
 inline constexpr std::string_view kDefaultPostProcessProfileKey = "default";
 
 /// \ingroup karma_rendering
-/// Keyed registry of post-process profiles selected by cameras.
+/// Internal keyed registry of post-process profiles selected by cameras.
 ///
 /// An empty camera profile key resolves to the default profile. Missing named
 /// profiles also resolve to the default profile so camera authoring mistakes do
 /// not disable rendering.
 ///
-/// \runtime `EngineApp` owns the registry and exposes borrowed pointers through
-/// `GameInterface` and `RuntimeModuleContext`. Register profiles during
-/// startup, or update them at runtime when camera looks need to change.
+/// `AssetRegistry` owns this backing store. Register profiles through
+/// `content::AssetRegistry` during startup, or update them at runtime when
+/// camera looks need to change.
 class PostProcessProfileLibrary {
  public:
   /// Replaces the default profile.
@@ -50,13 +50,15 @@ class PostProcessProfileLibrary {
   }
 
   /// Removes a named profile. The default profile cannot be removed.
-  void unregisterProfile(const std::string& key) {
+  bool unregisterProfile(const std::string& key) {
     if (key.empty() || key == kDefaultPostProcessProfileKey) {
-      return;
+      return false;
     }
     if (profiles_.erase(key) > 0) {
       version_ += 1;
+      return true;
     }
+    return false;
   }
 
   /// Removes all named profiles while preserving the default profile.

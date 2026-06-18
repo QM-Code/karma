@@ -93,23 +93,24 @@ class NavMeshSceneExample final : public app::GameInterface {
   }
 
   void buildScene() {
-    const std::string world_mesh_key = resolveExampleAssetPath("world.glb").string();
-    const std::string tank_mesh_key = resolveExampleAssetPath("tank_final.glb").string();
+    const std::string world_mesh_key = importExampleMeshAsset(assets, "world.glb");
+    const std::string tank_mesh_key = importExampleMeshAsset(assets, "tank_final.glb");
 
     world_entity_ = helpers::spawnMeshAsset(*world, "World", world_mesh_key, {});
+    const std::filesystem::path world_mesh_path = resolveExampleAssetPath("world.glb");
     const std::vector<geometry::MeshData> world_meshes =
-        content::importMeshes(world_mesh_key);
+        content::importMeshes(world_mesh_path);
     world->add(world_entity_, components::NavMeshSurfaceComponent{
                                 .area = navigation::kNavAreaDefault,
                                 .mesh_data =
                                     std::make_shared<geometry::MeshData>(combineMeshes(world_meshes)),
-                                .mesh_key = world_mesh_key,
+                                .mesh_asset_key = world_mesh_key,
                             });
 
     player_entity_ = helpers::spawnMeshAsset(*world, "Click Move Tank", tank_mesh_key, start_);
     target_marker_entity_ = helpers::createDebugBoxMarker(*world,
                                                           graphics,
-                                                          materials,
+                                                          assets,
                                                           "Move Target",
                                                           {0.98f, 0.72f, 0.1f, 1.0f},
                                                           toMarkerVisualPoint(start_),
@@ -229,9 +230,9 @@ class NavMeshSceneExample final : public app::GameInterface {
                                  .range = 26.0f,
                              });
 
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Environment",
-                              resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
                               0.4f,
                               true);
   }

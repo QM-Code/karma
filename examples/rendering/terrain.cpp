@@ -131,7 +131,7 @@ class TerrainExample final : public app::GameInterface {
 
  private:
   void registerTerrainMaterials() {
-    if (!materials) {
+    if (!assets) {
       return;
     }
 
@@ -139,7 +139,7 @@ class TerrainExample final : public app::GameInterface {
     ground.base_color = math::Color{0.32f, 0.45f, 0.28f, 1.0f};
     ground.roughness = 0.92f;
     ground.metallic = 0.0f;
-    materials->registerMaterialDesc(kTerrainGroundMaterial, ground);
+    assets->registerMaterialAsset(kTerrainGroundMaterial, ground);
   }
 
   void spawnTerrain() {

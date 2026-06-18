@@ -178,7 +178,7 @@ class CarGame final : public app::GameInterface {
   void onStart() override {
     bindFlyCameraControls(*input);
     bindCarControls();
-    addDefaultLighting(*world);
+    addDefaultLighting(*world, assets);
     createFlyCamera(*world, camera_, {0.0f, 7.0f, -16.0f}, 0.0f, -0.22f);
     createTrack();
     resetCar({0.0f, 1.25f, 0.0f}, {});

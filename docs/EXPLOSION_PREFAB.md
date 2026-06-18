@@ -6,14 +6,14 @@ The explosion is a direct-load prefab under
 Primary sources:
 
 - [`../examples/assets/prefabs/explosion/prefab.json`](../examples/assets/prefabs/explosion/prefab.json)
-- [`../examples/assets/prefabs/explosion/prefab.resources.json`](../examples/assets/prefabs/explosion/prefab.resources.json)
+- [`../examples/assets/prefabs/explosion/assets.package.json`](../examples/assets/prefabs/explosion/assets.package.json)
 - [`../examples/assets/prefabs/explosion/particles/`](../examples/assets/prefabs/explosion/particles/)
 - [`../examples/assets/prefabs/explosion/textures/`](../examples/assets/prefabs/explosion/textures/)
 
 ## What It Provides
 
-`prefab.resources.json` registers the prefab-owned texture aliases and particle
-effect files the first time the prefab directory is instantiated. The sidecar
+`assets.package.json` imports the prefab-owned texture assets and particle
+effect files the first time the prefab directory is instantiated. The package
 uses paths relative to the prefab directory.
 
 `prefab.json` owns the entity hierarchy, particle effect bindings, child
@@ -57,8 +57,8 @@ the root after the effect window:
 prefabs::destroyPrefab(*world, *scene, explosion->root);
 ```
 
-The runtime `EngineApp` binds the prefab resource context so direct loads can
-upload sidecar textures and register sidecar particle effect files.
+The runtime `EngineApp` binds the prefab asset registry so direct loads can
+import package texture assets and register package particle effect files.
 
 ## Runtime Timing
 
@@ -86,10 +86,10 @@ The old controller timings are now serialized in `prefab.json`:
 
 Committed PNG atlases live under `textures/`. Core and smoke flipbooks use
 `*_exr.png` atlases baked from the authored EXR source sequences with 400px
-frames, 4px borders, and 4px spacing. The current prefab resource loader still
-uploads RGBA8 textures and does not decode OpenEXR directly, so EXR source
+frames, 4px borders, and 4px spacing. The current asset package importer stores
+RGBA8 CPU texture assets and does not decode OpenEXR directly, so EXR source
 content must be converted to a runtime atlas format before being referenced by
-`prefab.resources.json`.
+`assets.package.json`.
 
 ## Reference Examples
 

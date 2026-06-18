@@ -130,13 +130,12 @@ class DiligentGltfViewerExample final : public app::GameInterface {
     const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
         *world,
         *scene,
-        *graphics,
+        *assets,
         prefab,
         scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
             .autoplay_animations = true,
-        },
-        materials);
+        });
     if (!imported.valid()) {
       spdlog::error("Failed to instantiate Diligent GLTFViewer model from {}", model_path_.string());
     }
@@ -368,9 +367,11 @@ class DiligentGltfViewerExample final : public app::GameInterface {
   }
 
   void spawnEnvironment() {
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Skybox",
-                              resolveExampleAssetPath("diligent_gltf_viewer/textures/papermill.ktx").string(),
+                              registerExampleEnvironmentMap(
+                                  assets,
+                                  "diligent_gltf_viewer/textures/papermill.ktx"),
                               1.0f,
                               true);
   }
@@ -429,7 +430,7 @@ int main(int argc, char** argv) {
   config.local_light_distance_damping = 0.03f;
   config.ao_affects_local_lights = false;
   config.lighting_exposure = 1.05f;
-  config.environment_map =
+  config.environment_map_source_path =
       karma::demo::resolveExampleAssetPath("diligent_gltf_viewer/textures/papermill.ktx");
   config.environment_intensity = 1.0f;
   config.environment_draw_skybox = true;

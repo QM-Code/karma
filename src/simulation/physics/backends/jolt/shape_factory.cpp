@@ -85,9 +85,9 @@ JPH::RefConst<JPH::Shape> applyLocalTransform(JPH::RefConst<JPH::Shape> shape,
 JPH::RefConst<JPH::Shape> createMeshShape(const karma::physics::PhysicsShapeDesc& desc,
                                           std::string& error) {
   if (desc.mesh_vertices.empty() || desc.mesh_indices.size() < 3) {
-    error = desc.mesh_path.empty()
+    error = desc.mesh_asset_key.empty()
                 ? "mesh shape requires vertices and triangle indices"
-                : "mesh shape requires vertices and triangle indices: " + desc.mesh_path;
+                : "mesh shape requires vertices and triangle indices: " + desc.mesh_asset_key;
     return nullptr;
   }
 
@@ -105,18 +105,18 @@ JPH::RefConst<JPH::Shape> createMeshShape(const karma::physics::PhysicsShapeDesc
     const uint32_t b = desc.mesh_indices[i + 1];
     const uint32_t c = desc.mesh_indices[i + 2];
     if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
-      error = desc.mesh_path.empty()
+      error = desc.mesh_asset_key.empty()
                   ? "mesh shape index out of range"
-                  : "mesh shape index out of range: " + desc.mesh_path;
+                  : "mesh shape index out of range: " + desc.mesh_asset_key;
       return nullptr;
     }
     triangles.push_back(JPH::IndexedTriangle(a, b, c));
   }
 
   if (triangles.empty()) {
-    error = desc.mesh_path.empty()
+    error = desc.mesh_asset_key.empty()
                 ? "mesh shape requires at least one triangle"
-                : "mesh shape requires at least one triangle: " + desc.mesh_path;
+                : "mesh shape requires at least one triangle: " + desc.mesh_asset_key;
     return nullptr;
   }
 

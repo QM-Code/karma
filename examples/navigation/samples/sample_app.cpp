@@ -554,20 +554,20 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     material.base_color = tintForSample(kind_);
     material.roughness = 0.72f;
     material.metallic = 0.0f;
-    materials->registerMaterialDesc(material_key, material);
+    assets->registerMaterialAsset(material_key, material);
 
     mesh_entity_ = helpers::spawnMeshAsset(*world,
                                            std::string(recastNavigationSampleName(kind_)) + " Mesh",
                                            mesh_key,
                                            mesh_offset_);
     world->get<components::MeshComponent>(mesh_entity_).materials = {
-        components::MeshMaterialBinding{.slot = 0, .material_key = material_key}};
+        components::MeshMaterialAssignment{.slot = 0, .material_key = material_key}};
     world->add(mesh_entity_,
                components::NavMeshSurfaceComponent{
                    .layer_mask = source_mask_,
                    .area = navigation::kNavAreaDefault,
                    .mesh_data = std::make_shared<geometry::MeshData>(combineMeshes(asset_.meshes)),
-                   .mesh_key = mesh_key,
+                   .mesh_asset_key = mesh_key,
                });
 
     nav_entity_ = world->createEntity();
@@ -615,9 +615,9 @@ class RecastNavigationSampleApp final : public app::GameInterface {
                                        .casts_shadows = true,
                                        .shadow_extent = 460.0f,
                                    });
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Environment",
-                              resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
                               0.35f,
                               true);
   }
@@ -1506,7 +1506,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     const ecs::Entity entity =
         helpers::createDebugBoxMarker(*world,
                                       graphics,
-                                      materials,
+                                      assets,
                                       std::string(recastNavigationSampleName(kind_)) + " " +
                                           std::string(name),
                                       color,
@@ -1532,7 +1532,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     const ecs::Entity entity =
         helpers::createDebugBoxMarker(*world,
                                       graphics,
-                                      materials,
+                                      assets,
                                       "Temp Obstacle",
                                       {0.96f, 0.45f, 0.12f, 1.0f},
                                       visual_position,

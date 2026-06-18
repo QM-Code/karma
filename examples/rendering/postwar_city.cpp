@@ -106,7 +106,7 @@ class PostwarCityExample final : public app::GameInterface {
     const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
         *world,
         *scene,
-        *graphics,
+        *assets,
         prefab,
         scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
@@ -277,9 +277,9 @@ class PostwarCityExample final : public app::GameInterface {
   }
 
   void spawnEnvironment() {
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Skybox",
-                              resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
                               0.45f,
                               true);
   }

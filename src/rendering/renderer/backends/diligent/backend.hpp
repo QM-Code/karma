@@ -64,6 +64,16 @@ struct PostProcessPassResources {
   Diligent::IShaderResourceVariable* sampler_var = nullptr;
 };
 
+enum class MaterialPipelineKind : uint32_t {
+  Standard = 0,
+  EnergyShell = 1,
+  WaveVolume = 2,
+  SphereHalo = 3,
+  ScreenWave = 4,
+  SphereGlowVolume = 5,
+  VolumetricSolid = 6,
+};
+
 class DiligentBackend final : public Backend {
  public:
   explicit DiligentBackend(karma::platform::Window& window);
@@ -76,7 +86,6 @@ class DiligentBackend final : public Backend {
 
   renderer::MeshId createMesh(const geometry::MeshData& mesh) override;
   void updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) override;
-  renderer::MeshId createMeshFromFile(const std::filesystem::path& path) override;
   void destroyMesh(renderer::MeshId mesh) override;
   bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const override;
   bool getMeshMaterialSlots(renderer::MeshId mesh,
@@ -215,8 +224,7 @@ class DiligentBackend final : public Backend {
     float thickness_factor = 0.0f;
     float attenuation_distance = std::numeric_limits<float>::infinity();
     glm::vec3 attenuation_color{1.0f, 1.0f, 1.0f};
-    renderer::MaterialDesc::ShadingModel shading_model =
-        renderer::MaterialDesc::ShadingModel::Standard;
+    MaterialPipelineKind shading_model = MaterialPipelineKind::Standard;
     float shell_fresnel_power = 5.0f;
     float shell_fresnel_strength = 1.0f;
     float shell_refraction_strength = 0.08f;
@@ -248,7 +256,7 @@ class DiligentBackend final : public Backend {
     float volume_distortion_strength = 0.0f;
     float volume_noise_strength = 1.0f;
     std::array<glm::vec4, 7> custom_material_params{};
-    std::array<bool, 7> custom_material_param_overrides{};
+    std::array<bool, 7> custom_material_param_enabled{};
     renderer::MaterialDesc::BlendMode blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> base_color_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_srv;
@@ -641,6 +649,8 @@ class DiligentBackend final : public Backend {
                                              const aiMaterial& material,
                                              const std::filesystem::path& asset_path);
   MaterialRecord buildImportedMaterialRecord(const renderer::ImportedMaterialData& material);
+  void applyResolvedMaterial(MaterialRecord& record,
+                             const renderer::ResolvedMaterialDesc& resolved);
   void initializeMaterialBindings(MaterialRecord& record);
   void initializeTextureCoordTransforms(MaterialRecord& record) const;
   void setTextureCoordTransform(MaterialRecord& record,

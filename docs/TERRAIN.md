@@ -43,7 +43,7 @@ Gaea-style exports:
 - Export packed splat/weight maps through `control_pattern` or `control_image`.
   RGBA channels map to `material_layers[0..3]`.
 - Add repeated terrain detail materials in `material_layers`. Prefer
-  `material_key` entries that reference the runtime `MaterialLibrary`, using the
+  `material_key` entries that reference `AssetRegistry` materials, using the
   same material assets and instances that mesh slots use. Terrain consumes
   `base_color`/`albedo`, `normal`, and `roughness` texture aliases when present;
   otherwise it synthesizes a tiny albedo/roughness texture from the resolved

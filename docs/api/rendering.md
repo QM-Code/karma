@@ -9,7 +9,7 @@ registries, then let karma::renderer::RenderSystem submit the frame.
 Post processing is selected by camera, not by global backend state.
 
 - karma::renderer::PostProcessSettings stores the tunable effect values.
-- karma::renderer::PostProcessProfileLibrary stores named settings profiles.
+- karma::content::AssetRegistry stores named settings profiles.
 - karma::components::CameraComponent::post_process_profile_key selects a
   profile for one camera pass.
 - An empty or missing profile key resolves to the default profile.
@@ -21,8 +21,8 @@ profiles in the same frame. Cameras only carry profile intent; backend pass
 objects, render targets, bloom mip chains, shader assets, and temporal history
 resources remain renderer-owned.
 
-Use karma::app::GameInterface::post_process_profiles or
-karma::app::RuntimeModuleContext::post_process_profiles to register profiles:
+Use karma::app::GameInterface::assets or
+karma::app::RuntimeModuleContext::assets to register profiles:
 
 ```cpp
 karma::renderer::PostProcessSettings cinematic{};
@@ -32,7 +32,7 @@ cinematic.bloom_intensity = 0.35f;
 cinematic.tone_mapping_enabled = true;
 cinematic.tone_exposure = 1.1f;
 
-post_process_profiles->registerProfile("camera/cinematic", cinematic);
+assets->registerPostProcessProfile("camera/cinematic", cinematic);
 
 world->add(camera, karma::components::CameraComponent{
     .is_primary = true,

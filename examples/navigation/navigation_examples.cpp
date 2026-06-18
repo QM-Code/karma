@@ -103,13 +103,13 @@ class NavigationExampleApp final : public app::GameInterface {
     const std::string mesh_key = std::string("runtime/navigation/") + exampleName(kind_) + "/surface";
     const std::string material_key = std::string("runtime/navigation/") + exampleName(kind_) + "/surface_material";
     if (graphics != nullptr) {
-      graphics->registerRuntimeMesh(mesh_key, surface_.mesh);
+      assets->registerMeshAsset(mesh_key, surface_.mesh);
     }
-    if (materials != nullptr) {
+    if (assets != nullptr) {
       renderer::MaterialDesc material;
       material.base_color = {0.42f, 0.44f, 0.40f, 1.0f};
       material.roughness = 0.85f;
-      materials->registerMaterialDesc(material_key, material);
+      assets->registerMaterialAsset(material_key, material);
     }
     surface_entity_ = helpers::spawnMesh(*world, "Navigation Surface", mesh_key, material_key, {}, true);
     world->add(surface_entity_, components::NavMeshSurfaceComponent{
@@ -122,10 +122,10 @@ class NavigationExampleApp final : public app::GameInterface {
     end_ = {bounds_.max.x - 1.0f, 0.1f, bounds_.max.z - 1.0f};
     target_ = end_;
 
-    start_marker_ = helpers::createDebugBoxMarker(*world, graphics, materials, "Start",
+    start_marker_ = helpers::createDebugBoxMarker(*world, graphics, assets, "Start",
                                                   {0.2f, 0.8f, 1.0f, 1.0f},
                                                   start_, {0.15f, 0.15f, 0.15f}, true);
-    end_marker_ = helpers::createDebugBoxMarker(*world, graphics, materials, "End",
+    end_marker_ = helpers::createDebugBoxMarker(*world, graphics, assets, "End",
                                                 {1.0f, 0.8f, 0.15f, 1.0f},
                                                 end_, {0.15f, 0.15f, 0.15f}, true);
   }
@@ -160,9 +160,9 @@ class NavigationExampleApp final : public app::GameInterface {
                                  .intensity = 12.0f,
                                  .range = 20.0f,
                              });
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Environment",
-                              resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
                               0.25f,
                               true);
   }
@@ -255,7 +255,7 @@ class NavigationExampleApp final : public app::GameInterface {
       if (!actor_entity_.isValid()) {
         actor_entity_ = helpers::spawnMeshAsset(*world,
                                                 "Click Agent",
-                                                resolveExampleAssetPath("tank_final.glb").string(),
+                                                importExampleMeshAsset(assets, "tank_final.glb"),
                                                 start_);
         components::NavMeshAgentComponent agent;
         agent.nav_mesh_entity = nav_mesh_entity_;
@@ -276,7 +276,7 @@ class NavigationExampleApp final : public app::GameInterface {
       if (!actor_entity_.isValid()) {
         actor_entity_ = helpers::createDebugBoxMarker(*world,
                                                       graphics,
-                                                      materials,
+                                                      assets,
                                                       "Physics Bridge Agent",
                                                       {0.25f, 0.9f, 0.55f, 1.0f},
                                                       start_,
@@ -325,7 +325,7 @@ class NavigationExampleApp final : public app::GameInterface {
       }
       const ecs::Entity marker = helpers::createDebugBoxMarker(*world,
                                                                graphics,
-                                                               materials,
+                                                               assets,
                                                                "Crowd Agent",
                                                                {0.25f, 0.55f, 1.0f, 1.0f},
                                                                position,

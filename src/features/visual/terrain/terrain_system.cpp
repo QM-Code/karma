@@ -13,8 +13,8 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "karma/content/assets/asset_registry.h"
 #include "karma/rendering/renderer/device.h"
-#include "karma/rendering/renderer/material_library.h"
 #include "karma/world/components/camera.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/transform.h"
@@ -692,13 +692,17 @@ std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
 std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
     const components::TerrainMaterialLayer& layer,
     uint32_t layer_index,
-    const renderer::MaterialLibrary* materials) {
+    const content::AssetRegistry* assets) {
   if (!layer.enabled || layer_index >= 4u) {
     return std::nullopt;
   }
 
-  if (!layer.material_key.empty() && materials != nullptr) {
-    if (auto material = materials->resolve(layer.material_key)) {
+  if (!layer.material_key.empty()) {
+    std::optional<renderer::ResolvedMaterialDesc> material;
+    if (assets != nullptr) {
+      material = assets->resolveMaterial(layer.material_key);
+    }
+    if (material.has_value()) {
       renderer::TerrainMaterialLayerData data{};
       data.layer = layer_index;
       data.name = !layer.name.empty() ? layer.name : layer.material_key;
@@ -845,8 +849,8 @@ std::optional<renderer::TerrainTileData> loadImageTerrainTile(
 }
 
 TerrainSystem::TerrainSystem(renderer::GraphicsDevice* device,
-                             const renderer::MaterialLibrary* materials)
-    : device_(device), materials_(materials) {
+                             const content::AssetRegistry* assets)
+    : device_(device), assets_(assets) {
   worker_ = std::thread([this] { workerLoop(); });
 }
 
@@ -937,7 +941,7 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
       .height_value_min = terrain.height_value_min,
       .height_value_max = terrain.height_value_max,
       .tile_index_base = terrain.tile_index_base,
-      .material_library_version = materials_ != nullptr ? materials_->version() : 0u,
+      .asset_registry_version = assets_ != nullptr ? assets_->version() : 0u,
       .material_layers = terrain.material_layers,
       .data_maps = terrain.data_maps,
   };
@@ -955,7 +959,7 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
           static_cast<uint32_t>(std::min<std::size_t>(terrain.material_layers.size(), 4u));
       for (uint32_t layer = 0u; layer < max_layers; ++layer) {
         if (auto data = loadTerrainMaterialLayer(
-                terrain.material_layers[layer], layer, materials_);
+                terrain.material_layers[layer], layer, assets_);
             data.has_value()) {
           device_->uploadTerrainMaterialLayer(state.terrain, *data);
         }

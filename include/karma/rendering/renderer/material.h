@@ -3,9 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <limits>
 #include <memory>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -24,11 +24,7 @@ namespace karma::renderer {
 using Color = math::Color;
 
 /// \ingroup karma_rendering
-/// Material parameters consumed by the renderer backend.
-///
-/// The standard fields describe PBR-ish material inputs. The feature-specific
-/// fields are currently used by built-in shell, wave, halo, and volume shading
-/// models until a more general custom-material pipeline exists.
+/// Standard material surface and render-state data.
 struct MaterialDesc {
   /// Transparent blending mode for material draws.
   enum class BlendMode : uint32_t {
@@ -36,19 +32,6 @@ struct MaterialDesc {
     Additive = 1,
   };
 
-  /// Built-in material shader family.
-  enum class ShadingModel : uint32_t {
-    Standard = 0,
-    EnergyShell = 1,
-    WaveVolume = 2,
-    SphereHalo = 3,
-    ScreenWave = 4,
-    SphereGlowVolume = 5,
-    VolumetricSolid = 6,
-  };
-
-  std::filesystem::path vertex_shader_path;
-  std::filesystem::path fragment_shader_path;
   math::Color base_color{1.0f, 1.0f, 1.0f, 1.0f};
   math::Color emissive_color{0.0f, 0.0f, 0.0f, 1.0f};
   float metallic = 1.0f;
@@ -66,38 +49,7 @@ struct MaterialDesc {
   float thickness = 0.0f;
   float attenuation_distance = std::numeric_limits<float>::infinity();
   math::Color attenuation_color{1.0f, 1.0f, 1.0f, 1.0f};
-  ShadingModel shading_model = ShadingModel::Standard;
-  float shell_fresnel_power = 5.0f;
-  float shell_fresnel_strength = 1.0f;
-  float shell_refraction_strength = 0.08f;
-  float shell_interior_strength = 0.4f;
-  float shell_highlight_strength = 1.0f;
-  float shell_alpha_boost = 0.0f;
-  float shell_swirl_strength = 0.0f;
   bool analytic_sphere_normals = false;
-  float shell_body_strength = 1.0f;
-  float screen_center_x = 0.5f;
-  float screen_center_y = 0.5f;
-  float screen_radius_x = 0.25f;
-  float screen_radius_y = 0.25f;
-  float wave_tint_strength = 0.75f;
-  float wave_distortion_strength = 0.6f;
-  float wave_edge_strength = 0.35f;
-  float wave_noise_strength = 0.65f;
-  glm::vec3 volume_center{0.0f, 0.0f, 0.0f};
-  glm::vec3 volume_axis_x{1.0f, 0.0f, 0.0f};
-  glm::vec3 volume_axis_y{0.0f, 1.0f, 0.0f};
-  glm::vec3 volume_axis_z{0.0f, 0.0f, 1.0f};
-  uint32_t volume_shape = 0u;
-  float volume_radius = 1.0f;
-  float volume_capsule_half_length = 0.0f;
-  float volume_density = 1.0f;
-  float volume_scattering = 1.0f;
-  float volume_anisotropy = 0.0f;
-  float volume_absorption = 0.0f;
-  float volume_distortion_strength = 0.0f;
-  float volume_noise_strength = 1.0f;
-  TextureId base_color_texture = kInvalidTexture;
   bool unlit = false;
   bool transparent = false;
   BlendMode blend_mode = BlendMode::Alpha;
@@ -162,12 +114,7 @@ struct ImportedMaterialData {
 
 /// Pipeline family for a material asset.
 struct MaterialPipelineDesc {
-  enum class Type : uint32_t {
-    Standard = 0,
-    Custom = 1,
-  };
-
-  Type type = Type::Standard;
+  std::string name = "standard";
   std::filesystem::path vertex_shader_path;
   std::filesystem::path fragment_shader_path;
   std::string vertex_entry_point = "main";
@@ -175,7 +122,7 @@ struct MaterialPipelineDesc {
   std::vector<std::string> defines;
 };
 
-/// Named material parameter value used by material assets and instances.
+/// Named material parameter value used by material assets and variants.
 using MaterialParameterValue =
     std::variant<bool,
                  int32_t,
@@ -193,26 +140,31 @@ struct MaterialAssetDesc {
   MaterialPipelineDesc pipeline{};
   MaterialDesc surface{};
   std::unordered_map<std::string, MaterialParameterValue> params;
-  std::unordered_map<std::string, std::filesystem::path> textures;
+  std::unordered_map<std::string, std::string> textures;
   std::filesystem::path material_asset_path;
   uint32_t material_asset_index = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<const ImportedMaterialData> imported_material;
 };
 
-/// Per-object material instance definition registered by key.
-struct MaterialInstanceDesc {
+/// Material variant definition registered by key.
+///
+/// A variant inherits a base material's pipeline, surface, textures, and import
+/// payload, then applies local params and texture assignments. Variants are just
+/// materials: any mesh slot can be assigned either an asset key or a variant key.
+struct MaterialVariantDesc {
   std::string material_key;
-  std::string parent_material_key;
+  std::string base_material_key;
   std::unordered_map<std::string, MaterialParameterValue> params;
-  std::unordered_map<std::string, std::filesystem::path> textures;
+  std::unordered_map<std::string, std::string> textures;
 };
 
-/// Flattened renderer-facing material after asset/instance inheritance.
+/// Flattened renderer-facing material after asset/variant inheritance.
 struct ResolvedMaterialDesc {
   MaterialPipelineDesc pipeline{};
   MaterialDesc surface{};
   std::unordered_map<std::string, MaterialParameterValue> params;
-  std::unordered_map<std::string, std::filesystem::path> textures;
+  std::unordered_map<std::string, std::string> textures;
+  std::unordered_map<std::string, TextureId> texture_handles;
   std::filesystem::path material_asset_path;
   uint32_t material_asset_index = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<const ImportedMaterialData> imported_material;

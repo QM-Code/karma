@@ -17,8 +17,8 @@
 
 #include <spdlog/spdlog.h>
 
-#include "karma/content/importers/mesh_import.h"
-#include "karma/content/prefabs/prefab_resource_context.h"
+#include "karma/content/assets/asset_registry.h"
+#include "karma/content/prefabs/prefab.h"
 #include "karma/core/math/glm.h"
 #include "karma/core/time.h"
 #include "karma/runtime/debug/debug_overlay.h"
@@ -33,6 +33,9 @@
 
 namespace karma::app {
 namespace {
+
+constexpr std::string_view kStartupEnvironmentMapAssetKey =
+    "__engine/startup/environment_map";
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -90,37 +93,35 @@ std::filesystem::path resolveStartupPath(const std::filesystem::path& path) {
   return path;
 }
 
-std::optional<physics::MeshColliderGeometry> loadMeshColliderGeometry(std::string_view mesh_key) {
-  if (mesh_key.empty()) {
+std::optional<physics::MeshColliderGeometry> loadMeshColliderGeometry(
+    const content::AssetRegistry& assets,
+    std::string_view mesh_asset_key) {
+  if (mesh_asset_key.empty()) {
     return std::nullopt;
   }
 
-  const std::vector<geometry::MeshData> meshes =
-      content::importMeshes(std::filesystem::path(std::string(mesh_key)));
+  const geometry::MeshData* mesh = assets.findMeshAsset(mesh_asset_key);
+  if (mesh == nullptr) {
+    return std::nullopt;
+  }
+
   physics::MeshColliderGeometry geometry;
-  for (const geometry::MeshData& mesh : meshes) {
-    if (mesh.vertices.empty() || mesh.indices.empty()) {
+  geometry.vertices.reserve(mesh->vertices.size());
+  for (const glm::vec3& vertex : mesh->vertices) {
+    geometry.vertices.push_back(math::fromGlm(vertex));
+  }
+
+  geometry.indices.reserve(mesh->indices.size());
+  for (std::size_t i = 0; i + 2 < mesh->indices.size(); i += 3) {
+    const uint32_t a = mesh->indices[i];
+    const uint32_t b = mesh->indices[i + 1];
+    const uint32_t c = mesh->indices[i + 2];
+    if (a >= mesh->vertices.size() || b >= mesh->vertices.size() || c >= mesh->vertices.size()) {
       continue;
     }
-
-    const uint32_t base = static_cast<uint32_t>(geometry.vertices.size());
-    geometry.vertices.reserve(geometry.vertices.size() + mesh.vertices.size());
-    for (const glm::vec3& vertex : mesh.vertices) {
-      geometry.vertices.push_back(math::fromGlm(vertex));
-    }
-
-    geometry.indices.reserve(geometry.indices.size() + mesh.indices.size());
-    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-      const uint32_t a = mesh.indices[i];
-      const uint32_t b = mesh.indices[i + 1];
-      const uint32_t c = mesh.indices[i + 2];
-      if (a >= mesh.vertices.size() || b >= mesh.vertices.size() || c >= mesh.vertices.size()) {
-        continue;
-      }
-      geometry.indices.push_back(base + a);
-      geometry.indices.push_back(base + b);
-      geometry.indices.push_back(base + c);
-    }
+    geometry.indices.push_back(a);
+    geometry.indices.push_back(b);
+    geometry.indices.push_back(c);
   }
 
   if (geometry.vertices.empty() || geometry.indices.empty()) {
@@ -208,7 +209,7 @@ std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
                                                     &scene_,
                                                     &systems_,
                                                     graphics_.get(),
-                                                    &materials_,
+                                                    &assets_,
                                                     config_.shadow_map_size,
                                                     config_.shadow_bias,
                                                     config_.shadow_pcf_radius,
@@ -240,9 +241,7 @@ RuntimeModuleContext EngineApp::makeRuntimeModuleContext() {
   return RuntimeModuleContext{
       .scene = &scene_,
       .graphics = graphics_.get(),
-      .materials = &materials_,
-      .post_process_profiles = &post_process_profiles_,
-      .particle_effects = &particle_effects_,
+      .assets = &assets_,
   };
 }
 
@@ -292,17 +291,18 @@ void EngineApp::initSubsystems() {
     graphics_->setVsync(config_.vsync);
     log_init_stage("graphics vsync apply", core::SteadyClock::now());
 
-    render_system_ =
-        std::make_unique<renderer::RenderSystem>(*graphics_, materials_, post_process_profiles_);
+    render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_, assets_);
     log_init_stage("render system create", core::SteadyClock::now());
 
-    particle_system_ =
-        std::make_unique<particles::ParticleSystem>(graphics_.get(), &particle_effects_);
+    particle_system_ = std::make_unique<particles::ParticleSystem>(graphics_.get(), &assets_);
     log_init_stage("particle system create", core::SteadyClock::now());
   }
 
   auto physics_system = std::make_unique<physics::PhysicsSystem>(physics_);
-  physics_system->setMeshColliderGeometryProvider(loadMeshColliderGeometry);
+  physics_system->setMeshColliderGeometryProvider(
+      [this](std::string_view mesh_asset_key) {
+        return loadMeshColliderGeometry(assets_, mesh_asset_key);
+      });
   const auto physics_system_id = systems_.addSystem(std::move(physics_system));
   log_init_stage("physics system create", core::SteadyClock::now());
 
@@ -311,10 +311,10 @@ void EngineApp::initSubsystems() {
   systems_.addDependency(collision_system_id, physics_system_id);
   log_init_stage("collision system create", core::SteadyClock::now());
 #if defined(KARMA_ENABLE_NAVIGATION)
-  systems_.addSystem(std::make_unique<navigation::NavigationSystem>());
+  systems_.addSystem(std::make_unique<navigation::NavigationSystem>(&assets_));
   log_init_stage("navigation system create", core::SteadyClock::now());
 #endif
-  audio_system_ = std::make_unique<audio::AudioSystem>(audio_);
+  audio_system_ = std::make_unique<audio::AudioSystem>(audio_, &assets_);
   log_init_stage("audio system create", core::SteadyClock::now());
   // Register other systems here (PhysicsSystem, AudioSystem, etc.).
   if (startup_diag) {
@@ -377,7 +377,7 @@ void EngineApp::warmUpRenderer() {
   log_stage("scene transforms", section_start, section_end);
 
   section_start = section_end;
-  deformation_system_.update(world_, scene_, *graphics_);
+  deformation_system_.update(world_, scene_, *graphics_, &assets_);
   section_end = core::SteadyClock::now();
   log_stage("mesh deformation", section_start, section_end);
 
@@ -437,7 +437,7 @@ void EngineApp::shutdownSubsystems() {
   debug_ui_context_.reset();
 #endif
   render_system_.reset();
-  prefabs::clearPrefabResourceContext();
+  prefabs::clearPrefabAssetPackages();
   particle_system_.reset();
   for (auto& module : runtime_modules_) {
     if (module) {
@@ -697,9 +697,16 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
   spdlog::set_level(spdlog::level::trace);
   config_ = config;
-  post_process_profiles_.setDefaultProfile(config_.post_process);
+  assets_.registerPostProcessProfile("", config_.post_process);
   loading_splash_presented_ = false;
   config_.loading_splash.image_path = resolveStartupPath(config_.loading_splash.image_path);
+  config_.environment_map_source_path =
+      resolveStartupPath(config_.environment_map_source_path);
+  if (!config_.environment_map_source_path.empty()) {
+    assets_.registerEnvironmentMap(
+        std::string(kStartupEnvironmentMapAssetKey),
+        content::EnvironmentMapAsset{.path = config_.environment_map_source_path});
+  }
   if (const char* vsync_env = std::getenv("KARMA_ENGINE_VSYNC")) {
     config_.vsync = envFlagEnabled(vsync_env);
     spdlog::info("KARMA_ENGINE_VSYNC override: {}", config_.vsync ? "on" : "off");
@@ -781,33 +788,12 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      input_,
                      physics_,
                      graphics_.get(),
-                     materials_,
-                     post_process_profiles_,
-                     particle_effects_,
+                     assets_,
                      systems_);
   section_end = core::SteadyClock::now();
   log_startup_stage("bind game context", section_start, section_end);
 
-  section_start = section_end;
-  prefabs::bindPrefabResourceContext(prefabs::PrefabResourceContext{
-      .graphics = graphics_.get(),
-      .particle_effects = &particle_effects_,
-      .create_texture_rgba8 = [this](int width,
-                                      int height,
-                                      const void* pixels) -> renderer::TextureId {
-        std::lock_guard<std::mutex> lock(loading_splash_graphics_mutex_);
-        return graphics_ ? graphics_->createTextureRGBA8(width, height, pixels)
-                         : renderer::kInvalidTexture;
-      },
-      .destroy_texture = [this](renderer::TextureId texture) {
-        std::lock_guard<std::mutex> lock(loading_splash_graphics_mutex_);
-        if (graphics_) {
-          graphics_->destroyTexture(texture);
-        }
-      },
-  });
-  section_end = core::SteadyClock::now();
-  log_startup_stage("bind prefab context", section_start, section_end);
+  prefabs::bindPrefabAssetRegistry(&assets_);
 
   section_start = section_end;
   for (auto& module : runtime_modules_) {
@@ -894,7 +880,12 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
 
   if (graphics_) {
     section_start = section_end;
-    graphics_->setEnvironmentMap(config_.environment_map,
+    std::filesystem::path startup_environment_path;
+    if (const content::EnvironmentMapAsset* environment =
+            assets_.findEnvironmentMap(kStartupEnvironmentMapAssetKey)) {
+      startup_environment_path = environment->path;
+    }
+    graphics_->setEnvironmentMap(startup_environment_path,
                                  config_.environment_intensity,
                                  config_.environment_draw_skybox);
     spdlog::info("Engine environment setup took {:.2f} ms",
@@ -1117,7 +1108,7 @@ void EngineApp::tick() {
 
   section_start = section_end;
   if (graphics_) {
-    deformation_system_.update(world_, scene_, *graphics_);
+    deformation_system_.update(world_, scene_, *graphics_, &assets_);
   }
   section_end = core::SteadyClock::now();
   const double mesh_deformation_ms = core::elapsedMilliseconds(section_start, section_end);

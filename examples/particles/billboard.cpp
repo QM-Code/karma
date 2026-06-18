@@ -154,14 +154,6 @@ void setEntityPositionIfAlive(ecs::World& world, ecs::Entity entity, const math:
   world.get<components::TransformComponent>(entity).setPosition(position);
 }
 
-void destroyTextureIfValid(renderer::GraphicsDevice* graphics, renderer::TextureId& texture) {
-  if (graphics == nullptr || texture == renderer::kInvalidTexture) {
-    return;
-  }
-  graphics->destroyTexture(texture);
-  texture = renderer::kInvalidTexture;
-}
-
 std::uint8_t toByte(float value) {
   return static_cast<std::uint8_t>(std::lround(saturate(value) * 255.0f));
 }
@@ -269,17 +261,6 @@ std::vector<std::uint8_t> buildExplosionCoreFlipbookAtlas(int frame_size,
   }
 
   return pixels;
-}
-
-renderer::TextureId buildProceduralExplosionCoreFlipbook(renderer::GraphicsDevice& graphics,
-                                                        int frame_size,
-                                                        int border,
-                                                        int spacing) {
-  ScopedStartupTimer timer("Particle example procedural fire atlas generation");
-  const auto atlas = buildExplosionCoreFlipbookAtlas(frame_size, border, spacing);
-  return graphics.createTextureRGBA8(explosionFlipbookAtlasWidth(frame_size, border, spacing),
-                                     explosionFlipbookAtlasHeight(frame_size, border, spacing),
-                                     atlas.data());
 }
 
 std::vector<std::uint8_t> buildSparkAtlas(int frame_size, int frame_count) {
@@ -575,79 +556,55 @@ std::vector<std::uint8_t> buildDebrisAtlas(int frame_size, int frame_count) {
   return pixels;
 }
 
-void registerParticleEffects(particles::ParticleLibrary& particle_effects,
-                             renderer::TextureId spark_texture,
-                             renderer::TextureId glow_texture,
-                             renderer::TextureId smoke_texture,
-                             renderer::TextureId heat_texture,
-                             renderer::TextureId explosion_flipbook_texture,
-                             renderer::TextureId explosion_smoke_flipbook_texture,
-                             renderer::TextureId dust_ring_texture,
-                             renderer::TextureId shock_ring_texture,
-                             renderer::TextureId scorch_texture,
-                             renderer::TextureId debris_texture,
+bool registerTextureAsset(content::AssetRegistry& assets,
+                          std::string_view key,
+                          int width,
+                          int height,
+                          const std::vector<std::uint8_t>& pixels) {
+  if (pixels.empty()) {
+    return false;
+  }
+  content::TextureAsset texture{};
+  texture.desc.width = width;
+  texture.desc.height = height;
+  texture.desc.format = renderer::TextureFormat::RGBA8;
+  texture.bytes = pixels;
+  return assets.registerTextureAsset(std::string(key), std::move(texture));
+}
+
+void registerParticleEffects(content::AssetRegistry& assets,
+                             bool has_explosion_flipbook_texture,
+                             bool has_explosion_smoke_flipbook_texture,
                              bool use_fast_flipbook_effects) {
-  particle_effects.clear();
-  particle_effects.clearTextureAliases();
-  particle_effects.registerTextureAliases({
-      {"spark_atlas", spark_texture},
-      {"glow_atlas", glow_texture},
-      {"smoke_atlas", smoke_texture},
-      {kExplosionTextureSpark, spark_texture},
-      {kExplosionTextureGlow, glow_texture},
-      {kExplosionTextureSmoke, smoke_texture},
-      {"heat_atlas", heat_texture},
-      {"dust_ring_atlas", dust_ring_texture},
-      {"shock_ring_atlas", shock_ring_texture},
-      {"scorch_atlas", scorch_texture},
-      {"debris_atlas", debris_texture},
-      {kExplosionTextureHeat, heat_texture},
-      {kExplosionTextureDustRing, dust_ring_texture},
-      {kExplosionTextureShockRing, shock_ring_texture},
-      {kExplosionTextureScorch, scorch_texture},
-      {kExplosionTextureDebris, debris_texture},
-  });
-  if (explosion_flipbook_texture != renderer::kInvalidTexture) {
-    particle_effects.registerTextureAlias(std::string(kExplosionTextureCoreFlipbook),
-                                          explosion_flipbook_texture);
-  }
-  if (explosion_smoke_flipbook_texture != renderer::kInvalidTexture) {
-    particle_effects.registerTextureAlias(std::string(kExplosionTextureSmokeFlipbook),
-                                          explosion_smoke_flipbook_texture);
-  }
-  particle_effects.registerEffectFiles({
-      {"spark_fountain", resolveExampleAssetPath("particles/spark_fountain.kpeffect")},
-      {"glow_halo", resolveExampleAssetPath("particles/glow_halo.kpeffect")},
-      {"smoke_plume", resolveExampleAssetPath("particles/smoke_plume.kpeffect")},
-      {kExplosionEffectFlash,
-       explosionPackageAssetPath("particles/explosion_flash.kpeffect")},
-      {kExplosionEffectFireball,
-       explosionPackageAssetPath("particles/explosion_fireball.kpeffect")},
-      {kExplosionEffectSmoke,
-       explosionPackageAssetPath("particles/explosion_smoke.kpeffect")},
-      {kExplosionEffectHeat,
-       explosionPackageAssetPath("particles/explosion_heat.kpeffect")},
-      {kExplosionEffectShockRing,
-       explosionPackageAssetPath("particles/explosion_shock_ring.kpeffect")},
-      {kExplosionEffectDustRing,
-       explosionPackageAssetPath("particles/explosion_dust_ring.kpeffect")},
-      {kExplosionEffectScorch,
-       explosionPackageAssetPath("particles/explosion_scorch.kpeffect")},
-      {kExplosionEffectDebris,
-       explosionPackageAssetPath("particles/explosion_debris.kpeffect")},
-      {kExplosionEffectEmbers,
-       explosionPackageAssetPath("particles/explosion_embers.kpeffect")},
-  });
-  if (explosion_flipbook_texture != renderer::kInvalidTexture) {
-    particle_effects.registerEffectFile(
-        std::string(kExplosionEffectCoreFlipbook),
+  auto import_effect = [&](std::string_view key, const std::filesystem::path& path) {
+    assets.importParticleEffect(std::string(key), path);
+  };
+  import_effect("spark_fountain", resolveExampleAssetPath("particles/spark_fountain.kpeffect"));
+  import_effect("glow_halo", resolveExampleAssetPath("particles/glow_halo.kpeffect"));
+  import_effect("smoke_plume", resolveExampleAssetPath("particles/smoke_plume.kpeffect"));
+  import_effect(kExplosionEffectFlash, explosionPackageAssetPath("particles/explosion_flash.kpeffect"));
+  import_effect(kExplosionEffectFireball,
+                explosionPackageAssetPath("particles/explosion_fireball.kpeffect"));
+  import_effect(kExplosionEffectSmoke, explosionPackageAssetPath("particles/explosion_smoke.kpeffect"));
+  import_effect(kExplosionEffectHeat, explosionPackageAssetPath("particles/explosion_heat.kpeffect"));
+  import_effect(kExplosionEffectShockRing,
+                explosionPackageAssetPath("particles/explosion_shock_ring.kpeffect"));
+  import_effect(kExplosionEffectDustRing,
+                explosionPackageAssetPath("particles/explosion_dust_ring.kpeffect"));
+  import_effect(kExplosionEffectScorch,
+                explosionPackageAssetPath("particles/explosion_scorch.kpeffect"));
+  import_effect(kExplosionEffectDebris, explosionPackageAssetPath("particles/explosion_debris.kpeffect"));
+  import_effect(kExplosionEffectEmbers, explosionPackageAssetPath("particles/explosion_embers.kpeffect"));
+  if (has_explosion_flipbook_texture) {
+    import_effect(
+        kExplosionEffectCoreFlipbook,
         use_fast_flipbook_effects
             ? explosionPackageAssetPath("particles/explosion_core_flipbook_fast.kpeffect")
             : explosionPackageAssetPath("particles/explosion_core_flipbook.kpeffect"));
   }
-  if (explosion_smoke_flipbook_texture != renderer::kInvalidTexture) {
-    particle_effects.registerEffectFile(
-        std::string(kExplosionEffectSmokeFlipbook),
+  if (has_explosion_smoke_flipbook_texture) {
+    import_effect(
+        kExplosionEffectSmokeFlipbook,
         use_fast_flipbook_effects
             ? explosionPackageAssetPath("particles/explosion_smoke_flipbook_fast.kpeffect")
             : explosionPackageAssetPath("particles/explosion_smoke_flipbook.kpeffect"));
@@ -662,9 +619,9 @@ class ParticleExample final : public app::GameInterface {
     input->bindKey("toggle_particles", platform::Key::Space, input::Trigger::Pressed);
     input->bindKey("trigger_explosion", platform::Key::E, input::Trigger::Pressed);
 
-    const std::string world_mesh = resolveExampleAssetPath("world.glb").string();
+    const std::string world_mesh = importExampleMeshAsset(assets, "world.glb");
     const std::string environment_map =
-        resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
+        registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
     const int atlas_frame_size = 64;
     const int atlas_frames = 4;
     const bool use_fast_flipbook_effects = true;
@@ -674,79 +631,68 @@ class ParticleExample final : public app::GameInterface {
     spdlog::info("Particle example using fast procedural explosion flipbook");
 
     const std::vector<std::uint8_t> spark_atlas = buildSparkAtlas(atlas_frame_size, atlas_frames);
-    spark_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                  atlas_frame_size,
-                                                  spark_atlas.data());
-
     const std::vector<std::uint8_t> glow_atlas = buildGlowAtlas(atlas_frame_size, atlas_frames);
-    glow_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                 atlas_frame_size,
-                                                 glow_atlas.data());
-
     const std::vector<std::uint8_t> smoke_atlas = buildSmokeAtlas(atlas_frame_size, atlas_frames);
-    smoke_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                  atlas_frame_size,
-                                                  smoke_atlas.data());
-
     const std::vector<std::uint8_t> heat_atlas = buildHeatAtlas(atlas_frame_size, atlas_frames);
-    heat_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                 atlas_frame_size,
-                                                 heat_atlas.data());
-
-    explosion_flipbook_texture_ =
-        buildProceduralExplosionCoreFlipbook(*graphics,
-                                             fallback_frame_size,
-                                             fallback_border,
-                                             fallback_spacing);
+    const std::vector<std::uint8_t> explosion_flipbook_atlas =
+        buildExplosionCoreFlipbookAtlas(fallback_frame_size,
+                                        fallback_border,
+                                        fallback_spacing);
     spdlog::info("Particle example fast mode skips Explosion01 smoke flipbook");
 
     const std::vector<std::uint8_t> dust_ring_atlas =
         buildDustRingAtlas(atlas_frame_size, atlas_frames);
-    dust_ring_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                      atlas_frame_size,
-                                                      dust_ring_atlas.data());
-
     const std::vector<std::uint8_t> shock_ring_atlas =
         buildShockRingAtlas(atlas_frame_size, atlas_frames);
-    shock_ring_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                       atlas_frame_size,
-                                                       shock_ring_atlas.data());
-
     const std::vector<std::uint8_t> scorch_atlas =
         buildScorchAtlas(atlas_frame_size, atlas_frames);
-    scorch_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                   atlas_frame_size,
-                                                   scorch_atlas.data());
-
     const std::vector<std::uint8_t> debris_atlas =
         buildDebrisAtlas(atlas_frame_size, atlas_frames);
-    debris_texture_ = graphics->createTextureRGBA8(atlas_frame_size * atlas_frames,
-                                                   atlas_frame_size,
-                                                   debris_atlas.data());
-    if (particle_effects) {
-      registerParticleEffects(*particle_effects,
-                              spark_texture_,
-                              glow_texture_,
-                              smoke_texture_,
-                              heat_texture_,
-                              explosion_flipbook_texture_,
-                              explosion_smoke_flipbook_texture_,
-                              dust_ring_texture_,
-                              shock_ring_texture_,
-                              scorch_texture_,
-                              debris_texture_,
+    bool has_explosion_flipbook_texture = false;
+    bool has_explosion_smoke_flipbook_texture = false;
+    if (assets) {
+      const int atlas_width = atlas_frame_size * atlas_frames;
+      registerTextureAsset(*assets, "spark_atlas", atlas_width, atlas_frame_size, spark_atlas);
+      registerTextureAsset(*assets, "glow_atlas", atlas_width, atlas_frame_size, glow_atlas);
+      registerTextureAsset(*assets, "smoke_atlas", atlas_width, atlas_frame_size, smoke_atlas);
+      registerTextureAsset(*assets, kExplosionTextureSpark, atlas_width, atlas_frame_size, spark_atlas);
+      registerTextureAsset(*assets, kExplosionTextureGlow, atlas_width, atlas_frame_size, glow_atlas);
+      registerTextureAsset(*assets, kExplosionTextureSmoke, atlas_width, atlas_frame_size, smoke_atlas);
+      registerTextureAsset(*assets, "heat_atlas", atlas_width, atlas_frame_size, heat_atlas);
+      registerTextureAsset(*assets, "dust_ring_atlas", atlas_width, atlas_frame_size, dust_ring_atlas);
+      registerTextureAsset(*assets, "shock_ring_atlas", atlas_width, atlas_frame_size, shock_ring_atlas);
+      registerTextureAsset(*assets, "scorch_atlas", atlas_width, atlas_frame_size, scorch_atlas);
+      registerTextureAsset(*assets, "debris_atlas", atlas_width, atlas_frame_size, debris_atlas);
+      registerTextureAsset(*assets, kExplosionTextureHeat, atlas_width, atlas_frame_size, heat_atlas);
+      registerTextureAsset(*assets, kExplosionTextureDustRing, atlas_width, atlas_frame_size, dust_ring_atlas);
+      registerTextureAsset(*assets, kExplosionTextureShockRing, atlas_width, atlas_frame_size, shock_ring_atlas);
+      registerTextureAsset(*assets, kExplosionTextureScorch, atlas_width, atlas_frame_size, scorch_atlas);
+      registerTextureAsset(*assets, kExplosionTextureDebris, atlas_width, atlas_frame_size, debris_atlas);
+      has_explosion_flipbook_texture =
+          registerTextureAsset(*assets,
+                               kExplosionTextureCoreFlipbook,
+                               explosionFlipbookAtlasWidth(fallback_frame_size,
+                                                           fallback_border,
+                                                           fallback_spacing),
+                               explosionFlipbookAtlasHeight(fallback_frame_size,
+                                                            fallback_border,
+                                                            fallback_spacing),
+                               explosion_flipbook_atlas);
+      registerParticleEffects(*assets,
+                              has_explosion_flipbook_texture,
+                              has_explosion_smoke_flipbook_texture,
                               use_fast_flipbook_effects);
     }
 
     auto world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
-    world->add(world_entity, components::MeshComponent{.mesh_key = world_mesh});
+    world->add(world_entity, components::MeshComponent{.mesh_asset_key = world_mesh});
 
     auto environment_entity = world->createEntity();
     world->setName(environment_entity, "Environment");
     world->add(environment_entity, components::EnvironmentComponent{
-        .environment_map = environment_map,
+        .environment_map_asset_key = environment_map,
         .intensity = 0.35f,
         .draw_skybox = true,
     });
@@ -777,7 +723,7 @@ class ParticleExample final : public app::GameInterface {
                                        });
     explosion_light_entity_ = explosion_light_entity;
 
-    if (particle_effects) {
+    if (assets) {
       fountain_entity_ = createParticleEffectEntity(
           *world,
           "Spark Fountain",
@@ -815,7 +761,7 @@ class ParticleExample final : public app::GameInterface {
           kExplosionEffectHeat,
           makeTransform({3.2f, 0.82f, 0.0f}),
           false);
-      if (explosion_flipbook_texture_ != renderer::kInvalidTexture) {
+      if (has_explosion_flipbook_texture) {
         explosion_core_flipbook_entity_ = createParticleEffectEntity(
             *world,
             "Explosion Core Flipbook",
@@ -823,7 +769,7 @@ class ParticleExample final : public app::GameInterface {
             makeTransform({3.2f, 0.88f, 0.0f}),
             false);
       }
-      if (explosion_smoke_flipbook_texture_ != renderer::kInvalidTexture) {
+      if (has_explosion_smoke_flipbook_texture) {
         explosion_smoke_flipbook_entity_ = createParticleEffectEntity(
             *world,
             "Explosion Smoke Flipbook",
@@ -953,16 +899,31 @@ class ParticleExample final : public app::GameInterface {
   }
 
   void onShutdown() override {
-    destroyTextureIfValid(graphics, spark_texture_);
-    destroyTextureIfValid(graphics, glow_texture_);
-    destroyTextureIfValid(graphics, smoke_texture_);
-    destroyTextureIfValid(graphics, heat_texture_);
-    destroyTextureIfValid(graphics, explosion_flipbook_texture_);
-    destroyTextureIfValid(graphics, explosion_smoke_flipbook_texture_);
-    destroyTextureIfValid(graphics, dust_ring_texture_);
-    destroyTextureIfValid(graphics, shock_ring_texture_);
-    destroyTextureIfValid(graphics, scorch_texture_);
-    destroyTextureIfValid(graphics, debris_texture_);
+    if (assets != nullptr) {
+      const std::array<std::string_view, 17> texture_keys{
+          "spark_atlas",
+          "glow_atlas",
+          "smoke_atlas",
+          kExplosionTextureSpark,
+          kExplosionTextureGlow,
+          kExplosionTextureSmoke,
+          "heat_atlas",
+          "dust_ring_atlas",
+          "shock_ring_atlas",
+          "scorch_atlas",
+          "debris_atlas",
+          kExplosionTextureHeat,
+          kExplosionTextureDustRing,
+          kExplosionTextureShockRing,
+          kExplosionTextureScorch,
+          kExplosionTextureDebris,
+          kExplosionTextureCoreFlipbook,
+      };
+      for (std::string_view key : texture_keys) {
+        assets->unregisterTextureAsset(std::string(key));
+      }
+      assets->unregisterTextureAsset(std::string(kExplosionTextureSmokeFlipbook));
+    }
   }
 
  private:
@@ -1127,16 +1088,6 @@ class ParticleExample final : public app::GameInterface {
   ecs::Entity explosion_smoke_entity_{};
   ecs::Entity explosion_scorch_entity_{};
   ecs::Entity explosion_light_entity_{};
-  renderer::TextureId spark_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId glow_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId smoke_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId heat_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId explosion_flipbook_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId explosion_smoke_flipbook_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId dust_ring_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId shock_ring_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId scorch_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId debris_texture_ = renderer::kInvalidTexture;
   std::vector<ScheduledEffectRestart> scheduled_restarts_;
   bool particles_enabled_ = true;
   bool explosion_light_active_ = false;

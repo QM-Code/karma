@@ -289,8 +289,8 @@ void NavigationSystem::applyCompletedPaths(ecs::World& world) {
   }
 }
 
-NavigationSystem::NavigationSystem()
-    : worker_(std::make_unique<WorkerState>()) {}
+NavigationSystem::NavigationSystem(const content::AssetRegistry* assets)
+    : worker_(std::make_unique<WorkerState>()), assets_(assets) {}
 
 NavigationSystem::~NavigationSystem() = default;
 

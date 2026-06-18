@@ -290,64 +290,63 @@ LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   };
 }
 
-renderer::MaterialDesc buildWaveOutsideMaterialDesc() {
-  renderer::MaterialDesc desc{};
-  desc.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 0.55f};
-  desc.emissive_color = {0.0f, 0.0f, 0.0f, 1.0f};
-  desc.metallic = 0.0f;
-  desc.roughness = 0.42f;
-  desc.transparent = true;
-  desc.double_sided = true;
-  desc.depth_test = true;
-  desc.depth_write = false;
-  desc.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
-  desc.shading_model = renderer::MaterialDesc::ShadingModel::Standard;
-  return desc;
+renderer::MaterialAssetDesc buildWaveOutsideMaterialDesc() {
+  renderer::MaterialAssetDesc asset{};
+  asset.surface.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 0.55f};
+  asset.surface.emissive_color = {0.0f, 0.0f, 0.0f, 1.0f};
+  asset.surface.metallic = 0.0f;
+  asset.surface.roughness = 0.42f;
+  asset.surface.transparent = true;
+  asset.surface.double_sided = true;
+  asset.surface.depth_test = true;
+  asset.surface.depth_write = false;
+  asset.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  return asset;
 }
 
-renderer::MaterialDesc buildWaveVolumeMaterialDesc() {
-  renderer::MaterialDesc desc{};
-  desc.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 1.0f};
-  desc.emissive_color = {0.18f, 0.44f, 0.52f, 1.0f};
-  desc.metallic = 0.0f;
-  desc.roughness = 0.0f;
-  desc.transparent = true;
-  desc.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
-  desc.double_sided = true;
-  desc.depth_test = false;
-  desc.depth_write = false;
-  desc.shading_model = renderer::MaterialDesc::ShadingModel::WaveVolume;
-  desc.shell_fresnel_power = 3.6f;
-  desc.shell_fresnel_strength = 1.5f;
-  desc.shell_refraction_strength = 2.8f;
-  desc.wave_tint_strength = 4.5f;
-  desc.wave_distortion_strength = 6.5f;
-  desc.wave_edge_strength = 1.45f;
-  desc.wave_noise_strength = 1.35f;
-  return desc;
+renderer::MaterialAssetDesc buildWaveVolumeMaterialDesc() {
+  renderer::MaterialAssetDesc asset{};
+  asset.pipeline.name = "wave_volume";
+  asset.surface.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 1.0f};
+  asset.surface.emissive_color = {0.18f, 0.44f, 0.52f, 1.0f};
+  asset.surface.metallic = 0.0f;
+  asset.surface.roughness = 0.0f;
+  asset.surface.transparent = true;
+  asset.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  asset.surface.double_sided = true;
+  asset.surface.depth_test = false;
+  asset.surface.depth_write = false;
+  asset.params["shell_fresnel_power"] = 3.6f;
+  asset.params["shell_fresnel_strength"] = 1.5f;
+  asset.params["shell_refraction_strength"] = 2.8f;
+  asset.params["wave_tint_strength"] = 4.5f;
+  asset.params["wave_distortion_strength"] = 6.5f;
+  asset.params["wave_edge_strength"] = 1.45f;
+  asset.params["wave_noise_strength"] = 1.35f;
+  return asset;
 }
 
-renderer::MaterialDesc buildWaveOverlayMaterialDesc() {
-  renderer::MaterialDesc desc{};
-  desc.metallic = 0.0f;
-  desc.roughness = 1.0f;
-  desc.transparent = true;
-  desc.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
-  desc.double_sided = true;
-  desc.depth_test = false;
-  desc.depth_write = false;
-  desc.shading_model = renderer::MaterialDesc::ShadingModel::ScreenWave;
-  desc.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 1.0f};
-  desc.emissive_color = {0.04f, 0.11f, 0.14f, 1.0f};
-  desc.wave_tint_strength = 1.45f;
-  desc.wave_distortion_strength = 1.9f;
-  desc.wave_edge_strength = 0.78f;
-  desc.wave_noise_strength = 1.05f;
-  desc.screen_center_x = 0.5f;
-  desc.screen_center_y = 0.5f;
-  desc.screen_radius_x = 1.5f;
-  desc.screen_radius_y = 1.5f;
-  return desc;
+renderer::MaterialAssetDesc buildWaveOverlayMaterialDesc() {
+  renderer::MaterialAssetDesc asset{};
+  asset.pipeline.name = "screen_wave";
+  asset.surface.metallic = 0.0f;
+  asset.surface.roughness = 1.0f;
+  asset.surface.transparent = true;
+  asset.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  asset.surface.double_sided = true;
+  asset.surface.depth_test = false;
+  asset.surface.depth_write = false;
+  asset.surface.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 1.0f};
+  asset.surface.emissive_color = {0.04f, 0.11f, 0.14f, 1.0f};
+  asset.params["wave_tint_strength"] = 1.45f;
+  asset.params["wave_distortion_strength"] = 1.9f;
+  asset.params["wave_edge_strength"] = 0.78f;
+  asset.params["wave_noise_strength"] = 1.05f;
+  asset.params["screen_center_x"] = 0.5f;
+  asset.params["screen_center_y"] = 0.5f;
+  asset.params["screen_radius_x"] = 1.5f;
+  asset.params["screen_radius_y"] = 1.5f;
+  return asset;
 }
 
 }  // namespace
@@ -361,15 +360,15 @@ class WaveExample final : public app::GameInterface {
     input->bindKey("cam_right", platform::Key::D);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    world_mesh_ = resolveExampleAssetPath("world.glb").string();
-    wave_mesh_ = resolveExampleAssetPath("wave.glb").string();
-    environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
+    world_mesh_ = importExampleMeshAsset(assets, "world.glb");
+    wave_mesh_ = importExampleMeshAsset(assets, "wave.glb");
+    environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
     aura_quad_mesh_key_ = "runtime/wave/aura_quad/mesh";
     wave_material_key_ = "runtime/wave/sphere/material";
     wave_volume_material_key_ = "runtime/wave/volume/material";
     wave_overlay_material_key_ = "runtime/wave/overlay/material";
     if (graphics != nullptr) {
-      graphics->registerRuntimeMesh(aura_quad_mesh_key_, buildAuraQuadMesh());
+      assets->registerMeshAsset(aura_quad_mesh_key_, buildAuraQuadMesh());
     }
 
     spawnWorld();
@@ -429,22 +428,12 @@ class WaveExample final : public app::GameInterface {
   }
 
   void onShutdown() override {
-    if (particle_effects != nullptr) {
-      particle_effects->unregisterTextureAlias("runtime/wave/glow_texture");
-      particle_effects->unregisterTextureAlias("runtime/wave/distortion_texture");
-    }
-    if (graphics != nullptr) {
-      if (wave_glow_texture_ != renderer::kInvalidTexture) {
-        graphics->destroyTexture(wave_glow_texture_);
-        wave_glow_texture_ = renderer::kInvalidTexture;
-      }
-      if (wave_distortion_texture_ != renderer::kInvalidTexture) {
-        graphics->destroyTexture(wave_distortion_texture_);
-        wave_distortion_texture_ = renderer::kInvalidTexture;
-      }
+    if (assets != nullptr) {
+      assets->unregisterTextureAsset("runtime/wave/glow_texture");
+      assets->unregisterTextureAsset("runtime/wave/distortion_texture");
     }
     if (graphics != nullptr && !aura_quad_mesh_key_.empty()) {
-      graphics->unregisterRuntimeMesh(aura_quad_mesh_key_);
+      assets->unregisterMeshAsset(aura_quad_mesh_key_);
       aura_quad_mesh_key_.clear();
     }
   }
@@ -455,13 +444,13 @@ class WaveExample final : public app::GameInterface {
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-                                 .mesh_key = world_mesh_,
+                                 .mesh_asset_key = world_mesh_,
                              });
 
     const ecs::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
-                                 .environment_map = environment_map_,
+                                 .environment_map_asset_key = environment_map_,
                                  .intensity = 0.28f,
                                  .draw_skybox = true,
                              });
@@ -493,16 +482,16 @@ class WaveExample final : public app::GameInterface {
   }
 
   void spawnWave() {
-    if (materials != nullptr) {
-      materials->registerMaterialDesc(wave_material_key_, buildWaveOutsideMaterialDesc());
+    if (assets != nullptr) {
+      assets->registerMaterialAsset(wave_material_key_, buildWaveOutsideMaterialDesc());
     }
 
     wave_entity_ = world->createEntity();
     world->setName(wave_entity_, "Wave Sphere");
     world->add(wave_entity_, makeWaveTransform());
     world->add(wave_entity_, components::MeshComponent{
-                         .mesh_key = wave_mesh_,
-                         .materials = {components::MeshMaterialBinding{
+                         .mesh_asset_key = wave_mesh_,
+                         .materials = {components::MeshMaterialAssignment{
                              .slot = 0,
                              .material_key = wave_material_key_,
                          }},
@@ -511,16 +500,16 @@ class WaveExample final : public app::GameInterface {
   }
 
   void spawnWaveVolume() {
-    if (materials != nullptr) {
-      materials->registerMaterialDesc(wave_volume_material_key_, buildWaveVolumeMaterialDesc());
+    if (assets != nullptr) {
+      assets->registerMaterialAsset(wave_volume_material_key_, buildWaveVolumeMaterialDesc());
     }
 
     wave_volume_entity_ = world->createEntity();
     world->setName(wave_volume_entity_, "Wave Volume");
     world->add(wave_volume_entity_, makeWaveTransform());
     world->add(wave_volume_entity_, components::MeshComponent{
-                                .mesh_key = wave_mesh_,
-                                .materials = {components::MeshMaterialBinding{
+                                .mesh_asset_key = wave_mesh_,
+                                .materials = {components::MeshMaterialAssignment{
                                     .slot = 0,
                                     .material_key = wave_volume_material_key_,
                                 }},
@@ -530,26 +519,24 @@ class WaveExample final : public app::GameInterface {
   }
 
   void spawnWaveShellParticles() {
-    if (graphics == nullptr) {
-      return;
-    }
-
     const std::vector<std::uint8_t> glow_pixels = buildWaveGlowTexture();
-    wave_glow_texture_ =
-        graphics->createTextureRGBA8(kWaveGlowTextureSize, kWaveGlowTextureSize, glow_pixels.data());
     const std::vector<std::uint8_t> distortion_pixels = buildWaveDistortionTexture();
-    wave_distortion_texture_ = graphics->createTextureRGBA8(
-        kWaveDistortionTextureSize, kWaveDistortionTextureSize, distortion_pixels.data());
-    if (wave_glow_texture_ == renderer::kInvalidTexture) {
-      return;
-    }
     const std::string glow_texture_key = "runtime/wave/glow_texture";
     const std::string distortion_texture_key = "runtime/wave/distortion_texture";
-    if (particle_effects != nullptr) {
-      particle_effects->registerTextureAlias(glow_texture_key, wave_glow_texture_);
-      if (wave_distortion_texture_ != renderer::kInvalidTexture) {
-        particle_effects->registerTextureAlias(distortion_texture_key, wave_distortion_texture_);
-      }
+    if (assets != nullptr) {
+      content::TextureAsset glow_texture{};
+      glow_texture.desc.width = kWaveGlowTextureSize;
+      glow_texture.desc.height = kWaveGlowTextureSize;
+      glow_texture.desc.format = renderer::TextureFormat::RGBA8;
+      glow_texture.bytes = glow_pixels;
+      assets->registerTextureAsset(glow_texture_key, std::move(glow_texture));
+
+      content::TextureAsset distortion_texture{};
+      distortion_texture.desc.width = kWaveDistortionTextureSize;
+      distortion_texture.desc.height = kWaveDistortionTextureSize;
+      distortion_texture.desc.format = renderer::TextureFormat::RGBA8;
+      distortion_texture.bytes = distortion_pixels;
+      assets->registerTextureAsset(distortion_texture_key, std::move(distortion_texture));
     }
 
     auto spawn_emitter = [&](std::string_view name,
@@ -567,24 +554,22 @@ class WaveExample final : public app::GameInterface {
     wave_outer_glow_entity_ =
         spawn_emitter("Wave Outer Glow",
                       buildWaveOuterGlowEmitter(glow_texture_key, kWaveRadius));
-    if (wave_distortion_texture_ != renderer::kInvalidTexture) {
-      wave_distortion_entity_ =
-          spawn_emitter("Wave Distortion Shell",
-                        buildWaveDistortionEmitter(distortion_texture_key, kWaveRadius));
-    }
+    wave_distortion_entity_ =
+        spawn_emitter("Wave Distortion Shell",
+                      buildWaveDistortionEmitter(distortion_texture_key, kWaveRadius));
   }
 
   void spawnWaveOverlay() {
-    if (materials != nullptr) {
-      materials->registerMaterialDesc(wave_overlay_material_key_, buildWaveOverlayMaterialDesc());
+    if (assets != nullptr) {
+      assets->registerMaterialAsset(wave_overlay_material_key_, buildWaveOverlayMaterialDesc());
     }
 
     wave_overlay_entity_ = world->createEntity();
     world->setName(wave_overlay_entity_, "Wave Overlay");
     world->add(wave_overlay_entity_, components::TransformComponent{});
     world->add(wave_overlay_entity_, components::MeshComponent{
-                                      .mesh_key = aura_quad_mesh_key_,
-                                      .materials = {components::MeshMaterialBinding{
+                                      .mesh_asset_key = aura_quad_mesh_key_,
+                                      .materials = {components::MeshMaterialAssignment{
                                           .slot = 0,
                                           .material_key = wave_overlay_material_key_,
                                       }},
@@ -703,8 +688,6 @@ class WaveExample final : public app::GameInterface {
   std::string wave_material_key_;
   std::string wave_volume_material_key_;
   std::string wave_overlay_material_key_;
-  renderer::TextureId wave_glow_texture_ = renderer::kInvalidTexture;
-  renderer::TextureId wave_distortion_texture_ = renderer::kInvalidTexture;
   ecs::Entity wave_entity_{};
   ecs::Entity wave_volume_entity_{};
   ecs::Entity wave_core_glow_entity_{};

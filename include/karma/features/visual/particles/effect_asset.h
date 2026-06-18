@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -25,5 +26,9 @@ struct ParticleEffectAsset {
 };
 
 using ParticleEffectDesc = ParticleEffectAsset;
+
+/// Parses a `.kpeffect` JSON file into a particle effect asset.
+bool loadParticleEffectAsset(const std::filesystem::path& path,
+                             ParticleEffectAsset& out_asset);
 
 }  // namespace karma::particles

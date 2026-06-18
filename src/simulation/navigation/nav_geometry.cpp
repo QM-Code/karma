@@ -4,11 +4,15 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <variant>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <spdlog/spdlog.h>
+
+#include "karma/content/assets/asset_registry.h"
 #include "karma/core/math/glm.h"
 #include "karma/world/components/collider.h"
 #include "karma/world/components/mesh.h"
@@ -145,6 +149,12 @@ void appendGeometry(NavMeshInputGeometry& out,
 }
 
 NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t source_mask) {
+  return collectNavMeshGeometry(world, nullptr, source_mask);
+}
+
+NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
+                                            const content::AssetRegistry* assets,
+                                            uint32_t source_mask) {
   NavMeshInputGeometry geometry;
   bool has_explicit_surfaces = false;
   world.forEach<components::NavMeshSurfaceComponent, components::TransformComponent>(
@@ -165,6 +175,15 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
           return;
         }
 
+        if (!surface.mesh_asset_key.empty()) {
+          if (const geometry::MeshData* mesh =
+                  assets != nullptr ? assets->findMeshAsset(surface.mesh_asset_key) : nullptr) {
+            appendMesh(geometry, *mesh, world_transform, area);
+          } else {
+            spdlog::warn("NavMeshSurface mesh asset key '{}' was not registered",
+                         surface.mesh_asset_key);
+          }
+        }
       });
 
   if (has_explicit_surfaces) {
@@ -180,15 +199,29 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t so
         if (mesh_shape == nullptr) {
           return;
         }
-        if (mesh_shape->vertices.empty() || mesh_shape->indices.empty()) {
-          return;
-        }
 
         const auto& transform = world.get<components::TransformComponent>(entity);
         const glm::mat4 world_transform = makeTransform(transform.getPosition(),
                                                         transform.getRotation(),
                                                         transform.getScale());
-        appendMesh(geometry, *mesh_shape, world_transform, kNavAreaDefault);
+        if (!mesh_shape->vertices.empty() && !mesh_shape->indices.empty()) {
+          appendMesh(geometry, *mesh_shape, world_transform, kNavAreaDefault);
+          return;
+        }
+
+        const auto& mesh_component = world.get<components::MeshComponent>(entity);
+        const std::string_view mesh_asset_key =
+            !mesh_shape->mesh_asset_key.empty() ? std::string_view(mesh_shape->mesh_asset_key)
+                                                : std::string_view(mesh_component.mesh_asset_key);
+        if (!mesh_asset_key.empty()) {
+          if (const geometry::MeshData* mesh =
+                  assets != nullptr ? assets->findMeshAsset(mesh_asset_key) : nullptr) {
+            appendMesh(geometry, *mesh, world_transform, kNavAreaDefault);
+          } else {
+            spdlog::warn("Mesh collider nav source asset key '{}' was not registered",
+                         mesh_asset_key);
+          }
+        }
       });
   appendOffMeshLinks(geometry, world, source_mask);
   appendConvexVolumes(geometry, world, source_mask);

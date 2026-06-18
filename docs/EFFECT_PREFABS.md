@@ -36,7 +36,7 @@ Directory prefabs are loaded from `prefab.json`:
           "scale": [1, 1, 1]
         },
         "MeshComponent": {
-          "mesh_key": "assets/crate.glb",
+          "mesh_asset_key": "assets/crate",
           "materials": [
             {
               "slot": 0,
@@ -76,27 +76,34 @@ and lookup maps by saved node name and id.
 Use `prefabs::destroyPrefab(world, scene, instance.root)` to remove a loaded
 subtree. Use `prefabs::savePrefab(...)` to write an entity subtree back to JSON.
 
-## Resource Sidecars
+## Asset Packages
 
-Use `prefab.resources.json` beside `prefab.json` when a prefab needs texture
-aliases or particle effect registration before its entities are created. The
-runtime loads the sidecar automatically when the prefab directory is passed to
+Use `assets.package.json` beside `prefab.json` when a prefab needs texture
+assets or particle effect registration before its entities are created. The
+runtime imports the package automatically when the prefab directory is passed to
 `prefabs::instantiatePrefab(...)`:
 
 ```json
 {
   "version": 1,
-  "textures": [
-    { "key": "orb_core_atlas", "path": "textures/orb_core_atlas.png" }
-  ],
-  "particle_effects": [
-    { "key": "energy_orb_core", "path": "particles/energy_orb_core.kpeffect" }
+  "assets": [
+    {
+      "type": "texture_rgba8",
+      "key": "orb_core_atlas",
+      "path": "textures/orb_core_atlas.png"
+    },
+    {
+      "type": "particle_effect",
+      "key": "energy_orb_core",
+      "path": "particles/energy_orb_core.kpeffect"
+    }
   ]
 }
 ```
 
-The paths are relative to the prefab directory. Sidecar resources are cached by
-prefab directory and released when the app clears the prefab resource context.
+The paths are relative to the prefab directory. Package assets are cached by
+prefab directory and registry, then released when the prefab instance is
+destroyed or when the app clears cached prefab asset packages.
 
 Variants should be separate JSON prefab files or post-instantiation component
 edits in C++. The old prefab parameter binding syntax is removed.

@@ -154,7 +154,7 @@ void restartPrefabParticleEffects(ecs::World& world, const prefabs::PrefabInstan
 }
 
 void applyOrbAccent(ecs::World& world,
-                    renderer::MaterialLibrary* materials,
+                    content::AssetRegistry* assets,
                     const prefabs::PrefabInstance& instance,
                     const math::Color& color,
                     std::string_view shell_material_key) {
@@ -184,7 +184,7 @@ void applyOrbAccent(ecs::World& world,
                       {1.0f, 1.0f, 1.0f, 0.0f});
 
   const ecs::Entity shell_entity = instance.find("shell");
-  if (!shell_material_key.empty() && materials != nullptr && world.isAlive(shell_entity) &&
+  if (!shell_material_key.empty() && assets != nullptr && world.isAlive(shell_entity) &&
       world.has<components::MeshComponent>(shell_entity)) {
     auto& shell_mesh = world.get<components::MeshComponent>(shell_entity);
     const std::string material_key(shell_material_key);
@@ -204,8 +204,8 @@ void applyOrbAccent(ecs::World& world,
     shell_material.roughness = 0.68f;
     shell_material.unlit = true;
     shell_material.transparent = false;
-    materials->registerMaterialDesc(material_key, shell_material);
-    shell_mesh.materials = {components::MeshMaterialBinding{
+    assets->registerMaterialAsset(material_key, shell_material);
+    shell_mesh.materials = {components::MeshMaterialAssignment{
         .slot = 0,
         .material_key = material_key,
     }};
@@ -236,7 +236,7 @@ class ParticleGalleryExample final : public app::GameInterface {
     input->bindKey("toggle_particles", platform::Key::Space, input::Trigger::Pressed);
     input->bindKey("restart_explosions", platform::Key::R, input::Trigger::Pressed);
 
-    world_mesh_ = resolveExampleAssetPath("world.glb").string();
+    world_mesh_ = importExampleMeshAsset(assets, "world.glb");
     log_stats_ = envFlagEnabled("KARMA_PARTICLE_GALLERY_STATS");
 
     {
@@ -517,7 +517,7 @@ class ParticleGalleryExample final : public app::GameInterface {
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-                                 .mesh_key = world_mesh_,
+                                 .mesh_asset_key = world_mesh_,
                                  .visible = true,
                              });
   }
@@ -606,7 +606,7 @@ class ParticleGalleryExample final : public app::GameInterface {
       }
 
       applyOrbAccent(*world,
-                     materials,
+                     assets,
                      *orb,
                      spec.accent,
                      "particle_gallery_orb_shell_" + std::to_string(i));
@@ -711,7 +711,7 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.75f;
   config.lighting_exposure = 1.08f;
-  config.environment_map =
+  config.environment_map_source_path =
       karma::demo::resolveExampleAssetPath("diligent_gltf_viewer/textures/papermill.ktx");
   config.environment_intensity = 0.22f;
   config.environment_draw_skybox = false;

@@ -180,7 +180,7 @@ void bindFlyCameraControls(input::InputSystem& input) {
   input.bindMouse("cam_look", platform::MouseButton::Right);
 }
 
-void addDefaultLighting(ecs::World& world) {
+void addDefaultLighting(ecs::World& world, content::AssetRegistry* assets) {
   auto light = world.createEntity();
   components::TransformComponent light_xform{};
   light_xform.setPosition({0.0f, 35.0f, 0.0f});
@@ -195,7 +195,7 @@ void addDefaultLighting(ecs::World& world) {
 
   auto environment = world.createEntity();
   components::EnvironmentComponent env{};
-  env.environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
+  env.environment_map_asset_key = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
   env.intensity = 0.45f;
   env.draw_skybox = true;
   world.add(environment, env);

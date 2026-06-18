@@ -9,6 +9,10 @@ namespace karma::ecs {
 class World;
 }
 
+namespace karma::content {
+class AssetRegistry;
+}
+
 namespace karma::scene {
 struct GltfScenePrefab;
 }
@@ -28,6 +32,11 @@ void appendGeometry(NavMeshInputGeometry& out,
 NavMeshInputGeometry collectNavMeshGeometry(const scene::GltfScenePrefab& prefab);
 /// Collects navmesh geometry from ECS navmesh surface/off-mesh-link components.
 NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
+                                            uint32_t source_mask = 0xffffffffu);
+/// Collects navmesh geometry from ECS components, resolving mesh asset keys
+/// through the runtime asset registry when embedded mesh data is not present.
+NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
+                                            const content::AssetRegistry* assets,
                                             uint32_t source_mask = 0xffffffffu);
 
 }  // namespace karma::navigation

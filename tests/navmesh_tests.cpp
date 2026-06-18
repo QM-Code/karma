@@ -10,6 +10,7 @@ int main() {
   testNearestPolyFlagsAndSnapshotRefresh();
   testGlbPrefabCollectionAppliesWorldTransform();
   testWorldSurfaceCollectionUsesNavMeshSurfaceArea();
+  testWorldSurfaceCollectionResolvesMeshAssetKey();
   testAreaFlagsFilterQueries();
   testConvexVolumeMarksArea();
   testPartitionModesAndTiledSnapshot();

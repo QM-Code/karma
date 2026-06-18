@@ -623,7 +623,7 @@ Json serializeMesh(const components::MeshComponent& component) {
     });
   }
   return Json{
-      {"mesh_key", component.mesh_key},
+      {"mesh_asset_key", component.mesh_asset_key},
       {"materials", std::move(materials)},
       {"visible", component.visible},
       {"shadow_visible", component.shadow_visible},
@@ -634,8 +634,17 @@ std::optional<components::MeshComponent> deserializeMesh(const Json& json) {
   if (!json.is_object()) {
     return std::nullopt;
   }
+  if (json.contains("mesh_key") ||
+      json.contains("material_key") ||
+      json.contains("texture_key") ||
+      json.contains("mesh_id") ||
+      json.contains("material_id") ||
+      json.contains("owns_mesh_id") ||
+      json.contains("owns_material_id")) {
+    return std::nullopt;
+  }
   components::MeshComponent component{};
-  if (!readString(json, "mesh_key", component.mesh_key) ||
+  if (!readString(json, "mesh_asset_key", component.mesh_asset_key) ||
       !readBool(json, "visible", component.visible) ||
       !readBool(json, "shadow_visible", component.shadow_visible)) {
     return std::nullopt;
@@ -650,7 +659,7 @@ std::optional<components::MeshComponent> deserializeMesh(const Json& json) {
       if (!material_json.is_object()) {
         return std::nullopt;
       }
-      components::MeshMaterialBinding binding{};
+      components::MeshMaterialAssignment binding{};
       if (!readUint32(material_json, "slot", binding.slot) ||
           !readString(material_json, "material_key", binding.material_key)) {
         return std::nullopt;
@@ -658,18 +667,6 @@ std::optional<components::MeshComponent> deserializeMesh(const Json& json) {
       if (!binding.material_key.empty()) {
         component.materials.push_back(std::move(binding));
       }
-    }
-  } else if (const auto old_material_it = json.find("material_key");
-             old_material_it != json.end()) {
-    if (!old_material_it->is_string()) {
-      return std::nullopt;
-    }
-    const std::string material_key = old_material_it->get<std::string>();
-    if (!material_key.empty()) {
-      component.materials.push_back(components::MeshMaterialBinding{
-          .slot = 0,
-          .material_key = material_key,
-      });
     }
   }
   return component;
@@ -1482,7 +1479,7 @@ Json serializeColliderShape(const components::MeshColliderShape& shape) {
   for (const math::Vec3& vertex : shape.vertices) {
     vertices.push_back(toJson(vertex));
   }
-  return Json{{"mesh_path", shape.mesh_path},
+  return Json{{"mesh_asset_key", shape.mesh_asset_key},
               {"vertices", std::move(vertices)},
               {"indices", shape.indices}};
 }
@@ -1673,7 +1670,8 @@ std::optional<components::ColliderComponent> deserializeCollider(const Json& jso
       components::MeshColliderShape shape{};
       const auto vertices_it = shape_json.find("vertices");
       const auto indices_it = shape_json.find("indices");
-      if (!readString(shape_json, "mesh_path", shape.mesh_path) ||
+      if (shape_json.contains("mesh_path") ||
+          !readString(shape_json, "mesh_asset_key", shape.mesh_asset_key) ||
           (vertices_it != shape_json.end() && !readVec3Array(*vertices_it, shape.vertices)) ||
           (indices_it != shape_json.end() && !readUint32Array(*indices_it, shape.indices))) {
         return std::nullopt;
@@ -1805,11 +1803,8 @@ Json serializeParticleEffectOverride(
   if (component.source_jitter_radius.has_value()) {
     json["source_jitter_radius"] = *component.source_jitter_radius;
   }
-  if (component.source_mesh_key.has_value()) {
-    json["source_mesh_key"] = *component.source_mesh_key;
-  }
-  if (component.source_mesh_path.has_value()) {
-    json["source_mesh_path"] = *component.source_mesh_path;
+  if (component.source_mesh_asset_key.has_value()) {
+    json["source_mesh_asset_key"] = *component.source_mesh_asset_key;
   }
   if (component.source_distribution.has_value()) {
     json["source_distribution"] = sourceDistributionName(*component.source_distribution);
@@ -1820,6 +1815,9 @@ Json serializeParticleEffectOverride(
 std::optional<components::ParticleEffectOverrideComponent>
 deserializeParticleEffectOverride(const Json& json) {
   if (!json.is_object()) {
+    return std::nullopt;
+  }
+  if (json.contains("source_mesh_key") || json.contains("source_mesh_path")) {
     return std::nullopt;
   }
   components::ParticleEffectOverrideComponent component{};
@@ -1918,17 +1916,11 @@ deserializeParticleEffectOverride(const Json& json) {
     }
     component.source_sampling = sampling;
   }
-  if (const auto it = json.find("source_mesh_key"); it != json.end()) {
+  if (const auto it = json.find("source_mesh_asset_key"); it != json.end()) {
     if (!it->is_string()) {
       return std::nullopt;
     }
-    component.source_mesh_key = it->get<std::string>();
-  }
-  if (const auto it = json.find("source_mesh_path"); it != json.end()) {
-    if (!it->is_string()) {
-      return std::nullopt;
-    }
-    component.source_mesh_path = it->get<std::string>();
+    component.source_mesh_asset_key = it->get<std::string>();
   }
   if (const auto it = json.find("source_distribution"); it != json.end()) {
     if (!it->is_string()) {

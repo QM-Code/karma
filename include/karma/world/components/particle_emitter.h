@@ -132,8 +132,7 @@ struct ParticleEmitterComponent : ecs::ComponentTag {
   bool source_closed_loop = false;
   ParticleSourceSamplingMode source_sampling = ParticleSourceSamplingMode::Random;
   float source_jitter_radius = 0.0f;
-  std::string source_mesh_key;
-  std::string source_mesh_path;
+  std::string source_mesh_asset_key;
   ParticleSourceDistribution source_distribution = ParticleSourceDistribution::Uniform;
   float radial_speed_min = 0.0f;
   float radial_speed_max = 0.0f;

@@ -7,8 +7,8 @@
 #include <string>
 #include <tuple>
 
+#include "karma/content/assets/asset_registry.h"
 #include "karma/core/time.h"
-#include "karma/features/visual/particles/effect_library.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/world/components/particle_effect.h"
 #include "karma/world/components/particle_effect_override.h"
@@ -133,13 +133,9 @@ uint64_t hashParticleEffectOverride(
   }
   seed = hashOptionalEnum(seed, effect_override->source_sampling);
   seed = hashOptionalFloat(seed, effect_override->source_jitter_radius);
-  seed = hashCombine(seed, effect_override->source_mesh_key.has_value() ? 1ull : 0ull);
-  if (effect_override->source_mesh_key.has_value()) {
-    seed = hashString(seed, *effect_override->source_mesh_key);
-  }
-  seed = hashCombine(seed, effect_override->source_mesh_path.has_value() ? 1ull : 0ull);
-  if (effect_override->source_mesh_path.has_value()) {
-    seed = hashString(seed, *effect_override->source_mesh_path);
+  seed = hashCombine(seed, effect_override->source_mesh_asset_key.has_value() ? 1ull : 0ull);
+  if (effect_override->source_mesh_asset_key.has_value()) {
+    seed = hashString(seed, *effect_override->source_mesh_asset_key);
   }
   seed = hashOptionalEnum(seed, effect_override->source_distribution);
   return seed;
@@ -245,11 +241,8 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   if (effect_override.source_jitter_radius.has_value()) {
     emitter.source_jitter_radius = *effect_override.source_jitter_radius;
   }
-  if (effect_override.source_mesh_key.has_value()) {
-    emitter.source_mesh_key = *effect_override.source_mesh_key;
-  }
-  if (effect_override.source_mesh_path.has_value()) {
-    emitter.source_mesh_path = *effect_override.source_mesh_path;
+  if (effect_override.source_mesh_asset_key.has_value()) {
+    emitter.source_mesh_asset_key = *effect_override.source_mesh_asset_key;
   }
   if (effect_override.source_distribution.has_value()) {
     emitter.source_distribution = *effect_override.source_distribution;
@@ -452,14 +445,59 @@ renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
 
 }  // namespace
 
+ParticleSystem::~ParticleSystem() {
+  releaseTextureCache();
+}
+
+void ParticleSystem::releaseTextureCache() {
+  if (device_ != nullptr) {
+    for (const auto& [key, texture] : texture_asset_cache_) {
+      (void)key;
+      if (texture != renderer::kInvalidTexture) {
+        device_->destroyTexture(texture);
+      }
+    }
+  }
+  texture_asset_cache_.clear();
+}
+
+renderer::TextureId ParticleSystem::resolveTextureAsset(const std::string& texture_key) {
+  if (texture_key.empty() || assets_ == nullptr || device_ == nullptr) {
+    return renderer::kInvalidTexture;
+  }
+  if (const auto it = texture_asset_cache_.find(texture_key);
+      it != texture_asset_cache_.end()) {
+    return it->second;
+  }
+
+  const content::TextureAsset* texture = assets_->findTextureAsset(texture_key);
+  if (texture == nullptr ||
+      texture->desc.format != renderer::TextureFormat::RGBA8 ||
+      texture->desc.width <= 0 ||
+      texture->desc.height <= 0 ||
+      texture->bytes.size() != static_cast<std::size_t>(texture->desc.width) *
+                                   static_cast<std::size_t>(texture->desc.height) * 4u) {
+    return renderer::kInvalidTexture;
+  }
+
+  renderer::TextureId id = device_->createTexture(texture->desc);
+  if (id != renderer::kInvalidTexture) {
+    device_->updateTextureRGBA8(id,
+                                texture->desc.width,
+                                texture->desc.height,
+                                texture->bytes.data());
+    texture_asset_cache_[texture_key] = id;
+  }
+  return id;
+}
+
 uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
-  if (library_ == nullptr) {
+  if (assets_ == nullptr) {
     return 0u;
   }
 
   uint32_t binding_updates = 0u;
-  library_->update();
-  const uint64_t library_version = library_->version();
+  const uint64_t asset_version = assets_->version();
   world.forEach<components::ParticleEffectComponent>([&](const ecs::Entity entity) {
     auto& effect = world.get<components::ParticleEffectComponent>(entity);
     if (!effect.auto_apply || effect.effect_key.empty()) {
@@ -474,7 +512,7 @@ uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
 
     const bool has_emitter = world.has<components::ParticleEmitterComponent>(entity);
     const bool needs_apply = !has_emitter ||
-                             effect.applied_version != library_version ||
+                             effect.applied_version != asset_version ||
                              effect.applied_override_hash != override_hash ||
                              effect.applied_restart_count != effect.restart_count ||
                              effect.applied_effect_key != effect.effect_key;
@@ -483,8 +521,14 @@ uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
     }
 
     components::ParticleEmitterComponent emitter{};
-    if (!library_->instantiateEmitter(effect.effect_key, emitter)) {
+    const ParticleEffectAsset* asset = assets_->findParticleEffect(effect.effect_key);
+    const ParticleEmitterDesc* primary = asset != nullptr ? asset->primaryEmitter() : nullptr;
+    if (primary == nullptr) {
       return;
+    }
+    emitter = primary->emitter;
+    if (!primary->texture_key.empty()) {
+      emitter.texture_key = primary->texture_key;
     }
 
     if (has_emitter) {
@@ -505,7 +549,7 @@ uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
     }
 
     world.add(entity, std::move(emitter));
-    effect.applied_version = library_version;
+    effect.applied_version = asset_version;
     effect.applied_override_hash = override_hash;
     effect.applied_restart_count = effect.restart_count;
     effect.applied_effect_key = effect.effect_key;
@@ -516,6 +560,11 @@ uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
 }
 
 void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alpha) {
+  if (assets_ != nullptr && assets_->textureVersion() != last_texture_version_) {
+    releaseTextureCache();
+    last_texture_version_ = assets_->textureVersion();
+  }
+
   renderer::ParticlePassStats frame_stats{};
   const auto sync_start = core::SteadyClock::now();
   frame_stats.effect_binding_updates = syncEffectBindings(world);
@@ -534,12 +583,19 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
 
   auto resolve_source_mesh = [&](const components::ParticleEmitterComponent& emitter) {
     renderer::MeshId mesh = renderer::kInvalidMesh;
-    if (library_ != nullptr && !emitter.source_mesh_key.empty()) {
-      mesh = library_->resolveMeshSourceAlias(emitter.source_mesh_key);
-    }
-    if (mesh == renderer::kInvalidMesh && library_ != nullptr &&
-        !emitter.source_mesh_path.empty()) {
-      mesh = library_->resolveMeshSourceAlias(emitter.source_mesh_path);
+    if (device_ != nullptr &&
+        assets_ != nullptr &&
+        !emitter.source_mesh_asset_key.empty()) {
+      const auto cache_it = mesh_asset_cache_.find(emitter.source_mesh_asset_key);
+      if (cache_it != mesh_asset_cache_.end()) {
+        mesh = cache_it->second;
+      } else if (const geometry::MeshData* mesh_asset =
+                     assets_->findMeshAsset(emitter.source_mesh_asset_key)) {
+        mesh = device_->registerRuntimeMesh(emitter.source_mesh_asset_key, *mesh_asset);
+        if (mesh != renderer::kInvalidMesh) {
+          mesh_asset_cache_[emitter.source_mesh_asset_key] = mesh;
+        }
+      }
     }
     math::Vec3 bounds_center{};
     float bounds_radius = 0.0f;
@@ -571,10 +627,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       return;
     }
 
-    const renderer::TextureId texture =
-        (library_ != nullptr && !emitter.texture_key.empty())
-            ? library_->resolveTextureAlias(emitter.texture_key)
-            : renderer::kInvalidTexture;
+    const renderer::TextureId texture = resolveTextureAsset(emitter.texture_key);
     const auto [source_mesh, source_mesh_bounds_center, source_mesh_bounds_radius] =
         resolve_source_mesh(emitter);
     const renderer::ParticleEmitterGpuDesc desc =
@@ -594,7 +647,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
     frame_stats.submitted_emitters += 1u;
   };
 
-  if (library_ != nullptr) {
+  if (assets_ != nullptr) {
     world.forEach<components::ParticleEffectComponent, components::TransformComponent>(
         [&](const ecs::Entity entity) {
       const auto& effect = world.get<components::ParticleEffectComponent>(entity);
@@ -602,7 +655,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         return;
       }
 
-      const ParticleEffectAsset* asset = library_->find(effect.effect_key);
+      const ParticleEffectAsset* asset = assets_->findParticleEffect(effect.effect_key);
       if (asset == nullptr || asset->emitters.empty()) {
         return;
       }

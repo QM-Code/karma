@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "karma/core/math/types.h"
+#include "karma/content/assets/asset_registry.h"
 #include "karma/runtime/app/game_interface.h"
 #include "karma/runtime/app/runtime_module.h"
 #include "karma/core/time.h"
@@ -20,15 +21,12 @@
 #include "karma/media/audio/audio_system.h"
 #include "karma/platform/window/window.h"
 #include "karma/features/visual/lights/light_pulse_system.h"
-#include "karma/features/visual/particles/effect_library.h"
 #include "karma/features/visual/particles/particle_system.h"
 #include "karma/runtime/app/ui_context.h"
 #include "karma/simulation/physics/physics_world.hpp"
 #include "karma/simulation/physics/physics_system.h"
 #include "karma/rendering/renderer/device.h"
-#include "karma/rendering/renderer/material_library.h"
 #include "karma/rendering/renderer/post_process.h"
-#include "karma/rendering/renderer/post_process_profile_library.h"
 #include "karma/rendering/renderer/render_system.h"
 #include "karma/world/scene/scene.h"
 #include "karma/world/systems/system_graph.h"
@@ -65,7 +63,8 @@ struct EngineConfig {
   bool vsync = false;
   bool fullscreen = false;
   bool cursor_visible = true;
-  std::filesystem::path environment_map;
+  /// Source path imported as the startup default environment map asset.
+  std::filesystem::path environment_map_source_path;
   float environment_intensity = 0.0f;
   bool environment_draw_skybox = true;
   bool enable_anisotropy = false;
@@ -159,9 +158,7 @@ class EngineApp {
   physics::World physics_;
   ecs::World world_;
   scene::Scene scene_;
-  renderer::MaterialLibrary materials_;
-  renderer::PostProcessProfileLibrary post_process_profiles_;
-  particles::ParticleLibrary particle_effects_;
+  content::AssetRegistry assets_;
   renderer::TextureId loading_splash_texture_ = renderer::kInvalidTexture;
   int loading_splash_texture_width_ = 0;
   int loading_splash_texture_height_ = 0;

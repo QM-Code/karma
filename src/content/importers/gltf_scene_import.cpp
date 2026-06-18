@@ -1,6 +1,7 @@
 #include "karma/content/importers/gltf_scene_import.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include "karma/content/assets/asset_registry.h"
 #include "gltf_document.h"
 #include "gltf_scene_animation_import.h"
 #include "gltf_scene_mesh_import.h"
@@ -573,43 +575,101 @@ std::string primitiveDisplayName(const GltfScenePrefabNode& node,
   return nodeDisplayName(node, node_index) + " Primitive " + std::to_string(primitive_index);
 }
 
-std::string prefabResourceKey(const GltfScenePrefab& prefab,
+std::string sanitizeAssetKeySegment(std::string_view value) {
+  std::string out;
+  out.reserve(value.size());
+  bool last_was_separator = false;
+  for (const unsigned char ch : value) {
+    if (std::isalnum(ch)) {
+      out.push_back(static_cast<char>(std::tolower(ch)));
+      last_was_separator = false;
+    } else if (!last_was_separator) {
+      out.push_back('_');
+      last_was_separator = true;
+    }
+  }
+  while (!out.empty() && out.front() == '_') {
+    out.erase(out.begin());
+  }
+  while (!out.empty() && out.back() == '_') {
+    out.pop_back();
+  }
+  return out.empty() ? std::string("scene") : out;
+}
+
+uint64_t stableHash(std::string_view value) {
+  uint64_t hash = 14695981039346656037ull;
+  for (const unsigned char ch : value) {
+    hash ^= static_cast<uint64_t>(ch);
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
+std::string hex64(uint64_t value) {
+  constexpr char kDigits[] = "0123456789abcdef";
+  std::string out(16u, '0');
+  for (int i = 15; i >= 0; --i) {
+    out[static_cast<size_t>(i)] = kDigits[value & 0x0full];
+    value >>= 4u;
+  }
+  return out;
+}
+
+std::string defaultAssetKeyPrefix(const GltfScenePrefab& prefab) {
+  const std::string raw_stem =
+      prefab.source_path.empty() ? std::string("imported_gltf") : prefab.source_path.stem().string();
+  const std::string stem = sanitizeAssetKeySegment(raw_stem);
+  std::string hash_source = prefab.source_path.lexically_normal().generic_string();
+  if (hash_source.empty()) {
+    hash_source = stem;
+  }
+  return "gltf/" + stem + "/" + hex64(stableHash(hash_source));
+}
+
+std::string normalizeAssetKeyPrefix(std::string prefix) {
+  while (prefix.size() > 1u && prefix.back() == '/') {
+    prefix.pop_back();
+  }
+  return prefix;
+}
+
+std::string prefabResourceKey(std::string_view asset_key_prefix,
                               uint32_t node_index,
                               size_t primitive_index,
                               std::string_view suffix) {
-  std::string key = prefab.source_path.empty() ? std::string("imported_gltf")
-                                               : prefab.source_path.string();
-  key.append("#node=");
+  std::string key(asset_key_prefix);
+  key.append("/nodes/");
   key.append(std::to_string(node_index));
-  key.append("/primitive=");
+  key.append("/primitives/");
   key.append(std::to_string(primitive_index));
   key.push_back('/');
   key.append(suffix);
   return key;
 }
 
-std::string materialResourceKey(const GltfScenePrefab& prefab, uint32_t material_index) {
-  std::string key = prefab.source_path.empty() ? std::string("imported_gltf")
-                                               : prefab.source_path.string();
-  key.append("#material=");
+std::string materialResourceKey(std::string_view asset_key_prefix, uint32_t material_index) {
+  std::string key(asset_key_prefix);
+  key.append("/materials/");
   key.append(std::to_string(material_index));
   return key;
 }
 
-std::string fallbackPrimitiveMaterialKey(const GltfScenePrefab& prefab,
+std::string fallbackPrimitiveMaterialKey(std::string_view asset_key_prefix,
                                          uint32_t node_index,
                                          size_t primitive_index) {
-  return prefabResourceKey(prefab, node_index, primitive_index, "material");
+  return prefabResourceKey(asset_key_prefix, node_index, primitive_index, "material");
 }
 
-std::string primitiveMaterialKey(const GltfScenePrefab& prefab,
+std::string primitiveMaterialKey(std::string_view asset_key_prefix,
+                                 const GltfScenePrefab& prefab,
                                  uint32_t node_index,
                                  size_t primitive_index,
                                  const GltfScenePrefabPrimitive& primitive) {
   if (primitive.source_material_index != kInvalidGltfSceneMaterial) {
-    return materialResourceKey(prefab, primitive.source_material_index);
+    return materialResourceKey(asset_key_prefix, primitive.source_material_index);
   }
-  return fallbackPrimitiveMaterialKey(prefab, node_index, primitive_index);
+  return fallbackPrimitiveMaterialKey(asset_key_prefix, node_index, primitive_index);
 }
 
 void registerPrimitiveMaterial(const GltfScenePrefab& prefab,
@@ -617,10 +677,9 @@ void registerPrimitiveMaterial(const GltfScenePrefab& prefab,
                                size_t primitive_index,
                                const GltfScenePrefabPrimitive& primitive,
                                const std::string& material_key,
-                               renderer::MaterialLibrary* materials,
+                               content::AssetRegistry& assets,
                                std::unordered_set<std::string>& registered_materials) {
-  if (materials == nullptr || material_key.empty() ||
-      !registered_materials.insert(material_key).second) {
+  if (material_key.empty() || !registered_materials.insert(material_key).second) {
     return;
   }
 
@@ -630,15 +689,18 @@ void registerPrimitiveMaterial(const GltfScenePrefab& prefab,
     if (primitive.source_material_index < prefab.imported_materials.size()) {
       imported_material = prefab.imported_materials[primitive.source_material_index];
     }
-    materials->registerImportedAssetMaterial(material_key,
-                                             prefab.source_path,
-                                             primitive.source_material_index,
-                                             primitive.material,
-                                             std::move(imported_material));
+    renderer::MaterialAssetDesc material{};
+    material.surface = primitive.material;
+    material.material_asset_path = prefab.source_path;
+    material.material_asset_index = primitive.source_material_index;
+    material.imported_material = std::move(imported_material);
+    assets.registerMaterialAsset(material_key, std::move(material));
   } else {
     (void)node_index;
     (void)primitive_index;
-    materials->registerMaterialDesc(material_key, primitive.material);
+    renderer::MaterialAssetDesc material{};
+    material.surface = primitive.material;
+    assets.registerMaterialAsset(material_key, std::move(material));
   }
 }
 
@@ -667,10 +729,11 @@ void appendPrimitiveMesh(geometry::MeshData& out,
 }
 
 geometry::MeshData buildCombinedNodeMesh(const GltfScenePrefab& prefab,
+                                         std::string_view asset_key_prefix,
                                          uint32_t node_index,
                                          const GltfScenePrefabNode& node,
                                          const std::vector<size_t>& primitive_indices,
-                                         renderer::MaterialLibrary* materials,
+                                         content::AssetRegistry& assets,
                                          std::unordered_set<std::string>& registered_materials) {
   geometry::MeshData combined{};
   std::unordered_map<std::string, uint32_t> slots_by_material_key;
@@ -679,13 +742,13 @@ geometry::MeshData buildCombinedNodeMesh(const GltfScenePrefab& prefab,
   for (const size_t primitive_index : primitive_indices) {
     const auto& primitive = node.primitives[primitive_index];
     const std::string material_key =
-        primitiveMaterialKey(prefab, node_index, primitive_index, primitive);
+        primitiveMaterialKey(asset_key_prefix, prefab, node_index, primitive_index, primitive);
     registerPrimitiveMaterial(prefab,
                               node_index,
                               primitive_index,
                               primitive,
                               material_key,
-                              materials,
+                              assets,
                               registered_materials);
 
     auto slot_it = slots_by_material_key.find(material_key);
@@ -695,7 +758,7 @@ geometry::MeshData buildCombinedNodeMesh(const GltfScenePrefab& prefab,
           primitive.name.empty() ? ("Slot " + std::to_string(slot)) : primitive.name;
       combined.material_slots.push_back(geometry::MeshMaterialSlot{
           .name = std::move(slot_name),
-          .default_material_key = materials != nullptr ? material_key : std::string{},
+          .default_material_key = material_key,
       });
       slot_it = slots_by_material_key.emplace(material_key, slot).first;
     }
@@ -763,12 +826,18 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
 GltfSceneImportResult instantiateGltfScenePrefab(
     ecs::World& world,
     scene::Scene& scene,
-    renderer::GraphicsDevice& device,
+    content::AssetRegistry& assets,
     const GltfScenePrefab& prefab,
-    const GltfSceneInstantiateOptions& options,
-    renderer::MaterialLibrary* materials) {
+    const GltfSceneInstantiateOptions& options) {
   GltfSceneImportResult result{};
   if (!prefab.valid()) {
+    return result;
+  }
+  const std::string asset_key_prefix =
+      normalizeAssetKeyPrefix(options.asset_key_prefix.empty()
+                                  ? defaultAssetKeyPrefix(prefab)
+                                  : options.asset_key_prefix);
+  if (!content::AssetRegistry::isValidAssetKey(asset_key_prefix)) {
     return result;
   }
 
@@ -862,20 +931,24 @@ GltfSceneImportResult instantiateGltfScenePrefab(
                                      {1.0f, 1.0f, 1.0f}});
 
       const std::string mesh_key =
-          prefabResourceKey(prefab, prefab_node_index, primitive_index, "mesh");
+          prefabResourceKey(asset_key_prefix, prefab_node_index, primitive_index, "mesh");
       const std::string material_key =
-          primitiveMaterialKey(prefab, prefab_node_index, primitive_index, primitive);
+          primitiveMaterialKey(asset_key_prefix,
+                               prefab,
+                               prefab_node_index,
+                               primitive_index,
+                               primitive);
       registerPrimitiveMaterial(prefab,
                                 prefab_node_index,
                                 primitive_index,
                                 primitive,
                                 material_key,
-                                materials,
+                                assets,
                                 registered_materials);
       geometry::MeshData mesh_asset = primitive.mesh;
       mesh_asset.material_slots = {geometry::MeshMaterialSlot{
           .name = primitive.name.empty() ? std::string("Slot 0") : primitive.name,
-          .default_material_key = materials != nullptr ? material_key : std::string{},
+          .default_material_key = material_key,
       }};
       if (mesh_asset.submeshes.empty() && !mesh_asset.indices.empty()) {
         mesh_asset.submeshes.push_back(geometry::MeshSubmesh{
@@ -888,9 +961,11 @@ GltfSceneImportResult instantiateGltfScenePrefab(
           submesh.material_slot = 0;
         }
       }
-      const renderer::MeshId mesh_id = device.registerRuntimeMesh(mesh_key, mesh_asset);
+      if (!assets.registerMeshAsset(mesh_key, mesh_asset)) {
+        continue;
+      }
       world.add(primitive_entity, components::MeshComponent{
-                                     .mesh_key = mesh_id != renderer::kInvalidMesh ? mesh_key : "",
+                                     .mesh_asset_key = mesh_key,
                                      .visible = true});
       if (primitive.morphable()) {
         if (prefab_node_index < result.morph_entities_by_node_index.size()) {
@@ -915,16 +990,19 @@ GltfSceneImportResult instantiateGltfScenePrefab(
                                {},
                                {1.0f, 1.0f, 1.0f}});
       const std::string mesh_key =
-          prefabResourceKey(prefab, prefab_node_index, 0, "mesh");
+          prefabResourceKey(asset_key_prefix, prefab_node_index, 0, "mesh");
       geometry::MeshData combined_mesh = buildCombinedNodeMesh(prefab,
+                                                               asset_key_prefix,
                                                                prefab_node_index,
                                                                prefab_node,
                                                                combined_primitive_indices,
-                                                               materials,
+                                                               assets,
                                                                registered_materials);
-      const renderer::MeshId mesh_id = device.registerRuntimeMesh(mesh_key, combined_mesh);
+      if (!assets.registerMeshAsset(mesh_key, std::move(combined_mesh))) {
+        return {entity, node_id};
+      }
       world.add(mesh_entity, components::MeshComponent{
-                                 .mesh_key = mesh_id != renderer::kInvalidMesh ? mesh_key : "",
+                                 .mesh_asset_key = mesh_key,
                                  .visible = true});
 
       const scene::NodeId mesh_node = scene.createNode(mesh_entity);
@@ -995,12 +1073,11 @@ GltfSceneImportResult instantiateGltfScenePrefab(
 
 GltfSceneImportResult importGltfScene(ecs::World& world,
                                     scene::Scene& scene,
-                                    renderer::GraphicsDevice& device,
+                                    content::AssetRegistry& assets,
                                     const std::filesystem::path& path,
-                                    const GltfSceneImportOptions& options,
-                                    renderer::MaterialLibrary* materials) {
+                                    const GltfSceneImportOptions& options) {
   const GltfScenePrefab prefab = loadGltfScenePrefab(path, options.load);
-  return instantiateGltfScenePrefab(world, scene, device, prefab, options.instantiate, materials);
+  return instantiateGltfScenePrefab(world, scene, assets, prefab, options.instantiate);
 }
 
 }  // namespace karma::scene

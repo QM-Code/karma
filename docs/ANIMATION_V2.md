@@ -236,5 +236,6 @@ weights, CPU reference deformation, explicit skeleton retargeting, external
 - Humanoid semantic profiles are not implemented.
 - Retargeting requires explicit source-joint to target-joint maps.
 - Imported cameras are not part of the glTF scene importer yet.
-- Flat `MeshComponent::mesh_key = "model.glb"` remains a static mesh path and
+- Flat `MeshComponent::mesh_asset_key` remains a registered static mesh key. Import a
+  source path with `AssetRegistry::importMeshAsset(...)`, then assign the key; this path
   does not instantiate animation, skeleton, or morph runtime data.

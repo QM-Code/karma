@@ -4,7 +4,11 @@
 #include <optional>
 #include <string>
 
-#include "karma/rendering/renderer/material_library.h"
+#include "karma/rendering/renderer/material.h"
+
+namespace karma::content {
+class AssetRegistry;
+}
 
 namespace karma::content {
 
@@ -19,13 +23,13 @@ std::optional<renderer::MaterialAssetDesc> loadMaterialAssetDesc(
     const std::filesystem::path& path,
     std::string* diagnostic = nullptr);
 
-/// Parses a material instance from a JSON `.mat` file.
-std::optional<renderer::MaterialInstanceDesc> loadMaterialInstanceDesc(
+/// Parses a material variant from a JSON `.mat` file.
+std::optional<renderer::MaterialVariantDesc> loadMaterialVariantDesc(
     const std::filesystem::path& path,
     std::string* diagnostic = nullptr);
 
-/// Loads a JSON `.mat` file and registers it in a material library.
-MaterialLoadResult loadMaterialFile(renderer::MaterialLibrary& library,
+/// Loads a JSON `.mat` file and registers it in the asset registry.
+MaterialLoadResult loadMaterialFile(AssetRegistry& assets,
                                     const std::string& key,
                                     const std::filesystem::path& path);
 

@@ -1,7 +1,10 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 #include <string_view>
+
+#include "karma/content/assets/asset_registry.h"
 
 namespace karma::demo {
 
@@ -33,6 +36,31 @@ inline std::filesystem::path resolveExampleAssetPath(std::string_view name) {
 inline std::filesystem::path resolveExampleShaderPath(std::string_view name) {
   return resolveExamplePath(std::filesystem::path("examples") / "assets" / "shaders" /
                             std::filesystem::path{name});
+}
+
+inline std::string exampleAssetKey(std::string_view category, std::string_view name) {
+  std::filesystem::path logical{name};
+  logical.replace_extension();
+  return "examples/" + std::string(category) + "/" + logical.generic_string();
+}
+
+inline std::string importExampleMeshAsset(content::AssetRegistry* assets, std::string_view name) {
+  const std::filesystem::path path = resolveExampleAssetPath(name);
+  const std::string key = exampleAssetKey("mesh", name);
+  if (assets != nullptr) {
+    assets->importMeshAsset(key, path);
+  }
+  return key;
+}
+
+inline std::string registerExampleEnvironmentMap(content::AssetRegistry* assets,
+                                                 std::string_view name) {
+  const std::filesystem::path path = resolveExampleAssetPath(name);
+  const std::string key = exampleAssetKey("environment", name);
+  if (assets != nullptr) {
+    assets->registerEnvironmentMap(key, content::EnvironmentMapAsset{.path = path});
+  }
+  return key;
 }
 
 }  // namespace karma::demo

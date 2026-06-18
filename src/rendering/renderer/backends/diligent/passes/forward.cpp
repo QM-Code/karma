@@ -194,7 +194,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
                                           const MeshRecord& mesh) {
     if (mat) {
       return mat->desc.transparent ||
-             (mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard &&
+             (mat->shading_model == MaterialPipelineKind::Standard &&
               mat->transmission_factor > 0.001f);
     }
     return mesh.base_color.a < 0.999f;
@@ -204,24 +204,24 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
     if (!mat) {
       return false;
     }
-    return mat->shading_model == renderer::MaterialDesc::ShadingModel::EnergyShell ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereGlowVolume ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid;
+    return mat->shading_model == MaterialPipelineKind::EnergyShell ||
+           mat->shading_model == MaterialPipelineKind::SphereHalo ||
+           mat->shading_model == MaterialPipelineKind::ScreenWave ||
+           mat->shading_model == MaterialPipelineKind::SphereGlowVolume ||
+           mat->shading_model == MaterialPipelineKind::VolumetricSolid;
   };
 
   auto uses_pre_particle_scene_sample_pass = [&](const MaterialRecord* mat) {
     if (!mat) {
       return false;
     }
-    return mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-           (mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard &&
+    return mat->shading_model == MaterialPipelineKind::WaveVolume ||
+           (mat->shading_model == MaterialPipelineKind::Standard &&
             mat->transmission_factor > 0.001f);
   };
 
   auto uses_scene_reflection_overlay = [&](const MaterialRecord* mat) {
-    if (!mat || mat->shading_model != renderer::MaterialDesc::ShadingModel::Standard) {
+    if (!mat || mat->shading_model != MaterialPipelineKind::Standard) {
       return false;
     }
     return mat->clearcoat_factor > 0.001f ||
@@ -235,7 +235,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         mesh.bounds_radius > 0.0f
             ? glm::vec3(transform * glm::vec4(mesh.bounds_center, 1.0f))
             : glm::vec3(transform[3]);
-    if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+    if (mat && mat->shading_model == MaterialPipelineKind::VolumetricSolid) {
       world_center = mat->volume_center;
     }
     return glm::dot(world_center - camera_position, camera_forward);
@@ -522,14 +522,14 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     constants.material_params0[1] = mat ? mat->shell_fresnel_power : 5.0f;
     constants.material_params0[2] = mat ? mat->shell_fresnel_strength : 1.0f;
     constants.material_params0[3] = mat ? mat->shell_refraction_strength : 0.08f;
-    if (mat && (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-                mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave)) {
+    if (mat && (mat->shading_model == MaterialPipelineKind::WaveVolume ||
+                mat->shading_model == MaterialPipelineKind::ScreenWave)) {
       constants.material_params1[0] = mat->wave_tint_strength;
       constants.material_params1[1] = mat->wave_distortion_strength;
       constants.material_params1[2] = mat->wave_edge_strength;
       constants.material_params1[3] = mat->wave_noise_strength;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+               mat->shading_model == MaterialPipelineKind::VolumetricSolid) {
       constants.material_params0[1] = static_cast<float>(mat->volume_shape);
       constants.material_params0[2] = mat->volume_anisotropy;
       constants.material_params0[3] = mat->volume_absorption;
@@ -559,18 +559,18 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params1[2] = mat ? mat->shell_alpha_boost : 0.0f;
       constants.material_params1[3] = mat ? mat->shell_swirl_strength : 0.0f;
     }
-    if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo) {
+    if (mat && mat->shading_model == MaterialPipelineKind::SphereHalo) {
       constants.material_params2[0] = mat->screen_center_x;
       constants.material_params2[1] = mat->screen_center_y;
       constants.material_params2[2] = mat->screen_radius_x;
       constants.material_params2[3] = mat->screen_radius_y;
-    } else if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave) {
+    } else if (mat && mat->shading_model == MaterialPipelineKind::ScreenWave) {
       constants.material_params2[0] = mat->screen_center_x;
       constants.material_params2[1] = mat->screen_center_y;
       constants.material_params2[2] = mat->screen_radius_x;
       constants.material_params2[3] = mat->screen_radius_y;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+               mat->shading_model == MaterialPipelineKind::VolumetricSolid) {
       // Volumetric solids pack params 2-5 above with shape axes and optical data.
     } else {
       constants.material_params2[0] = (mat && mat->analytic_sphere_normals) ? 1.0f : 0.0f;
@@ -578,7 +578,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params2[2] = (mat && mat->desc.unlit) ? 1.0f : 0.0f;
       constants.material_params2[3] = 0.0f;
     }
-    if (!mat || mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard) {
+    if (!mat || mat->shading_model == MaterialPipelineKind::Standard) {
       constants.material_params3[0] = mat ? mat->clearcoat_factor : 0.0f;
       constants.material_params3[1] = mat ? mat->clearcoat_roughness_factor : 0.0f;
       constants.material_params3[2] = mat ? mat->sheen_roughness_factor : 0.0f;
@@ -629,25 +629,25 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         out[2] = value.z;
         out[3] = value.w;
       };
-      if (mat->custom_material_param_overrides[0]) {
+      if (mat->custom_material_param_enabled[0]) {
         copy_custom_param(mat->custom_material_params[0], constants.material_params0);
       }
-      if (mat->custom_material_param_overrides[1]) {
+      if (mat->custom_material_param_enabled[1]) {
         copy_custom_param(mat->custom_material_params[1], constants.material_params1);
       }
-      if (mat->custom_material_param_overrides[2]) {
+      if (mat->custom_material_param_enabled[2]) {
         copy_custom_param(mat->custom_material_params[2], constants.material_params2);
       }
-      if (mat->custom_material_param_overrides[3]) {
+      if (mat->custom_material_param_enabled[3]) {
         copy_custom_param(mat->custom_material_params[3], constants.material_params3);
       }
-      if (mat->custom_material_param_overrides[4]) {
+      if (mat->custom_material_param_enabled[4]) {
         copy_custom_param(mat->custom_material_params[4], constants.material_params4);
       }
-      if (mat->custom_material_param_overrides[5]) {
+      if (mat->custom_material_param_enabled[5]) {
         copy_custom_param(mat->custom_material_params[5], constants.material_params5);
       }
-      if (mat->custom_material_param_overrides[6]) {
+      if (mat->custom_material_param_enabled[6]) {
         copy_custom_param(mat->custom_material_params[6], constants.material_params6);
       }
     }
@@ -1201,14 +1201,14 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     constants.material_params0[1] = mat ? mat->shell_fresnel_power : 5.0f;
     constants.material_params0[2] = mat ? mat->shell_fresnel_strength : 1.0f;
     constants.material_params0[3] = mat ? mat->shell_refraction_strength : 0.08f;
-    if (mat && (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-                mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave)) {
+    if (mat && (mat->shading_model == MaterialPipelineKind::WaveVolume ||
+                mat->shading_model == MaterialPipelineKind::ScreenWave)) {
       constants.material_params1[0] = mat->wave_tint_strength;
       constants.material_params1[1] = mat->wave_distortion_strength;
       constants.material_params1[2] = mat->wave_edge_strength;
       constants.material_params1[3] = mat->wave_noise_strength;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+               mat->shading_model == MaterialPipelineKind::VolumetricSolid) {
       constants.material_params0[1] = static_cast<float>(mat->volume_shape);
       constants.material_params0[2] = mat->volume_anisotropy;
       constants.material_params0[3] = mat->volume_absorption;
@@ -1238,18 +1238,18 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params1[2] = mat ? mat->shell_alpha_boost : 0.0f;
       constants.material_params1[3] = mat ? mat->shell_swirl_strength : 0.0f;
     }
-    if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::SphereHalo) {
+    if (mat && mat->shading_model == MaterialPipelineKind::SphereHalo) {
       constants.material_params2[0] = mat->screen_center_x;
       constants.material_params2[1] = mat->screen_center_y;
       constants.material_params2[2] = mat->screen_radius_x;
       constants.material_params2[3] = mat->screen_radius_y;
-    } else if (mat && mat->shading_model == renderer::MaterialDesc::ShadingModel::ScreenWave) {
+    } else if (mat && mat->shading_model == MaterialPipelineKind::ScreenWave) {
       constants.material_params2[0] = mat->screen_center_x;
       constants.material_params2[1] = mat->screen_center_y;
       constants.material_params2[2] = mat->screen_radius_x;
       constants.material_params2[3] = mat->screen_radius_y;
     } else if (mat &&
-               mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+               mat->shading_model == MaterialPipelineKind::VolumetricSolid) {
       // Volumetric solids pack params 2-5 above with shape axes and optical data.
     } else {
       constants.material_params2[0] = (mat && mat->analytic_sphere_normals) ? 1.0f : 0.0f;
@@ -1257,7 +1257,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params2[2] = (mat && mat->desc.unlit) ? 1.0f : 0.0f;
       constants.material_params2[3] = 0.0f;
     }
-    if (!mat || mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard) {
+    if (!mat || mat->shading_model == MaterialPipelineKind::Standard) {
       constants.material_params3[0] = mat ? mat->clearcoat_factor : 0.0f;
       constants.material_params3[1] = mat ? mat->clearcoat_roughness_factor : 0.0f;
       constants.material_params3[2] = mat ? mat->sheen_roughness_factor : 0.0f;
@@ -1309,25 +1309,25 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
         out[2] = value.z;
         out[3] = value.w;
       };
-      if (mat->custom_material_param_overrides[0]) {
+      if (mat->custom_material_param_enabled[0]) {
         copy_custom_param(mat->custom_material_params[0], constants.material_params0);
       }
-      if (mat->custom_material_param_overrides[1]) {
+      if (mat->custom_material_param_enabled[1]) {
         copy_custom_param(mat->custom_material_params[1], constants.material_params1);
       }
-      if (mat->custom_material_param_overrides[2]) {
+      if (mat->custom_material_param_enabled[2]) {
         copy_custom_param(mat->custom_material_params[2], constants.material_params2);
       }
-      if (mat->custom_material_param_overrides[3]) {
+      if (mat->custom_material_param_enabled[3]) {
         copy_custom_param(mat->custom_material_params[3], constants.material_params3);
       }
-      if (mat->custom_material_param_overrides[4]) {
+      if (mat->custom_material_param_enabled[4]) {
         copy_custom_param(mat->custom_material_params[4], constants.material_params4);
       }
-      if (mat->custom_material_param_overrides[5]) {
+      if (mat->custom_material_param_enabled[5]) {
         copy_custom_param(mat->custom_material_params[5], constants.material_params5);
       }
-      if (mat->custom_material_param_overrides[6]) {
+      if (mat->custom_material_param_enabled[6]) {
         copy_custom_param(mat->custom_material_params[6], constants.material_params6);
       }
     }
@@ -1604,9 +1604,9 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     if (srb &&
         (draw.scene_sample_mode != TransparentForwardDraw::SceneSampleMode::None ||
          (mat &&
-          (mat->shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-           mat->shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid ||
-           (mat->shading_model == renderer::MaterialDesc::ShadingModel::Standard &&
+          (mat->shading_model == MaterialPipelineKind::WaveVolume ||
+           mat->shading_model == MaterialPipelineKind::VolumetricSolid ||
+           (mat->shading_model == MaterialPipelineKind::Standard &&
             mat->transmission_factor > 0.001f))))) {
       Diligent::ITextureView* desired_scene_color =
           scene_color_sample_srv ? scene_color_sample_srv : default_base_color_;
@@ -1667,8 +1667,8 @@ bool DiligentBackend::forwardDrawsRequireSceneColorCopy(
       continue;
     }
     const auto& mat = mat_it->second;
-    if (mat.shading_model == renderer::MaterialDesc::ShadingModel::WaveVolume ||
-        mat.shading_model == renderer::MaterialDesc::ShadingModel::VolumetricSolid) {
+    if (mat.shading_model == MaterialPipelineKind::WaveVolume ||
+        mat.shading_model == MaterialPipelineKind::VolumetricSolid) {
       return true;
     }
   }

@@ -282,6 +282,8 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
 endif()
 
 karma_add_static(karma_content
+  src/content/assets/asset_package.cpp
+  src/content/assets/asset_registry.cpp
   src/content/importers/gltf_document.cpp
   src/content/importers/mesh_import.cpp
   src/content/importers/gltf_scene_animation_import.cpp
@@ -291,8 +293,8 @@ karma_add_static(karma_content
   src/content/image/stb_image.cpp
   src/content/materials/material_loader.cpp
   src/content/prefabs/component_serializer_registry.cpp
-  src/content/prefabs/prefab_resources.cpp
   src/content/prefabs/prefab_runtime.cpp
+  src/features/visual/particles/effect_library.cpp
 )
 target_link_libraries(karma_content
   PUBLIC
@@ -364,7 +366,6 @@ list(APPEND KARMA_INSTALL_TARGETS karma_features_network)
 if (KARMA_BUILD_HEADLESS_PROFILE OR KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_static(karma_features_visual
     src/features/visual/lights/light_pulse_system.cpp
-    src/features/visual/particles/effect_library.cpp
     src/features/visual/particles/particle_system.cpp
     src/features/visual/terrain/terrain_runtime_module.cpp
     src/features/visual/terrain/terrain_system.cpp

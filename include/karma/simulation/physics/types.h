@@ -403,7 +403,7 @@ struct PhysicsShapeDesc {
     std::array<glm::vec3, 3> triangle{};
     std::vector<glm::vec3> points;
 
-    std::string mesh_path;
+    std::string mesh_asset_key;
     std::vector<glm::vec3> mesh_vertices;
     std::vector<uint32_t> mesh_indices;
     std::vector<float> height_samples;

@@ -29,7 +29,7 @@ math::Vec3 rotated(const math::Quat& q, const math::Vec3& v);
 math::Quat axisAngle(const math::Vec3& axis, float radians);
 
 void bindFlyCameraControls(input::InputSystem& input);
-void addDefaultLighting(ecs::World& world);
+void addDefaultLighting(ecs::World& world, content::AssetRegistry* assets);
 void createFlyCamera(ecs::World& world,
                      CameraRig& rig,
                      const math::Vec3& position,

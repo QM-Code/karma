@@ -174,13 +174,12 @@ class GltfAnimationExample final : public app::GameInterface {
     const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
         *world,
         *scene,
-        *graphics,
+        *assets,
         prefab,
         scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
             .autoplay_animations = true,
-        },
-        materials);
+        });
     if (!imported.valid()) {
       spdlog::error("Failed to instantiate animation model from {}", model_path_.string());
     } else {
@@ -519,14 +518,14 @@ class GltfAnimationExample final : public app::GameInterface {
     const std::string mesh_key = "runtime/gltf_animation/ground/mesh";
     const std::string material_key = "runtime/gltf_animation/ground/material";
     if (graphics != nullptr) {
-      graphics->registerRuntimeMesh(mesh_key, helpers::makeBoxMesh(half_extents));
+      assets->registerMeshAsset(mesh_key, helpers::makeBoxMesh(half_extents));
     }
-    if (materials != nullptr) {
+    if (assets != nullptr) {
       renderer::MaterialDesc material;
       material.base_color = math::Color{0.16f, 0.18f, 0.18f, 1.0f};
       material.roughness = 0.82f;
       material.metallic = 0.0f;
-      materials->registerMaterialDesc(material_key, material);
+      assets->registerMaterialAsset(material_key, material);
     }
     helpers::spawnMesh(*world,
                        "Animation Model Ground",
@@ -590,8 +589,12 @@ class GltfAnimationExample final : public app::GameInterface {
   }
 
   void spawnEnvironment() {
-    const std::filesystem::path env_path = resolveExampleAssetPath("golden_gate_hills_4k.hdr");
-    helpers::spawnEnvironment(*world, "Environment", env_path.string(), 0.28f, false);
+    helpers::spawnEnvironment(*world,
+                              assets,
+                              "Environment",
+                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
+                              0.28f,
+                              false);
   }
 
   void setImportedDeformationPath(components::DeformationPath path) {

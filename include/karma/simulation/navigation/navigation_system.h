@@ -13,6 +13,10 @@ namespace karma::renderer {
 class GraphicsDevice;
 }
 
+namespace karma::content {
+class AssetRegistry;
+}
+
 namespace karma::navigation {
 
 /// \ingroup karma_navigation
@@ -43,7 +47,7 @@ struct NavigationSystemStats {
 /// worker-thread path solves, and writes path/status data back to agents.
 class NavigationSystem : public systems::ISystem {
  public:
-  NavigationSystem();
+  explicit NavigationSystem(const content::AssetRegistry* assets = nullptr);
   ~NavigationSystem() override;
 
   NavigationSystem(const NavigationSystem&) = delete;
@@ -85,6 +89,7 @@ class NavigationSystem : public systems::ISystem {
   void applyCompletedPaths(ecs::World& world);
 
   std::unique_ptr<WorkerState> worker_;
+  const content::AssetRegistry* assets_ = nullptr;
   uint64_t next_request_id_ = 1;
   NavigationSystemStats stats_{};
 };

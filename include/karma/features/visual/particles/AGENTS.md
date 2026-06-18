@@ -8,7 +8,7 @@ Keep this API small. Most gameplay code should use:
 - `particles::bindEffect(...)`
 - `particles::restartEffect(...)`
 - `particles::setEffectPlayback(...)`
-- `ParticleLibrary` registration and lookup helpers
+- `content::AssetRegistry` particle effect and texture-handle registration
 
 When adding fields:
 

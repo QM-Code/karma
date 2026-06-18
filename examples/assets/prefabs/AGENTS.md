@@ -11,8 +11,8 @@ For particle-heavy prefabs:
   for direct-load one-shot staged effects.
 - Save separate JSON prefabs for data variants, or instantiate and modify
   components in C++.
-- If a prefab needs texture aliases or effect registration for direct path-only
-  instantiation, add `prefab.resources.json` beside `prefab.json`.
+- If a prefab needs texture assets or effect registration for direct path-only
+  instantiation, add `assets.package.json` beside `prefab.json`.
 
 Reference particle-heavy effects:
 

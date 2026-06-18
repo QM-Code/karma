@@ -22,7 +22,7 @@ struct GameInitResult {
   ecs::Entity camera;
 };
 
-GameInitResult BuildDemoScene() {
+GameInitResult BuildDemoScene(content::AssetRegistry& assets) {
   GameInitResult result{};
 
   // Player entity
@@ -30,7 +30,7 @@ GameInitResult BuildDemoScene() {
   result.world.add(result.player, components::TagComponent{"player"});
   result.world.add(result.player, components::TransformComponent{});
   result.world.add(result.player, components::MeshComponent{
-      .mesh_key = resolveExampleAssetPath("tank_final.glb").string(),
+      .mesh_asset_key = importExampleMeshAsset(&assets, "tank_final.glb"),
       .visible = true});
   result.world.add(result.player,
                    components::ColliderComponent::capsule(
@@ -54,7 +54,8 @@ GameInitResult BuildDemoScene() {
   // Example environment entity (optional)
   auto sky = result.world.createEntity();
   result.world.add(sky, components::EnvironmentComponent{
-      .environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+      .environment_map_asset_key =
+          registerExampleEnvironmentMap(&assets, "golden_gate_hills_4k.hdr"),
       .intensity = 0.6f,
       .draw_skybox = true});
 

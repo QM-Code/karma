@@ -18,7 +18,7 @@ using detail::syncTileCaches;
 void NavigationSystem::update(ecs::World& world, float dt) {
   const auto update_start = core::SteadyClock::now();
   auto section_start = update_start;
-  rebuildNavMeshes(world);
+  rebuildNavMeshes(world, assets_);
   syncTileCaches(world, dt);
   syncCrowds(world, dt);
   auto section_end = core::SteadyClock::now();

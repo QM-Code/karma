@@ -89,14 +89,14 @@ math::Vec3 panelPoint(const Panel& panel, float x, float y, float z) {
   return localToWorld(panel, {x, y, z});
 }
 
-void registerPanelMaterial(renderer::MaterialLibrary& materials,
+void registerPanelMaterial(content::AssetRegistry& assets,
                            const std::string& key,
                            const math::Color& tint) {
   renderer::MaterialDesc material{};
   material.base_color = tint;
   material.roughness = 0.72f;
   material.metallic = 0.0f;
-  materials.registerMaterialDesc(key, material);
+  assets.registerMaterialAsset(key, material);
 }
 
 }  // namespace
@@ -179,16 +179,16 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
 
     const std::string mesh_key = asset.path.string();
     const std::string material_key = "recast/" + panel.name + "/mesh_tint";
-    registerPanelMaterial(*materials, material_key, tint);
+    registerPanelMaterial(*assets, material_key, tint);
     panel.mesh_entity = helpers::spawnMeshAsset(*world, panel.name + " Mesh", mesh_key, panel.mesh_offset);
     world->get<components::MeshComponent>(panel.mesh_entity).materials = {
-        components::MeshMaterialBinding{.slot = 0, .material_key = material_key}};
+        components::MeshMaterialAssignment{.slot = 0, .material_key = material_key}};
     world->add(panel.mesh_entity,
                components::NavMeshSurfaceComponent{
                    .layer_mask = panel.source_mask,
                    .area = navigation::kNavAreaDefault,
                    .mesh_data = std::make_shared<geometry::MeshData>(combineMeshes(asset.meshes)),
-                   .mesh_key = mesh_key,
+                   .mesh_asset_key = mesh_key,
                });
 
     panel.nav_entity = world->createEntity();
@@ -378,14 +378,14 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
     const QueryCase& query = nav_tests_.queries.front();
     const ecs::Entity end = helpers::createDebugBoxMarker(*world,
                                                           graphics,
-                                                          materials,
+                                                          assets,
                                                           panel.name + " OffMesh End",
                                                           {0.95f, 0.90f, 0.20f, 1.0f},
                                                           localToWorld(panel, query.end),
                                                           {0.45f, 0.45f, 0.45f});
     const ecs::Entity start = helpers::createDebugBoxMarker(*world,
                                                             graphics,
-                                                            materials,
+                                                            assets,
                                                             panel.name + " OffMesh Start",
                                                             {0.15f, 0.75f, 0.95f, 1.0f},
                                                             localToWorld(panel, query.start),
@@ -448,7 +448,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
                              float yaw = 0.0f) {
     const ecs::Entity entity = helpers::createDebugBoxMarker(*world,
                                                              graphics,
-                                                             materials,
+                                                             assets,
                                                              panel.name + " " + std::string(label),
                                                              {0.96f, 0.45f, 0.12f, 1.0f},
                                                              position,
@@ -487,7 +487,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
       };
       const ecs::Entity entity = helpers::createDebugBoxMarker(*world,
                                                                graphics,
-                                                               materials,
+                                                               assets,
                                                                panel.name + " Agent",
                                                                {0.2f, 0.65f, 1.0f, 1.0f},
                                                                position,
@@ -532,9 +532,9 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
                                        .casts_shadows = true,
                                        .shadow_extent = 460.0f,
                                    });
-    helpers::spawnEnvironment(*world,
+    helpers::spawnEnvironment(*world, assets,
                               "Environment",
-                              resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
                               0.35f,
                               true);
   }

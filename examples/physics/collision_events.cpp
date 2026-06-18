@@ -374,14 +374,14 @@ class CollisionEventsGame final : public app::GameInterface {
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-        .mesh_key = resolveExampleAssetPath("world.glb").string()});
+        .mesh_asset_key = importExampleMeshAsset(assets, "world.glb")});
     world->add(world_entity, components::ColliderComponent::mesh());
 
     player_entity_ = world->createEntity();
     world->setName(player_entity_, "Player");
     world->add(player_entity_, components::TransformComponent{});
     world->add(player_entity_, components::MeshComponent{
-        .mesh_key = resolveExampleAssetPath("tank_final.glb").string()});
+        .mesh_asset_key = importExampleMeshAsset(assets, "tank_final.glb")});
     world->add(player_entity_,
                components::ColliderComponent::box(
                    components::BoxColliderShape{
@@ -426,7 +426,7 @@ class CollisionEventsGame final : public app::GameInterface {
     auto environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
-        .environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+        .environment_map_asset_key = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
         .intensity = 0.5f,
         .draw_skybox = true});
 
@@ -584,7 +584,7 @@ class CollisionEventsGame final : public app::GameInterface {
     transform.setScale({radius, radius, radius});
     world->add(entity, transform);
 
-    if (materials != nullptr) {
+    if (assets != nullptr) {
       renderer::MaterialDesc material{};
       material.base_color = color;
       material.emissive_color = {color.r * 1.8f, color.g * 1.8f, color.b * 1.8f, 1.0f};
@@ -594,12 +594,12 @@ class CollisionEventsGame final : public app::GameInterface {
       material.double_sided = true;
       material.roughness = 1.0f;
       material.metallic = 0.0f;
-      materials->registerMaterialDesc(material_key, material);
+      assets->registerMaterialAsset(material_key, material);
     }
 
     world->add(entity, components::MeshComponent{
-        .mesh_key = resolveExampleAssetPath("wave.glb").string(),
-        .materials = {components::MeshMaterialBinding{
+        .mesh_asset_key = importExampleMeshAsset(assets, "wave.glb"),
+        .materials = {components::MeshMaterialAssignment{
             .slot = 0,
             .material_key = material_key,
         }},

@@ -21,7 +21,7 @@ struct NavMeshSurfaceComponent : ecs::ComponentTag {
   unsigned char area = navigation::kNavAreaDefault;
   bool walkable = true;
   std::shared_ptr<const geometry::MeshData> mesh_data;
-  std::string mesh_key;
+  std::string mesh_asset_key;
 };
 
 /// \ingroup karma_components

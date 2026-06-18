@@ -1,5 +1,7 @@
 #include "navmesh_test_utils.h"
 
+#include "karma/content/assets/asset_registry.h"
+
 namespace karma::tests::navigation {
 
 void testFlatPlaneBuildAndPath() {
@@ -132,6 +134,26 @@ void testWorldSurfaceCollectionUsesNavMeshSurfaceArea() {
   assert(geometry.triangle_areas.size() == 2);
   assert(geometry.triangle_areas[0] == 2);
   assert(geometry.triangle_areas[1] == 2);
+}
+
+void testWorldSurfaceCollectionResolvesMeshAssetKey() {
+  karma::content::AssetRegistry assets;
+  assets.registerMeshAsset("runtime/nav/plane", makePlaneMesh());
+
+  karma::ecs::World world;
+  const auto surface = world.createEntity();
+  world.add(surface, karma::components::TransformComponent{});
+  world.add(surface, karma::components::NavMeshSurfaceComponent{
+                         .area = 3,
+                         .mesh_asset_key = "runtime/nav/plane",
+                     });
+
+  const karma::navigation::NavMeshInputGeometry geometry =
+      karma::navigation::collectNavMeshGeometry(world, &assets);
+  assert(geometry.triangleCount() == 2);
+  assert(geometry.triangle_areas.size() == 2);
+  assert(geometry.triangle_areas[0] == 3);
+  assert(geometry.triangle_areas[1] == 3);
 }
 
 void testAreaFlagsFilterQueries() {

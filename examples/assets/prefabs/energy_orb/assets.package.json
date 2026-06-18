@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "assets": [
+    { "type": "mesh", "key": "prefabs/energy_orb/orb_shell", "path": "../../orb_shell.glb" },
+    { "type": "texture_rgba8", "key": "orb_core_atlas", "path": "textures/orb_core_atlas.png" },
+    { "type": "texture_rgba8", "key": "orb_arc_atlas", "path": "textures/orb_arc_atlas.png" },
+    { "type": "texture_rgba8", "key": "orb_halo_atlas", "path": "textures/orb_halo_atlas.png" },
+    { "type": "texture_rgba8", "key": "orb_distortion_atlas", "path": "textures/orb_distortion_atlas.png" },
+    { "type": "particle_effect", "key": "energy_orb_core", "path": "particles/energy_orb_core.kpeffect" },
+    { "type": "particle_effect", "key": "energy_orb_arcs", "path": "particles/energy_orb_arcs.kpeffect" },
+    { "type": "particle_effect", "key": "energy_orb_halo", "path": "particles/energy_orb_halo.kpeffect" },
+    { "type": "particle_effect", "key": "energy_orb_distortion", "path": "particles/energy_orb_distortion.kpeffect" }
+  ]
+}

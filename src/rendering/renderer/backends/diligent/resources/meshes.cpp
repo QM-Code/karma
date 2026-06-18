@@ -2,43 +2,17 @@
 
 #include "../backend_internal.h"
 
-#include <assimp/Importer.hpp>
-#include <assimp/material.h>
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
-
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
-#include <cstring>
 #include <limits>
 #include <glm/geometric.hpp>
-#include <spdlog/spdlog.h>
-
-#include "karma/core/time.h"
 
 namespace karma::renderer_backend {
 
 namespace {
-bool envFlagEnabled(const char* value) {
-  if (value == nullptr || value[0] == '\0') {
-    return false;
-  }
-  return std::strcmp(value, "0") != 0 &&
-         std::strcmp(value, "false") != 0 &&
-         std::strcmp(value, "FALSE") != 0 &&
-         std::strcmp(value, "off") != 0 &&
-         std::strcmp(value, "OFF") != 0;
-}
-
-bool renderResourceDiagEnabled() {
-  static const bool enabled = envFlagEnabled(std::getenv("KARMA_RENDER_RESOURCE_DIAG"));
-  return enabled;
-}
-
 void computeBounds(const geometry::MeshData& mesh, glm::vec3& out_center, float& out_radius) {
   if (mesh.vertices.empty()) {
     out_center = glm::vec3(0.0f);
@@ -260,145 +234,6 @@ void DiligentBackend::updateMesh(renderer::MeshId mesh, const geometry::MeshData
   record.particle_source_samples = buildParticleMeshSamples(record.data);
   uploadMeshBuffers(data, record);
   refreshSubmeshesFromMeshData(record);
-}
-
-renderer::MeshId DiligentBackend::createMeshFromFile(const std::filesystem::path& path) {
-  const renderer::MeshId id = nextMeshId_++;
-  const bool diag_enabled = renderResourceDiagEnabled();
-  const auto total_start = core::SteadyClock::now();
-
-  Assimp::Importer importer;
-  auto section_start = total_start;
-  const aiScene* scene = importer.ReadFile(path.string(),
-                                           aiProcess_Triangulate |
-                                           aiProcess_GenNormals |
-                                           aiProcess_CalcTangentSpace |
-                                           aiProcess_JoinIdenticalVertices |
-                                           aiProcess_PreTransformVertices);
-  auto section_end = core::SteadyClock::now();
-  if (diag_enabled) {
-    spdlog::info("Render resource '{}' Assimp import took {:.2f} ms",
-                 path.string(),
-                 core::elapsedMilliseconds(section_start, section_end));
-  }
-  if (!scene || !scene->mRootNode) {
-    meshes_[id] = MeshRecord{};
-    return id;
-  }
-
-  glm::vec4 base_color(1.0f);
-  std::vector<SubmeshInfo> submesh_infos;
-  section_start = section_end;
-  auto combined = combineMeshes(*scene, base_color, submesh_infos);
-  section_end = core::SteadyClock::now();
-  if (diag_enabled) {
-    spdlog::info(
-        "Render resource '{}' combineMeshes took {:.2f} ms (vertices={} indices={} submeshes={})",
-        path.string(),
-        core::elapsedMilliseconds(section_start, section_end),
-        combined.vertices.size(),
-        combined.indices.size(),
-        submesh_infos.size());
-  }
-
-  combined.material_slots.reserve(scene->mNumMaterials);
-  for (unsigned int mat_index = 0; mat_index < scene->mNumMaterials; ++mat_index) {
-    std::string slot_name = "material_" + std::to_string(mat_index);
-    if (scene->mMaterials[mat_index] != nullptr) {
-      aiString material_name;
-      if (scene->mMaterials[mat_index]->Get(AI_MATKEY_NAME, material_name) == AI_SUCCESS &&
-          material_name.length > 0) {
-        slot_name = material_name.C_Str();
-      }
-    }
-    combined.material_slots.push_back(geometry::MeshMaterialSlot{
-        .name = std::move(slot_name),
-        .default_material_key = {},
-    });
-  }
-  combined.submeshes.reserve(submesh_infos.size());
-  for (const auto& sub : submesh_infos) {
-    combined.submeshes.push_back(geometry::MeshSubmesh{
-        .index_offset = sub.index_offset,
-        .index_count = sub.index_count,
-        .material_slot = sub.material_index,
-    });
-  }
-
-  MeshRecord record{};
-  record.data = combined;
-  record.base_color = base_color;
-  section_start = section_end;
-  computeBounds(record.data, record.bounds_center, record.bounds_radius);
-  record.particle_source_samples = buildParticleMeshSamples(record.data);
-  section_end = core::SteadyClock::now();
-  if (diag_enabled) {
-    spdlog::info("Render resource '{}' bounds took {:.2f} ms",
-                 path.string(),
-                 core::elapsedMilliseconds(section_start, section_end));
-  }
-
-  section_start = section_end;
-  uploadMeshBuffers(combined, record);
-  section_end = core::SteadyClock::now();
-  if (diag_enabled) {
-    spdlog::info("Render resource '{}' GPU mesh upload took {:.2f} ms",
-                 path.string(),
-                 core::elapsedMilliseconds(section_start, section_end));
-  }
-
-  std::vector<renderer::MaterialId> material_ids;
-  material_ids.resize(scene->mNumMaterials, renderer::kInvalidMaterial);
-  section_start = section_end;
-  for (unsigned int mat_index = 0; mat_index < scene->mNumMaterials; ++mat_index) {
-    const aiMaterial* material = scene->mMaterials[mat_index];
-    if (!material) {
-      continue;
-    }
-
-    renderer::MaterialId mat_id = nextMaterialId_++;
-    MaterialRecord mat_record = buildImportedMaterialRecord(*scene, *material, path);
-    initializeMaterialBindings(mat_record);
-
-    materials_[mat_id] = std::move(mat_record);
-    material_ids[mat_index] = mat_id;
-    record.owned_materials.push_back(mat_id);
-  }
-  section_end = core::SteadyClock::now();
-  if (diag_enabled) {
-    spdlog::info("Render resource '{}' material setup took {:.2f} ms (materials={})",
-                 path.string(),
-                 core::elapsedMilliseconds(section_start, section_end),
-                 scene->mNumMaterials);
-  }
-
-  section_start = section_end;
-  for (const auto& sub : submesh_infos) {
-    MeshRecord::Submesh submesh{};
-    submesh.index_offset = sub.index_offset;
-    submesh.index_count = sub.index_count;
-    submesh.material_slot = sub.material_index;
-    if (sub.material_index < material_ids.size()) {
-      submesh.material = material_ids[sub.material_index];
-    } else {
-      submesh.material = renderer::kInvalidMaterial;
-    }
-    record.submeshes.push_back(submesh);
-  }
-  section_end = core::SteadyClock::now();
-  if (diag_enabled) {
-    spdlog::info("Render resource '{}' submesh finalize took {:.2f} ms",
-                 path.string(),
-                 core::elapsedMilliseconds(section_start, section_end));
-  }
-
-  meshes_[id] = std::move(record);
-  if (diag_enabled) {
-    spdlog::info("Render resource '{}' createMeshFromFile total took {:.2f} ms",
-                 path.string(),
-                 core::elapsedMillisecondsSince(total_start));
-  }
-  return id;
 }
 
 void DiligentBackend::destroyMesh(renderer::MeshId mesh) {

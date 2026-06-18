@@ -98,7 +98,7 @@ class DemoGame : public app::GameInterface {
     auto world_entity = world->createEntity();
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-        .mesh_key = resolveExampleAssetPath("world.glb").string()});
+        .mesh_asset_key = importExampleMeshAsset(assets, "world.glb")});
     world->add(world_entity, components::ColliderComponent::mesh());
 
     auto camera = world->createEntity();
@@ -128,7 +128,7 @@ class DemoGame : public app::GameInterface {
 
     auto environment = world->createEntity();
     world->add(environment, components::EnvironmentComponent{
-        .environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+        .environment_map_asset_key = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
         .intensity = 0.6f,
         .draw_skybox = true});
   }

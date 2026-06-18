@@ -14,33 +14,26 @@
 namespace karma::renderer {
 
 /// \ingroup karma_rendering
-/// Keyed registry of shared material assets and per-object material instances.
+/// Internal keyed registry of shared material assets and reusable material variants.
 ///
-/// `RenderSystem` watches `version()` and rebuilds renderer material handles
-/// when registrations change.
+/// `AssetRegistry` wraps this store and exposes the public version counter that
+/// render systems watch for material changes.
 class MaterialLibrary {
  public:
   /// Registers or replaces a shared material asset.
   void registerMaterialAsset(const std::string& key, MaterialAssetDesc desc) {
     desc.material_key = key;
     assets_[key] = std::move(desc);
-    instances_.erase(key);
+    variants_.erase(key);
     version_ += 1;
   }
 
-  /// Registers or replaces a material instance.
-  void registerMaterialInstance(const std::string& key, MaterialInstanceDesc desc) {
+  /// Registers or replaces a material variant.
+  void registerMaterialVariant(const std::string& key, MaterialVariantDesc desc) {
     desc.material_key = key;
-    instances_[key] = std::move(desc);
+    variants_[key] = std::move(desc);
     assets_.erase(key);
     version_ += 1;
-  }
-
-  /// Registers an explicit material asset from renderer material parameters.
-  void registerMaterialDesc(const std::string& key, MaterialDesc desc) {
-    MaterialAssetDesc asset{};
-    asset.surface = std::move(desc);
-    registerMaterialAsset(key, std::move(asset));
   }
 
   /// Registers a material asset sourced from an imported asset material.
@@ -57,19 +50,20 @@ class MaterialLibrary {
     registerMaterialAsset(key, std::move(asset));
   }
 
-  /// Removes a material asset or instance.
-  void unregisterMaterial(const std::string& key) {
-    const bool removed = assets_.erase(key) > 0 || instances_.erase(key) > 0;
+  /// Removes a material asset or variant.
+  bool unregisterMaterial(const std::string& key) {
+    const bool removed = assets_.erase(key) > 0 || variants_.erase(key) > 0;
     if (removed) {
       version_ += 1;
     }
+    return removed;
   }
 
-  /// Removes all material assets and instances.
+  /// Removes all material assets and variants.
   void clear() {
-    if (!assets_.empty() || !instances_.empty()) {
+    if (!assets_.empty() || !variants_.empty()) {
       assets_.clear();
-      instances_.clear();
+      variants_.clear();
       version_ += 1;
     }
   }
@@ -80,13 +74,13 @@ class MaterialLibrary {
     return it != assets_.end() ? &it->second : nullptr;
   }
 
-  /// Finds a material instance by key.
-  const MaterialInstanceDesc* findInstance(const std::string& key) const {
-    const auto it = instances_.find(key);
-    return it != instances_.end() ? &it->second : nullptr;
+  /// Finds a material variant by key.
+  const MaterialVariantDesc* findVariant(const std::string& key) const {
+    const auto it = variants_.find(key);
+    return it != variants_.end() ? &it->second : nullptr;
   }
 
-  /// Resolves a material asset or instance to a flattened backend descriptor.
+  /// Resolves a material asset or variant to a flattened backend descriptor.
   std::optional<ResolvedMaterialDesc> resolve(const std::string& key) const {
     return resolveRecursive(key, 0);
   }
@@ -191,74 +185,8 @@ class MaterialLibrary {
           material.blend_mode = MaterialDesc::BlendMode::Alpha;
         }
       }
-    } else if (name == "shading_model") {
-      if (const auto* s = asString(value)) {
-        if (*s == "standard") material.shading_model = MaterialDesc::ShadingModel::Standard;
-        else if (*s == "energy_shell") material.shading_model = MaterialDesc::ShadingModel::EnergyShell;
-        else if (*s == "wave_volume") material.shading_model = MaterialDesc::ShadingModel::WaveVolume;
-        else if (*s == "sphere_halo") material.shading_model = MaterialDesc::ShadingModel::SphereHalo;
-        else if (*s == "screen_wave") material.shading_model = MaterialDesc::ShadingModel::ScreenWave;
-        else if (*s == "sphere_glow_volume") material.shading_model = MaterialDesc::ShadingModel::SphereGlowVolume;
-        else if (*s == "volumetric_solid") material.shading_model = MaterialDesc::ShadingModel::VolumetricSolid;
-      }
-    } else if (name == "shell_fresnel_power") {
-      if (const auto* f = asFloat(value)) material.shell_fresnel_power = *f;
-    } else if (name == "shell_fresnel_strength") {
-      if (const auto* f = asFloat(value)) material.shell_fresnel_strength = *f;
-    } else if (name == "shell_refraction_strength") {
-      if (const auto* f = asFloat(value)) material.shell_refraction_strength = *f;
-    } else if (name == "shell_interior_strength") {
-      if (const auto* f = asFloat(value)) material.shell_interior_strength = *f;
-    } else if (name == "shell_highlight_strength") {
-      if (const auto* f = asFloat(value)) material.shell_highlight_strength = *f;
-    } else if (name == "shell_alpha_boost") {
-      if (const auto* f = asFloat(value)) material.shell_alpha_boost = *f;
-    } else if (name == "shell_swirl_strength") {
-      if (const auto* f = asFloat(value)) material.shell_swirl_strength = *f;
     } else if (name == "analytic_sphere_normals") {
       if (const auto* b = asBool(value)) material.analytic_sphere_normals = *b;
-    } else if (name == "shell_body_strength") {
-      if (const auto* f = asFloat(value)) material.shell_body_strength = *f;
-    } else if (name == "screen_center_x") {
-      if (const auto* f = asFloat(value)) material.screen_center_x = *f;
-    } else if (name == "screen_center_y") {
-      if (const auto* f = asFloat(value)) material.screen_center_y = *f;
-    } else if (name == "screen_radius_x") {
-      if (const auto* f = asFloat(value)) material.screen_radius_x = *f;
-    } else if (name == "screen_radius_y") {
-      if (const auto* f = asFloat(value)) material.screen_radius_y = *f;
-    } else if (name == "wave_tint_strength") {
-      if (const auto* f = asFloat(value)) material.wave_tint_strength = *f;
-    } else if (name == "wave_distortion_strength") {
-      if (const auto* f = asFloat(value)) material.wave_distortion_strength = *f;
-    } else if (name == "wave_edge_strength") {
-      if (const auto* f = asFloat(value)) material.wave_edge_strength = *f;
-    } else if (name == "wave_noise_strength") {
-      if (const auto* f = asFloat(value)) material.wave_noise_strength = *f;
-    } else if (name == "volume_center") {
-      if (const auto* v = asVec3(value)) material.volume_center = *v;
-    } else if (name == "volume_axis_x") {
-      if (const auto* v = asVec3(value)) material.volume_axis_x = *v;
-    } else if (name == "volume_axis_y") {
-      if (const auto* v = asVec3(value)) material.volume_axis_y = *v;
-    } else if (name == "volume_axis_z") {
-      if (const auto* v = asVec3(value)) material.volume_axis_z = *v;
-    } else if (name == "volume_radius") {
-      if (const auto* f = asFloat(value)) material.volume_radius = *f;
-    } else if (name == "volume_capsule_half_length") {
-      if (const auto* f = asFloat(value)) material.volume_capsule_half_length = *f;
-    } else if (name == "volume_density") {
-      if (const auto* f = asFloat(value)) material.volume_density = *f;
-    } else if (name == "volume_scattering") {
-      if (const auto* f = asFloat(value)) material.volume_scattering = *f;
-    } else if (name == "volume_anisotropy") {
-      if (const auto* f = asFloat(value)) material.volume_anisotropy = *f;
-    } else if (name == "volume_absorption") {
-      if (const auto* f = asFloat(value)) material.volume_absorption = *f;
-    } else if (name == "volume_distortion_strength") {
-      if (const auto* f = asFloat(value)) material.volume_distortion_strength = *f;
-    } else if (name == "volume_noise_strength") {
-      if (const auto* f = asFloat(value)) material.volume_noise_strength = *f;
     }
   }
 
@@ -285,37 +213,31 @@ class MaterialLibrary {
       resolved.material_asset_index = asset_it->second.material_asset_index;
       resolved.imported_material = asset_it->second.imported_material;
       applyParameters(resolved.surface, resolved.params);
-      if (!resolved.pipeline.vertex_shader_path.empty()) {
-        resolved.surface.vertex_shader_path = resolved.pipeline.vertex_shader_path;
-      }
-      if (!resolved.pipeline.fragment_shader_path.empty()) {
-        resolved.surface.fragment_shader_path = resolved.pipeline.fragment_shader_path;
-      }
       return resolved;
     }
 
-    const auto instance_it = instances_.find(key);
-    if (instance_it == instances_.end() ||
-        instance_it->second.parent_material_key.empty()) {
+    const auto variant_it = variants_.find(key);
+    if (variant_it == variants_.end() ||
+        variant_it->second.base_material_key.empty()) {
       return std::nullopt;
     }
 
-    auto parent = resolveRecursive(instance_it->second.parent_material_key, depth + 1);
-    if (!parent.has_value()) {
+    auto base = resolveRecursive(variant_it->second.base_material_key, depth + 1);
+    if (!base.has_value()) {
       return std::nullopt;
     }
-    for (const auto& [name, value] : instance_it->second.params) {
-      parent->params[name] = value;
+    for (const auto& [name, value] : variant_it->second.params) {
+      base->params[name] = value;
     }
-    for (const auto& [name, value] : instance_it->second.textures) {
-      parent->textures[name] = value;
+    for (const auto& [name, value] : variant_it->second.textures) {
+      base->textures[name] = value;
     }
-    applyParameters(parent->surface, instance_it->second.params);
-    return parent;
+    applyParameters(base->surface, variant_it->second.params);
+    return base;
   }
 
   std::unordered_map<std::string, MaterialAssetDesc> assets_;
-  std::unordered_map<std::string, MaterialInstanceDesc> instances_;
+  std::unordered_map<std::string, MaterialVariantDesc> variants_;
   uint64_t version_ = 0;
 };
 

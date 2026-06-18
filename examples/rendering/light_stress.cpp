@@ -56,14 +56,14 @@ bool envFlagEnabled(const char* name) {
   return false;
 }
 
-void registerTintMaterial(renderer::MaterialLibrary& materials,
+void registerTintMaterial(content::AssetRegistry& assets,
                           const std::string& key,
                           const math::Color& color) {
   renderer::MaterialDesc material{};
   material.base_color = color;
   material.roughness = 0.62f;
   material.metallic = 0.0f;
-  materials.registerMaterialDesc(key, material);
+  assets.registerMaterialAsset(key, material);
 }
 
 }  // namespace
@@ -85,11 +85,10 @@ class LocalLightProbeExample final : public app::GameInterface {
     input->bindKey("cam_fast", platform::Key::LeftShift);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    world_mesh_ = resolveExampleAssetPath("world.glb").string();
-    marker_mesh_ = resolveExampleAssetPath("shot.glb").string();
-    environment_map_ = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string();
-    registerTintMaterial(*materials, "light_receiver", math::Color{0.82f, 0.82f, 0.82f, 1.0f});
-    registerTintMaterial(*materials, "shadow_caster", math::Color{0.22f, 0.24f, 0.28f, 1.0f});
+    marker_mesh_ = importExampleMeshAsset(assets, "shot.glb");
+    environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
+    registerTintMaterial(*assets, "light_receiver", math::Color{0.82f, 0.82f, 0.82f, 1.0f});
+    registerTintMaterial(*assets, "shadow_caster", math::Color{0.22f, 0.24f, 0.28f, 1.0f});
 
     spawnBackdrop();
     spawnLights();
@@ -220,19 +219,49 @@ class LocalLightProbeExample final : public app::GameInterface {
   }
 
   void spawnBackdrop() {
-    const ecs::Entity world_entity = world->createEntity();
-    world->setName(world_entity, "World");
-    world->add(world_entity, components::TransformComponent{});
-    world->add(world_entity, components::MeshComponent{
-                              .mesh_key = world_mesh_,
-                              .visible = true,
-                              .shadow_visible = true,
-                          });
+    const std::filesystem::path world_path = resolveExampleAssetPath("world.glb");
+    bool spawned_world = false;
+    const scene::GltfScenePrefab world_prefab = scene::loadGltfScenePrefab(
+        world_path,
+        scene::GltfSceneLoadOptions{
+            .import_meshes = true,
+            .import_lights = false,
+        });
+    if (world_prefab.valid()) {
+      const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
+          *world,
+          *scene,
+          *assets,
+          world_prefab,
+          scene::GltfSceneInstantiateOptions{
+              .create_synthetic_root = true,
+              .asset_key_prefix = "examples/light_stress/world",
+          });
+      if (imported.valid()) {
+        world->setName(imported.root_entity, "World");
+        spawned_world = true;
+      } else {
+        spdlog::error("Failed to instantiate textured world scene from {}", world_path.string());
+      }
+    } else {
+      spdlog::error("Failed to load textured world scene from {}", world_path.string());
+    }
+
+    if (!spawned_world) {
+      const ecs::Entity world_entity = world->createEntity();
+      world->setName(world_entity, "World");
+      world->add(world_entity, components::TransformComponent{});
+      world->add(world_entity, components::MeshComponent{
+                                .mesh_asset_key = importExampleMeshAsset(assets, "world.glb"),
+                                .visible = true,
+                                .shadow_visible = true,
+                            });
+    }
 
     const ecs::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
-                                 .environment_map = environment_map_,
+                                 .environment_map_asset_key = environment_map_,
                                  .intensity = unsafe_stress_mode_ ? 0.04f : 0.4f,
                                  .draw_skybox = !unsafe_stress_mode_,
                              });
@@ -271,7 +300,7 @@ class LocalLightProbeExample final : public app::GameInterface {
         const float hue = std::fmod(35.0f + static_cast<float>(index) * 47.0f, 360.0f);
         const math::Color color = hsvToColor(hue, 0.62f, 1.0f);
         const std::string marker_material_key = "light_marker_" + std::to_string(index);
-        registerTintMaterial(*materials, marker_material_key, color);
+        registerTintMaterial(*assets, marker_material_key, color);
 
         const ecs::Entity light = world->createEntity();
         world->setName(light, "Probe Light " + std::to_string(index));
@@ -293,8 +322,8 @@ class LocalLightProbeExample final : public app::GameInterface {
         marker_xform.setScale({kLightMarkerScale, kLightMarkerScale, kLightMarkerScale});
         world->add(marker, marker_xform);
         world->add(marker, components::MeshComponent{
-                                .mesh_key = marker_mesh_,
-                                .materials = {components::MeshMaterialBinding{
+                                .mesh_asset_key = marker_mesh_,
+                                .materials = {components::MeshMaterialAssignment{
                                     .slot = 0,
                                     .material_key = marker_material_key,
                                 }},
@@ -357,7 +386,7 @@ class LocalLightProbeExample final : public app::GameInterface {
         marker_xform.setScale({0.10f, 0.10f, 0.10f});
         world->add(marker, marker_xform);
         world->add(marker, components::MeshComponent{
-                                .mesh_key = marker_mesh_,
+                                .mesh_asset_key = marker_mesh_,
                                 .visible = true,
                             });
       }
@@ -393,8 +422,8 @@ class LocalLightProbeExample final : public app::GameInterface {
         receiver_xform.setScale({kReceiverScale, kReceiverScale, kReceiverScale});
         world->add(receiver, receiver_xform);
         world->add(receiver, components::MeshComponent{
-                                  .mesh_key = marker_mesh_,
-                                  .materials = {components::MeshMaterialBinding{
+                                  .mesh_asset_key = marker_mesh_,
+                                  .materials = {components::MeshMaterialAssignment{
                                       .slot = 0,
                                       .material_key = "light_receiver",
                                   }},
@@ -409,8 +438,8 @@ class LocalLightProbeExample final : public app::GameInterface {
         caster_xform.setScale({kCasterScale, kCasterScale, kCasterScale});
         world->add(caster, caster_xform);
         world->add(caster, components::MeshComponent{
-                                  .mesh_key = marker_mesh_,
-                                  .materials = {components::MeshMaterialBinding{
+                                  .mesh_asset_key = marker_mesh_,
+                                  .materials = {components::MeshMaterialAssignment{
                                       .slot = 0,
                                       .material_key = "shadow_caster",
                                   }},
@@ -444,8 +473,8 @@ class LocalLightProbeExample final : public app::GameInterface {
         receiver_xform.setScale({kReceiverScale, kReceiverScale, kReceiverScale});
         world->add(receiver, receiver_xform);
         world->add(receiver, components::MeshComponent{
-                                  .mesh_key = marker_mesh_,
-                                  .materials = {components::MeshMaterialBinding{
+                                  .mesh_asset_key = marker_mesh_,
+                                  .materials = {components::MeshMaterialAssignment{
                                       .slot = 0,
                                       .material_key = "light_receiver",
                                   }},
@@ -496,7 +525,6 @@ class LocalLightProbeExample final : public app::GameInterface {
     world->add(camera, camera_component);
   }
 
-  std::string world_mesh_;
   std::string marker_mesh_;
   std::string environment_map_;
   struct AnimatedLight {

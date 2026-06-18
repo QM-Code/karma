@@ -117,7 +117,7 @@ The shared explosion prefab now has the following presentation/runtime state:
 Primary files:
 
 - [`../examples/assets/prefabs/explosion/prefab.json`](../examples/assets/prefabs/explosion/prefab.json)
-- [`../examples/assets/prefabs/explosion/prefab.resources.json`](../examples/assets/prefabs/explosion/prefab.resources.json)
+- [`../examples/assets/prefabs/explosion/assets.package.json`](../examples/assets/prefabs/explosion/assets.package.json)
 - [`../examples/assets/prefabs/explosion/textures/`](../examples/assets/prefabs/explosion/textures/)
 - [`../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_core_flipbook.kpeffect)
 - [`../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect`](../examples/assets/prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect)

@@ -8,9 +8,9 @@
 namespace karma::components {
 
 /// \ingroup karma_components
-/// Binds an entity's emitter to a named `ParticleLibrary` effect.
+/// Binds an entity's emitter to a named `content::AssetRegistry` particle effect.
 ///
-/// The particle system reapplies the effect when the library version, override
+/// The particle system reapplies the effect when the asset registry version, override
 /// hash, effect key, or restart counter changes.
 struct ParticleEffectComponent : ecs::ComponentTag {
   std::string effect_key;

@@ -53,8 +53,8 @@ Shared example helpers live in `examples/common/`.
 - `rendering/light_stress.cpp`: target `rendering_light_stress`, output
   `examples/rendering/light_stress`. Forward+ local-light and point-shadow
   probe with `--lights`, `--stats`, and unsafe stress modes.
-- `rendering/material_override.cpp`: target `rendering_material_override`,
-  output `examples/rendering/material_override`. Runtime material binding
+- `rendering/material_assignment.cpp`: target `rendering_material_assignment`,
+  output `examples/rendering/material_assignment`. Runtime material assignment
   example with side-by-side GLB tints.
 - `rendering/terrain.cpp`: target `rendering_terrain`, output
   `examples/rendering/terrain`. Fixed-size heightmap terrain renderer sample

@@ -53,10 +53,10 @@ High-signal areas right now:
 - [`src/features/visual/volumes/volume_sphere_system.cpp`](../src/features/visual/volumes/volume_sphere_system.cpp)
 - [`src/features/visual/volumes/volume_sphere_runtime_module.cpp`](../src/features/visual/volumes/volume_sphere_runtime_module.cpp)
 - [`src/content/prefabs/prefab_runtime.cpp`](../src/content/prefabs/prefab_runtime.cpp)
-- [`src/content/prefabs/prefab_resources.cpp`](../src/content/prefabs/prefab_resources.cpp)
+- [`src/content/assets/asset_package.cpp`](../src/content/assets/asset_package.cpp)
 - [`src/content/prefabs/component_serializer_registry.cpp`](../src/content/prefabs/component_serializer_registry.cpp)
 - [`include/karma/runtime/app/runtime_module.h`](../include/karma/runtime/app/runtime_module.h)
-- [`include/karma/content/prefabs/prefab_resource_context.h`](../include/karma/content/prefabs/prefab_resource_context.h)
+- [`include/karma/content/assets/asset_package.h`](../include/karma/content/assets/asset_package.h)
 - [`include/karma/content/prefabs/component_serializer_registry.h`](../include/karma/content/prefabs/component_serializer_registry.h)
 - [`src/simulation/physics/`](../src/simulation/physics)
 - [`src/simulation/collision/`](../src/simulation/collision)
@@ -161,8 +161,9 @@ Important limitations:
 - no humanoid semantic retarget profiles yet; use explicit skeleton maps
 - no standalone animation-library asset format or humanoid profile binding
   layer yet
-- `MeshComponent.mesh_key = "model.glb"` remains the flat mesh path and does not
-  use this scene animation/skinning path
+- `MeshComponent.mesh_asset_key` remains a registered mesh asset key. Import sources with
+  `AssetRegistry::importMeshAsset(...)`, then assign the key; this flat mesh path does not
+  use the scene animation/skinning path.
 
 If continuing there, start with:
 
@@ -237,7 +238,7 @@ Recent particle-side work already in the tree:
 - wave volume proxies now render as projected screen-bounds quads instead of near-full-screen overlays
 - analytic volumetric spheres now render post-particle, sort by real sphere center, and alpha-compose without erasing background spheres
 - prefab gallery perf logging exists behind `KARMA_PREFAB_GALLERY_STATS=1`
-- direct-load staged explosion prefabs use `prefab.resources.json` sidecars for
+- direct-load staged explosion prefabs use `assets.package.json` packages for
   prefab-local atlas textures and effect files
 - `particles_explosion_stress` supports up to 128 staged explosion
   controllers; 128 is the current stress acceptance target

@@ -166,14 +166,14 @@ class DemoGame : public app::GameInterface {
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-        .mesh_key = resolveExampleAssetPath("world.glb").string()});
+        .mesh_asset_key = importExampleMeshAsset(assets, "world.glb")});
     world->add(world_entity, components::ColliderComponent::mesh());
     
     auto player = world->createEntity();
     world->setName(player, "Player");
     world->add(player, components::TransformComponent{});
     world->add(player, components::MeshComponent{
-        .mesh_key = resolveExampleAssetPath("tank_final.glb").string()});
+        .mesh_asset_key = importExampleMeshAsset(assets, "tank_final.glb")});
     world->add(player,
                components::ColliderComponent::box(
                    components::BoxColliderShape{
@@ -287,7 +287,7 @@ class DemoGame : public app::GameInterface {
     auto skybox = world->createEntity();
     world->setName(skybox, "Environment");
     world->add(skybox, components::EnvironmentComponent{
-        .environment_map = resolveExampleAssetPath("golden_gate_hills_4k.hdr").string(),
+        .environment_map_asset_key = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
         .intensity = 0.4f,
         .draw_skybox = true});
   }

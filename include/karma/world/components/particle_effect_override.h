@@ -38,8 +38,7 @@ struct ParticleEffectOverrideComponent : ecs::ComponentTag {
   std::optional<bool> source_closed_loop;
   std::optional<ParticleSourceSamplingMode> source_sampling;
   std::optional<float> source_jitter_radius;
-  std::optional<std::string> source_mesh_key;
-  std::optional<std::string> source_mesh_path;
+  std::optional<std::string> source_mesh_asset_key;
   std::optional<ParticleSourceDistribution> source_distribution;
 };
 

@@ -13,6 +13,10 @@ namespace karma::scene {
 class Scene;
 }
 
+namespace karma::content {
+class AssetRegistry;
+}  // namespace karma::content
+
 namespace karma::animation {
 
 /// \ingroup karma_animation
@@ -48,7 +52,10 @@ SkinningPalette buildSkinningPaletteFromScene(
 /// diagnostics.
 class DeformationSystem {
  public:
-  void update(ecs::World& world, const scene::Scene& scene, renderer::GraphicsDevice& device);
+  void update(ecs::World& world,
+              const scene::Scene& scene,
+              renderer::GraphicsDevice& device,
+              const content::AssetRegistry* assets = nullptr);
 };
 
 }  // namespace karma::animation

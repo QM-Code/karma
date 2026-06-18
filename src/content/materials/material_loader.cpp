@@ -1,9 +1,12 @@
 #include "karma/content/materials/material_loader.h"
 
 #include <fstream>
+#include <initializer_list>
 #include <utility>
 
 #include <nlohmann/json.hpp>
+
+#include "karma/content/assets/asset_registry.h"
 
 namespace karma::content {
 
@@ -41,8 +44,29 @@ bool readJsonFile(const std::filesystem::path& path, Json& out, std::string* dia
     return fail(diagnostic, "Material file root must be an object");
   }
   if (!out.contains("version") || !out["version"].is_number_integer() ||
-      out["version"].get<int>() != 1) {
-    return fail(diagnostic, "Material file version must be integer 1");
+      out["version"].get<int>() != 2) {
+    return fail(diagnostic, "Material file version must be integer 2");
+  }
+  return true;
+}
+
+bool fieldAllowed(const Json& object,
+                  std::initializer_list<std::string_view> names,
+                  std::string_view section,
+                  std::string* diagnostic) {
+  for (const auto& [name, value] : object.items()) {
+    (void)value;
+    bool found = false;
+    for (std::string_view allowed : names) {
+      if (name == allowed) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      return fail(diagnostic,
+                  std::string("unsupported ") + std::string(section) + " field: " + name);
+    }
   }
   return true;
 }
@@ -128,19 +152,34 @@ bool parsePipeline(const Json& root,
     return fail(diagnostic, "pipeline must be an object");
   }
   const Json& pipeline = *it;
-  std::string type = "standard";
-  if (const auto type_it = pipeline.find("type"); type_it != pipeline.end()) {
-    if (!type_it->is_string()) {
-      return fail(diagnostic, "pipeline.type must be a string");
-    }
-    type = type_it->get<std::string>();
+  if (!fieldAllowed(pipeline,
+                    {"name",
+                     "vertex",
+                     "fragment",
+                     "vertex_entry",
+                     "fragment_entry",
+                     "defines"},
+                    "pipeline",
+                    diagnostic)) {
+    return false;
   }
-  if (type == "standard") {
-    out.type = renderer::MaterialPipelineDesc::Type::Standard;
-  } else if (type == "custom") {
-    out.type = renderer::MaterialPipelineDesc::Type::Custom;
-  } else {
-    return fail(diagnostic, "pipeline.type must be 'standard' or 'custom'");
+
+  out.name = "standard";
+  if (const auto name_it = pipeline.find("name"); name_it != pipeline.end()) {
+    if (!name_it->is_string()) {
+      return fail(diagnostic, "pipeline.name must be a string");
+    }
+    out.name = name_it->get<std::string>();
+  }
+  const bool built_in = out.name == "standard" ||
+                        out.name == "energy_shell" ||
+                        out.name == "wave_volume" ||
+                        out.name == "screen_wave" ||
+                        out.name == "sphere_halo" ||
+                        out.name == "sphere_glow_volume" ||
+                        out.name == "volumetric_solid";
+  if (!built_in && out.name != "custom") {
+    return fail(diagnostic, "pipeline.name is not a supported built-in pipeline or 'custom'");
   }
 
   auto read_path = [&](const char* key, std::filesystem::path& dst) {
@@ -158,9 +197,13 @@ bool parsePipeline(const Json& root,
       !read_path("fragment", out.fragment_shader_path)) {
     return false;
   }
-  if (out.type == renderer::MaterialPipelineDesc::Type::Custom &&
+  if (out.name == "custom" &&
       (out.vertex_shader_path.empty() || out.fragment_shader_path.empty())) {
     return fail(diagnostic, "custom material pipelines require vertex and fragment shader paths");
+  }
+  if (out.name != "custom" &&
+      (!out.vertex_shader_path.empty() || !out.fragment_shader_path.empty())) {
+    return fail(diagnostic, "shader paths are only valid for custom material pipelines");
   }
 
   auto read_entry = [&](const char* key, std::string& dst) {
@@ -203,6 +246,30 @@ bool parseSurface(const Json& root, renderer::MaterialDesc& out, std::string* di
     return fail(diagnostic, "surface must be an object");
   }
   const Json& surface = *it;
+  if (!fieldAllowed(surface,
+                    {"base_color",
+                     "emissive_color",
+                     "metallic",
+                     "roughness",
+                     "normal_scale",
+                     "occlusion_strength",
+                     "emissive_strength",
+                     "clearcoat",
+                     "clearcoat_roughness",
+                     "sheen_color",
+                     "sheen_roughness",
+                     "anisotropy",
+                     "transmission",
+                     "ior",
+                     "thickness",
+                     "attenuation_distance",
+                     "attenuation_color",
+                     "unlit",
+                     "analytic_sphere_normals"},
+                    "surface",
+                    diagnostic)) {
+    return false;
+  }
   if (!readColor(surface, "base_color", out.base_color, diagnostic) ||
       !readColor(surface, "emissive_color", out.emissive_color, diagnostic) ||
       !readFloat(surface, "metallic", out.metallic, diagnostic) ||
@@ -218,24 +285,11 @@ bool parseSurface(const Json& root, renderer::MaterialDesc& out, std::string* di
       !readFloat(surface, "transmission", out.transmission, diagnostic) ||
       !readFloat(surface, "ior", out.ior, diagnostic) ||
       !readFloat(surface, "thickness", out.thickness, diagnostic) ||
+      !readFloat(surface, "attenuation_distance", out.attenuation_distance, diagnostic) ||
       !readColor(surface, "attenuation_color", out.attenuation_color, diagnostic) ||
       !readBool(surface, "unlit", out.unlit, diagnostic) ||
-      !readBool(surface, "transparent", out.transparent, diagnostic)) {
+      !readBool(surface, "analytic_sphere_normals", out.analytic_sphere_normals, diagnostic)) {
     return false;
-  }
-  if (const auto shading_it = surface.find("shading_model"); shading_it != surface.end()) {
-    if (!shading_it->is_string()) {
-      return fail(diagnostic, "surface.shading_model must be a string");
-    }
-    const std::string shading = shading_it->get<std::string>();
-    if (shading == "standard") out.shading_model = renderer::MaterialDesc::ShadingModel::Standard;
-    else if (shading == "energy_shell") out.shading_model = renderer::MaterialDesc::ShadingModel::EnergyShell;
-    else if (shading == "wave_volume") out.shading_model = renderer::MaterialDesc::ShadingModel::WaveVolume;
-    else if (shading == "sphere_halo") out.shading_model = renderer::MaterialDesc::ShadingModel::SphereHalo;
-    else if (shading == "screen_wave") out.shading_model = renderer::MaterialDesc::ShadingModel::ScreenWave;
-    else if (shading == "sphere_glow_volume") out.shading_model = renderer::MaterialDesc::ShadingModel::SphereGlowVolume;
-    else if (shading == "volumetric_solid") out.shading_model = renderer::MaterialDesc::ShadingModel::VolumetricSolid;
-    else return fail(diagnostic, "Unknown surface.shading_model value");
   }
   return true;
 }
@@ -249,6 +303,17 @@ bool parseRenderState(const Json& root, renderer::MaterialDesc& out, std::string
     return fail(diagnostic, "render_state must be an object");
   }
   const Json& state = *it;
+  if (!fieldAllowed(state,
+                    {"transparent",
+                     "depth_test",
+                     "depth_write",
+                     "wireframe",
+                     "double_sided",
+                     "blend_mode"},
+                    "render_state",
+                    diagnostic)) {
+    return false;
+  }
   if (!readBool(state, "transparent", out.transparent, diagnostic) ||
       !readBool(state, "depth_test", out.depth_test, diagnostic) ||
       !readBool(state, "depth_write", out.depth_write, diagnostic) ||
@@ -356,8 +421,7 @@ bool parseSectionAsParams(const Json& root,
 }
 
 bool parseTextures(const Json& root,
-                   const std::filesystem::path& base_dir,
-                   std::unordered_map<std::string, std::filesystem::path>& out,
+                   std::unordered_map<std::string, std::string>& out,
                    std::string* diagnostic) {
   const auto it = root.find("textures");
   if (it == root.end()) {
@@ -370,16 +434,22 @@ bool parseTextures(const Json& root,
     if (!value.is_string()) {
       return fail(diagnostic, "texture values must be strings");
     }
-    out[name] = resolvePath(base_dir, value.get<std::string>());
+    const std::string texture_key = value.get<std::string>();
+    if (!AssetRegistry::isValidAssetKey(texture_key)) {
+      return fail(diagnostic,
+                  "invalid texture asset key '" + texture_key + "': " +
+                      AssetRegistry::assetKeyValidationError(texture_key));
+    }
+    out[name] = texture_key;
   }
   return true;
 }
 
-bool isInstanceDocument(const Json& root) {
+bool isVariantDocument(const Json& root) {
   if (const auto kind_it = root.find("kind"); kind_it != root.end() && kind_it->is_string()) {
-    return kind_it->get<std::string>() == "instance";
+    return kind_it->get<std::string>() == "variant";
   }
-  return root.contains("parent");
+  return root.contains("base");
 }
 
 }  // namespace
@@ -391,8 +461,8 @@ std::optional<renderer::MaterialAssetDesc> loadMaterialAssetDesc(
   if (!readJsonFile(path, root, diagnostic)) {
     return std::nullopt;
   }
-  if (isInstanceDocument(root)) {
-    fail(diagnostic, "Material file describes an instance, not an asset");
+  if (isVariantDocument(root)) {
+    fail(diagnostic, "Material file describes a variant, not an asset");
     return std::nullopt;
   }
 
@@ -402,42 +472,47 @@ std::optional<renderer::MaterialAssetDesc> loadMaterialAssetDesc(
       !parseSurface(root, desc.surface, diagnostic) ||
       !parseRenderState(root, desc.surface, diagnostic) ||
       !parseParams(root, desc.params, diagnostic) ||
-      !parseTextures(root, base_dir, desc.textures, diagnostic)) {
+      !parseTextures(root, desc.textures, diagnostic)) {
     return std::nullopt;
   }
   return desc;
 }
 
-std::optional<renderer::MaterialInstanceDesc> loadMaterialInstanceDesc(
+std::optional<renderer::MaterialVariantDesc> loadMaterialVariantDesc(
     const std::filesystem::path& path,
     std::string* diagnostic) {
   Json root;
   if (!readJsonFile(path, root, diagnostic)) {
     return std::nullopt;
   }
-  if (!isInstanceDocument(root)) {
-    fail(diagnostic, "Material file describes an asset, not an instance");
+  if (!isVariantDocument(root)) {
+    fail(diagnostic, "Material file describes an asset, not a variant");
     return std::nullopt;
   }
-  const auto parent_it = root.find("parent");
-  if (parent_it == root.end() || !parent_it->is_string() || parent_it->get<std::string>().empty()) {
-    fail(diagnostic, "material instances require a non-empty parent string");
+  const auto base_it = root.find("base");
+  if (base_it == root.end() || !base_it->is_string() || base_it->get<std::string>().empty()) {
+    fail(diagnostic, "material variants require a non-empty base string");
     return std::nullopt;
   }
 
-  renderer::MaterialInstanceDesc desc{};
-  desc.parent_material_key = parent_it->get<std::string>();
-  const std::filesystem::path base_dir = path.parent_path();
+  renderer::MaterialVariantDesc desc{};
+  desc.base_material_key = base_it->get<std::string>();
+  if (!AssetRegistry::isValidAssetKey(desc.base_material_key)) {
+    fail(diagnostic,
+         "invalid base material key '" + desc.base_material_key + "': " +
+             AssetRegistry::assetKeyValidationError(desc.base_material_key));
+    return std::nullopt;
+  }
   if (!parseSectionAsParams(root, "surface", desc.params, diagnostic) ||
       !parseSectionAsParams(root, "render_state", desc.params, diagnostic) ||
       !parseParams(root, desc.params, diagnostic) ||
-      !parseTextures(root, base_dir, desc.textures, diagnostic)) {
+      !parseTextures(root, desc.textures, diagnostic)) {
     return std::nullopt;
   }
   return desc;
 }
 
-MaterialLoadResult loadMaterialFile(renderer::MaterialLibrary& library,
+MaterialLoadResult loadMaterialFile(AssetRegistry& assets,
                                     const std::string& key,
                                     const std::filesystem::path& path) {
   MaterialLoadResult result{};
@@ -448,20 +523,26 @@ MaterialLoadResult loadMaterialFile(renderer::MaterialLibrary& library,
     return result;
   }
 
-  if (isInstanceDocument(root)) {
-    auto instance = loadMaterialInstanceDesc(path, &diagnostic);
-    if (!instance.has_value()) {
+  if (isVariantDocument(root)) {
+    auto variant = loadMaterialVariantDesc(path, &diagnostic);
+    if (!variant.has_value()) {
       result.diagnostic = std::move(diagnostic);
       return result;
     }
-    library.registerMaterialInstance(key, std::move(*instance));
+    if (!assets.registerMaterialVariant(key, std::move(*variant))) {
+      result.diagnostic = AssetRegistry::assetKeyValidationError(key);
+      return result;
+    }
   } else {
     auto asset = loadMaterialAssetDesc(path, &diagnostic);
     if (!asset.has_value()) {
       result.diagnostic = std::move(diagnostic);
       return result;
     }
-    library.registerMaterialAsset(key, std::move(*asset));
+    if (!assets.registerMaterialAsset(key, std::move(*asset))) {
+      result.diagnostic = AssetRegistry::assetKeyValidationError(key);
+      return result;
+    }
   }
   result.success = true;
   return result;

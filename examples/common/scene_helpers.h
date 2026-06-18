@@ -6,11 +6,14 @@
 
 #include "karma/core/math/types.h"
 #include "karma/rendering/renderer/material.h"
-#include "karma/rendering/renderer/material_library.h"
 #include "karma/world/geometry/mesh_data.h"
 #include "karma/world/components/camera.h"
 #include "karma/world/components/light.h"
 #include "karma/world/ecs/entity.h"
+
+namespace karma::content {
+class AssetRegistry;
+}
 
 namespace karma::components {
 class TransformComponent;
@@ -42,7 +45,7 @@ ecs::Entity spawnMeshAsset(ecs::World& world,
 
 ecs::Entity createDebugBoxMarker(ecs::World& world,
                                  renderer::GraphicsDevice* graphics,
-                                 renderer::MaterialLibrary* materials,
+                                 content::AssetRegistry* assets,
                                  std::string name,
                                  const math::Color& color,
                                  const math::Vec3& position,
@@ -68,6 +71,7 @@ ecs::Entity spawnPointLight(ecs::World& world,
                             const components::LightComponent& light);
 
 ecs::Entity spawnEnvironment(ecs::World& world,
+                             content::AssetRegistry* assets,
                              std::string name,
                              std::string environment_map,
                              float intensity,

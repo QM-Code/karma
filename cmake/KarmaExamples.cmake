@@ -65,8 +65,8 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
 
   karma_add_graphical_example(rendering_light_stress rendering light_stress
     examples/rendering/light_stress.cpp)
-  karma_add_graphical_example(rendering_material_override rendering material_override
-    examples/rendering/material_override.cpp)
+  karma_add_graphical_example(rendering_material_assignment rendering material_assignment
+    examples/rendering/material_assignment.cpp)
   karma_add_graphical_example(rendering_postwar_city rendering postwar_city
     examples/rendering/postwar_city.cpp
     examples/common/scene_helpers.cpp)

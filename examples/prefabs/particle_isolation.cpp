@@ -104,7 +104,7 @@ class PrefabParticleIsolationExample final : public app::GameInterface {
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
-                                 .mesh_key = resolveExampleAssetPath("world.glb").string(),
+                                 .mesh_asset_key = importExampleMeshAsset(assets, "world.glb"),
                                  .visible = true,
                              });
   }
@@ -195,7 +195,8 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.0f;
   config.lighting_exposure = 1.15f;
-  config.environment_map = karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
+  config.environment_map_source_path =
+      karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
   config.environment_intensity = 0.18f;
   config.environment_draw_skybox = false;
 

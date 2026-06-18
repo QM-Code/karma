@@ -864,14 +864,9 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
     return nullptr;
   }
 
-  const bool pipeline_desc_custom =
-      material.pipeline.type == renderer::MaterialPipelineDesc::Type::Custom;
-  const std::filesystem::path vertex_path =
-      pipeline_desc_custom ? material.pipeline.vertex_shader_path
-                           : material.desc.vertex_shader_path;
-  const std::filesystem::path fragment_path =
-      pipeline_desc_custom ? material.pipeline.fragment_shader_path
-                           : material.desc.fragment_shader_path;
+  const bool pipeline_desc_custom = material.pipeline.name == "custom";
+  const std::filesystem::path vertex_path = material.pipeline.vertex_shader_path;
+  const std::filesystem::path fragment_path = material.pipeline.fragment_shader_path;
   const std::string vertex_entry =
       pipeline_desc_custom && !material.pipeline.vertex_entry_point.empty()
           ? material.pipeline.vertex_entry_point

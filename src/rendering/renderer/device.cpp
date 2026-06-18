@@ -54,11 +54,6 @@ void GraphicsDevice::updateMesh(MeshId mesh, const geometry::MeshData& data) {
   }
 }
 
-MeshId GraphicsDevice::createMeshFromFile(const std::filesystem::path& path) {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
-  return backend_ ? backend_->createMeshFromFile(path) : kInvalidMesh;
-}
-
 void GraphicsDevice::destroyMesh(MeshId mesh) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {

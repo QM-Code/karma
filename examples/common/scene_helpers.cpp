@@ -4,8 +4,8 @@
 #include <utility>
 #include <vector>
 
+#include "karma/content/assets/asset_registry.h"
 #include "karma/rendering/renderer/device.h"
-#include "karma/rendering/renderer/material_library.h"
 #include "karma/world/components/audio_listener.h"
 #include "karma/world/components/environment.h"
 #include "karma/world/components/mesh.h"
@@ -74,11 +74,11 @@ ecs::Entity spawnMesh(ecs::World& world,
   transform.setPosition(position);
   world.add(entity, transform);
   world.add(entity, components::MeshComponent{
-                        .mesh_key = std::move(mesh_key),
+                        .mesh_asset_key = std::move(mesh_key),
                         .materials = material_key.empty()
-                            ? std::vector<components::MeshMaterialBinding>{}
-                            : std::vector<components::MeshMaterialBinding>{
-                                  components::MeshMaterialBinding{
+                            ? std::vector<components::MeshMaterialAssignment>{}
+                            : std::vector<components::MeshMaterialAssignment>{
+                                  components::MeshMaterialAssignment{
                                       .slot = 0,
                                       .material_key = std::move(material_key),
                                   }},
@@ -98,14 +98,14 @@ ecs::Entity spawnMeshAsset(ecs::World& world,
   transform.setPosition(position);
   world.add(entity, transform);
   world.add(entity, components::MeshComponent{
-                        .mesh_key = std::move(mesh_key),
+                        .mesh_asset_key = std::move(mesh_key),
                     });
   return entity;
 }
 
 ecs::Entity createDebugBoxMarker(ecs::World& world,
                                  renderer::GraphicsDevice* graphics,
-                                 renderer::MaterialLibrary* materials,
+                                 content::AssetRegistry* assets,
                                  std::string name,
                                  const math::Color& color,
                                  const math::Vec3& position,
@@ -114,16 +114,16 @@ ecs::Entity createDebugBoxMarker(ecs::World& world,
   const geometry::MeshData marker_mesh = makeBoxMesh(half_extents);
   const std::string mesh_key = "runtime/debug_box/" + name + "/mesh";
   const std::string material_key = "runtime/debug_box/" + name + "/material";
-  if (graphics != nullptr) {
-    graphics->registerRuntimeMesh(mesh_key, marker_mesh);
+  if (graphics != nullptr && assets != nullptr) {
+    assets->registerMeshAsset(mesh_key, marker_mesh);
   }
-  if (materials != nullptr) {
+  if (assets != nullptr) {
     renderer::MaterialDesc material;
     material.base_color = color;
     material.emissive_color = color;
     material.unlit = true;
     material.roughness = 0.85f;
-    materials->registerMaterialDesc(material_key, material);
+    assets->registerMaterialAsset(material_key, material);
   }
   return spawnMesh(world, std::move(name), mesh_key, material_key, position, visible);
 }
@@ -176,14 +176,16 @@ ecs::Entity spawnPointLight(ecs::World& world,
 }
 
 ecs::Entity spawnEnvironment(ecs::World& world,
+                             content::AssetRegistry* assets,
                              std::string name,
                              std::string environment_map,
                              float intensity,
                              bool draw_skybox) {
+  (void)assets;
   const ecs::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   world.add(entity, components::EnvironmentComponent{
-                        .environment_map = std::move(environment_map),
+                        .environment_map_asset_key = std::move(environment_map),
                         .intensity = intensity,
                         .draw_skybox = draw_skybox,
                     });

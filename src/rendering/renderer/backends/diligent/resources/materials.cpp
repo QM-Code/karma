@@ -21,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -215,6 +216,79 @@ void collectAssimpMaterialTextureRefs(const aiMaterial& material,
   collect_texture(aiTextureType_TRANSMISSION, 0, false, "transmission");
   collect_texture(aiTextureType_TRANSMISSION, 1, false, "thickness");
 }
+
+MaterialPipelineKind pipelineKind(std::string_view name) {
+  if (name == "energy_shell") {
+    return MaterialPipelineKind::EnergyShell;
+  }
+  if (name == "wave_volume") {
+    return MaterialPipelineKind::WaveVolume;
+  }
+  if (name == "sphere_halo") {
+    return MaterialPipelineKind::SphereHalo;
+  }
+  if (name == "screen_wave") {
+    return MaterialPipelineKind::ScreenWave;
+  }
+  if (name == "sphere_glow_volume") {
+    return MaterialPipelineKind::SphereGlowVolume;
+  }
+  if (name == "volumetric_solid") {
+    return MaterialPipelineKind::VolumetricSolid;
+  }
+  return MaterialPipelineKind::Standard;
+}
+
+const float* parameterFloat(
+    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    std::string_view name) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return nullptr;
+  }
+  return std::get_if<float>(&it->second);
+}
+
+const bool* parameterBool(
+    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    std::string_view name) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return nullptr;
+  }
+  return std::get_if<bool>(&it->second);
+}
+
+const glm::vec3* parameterVec3(
+    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    std::string_view name) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return nullptr;
+  }
+  return std::get_if<glm::vec3>(&it->second);
+}
+
+uint32_t parameterUint(
+    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    std::string_view name,
+    uint32_t fallback) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return fallback;
+  }
+  if (const auto* value = std::get_if<uint32_t>(&it->second)) {
+    return *value;
+  }
+  if (const auto* value = std::get_if<int32_t>(&it->second); value != nullptr && *value >= 0) {
+    return static_cast<uint32_t>(*value);
+  }
+  if (const auto* value = std::get_if<float>(&it->second); value != nullptr && *value >= 0.0f) {
+    return static_cast<uint32_t>(*value);
+  }
+  return fallback;
+}
+
 }  // namespace
 
 void DiligentBackend::initializeTextureCoordTransforms(MaterialRecord& record) const {
@@ -467,18 +541,9 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
 }
 
 bool DiligentBackend::materialUsesCustomForwardPipeline(const MaterialRecord& material) const {
-  if (material.pipeline.type == renderer::MaterialPipelineDesc::Type::Custom) {
-    return !material.pipeline.vertex_shader_path.empty() &&
-           !material.pipeline.fragment_shader_path.empty();
-  }
-
-  if (!material.pipeline.vertex_shader_path.empty() ||
-      !material.pipeline.fragment_shader_path.empty()) {
-    return false;
-  }
-
-  return !material.desc.vertex_shader_path.empty() &&
-         !material.desc.fragment_shader_path.empty();
+  return material.pipeline.name == "custom" &&
+         !material.pipeline.vertex_shader_path.empty() &&
+         !material.pipeline.fragment_shader_path.empty();
 }
 
 Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
@@ -991,37 +1056,7 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
   record.attenuation_color = glm::vec3(record.desc.attenuation_color.r,
                                        record.desc.attenuation_color.g,
                                        record.desc.attenuation_color.b);
-  record.shading_model = record.desc.shading_model;
-  record.shell_fresnel_power = record.desc.shell_fresnel_power;
-  record.shell_fresnel_strength = record.desc.shell_fresnel_strength;
-  record.shell_refraction_strength = record.desc.shell_refraction_strength;
-  record.shell_interior_strength = record.desc.shell_interior_strength;
-  record.shell_highlight_strength = record.desc.shell_highlight_strength;
-  record.shell_alpha_boost = record.desc.shell_alpha_boost;
-  record.shell_swirl_strength = record.desc.shell_swirl_strength;
   record.analytic_sphere_normals = record.desc.analytic_sphere_normals;
-  record.shell_body_strength = record.desc.shell_body_strength;
-  record.screen_center_x = record.desc.screen_center_x;
-  record.screen_center_y = record.desc.screen_center_y;
-  record.screen_radius_x = record.desc.screen_radius_x;
-  record.screen_radius_y = record.desc.screen_radius_y;
-  record.wave_tint_strength = record.desc.wave_tint_strength;
-  record.wave_distortion_strength = record.desc.wave_distortion_strength;
-  record.wave_edge_strength = record.desc.wave_edge_strength;
-  record.wave_noise_strength = record.desc.wave_noise_strength;
-  record.volume_center = record.desc.volume_center;
-  record.volume_axis_x = record.desc.volume_axis_x;
-  record.volume_axis_y = record.desc.volume_axis_y;
-  record.volume_axis_z = record.desc.volume_axis_z;
-  record.volume_shape = record.desc.volume_shape;
-  record.volume_radius = record.desc.volume_radius;
-  record.volume_capsule_half_length = record.desc.volume_capsule_half_length;
-  record.volume_density = record.desc.volume_density;
-  record.volume_scattering = record.desc.volume_scattering;
-  record.volume_anisotropy = record.desc.volume_anisotropy;
-  record.volume_absorption = record.desc.volume_absorption;
-  record.volume_distortion_strength = record.desc.volume_distortion_strength;
-  record.volume_noise_strength = record.desc.volume_noise_strength;
   record.blend_mode = record.desc.blend_mode;
 
   const size_t texcoord_count =
@@ -1397,6 +1432,197 @@ const DiligentBackend::ImportedMaterialTemplateCacheEntry* DiligentBackend::getI
   return &it->second;
 }
 
+void DiligentBackend::applyResolvedMaterial(
+    MaterialRecord& record,
+    const renderer::ResolvedMaterialDesc& resolved) {
+  const renderer::MaterialDesc& material = resolved.surface;
+  record.pipeline = resolved.pipeline;
+  record.desc = material;
+  record.base_color_factor = glm::vec4(material.base_color.r,
+                                       material.base_color.g,
+                                       material.base_color.b,
+                                       material.base_color.a);
+  record.emissive_factor = glm::vec3(material.emissive_color.r,
+                                     material.emissive_color.g,
+                                     material.emissive_color.b);
+  record.metallic_factor = material.metallic;
+  record.roughness_factor = material.roughness;
+  record.normal_scale = material.normal_scale;
+  record.occlusion_strength = material.occlusion_strength;
+  record.emissive_strength = material.emissive_strength;
+  record.emissive_factor *= record.emissive_strength;
+  record.clearcoat_factor = material.clearcoat;
+  record.clearcoat_roughness_factor = material.clearcoat_roughness;
+  record.sheen_color_factor =
+      glm::vec3(material.sheen_color.r, material.sheen_color.g, material.sheen_color.b);
+  record.sheen_roughness_factor = material.sheen_roughness;
+  record.anisotropy_factor = material.anisotropy;
+  record.transmission_factor = material.transmission;
+  record.ior = material.ior;
+  record.thickness_factor = material.thickness;
+  record.attenuation_distance = material.attenuation_distance;
+  record.attenuation_color = glm::vec3(material.attenuation_color.r,
+                                       material.attenuation_color.g,
+                                       material.attenuation_color.b);
+  record.shading_model = pipelineKind(resolved.pipeline.name);
+  record.analytic_sphere_normals = material.analytic_sphere_normals;
+  if (const float* value = parameterFloat(resolved.params, "shell_fresnel_power")) {
+    record.shell_fresnel_power = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_fresnel_strength")) {
+    record.shell_fresnel_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_refraction_strength")) {
+    record.shell_refraction_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_interior_strength")) {
+    record.shell_interior_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_highlight_strength")) {
+    record.shell_highlight_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_alpha_boost")) {
+    record.shell_alpha_boost = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_swirl_strength")) {
+    record.shell_swirl_strength = *value;
+  }
+  if (const bool* value = parameterBool(resolved.params, "analytic_sphere_normals")) {
+    record.analytic_sphere_normals = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_body_strength")) {
+    record.shell_body_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_center_x")) {
+    record.screen_center_x = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_center_y")) {
+    record.screen_center_y = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_radius_x")) {
+    record.screen_radius_x = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_radius_y")) {
+    record.screen_radius_y = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_tint_strength")) {
+    record.wave_tint_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_distortion_strength")) {
+    record.wave_distortion_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_edge_strength")) {
+    record.wave_edge_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_noise_strength")) {
+    record.wave_noise_strength = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_center")) {
+    record.volume_center = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_axis_x")) {
+    record.volume_axis_x = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_axis_y")) {
+    record.volume_axis_y = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_axis_z")) {
+    record.volume_axis_z = *value;
+  }
+  record.volume_shape = parameterUint(resolved.params, "volume_shape", record.volume_shape);
+  if (const float* value = parameterFloat(resolved.params, "volume_radius")) {
+    record.volume_radius = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_capsule_half_length")) {
+    record.volume_capsule_half_length = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_density")) {
+    record.volume_density = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_scattering")) {
+    record.volume_scattering = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_anisotropy")) {
+    record.volume_anisotropy = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_absorption")) {
+    record.volume_absorption = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_distortion_strength")) {
+    record.volume_distortion_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_noise_strength")) {
+    record.volume_noise_strength = *value;
+  }
+  auto assign_custom_material_param =
+      [&](size_t index, const renderer::MaterialParameterValue& value) {
+    glm::vec4 parsed{0.0f};
+    if (const auto* f = std::get_if<float>(&value)) {
+      parsed.x = *f;
+    } else if (const auto* i = std::get_if<int32_t>(&value)) {
+      parsed.x = static_cast<float>(*i);
+    } else if (const auto* u = std::get_if<uint32_t>(&value)) {
+      parsed.x = static_cast<float>(*u);
+    } else if (const auto* b = std::get_if<bool>(&value)) {
+      parsed.x = *b ? 1.0f : 0.0f;
+    } else if (const auto* color = std::get_if<renderer::Color>(&value)) {
+      parsed = glm::vec4(color->r, color->g, color->b, color->a);
+    } else if (const auto* v = std::get_if<glm::vec2>(&value)) {
+      parsed = glm::vec4(*v, 0.0f, 0.0f);
+    } else if (const auto* v = std::get_if<glm::vec3>(&value)) {
+      parsed = glm::vec4(*v, 0.0f);
+    } else if (const auto* v = std::get_if<glm::vec4>(&value)) {
+      parsed = *v;
+    } else {
+      return;
+    }
+    if (index < record.custom_material_params.size()) {
+      record.custom_material_params[index] = parsed;
+      record.custom_material_param_enabled[index] = true;
+    }
+  };
+  for (size_t index = 0; index < record.custom_material_params.size(); ++index) {
+    const std::string key = "material_params" + std::to_string(index);
+    if (const auto param_it = resolved.params.find(key); param_it != resolved.params.end()) {
+      assign_custom_material_param(index, param_it->second);
+    }
+  }
+  record.blend_mode = material.blend_mode;
+  auto assign_texture_handle =
+      [&](std::initializer_list<const char*> keys,
+          Diligent::RefCntAutoPtr<Diligent::ITextureView>& target) {
+    for (const char* key : keys) {
+      const auto texture_it = resolved.texture_handles.find(key);
+      if (texture_it == resolved.texture_handles.end()) {
+        continue;
+      }
+      const auto renderer_texture_it = textures_.find(texture_it->second);
+      if (renderer_texture_it != textures_.end() && renderer_texture_it->second.srv) {
+        target = renderer_texture_it->second.srv;
+      }
+      return;
+    }
+  };
+  assign_texture_handle({"base_color", "baseColor", "albedo", "diffuse"},
+                        record.base_color_srv);
+  assign_texture_handle({"normal", "normal_map", "normalMap"}, record.normal_srv);
+  assign_texture_handle({"metallic_roughness", "metallicRoughness"},
+                        record.metallic_roughness_srv);
+  assign_texture_handle({"occlusion", "ao"}, record.occlusion_srv);
+  assign_texture_handle({"emissive"}, record.emissive_srv);
+  assign_texture_handle({"clearcoat"}, record.clearcoat_srv);
+  assign_texture_handle({"clearcoat_roughness", "clearcoatRoughness"},
+                        record.clearcoat_roughness_srv);
+  assign_texture_handle({"clearcoat_normal", "clearcoatNormal"},
+                        record.clearcoat_normal_srv);
+  assign_texture_handle({"sheen_color", "sheenColor"}, record.sheen_color_srv);
+  assign_texture_handle({"sheen_roughness", "sheenRoughness"},
+                        record.sheen_roughness_srv);
+  assign_texture_handle({"transmission"}, record.transmission_srv);
+  assign_texture_handle({"thickness"}, record.thickness_srv);
+  initializeMaterialBindings(record);
+}
+
 renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMaterialDesc& resolved) {
   if (resolved.imported_material &&
       resolved.material_asset_index != std::numeric_limits<uint32_t>::max()) {
@@ -1405,6 +1631,9 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
                                           resolved.material_asset_index,
                                           *resolved.imported_material);
     if (imported != renderer::kInvalidMaterial) {
+      if (auto it = materials_.find(imported); it != materials_.end()) {
+        applyResolvedMaterial(it->second, resolved);
+      }
       return imported;
     }
   }
@@ -1413,17 +1642,14 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
     const renderer::MaterialId imported =
         createMaterialFromAsset(resolved.material_asset_path, resolved.material_asset_index);
     if (imported != renderer::kInvalidMaterial) {
+      if (auto it = materials_.find(imported); it != materials_.end()) {
+        applyResolvedMaterial(it->second, resolved);
+      }
       return imported;
     }
   }
 
   renderer::MaterialDesc material = resolved.surface;
-  if (!resolved.pipeline.vertex_shader_path.empty()) {
-    material.vertex_shader_path = resolved.pipeline.vertex_shader_path;
-  }
-  if (!resolved.pipeline.fragment_shader_path.empty()) {
-    material.fragment_shader_path = resolved.pipeline.fragment_shader_path;
-  }
 
   const renderer::MaterialId id = nextMaterialId_++;
   MaterialRecord record{};
@@ -1456,37 +1682,96 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
   record.attenuation_color = glm::vec3(material.attenuation_color.r,
                                        material.attenuation_color.g,
                                        material.attenuation_color.b);
-  record.shading_model = material.shading_model;
-  record.shell_fresnel_power = material.shell_fresnel_power;
-  record.shell_fresnel_strength = material.shell_fresnel_strength;
-  record.shell_refraction_strength = material.shell_refraction_strength;
-  record.shell_interior_strength = material.shell_interior_strength;
-  record.shell_highlight_strength = material.shell_highlight_strength;
-  record.shell_alpha_boost = material.shell_alpha_boost;
-  record.shell_swirl_strength = material.shell_swirl_strength;
+  record.shading_model = pipelineKind(resolved.pipeline.name);
   record.analytic_sphere_normals = material.analytic_sphere_normals;
-  record.shell_body_strength = material.shell_body_strength;
-  record.screen_center_x = material.screen_center_x;
-  record.screen_center_y = material.screen_center_y;
-  record.screen_radius_x = material.screen_radius_x;
-  record.screen_radius_y = material.screen_radius_y;
-  record.wave_tint_strength = material.wave_tint_strength;
-  record.wave_distortion_strength = material.wave_distortion_strength;
-  record.wave_edge_strength = material.wave_edge_strength;
-  record.wave_noise_strength = material.wave_noise_strength;
-  record.volume_center = material.volume_center;
-  record.volume_axis_x = material.volume_axis_x;
-  record.volume_axis_y = material.volume_axis_y;
-  record.volume_axis_z = material.volume_axis_z;
-  record.volume_shape = material.volume_shape;
-  record.volume_radius = material.volume_radius;
-  record.volume_capsule_half_length = material.volume_capsule_half_length;
-  record.volume_density = material.volume_density;
-  record.volume_scattering = material.volume_scattering;
-  record.volume_anisotropy = material.volume_anisotropy;
-  record.volume_absorption = material.volume_absorption;
-  record.volume_distortion_strength = material.volume_distortion_strength;
-  record.volume_noise_strength = material.volume_noise_strength;
+  if (const float* value = parameterFloat(resolved.params, "shell_fresnel_power")) {
+    record.shell_fresnel_power = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_fresnel_strength")) {
+    record.shell_fresnel_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_refraction_strength")) {
+    record.shell_refraction_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_interior_strength")) {
+    record.shell_interior_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_highlight_strength")) {
+    record.shell_highlight_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_alpha_boost")) {
+    record.shell_alpha_boost = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_swirl_strength")) {
+    record.shell_swirl_strength = *value;
+  }
+  if (const bool* value = parameterBool(resolved.params, "analytic_sphere_normals")) {
+    record.analytic_sphere_normals = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "shell_body_strength")) {
+    record.shell_body_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_center_x")) {
+    record.screen_center_x = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_center_y")) {
+    record.screen_center_y = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_radius_x")) {
+    record.screen_radius_x = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "screen_radius_y")) {
+    record.screen_radius_y = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_tint_strength")) {
+    record.wave_tint_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_distortion_strength")) {
+    record.wave_distortion_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_edge_strength")) {
+    record.wave_edge_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "wave_noise_strength")) {
+    record.wave_noise_strength = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_center")) {
+    record.volume_center = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_axis_x")) {
+    record.volume_axis_x = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_axis_y")) {
+    record.volume_axis_y = *value;
+  }
+  if (const glm::vec3* value = parameterVec3(resolved.params, "volume_axis_z")) {
+    record.volume_axis_z = *value;
+  }
+  record.volume_shape = parameterUint(resolved.params, "volume_shape", record.volume_shape);
+  if (const float* value = parameterFloat(resolved.params, "volume_radius")) {
+    record.volume_radius = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_capsule_half_length")) {
+    record.volume_capsule_half_length = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_density")) {
+    record.volume_density = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_scattering")) {
+    record.volume_scattering = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_anisotropy")) {
+    record.volume_anisotropy = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_absorption")) {
+    record.volume_absorption = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_distortion_strength")) {
+    record.volume_distortion_strength = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "volume_noise_strength")) {
+    record.volume_noise_strength = *value;
+  }
   auto assign_custom_material_param =
       [&](size_t index, const renderer::MaterialParameterValue& value) {
     glm::vec4 parsed{0.0f};
@@ -1511,7 +1796,7 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
     }
     if (index < record.custom_material_params.size()) {
       record.custom_material_params[index] = parsed;
-      record.custom_material_param_overrides[index] = true;
+      record.custom_material_param_enabled[index] = true;
     }
   };
   for (size_t index = 0; index < record.custom_material_params.size(); ++index) {
@@ -1521,67 +1806,38 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
     }
   }
   record.blend_mode = material.blend_mode;
-  if (material.base_color_texture != renderer::kInvalidTexture) {
-    auto tex_it = textures_.find(material.base_color_texture);
-    if (tex_it != textures_.end()) {
-      record.base_color_srv = tex_it->second.srv;
-    }
-  }
-  auto assign_texture_path =
+  auto assign_texture_handle =
       [&](std::initializer_list<const char*> keys,
-          Diligent::RefCntAutoPtr<Diligent::ITextureView>& target,
-          bool srgb,
-          const char* label) {
+          Diligent::RefCntAutoPtr<Diligent::ITextureView>& target) {
     for (const char* key : keys) {
-      const auto texture_it = resolved.textures.find(key);
-      if (texture_it == resolved.textures.end()) {
+      const auto texture_it = resolved.texture_handles.find(key);
+      if (texture_it == resolved.texture_handles.end()) {
         continue;
       }
-      if (auto srv = loadTextureFromFile(texture_it->second, srgb, label)) {
-        target = std::move(srv);
+      const auto renderer_texture_it = textures_.find(texture_it->second);
+      if (renderer_texture_it != textures_.end() && renderer_texture_it->second.srv) {
+        target = renderer_texture_it->second.srv;
       }
       return;
     }
   };
-  assign_texture_path({"base_color", "baseColor", "albedo", "diffuse"},
-                      record.base_color_srv,
-                      true,
-                      "materialBaseColor");
-  assign_texture_path({"normal", "normal_map", "normalMap"},
-                      record.normal_srv,
-                      false,
-                      "materialNormal");
-  assign_texture_path({"metallic_roughness", "metallicRoughness"},
-                      record.metallic_roughness_srv,
-                      false,
-                      "materialMetallicRoughness");
-  assign_texture_path({"occlusion", "ao"},
-                      record.occlusion_srv,
-                      false,
-                      "materialOcclusion");
-  assign_texture_path({"emissive"}, record.emissive_srv, true, "materialEmissive");
-  assign_texture_path({"clearcoat"}, record.clearcoat_srv, false, "materialClearcoat");
-  assign_texture_path({"clearcoat_roughness", "clearcoatRoughness"},
-                      record.clearcoat_roughness_srv,
-                      false,
-                      "materialClearcoatRoughness");
-  assign_texture_path({"clearcoat_normal", "clearcoatNormal"},
-                      record.clearcoat_normal_srv,
-                      false,
-                      "materialClearcoatNormal");
-  assign_texture_path({"sheen_color", "sheenColor"},
-                      record.sheen_color_srv,
-                      true,
-                      "materialSheenColor");
-  assign_texture_path({"sheen_roughness", "sheenRoughness"},
-                      record.sheen_roughness_srv,
-                      false,
-                      "materialSheenRoughness");
-  assign_texture_path({"transmission"},
-                      record.transmission_srv,
-                      false,
-                      "materialTransmission");
-  assign_texture_path({"thickness"}, record.thickness_srv, false, "materialThickness");
+  assign_texture_handle({"base_color", "baseColor", "albedo", "diffuse"},
+                        record.base_color_srv);
+  assign_texture_handle({"normal", "normal_map", "normalMap"}, record.normal_srv);
+  assign_texture_handle({"metallic_roughness", "metallicRoughness"},
+                        record.metallic_roughness_srv);
+  assign_texture_handle({"occlusion", "ao"}, record.occlusion_srv);
+  assign_texture_handle({"emissive"}, record.emissive_srv);
+  assign_texture_handle({"clearcoat"}, record.clearcoat_srv);
+  assign_texture_handle({"clearcoat_roughness", "clearcoatRoughness"},
+                        record.clearcoat_roughness_srv);
+  assign_texture_handle({"clearcoat_normal", "clearcoatNormal"},
+                        record.clearcoat_normal_srv);
+  assign_texture_handle({"sheen_color", "sheenColor"}, record.sheen_color_srv);
+  assign_texture_handle({"sheen_roughness", "sheenRoughness"},
+                        record.sheen_roughness_srv);
+  assign_texture_handle({"transmission"}, record.transmission_srv);
+  assign_texture_handle({"thickness"}, record.thickness_srv);
   initializeMaterialBindings(record);
 
   materials_[id] = std::move(record);
@@ -1711,45 +1967,9 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material,
   it->second.attenuation_color = glm::vec3(desc.attenuation_color.r,
                                            desc.attenuation_color.g,
                                            desc.attenuation_color.b);
-  it->second.shading_model = desc.shading_model;
-  it->second.shell_fresnel_power = desc.shell_fresnel_power;
-  it->second.shell_fresnel_strength = desc.shell_fresnel_strength;
-  it->second.shell_refraction_strength = desc.shell_refraction_strength;
-  it->second.shell_interior_strength = desc.shell_interior_strength;
-  it->second.shell_highlight_strength = desc.shell_highlight_strength;
-  it->second.shell_alpha_boost = desc.shell_alpha_boost;
-  it->second.shell_swirl_strength = desc.shell_swirl_strength;
   it->second.analytic_sphere_normals = desc.analytic_sphere_normals;
-  it->second.shell_body_strength = desc.shell_body_strength;
-  it->second.screen_center_x = desc.screen_center_x;
-  it->second.screen_center_y = desc.screen_center_y;
-  it->second.screen_radius_x = desc.screen_radius_x;
-  it->second.screen_radius_y = desc.screen_radius_y;
-  it->second.wave_tint_strength = desc.wave_tint_strength;
-  it->second.wave_distortion_strength = desc.wave_distortion_strength;
-  it->second.wave_edge_strength = desc.wave_edge_strength;
-  it->second.wave_noise_strength = desc.wave_noise_strength;
-  it->second.volume_center = desc.volume_center;
-  it->second.volume_axis_x = desc.volume_axis_x;
-  it->second.volume_axis_y = desc.volume_axis_y;
-  it->second.volume_axis_z = desc.volume_axis_z;
-  it->second.volume_shape = desc.volume_shape;
-  it->second.volume_radius = desc.volume_radius;
-  it->second.volume_capsule_half_length = desc.volume_capsule_half_length;
-  it->second.volume_density = desc.volume_density;
-  it->second.volume_scattering = desc.volume_scattering;
-  it->second.volume_anisotropy = desc.volume_anisotropy;
-  it->second.volume_absorption = desc.volume_absorption;
-  it->second.volume_distortion_strength = desc.volume_distortion_strength;
-  it->second.volume_noise_strength = desc.volume_noise_strength;
   it->second.blend_mode = desc.blend_mode;
   it->second.base_color_srv = {};
-  if (desc.base_color_texture != renderer::kInvalidTexture) {
-    auto tex_it = textures_.find(desc.base_color_texture);
-    if (tex_it != textures_.end()) {
-      it->second.base_color_srv = tex_it->second.srv;
-    }
-  }
   initializeMaterialBindings(it->second);
 }
 

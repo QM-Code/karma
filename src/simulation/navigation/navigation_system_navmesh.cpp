@@ -13,7 +13,7 @@
 
 namespace karma::navigation::detail {
 
-void rebuildNavMeshes(ecs::World& world) {
+void rebuildNavMeshes(ecs::World& world, const content::AssetRegistry* assets) {
   world.forEach<components::NavMeshComponent>([&](ecs::Entity entity) {
     auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
     if (!nav_mesh.enabled) {
@@ -39,7 +39,7 @@ void rebuildNavMeshes(ecs::World& world) {
     incrementBuildVersion(nav_mesh);
 
     const NavMeshInputGeometry geometry =
-        collectNavMeshGeometry(world, nav_mesh.source_mask);
+        collectNavMeshGeometry(world, assets, nav_mesh.source_mask);
     if (tile_cache != nullptr && tile_cache->enabled) {
       NavTileCacheBuildResult cache_result;
       tile_cache->built = tile_cache->tile_cache.build(nav_mesh.nav_mesh,

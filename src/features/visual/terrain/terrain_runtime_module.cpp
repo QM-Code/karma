@@ -10,7 +10,7 @@ TerrainRuntimeModule::~TerrainRuntimeModule() = default;
 
 void TerrainRuntimeModule::onAttach(const app::RuntimeModuleContext& context) {
   system_.reset();
-  system_ = std::make_unique<TerrainSystem>(context.graphics, context.materials);
+  system_ = std::make_unique<TerrainSystem>(context.graphics, context.assets);
 }
 
 void TerrainRuntimeModule::onDetach() {

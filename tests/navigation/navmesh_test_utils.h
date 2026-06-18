@@ -64,6 +64,7 @@ void testNearestPoint();
 void testNearestPolyFlagsAndSnapshotRefresh();
 void testGlbPrefabCollectionAppliesWorldTransform();
 void testWorldSurfaceCollectionUsesNavMeshSurfaceArea();
+void testWorldSurfaceCollectionResolvesMeshAssetKey();
 void testAreaFlagsFilterQueries();
 void testConvexVolumeMarksArea();
 void testPartitionModesAndTiledSnapshot();

@@ -342,33 +342,33 @@ uint32_t volumeShapeId(components::VolumetricShape shape) {
   return 0u;
 }
 
-renderer::MaterialDesc buildMaterialDesc(const components::VolumetricComponent& volume,
-                                         const ResolvedVolume& resolved) {
-  renderer::MaterialDesc desc{};
-  desc.base_color = volume.color;
-  desc.emissive_color = volume.emissive_color;
-  desc.metallic = 0.0f;
-  desc.roughness = 1.0f;
-  desc.unlit = true;
-  desc.transparent = true;
-  desc.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
-  desc.double_sided = true;
-  desc.depth_test = false;
-  desc.depth_write = false;
-  desc.shading_model = renderer::MaterialDesc::ShadingModel::VolumetricSolid;
-  desc.volume_shape = volumeShapeId(volume.shape);
-  desc.volume_center = resolved.center;
-  desc.volume_axis_x = resolved.axis_x;
-  desc.volume_axis_y = resolved.axis_y;
-  desc.volume_axis_z = resolved.axis_z;
-  desc.volume_radius = resolved.radius;
-  desc.volume_capsule_half_length = resolved.capsule_half_length;
-  desc.volume_density = resolveVolumeDensity(volume, resolved.radius);
-  desc.volume_scattering = std::max(volume.scattering, 0.0f);
-  desc.volume_anisotropy = std::clamp(volume.anisotropy, -0.95f, 0.95f);
-  desc.volume_absorption = std::max(volume.absorption, 0.0f);
-  desc.volume_distortion_strength = std::max(volume.distortion_strength, 0.0f);
-  desc.volume_noise_strength = std::max(volume.noise_strength, 0.0f);
+renderer::ResolvedMaterialDesc buildMaterialDesc(const components::VolumetricComponent& volume,
+                                                 const ResolvedVolume& resolved) {
+  renderer::ResolvedMaterialDesc desc{};
+  desc.pipeline.name = "volumetric_solid";
+  desc.surface.base_color = volume.color;
+  desc.surface.emissive_color = volume.emissive_color;
+  desc.surface.metallic = 0.0f;
+  desc.surface.roughness = 1.0f;
+  desc.surface.unlit = true;
+  desc.surface.transparent = true;
+  desc.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  desc.surface.double_sided = true;
+  desc.surface.depth_test = false;
+  desc.surface.depth_write = false;
+  desc.params["volume_shape"] = volumeShapeId(volume.shape);
+  desc.params["volume_center"] = resolved.center;
+  desc.params["volume_axis_x"] = resolved.axis_x;
+  desc.params["volume_axis_y"] = resolved.axis_y;
+  desc.params["volume_axis_z"] = resolved.axis_z;
+  desc.params["volume_radius"] = resolved.radius;
+  desc.params["volume_capsule_half_length"] = resolved.capsule_half_length;
+  desc.params["volume_density"] = resolveVolumeDensity(volume, resolved.radius);
+  desc.params["volume_scattering"] = std::max(volume.scattering, 0.0f);
+  desc.params["volume_anisotropy"] = std::clamp(volume.anisotropy, -0.95f, 0.95f);
+  desc.params["volume_absorption"] = std::max(volume.absorption, 0.0f);
+  desc.params["volume_distortion_strength"] = std::max(volume.distortion_strength, 0.0f);
+  desc.params["volume_noise_strength"] = std::max(volume.noise_strength, 0.0f);
   return desc;
 }
 
@@ -417,9 +417,6 @@ VolumeSystem::RuntimeState& VolumeSystem::ensureRuntimeState(ecs::Entity source)
   }
 
   RuntimeState state{};
-  if (device_ != nullptr) {
-    state.material = device_->createMaterial(renderer::MaterialDesc{});
-  }
   it = runtime_.emplace(key, std::move(state)).first;
   return it->second;
 }
@@ -491,8 +488,13 @@ void VolumeSystem::update(ecs::World& world, float dt, float interpolation_alpha
                                    aspect,
                                    volume.overlay_depth,
                                    overlay_rect);
+    if (device_ != nullptr) {
+      if (state.material != renderer::kInvalidMaterial) {
+        device_->destroyMaterial(state.material);
+      }
+      state.material = device_->createMaterial(buildMaterialDesc(volume, resolved));
+    }
     if (device_ != nullptr && state.material != renderer::kInvalidMaterial) {
-      device_->updateMaterial(state.material, buildMaterialDesc(volume, resolved));
       renderer::DrawItem item{};
       item.instance = key;
       item.mesh = overlay_mesh_;

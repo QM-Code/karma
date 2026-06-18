@@ -96,9 +96,9 @@ struct HeightFieldColliderShape {
 };
 
 /// \ingroup karma_components
-/// Mesh collider using render or imported mesh geometry.
+/// Mesh collider using registered mesh asset geometry.
 struct MeshColliderShape {
-  std::string mesh_path;
+  std::string mesh_asset_key;
   std::vector<math::Vec3> vertices;
   std::vector<uint32_t> indices;
 };

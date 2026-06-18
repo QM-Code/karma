@@ -1,4 +1,4 @@
-#include "glb_scene_skinning.h"
+#include "gltf_scene_skinning.h"
 
 #include <algorithm>
 #include <cstring>
@@ -54,7 +54,7 @@ void normalizeInfluence(components::VertexSkinInfluence& influence) {
   influence.weights /= sum;
 }
 
-void setInfluenceMeshAttributes(GlbScenePrefabPrimitive& primitive) {
+void setInfluenceMeshAttributes(GltfScenePrefabPrimitive& primitive) {
   primitive.mesh.joint_indices.clear();
   primitive.mesh.joint_weights.clear();
   primitive.mesh.joint_indices.reserve(primitive.vertex_influences.size());
@@ -92,7 +92,7 @@ std::vector<int> buildGltfParentMap(const GltfDocument& doc) {
 bool populatePrimitiveInfluencesFromGltf(const GltfDocument& doc,
                                          const Json& source_primitive,
                                          const animation::Skin& skin,
-                                         GlbScenePrefabPrimitive& primitive) {
+                                         GltfScenePrefabPrimitive& primitive) {
   if (!source_primitive.contains("attributes") ||
       !source_primitive["attributes"].is_object()) {
     return false;
@@ -136,7 +136,7 @@ bool populatePrimitiveInfluencesFromGltf(const GltfDocument& doc,
 
 void populateGltfSkins(const GltfDocument& doc,
                        const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
-                       GlbScenePrefab& prefab) {
+                       GltfScenePrefab& prefab) {
   if (!doc.valid() || !doc.json.contains("skins") || !doc.json["skins"].is_array()) {
     return;
   }
@@ -264,7 +264,7 @@ void populateGltfSkins(const GltfDocument& doc,
 
     auto& primitives = prefab.nodes[prefab_node_it->second].primitives;
     for (size_t primitive_index = 0; primitive_index < primitives.size(); ++primitive_index) {
-      GlbScenePrefabPrimitive& primitive = primitives[primitive_index];
+      GltfScenePrefabPrimitive& primitive = primitives[primitive_index];
       primitive.skin_index = skin_index;
       primitive.joint_node_indices = skin.joint_node_indices;
       primitive.inverse_bind_matrices = skin.inverse_bind_matrices;
@@ -281,9 +281,9 @@ void populateGltfSkins(const GltfDocument& doc,
 void populatePrimitiveSkinning(
     const aiScene& scene,
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
-    GlbScenePrefab& prefab) {
-  for (GlbScenePrefabNode& node : prefab.nodes) {
-    for (GlbScenePrefabPrimitive& primitive : node.primitives) {
+    GltfScenePrefab& prefab) {
+  for (GltfScenePrefabNode& node : prefab.nodes) {
+    for (GltfScenePrefabPrimitive& primitive : node.primitives) {
       if (primitive.source_mesh_index >= scene.mNumMeshes ||
           scene.mMeshes[primitive.source_mesh_index] == nullptr) {
         continue;

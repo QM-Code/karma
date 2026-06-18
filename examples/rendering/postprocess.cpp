@@ -45,7 +45,7 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   bounds.max = glm::max(bounds.max, point);
 }
 
-SceneBounds computePrefabBounds(const scene::GlbScenePrefab& prefab) {
+SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
   SceneBounds bounds{};
   for (const auto& node : prefab.nodes) {
     const glm::vec3 world_pos = toGlm(node.world_position);
@@ -93,9 +93,9 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
 
     const std::filesystem::path model_path =
         resolveExampleAssetPath("diligent_gltf_viewer/models/DamagedHelmet/DamagedHelmet.gltf");
-    const scene::GlbScenePrefab prefab = scene::loadGlbScenePrefab(
+    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
         model_path,
-        scene::GlbSceneLoadOptions{
+        scene::GltfSceneLoadOptions{
             .import_meshes = true,
             .import_lights = false,
         });
@@ -106,12 +106,12 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
       for (const std::string& diagnostic : prefab.diagnostics) {
         spdlog::warn("Postprocess demo import diagnostic: {}", diagnostic);
       }
-      scene::instantiateGlbScenePrefab(
+      scene::instantiateGltfScenePrefab(
           *world,
           *scene,
           *graphics,
           prefab,
-          scene::GlbSceneInstantiateOptions{
+          scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = true,
           },

@@ -80,10 +80,10 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     examples/rendering/bloom.cpp
     examples/common/scene_helpers.cpp)
 
-  karma_add_graphical_example(scene_glb_import scene glb_import
-    examples/scene/glb_import.cpp)
-  karma_add_graphical_example(animation_glb animation glb
-    examples/animation/glb.cpp
+  karma_add_graphical_example(scene_gltf_import scene gltf_import
+    examples/scene/gltf_import.cpp)
+  karma_add_graphical_example(animation_gltf animation gltf
+    examples/animation/gltf.cpp
     examples/common/scene_helpers.cpp)
 
   karma_add_graphical_example(particles_billboard particles billboard

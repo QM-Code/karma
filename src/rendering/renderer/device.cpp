@@ -227,6 +227,31 @@ TerrainStats GraphicsDevice::getTerrainStats() const {
   return backend_ ? backend_->getTerrainStats() : TerrainStats{};
 }
 
+DeformationId GraphicsDevice::createDeformation(const DeformationDesc& desc) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->createDeformation(desc) : kInvalidDeformation;
+}
+
+void GraphicsDevice::updateDeformation(DeformationId deformation,
+                                       const DeformationDesc& desc) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->updateDeformation(deformation, desc);
+  }
+}
+
+void GraphicsDevice::destroyDeformation(DeformationId deformation) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (backend_) {
+    backend_->destroyDeformation(deformation);
+  }
+}
+
+DeformationStats GraphicsDevice::getDeformationStats() const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->getDeformationStats() : DeformationStats{};
+}
+
 void GraphicsDevice::submit(const DrawItem& item) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {

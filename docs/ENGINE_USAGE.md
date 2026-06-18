@@ -1004,19 +1004,19 @@ Current limitation:
 - custom material pipelines do not support arbitrary vertex layouts, geometry or tessellation stages, compute materials, or material graphs
 - hot reload is not implemented for `.mat` files
 
-## GLB Scene Import
-Karma now has a separate GLB scene-import path for authored scenes.
+## glTF Scene Import
+Karma has a separate glTF scene-import path for authored scenes.
 This is distinct from `MeshComponent.mesh_key = "model.glb"`, which still uses the flat mesh import path.
 
 Use the convenience import directly:
 
 ```cpp
-auto imported = karma::scene::importGlbScene(
+auto imported = karma::scene::importGltfScene(
     *world,
     *scene,
     *graphics,
     "assets/level.glb",
-    karma::scene::GlbSceneImportOptions{
+    karma::scene::GltfSceneImportOptions{
         .load = {
             .import_meshes = true,
             .import_lights = true,
@@ -1033,8 +1033,8 @@ if (imported.valid()) {
 You can also split loading and instantiation:
 
 ```cpp
-const auto prefab = karma::scene::loadGlbScenePrefab("assets/level.glb");
-auto imported = karma::scene::instantiateGlbScenePrefab(
+const auto prefab = karma::scene::loadGltfScenePrefab("assets/level.glb");
+auto imported = karma::scene::instantiateGltfScenePrefab(
     *world,
     *scene,
     *graphics,
@@ -1044,7 +1044,7 @@ auto imported = karma::scene::instantiateGlbScenePrefab(
 
 Current behavior:
 
-- one structural ECS entity is created for each imported GLB node
+- one structural ECS entity is created for each imported glTF node
 - imported local transforms are preserved and `scene::updateWorldTransforms(...)`
   composes final world transforms
 - imported lights become `LightComponent`s on those node entities
@@ -1056,46 +1056,60 @@ Current behavior:
 - skinned primitives import joint indices, weights, skins, skeletons, and inverse
   bind matrices
 - imported animation roots get an `AnimatorComponent` and can autoplay clip `0`
-- GPU skinning is the default for imported skinned meshes; CPU skinning remains
-  the fallback/reference path
-- morph target deltas and default weights import from GLB mesh primitives and
-  morph-weight animation updates runtime morph components
+- GPU deformation is the default for imported skinned or morphed meshes; CPU
+  reference deformation remains available for diagnostics
+- morph target deltas and default weights import from glTF mesh primitives and
+  morph-weight animation updates runtime deformation components
 - the full node tree is recreated in `scene::Scene`
+
+Animation asset boundary:
+
+- a source `.glb` or `.gltf` is only an import container
+- `loadGltfScenePrefab(...)` stores clips as plain
+  `karma::animation::AnimationClip` values in `GltfScenePrefab::animations`
+- `instantiateGltfScenePrefab(...)` copies those clips into
+  `AnimatorComponent::clips`
+- clips do not own renderer resources, mesh resources, or file handles
+- imported clips still target the source node/skeleton index space until they
+  are retargeted
+- reusable humanoid animation libraries should retarget source clips into each
+  target rig with an explicit `SkeletonMap`
 
 Animation runtime flow:
 
 - `AnimationSystem` samples imported clips on the root `AnimatorComponent`
-- transform channels write local values on imported node `TransformComponent`
-  instances
-- morph-weight channels write `MorphTargetComponent::weights` on the matching
-  renderable primitive entities
+- transform channels write `LocalTransformComponent` values on imported node
+  entities
+- morph-weight channels write `DeformableMeshComponent::morph_weights` on the
+  matching renderable primitive entities
 - `scene::updateWorldTransforms(...)` composes final world transforms after
   animation sampling
-- `CpuSkinningSystem` is the mesh deformation upload stage: it applies morph
-  targets on CPU, builds skinning palettes, leaves GPU-skinned meshes in bind or
-  morphed-bind pose, and uploads CPU-skinned fallback meshes when needed
-- `RenderSystem` submits visible meshes and GPU skinning palettes to the
+- `DeformationSystem` is the mesh deformation upload stage: it builds joint
+  palettes, updates renderer-owned deformation resources, and uploads
+  CPU-deformed meshes only for the CPU reference path
+- `RenderSystem` submits visible meshes and deformation resource handles to the
   renderer
 
 Imported light assumptions:
 
-- `KHR_lights_punctual` light intensities from GLB files are normalized during import because authored glTF values are typically much larger than Karma's runtime light scale
+- `KHR_lights_punctual` light intensities from glTF/GLB files are normalized during import because authored glTF values are typically much larger than Karma's runtime light scale
 - directional lights are currently scaled by `1/700`
 - point and spot lights are currently scaled by `1/50`
 - when Assimp reports the glTF default quadratic attenuation (`constant = 0`, `linear = 0`, `quadratic = 1`), Karma derives a usable local-light range from the scaled intensity instead of using a radius of `1.0`
 - that derived point/spot range is currently clamped to `[4.0, 40.0]`
 - imported light color is normalized and the scaled magnitude becomes `LightComponent::intensity`
 
-Current v1 limitations:
+Current limitations:
 
 - imported material alpha and double-sided metadata are preserved in generated material assets
-- GLB light scaling is currently importer-defined, not configurable per asset
+- glTF/GLB light scaling is currently importer-defined, not configurable per asset
 - cameras are not imported yet
-- retargeting clips between different skeletons is not implemented
-- glTF sparse accessors and external `.bin` buffers are not imported by the
-  explicit GLB metadata reader
-- morph target deformation is currently CPU-applied before GPU skinning; a pure
-  GPU morph path is still future renderer work
+- humanoid semantic retarget profiles are not implemented; retargeting uses
+  explicit skeleton maps
+
+See [Animation V2 Architecture](ANIMATION_V2.md) and
+[Rigged glTF/GLB Authoring](RIGGED_GLTF_AUTHORING.md) for the full animation
+runtime and asset-authoring contracts.
 
 ## Rendering Features
 - Directional light with shadows (PCF supported)

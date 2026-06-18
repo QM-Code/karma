@@ -1,4 +1,4 @@
-#include "glb_scene_mesh_import.h"
+#include "gltf_scene_mesh_import.h"
 
 #include <algorithm>
 #include <cmath>
@@ -246,7 +246,7 @@ std::vector<float> readMorphWeights(const Json& source_mesh, size_t target_count
 
 void populateGltfMeshData(const GltfDocument& doc,
                           const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
-                          GlbScenePrefab& prefab) {
+                          GltfScenePrefab& prefab) {
   if (!doc.valid() ||
       !doc.json.contains("nodes") ||
       !doc.json["nodes"].is_array() ||

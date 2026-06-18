@@ -54,14 +54,14 @@ struct ShadowBatchKey {
   Diligent::Uint32 index_offset = 0;
   Diligent::Uint32 index_count = 0;
   bool indexed = false;
-  bool skinned = false;
+  bool deformed = false;
 
   bool operator==(const ShadowBatchKey& other) const {
     return mesh == other.mesh &&
            index_offset == other.index_offset &&
            index_count == other.index_count &&
            indexed == other.indexed &&
-           skinned == other.skinned;
+           deformed == other.deformed;
   }
 };
 
@@ -71,7 +71,7 @@ struct ShadowBatchKeyHash {
     h ^= static_cast<size_t>(key.index_offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.index_count) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.indexed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    h ^= static_cast<size_t>(key.skinned ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= static_cast<size_t>(key.deformed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
   }
 };
@@ -82,11 +82,11 @@ struct ShadowBatch {
   std::vector<glm::vec4> bounds_spheres;
 };
 
-struct SkinnedShadowDraw {
+struct DeformedShadowDraw {
   ShadowBatchKey key{};
   InstanceTransformData transform{};
   glm::vec4 bounds_sphere{0.0f};
-  std::vector<glm::mat4> skinning_palette;
+  renderer::DeformationId deformation = renderer::kInvalidDeformation;
 };
 
 #if defined(NDEBUG)
@@ -94,31 +94,6 @@ constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_NONE;
 #else
 constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
 #endif
-
-bool updateSkinningConstants(Diligent::IDeviceContext* context,
-                             Diligent::IBuffer* buffer,
-                             const std::vector<glm::mat4>& palette) {
-  if (context == nullptr || buffer == nullptr) {
-    return false;
-  }
-
-  SkinningConstants constants{};
-  const size_t count = std::min<size_t>(palette.size(), 128u);
-  constants.params[0] = count > 0 ? 1.0f : 0.0f;
-  constants.params[1] = static_cast<float>(count);
-  for (size_t i = 0; i < count; ++i) {
-    copyMat4(constants.matrices[i], palette[i]);
-  }
-
-  Diligent::MapHelper<SkinningConstants> mapped(
-      context, buffer, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
-  auto* mapped_constants = getMappedData(mapped);
-  if (mapped_constants == nullptr) {
-    return false;
-  }
-  *mapped_constants = constants;
-  return true;
-}
 
 glm::mat4 buildLightView(const renderer::DirectionalLightData& light) {
   glm::vec3 dir = light.direction;
@@ -417,8 +392,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       const auto& instance = entry.second;
       if (instance.layer == layer &&
           instance.shadow_visible &&
-          instance.skinning_enabled &&
-          !instance.skinning_palette.empty()) {
+          instance.deformation != renderer::kInvalidDeformation) {
         directional_shadow_needs_update = true;
         break;
       }
@@ -726,25 +700,25 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       can_render_point_shadows && point_shadow_face_update_count > 0;
 
   thread_local std::vector<ShadowBatch> shadow_batches;
-  thread_local std::vector<SkinnedShadowDraw> skinned_shadow_draws;
+  thread_local std::vector<DeformedShadowDraw> deformed_shadow_draws;
   thread_local std::unordered_map<ShadowBatchKey, size_t, ShadowBatchKeyHash> shadow_batch_lookup;
   shadow_batches.clear();
-  skinned_shadow_draws.clear();
+  deformed_shadow_draws.clear();
   shadow_batch_lookup.clear();
   if (render_directional_shadows || render_point_shadows) {
     shadow_batches.reserve(instances_.size());
-    skinned_shadow_draws.reserve(instances_.size() / 4 + 1);
+    deformed_shadow_draws.reserve(instances_.size() / 4 + 1);
     shadow_batch_lookup.reserve(instances_.size());
     auto append_shadow_batch = [&](const ShadowBatchKey& key,
                                    const glm::mat4& transform,
                                    const glm::vec4& bounds_sphere,
-                                   const std::vector<glm::mat4>& skinning_palette) {
-      if (key.skinned) {
-        skinned_shadow_draws.push_back(SkinnedShadowDraw{
+                                   renderer::DeformationId deformation) {
+      if (key.deformed) {
+        deformed_shadow_draws.push_back(DeformedShadowDraw{
             .key = key,
             .transform = packInstanceTransform(transform),
             .bounds_sphere = bounds_sphere,
-            .skinning_palette = skinning_palette,
+            .deformation = deformation,
         });
         return;
       }
@@ -783,12 +757,12 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
               .index_offset = submesh.index_offset,
               .index_count = submesh.index_count,
               .indexed = indexed_mesh && submesh.index_count > 0,
-              .skinned = instance.skinning_enabled,
+              .deformed = instance.deformation != renderer::kInvalidDeformation,
           };
           append_shadow_batch(key,
                               instance.transform,
                               world_bounds_sphere,
-                              instance.skinning_palette);
+                              instance.deformation);
         }
       } else {
         const ShadowBatchKey key{
@@ -796,12 +770,12 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
             .index_offset = 0,
             .index_count = mesh.index_count,
             .indexed = indexed_mesh,
-            .skinned = instance.skinning_enabled,
+            .deformed = instance.deformation != renderer::kInvalidDeformation,
         };
         append_shadow_batch(key,
                             instance.transform,
                             world_bounds_sphere,
-                            instance.skinning_palette);
+                            instance.deformation);
       }
     }
     std::sort(shadow_batches.begin(),
@@ -835,7 +809,6 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       }
       *mapped_constants = pass_constants;
     }
-    updateSkinningConstants(context_, skinning_constants_, {});
     for (const auto& batch : shadow_batches) {
       if (batch.transforms.empty()) {
         continue;
@@ -858,6 +831,17 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       }
       const auto& mesh = mesh_it->second;
       if (!mesh.vertex_buffer) {
+        continue;
+      }
+      if (shadow_srb_) {
+        if (!bindDeformationResources(shadow_srb_,
+                                      mesh,
+                                      renderer::kInvalidDeformation)) {
+          continue;
+        }
+        context_->CommitShaderResources(shadow_srb_,
+                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      } else if (!updateDeformationConstants(mesh, renderer::kInvalidDeformation)) {
         continue;
       }
       if (!ensure_instance_buffer(filtered_shadow_transforms.size())) {
@@ -917,7 +901,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       }
     }
 
-    for (const auto& draw : skinned_shadow_draws) {
+    for (const auto& draw : deformed_shadow_draws) {
       if (!sphere_visible(draw.bounds_sphere)) {
         continue;
       }
@@ -929,7 +913,13 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       if (!mesh.vertex_buffer) {
         continue;
       }
-      if (!updateSkinningConstants(context_, skinning_constants_, draw.skinning_palette)) {
+      if (shadow_srb_) {
+        if (!bindDeformationResources(shadow_srb_, mesh, draw.deformation)) {
+          continue;
+        }
+        context_->CommitShaderResources(shadow_srb_,
+                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      } else if (!updateDeformationConstants(mesh, draw.deformation)) {
         continue;
       }
       if (!ensure_instance_buffer(1)) {

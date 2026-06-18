@@ -1,4 +1,4 @@
-#include "karma/simulation/animation/cpu_skinning_system.h"
+#include "karma/simulation/animation/deformation_system.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -10,8 +10,6 @@
 
 #include "karma/core/math/glm.h"
 #include "karma/world/components/mesh.h"
-#include "karma/world/components/morph_target.h"
-#include "karma/world/components/skinned_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/scene/scene.h"
 
@@ -103,9 +101,11 @@ glm::vec3 transformNormal(const glm::mat4& matrix, const glm::vec3& normal) {
   return transformed / std::sqrt(len2);
 }
 
-std::vector<float> effectiveMorphWeights(const components::MorphTargetComponent& morph) {
-  std::vector<float> weights = morph.weights.empty() ? morph.base_weights : morph.weights;
-  weights.resize(morph.bind_mesh.morph_targets.size(), 0.0f);
+std::vector<float> effectiveMorphWeights(const components::DeformableMeshComponent& deformation) {
+  std::vector<float> weights = deformation.morph_weights.empty()
+                                   ? deformation.base_morph_weights
+                                   : deformation.morph_weights;
+  weights.resize(deformation.bind_mesh.morph_targets.size(), 0.0f);
   return weights;
 }
 
@@ -115,162 +115,163 @@ bool hasActiveMorphWeights(const std::vector<float>& weights) {
   });
 }
 
-bool prepareMorphMesh(components::MorphTargetComponent& morph, geometry::MeshData& out_mesh) {
-  out_mesh = morph.bind_mesh;
-  if (!morph.enabled || morph.bind_mesh.vertices.empty() || morph.bind_mesh.morph_targets.empty()) {
-    morph.weights_dirty = false;
+bool prepareMorphMesh(components::DeformableMeshComponent& deformation,
+                      geometry::MeshData& out_mesh) {
+  out_mesh = deformation.bind_mesh;
+  if (!deformation.enabled ||
+      deformation.bind_mesh.vertices.empty() ||
+      deformation.bind_mesh.morph_targets.empty()) {
+    deformation.morph_weights_dirty = false;
     return false;
   }
 
-  const std::vector<float> weights = effectiveMorphWeights(morph);
+  const std::vector<float> weights = effectiveMorphWeights(deformation);
   const bool active = hasActiveMorphWeights(weights);
   if (!active) {
-    morph.weights_dirty = false;
+    deformation.morph_weights_dirty = false;
     return false;
   }
 
-  if (morph.weights_dirty || morph.deformed_mesh.vertices.size() != morph.bind_mesh.vertices.size()) {
-    morph.deformed_mesh = morphMesh(morph.bind_mesh, weights);
-    morph.weights_dirty = false;
+  if (deformation.morph_weights_dirty ||
+      deformation.cpu_deformed_mesh.vertices.size() != deformation.bind_mesh.vertices.size()) {
+    deformation.cpu_deformed_mesh = morphMesh(deformation.bind_mesh, weights);
+    deformation.morph_weights_dirty = false;
   }
-  out_mesh = morph.deformed_mesh;
+  out_mesh = deformation.cpu_deformed_mesh;
   return true;
 }
 
 }  // namespace
 
-void CpuSkinningSystem::update(ecs::World& world,
+void DeformationSystem::update(ecs::World& world,
                                const scene::Scene& scene,
                                renderer::GraphicsDevice& device) {
-  const std::vector<ecs::Entity> morph_entities =
-      world.view<components::MorphTargetComponent, components::MeshComponent>();
-  for (const ecs::Entity entity : morph_entities) {
-    if (world.has<components::SkinnedMeshComponent>(entity)) {
-      continue;
-    }
-    auto& morph = world.get<components::MorphTargetComponent>(entity);
-    auto& mesh = world.get<components::MeshComponent>(entity);
-    const renderer::MeshId renderer_mesh = device.findRuntimeMesh(mesh.mesh_key);
-    if (renderer_mesh == renderer::kInvalidMesh || morph.bind_mesh.vertices.empty()) {
-      morph.diagnostic = "Morph mesh key is not registered as a runtime mesh";
-      continue;
-    }
-
-    const bool morph_was_dirty = morph.weights_dirty;
-    geometry::MeshData deformed_mesh{};
-    const bool active = prepareMorphMesh(morph, deformed_mesh);
-    if (active) {
-      if (morph_was_dirty || !morph.renderer_mesh_is_deformed) {
-        device.updateMesh(renderer_mesh, deformed_mesh);
-      }
-      morph.renderer_mesh_is_deformed = true;
-      morph.diagnostic.clear();
-      continue;
-    }
-
-    if (morph.renderer_mesh_is_deformed) {
-      device.updateMesh(renderer_mesh, morph.bind_mesh);
-      morph.renderer_mesh_is_deformed = false;
-    }
-    morph.diagnostic.clear();
-  }
-
   const std::vector<ecs::Entity> entities =
-      world.view<components::SkinnedMeshComponent, components::MeshComponent,
+      world.view<components::DeformableMeshComponent, components::MeshComponent,
                  components::TransformComponent>();
 
   for (const ecs::Entity entity : entities) {
-    auto& skin = world.get<components::SkinnedMeshComponent>(entity);
+    auto& deformation = world.get<components::DeformableMeshComponent>(entity);
     auto& mesh = world.get<components::MeshComponent>(entity);
-    if (skin.skinning_path == components::SkinningPath::Gpu) {
-      skin.diagnostic.clear();
+    if (deformation.path == components::DeformationPath::Gpu) {
+      deformation.diagnostic.clear();
     }
-    if (!skin.enabled ||
-        skin.bind_mesh.vertices.empty() ||
-        skin.vertex_influences.size() != skin.bind_mesh.vertices.size()) {
-      skin.palette_valid = false;
+    if (!deformation.enabled || deformation.bind_mesh.vertices.empty()) {
+      deformation.palette_valid = false;
       continue;
     }
 
     geometry::MeshData deformed_bind_mesh{};
-    geometry::MeshData* mesh_for_skinning = &skin.bind_mesh;
-    bool morph_active = false;
-    bool morph_was_dirty = false;
-    if (world.has<components::MorphTargetComponent>(entity)) {
-      auto& morph = world.get<components::MorphTargetComponent>(entity);
-      morph_was_dirty = morph.weights_dirty;
-      if (morph.bind_mesh.vertices.empty()) {
-        morph.bind_mesh = skin.bind_mesh;
-      }
-      morph_active = prepareMorphMesh(morph, deformed_bind_mesh);
-      if (morph_active) {
-        mesh_for_skinning = &deformed_bind_mesh;
-        morph.renderer_mesh_is_deformed = true;
-      } else {
-        morph.renderer_mesh_is_deformed = false;
-      }
+    geometry::MeshData* mesh_for_deformation = &deformation.bind_mesh;
+    const bool morph_was_dirty = deformation.morph_weights_dirty;
+    const bool morph_active = prepareMorphMesh(deformation, deformed_bind_mesh);
+    if (morph_active) {
+      mesh_for_deformation = &deformed_bind_mesh;
     }
 
     const glm::mat4 mesh_world = toMatrix(world.get<components::TransformComponent>(entity));
-    SkinningPalette palette = buildSkinningPaletteFromScene(skin, world, scene, mesh_world);
-    skin.joint_palette = std::move(palette.joint_matrices);
-    skin.palette_valid = palette.valid;
-    if (!palette.valid) {
-      skin.diagnostic = std::move(palette.diagnostic);
-      continue;
-    }
-    if (skin.joint_palette.size() > components::kMaxSkinningJointsPerDraw) {
-      skin.palette_valid = false;
-      skin.skinning_path = components::SkinningPath::GpuUnavailableCpuFallback;
-      skin.diagnostic = "Skin joint count exceeds renderer palette capacity";
+    const bool has_skin = deformation.skinned() &&
+                          deformation.vertex_influences.size() ==
+                              deformation.bind_mesh.vertices.size();
+    if (has_skin) {
+      SkinningPalette palette =
+          buildSkinningPaletteFromScene(deformation, world, scene, mesh_world);
+      deformation.joint_palette = std::move(palette.joint_matrices);
+      deformation.palette_valid = palette.valid;
+      if (!palette.valid) {
+        deformation.diagnostic = std::move(palette.diagnostic);
+      }
+    } else {
+      deformation.joint_palette.clear();
+      deformation.palette_valid = false;
     }
 
     const renderer::MeshId renderer_mesh = device.findRuntimeMesh(mesh.mesh_key);
     if (renderer_mesh == renderer::kInvalidMesh) {
-      skin.palette_valid = false;
-      skin.diagnostic = "Skinned mesh key is not registered as a runtime mesh";
-      continue;
-    }
-    if (skin.skinning_path == components::SkinningPath::Gpu) {
-      if (morph_active) {
-        if (morph_was_dirty || skin.renderer_mesh_is_bind_pose) {
-          device.updateMesh(renderer_mesh, *mesh_for_skinning);
-          skin.renderer_mesh_is_bind_pose = false;
-        }
-      } else if (!skin.renderer_mesh_is_bind_pose) {
-        skin.skinned_mesh = skin.bind_mesh;
-        if (renderer_mesh != renderer::kInvalidMesh) {
-          device.updateMesh(renderer_mesh, skin.bind_mesh);
-        }
-        skin.renderer_mesh_is_bind_pose = true;
-      }
+      deformation.palette_valid = false;
+      deformation.diagnostic = "Deformable mesh key is not registered as a runtime mesh";
       continue;
     }
 
-    skin.skinned_mesh = skinMesh(*mesh_for_skinning, skin.vertex_influences, skin.joint_palette);
-    device.updateMesh(renderer_mesh, skin.skinned_mesh);
-    skin.renderer_mesh_is_bind_pose = false;
+    if (deformation.path == components::DeformationPath::Gpu) {
+      if (deformation.renderer_mesh_is_cpu_deformed) {
+        device.updateMesh(renderer_mesh, deformation.bind_mesh);
+        deformation.renderer_mesh_is_cpu_deformed = false;
+      }
+
+      renderer::DeformationDesc desc{};
+      desc.skinning_enabled = has_skin && deformation.palette_valid &&
+                              !deformation.joint_palette.empty();
+      desc.joint_palette = desc.skinning_enabled ? deformation.joint_palette
+                                                 : std::vector<glm::mat4>{};
+      desc.morphing_enabled = deformation.morphable() && morph_active;
+      desc.morph_weights = desc.morphing_enabled ? effectiveMorphWeights(deformation)
+                                                 : std::vector<float>{};
+      if (desc.skinning_enabled || desc.morphing_enabled) {
+        if (deformation.deformation == renderer::kInvalidDeformation) {
+          deformation.deformation = device.createDeformation(desc);
+        } else {
+          device.updateDeformation(deformation.deformation, desc);
+        }
+      } else if (deformation.deformation != renderer::kInvalidDeformation) {
+        device.destroyDeformation(deformation.deformation);
+        deformation.deformation = renderer::kInvalidDeformation;
+      }
+      deformation.diagnostic.clear();
+      continue;
+    }
+
+    if (deformation.deformation != renderer::kInvalidDeformation) {
+      device.destroyDeformation(deformation.deformation);
+      deformation.deformation = renderer::kInvalidDeformation;
+    }
+
+    if (has_skin && deformation.palette_valid) {
+      deformation.cpu_deformed_mesh =
+          skinMesh(*mesh_for_deformation,
+                   deformation.vertex_influences,
+                   deformation.joint_palette);
+      device.updateMesh(renderer_mesh, deformation.cpu_deformed_mesh);
+      deformation.renderer_mesh_is_cpu_deformed = true;
+      deformation.diagnostic.clear();
+      continue;
+    }
+
+    if (morph_active) {
+      if (morph_was_dirty || !deformation.renderer_mesh_is_cpu_deformed) {
+        device.updateMesh(renderer_mesh, *mesh_for_deformation);
+      }
+      deformation.renderer_mesh_is_cpu_deformed = true;
+      deformation.diagnostic.clear();
+      continue;
+    }
+
+    if (deformation.renderer_mesh_is_cpu_deformed) {
+      device.updateMesh(renderer_mesh, deformation.bind_mesh);
+      deformation.renderer_mesh_is_cpu_deformed = false;
+    }
+    deformation.diagnostic.clear();
   }
 }
 
 SkinningPalette buildSkinningPaletteFromWorld(
-    const components::SkinnedMeshComponent& skin,
+    const components::DeformableMeshComponent& deformation,
     const ecs::World& world,
     const glm::mat4& mesh_world) {
   glm::mat4 output_space_world = mesh_world;
-  if (skin.override_render_transform) {
+  if (deformation.override_render_transform) {
     output_space_world = glm::mat4(1.0f);
-    if (skin.render_transform_entity.isValid() &&
-        world.isAlive(skin.render_transform_entity) &&
-        world.has<components::TransformComponent>(skin.render_transform_entity)) {
+    if (deformation.render_transform_entity.isValid() &&
+        world.isAlive(deformation.render_transform_entity) &&
+        world.has<components::TransformComponent>(deformation.render_transform_entity)) {
       output_space_world =
-          toMatrix(world.get<components::TransformComponent>(skin.render_transform_entity));
+          toMatrix(world.get<components::TransformComponent>(deformation.render_transform_entity));
     }
   }
 
   std::vector<glm::mat4> joint_world_matrices;
-  joint_world_matrices.reserve(skin.joint_entities.size());
-  for (const ecs::Entity joint : skin.joint_entities) {
+  joint_world_matrices.reserve(deformation.joint_entities.size());
+  for (const ecs::Entity joint : deformation.joint_entities) {
     glm::mat4 joint_world(1.0f);
     if (world.isAlive(joint) && world.has<components::TransformComponent>(joint)) {
       joint_world = toMatrix(world.get<components::TransformComponent>(joint));
@@ -284,28 +285,28 @@ SkinningPalette buildSkinningPaletteFromWorld(
     joint_indices.push_back(static_cast<uint32_t>(i));
   }
   return buildSkinningPalette(joint_indices,
-                              skin.inverse_bind_matrices,
+                              deformation.inverse_bind_matrices,
                               joint_world_matrices,
                               output_space_world,
-                              skin.skin_index);
+                              deformation.skin_index);
 }
 
 SkinningPalette buildSkinningPaletteFromScene(
-    const components::SkinnedMeshComponent& skin,
+    const components::DeformableMeshComponent& deformation,
     const ecs::World& world,
     const scene::Scene& scene,
     const glm::mat4& mesh_world) {
   SceneMatrixResolver resolver(world, scene);
 
   glm::mat4 output_space_world = mesh_world;
-  if (skin.override_render_transform) {
+  if (deformation.override_render_transform) {
     output_space_world =
-        resolver.entityWorld(skin.render_transform_entity, glm::mat4(1.0f));
+        resolver.entityWorld(deformation.render_transform_entity, glm::mat4(1.0f));
   }
 
   std::vector<glm::mat4> joint_world_matrices;
-  joint_world_matrices.reserve(skin.joint_entities.size());
-  for (const ecs::Entity joint : skin.joint_entities) {
+  joint_world_matrices.reserve(deformation.joint_entities.size());
+  for (const ecs::Entity joint : deformation.joint_entities) {
     joint_world_matrices.push_back(resolver.entityWorld(joint, glm::mat4(1.0f)));
   }
 
@@ -315,10 +316,10 @@ SkinningPalette buildSkinningPaletteFromScene(
     joint_indices.push_back(static_cast<uint32_t>(i));
   }
   return buildSkinningPalette(joint_indices,
-                              skin.inverse_bind_matrices,
+                              deformation.inverse_bind_matrices,
                               joint_world_matrices,
                               output_space_world,
-                              skin.skin_index);
+                              deformation.skin_index);
 }
 
 geometry::MeshData skinMesh(const geometry::MeshData& bind_mesh,

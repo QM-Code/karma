@@ -3,23 +3,31 @@
 Karma animation is split across content import, ECS components, simulation
 sampling, scene transform composition, and renderer upload/submission.
 
-## Imported GLB Flow
+For the durable architecture overview, asset-boundary explanation, showcase
+commands, and retargeting notes, see `docs/ANIMATION_V2.md`.
 
-`karma::scene::loadGlbScenePrefab(...)` imports GLB nodes, transforms, skins,
-skeletons, animation clips, and mesh primitive data. `instantiateGlbScenePrefab(...)`
+## Imported glTF Flow
+
+`karma::scene::loadGltfScenePrefab(...)` imports glTF nodes, transforms, skins,
+skeletons, animation clips, and mesh primitive data. `instantiateGltfScenePrefab(...)`
 creates ECS entities for the node tree and separate child entities for renderable
 mesh primitives.
 
 Renderable primitive entities may receive:
 
 - `karma::components::MeshComponent` for renderer mesh/material binding.
-- `karma::components::SkinnedMeshComponent` when the primitive has skin data.
-- `karma::components::MorphTargetComponent` when the primitive has morph target
-  deltas or default morph weights.
+- `karma::components::DeformableMeshComponent` when the primitive has skin data,
+  morph target deltas, or authored morph weights.
 
 Imported roots receive `karma::components::AnimatorComponent` when clips are
 available. The animator stores the imported clips, node entity map, and
 node-to-morph-primitive map needed for runtime sampling.
+
+Imported animation clips are plain `karma::animation::AnimationClip` values.
+They are copied from `GltfScenePrefab::animations` into
+`AnimatorComponent::clips`; they do not retain file handles, renderer handles,
+or mesh ownership. They remain authored in the imported node/skeleton index
+space until retargeted.
 
 ## Runtime Update Order
 
@@ -29,43 +37,57 @@ The engine-owned frame order is:
    plus morph weights.
 2. `karma::scene::updateWorldTransforms(...)` composes local transforms into
    final world `TransformComponent` values.
-3. `karma::animation::CpuSkinningSystem` applies CPU morph deformation, builds
-   skinning palettes, and uploads CPU-deformed meshes when required.
-4. `karma::renderer::RenderSystem` submits visible meshes and GPU skinning
-   palettes to the renderer.
+3. `karma::animation::DeformationSystem` builds joint palettes, updates
+   renderer-owned deformation resources, and uploads CPU-deformed meshes only
+   when the CPU reference path is explicitly selected.
+4. `karma::renderer::RenderSystem` submits visible meshes and deformation
+   resource handles to the renderer.
 
 The animation system is renderer-agnostic. It writes ECS data only. Mesh buffer
 updates are isolated to the deformation upload stage.
 
-## Skinning
+## Deformation
 
-Imported skinned meshes use GPU skinning by default when their joint palette
-fits `karma::components::kMaxSkinningJointsPerDraw`. The renderer consumes the
-bind or morphed-bind mesh plus the per-draw joint palette.
+Imported skinned and morphed meshes use GPU deformation by default. The
+renderer consumes the bind mesh plus a `karma::renderer::DeformationId` that
+references joint palette and morph-weight resources owned by the backend.
 
 CPU skinning remains available through `karma::animation::skinMesh(...)` and
-`karma::components::SkinningPath::Cpu`. It is intended for tests, diagnostics,
-and fallback behavior when the GPU path cannot draw a mesh directly.
+CPU morphing through `karma::animation::morphMesh(...)`. Runtime CPU mesh
+uploads are selected with `karma::components::DeformationPath::CpuReference`
+and are intended for tests and diagnostics.
 
 ## Morph Targets
 
-Morph target deltas are stored on `karma::renderer::MeshData`. Runtime weights
-live on `karma::components::MorphTargetComponent`.
+Morph target deltas are stored on `karma::geometry::MeshData`. Runtime weights
+live on `karma::components::DeformableMeshComponent`.
 
 `AnimationSystem` samples glTF `weights` channels into morph components. If the
 active clip has no morph track for a node, the component returns to its authored
 base weights. For blended states, morph weights are blended with the same clip
 weights used for transform sampling.
 
-Morph deformation currently happens on the CPU before skinning. For a skinned
-mesh that still uses GPU skinning, the renderer mesh is updated to the morphed
-bind pose and the renderer applies the joint palette on the GPU.
+Morph deformation is GPU-first in the runtime path. CPU deformation remains as
+a reference path for validation and diagnostics.
+
+## Retargeting
+
+Karma supports explicit skeleton retargeting through
+`karma::animation::SkeletonMap`, `SkeletonMapEntry`, `RetargetOptions`,
+`validateSkeletonMap(...)`, and `retargetClip(...)`.
+
+Retargeting converts a source clip from the source skeleton's joint/node index
+space into the target skeleton's joint/node index space. The map is explicit:
+Karma does not infer humanoid semantics or profile names yet.
+
+This keeps the runtime clean for future reusable humanoid animation libraries:
+clips, skeletons, node bindings, and mesh deformation are separate data
+contracts, but a higher-level humanoid profile/binding layer still needs to be
+authored above the current explicit maps.
 
 ## Current Limits
 
-- Retargeting clips between different skeletons is not implemented.
-- glTF sparse accessors and external `.bin` buffers are not imported by the
-  explicit GLB metadata reader.
-- Morph targets do not yet have a pure GPU deformation path.
-- `MeshComponent::mesh_key` flat mesh loading does not use the GLB scene
+- Humanoid semantic retarget profiles are not implemented; retargeting uses
+  explicit skeleton maps.
+- `MeshComponent::mesh_key` flat mesh loading does not use the glTF scene
   animation, skinning, or morph-target path.

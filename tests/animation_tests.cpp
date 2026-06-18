@@ -5,19 +5,18 @@
 
 #include "karma/simulation/animation/animation_clip.h"
 #include "karma/simulation/animation/animation_system.h"
-#include "karma/simulation/animation/cpu_skinning_system.h"
+#include "karma/simulation/animation/deformation_system.h"
 #include "karma/simulation/animation/pose.h"
-#include "karma/world/components/animation_player.h"
+#include "karma/simulation/animation/retarget.h"
 #include "karma/world/components/animator.h"
-#include "karma/world/components/morph_target.h"
-#include "karma/world/components/skinned_mesh.h"
+#include "karma/world/components/deformable_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
-#include "karma/content/importers/glb_scene_import.h"
+#include "karma/content/importers/gltf_scene_import.h"
 #include "karma/world/scene/scene.h"
 #include "karma/world/scene/transform_hierarchy.h"
-#include "../src/content/importers/glb_scene_animation_import.h"
-#include "../src/content/importers/glb_scene_mesh_import.h"
+#include "../src/content/importers/gltf_scene_animation_import.h"
+#include "../src/content/importers/gltf_scene_mesh_import.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -25,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <string>
 #include <unordered_map>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -97,6 +97,18 @@ void align4(std::vector<std::uint8_t>& data) {
   while ((data.size() % 4u) != 0u) {
     data.push_back(0);
   }
+}
+
+std::string dataUriForBytes(const std::vector<std::uint8_t>& data) {
+  constexpr char kHex[] = "0123456789ABCDEF";
+  std::string uri = "data:application/octet-stream,";
+  uri.reserve(uri.size() + data.size() * 3u);
+  for (const std::uint8_t byte : data) {
+    uri.push_back('%');
+    uri.push_back(kHex[(byte >> 4u) & 0x0Fu]);
+    uri.push_back(kHex[byte & 0x0Fu]);
+  }
+  return uri;
 }
 
 bool writeSkinnedGlb(const std::filesystem::path& path) {
@@ -364,7 +376,7 @@ std::vector<glm::mat4> buildGltfWorldMatrices(const karma::scene::GltfDocument& 
 }
 
 std::unordered_map<std::string, uint32_t> buildPrefabNodeMap(
-    const karma::scene::GlbScenePrefab& prefab) {
+    const karma::scene::GltfScenePrefab& prefab) {
   std::unordered_map<std::string, uint32_t> out;
   for (uint32_t i = 0; i < prefab.nodes.size(); ++i) {
     if (!prefab.nodes[i].name.empty()) {
@@ -375,7 +387,7 @@ std::unordered_map<std::string, uint32_t> buildPrefabNodeMap(
 }
 
 karma::animation::PoseHierarchy buildPrefabPoseHierarchy(
-    const karma::scene::GlbScenePrefab& prefab) {
+    const karma::scene::GltfScenePrefab& prefab) {
   karma::animation::PoseHierarchy hierarchy{};
   hierarchy.parent_indices.assign(prefab.nodes.size(), karma::animation::kInvalidAnimationIndex);
   hierarchy.rest_local_transforms.resize(prefab.nodes.size());
@@ -506,7 +518,7 @@ void testHierarchyAndPlayback() {
   assert(near(initial_child_transform.getInterpolatedPosition(0.0f).x, 12.0f));
   assert(near(initial_child_transform.getInterpolatedPosition(0.5f).x, 12.0f));
 
-  world.add(root, karma::components::AnimationPlayerComponent{
+  world.add(root, karma::components::AnimatorComponent{
                       .clips = {makeMoveClip(4.0f)},
                       .node_entities_by_index = {root, child},
                       .current_clip_index = 0,
@@ -520,15 +532,15 @@ void testHierarchyAndPlayback() {
   karma::scene::updateWorldTransforms(world, scene);
   assert(near(world.get<karma::components::TransformComponent>(child).getPosition().x, 12.0f));
 
-  auto& player = world.get<karma::components::AnimationPlayerComponent>(root);
-  karma::components::pauseAnimation(player);
+  auto& player = world.get<karma::components::AnimatorComponent>(root);
+  karma::components::pauseAnimator(player);
   animation_system.update(world, scene, 0.5f);
   karma::scene::updateWorldTransforms(world, scene);
   assert(near(world.get<karma::components::TransformComponent>(child).getPosition().x, 12.0f));
 
   player.clips.push_back(makeMoveClip(8.0f));
   player.time_seconds = 0.75f;
-  assert(karma::components::setAnimationClip(player, 1, true));
+  assert(karma::components::setAnimatorClip(player, 1, true));
   assert(player.current_clip_index == 1 && near(player.time_seconds, 0.0f));
 }
 
@@ -550,6 +562,8 @@ void testAnimatorStateMachineAndEvents() {
   karma::animation::AnimationClip run = makeMoveClip(10.0f);
   run.name = "Run";
   run.events.push_back({.name = "Footstep", .time_seconds = 0.25f});
+
+  world.add(root, karma::components::AnimationEventBufferComponent{});
 
   karma::components::AnimatorComponent animator{};
   animator.clips = {idle, run};
@@ -589,10 +603,84 @@ void testAnimatorStateMachineAndEvents() {
   animation_system.update(world, scene, 0.25f);
   assert(live_animator.event_queue.size() == 1);
   assert(live_animator.event_queue.front().name == "Footstep");
+  auto& event_buffer = world.get<karma::components::AnimationEventBufferComponent>(root);
+  assert(event_buffer.events.size() == 1);
+  assert(event_buffer.events.front().name == "Footstep");
+  assert(event_buffer.sequence == 1u);
   assert(near(world.get<karma::components::TransformComponent>(child).localPosition().x, 2.5f));
 
   animation_system.update(world, scene, 0.1f);
   assert(live_animator.event_queue.empty());
+  assert(event_buffer.events.empty());
+  assert(event_buffer.sequence == 1u);
+}
+
+void testAnimatorTransitionInterruption() {
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+
+  const auto root = world.createEntity();
+  world.add(root, karma::components::TransformComponent{});
+  scene.createNode(root);
+
+  karma::animation::AnimationClip idle = makeMoveClip(0.0f);
+  idle.name = "Idle";
+  karma::animation::AnimationClip walk = makeMoveClip(1.0f);
+  walk.name = "Walk";
+  karma::animation::AnimationClip run = makeMoveClip(2.0f);
+  run.name = "Run";
+
+  karma::components::AnimatorComponent animator{};
+  animator.clips = {idle, walk, run};
+  animator.node_entities_by_index = {root};
+  animator.playing = true;
+  animator.state_machine.parameters = {
+      {.name = "go", .type = karma::components::AnimatorParameterType::Trigger},
+      {.name = "run", .type = karma::components::AnimatorParameterType::Trigger},
+  };
+  animator.state_machine.states.push_back(karma::components::AnimatorState{
+      .name = "Idle",
+      .clip_index = 0u,
+      .transitions = {karma::components::AnimatorTransition{
+          .to_state_index = 1u,
+          .conditions = {karma::components::AnimatorCondition{
+              .parameter = "go",
+              .op = karma::components::AnimatorConditionOp::If,
+          }},
+          .duration_seconds = 1.0f,
+          .interrupt_policy = karma::components::AnimatorInterruptPolicy::Destination,
+      }},
+  });
+  animator.state_machine.states.push_back(karma::components::AnimatorState{
+      .name = "Walk",
+      .clip_index = 1u,
+      .transitions = {karma::components::AnimatorTransition{
+          .to_state_index = 2u,
+          .conditions = {karma::components::AnimatorCondition{
+              .parameter = "run",
+              .op = karma::components::AnimatorConditionOp::If,
+          }},
+          .duration_seconds = 0.25f,
+      }},
+  });
+  animator.state_machine.states.push_back(karma::components::AnimatorState{
+      .name = "Run",
+      .clip_index = 2u,
+  });
+  world.add(root, animator);
+
+  auto& live_animator = world.get<karma::components::AnimatorComponent>(root);
+  karma::animation::AnimationSystem animation_system;
+  assert(karma::components::setAnimatorTrigger(live_animator, "go"));
+  animation_system.update(world, scene, 0.0f);
+  assert(live_animator.transition.active);
+  assert(live_animator.transition.to_state_index == 1u);
+
+  assert(karma::components::setAnimatorTrigger(live_animator, "run"));
+  animation_system.update(world, scene, 0.1f);
+  assert(live_animator.transition.active);
+  assert(live_animator.transition.from_state_index == 1u);
+  assert(live_animator.transition.to_state_index == 2u);
 }
 
 void testAnimatorBlendTreeAndRootMotion() {
@@ -620,11 +708,15 @@ void testAnimatorBlendTreeAndRootMotion() {
   karma::animation::AnimationClip fast = makeMoveClip(10.0f);
   fast.name = "Fast";
 
+  world.add(root, karma::components::RootMotionComponent{
+                      .mode = karma::components::RootMotionMode::ExposeDelta,
+                      .root_motion_node_index = 0u,
+                  });
+
   karma::components::AnimatorComponent animator{};
   animator.clips = {slow, fast};
   animator.node_entities_by_index = {root, child};
   animator.playing = true;
-  animator.root_motion_mode = karma::components::RootMotionMode::ExposeDelta;
   animator.state_machine.parameters.push_back(karma::components::AnimatorParameter{
       .name = "speed",
       .type = karma::components::AnimatorParameterType::Float,
@@ -650,6 +742,16 @@ void testAnimatorBlendTreeAndRootMotion() {
   assert(near(world.get<karma::components::TransformComponent>(child).localPosition().x, 3.0f));
   assert(live_animator.root_motion_delta.position);
   assert(near(live_animator.root_motion_delta.position->x, 2.0f));
+  auto& root_motion = world.get<karma::components::RootMotionComponent>(root);
+  assert(root_motion.has_unconsumed_delta);
+  assert(root_motion.delta.position);
+  assert(near(root_motion.delta.position->x, 2.0f));
+  const karma::animation::SampledTransform consumed =
+      karma::components::consumeRootMotionDelta(root_motion);
+  assert(consumed.position);
+  assert(near(consumed.position->x, 2.0f));
+  assert(!root_motion.has_unconsumed_delta);
+  assert(!root_motion.delta.position);
 }
 
 void testCpuSkinning() {
@@ -718,12 +820,12 @@ void testAnimationSystemUpdatesMorphWeights() {
   });
 
   const auto primitive = world.createEntity();
-  world.add(primitive, karma::components::MorphTargetComponent{
+  world.add(primitive, karma::components::DeformableMeshComponent{
                            .bind_mesh = bind_mesh,
-                           .deformed_mesh = bind_mesh,
-                           .base_weights = {0.0f},
-                           .weights = {0.0f},
-                           .weights_dirty = false,
+                           .cpu_deformed_mesh = bind_mesh,
+                           .base_morph_weights = {0.0f},
+                           .morph_weights = {0.0f},
+                           .morph_weights_dirty = false,
                            .enabled = true});
 
   karma::animation::AnimationClip clip{};
@@ -737,7 +839,7 @@ void testAnimationSystemUpdatesMorphWeights() {
           {.time_seconds = 1.0f, .values = {1.0f}},
       },
   });
-  world.add(root, karma::components::AnimationPlayerComponent{
+  world.add(root, karma::components::AnimatorComponent{
                       .clips = {clip},
                       .node_entities_by_index = {root},
                       .morph_entities_by_node_index = {{primitive}},
@@ -750,21 +852,21 @@ void testAnimationSystemUpdatesMorphWeights() {
   karma::animation::AnimationSystem animation_system;
   animation_system.update(world, scene, 0.5f);
 
-  auto& morph = world.get<karma::components::MorphTargetComponent>(primitive);
-  assert(morph.weights.size() == 1);
-  assert(near(morph.weights[0], 0.5f));
-  assert(morph.weights_dirty);
+  auto& morph = world.get<karma::components::DeformableMeshComponent>(primitive);
+  assert(morph.morph_weights.size() == 1);
+  assert(near(morph.morph_weights[0], 0.5f));
+  assert(morph.morph_weights_dirty);
 
   karma::animation::AnimationClip base_clip{};
   base_clip.name = "Base";
   base_clip.duration_seconds = 1.0f;
-  auto& player = world.get<karma::components::AnimationPlayerComponent>(root);
+  auto& player = world.get<karma::components::AnimatorComponent>(root);
   player.clips.push_back(base_clip);
-  assert(karma::components::setAnimationClip(player, 1, true));
-  morph.weights_dirty = false;
+  assert(karma::components::setAnimatorClip(player, 1, true));
+  morph.morph_weights_dirty = false;
   animation_system.update(world, scene, 0.0f);
-  assert(near(morph.weights[0], 0.0f));
-  assert(morph.weights_dirty);
+  assert(near(morph.morph_weights[0], 0.0f));
+  assert(morph.morph_weights_dirty);
 }
 
 void testPoseCompositionAndPalette() {
@@ -801,12 +903,86 @@ void testPoseCompositionAndPalette() {
   assert(near(palette.joint_matrices[0][3].x, 1.0f));
 }
 
+void testSkeletonRetargeting() {
+  karma::animation::Skeleton source{};
+  source.joints = {
+      {.name = "Root", .node_index = 0u},
+      {.name = "Hand", .parent_joint_index = 0u, .node_index = 1u},
+  };
+  source.root_joint_indices = {0u};
+
+  karma::animation::Skeleton target{};
+  target.joints = {
+      {.name = "TargetRoot", .node_index = 10u},
+      {.name = "TargetHand", .parent_joint_index = 0u, .node_index = 11u},
+  };
+  target.root_joint_indices = {0u};
+
+  karma::animation::SkeletonMap map{};
+  map.source_root_joint_index = 0u;
+  map.target_root_joint_index = 0u;
+  map.joints = {
+      {.source_joint_index = 0u, .target_joint_index = 0u},
+      {.source_joint_index = 1u, .target_joint_index = 1u},
+  };
+  std::string diagnostic;
+  assert(karma::animation::validateSkeletonMap(source, target, map, &diagnostic));
+  assert(diagnostic.empty());
+
+  karma::animation::AnimationClip clip{};
+  clip.name = "Reach";
+  clip.duration_seconds = 1.0f;
+  clip.channels.push_back(karma::animation::AnimationChannel{
+      .target_node_index = 0u,
+      .position_keys = {
+          {.time_seconds = 0.0f, .value = {1.0f, 0.0f, 0.0f}},
+          {.time_seconds = 1.0f, .value = {2.0f, 0.0f, 0.0f}},
+      },
+  });
+  clip.channels.push_back(karma::animation::AnimationChannel{
+      .target_node_index = 1u,
+      .rotation_keys = {
+          {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f, 1.0f}},
+      },
+  });
+  clip.root_motion = karma::animation::RootMotionTrack{
+      .target_node_index = 0u,
+      .position_keys = {
+          {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f}},
+          {.time_seconds = 1.0f, .value = {1.0f, 0.0f, 0.0f}},
+      },
+  };
+
+  const karma::animation::AnimationClip retargeted = karma::animation::retargetClip(
+      clip,
+      source,
+      target,
+      map,
+      karma::animation::RetargetOptions{
+          .root_scale_policy = karma::animation::RetargetRootScalePolicy::ExplicitScale,
+          .root_translation_scale = 2.0f,
+      });
+
+  assert(retargeted.channels.size() == 2u);
+  assert(retargeted.channels[0].target_node_index == 10u);
+  assert(near(retargeted.channels[0].position_keys[0].value.x, 2.0f));
+  assert(near(retargeted.channels[0].position_keys[1].value.x, 4.0f));
+  assert(retargeted.channels[1].target_node_index == 11u);
+  assert(retargeted.root_motion);
+  assert(retargeted.root_motion->target_node_index == 10u);
+  assert(near(retargeted.root_motion->position_keys[1].value.x, 2.0f));
+
+  map.joints.back().target_joint_index = 99u;
+  assert(!karma::animation::validateSkeletonMap(source, target, map, &diagnostic));
+  assert(!diagnostic.empty());
+}
+
 void testSkinnedGlbImport() {
   const std::filesystem::path path =
       std::filesystem::temp_directory_path() / "karma_test_skinned_animation.glb";
   assert(writeSkinnedGlb(path));
 
-  const karma::scene::GlbScenePrefab prefab = karma::scene::loadGlbScenePrefab(path);
+  const karma::scene::GltfScenePrefab prefab = karma::scene::loadGltfScenePrefab(path);
   assert(prefab.valid());
   assert(!prefab.animations.empty());
   assert(!prefab.skins.empty());
@@ -835,7 +1011,7 @@ void testSplitWeightGlbImport() {
       std::filesystem::temp_directory_path() / "karma_test_split_weight_skin.glb";
   assert(writeSplitWeightGlb(path));
 
-  const karma::scene::GlbScenePrefab prefab = karma::scene::loadGlbScenePrefab(path);
+  const karma::scene::GltfScenePrefab prefab = karma::scene::loadGltfScenePrefab(path);
   assert(prefab.valid());
   assert(!prefab.skins.empty());
   assert(prefab.skins.front().joint_node_indices.size() == 2);
@@ -897,14 +1073,14 @@ void testGltfMeshReplacementImportsAllMeshNodes() {
        })},
   };
 
-  karma::scene::GlbScenePrefab prefab{};
+  karma::scene::GltfScenePrefab prefab{};
   prefab.nodes.resize(2);
   prefab.nodes[0].name = "StaticNode";
-  prefab.nodes[0].primitives.push_back(karma::scene::GlbScenePrefabPrimitive{});
+  prefab.nodes[0].primitives.push_back(karma::scene::GltfScenePrefabPrimitive{});
   prefab.nodes[0].primitives.front().source_material_index = 10;
   prefab.nodes[0].primitives.front().mesh.vertices.push_back({42.0f, 0.0f, 0.0f});
   prefab.nodes[1].name = "SkinnedNode";
-  prefab.nodes[1].primitives.push_back(karma::scene::GlbScenePrefabPrimitive{});
+  prefab.nodes[1].primitives.push_back(karma::scene::GltfScenePrefabPrimitive{});
   prefab.nodes[1].primitives.front().source_material_index = 11;
   prefab.nodes[1].primitives.front().mesh.vertices.push_back({42.0f, 0.0f, 0.0f});
 
@@ -983,10 +1159,10 @@ void testGltfMorphTargetImport() {
        })},
   };
 
-  karma::scene::GlbScenePrefab prefab{};
+  karma::scene::GltfScenePrefab prefab{};
   prefab.nodes.resize(1);
   prefab.nodes[0].name = "MorphNode";
-  prefab.nodes[0].primitives.push_back(karma::scene::GlbScenePrefabPrimitive{});
+  prefab.nodes[0].primitives.push_back(karma::scene::GltfScenePrefabPrimitive{});
 
   const std::unordered_map<std::string, uint32_t> node_indices_by_name{{"MorphNode", 0u}};
   karma::scene::populateGltfMeshData(doc, node_indices_by_name, prefab);
@@ -1020,12 +1196,147 @@ void testGltfMorphTargetImport() {
   assert(sampled_morph);
 }
 
+void testGltfDocumentExternalAndDataBuffers() {
+  std::vector<std::uint8_t> bin;
+  appendFloat(bin, 0.0f); appendFloat(bin, 0.0f); appendFloat(bin, 0.0f);
+  appendFloat(bin, 1.0f); appendFloat(bin, 2.0f); appendFloat(bin, 3.0f);
+
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() / "karma_gltf_buffer_modes";
+  std::filesystem::create_directories(dir);
+  const std::filesystem::path external_bin = dir / "positions.bin";
+  {
+    std::ofstream out(external_bin, std::ios::binary);
+    assert(out);
+    out.write(reinterpret_cast<const char*>(bin.data()),
+              static_cast<std::streamsize>(bin.size()));
+    assert(out.good());
+  }
+
+  auto make_json = [&](const std::string& uri) {
+    return karma::scene::Json{
+        {"asset", {{"version", "2.0"}}},
+        {"buffers", karma::scene::Json::array({
+                        {{"uri", uri}, {"byteLength", bin.size()}},
+                    })},
+        {"bufferViews", karma::scene::Json::array({
+                            {{"buffer", 0u}, {"byteOffset", 0u}, {"byteLength", bin.size()}},
+                        })},
+        {"accessors", karma::scene::Json::array({
+                          {{"bufferView", 0u},
+                           {"componentType", 5126},
+                           {"count", 2u},
+                           {"type", "VEC3"}},
+                      })},
+    };
+  };
+
+  const std::filesystem::path external_gltf = dir / "external.gltf";
+  {
+    std::ofstream out(external_gltf);
+    assert(out);
+    out << make_json("positions.bin").dump();
+  }
+  karma::scene::GltfDocument external_doc = karma::scene::loadGltfDocument(external_gltf);
+  std::vector<float> values;
+  size_t count = 0;
+  assert(karma::scene::readFloatAccessor(external_doc, 0u, 3u, values, &count));
+  assert(count == 2u);
+  assert(near(values[3], 1.0f));
+  assert(near(values[4], 2.0f));
+  assert(near(values[5], 3.0f));
+
+  const std::filesystem::path data_uri_gltf = dir / "data_uri.gltf";
+  {
+    std::ofstream out(data_uri_gltf);
+    assert(out);
+    out << make_json(dataUriForBytes(bin)).dump();
+  }
+  karma::scene::GltfDocument data_uri_doc = karma::scene::loadGltfDocument(data_uri_gltf);
+  values.clear();
+  count = 0;
+  assert(karma::scene::readFloatAccessor(data_uri_doc, 0u, 3u, values, &count));
+  assert(count == 2u);
+  assert(near(values[3], 1.0f));
+  assert(near(values[4], 2.0f));
+  assert(near(values[5], 3.0f));
+}
+
+void testGltfSparseAccessors() {
+  karma::scene::GltfDocument doc{};
+
+  const std::uint32_t position_sparse_indices_offset =
+      static_cast<std::uint32_t>(doc.bin.size());
+  appendU16(doc.bin, 1u);
+  appendU16(doc.bin, 2u);
+
+  const std::uint32_t position_sparse_values_offset =
+      static_cast<std::uint32_t>(doc.bin.size());
+  appendFloat(doc.bin, 1.0f); appendFloat(doc.bin, 2.0f); appendFloat(doc.bin, 3.0f);
+  appendFloat(doc.bin, 4.0f); appendFloat(doc.bin, 5.0f); appendFloat(doc.bin, 6.0f);
+
+  const std::uint32_t index_sparse_indices_offset =
+      static_cast<std::uint32_t>(doc.bin.size());
+  appendU16(doc.bin, 2u);
+
+  const std::uint32_t index_sparse_values_offset =
+      static_cast<std::uint32_t>(doc.bin.size());
+  appendU16(doc.bin, 7u);
+
+  doc.json = karma::scene::Json{
+      {"asset", {{"version", "2.0"}}},
+      {"bufferViews",
+       karma::scene::Json::array({
+           {{"buffer", 0u}, {"byteOffset", position_sparse_indices_offset}, {"byteLength", 4u}},
+           {{"buffer", 0u}, {"byteOffset", position_sparse_values_offset}, {"byteLength", 24u}},
+           {{"buffer", 0u}, {"byteOffset", index_sparse_indices_offset}, {"byteLength", 2u}},
+           {{"buffer", 0u}, {"byteOffset", index_sparse_values_offset}, {"byteLength", 2u}},
+       })},
+      {"accessors",
+       karma::scene::Json::array({
+           {{"componentType", 5126},
+            {"count", 3u},
+            {"type", "VEC3"},
+            {"sparse",
+             {{"count", 2u},
+              {"indices", {{"bufferView", 0u}, {"componentType", 5123}}},
+              {"values", {{"bufferView", 1u}}}}}},
+           {{"componentType", 5123},
+            {"count", 3u},
+            {"type", "SCALAR"},
+            {"sparse",
+             {{"count", 1u},
+              {"indices", {{"bufferView", 2u}, {"componentType", 5123}}},
+              {"values", {{"bufferView", 3u}}}}}},
+       })},
+  };
+
+  std::vector<float> positions;
+  size_t position_count = 0;
+  assert(karma::scene::readFloatAccessor(doc, 0u, 3u, positions, &position_count));
+  assert(position_count == 3u);
+  assert(near(positions[0], 0.0f));
+  assert(near(positions[3], 1.0f));
+  assert(near(positions[4], 2.0f));
+  assert(near(positions[5], 3.0f));
+  assert(near(positions[6], 4.0f));
+  assert(near(positions[7], 5.0f));
+  assert(near(positions[8], 6.0f));
+
+  std::vector<uint32_t> indices;
+  assert(karma::scene::readIndexAccessor(doc, 1u, indices));
+  assert(indices.size() == 3u);
+  assert(indices[0] == 0u);
+  assert(indices[1] == 0u);
+  assert(indices[2] == 7u);
+}
+
 void testWalkingGlbImportSmoke() {
   const std::filesystem::path path =
       findRepoRoot() / "examples/assets/animation_model/source/walking.glb";
   assert(std::filesystem::exists(path));
 
-  const karma::scene::GlbScenePrefab prefab = karma::scene::loadGlbScenePrefab(path);
+  const karma::scene::GltfScenePrefab prefab = karma::scene::loadGltfScenePrefab(path);
   const karma::scene::GltfDocument gltf = karma::scene::loadGltfDocument(path);
   assert(prefab.valid());
   assert(gltf.valid());
@@ -1057,12 +1368,12 @@ void testWalkingGlbImportSmoke() {
         return node_index;
       }
     }
-    return karma::scene::kInvalidGlbSceneNode;
+    return karma::scene::kInvalidGltfSceneNode;
   };
   auto assert_imported_world_matches_gltf = [&](const char* name) {
     const uint32_t gltf_node = gltf_node_by_name(name);
     const auto prefab_it = prefab_nodes_by_name.find(name);
-    assert(gltf_node != karma::scene::kInvalidGlbSceneNode);
+    assert(gltf_node != karma::scene::kInvalidGltfSceneNode);
     assert(prefab_it != prefab_nodes_by_name.end());
     assert(gltf_node < gltf_world_matrices.size());
     assert(prefab_it->second < prefab.nodes.size());
@@ -1174,8 +1485,8 @@ void testWalkingGlbImportSmoke() {
                         .playing = true});
 
   struct RuntimePrimitive {
-    const karma::scene::GlbScenePrefabPrimitive* primitive = nullptr;
-    karma::components::SkinnedMeshComponent skin;
+    const karma::scene::GltfScenePrefabPrimitive* primitive = nullptr;
+    karma::components::DeformableMeshComponent deformation;
   };
   std::vector<RuntimePrimitive> runtime_primitives;
   for (const auto& node : prefab.nodes) {
@@ -1192,15 +1503,15 @@ void testWalkingGlbImportSmoke() {
       }
       runtime_primitives.push_back(RuntimePrimitive{
           .primitive = &primitive,
-          .skin = karma::components::SkinnedMeshComponent{
+          .deformation = karma::components::DeformableMeshComponent{
               .bind_mesh = primitive.mesh,
-              .skinned_mesh = primitive.mesh,
+              .cpu_deformed_mesh = primitive.mesh,
               .vertex_influences = primitive.vertex_influences,
               .joint_entities = std::move(joint_entities),
               .inverse_bind_matrices = primitive.inverse_bind_matrices,
               .render_transform_entity = runtime_root,
               .skin_index = primitive.skin_index,
-              .skinning_path = karma::components::SkinningPath::Cpu,
+              .path = karma::components::DeformationPath::CpuReference,
               .override_render_transform = true,
               .enabled = true,
           }});
@@ -1215,7 +1526,7 @@ void testWalkingGlbImportSmoke() {
   Bounds runtime_bounds{};
   for (const RuntimePrimitive& runtime_primitive : runtime_primitives) {
     const karma::animation::SkinningPalette palette =
-        karma::animation::buildSkinningPaletteFromScene(runtime_primitive.skin,
+        karma::animation::buildSkinningPaletteFromScene(runtime_primitive.deformation,
                                                         runtime_world,
                                                         runtime_scene,
                                                         glm::mat4(1.0f));
@@ -1269,15 +1580,19 @@ int main() {
   testInterpolationModes();
   testHierarchyAndPlayback();
   testAnimatorStateMachineAndEvents();
+  testAnimatorTransitionInterruption();
   testAnimatorBlendTreeAndRootMotion();
   testCpuSkinning();
   testMorphTargets();
   testAnimationSystemUpdatesMorphWeights();
   testPoseCompositionAndPalette();
+  testSkeletonRetargeting();
   testSkinnedGlbImport();
   testSplitWeightGlbImport();
   testGltfMeshReplacementImportsAllMeshNodes();
   testGltfMorphTargetImport();
+  testGltfDocumentExternalAndDataBuffers();
+  testGltfSparseAccessors();
   testWalkingGlbImportSmoke();
   return 0;
 }

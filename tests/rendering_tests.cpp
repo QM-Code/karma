@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "karma/content/materials/material_loader.h"
+#include <glm/mat4x4.hpp>
+
 #include "karma/platform/window/window.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/rendering/renderer/material_library.h"
@@ -201,6 +203,27 @@ void testMaterialFileLoading() {
   std::filesystem::remove_all(dir);
 }
 
+void testDeformationHeadlessNoopApi() {
+  DummyWindow window;
+  karma::renderer::GraphicsDevice device(window);
+
+  karma::renderer::DeformationDesc desc{};
+  desc.skinning_enabled = true;
+  desc.morphing_enabled = true;
+  desc.joint_palette = {glm::mat4(1.0f), glm::mat4(2.0f)};
+  desc.morph_weights = {0.25f, 0.75f};
+
+  const karma::renderer::DeformationId deformation = device.createDeformation(desc);
+  assert(deformation == karma::renderer::kInvalidDeformation);
+  device.updateDeformation(deformation, desc);
+  device.destroyDeformation(deformation);
+
+  const auto stats = device.getDeformationStats();
+  assert(stats.resource_count == 0u);
+  assert(stats.joint_matrix_count == 0u);
+  assert(stats.morph_weight_count == 0u);
+}
+
 }  // namespace
 
 int main() {
@@ -239,6 +262,7 @@ int main() {
   assert(profiles.resolve("cinematic").depth_of_field_enabled);
 
   testTerrainHeadlessNoopApi();
+  testDeformationHeadlessNoopApi();
 
   return 0;
 }

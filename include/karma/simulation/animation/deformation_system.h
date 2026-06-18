@@ -4,11 +4,10 @@
 
 #include <glm/glm.hpp>
 
-#include "karma/world/components/skinned_mesh.h"
-#include "karma/world/components/morph_target.h"
-#include "karma/world/ecs/world.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/simulation/animation/pose.h"
+#include "karma/world/components/deformable_mesh.h"
+#include "karma/world/ecs/world.h"
 
 namespace karma::scene {
 class Scene;
@@ -30,24 +29,24 @@ geometry::MeshData morphMesh(const geometry::MeshData& bind_mesh,
 
 /// Builds a skinning palette from ECS world transforms.
 SkinningPalette buildSkinningPaletteFromWorld(
-    const components::SkinnedMeshComponent& skin,
+    const components::DeformableMeshComponent& deformation,
     const ecs::World& world,
     const glm::mat4& mesh_world);
 
 /// Builds a skinning palette from scene hierarchy and world transforms.
 SkinningPalette buildSkinningPaletteFromScene(
-    const components::SkinnedMeshComponent& skin,
+    const components::DeformableMeshComponent& deformation,
     const ecs::World& world,
     const scene::Scene& scene,
     const glm::mat4& mesh_world);
 
 /// \ingroup karma_animation
-/// CPU mesh deformation correctness/fallback path.
+/// Updates renderer-owned deformation resources for skinned/morphed meshes.
 ///
-/// The system applies morph targets, builds skinning palettes for
-/// `SkinnedMeshComponent`, and uploads CPU-deformed meshes when the renderer
-/// cannot consume the full deformation directly.
-class CpuSkinningSystem {
+/// GPU mode updates joint palettes and morph weights without rewriting mesh
+/// vertex buffers. CPU reference mode remains available for validation and
+/// diagnostics.
+class DeformationSystem {
  public:
   void update(ecs::World& world, const scene::Scene& scene, renderer::GraphicsDevice& device);
 };

@@ -40,10 +40,10 @@ Public headers are split by API role:
 4. Call `findPath`, `findNearestPoint`, `raycast`, sliced path queries, or the
    local spatial helpers.
 
-GLB scenes can be baked directly from `scene::GlbScenePrefab`:
+glTF scenes can be baked directly from `scene::GltfScenePrefab`:
 
 ```cpp
-const auto prefab = scene::loadGlbScenePrefab(path);
+const auto prefab = scene::loadGltfScenePrefab(path);
 const auto geometry = navigation::collectNavMeshGeometry(prefab);
 
 navigation::NavMesh nav_mesh;

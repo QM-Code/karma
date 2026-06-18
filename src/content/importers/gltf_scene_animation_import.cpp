@@ -1,4 +1,4 @@
-#include "glb_scene_animation_import.h"
+#include "gltf_scene_animation_import.h"
 
 #include <algorithm>
 #include <string_view>
@@ -35,7 +35,7 @@ animation::InterpolationMode parseInterpolation(const Json& sampler) {
 
 animation::AnimationChannel& findOrCreateChannel(animation::AnimationClip& clip,
                                                  uint32_t target_node_index,
-                                                 const GlbScenePrefab& prefab) {
+                                                 const GltfScenePrefab& prefab) {
   const auto it = std::find_if(clip.channels.begin(),
                                clip.channels.end(),
                                [&](const animation::AnimationChannel& channel) {
@@ -68,7 +68,7 @@ animation::AnimationChannel& findOrCreateChannel(animation::AnimationClip& clip,
 std::vector<animation::AnimationClip> loadGltfAnimationClips(
     const GltfDocument& doc,
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
-    const GlbScenePrefab& prefab) {
+    const GltfScenePrefab& prefab) {
   std::vector<animation::AnimationClip> clips;
   if (!doc.valid() ||
       !doc.json.contains("animations") ||

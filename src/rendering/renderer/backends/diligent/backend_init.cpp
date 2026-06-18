@@ -246,11 +246,21 @@ cbuffer Constants
     float4 g_TexCoordRow1[12];
 };
 
-cbuffer SkinningConstants
+cbuffer DeformationConstants
 {
-    float4 g_SkinningParams;
-    float4x4 g_SkinMatrices[128];
+    float4 g_DeformationParams;
 };
+
+struct MorphTargetDelta
+{
+    float4 position;
+    float4 normal;
+    float4 tangent;
+};
+
+StructuredBuffer<float4x4> g_DeformationMatrices;
+StructuredBuffer<float> g_MorphWeights;
+StructuredBuffer<MorphTargetDelta> g_MorphTargetDeltas;
 
 struct VSInput
 {
@@ -265,6 +275,7 @@ struct VSInput
     float4 ModelCol3 : ATTRIB7;
     float4 JointIndices : ATTRIB8;
     float4 JointWeights : ATTRIB9;
+    uint VertexId : SV_VertexID;
 };
 
 struct VSOutput
@@ -276,19 +287,36 @@ VSOutput main(VSInput input)
 {
     VSOutput output;
     float3 local_pos = input.Pos;
-    if (g_SkinningParams.x > 0.5)
+    uint morph_count = (uint)max(g_DeformationParams.z, 0.0);
+    uint vertex_count = (uint)max(g_DeformationParams.w, 0.0);
+    if (morph_count > 0u && vertex_count > 0u)
+    {
+        uint vertex_id = min(input.VertexId, vertex_count - 1u);
+        for (uint target = 0u; target < morph_count; ++target)
+        {
+            float weight = g_MorphWeights[target];
+            if (abs(weight) <= 1.0e-6)
+            {
+                continue;
+            }
+            MorphTargetDelta delta = g_MorphTargetDeltas[target * vertex_count + vertex_id];
+            local_pos += delta.position.xyz * weight;
+        }
+    }
+    if (g_DeformationParams.x > 0.5)
     {
         uint4 joints = (uint4)round(input.JointIndices);
+        uint joint_count = max((uint)g_DeformationParams.y, 1u);
         float4 weights = input.JointWeights;
         float weight_sum = weights.x + weights.y + weights.z + weights.w;
         if (weight_sum > 1.0e-5)
         {
-            float4 bind_pos = float4(input.Pos, 1.0);
+            float4 bind_pos = float4(local_pos, 1.0);
             float4 skinned_pos =
-                mul(g_SkinMatrices[min(joints.x, 127u)], bind_pos) * weights.x +
-                mul(g_SkinMatrices[min(joints.y, 127u)], bind_pos) * weights.y +
-                mul(g_SkinMatrices[min(joints.z, 127u)], bind_pos) * weights.z +
-                mul(g_SkinMatrices[min(joints.w, 127u)], bind_pos) * weights.w;
+                mul(g_DeformationMatrices[min(joints.x, joint_count - 1u)], bind_pos) * weights.x +
+                mul(g_DeformationMatrices[min(joints.y, joint_count - 1u)], bind_pos) * weights.y +
+                mul(g_DeformationMatrices[min(joints.z, joint_count - 1u)], bind_pos) * weights.z +
+                mul(g_DeformationMatrices[min(joints.w, joint_count - 1u)], bind_pos) * weights.w;
             local_pos = skinned_pos.xyz / max(skinned_pos.w, 1.0e-5);
         }
     }
@@ -532,8 +560,14 @@ void DiligentBackend::recreateShadowPipeline() {
 
   Diligent::ShaderResourceVariableDesc shadow_vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_VERTEX, "SkinningConstants",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+      {Diligent::SHADER_TYPE_VERTEX, "DeformationConstants",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_DeformationMatrices",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_MorphWeights",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_MorphTargetDeltas",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC}
   };
   shadow_pso.PSODesc.ResourceLayout.Variables = shadow_vars;
   shadow_pso.PSODesc.ResourceLayout.NumVariables =
@@ -552,10 +586,10 @@ void DiligentBackend::recreateShadowPipeline() {
       variable->Set(constants_);
     }
   }
-  if (skinning_constants_) {
+  if (deformation_constants_) {
     if (auto* variable = shadow_pipeline_state_->GetStaticVariableByName(
-            Diligent::SHADER_TYPE_VERTEX, "SkinningConstants")) {
-      variable->Set(skinning_constants_);
+            Diligent::SHADER_TYPE_VERTEX, "DeformationConstants")) {
+      variable->Set(deformation_constants_);
     }
   }
   shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
@@ -575,10 +609,10 @@ void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineStat
       variable->Set(constants_);
     }
   }
-  if (skinning_constants_) {
+  if (deformation_constants_) {
     if (auto* variable = pso->GetStaticVariableByName(
-            Diligent::SHADER_TYPE_VERTEX, "SkinningConstants")) {
-      variable->Set(skinning_constants_);
+            Diligent::SHADER_TYPE_VERTEX, "DeformationConstants")) {
+      variable->Set(deformation_constants_);
     }
   }
   if (shadow_map_srv_) {
@@ -725,8 +759,14 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
 
   Diligent::ShaderResourceVariableDesc vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_VERTEX, "SkinningConstants",
+      {Diligent::SHADER_TYPE_VERTEX, "DeformationConstants",
        Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_DeformationMatrices",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_MorphWeights",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_MorphTargetDeltas",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
       {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
@@ -761,8 +801,14 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   };
   Diligent::ShaderResourceVariableDesc depth_prepass_vars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
-      {Diligent::SHADER_TYPE_VERTEX, "SkinningConstants",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC}
+      {Diligent::SHADER_TYPE_VERTEX, "DeformationConstants",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_DeformationMatrices",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_MorphWeights",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+      {Diligent::SHADER_TYPE_VERTEX, "g_MorphTargetDeltas",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC}
   };
   if (depth_prepass) {
     pso_ci.PSODesc.ResourceLayout.Variables = depth_prepass_vars;
@@ -780,6 +826,9 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   *out_pso = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
   logRenderPipelineDiag("forward", name, pso_start, core::SteadyClock::now());
   bindForwardPipelineStaticResources(out_pso->RawPtr());
+  if (depth_prepass && *out_pso) {
+    (*out_pso)->CreateShaderResourceBinding(&depth_prepass_srb_, true);
+  }
   if (!depth_prepass && default_base_color_ && default_normal_ && default_metallic_roughness_ &&
       default_occlusion_ && default_emissive_) {
     switch (variant) {
@@ -1236,11 +1285,21 @@ cbuffer Constants
     float4 g_TexCoordRow1[12];
 };
 
-cbuffer SkinningConstants
+cbuffer DeformationConstants
 {
-    float4 g_SkinningParams;
-    float4x4 g_SkinMatrices[128];
+    float4 g_DeformationParams;
 };
+
+struct MorphTargetDelta
+{
+    float4 position;
+    float4 normal;
+    float4 tangent;
+};
+
+StructuredBuffer<float4x4> g_DeformationMatrices;
+StructuredBuffer<float> g_MorphWeights;
+StructuredBuffer<MorphTargetDelta> g_MorphTargetDeltas;
 
 struct VSInput
 {
@@ -1255,6 +1314,7 @@ struct VSInput
     float4 ModelCol3 : ATTRIB7;
     float4 JointIndices : ATTRIB8;
     float4 JointWeights : ATTRIB9;
+    uint VertexId : SV_VertexID;
 };
 
 struct VSOutput
@@ -1273,30 +1333,51 @@ VSOutput main(VSInput input)
     float3 local_pos = input.Pos;
     float3 local_normal = input.Normal;
     float3 local_tangent = input.Tangent.xyz;
-    if (g_SkinningParams.x > 0.5)
+    uint morph_count = (uint)max(g_DeformationParams.z, 0.0);
+    uint vertex_count = (uint)max(g_DeformationParams.w, 0.0);
+    if (morph_count > 0u && vertex_count > 0u)
+    {
+        uint vertex_id = min(input.VertexId, vertex_count - 1u);
+        for (uint target = 0u; target < morph_count; ++target)
+        {
+            float weight = g_MorphWeights[target];
+            if (abs(weight) <= 1.0e-6)
+            {
+                continue;
+            }
+            MorphTargetDelta delta = g_MorphTargetDeltas[target * vertex_count + vertex_id];
+            local_pos += delta.position.xyz * weight;
+            local_normal += delta.normal.xyz * weight;
+            local_tangent += delta.tangent.xyz * weight;
+        }
+        local_normal = normalize(local_normal);
+        local_tangent = normalize(local_tangent);
+    }
+    if (g_DeformationParams.x > 0.5)
     {
         uint4 joints = (uint4)round(input.JointIndices);
+        uint joint_count = max((uint)g_DeformationParams.y, 1u);
         float4 weights = input.JointWeights;
         float weight_sum = weights.x + weights.y + weights.z + weights.w;
         if (weight_sum > 1.0e-5)
         {
-            float4 bind_pos = float4(input.Pos, 1.0);
+            float4 bind_pos = float4(local_pos, 1.0);
             float4 skinned_pos =
-                mul(g_SkinMatrices[min(joints.x, 127u)], bind_pos) * weights.x +
-                mul(g_SkinMatrices[min(joints.y, 127u)], bind_pos) * weights.y +
-                mul(g_SkinMatrices[min(joints.z, 127u)], bind_pos) * weights.z +
-                mul(g_SkinMatrices[min(joints.w, 127u)], bind_pos) * weights.w;
+                mul(g_DeformationMatrices[min(joints.x, joint_count - 1u)], bind_pos) * weights.x +
+                mul(g_DeformationMatrices[min(joints.y, joint_count - 1u)], bind_pos) * weights.y +
+                mul(g_DeformationMatrices[min(joints.z, joint_count - 1u)], bind_pos) * weights.z +
+                mul(g_DeformationMatrices[min(joints.w, joint_count - 1u)], bind_pos) * weights.w;
             local_pos = skinned_pos.xyz / max(skinned_pos.w, 1.0e-5);
             local_normal =
-                mul((float3x3)g_SkinMatrices[min(joints.x, 127u)], input.Normal) * weights.x +
-                mul((float3x3)g_SkinMatrices[min(joints.y, 127u)], input.Normal) * weights.y +
-                mul((float3x3)g_SkinMatrices[min(joints.z, 127u)], input.Normal) * weights.z +
-                mul((float3x3)g_SkinMatrices[min(joints.w, 127u)], input.Normal) * weights.w;
+                mul((float3x3)g_DeformationMatrices[min(joints.x, joint_count - 1u)], local_normal) * weights.x +
+                mul((float3x3)g_DeformationMatrices[min(joints.y, joint_count - 1u)], local_normal) * weights.y +
+                mul((float3x3)g_DeformationMatrices[min(joints.z, joint_count - 1u)], local_normal) * weights.z +
+                mul((float3x3)g_DeformationMatrices[min(joints.w, joint_count - 1u)], local_normal) * weights.w;
             local_tangent =
-                mul((float3x3)g_SkinMatrices[min(joints.x, 127u)], input.Tangent.xyz) * weights.x +
-                mul((float3x3)g_SkinMatrices[min(joints.y, 127u)], input.Tangent.xyz) * weights.y +
-                mul((float3x3)g_SkinMatrices[min(joints.z, 127u)], input.Tangent.xyz) * weights.z +
-                mul((float3x3)g_SkinMatrices[min(joints.w, 127u)], input.Tangent.xyz) * weights.w;
+                mul((float3x3)g_DeformationMatrices[min(joints.x, joint_count - 1u)], local_tangent) * weights.x +
+                mul((float3x3)g_DeformationMatrices[min(joints.y, joint_count - 1u)], local_tangent) * weights.y +
+                mul((float3x3)g_DeformationMatrices[min(joints.z, joint_count - 1u)], local_tangent) * weights.z +
+                mul((float3x3)g_DeformationMatrices[min(joints.w, joint_count - 1u)], local_tangent) * weights.w;
         }
     }
     float4 world_pos = input.ModelCol0 * local_pos.x +
@@ -1310,7 +1391,7 @@ VSOutput main(VSInput input)
                               input.ModelCol2.xyz * local_normal.z);
     output.UV = input.UV;
     output.UV1 = input.UV1;
-    output.Tangent = input.Tangent;
+    output.Tangent = float4(normalize(local_tangent), input.Tangent.w);
     return output;
 }
 )";
@@ -3279,13 +3360,13 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   cb_desc.Size = sizeof(DrawConstants);
   device_->CreateBuffer(cb_desc, nullptr, &constants_);
 
-  Diligent::BufferDesc skin_cb_desc{};
-  skin_cb_desc.Name = "Karma Skinning Constants";
-  skin_cb_desc.Usage = Diligent::USAGE_DYNAMIC;
-  skin_cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
-  skin_cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-  skin_cb_desc.Size = sizeof(SkinningConstants);
-  device_->CreateBuffer(skin_cb_desc, nullptr, &skinning_constants_);
+  Diligent::BufferDesc deformation_cb_desc{};
+  deformation_cb_desc.Name = "Karma Deformation Constants";
+  deformation_cb_desc.Usage = Diligent::USAGE_DYNAMIC;
+  deformation_cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
+  deformation_cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+  deformation_cb_desc.Size = sizeof(DeformationConstants);
+  device_->CreateBuffer(deformation_cb_desc, nullptr, &deformation_constants_);
 
   Diligent::BufferDesc camera_override_cb_desc{};
   camera_override_cb_desc.Name = "Karma Camera Override User Constants";

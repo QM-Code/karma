@@ -131,4 +131,11 @@ bool resetAnimatorTrigger(AnimatorComponent& animator, std::string_view name) {
   return true;
 }
 
+animation::SampledTransform consumeRootMotionDelta(RootMotionComponent& root_motion) {
+  animation::SampledTransform out = root_motion.delta;
+  root_motion.delta = animation::SampledTransform{};
+  root_motion.has_unconsumed_delta = false;
+  return out;
+}
+
 }  // namespace karma::components

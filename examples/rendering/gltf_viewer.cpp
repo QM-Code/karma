@@ -50,7 +50,7 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   bounds.max = glm::max(bounds.max, point);
 }
 
-SceneBounds computePrefabBounds(const scene::GlbScenePrefab& prefab) {
+SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
   SceneBounds geometry_bounds{};
   SceneBounds fallback_bounds{};
 
@@ -107,9 +107,9 @@ class DiligentGltfViewerExample final : public app::GameInterface {
     input->bindKey("viewer_zoom_out", platform::Key::X);
     input->bindKey("viewer_reset", platform::Key::R, input::Trigger::Pressed);
 
-    const scene::GlbScenePrefab prefab = scene::loadGlbScenePrefab(
+    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
         model_path_,
-        scene::GlbSceneLoadOptions{
+        scene::GltfSceneLoadOptions{
             .import_meshes = true,
             .import_lights = false,
         });
@@ -127,12 +127,12 @@ class DiligentGltfViewerExample final : public app::GameInterface {
     }
 
     const SceneBounds bounds = computePrefabBounds(prefab);
-    const scene::GlbSceneImportResult imported = scene::instantiateGlbScenePrefab(
+    const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
         *world,
         *scene,
         *graphics,
         prefab,
-        scene::GlbSceneInstantiateOptions{
+        scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
             .autoplay_animations = true,
         },
@@ -248,7 +248,7 @@ class DiligentGltfViewerExample final : public app::GameInterface {
   void onShutdown() override {}
 
  private:
-  void logSceneSummary(const scene::GlbScenePrefab& prefab, const SceneBounds& bounds) const {
+  void logSceneSummary(const scene::GltfScenePrefab& prefab, const SceneBounds& bounds) const {
     std::size_t primitive_count = 0u;
     std::size_t vertex_count = 0u;
     std::size_t triangle_count = 0u;

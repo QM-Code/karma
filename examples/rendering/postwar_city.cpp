@@ -38,7 +38,7 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   bounds.max = glm::max(bounds.max, point);
 }
 
-SceneBounds computePrefabBounds(const scene::GlbScenePrefab& prefab) {
+SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
   SceneBounds geometry_bounds{};
   SceneBounds fallback_bounds{};
 
@@ -84,9 +84,9 @@ class PostwarCityExample final : public app::GameInterface {
 
     const std::filesystem::path city_path =
         resolveExampleAssetPath("postwar_city_-_exterior_scene.glb");
-    const scene::GlbScenePrefab prefab = scene::loadGlbScenePrefab(
+    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
         city_path,
-        scene::GlbSceneLoadOptions{
+        scene::GltfSceneLoadOptions{
             .import_meshes = true,
             .import_lights = false,
         });
@@ -103,12 +103,12 @@ class PostwarCityExample final : public app::GameInterface {
     }
 
     const SceneBounds bounds = computePrefabBounds(prefab);
-    const scene::GlbSceneImportResult imported = scene::instantiateGlbScenePrefab(
+    const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
         *world,
         *scene,
         *graphics,
         prefab,
-        scene::GlbSceneInstantiateOptions{
+        scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
             .autoplay_animations = false,
         });
@@ -191,7 +191,7 @@ class PostwarCityExample final : public app::GameInterface {
 
  private:
   void logSceneSummary(const std::filesystem::path& city_path,
-                       const scene::GlbScenePrefab& prefab,
+                       const scene::GltfScenePrefab& prefab,
                        const SceneBounds& bounds) const {
     std::size_t primitive_count = 0u;
     std::size_t vertex_count = 0u;

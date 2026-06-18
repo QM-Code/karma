@@ -136,6 +136,7 @@ struct AnimatorTransitionRuntime {
   float duration_seconds = 0.0f;
   float from_time_seconds = 0.0f;
   float to_time_seconds = 0.0f;
+  AnimatorInterruptPolicy interrupt_policy = AnimatorInterruptPolicy::None;
 };
 
 /// \ingroup karma_components
@@ -149,15 +150,35 @@ struct AnimatorEventRecord {
 };
 
 /// \ingroup karma_components
+/// Frame-stable buffer populated from an entity's `AnimatorComponent` events.
+struct AnimationEventBufferComponent : ecs::ComponentTag {
+  std::vector<AnimatorEventRecord> events;
+  uint64_t sequence = 0;
+};
+
+/// \ingroup karma_components
+/// Root-motion exposure/apply state for an entity's `AnimatorComponent`.
+///
+/// In `ExposeDelta` mode, `delta` accumulates sampled deltas until game code
+/// calls `consumeRootMotionDelta(...)`.
+struct RootMotionComponent : ecs::ComponentTag {
+  RootMotionMode mode = RootMotionMode::Disabled;
+  uint32_t root_motion_node_index = animation::kInvalidAnimationIndex;
+  animation::SampledTransform delta;
+  animation::SampledTransform accumulated;
+  bool has_unconsumed_delta = false;
+};
+
+/// \ingroup karma_components
 /// Full animation state machine, blending, root motion, and skinning metadata.
 ///
 /// `AnimationSystem` consumes this component. Clips and node maps normally come
-/// from GLB import. Game code changes parameters or calls helper functions to
+/// from glTF import. Game code changes parameters or calls helper functions to
 /// drive playback.
 struct AnimatorComponent : ecs::ComponentTag {
   std::vector<animation::AnimationClip> clips;
   std::vector<ecs::Entity> node_entities_by_index;
-  /// Renderable morph primitive entities keyed by imported GLB node index.
+  /// Renderable morph primitive entities keyed by imported glTF node index.
   std::vector<std::vector<ecs::Entity>> morph_entities_by_node_index;
   std::vector<animation::Skeleton> skeletons;
   std::vector<animation::Skin> skins;
@@ -219,5 +240,8 @@ bool setAnimatorFloat(AnimatorComponent& animator, std::string_view name, float 
 bool setAnimatorTrigger(AnimatorComponent& animator, std::string_view name);
 /// Clears a trigger parameter manually.
 bool resetAnimatorTrigger(AnimatorComponent& animator, std::string_view name);
+
+/// Returns and clears the currently exposed root-motion delta.
+animation::SampledTransform consumeRootMotionDelta(RootMotionComponent& root_motion);
 
 }  // namespace karma::components

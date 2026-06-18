@@ -105,6 +105,12 @@ class DiligentBackend final : public Backend {
   renderer::TerrainCapabilities getTerrainCapabilities() const override;
   renderer::TerrainStats getTerrainStats() const override;
 
+  renderer::DeformationId createDeformation(const renderer::DeformationDesc& desc) override;
+  void updateDeformation(renderer::DeformationId deformation,
+                         const renderer::DeformationDesc& desc) override;
+  void destroyDeformation(renderer::DeformationId deformation) override;
+  renderer::DeformationStats getDeformationStats() const override;
+
   void submit(const renderer::DrawItem& item) override;
   void submitParticles(renderer::ParticleBatch batch) override;
   void submitPackedParticles(renderer::PackedParticleBatch batch) override;
@@ -163,8 +169,11 @@ class DiligentBackend final : public Backend {
     geometry::MeshData data;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> vertex_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> index_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> morph_delta_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> morph_delta_srv;
     Diligent::Uint32 vertex_count = 0;
     Diligent::Uint32 index_count = 0;
+    Diligent::Uint32 morph_target_count = 0;
     glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
     glm::vec3 bounds_center{0.0f, 0.0f, 0.0f};
     float bounds_radius = 0.0f;
@@ -292,12 +301,21 @@ class DiligentBackend final : public Backend {
     renderer::MeshId mesh = renderer::kInvalidMesh;
     renderer::MaterialId material = renderer::kInvalidMaterial;
     std::vector<renderer::DrawMaterialBinding> materials;
+    renderer::DeformationId deformation = renderer::kInvalidDeformation;
     glm::mat4 transform{1.0f};
-    std::vector<glm::mat4> skinning_palette;
     bool visible = true;
     bool shadow_visible = true;
-    bool skinning_enabled = false;
     bool transform_changed = true;
+  };
+
+  struct DeformationRecord {
+    renderer::DeformationDesc desc;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> joint_palette_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> joint_palette_srv;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> morph_weight_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> morph_weight_srv;
+    size_t joint_capacity = 0;
+    size_t morph_weight_capacity = 0;
   };
 
   struct TerrainTileCoordHash {
@@ -350,7 +368,7 @@ class DiligentBackend final : public Backend {
     Diligent::Uint32 index_offset = 0;
     Diligent::Uint32 index_count = 0;
     bool indexed = false;
-    bool skinned = false;
+    bool deformed = false;
 
     bool operator==(const ForwardBatchKey& other) const {
       return mesh == other.mesh &&
@@ -358,7 +376,7 @@ class DiligentBackend final : public Backend {
              index_offset == other.index_offset &&
              index_count == other.index_count &&
              indexed == other.indexed &&
-             skinned == other.skinned;
+             deformed == other.deformed;
     }
   };
 
@@ -375,20 +393,20 @@ class DiligentBackend final : public Backend {
 
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
-    std::vector<glm::mat4> skinning_palette;
+    renderer::DeformationId deformation = renderer::kInvalidDeformation;
     float depth = 0.0f;
     SceneSampleMode scene_sample_mode = SceneSampleMode::None;
   };
 
-  struct SkinnedForwardDraw {
+  struct DeformedForwardDraw {
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
-    std::vector<glm::mat4> skinning_palette;
+    renderer::DeformationId deformation = renderer::kInvalidDeformation;
   };
 
   struct ForwardLayerState {
     std::vector<ForwardBatch> opaque_batches;
-    std::vector<SkinnedForwardDraw> skinned_opaque_draws;
+    std::vector<DeformedForwardDraw> deformed_opaque_draws;
     std::vector<TransparentForwardDraw> scene_reflection_draws;
     std::vector<TransparentForwardDraw> transparent_draws;
     std::vector<TransparentForwardDraw> pre_particle_scene_sample_draws;
@@ -564,6 +582,13 @@ class DiligentBackend final : public Backend {
                                         int height,
                                         Diligent::TEXTURE_FORMAT format);
   void uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record);
+  void uploadMeshMorphBuffers(const geometry::MeshData& mesh, MeshRecord& record);
+  bool ensureFallbackDeformationResources();
+  bool bindDeformationResources(Diligent::IShaderResourceBinding* srb,
+                                const MeshRecord& mesh,
+                                renderer::DeformationId deformation);
+  bool updateDeformationConstants(const MeshRecord& mesh,
+                                  renderer::DeformationId deformation);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
                                                                    int width,
                                                                    int height,
@@ -627,7 +652,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path render_state_cache_path_;
   bool shader_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 18;
+  std::uint32_t shader_cache_version_ = 19;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_vs_;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_ps_;
@@ -645,6 +670,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path camera_override_fragment_path_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> shadow_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shader_resources_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> depth_prepass_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>
@@ -654,11 +680,20 @@ class DiligentBackend final : public Backend {
       additive_double_sided_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shadow_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> constants_;
-  Diligent::RefCntAutoPtr<Diligent::IBuffer> skinning_constants_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> deformation_constants_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> fallback_joint_palette_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> fallback_joint_palette_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> fallback_morph_weight_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> fallback_morph_weight_srv_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> fallback_morph_delta_buffer_;
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> fallback_morph_delta_srv_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_color_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_data_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> terrain_color_sampler_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> terrain_height_sampler_;
+  Diligent::RefCntAutoPtr<Diligent::ISampler> terrain_material_sampler_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> terrain_default_control_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> terrain_default_control_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> shadow_sampler_;
   static constexpr int kShadowCascadeCount = 4;
   static constexpr int kMaxPointShadowLights = 16;
@@ -992,6 +1027,7 @@ class DiligentBackend final : public Backend {
   renderer::TextureId nextTextureId_ = 1;
   renderer::RenderTargetId nextTargetId_ = 1;
   renderer::TerrainId nextTerrainId_ = 1;
+  renderer::DeformationId nextDeformationId_ = 1;
 
   std::unordered_map<renderer::MeshId, MeshRecord> meshes_;
   std::unordered_map<renderer::MaterialId, MaterialRecord> materials_;
@@ -1001,6 +1037,7 @@ class DiligentBackend final : public Backend {
   std::unordered_map<std::string, renderer::TextureId> texture_cache_;
   std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;
   std::unordered_map<renderer::TerrainId, TerrainRecord> terrains_;
+  std::unordered_map<renderer::DeformationId, DeformationRecord> deformations_;
   std::unordered_map<renderer::InstanceId, InstanceRecord> instances_;
   std::vector<TerrainSubmission> terrain_submissions_;
   std::vector<ParticleBatchRecord> particle_batches_;

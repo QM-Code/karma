@@ -89,13 +89,13 @@ agnostic.
 /**
 \defgroup karma_animation Animation
 \ingroup karma_simulation
-Animation clips, sampling, pose math, morph targets, and skinning support.
+Animation clips, sampling, pose math, morph targets, and deformation support.
 
 Node animation writes local transforms. Scene hierarchy composition writes
-world transforms. Imported skinned meshes use GPU skinning by default, while CPU
-skinning and CPU morph deformation remain correctness/fallback paths.
+world transforms. Imported skinned and morphed meshes use GPU deformation by
+default, while CPU deformation remains a correctness/reference path.
 
-See \ref karma_animation_guide for the GLB animation, skinning, and morph-target
+See \ref karma_animation_guide for the glTF animation and deformation
 runtime flow.
 */
 
@@ -115,14 +115,14 @@ experimental and may lag the ECS physics feature set.
 Solo/tiled navmesh baking, Detour queries, tile-cache obstacles, crowd steering,
 geometry collection, diagnostics, and the engine-owned async navigation system.
 
-Navmesh generation can collect geometry from GLB scenes, ECS mesh colliders, or
+Navmesh generation can collect geometry from glTF/GLB scenes, ECS mesh colliders, or
 direct mesh data. Runtime path requests are queued through NavigationSystem;
 tile-cache and crowd updates mutate live simulation state on the main thread.
 */
 
 /**
 \defgroup karma_content Content
-Asset loading, image helpers, mesh import, GLB import, prefab instantiation, and
+Asset loading, image helpers, mesh import, glTF/GLB import, prefab instantiation, and
 prefab-local resource registration.
 
 Content APIs transform authored data into shared world contracts, ECS

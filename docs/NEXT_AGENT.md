@@ -16,7 +16,7 @@ There are seven active technical tracks in the current tree:
 3. effect API split / prefab modularization
 4. collision/contact/ground-state ECS work
 5. local-light / point-shadow validation
-6. GLB node animation / skeletal skinning / morph targets
+6. gltf node animation / skeletal skinning / morph targets
 7. static navmesh generation and pathfinding
 
 Durable reference docs:
@@ -32,7 +32,8 @@ Durable reference docs:
 - [docs/EXPLOSION_PREFAB.md](EXPLOSION_PREFAB.md)
 - [docs/EXPLOSION_STRESS_PERF.md](EXPLOSION_STRESS_PERF.md)
 - [docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md](VOLUMETRIC_SPHERE_TRANSPARENCY.md)
-- [docs/RIGGED_GLB_AUTHORING.md](RIGGED_GLB_AUTHORING.md)
+- [docs/ANIMATION_V2.md](ANIMATION_V2.md)
+- [docs/RIGGED_GLTF_AUTHORING.md](RIGGED_GLTF_AUTHORING.md)
 - [docs/DEBUG_EDITOR.md](DEBUG_EDITOR.md) if changing the runtime debug editor
 
 ## Worktree Caution
@@ -61,7 +62,7 @@ High-signal areas right now:
 - [`src/simulation/collision/`](../src/simulation/collision)
 - [`src/simulation/animation/`](../src/simulation/animation)
 - [`include/karma/simulation/animation/`](../include/karma/simulation/animation)
-- [`src/content/importers/glb_scene_import.cpp`](../src/content/importers/glb_scene_import.cpp)
+- [`src/content/importers/gltf_scene_import.cpp`](../src/content/importers/gltf_scene_import.cpp)
 - [`src/world/scene/transform_hierarchy.cpp`](../src/world/scene/transform_hierarchy.cpp)
 - [`include/karma/simulation/navigation/`](../include/karma/simulation/navigation)
 - [`src/simulation/navigation/`](../src/simulation/navigation)
@@ -111,18 +112,18 @@ cmake --build build-local --target \
   -j2
 ```
 
-For GLB animation / skeletal skinning, these were verified:
+For glTF animation / deformation, these were verified:
 
 ```bash
 cmake --build build --target karma_animation_tests -j2
 ./build/karma_animation_tests
 ctest --test-dir build -R karma_animation_tests --output-on-failure
-cmake --build build --target scene_glb_import animation_glb -j2
+cmake --build build --target scene_gltf_import animation_gltf -j2
 ```
 
 `karma_animation_tests` is headless and exits silently on success.
 
-## GLB Animation / Skinning / Morph Summary
+## glTF Animation / Deformation Summary
 
 Recent animation-side work already in the tree:
 
@@ -131,37 +132,42 @@ Recent animation-side work already in the tree:
   physics, lights, particles, and audio
 - `scene::updateWorldTransforms(...)` composes scene roots/children and writes
   world transforms
-- GLB scene import now creates local and world transforms for imported nodes and
+- glTF scene import now creates local and world transforms for imported nodes and
   primitive entities
-- GLB animation clips are parsed from explicit glTF channels when available and
+- glTF animation clips are parsed from explicit glTF channels when available and
   fall back to Assimp channels
-- `AnimationPlayerComponent` supports clip storage, playback state, speed, loop,
-  transform sampling, morph-weight sampling, and helper functions for
-  play/pause/stop and clip selection
-- imported GLB roots autoplay clip `0` when clips exist unless
-  `GlbSceneInstantiateOptions::autoplay_animations` is false
+- `AnimatorComponent` supports clip storage, playback state, speed, loop,
+  state machines, transform sampling, morph-weight sampling, events, root
+  motion, and helper functions for play/pause/stop and clip selection
+- imported glTF roots autoplay clip `0` when clips exist unless
+  `GltfSceneInstantiateOptions::autoplay_animations` is false
 - skeletal support imports vertex weights, joint node references, skins,
-  skeletons, and inverse bind matrices into `SkinnedMeshComponent`
-- imported skinned primitives use GPU skinning by default; CPU skinning remains
-  the fallback/reference path
+  skeletons, and inverse bind matrices into `DeformableMeshComponent`
+- imported skinned and morphed primitives use GPU deformation by default; CPU
+  reference deformation remains available for diagnostics
 - morph target deltas and mesh default weights import into `MeshData` and
-  `MorphTargetComponent`
-- `CpuSkinningSystem` is now the mesh deformation upload point: it applies CPU
-  morph targets, builds joint palettes, keeps GPU-skinned meshes in a renderer
-  bind/morphed-bind state, and performs CPU fallback skinning when needed
+  `DeformableMeshComponent`
+- `DeformationSystem` is now the mesh deformation upload point: it builds joint
+  palettes, updates renderer-owned deformation resources, and performs CPU
+  reference deformation when selected
+- explicit skeleton retargeting is available through `SkeletonMap` and
+  `retargetClip(...)`
+- `animation_gltf` has an ImGui clip/transition/deformation/root
+  motion panel and defaults to
+  `examples/assets/animation_model/source/dustbound_wayfarer_merged_animations.glb`
 
 Important limitations:
 
-- no retargeting between different skeletons
-- no pure GPU morph target path yet
-- CPU morph deformation and CPU skinning fallback can be expensive on large
-  animated meshes
+- no humanoid semantic retarget profiles yet; use explicit skeleton maps
+- no standalone animation-library asset format or humanoid profile binding
+  layer yet
 - `MeshComponent.mesh_key = "model.glb"` remains the flat mesh path and does not
   use this scene animation/skinning path
 
 If continuing there, start with:
 
-- [docs/RIGGED_GLB_AUTHORING.md](RIGGED_GLB_AUTHORING.md)
+- [docs/ANIMATION_V2.md](ANIMATION_V2.md)
+- [docs/RIGGED_GLTF_AUTHORING.md](RIGGED_GLTF_AUTHORING.md)
 - [src/simulation/animation/AGENTS.md](../src/simulation/animation/AGENTS.md)
 - [include/karma/simulation/animation/AGENTS.md](../include/karma/simulation/animation/AGENTS.md)
 
@@ -373,12 +379,12 @@ If continuing local-light/shadow work:
 2. validate the shadow path across more scenes and hardware
 3. only replace the current depth-SRV path with a custom linear-depth format if another backend shows the old failure mode
 
-If continuing GLB animation/skinning work:
+If continuing glTF animation/deformation work:
 
 1. add a windowed skeletal visual sample with a tiny generated or checked-in GLB
 2. validate a real Blender-authored skinned and morphed GLB through scene import
-3. decide whether morph targets should move from CPU mesh updates to a GPU path
-4. keep node animation, hierarchy composition, morph, and skinning tests green
+3. keep GPU deformation and CPU reference diagnostics visually aligned
+4. keep node animation, hierarchy composition, morph, and deformation tests green
 
 If continuing navigation work:
 

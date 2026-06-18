@@ -38,7 +38,7 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   bounds.max = glm::max(bounds.max, point);
 }
 
-SceneBounds computePrefabBounds(const scene::GlbScenePrefab& prefab) {
+SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
   SceneBounds geometry_bounds{};
   SceneBounds fallback_bounds{};
 
@@ -73,7 +73,7 @@ LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
 
 }  // namespace
 
-class GlbSceneImportExample final : public app::GameInterface {
+class GltfSceneImportExample final : public app::GameInterface {
  public:
   void onStart() override {
     input->bindKey("cam_forward", platform::Key::W);
@@ -83,31 +83,31 @@ class GlbSceneImportExample final : public app::GameInterface {
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
     const std::filesystem::path scene_path = resolveExampleAssetPath("world-with-lights.glb");
-    const scene::GlbScenePrefab prefab = scene::loadGlbScenePrefab(
+    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
         scene_path,
-        scene::GlbSceneLoadOptions{
+        scene::GltfSceneLoadOptions{
             .import_meshes = true,
             .import_lights = true,
         });
 
     if (!prefab.valid()) {
-      spdlog::error("Failed to load GLB scene prefab from {}", scene_path.string());
+      spdlog::error("Failed to load gltf scene prefab from {}", scene_path.string());
       spawnCamera(SceneBounds{});
       return;
     }
 
     const SceneBounds bounds = computePrefabBounds(prefab);
-    const scene::GlbSceneImportResult imported = scene::instantiateGlbScenePrefab(
+    const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
         *world,
         *scene,
         *graphics,
         prefab,
-        scene::GlbSceneInstantiateOptions{
+        scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
         },
         materials);
     if (!imported.valid()) {
-      spdlog::error("Failed to instantiate GLB scene from {}", scene_path.string());
+      spdlog::error("Failed to instantiate gltf scene from {}", scene_path.string());
     }
 
     spawnCamera(bounds);
@@ -202,10 +202,10 @@ class GlbSceneImportExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  karma::demo::GlbSceneImportExample game;
+  karma::demo::GltfSceneImportExample game;
 
   karma::app::EngineConfig config;
-  config.window.title = "Karma GLB Scene Import Example";
+  config.window.title = "Karma Gltf Scene Import Example";
   config.window.samples = 1;
   config.cursor_visible = true;
   config.enable_anisotropy = true;

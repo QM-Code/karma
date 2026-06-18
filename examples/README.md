@@ -63,10 +63,15 @@ Shared example helpers live in `examples/common/`.
 
 ## Scene And Animation
 
-- `scene/glb_import.cpp`: target `scene_glb_import`, output
-  `examples/scene/glb_import`. Minimal authored-scene import example.
-- `animation/glb.cpp`: target `animation_glb`, output `examples/animation/glb`.
-  GLB animation and skinning example.
+- `scene/gltf_import.cpp`: target `scene_gltf_import`, output
+  `examples/scene/gltf_import`. Minimal authored glTF/GLB scene import example.
+- `animation/gltf.cpp`: target `animation_gltf`, output `examples/animation/gltf`.
+  Rigged glTF/GLB animation showcase using
+  `animation_model/source/dustbound_wayfarer_merged_animations.glb` by default,
+  with ImGui clip playback, crossfade, auto-cycle, deformation, and root-motion
+  controls. An optional first command-line argument can point at another glTF/GLB
+  model. See [../docs/ANIMATION_V2.md](../docs/ANIMATION_V2.md) and
+  [../docs/RIGGED_GLTF_AUTHORING.md](../docs/RIGGED_GLTF_AUTHORING.md).
 
 ## Particles, Effects, And Prefabs
 

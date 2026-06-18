@@ -91,6 +91,15 @@ class GraphicsDevice {
   /// Returns active backend terrain diagnostics.
   TerrainStats getTerrainStats() const;
 
+  /// Creates renderer-owned skin/morph deformation resources.
+  DeformationId createDeformation(const DeformationDesc& desc);
+  /// Updates renderer-owned skin/morph deformation resources.
+  void updateDeformation(DeformationId deformation, const DeformationDesc& desc);
+  /// Destroys renderer-owned skin/morph deformation resources.
+  void destroyDeformation(DeformationId deformation);
+  /// Returns active backend deformation diagnostics.
+  DeformationStats getDeformationStats() const;
+
   /// Submits one mesh draw item.
   void submit(const DrawItem& item);
   /// Submits a compatibility particle batch.

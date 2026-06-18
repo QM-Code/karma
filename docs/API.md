@@ -55,6 +55,12 @@ Current handwritten generated-reference pages:
   backend shader assets, and shadow authoring.
 - `docs/api/groups.dox`: Doxygen module/group definitions.
 
+Related durable animation guides:
+
+- `docs/ANIMATION_V2.md`: animation v2 architecture, asset boundaries,
+  deformation resources, retargeting, and validation commands.
+- `docs/RIGGED_GLTF_AUTHORING.md`: rigged glTF/GLB authoring conventions.
+
 ## Publish To GitHub Pages
 
 The `.github/workflows/docs.yml` workflow builds this target on pull requests

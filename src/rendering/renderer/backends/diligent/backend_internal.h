@@ -78,9 +78,8 @@ struct DrawConstants {
   float texcoord_row1[12][4];
 };
 
-struct SkinningConstants {
+struct DeformationConstants {
   float params[4];
-  float matrices[128][16];
 };
 
 struct ForwardPlusComputeConstants {

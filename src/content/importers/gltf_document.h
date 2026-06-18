@@ -17,7 +17,9 @@ using Json = nlohmann::json;
 
 struct GltfDocument {
   Json json;
+  std::filesystem::path source_path;
   std::vector<std::uint8_t> bin;
+  std::vector<std::vector<std::uint8_t>> buffers;
 
   bool valid() const {
     return json.is_object();

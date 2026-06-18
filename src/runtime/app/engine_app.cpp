@@ -377,7 +377,7 @@ void EngineApp::warmUpRenderer() {
   log_stage("scene transforms", section_start, section_end);
 
   section_start = section_end;
-  cpu_skinning_system_.update(world_, scene_, *graphics_);
+  deformation_system_.update(world_, scene_, *graphics_);
   section_end = core::SteadyClock::now();
   log_stage("mesh deformation", section_start, section_end);
 
@@ -1117,7 +1117,7 @@ void EngineApp::tick() {
 
   section_start = section_end;
   if (graphics_) {
-    cpu_skinning_system_.update(world_, scene_, *graphics_);
+    deformation_system_.update(world_, scene_, *graphics_);
   }
   section_end = core::SteadyClock::now();
   const double mesh_deformation_ms = core::elapsedMilliseconds(section_start, section_end);

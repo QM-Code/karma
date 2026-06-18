@@ -13,7 +13,7 @@
 #include "karma/runtime/app/runtime_module.h"
 #include "karma/core/time.h"
 #include "karma/simulation/animation/animation_system.h"
-#include "karma/simulation/animation/cpu_skinning_system.h"
+#include "karma/simulation/animation/deformation_system.h"
 #include "karma/world/ecs/world.h"
 #include "karma/runtime/input/input_system.h"
 #include "karma/media/audio/audio.h"
@@ -152,7 +152,7 @@ class EngineApp {
   std::unique_ptr<renderer::RenderSystem> render_system_;
   std::unique_ptr<particles::ParticleSystem> particle_system_;
   animation::AnimationSystem animation_system_;
-  animation::CpuSkinningSystem cpu_skinning_system_;
+  animation::DeformationSystem deformation_system_;
   visual::LightPulseSystem light_pulse_system_;
   audio::Audio audio_;
   std::unique_ptr<audio::AudioSystem> audio_system_;

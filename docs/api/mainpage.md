@@ -13,8 +13,8 @@ Start with these modules:
 - \ref karma_rendering_guide for camera-resolved post-processing, shadows, and
   render submission boundaries.
 - \ref karma_simulation for animation, physics, collision, and navigation.
-- \ref karma_content for GLB import, mesh import, and prefab runtime APIs.
-- \ref karma_animation_guide for GLB animation, skinning, and morph-target
+- \ref karma_content for glTF/GLB import, mesh import, and prefab runtime APIs.
+- \ref karma_animation_guide for glTF animation and deformation
   runtime flow.
 - \ref karma_features for optional visual and UI feature modules.
 - \ref karma_media for audio APIs.
@@ -28,10 +28,11 @@ Handwritten guides live beside this generated reference:
 - `docs/ENGINE_USAGE.md#post-process-profiles`
 - `docs/RENDERING_STARTUP_OPTIMIZATION.md`
 - `docs/NAVIGATION.md`
+- `docs/ANIMATION_V2.md`
 - `docs/PARTICLE_SYSTEM.md`
 - `docs/EFFECT_PREFABS.md`
 - `docs/BEAM_PATHS.md`
-- `docs/RIGGED_GLB_AUTHORING.md`
+- `docs/RIGGED_GLTF_AUTHORING.md`
 
 ## Public API Rules
 

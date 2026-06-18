@@ -10,7 +10,7 @@
 
 Karma is a C++20 ECS-driven 3D game engine. The current tree is a working
 static library plus examples, with a layered runtime, Diligent/Vulkan rendering,
-prefabs, particles, GLB import, animation/skinning, physics/collision,
+prefabs, particles, glTF/GLB import, animation/skinning, physics/collision,
 navigation, audio, networking, and UI adapters.
 
 Published API docs: <https://qm-code.github.io/karma/>
@@ -200,7 +200,7 @@ before `find_package(karma)` to allow package-time fetching.
   shadows, camera-selected post-process profiles, bloom/tone/color controls,
   transparent passes, debug lines, particles, UI draw-data composition, and
   environment/texture/mesh resource management.
-- Content pipeline for GLB scene import, materials, lights, node animation,
+- Content pipeline for glTF/GLB scene import, materials, lights, node animation,
   skeletal animation, GPU skinning with CPU fallback, morph target deformation,
   JSON prefabs, and prefab-local `prefab.resources.json` registrations.
 - Particle tooling with `.kpeffect` files, hot reload, emitter overrides,
@@ -215,6 +215,16 @@ before `find_package(karma)` to allow package-time fetching.
   path queries.
 - UI adapters for ImGui and RmlUi behind `runtime/app/UiLayer`.
 - Audio and networking through miniaudio/SDL and ENet-backed abstractions.
+
+## TODO
+
+- Investigate a VDB/NanoVDB-backed volume renderer using
+  [GPU Volume Rendering with Hierarchical Compression Using VDB](2504.04564v2.pdf)
+  as the design reference. The paper is enough to define the architecture
+  (OpenVDB CPU compression, NanoVDB GPU sampling, sparse texture-like renderer
+  backend), but implementation should also use OpenVDB/NanoVDB docs or samples
+  for exact API, device-memory, coordinate-transform, filtering, and traversal
+  details.
 
 ## Examples
 
@@ -231,8 +241,8 @@ build into category directories under `build/examples/`:
   `rendering_postwar_city`, `rendering_light_stress`,
   `rendering_material_override`, and `rendering_terrain`: rendering inspection
   and stress samples.
-- `scene_glb_import` and `animation_glb`: authored GLB scene import,
-  animation, and skinning paths.
+- `scene_gltf_import` and `animation_gltf`: authored glTF/GLB scene import,
+  animation, deformation, and skinning paths.
 - `particles_*`, `effects_*`, and `prefabs_*`: particle, visual effect, and
   prefab proof/stress scenes.
 - `navigation_*`: click-to-move, sample-gallery, crowd, tile-cache, query,
@@ -349,7 +359,8 @@ Focused references:
 - [Particle Beam Prefabs](docs/BEAM_PATHS.md)
 - [Explosion Prefab](docs/EXPLOSION_PREFAB.md)
 - [Explosion Stress Performance](docs/EXPLOSION_STRESS_PERF.md)
-- [Rigged GLB Authoring](docs/RIGGED_GLB_AUTHORING.md)
+- [Animation V2 Architecture](docs/ANIMATION_V2.md)
+- [Rigged glTF/GLB Authoring](docs/RIGGED_GLTF_AUTHORING.md)
 - [Volumetric Solid Transparency](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 - [Debug Editor](docs/DEBUG_EDITOR.md)
 

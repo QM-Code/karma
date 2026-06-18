@@ -10,7 +10,7 @@ namespace karma::animation {
 /// \ingroup karma_animation
 /// Samples animation components and writes local transforms.
 ///
-/// The system consumes `AnimationPlayerComponent` and `AnimatorComponent`.
+/// The system consumes `AnimatorComponent`.
 /// Scene hierarchy composition later writes final world transforms.
 class AnimationSystem {
  public:

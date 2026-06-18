@@ -98,7 +98,7 @@ void testNearestPolyFlagsAndSnapshotRefresh() {
 }
 
 void testGlbPrefabCollectionAppliesWorldTransform() {
-  karma::scene::GlbScenePrefab prefab;
+  karma::scene::GltfScenePrefab prefab;
   prefab.root_node = 0;
   prefab.nodes.resize(1);
   prefab.nodes[0].world_position = {10.0f, 2.0f, -3.0f};

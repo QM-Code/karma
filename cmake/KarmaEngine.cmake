@@ -56,7 +56,6 @@ list(APPEND KARMA_INSTALL_TARGETS karma_core)
 
 karma_add_static(karma_world
   src/world/components/animator.cpp
-  src/world/components/animation_player.cpp
   src/world/components/transform.cpp
   src/world/ecs/collider_queries.cpp
   src/world/scene/transform_hierarchy.cpp
@@ -109,6 +108,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       src/rendering/renderer/backends/diligent/passes/render_state.cpp
       src/rendering/renderer/backends/diligent/passes/shadows.cpp
       src/rendering/renderer/backends/diligent/passes/terrain.cpp
+      src/rendering/renderer/backends/diligent/resources/deformations.cpp
       src/rendering/renderer/backends/diligent/resources/materials.cpp
       src/rendering/renderer/backends/diligent/resources/meshes.cpp
       src/rendering/renderer/backends/diligent/resources/render_targets.cpp
@@ -143,8 +143,9 @@ endif()
 karma_add_static(karma_simulation_animation
   src/simulation/animation/animation_clip.cpp
   src/simulation/animation/animation_system.cpp
-  src/simulation/animation/cpu_skinning_system.cpp
+  src/simulation/animation/deformation_system.cpp
   src/simulation/animation/pose.cpp
+  src/simulation/animation/retarget.cpp
 )
 target_link_libraries(karma_simulation_animation PUBLIC karma_core karma_world)
 list(APPEND KARMA_INSTALL_TARGETS karma_simulation_animation)
@@ -283,10 +284,10 @@ endif()
 karma_add_static(karma_content
   src/content/importers/gltf_document.cpp
   src/content/importers/mesh_import.cpp
-  src/content/importers/glb_scene_animation_import.cpp
-  src/content/importers/glb_scene_mesh_import.cpp
-  src/content/importers/glb_scene_skinning.cpp
-  src/content/importers/glb_scene_import.cpp
+  src/content/importers/gltf_scene_animation_import.cpp
+  src/content/importers/gltf_scene_mesh_import.cpp
+  src/content/importers/gltf_scene_skinning.cpp
+  src/content/importers/gltf_scene_import.cpp
   src/content/image/stb_image.cpp
   src/content/materials/material_loader.cpp
   src/content/prefabs/component_serializer_registry.cpp

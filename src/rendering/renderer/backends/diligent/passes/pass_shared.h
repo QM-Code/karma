@@ -69,6 +69,12 @@ struct alignas(16) ParticleGpuMeshSample {
   float p2[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
+struct alignas(16) MorphTargetDeltaGpu {
+  float position[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float normal[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float tangent[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
 struct alignas(16) ParticleGpuEmitterDesc {
   float position[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float rotation[4] = {0.0f, 0.0f, 0.0f, 1.0f};

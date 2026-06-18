@@ -10,7 +10,7 @@ class World;
 }
 
 namespace karma::scene {
-struct GlbScenePrefab;
+struct GltfScenePrefab;
 }
 
 namespace karma::navigation {
@@ -24,8 +24,8 @@ void appendGeometry(NavMeshInputGeometry& out,
                     const math::Vec3& scale = {1.0f, 1.0f, 1.0f},
                     unsigned char area = kNavAreaDefault);
 
-/// Collects navmesh geometry from a loaded GLB scene prefab.
-NavMeshInputGeometry collectNavMeshGeometry(const scene::GlbScenePrefab& prefab);
+/// Collects navmesh geometry from a loaded glTF scene prefab.
+NavMeshInputGeometry collectNavMeshGeometry(const scene::GltfScenePrefab& prefab);
 /// Collects navmesh geometry from ECS navmesh surface/off-mesh-link components.
 NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
                                             uint32_t source_mask = 0xffffffffu);

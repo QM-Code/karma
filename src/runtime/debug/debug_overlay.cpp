@@ -25,7 +25,7 @@
 #include "karma/world/components/character_controller.h"
 #include "karma/world/components/rigidbody.h"
 #include "karma/world/components/script.h"
-#include "karma/world/components/skinned_mesh.h"
+#include "karma/world/components/deformable_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
 #include "karma/world/scene/scene.h"
@@ -170,11 +170,10 @@ const char* lightTypeName(components::LightComponent::Type type) {
   }
 }
 
-const char* skinningPathName(components::SkinningPath path) {
+const char* deformationPathName(components::DeformationPath path) {
   switch (path) {
-    case components::SkinningPath::Cpu: return "CPU";
-    case components::SkinningPath::Gpu: return "GPU";
-    case components::SkinningPath::GpuUnavailableCpuFallback: return "CPU fallback";
+    case components::DeformationPath::CpuReference: return "CPU reference";
+    case components::DeformationPath::Gpu: return "GPU";
   }
   return "Unknown";
 }
@@ -192,8 +191,8 @@ std::string debugMaterialInstanceKey(ecs::Entity entity,
   return key;
 }
 
-const char* rendererMeshStateName(const components::SkinnedMeshComponent& skin) {
-  return skin.renderer_mesh_is_bind_pose ? "bind pose" : "CPU skinned";
+const char* rendererMeshStateName(const components::DeformableMeshComponent& deformation) {
+  return deformation.renderer_mesh_is_cpu_deformed ? "CPU deformed" : "bind pose";
 }
 
 const char* rootMotionModeName(components::RootMotionMode mode) {
@@ -748,7 +747,7 @@ void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
   if (world_->has<components::TagComponent>(node.entity)) append_component("Tag");
   if (world_->has<components::MeshComponent>(node.entity)) append_component("Mesh");
   if (world_->has<components::AnimatorComponent>(node.entity)) append_component("Animator");
-  if (world_->has<components::SkinnedMeshComponent>(node.entity)) append_component("SkinnedMesh");
+  if (world_->has<components::DeformableMeshComponent>(node.entity)) append_component("DeformableMesh");
   if (world_->has<components::EnvironmentComponent>(node.entity)) append_component("Environment");
   if (world_->has<components::LightComponent>(node.entity)) append_component("Light");
   if (world_->has<components::CameraComponent>(node.entity)) append_component("Camera");
@@ -1014,35 +1013,35 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
       }
     }
   }
-  if (world_->has<components::SkinnedMeshComponent>(node.entity)) {
-    if (ImGui::CollapsingHeader("Skinned Mesh")) {
-      auto& c = world_->get<components::SkinnedMeshComponent>(node.entity);
+  if (world_->has<components::DeformableMeshComponent>(node.entity)) {
+    if (ImGui::CollapsingHeader("Deformable Mesh")) {
+      auto& c = world_->get<components::DeformableMeshComponent>(node.entity);
       editBool("Enabled", c.enabled);
-      int path = static_cast<int>(c.skinning_path);
-      const char* paths[] = {"CPU", "GPU", "CPU fallback"};
-      if (editEnumCombo("Skinning Path", path, paths, 3)) {
-        path = std::clamp(path, 0, 2);
-        c.skinning_path = static_cast<components::SkinningPath>(path);
+      int path = static_cast<int>(c.path);
+      const char* paths[] = {"GPU", "CPU reference"};
+      if (editEnumCombo("Deformation Path", path, paths, 2)) {
+        path = std::clamp(path, 0, 1);
+        c.path = static_cast<components::DeformationPath>(path);
       }
-      const bool gpu_requested = c.skinning_path == components::SkinningPath::Gpu;
-      const bool palette_within_capacity =
-          c.joint_palette.size() <= components::kMaxSkinningJointsPerDraw;
       const bool gpu_draw_ready =
-          c.enabled && gpu_requested && c.palette_valid && !c.joint_palette.empty() &&
-          palette_within_capacity;
+          c.enabled && c.path == components::DeformationPath::Gpu &&
+          c.deformation != renderer::kInvalidDeformation;
       ImGui::Text("Runtime: %s path, palette %s, GPU draw %s",
-                  skinningPathName(c.skinning_path),
+                  deformationPathName(c.path),
                   c.palette_valid ? "valid" : "invalid",
                   gpu_draw_ready ? "ready" : "not ready");
       ImGui::Text("Renderer Mesh: %s", rendererMeshStateName(c));
+      ImGui::Text("Renderer Deformation: %u", static_cast<unsigned int>(c.deformation));
       ImGui::Text("Skin Index: %u", static_cast<unsigned int>(c.skin_index));
       ImGui::Text("Bind Vertices: %zu", c.bind_mesh.vertices.size());
       ImGui::Text("Influences: %zu", c.vertex_influences.size());
       ImGui::Text("Joints: %zu", c.joint_entities.size());
-      ImGui::Text("Palette: %s (%zu/%u matrices)",
+      ImGui::Text("Palette: %s (%zu matrices)",
                   c.palette_valid ? "valid" : "invalid",
-                  c.joint_palette.size(),
-                  static_cast<unsigned int>(components::kMaxSkinningJointsPerDraw));
+                  c.joint_palette.size());
+      ImGui::Text("Morph Targets: %zu weights: %zu",
+                  c.bind_mesh.morph_targets.size(),
+                  c.morph_weights.size());
       ImGui::Text("Inverse Bind Matrices: %zu", c.inverse_bind_matrices.size());
       if (!c.diagnostic.empty()) {
         ImGui::TextWrapped("Diagnostic: %s", c.diagnostic.c_str());

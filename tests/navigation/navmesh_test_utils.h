@@ -26,7 +26,7 @@
 #include "karma/simulation/navigation/nav_query.h"
 #include "karma/simulation/navigation/nav_tile_cache.h"
 #include "karma/simulation/navigation/navigation_system.h"
-#include "karma/content/importers/glb_scene_import.h"
+#include "karma/content/importers/gltf_scene_import.h"
 #include "karma/content/navigation/nav_tile_cache.h"
 
 #ifdef NDEBUG

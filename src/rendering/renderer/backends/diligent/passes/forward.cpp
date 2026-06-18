@@ -107,31 +107,6 @@ constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_NONE;
 constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
 #endif
 
-bool updateSkinningConstants(Diligent::IDeviceContext* context,
-                             Diligent::IBuffer* buffer,
-                             const std::vector<glm::mat4>& palette) {
-  if (context == nullptr || buffer == nullptr) {
-    return false;
-  }
-
-  SkinningConstants constants{};
-  const size_t count = std::min<size_t>(palette.size(), 128u);
-  constants.params[0] = count > 0 ? 1.0f : 0.0f;
-  constants.params[1] = static_cast<float>(count);
-  for (size_t i = 0; i < count; ++i) {
-    copyMat4(constants.matrices[i], palette[i]);
-  }
-
-  Diligent::MapHelper<SkinningConstants> mapped(
-      context, buffer, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
-  auto* mapped_constants = getMappedData(mapped);
-  if (mapped_constants == nullptr) {
-    return false;
-  }
-  *mapped_constants = constants;
-  return true;
-}
-
 }  // namespace
 
 void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
@@ -148,19 +123,19 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
       h ^= static_cast<size_t>(key.index_offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
       h ^= static_cast<size_t>(key.index_count) + 0x9e3779b9 + (h << 6) + (h >> 2);
       h ^= static_cast<size_t>(key.indexed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
-      h ^= static_cast<size_t>(key.skinned ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
+      h ^= static_cast<size_t>(key.deformed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
       return h;
     }
   };
 
   out_state.opaque_batches.clear();
-  out_state.skinned_opaque_draws.clear();
+  out_state.deformed_opaque_draws.clear();
   out_state.scene_reflection_draws.clear();
   out_state.transparent_draws.clear();
   out_state.pre_particle_scene_sample_draws.clear();
   out_state.post_particle_draws.clear();
   out_state.opaque_batches.reserve(instances_.size());
-  out_state.skinned_opaque_draws.reserve(instances_.size() / 4 + 1);
+  out_state.deformed_opaque_draws.reserve(instances_.size() / 4 + 1);
   out_state.scene_reflection_draws.reserve(instances_.size() / 4 + 1);
   out_state.transparent_draws.reserve(instances_.size());
   out_state.pre_particle_scene_sample_draws.reserve(instances_.size() / 4 + 1);
@@ -172,12 +147,12 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
 
   auto append_opaque_forward_batch = [&](const ForwardBatchKey& key,
                                          const glm::mat4& transform,
-                                         const std::vector<glm::mat4>& skinning_palette) {
-    if (key.skinned) {
-      out_state.skinned_opaque_draws.push_back(SkinnedForwardDraw{
+                                         renderer::DeformationId deformation) {
+    if (key.deformed) {
+      out_state.deformed_opaque_draws.push_back(DeformedForwardDraw{
           .key = key,
           .transform = transform,
-          .skinning_palette = skinning_palette,
+          .deformation = deformation,
       });
       return;
     }
@@ -307,7 +282,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
             .index_offset = submesh.index_offset,
             .index_count = submesh.index_count,
             .indexed = indexed_mesh && submesh.index_count > 0,
-            .skinned = instance.skinning_enabled,
+            .deformed = instance.deformation != renderer::kInvalidDeformation,
         };
         const MaterialRecord* mat = lookup_material(mat_id);
         const bool transparent = uses_transparent_forward_path(mat, mesh);
@@ -320,16 +295,16 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           target_draws.push_back(TransparentForwardDraw{
               .key = key,
               .transform = instance.transform,
-              .skinning_palette = instance.skinning_palette,
+              .deformation = instance.deformation,
               .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
           });
         } else {
-          append_opaque_forward_batch(key, instance.transform, instance.skinning_palette);
+          append_opaque_forward_batch(key, instance.transform, instance.deformation);
           if (uses_scene_reflection_overlay(mat)) {
             out_state.scene_reflection_draws.push_back(TransparentForwardDraw{
                 .key = key,
                 .transform = instance.transform,
-                .skinning_palette = instance.skinning_palette,
+                .deformation = instance.deformation,
                 .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
                 .scene_sample_mode = TransparentForwardDraw::SceneSampleMode::ReflectionOverlay,
             });
@@ -345,7 +320,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
           .index_offset = 0,
           .index_count = mesh.index_count,
           .indexed = indexed_mesh,
-          .skinned = instance.skinning_enabled,
+          .deformed = instance.deformation != renderer::kInvalidDeformation,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
       const bool transparent = uses_transparent_forward_path(mat, mesh);
@@ -358,16 +333,16 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         target_draws.push_back(TransparentForwardDraw{
             .key = key,
             .transform = instance.transform,
-            .skinning_palette = instance.skinning_palette,
+            .deformation = instance.deformation,
             .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
         });
       } else {
-        append_opaque_forward_batch(key, instance.transform, instance.skinning_palette);
+        append_opaque_forward_batch(key, instance.transform, instance.deformation);
         if (uses_scene_reflection_overlay(mat)) {
           out_state.scene_reflection_draws.push_back(TransparentForwardDraw{
               .key = key,
               .transform = instance.transform,
-              .skinning_palette = instance.skinning_palette,
+              .deformation = instance.deformation,
               .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
               .scene_sample_mode = TransparentForwardDraw::SceneSampleMode::ReflectionOverlay,
           });
@@ -770,14 +745,14 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       }
       std::fprintf(stderr,
                    "[Karma][DrawDebug] pass=%s kind=%s mesh=%u material=%u "
-                   "indexed=%s skinned=%s vertices=%u mesh_indices=%u "
+                   "indexed=%s deformed=%s vertices=%u mesh_indices=%u "
                    "first_index=%u draw_indices=%u instances=%u vb=%s ib=%s\n",
                    pass_label,
                    draw_kind,
                    key.mesh,
                    key.material,
                    key.indexed ? "true" : "false",
-                   key.skinned ? "true" : "false",
+                   key.deformed ? "true" : "false",
                    mesh.vertex_count,
                    mesh.index_count,
                    key.index_offset,
@@ -843,7 +818,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
   }
   if (!has_custom_opaque_material) {
-    for (const auto& draw : state.skinned_opaque_draws) {
+    for (const auto& draw : state.deformed_opaque_draws) {
       if (MaterialRecord* mat = lookup_material(draw.key.material);
           mat && materialUsesCustomForwardPipeline(*mat)) {
         has_custom_opaque_material = true;
@@ -884,7 +859,6 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     Diligent::IBuffer* depth_bound_instance_vb = nullptr;
     Diligent::IBuffer* depth_bound_index_buffer = nullptr;
     if (depth_prepass_ready) {
-      updateSkinningConstants(context_, skinning_constants_, {});
       for (const auto& batch : state.opaque_batches) {
         if (batch.transforms.empty()) {
           continue;
@@ -896,6 +870,15 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         const auto& mesh = mesh_it->second;
         if (!mesh.vertex_buffer) {
           continue;
+        }
+        if (depth_prepass_srb_) {
+          if (!bindDeformationResources(depth_prepass_srb_,
+                                        mesh,
+                                        renderer::kInvalidDeformation)) {
+            continue;
+          }
+          context_->CommitShaderResources(depth_prepass_srb_,
+                                          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         }
 
         pack_transforms(batch.transforms);
@@ -909,7 +892,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                            depth_bound_index_buffer,
                            "opaque-depth-prepass");
       }
-      for (const auto& draw : state.skinned_opaque_draws) {
+      for (const auto& draw : state.deformed_opaque_draws) {
         auto mesh_it = meshes_.find(draw.key.mesh);
         if (mesh_it == meshes_.end()) {
           continue;
@@ -918,7 +901,13 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         if (!mesh.vertex_buffer) {
           continue;
         }
-        if (!updateSkinningConstants(context_, skinning_constants_, draw.skinning_palette)) {
+        if (depth_prepass_srb_) {
+          if (!bindDeformationResources(depth_prepass_srb_, mesh, draw.deformation)) {
+            continue;
+          }
+          context_->CommitShaderResources(depth_prepass_srb_,
+                                          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        } else if (!updateDeformationConstants(mesh, draw.deformation)) {
           continue;
         }
         InstanceTransformData packed_transform{};
@@ -932,7 +921,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                 mesh, single_transform, depth_bound_mesh_vb, depth_bound_instance_vb)) {
           continue;
         }
-        draw_forward_batch(mesh, draw.key, 1, depth_bound_index_buffer, "skinned-depth-prepass");
+        draw_forward_batch(mesh, draw.key, 1, depth_bound_index_buffer, "deformed-depth-prepass");
       }
     }
 
@@ -968,8 +957,6 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                     Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     bound_forward_srb = camera_override_srb_;
   }
-  updateSkinningConstants(context_, skinning_constants_, {});
-
   for (const auto& batch : state.opaque_batches) {
     if (batch.transforms.empty()) {
       continue;
@@ -1013,10 +1000,16 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
 
     if (!use_custom_shader_override) {
       Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, custom_pipeline);
+      if (srb &&
+          !bindDeformationResources(srb, mesh, renderer::kInvalidDeformation)) {
+        continue;
+      }
       if (srb && srb != bound_forward_srb) {
         context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         bound_forward_srb = srb;
       }
+    } else if (!updateDeformationConstants(mesh, renderer::kInvalidDeformation)) {
+      continue;
     }
 
     pack_transforms(batch.transforms);
@@ -1032,7 +1025,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
   }
 
-  for (const auto& draw : state.skinned_opaque_draws) {
+  for (const auto& draw : state.deformed_opaque_draws) {
     auto mesh_it = meshes_.find(draw.key.mesh);
     if (mesh_it == meshes_.end()) {
       continue;
@@ -1072,13 +1065,14 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
 
     if (!use_custom_shader_override) {
       Diligent::IShaderResourceBinding* srb = resolve_forward_srb(mat, custom_pipeline);
-      if (srb && srb != bound_forward_srb) {
+      if (srb && !bindDeformationResources(srb, mesh, draw.deformation)) {
+        continue;
+      }
+      if (srb) {
         context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         bound_forward_srb = srb;
       }
-    }
-
-    if (!updateSkinningConstants(context_, skinning_constants_, draw.skinning_palette)) {
+    } else if (!updateDeformationConstants(mesh, draw.deformation)) {
       continue;
     }
 
@@ -1094,7 +1088,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                bound_instance_vb)) {
       continue;
     }
-    if (draw_forward_batch(mesh, draw.key, 1, bound_index_buffer, "skinned-forward")) {
+    if (draw_forward_batch(mesh, draw.key, 1, bound_index_buffer, "deformed-forward")) {
       draw_count += 1;
     }
   }
@@ -1496,13 +1490,13 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       }
       std::fprintf(stderr,
                    "[Karma][DrawDebug] pass=transparent-forward kind=%s mesh=%u material=%u "
-                   "indexed=%s skinned=%s vertices=%u mesh_indices=%u "
+                   "indexed=%s deformed=%s vertices=%u mesh_indices=%u "
                    "first_index=%u draw_indices=%u instances=%u vb=%s ib=%s\n",
                    draw_kind,
                    key.mesh,
                    key.material,
                    key.indexed ? "true" : "false",
-                   key.skinned ? "true" : "false",
+                   key.deformed ? "true" : "false",
                    mesh.vertex_count,
                    mesh.index_count,
                    key.index_offset,
@@ -1567,8 +1561,6 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   renderer::MeshId last_constants_mesh = renderer::kInvalidMesh;
   auto last_constants_scene_sample_mode = TransparentForwardDraw::SceneSampleMode::None;
   Diligent::Uint32 draw_count = 0;
-  const std::vector<glm::mat4> empty_skinning_palette;
-
   for (const auto& draw : draws) {
     auto mesh_it = meshes_.find(draw.key.mesh);
     if (mesh_it == meshes_.end()) {
@@ -1635,15 +1627,15 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
         }
       }
     }
-    if (srb && srb != bound_forward_srb) {
+    const renderer::DeformationId deformation =
+        draw.key.deformed ? draw.deformation : renderer::kInvalidDeformation;
+    if (srb && !bindDeformationResources(srb, mesh, deformation)) {
+      continue;
+    }
+    if (srb) {
       context_->CommitShaderResources(srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
       bound_forward_srb = srb;
-    }
-
-    if (!updateSkinningConstants(context_,
-                                 skinning_constants_,
-                                 draw.key.skinned ? draw.skinning_palette
-                                                  : empty_skinning_palette)) {
+    } else if (!srb && !updateDeformationConstants(mesh, deformation)) {
       continue;
     }
 

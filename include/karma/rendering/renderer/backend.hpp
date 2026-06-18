@@ -2,6 +2,7 @@
 
 #include "karma/core/math/types.h"
 #include "karma/rendering/renderer/camera.h"
+#include "karma/rendering/renderer/deformation.h"
 #include "karma/rendering/renderer/draw_item.h"
 #include "karma/rendering/renderer/frame.h"
 #include "karma/rendering/renderer/ids.h"
@@ -85,6 +86,20 @@ class Backend {
   virtual void submitTerrain(const renderer::TerrainDrawItem& item) { (void)item; }
   virtual renderer::TerrainCapabilities getTerrainCapabilities() const { return {}; }
   virtual renderer::TerrainStats getTerrainStats() const { return {}; }
+
+  virtual renderer::DeformationId createDeformation(const renderer::DeformationDesc& desc) {
+    (void)desc;
+    return renderer::kInvalidDeformation;
+  }
+  virtual void updateDeformation(renderer::DeformationId deformation,
+                                 const renderer::DeformationDesc& desc) {
+    (void)deformation;
+    (void)desc;
+  }
+  virtual void destroyDeformation(renderer::DeformationId deformation) {
+    (void)deformation;
+  }
+  virtual renderer::DeformationStats getDeformationStats() const { return {}; }
 
   virtual void submit(const renderer::DrawItem& item) = 0;
   virtual void submitParticles(renderer::ParticleBatch batch) = 0;

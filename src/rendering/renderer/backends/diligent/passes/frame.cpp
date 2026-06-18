@@ -450,14 +450,13 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   const bool mesh_changed = record.mesh != item.mesh;
   record.transform_changed =
       mesh_changed || matrixChangedBeyondEpsilon(record.transform, item.transform) ||
-      (item.skinning_enabled && !item.skinning_palette.empty());
+      record.deformation != item.deformation;
   record.layer = item.layer;
   record.mesh = item.mesh;
   record.material = item.material;
   record.materials = item.materials;
+  record.deformation = item.deformation;
   record.transform = item.transform;
-  record.skinning_palette = item.skinning_palette;
-  record.skinning_enabled = item.skinning_enabled && !record.skinning_palette.empty();
   record.visible = item.visible;
   record.shadow_visible = item.shadow_visible;
 }

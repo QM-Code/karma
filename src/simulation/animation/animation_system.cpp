@@ -10,9 +10,8 @@
 #include "karma/core/math/quat.h"
 #include "karma/core/math/vec3.h"
 #include "karma/simulation/animation/pose.h"
-#include "karma/world/components/animation_player.h"
 #include "karma/world/components/animator.h"
-#include "karma/world/components/morph_target.h"
+#include "karma/world/components/deformable_mesh.h"
 #include "karma/world/components/transform.h"
 
 namespace karma::animation {
@@ -159,14 +158,15 @@ void consumeTransitionTriggers(components::AnimatorComponent& animator,
 
 const components::AnimatorTransition* findReadyTransition(
     components::AnimatorComponent& animator,
-    const components::AnimatorState& state) {
+    const components::AnimatorState& state,
+    float state_time_seconds) {
   for (const components::AnimatorTransition& transition : state.transitions) {
     if (transition.to_state_index >= animator.state_machine.states.size()) {
       continue;
     }
     if (transition.has_exit_time) {
       const float duration = std::max(stateDuration(animator, state), 0.0001f);
-      if ((animator.state_time_seconds / duration) < transition.exit_time_normalized) {
+      if ((state_time_seconds / duration) < transition.exit_time_normalized) {
         continue;
       }
     }
@@ -175,6 +175,101 @@ const components::AnimatorTransition* findReadyTransition(
     }
   }
   return nullptr;
+}
+
+struct InterruptTransitionCandidate {
+  const components::AnimatorTransition* transition = nullptr;
+  uint32_t from_state_index = kInvalidAnimationIndex;
+  float from_time_seconds = 0.0f;
+};
+
+InterruptTransitionCandidate findInterruptingTransition(
+    components::AnimatorComponent& animator) {
+  if (!animator.transition.active) {
+    return {};
+  }
+
+  auto check_state = [&](uint32_t state_index,
+                         float state_time_seconds) -> InterruptTransitionCandidate {
+    if (state_index >= animator.state_machine.states.size()) {
+      return {};
+    }
+    const components::AnimatorState& state = animator.state_machine.states[state_index];
+    if (const components::AnimatorTransition* transition =
+            findReadyTransition(animator, state, state_time_seconds)) {
+      if (transition->to_state_index != animator.transition.to_state_index ||
+          state_index != animator.transition.from_state_index) {
+        return InterruptTransitionCandidate{
+            .transition = transition,
+            .from_state_index = state_index,
+            .from_time_seconds = state_time_seconds,
+        };
+      }
+    }
+    return {};
+  };
+
+  switch (animator.transition.interrupt_policy) {
+    case components::AnimatorInterruptPolicy::None:
+      return {};
+    case components::AnimatorInterruptPolicy::Source:
+      return check_state(animator.transition.from_state_index,
+                         animator.transition.from_time_seconds);
+    case components::AnimatorInterruptPolicy::Destination:
+      return check_state(animator.transition.to_state_index,
+                         animator.transition.to_time_seconds);
+    case components::AnimatorInterruptPolicy::SourceThenDestination:
+      if (InterruptTransitionCandidate source =
+              check_state(animator.transition.from_state_index,
+                          animator.transition.from_time_seconds);
+          source.transition != nullptr) {
+        return source;
+      }
+      return check_state(animator.transition.to_state_index,
+                         animator.transition.to_time_seconds);
+    case components::AnimatorInterruptPolicy::Any:
+      for (uint32_t state_index = 0;
+           state_index < animator.state_machine.states.size();
+           ++state_index) {
+        float state_time = 0.0f;
+        if (state_index == animator.transition.from_state_index) {
+          state_time = animator.transition.from_time_seconds;
+        } else if (state_index == animator.transition.to_state_index) {
+          state_time = animator.transition.to_time_seconds;
+        }
+        if (InterruptTransitionCandidate candidate = check_state(state_index, state_time);
+            candidate.transition != nullptr) {
+          return candidate;
+        }
+      }
+      return {};
+  }
+  return {};
+}
+
+void beginAnimatorTransition(components::AnimatorComponent& animator,
+                             uint32_t from_state_index,
+                             float from_time_seconds,
+                             const components::AnimatorTransition& transition) {
+  consumeTransitionTriggers(animator, transition);
+  if (transition.duration_seconds <= 0.0f) {
+    animator.current_state_index = transition.to_state_index;
+    animator.state_time_seconds = 0.0f;
+    animator.transition = components::AnimatorTransitionRuntime{};
+    return;
+  }
+  animator.current_state_index = from_state_index;
+  animator.state_time_seconds = from_time_seconds;
+  animator.transition = components::AnimatorTransitionRuntime{
+      .active = true,
+      .from_state_index = from_state_index,
+      .to_state_index = transition.to_state_index,
+      .elapsed_seconds = 0.0f,
+      .duration_seconds = transition.duration_seconds,
+      .from_time_seconds = from_time_seconds,
+      .to_time_seconds = 0.0f,
+      .interrupt_policy = transition.interrupt_policy,
+  };
 }
 
 void collectClipEvents(components::AnimatorComponent& animator,
@@ -309,18 +404,18 @@ bool morphWeightsChanged(const std::vector<float>& a, const std::vector<float>& 
   return false;
 }
 
-void setMorphWeights(components::MorphTargetComponent& morph,
+void setMorphWeights(components::DeformableMeshComponent& deformation,
                      const std::vector<float>& sampled_weights) {
-  const size_t target_count = morph.bind_mesh.morph_targets.size();
-  std::vector<float> next = morph.base_weights;
+  const size_t target_count = deformation.bind_mesh.morph_targets.size();
+  std::vector<float> next = deformation.base_morph_weights;
   next.resize(target_count, 0.0f);
   const size_t count = std::min(target_count, sampled_weights.size());
   for (size_t i = 0; i < count; ++i) {
     next[i] = sampled_weights[i];
   }
-  if (morphWeightsChanged(morph.weights, next)) {
-    morph.weights = std::move(next);
-    morph.weights_dirty = true;
+  if (morphWeightsChanged(deformation.morph_weights, next)) {
+    deformation.morph_weights = std::move(next);
+    deformation.morph_weights_dirty = true;
   }
 }
 
@@ -334,10 +429,10 @@ void applyMorphWeightsToEntities(
     }
     const std::vector<float> weights = finalizeMorphWeights(value);
     for (const ecs::Entity entity : morph_entities_by_node_index[target_node_index]) {
-      if (!world.isAlive(entity) || !world.has<components::MorphTargetComponent>(entity)) {
+      if (!world.isAlive(entity) || !world.has<components::DeformableMeshComponent>(entity)) {
         continue;
       }
-      setMorphWeights(world.get<components::MorphTargetComponent>(entity), weights);
+      setMorphWeights(world.get<components::DeformableMeshComponent>(entity), weights);
     }
   }
 }
@@ -345,12 +440,12 @@ void applyMorphWeightsToEntities(
 std::vector<float> baseMorphWeightsForNode(ecs::World& world,
                                            const std::vector<ecs::Entity>& entities) {
   for (const ecs::Entity entity : entities) {
-    if (!world.isAlive(entity) || !world.has<components::MorphTargetComponent>(entity)) {
+    if (!world.isAlive(entity) || !world.has<components::DeformableMeshComponent>(entity)) {
       continue;
     }
-    const auto& morph = world.get<components::MorphTargetComponent>(entity);
-    std::vector<float> weights = morph.base_weights;
-    weights.resize(morph.bind_mesh.morph_targets.size(), 0.0f);
+    const auto& deformation = world.get<components::DeformableMeshComponent>(entity);
+    std::vector<float> weights = deformation.base_morph_weights;
+    weights.resize(deformation.bind_mesh.morph_targets.size(), 0.0f);
     return weights;
   }
   return {};
@@ -608,6 +703,66 @@ void updateRootMotion(ecs::World& world,
   }
 }
 
+bool hasSampledTransform(const SampledTransform& transform) {
+  return transform.position || transform.rotation || transform.scale;
+}
+
+void appendRootMotionDelta(SampledTransform& dst, const SampledTransform& delta) {
+  if (delta.position) {
+    dst.position = dst.position ? math::add(*dst.position, *delta.position) : *delta.position;
+  }
+  if (delta.rotation) {
+    dst.rotation = dst.rotation
+                       ? math::normalize(math::mul(*delta.rotation, *dst.rotation))
+                       : *delta.rotation;
+  }
+  if (delta.scale) {
+    dst.scale = dst.scale ? math::add(*dst.scale, *delta.scale) : *delta.scale;
+  }
+}
+
+void prepareRootMotionComponent(ecs::World& world,
+                                ecs::Entity entity,
+                                components::AnimatorComponent& animator) {
+  if (!world.has<components::RootMotionComponent>(entity)) {
+    return;
+  }
+  const auto& root_motion = world.get<components::RootMotionComponent>(entity);
+  animator.root_motion_mode = root_motion.mode;
+  animator.root_motion_node_index = root_motion.root_motion_node_index;
+}
+
+void publishAnimatorSideChannels(ecs::World& world,
+                                 ecs::Entity entity,
+                                 const components::AnimatorComponent& animator) {
+  if (world.has<components::AnimationEventBufferComponent>(entity)) {
+    auto& buffer = world.get<components::AnimationEventBufferComponent>(entity);
+    buffer.events = animator.event_queue;
+    if (!buffer.events.empty()) {
+      ++buffer.sequence;
+    }
+  }
+
+  if (!world.has<components::RootMotionComponent>(entity)) {
+    return;
+  }
+  auto& root_motion = world.get<components::RootMotionComponent>(entity);
+  root_motion.accumulated = animator.root_motion_accumulated;
+  if (root_motion.mode == components::RootMotionMode::Disabled) {
+    root_motion.delta = SampledTransform{};
+    root_motion.has_unconsumed_delta = false;
+    return;
+  }
+  if (root_motion.mode == components::RootMotionMode::ExposeDelta) {
+    appendRootMotionDelta(root_motion.delta, animator.root_motion_delta);
+    root_motion.has_unconsumed_delta =
+        root_motion.has_unconsumed_delta || hasSampledTransform(animator.root_motion_delta);
+    return;
+  }
+  root_motion.delta = animator.root_motion_delta;
+  root_motion.has_unconsumed_delta = hasSampledTransform(root_motion.delta);
+}
+
 void updateSimpleAnimator(ecs::World& world,
                           ecs::Entity entity,
                           components::AnimatorComponent& animator,
@@ -708,6 +863,14 @@ void updateStateMachineAnimator(ecs::World& world,
       animator.current_state_index = animator.transition.to_state_index;
       animator.state_time_seconds = animator.transition.to_time_seconds;
       animator.transition = components::AnimatorTransitionRuntime{};
+    } else {
+      const InterruptTransitionCandidate interrupt = findInterruptingTransition(animator);
+      if (interrupt.transition != nullptr) {
+        beginAnimatorTransition(animator,
+                                interrupt.from_state_index,
+                                interrupt.from_time_seconds,
+                                *interrupt.transition);
+      }
     }
   } else if (animator.playing) {
     const components::AnimatorState& state =
@@ -769,23 +932,12 @@ void updateStateMachineAnimator(ecs::World& world,
       }
     }
 
-    if (const components::AnimatorTransition* transition = findReadyTransition(animator, state)) {
-      consumeTransitionTriggers(animator, *transition);
-      if (transition->duration_seconds <= 0.0f) {
-        animator.current_state_index = transition->to_state_index;
-        animator.state_time_seconds = 0.0f;
-        animator.transition = components::AnimatorTransitionRuntime{};
-      } else {
-        animator.transition = components::AnimatorTransitionRuntime{
-            .active = true,
-            .from_state_index = animator.current_state_index,
-            .to_state_index = transition->to_state_index,
-            .elapsed_seconds = 0.0f,
-            .duration_seconds = transition->duration_seconds,
-            .from_time_seconds = animator.state_time_seconds,
-            .to_time_seconds = 0.0f,
-        };
-      }
+    if (const components::AnimatorTransition* transition =
+            findReadyTransition(animator, state, animator.state_time_seconds)) {
+      beginAnimatorTransition(animator,
+                              animator.current_state_index,
+                              animator.state_time_seconds,
+                              *transition);
     }
   }
 
@@ -820,43 +972,14 @@ void updateStateMachineAnimator(ecs::World& world,
 void AnimationSystem::update(ecs::World& world, scene::Scene& scene, float dt) {
   (void)scene;
 
-  const std::vector<ecs::Entity> players = world.view<components::AnimationPlayerComponent>();
-  for (const ecs::Entity entity : players) {
-    auto& player = world.get<components::AnimationPlayerComponent>(entity);
-    if (player.clips.empty() || player.current_clip_index >= player.clips.size()) {
-      continue;
-    }
-
-    if (player.playing) {
-      player.time_seconds += dt * player.speed;
-    }
-
-    const AnimationClip& clip = player.clips[player.current_clip_index];
-    if (player.playing) {
-      player.time_seconds = normalizeAnimationTime(clip, player.time_seconds, player.loop);
-    }
-
-    const std::vector<WeightedClipSample> samples{
-        WeightedClipSample{
-            .clip_index = static_cast<uint32_t>(player.current_clip_index),
-            .time_seconds = player.time_seconds,
-            .loop = player.loop,
-            .weight = 1.0f,
-        },
-    };
-    applyWeightedClipSamples(world,
-                             player.clips,
-                             player.node_entities_by_index,
-                             player.morph_entities_by_node_index,
-                             samples);
-  }
-
   const std::vector<ecs::Entity> animators = world.view<components::AnimatorComponent>();
   for (const ecs::Entity entity : animators) {
     auto& animator = world.get<components::AnimatorComponent>(entity);
     animator.event_queue.clear();
     animator.root_motion_delta = SampledTransform{};
+    prepareRootMotionComponent(world, entity, animator);
     updateStateMachineAnimator(world, entity, animator, dt);
+    publishAnimatorSideChannels(world, entity, animator);
   }
 }
 

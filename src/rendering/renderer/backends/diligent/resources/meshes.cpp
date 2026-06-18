@@ -136,6 +136,7 @@ void DiligentBackend::uploadMeshBuffers(const geometry::MeshData& mesh, MeshReco
   record.index_buffer.Release();
   record.vertex_count = 0;
   record.index_count = 0;
+  record.morph_target_count = 0;
 
   if (device_ && !mesh.vertices.empty()) {
     const auto interleaved = buildInterleavedVertices(mesh);
@@ -160,6 +161,68 @@ void DiligentBackend::uploadMeshBuffers(const geometry::MeshData& mesh, MeshReco
     Diligent::BufferData ib_data{mesh.indices.data(), ib_desc.Size};
     device_->CreateBuffer(ib_desc, &ib_data, &record.index_buffer);
     record.index_count = static_cast<Diligent::Uint32>(mesh.indices.size());
+  }
+
+  uploadMeshMorphBuffers(mesh, record);
+}
+
+void DiligentBackend::uploadMeshMorphBuffers(const geometry::MeshData& mesh,
+                                             MeshRecord& record) {
+  record.morph_delta_buffer.Release();
+  record.morph_delta_srv.Release();
+  record.morph_target_count = 0;
+  if (!device_ || mesh.vertices.empty() || mesh.morph_targets.empty()) {
+    return;
+  }
+
+  std::vector<MorphTargetDeltaGpu> deltas;
+  deltas.reserve(mesh.vertices.size() * mesh.morph_targets.size());
+  for (const geometry::MeshData::MorphTarget& target : mesh.morph_targets) {
+    for (size_t vertex_index = 0; vertex_index < mesh.vertices.size(); ++vertex_index) {
+      MorphTargetDeltaGpu delta{};
+      if (vertex_index < target.position_deltas.size()) {
+        const glm::vec3& v = target.position_deltas[vertex_index];
+        delta.position[0] = v.x;
+        delta.position[1] = v.y;
+        delta.position[2] = v.z;
+      }
+      if (vertex_index < target.normal_deltas.size()) {
+        const glm::vec3& n = target.normal_deltas[vertex_index];
+        delta.normal[0] = n.x;
+        delta.normal[1] = n.y;
+        delta.normal[2] = n.z;
+      }
+      if (vertex_index < target.tangent_deltas.size()) {
+        const glm::vec3& t = target.tangent_deltas[vertex_index];
+        delta.tangent[0] = t.x;
+        delta.tangent[1] = t.y;
+        delta.tangent[2] = t.z;
+      }
+      deltas.push_back(delta);
+    }
+  }
+  if (deltas.empty()) {
+    return;
+  }
+
+  Diligent::BufferDesc desc{};
+  desc.Name = "Karma Morph Target Deltas";
+  desc.Usage = Diligent::USAGE_IMMUTABLE;
+  desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+  desc.CPUAccessFlags = Diligent::CPU_ACCESS_NONE;
+  desc.Mode = Diligent::BUFFER_MODE_STRUCTURED;
+  desc.ElementByteStride = static_cast<Diligent::Uint32>(sizeof(MorphTargetDeltaGpu));
+  desc.Size = static_cast<Diligent::Uint64>(deltas.size()) *
+              static_cast<Diligent::Uint64>(sizeof(MorphTargetDeltaGpu));
+  Diligent::BufferData data{deltas.data(), desc.Size};
+  device_->CreateBuffer(desc, &data, &record.morph_delta_buffer);
+  if (!record.morph_delta_buffer) {
+    return;
+  }
+  record.morph_delta_srv =
+      record.morph_delta_buffer->GetDefaultView(Diligent::BUFFER_VIEW_SHADER_RESOURCE);
+  if (record.morph_delta_srv) {
+    record.morph_target_count = static_cast<Diligent::Uint32>(mesh.morph_targets.size());
   }
 }
 

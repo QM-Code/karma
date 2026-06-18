@@ -1,4 +1,4 @@
-#include "karma/content/importers/glb_scene_import.h"
+#include "karma/content/importers/gltf_scene_import.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,13 +20,12 @@
 #include <assimp/scene.h>
 
 #include "gltf_document.h"
-#include "glb_scene_animation_import.h"
-#include "glb_scene_mesh_import.h"
-#include "glb_scene_skinning.h"
+#include "gltf_scene_animation_import.h"
+#include "gltf_scene_mesh_import.h"
+#include "gltf_scene_skinning.h"
 #include "karma/world/components/animator.h"
+#include "karma/world/components/deformable_mesh.h"
 #include "karma/world/components/mesh.h"
-#include "karma/world/components/morph_target.h"
-#include "karma/world/components/skinned_mesh.h"
 #include "karma/world/components/tag.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/scene/transform_hierarchy.h"
@@ -483,12 +482,12 @@ uint32_t loadNodePrefab(const aiScene& scene,
                         const aiNode& node,
                         const aiMatrix4x4& parent_world,
                         const std::unordered_map<std::string, const aiLight*>& lights_by_name,
-                        const GlbSceneLoadOptions& options,
-                        GlbScenePrefab& prefab,
+                        const GltfSceneLoadOptions& options,
+                        GltfScenePrefab& prefab,
                         std::unordered_map<std::string, uint32_t>& node_indices_by_name) {
   const aiMatrix4x4 world_transform = parent_world * node.mTransformation;
 
-  GlbScenePrefabNode prefab_node{};
+  GltfScenePrefabNode prefab_node{};
   prefab_node.name = node.mName.C_Str();
   decomposeTransform(node.mTransformation,
                      prefab_node.local_position,
@@ -507,11 +506,11 @@ uint32_t loadNodePrefab(const aiScene& scene,
         continue;
       }
       const aiMesh& mesh = *scene.mMeshes[scene_mesh_index];
-      GlbScenePrefabPrimitive primitive{};
+      GltfScenePrefabPrimitive primitive{};
       primitive.name = safeName(mesh.mName.C_Str(), "Primitive");
       primitive.mesh = buildMeshData(mesh);
       primitive.source_material_index =
-          mesh.mMaterialIndex < scene.mNumMaterials ? mesh.mMaterialIndex : kInvalidGlbSceneMaterial;
+          mesh.mMaterialIndex < scene.mNumMaterials ? mesh.mMaterialIndex : kInvalidGltfSceneMaterial;
       if (primitive.source_material_index < prefab.imported_materials.size() &&
           prefab.imported_materials[primitive.source_material_index]) {
         primitive.material = prefab.imported_materials[primitive.source_material_index]->material;
@@ -549,7 +548,7 @@ uint32_t loadNodePrefab(const aiScene& scene,
                        options,
                        prefab,
                        node_indices_by_name);
-    if (imported_child != kInvalidGlbSceneNode) {
+    if (imported_child != kInvalidGltfSceneNode) {
       prefab.nodes[node_index].children.push_back(imported_child);
     }
   }
@@ -557,16 +556,16 @@ uint32_t loadNodePrefab(const aiScene& scene,
   return node_index;
 }
 
-std::string nodeDisplayName(const GlbScenePrefabNode& node, uint32_t index) {
+std::string nodeDisplayName(const GltfScenePrefabNode& node, uint32_t index) {
   if (!node.name.empty()) {
     return node.name;
   }
-  return "GLB Node " + std::to_string(index);
+  return "glTF Node " + std::to_string(index);
 }
 
-std::string primitiveDisplayName(const GlbScenePrefabNode& node,
+std::string primitiveDisplayName(const GltfScenePrefabNode& node,
                                  uint32_t node_index,
-                                 const GlbScenePrefabPrimitive& primitive,
+                                 const GltfScenePrefabPrimitive& primitive,
                                  size_t primitive_index) {
   if (!primitive.name.empty()) {
     return primitive.name;
@@ -574,11 +573,11 @@ std::string primitiveDisplayName(const GlbScenePrefabNode& node,
   return nodeDisplayName(node, node_index) + " Primitive " + std::to_string(primitive_index);
 }
 
-std::string prefabResourceKey(const GlbScenePrefab& prefab,
+std::string prefabResourceKey(const GltfScenePrefab& prefab,
                               uint32_t node_index,
                               size_t primitive_index,
                               std::string_view suffix) {
-  std::string key = prefab.source_path.empty() ? std::string("imported_glb")
+  std::string key = prefab.source_path.empty() ? std::string("imported_gltf")
                                                : prefab.source_path.string();
   key.append("#node=");
   key.append(std::to_string(node_index));
@@ -589,34 +588,34 @@ std::string prefabResourceKey(const GlbScenePrefab& prefab,
   return key;
 }
 
-std::string materialResourceKey(const GlbScenePrefab& prefab, uint32_t material_index) {
-  std::string key = prefab.source_path.empty() ? std::string("imported_glb")
+std::string materialResourceKey(const GltfScenePrefab& prefab, uint32_t material_index) {
+  std::string key = prefab.source_path.empty() ? std::string("imported_gltf")
                                                : prefab.source_path.string();
   key.append("#material=");
   key.append(std::to_string(material_index));
   return key;
 }
 
-std::string fallbackPrimitiveMaterialKey(const GlbScenePrefab& prefab,
+std::string fallbackPrimitiveMaterialKey(const GltfScenePrefab& prefab,
                                          uint32_t node_index,
                                          size_t primitive_index) {
   return prefabResourceKey(prefab, node_index, primitive_index, "material");
 }
 
-std::string primitiveMaterialKey(const GlbScenePrefab& prefab,
+std::string primitiveMaterialKey(const GltfScenePrefab& prefab,
                                  uint32_t node_index,
                                  size_t primitive_index,
-                                 const GlbScenePrefabPrimitive& primitive) {
-  if (primitive.source_material_index != kInvalidGlbSceneMaterial) {
+                                 const GltfScenePrefabPrimitive& primitive) {
+  if (primitive.source_material_index != kInvalidGltfSceneMaterial) {
     return materialResourceKey(prefab, primitive.source_material_index);
   }
   return fallbackPrimitiveMaterialKey(prefab, node_index, primitive_index);
 }
 
-void registerPrimitiveMaterial(const GlbScenePrefab& prefab,
+void registerPrimitiveMaterial(const GltfScenePrefab& prefab,
                                uint32_t node_index,
                                size_t primitive_index,
-                               const GlbScenePrefabPrimitive& primitive,
+                               const GltfScenePrefabPrimitive& primitive,
                                const std::string& material_key,
                                renderer::MaterialLibrary* materials,
                                std::unordered_set<std::string>& registered_materials) {
@@ -625,7 +624,7 @@ void registerPrimitiveMaterial(const GlbScenePrefab& prefab,
     return;
   }
 
-  if (primitive.source_material_index != kInvalidGlbSceneMaterial &&
+  if (primitive.source_material_index != kInvalidGltfSceneMaterial &&
       !prefab.source_path.empty()) {
     std::shared_ptr<const renderer::ImportedMaterialData> imported_material;
     if (primitive.source_material_index < prefab.imported_materials.size()) {
@@ -667,9 +666,9 @@ void appendPrimitiveMesh(geometry::MeshData& out,
   }
 }
 
-geometry::MeshData buildCombinedNodeMesh(const GlbScenePrefab& prefab,
+geometry::MeshData buildCombinedNodeMesh(const GltfScenePrefab& prefab,
                                          uint32_t node_index,
-                                         const GlbScenePrefabNode& node,
+                                         const GltfScenePrefabNode& node,
                                          const std::vector<size_t>& primitive_indices,
                                          renderer::MaterialLibrary* materials,
                                          std::unordered_set<std::string>& registered_materials) {
@@ -707,9 +706,9 @@ geometry::MeshData buildCombinedNodeMesh(const GlbScenePrefab& prefab,
 }
 }  // namespace
 
-GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
-                                  const GlbSceneLoadOptions& options) {
-  GlbScenePrefab prefab{};
+GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
+                                  const GltfSceneLoadOptions& options) {
+  GltfScenePrefab prefab{};
   prefab.source_path = path;
 
   Assimp::Importer importer;
@@ -761,14 +760,14 @@ GlbScenePrefab loadGlbScenePrefab(const std::filesystem::path& path,
   return prefab;
 }
 
-GlbSceneImportResult instantiateGlbScenePrefab(
+GltfSceneImportResult instantiateGltfScenePrefab(
     ecs::World& world,
     scene::Scene& scene,
     renderer::GraphicsDevice& device,
-    const GlbScenePrefab& prefab,
-    const GlbSceneInstantiateOptions& options,
+    const GltfScenePrefab& prefab,
+    const GltfSceneInstantiateOptions& options,
     renderer::MaterialLibrary* materials) {
-  GlbSceneImportResult result{};
+  GltfSceneImportResult result{};
   if (!prefab.valid()) {
     return result;
   }
@@ -776,40 +775,48 @@ GlbSceneImportResult instantiateGlbScenePrefab(
   result.node_entities_by_index.resize(prefab.nodes.size());
   result.morph_entities_by_node_index.resize(prefab.nodes.size());
 
-  struct PendingSkin {
+  struct PendingDeformation {
     ecs::Entity entity{};
-    const GlbScenePrefabPrimitive* primitive = nullptr;
+    const GltfScenePrefabPrimitive* primitive = nullptr;
   };
-  std::vector<PendingSkin> pending_skins;
+  std::vector<PendingDeformation> pending_deformations;
   ecs::Entity skin_render_transform_entity{};
   std::unordered_set<std::string> registered_materials;
 
-  auto attach_pending_skins = [&]() {
-    for (const PendingSkin& pending : pending_skins) {
-      if (!world.isAlive(pending.entity) || pending.primitive == nullptr ||
-          !pending.primitive->skinned()) {
+  auto attach_pending_deformations = [&]() {
+    for (const PendingDeformation& pending : pending_deformations) {
+      if (!world.isAlive(pending.entity) || pending.primitive == nullptr) {
         continue;
       }
       std::vector<ecs::Entity> joint_entities;
-      joint_entities.reserve(pending.primitive->joint_node_indices.size());
-      for (const uint32_t joint_node_index : pending.primitive->joint_node_indices) {
-        if (joint_node_index < result.node_entities_by_index.size()) {
-          joint_entities.push_back(result.node_entities_by_index[joint_node_index]);
-        } else {
-          joint_entities.push_back({});
+      if (pending.primitive->skinned()) {
+        joint_entities.reserve(pending.primitive->joint_node_indices.size());
+        for (const uint32_t joint_node_index : pending.primitive->joint_node_indices) {
+          if (joint_node_index < result.node_entities_by_index.size()) {
+            joint_entities.push_back(result.node_entities_by_index[joint_node_index]);
+          } else {
+            joint_entities.push_back({});
+          }
         }
       }
-      world.add(pending.entity, components::SkinnedMeshComponent{
+
+      std::vector<float> morph_weights = pending.primitive->morph_weights;
+      morph_weights.resize(pending.primitive->mesh.morph_targets.size(), 0.0f);
+      world.add(pending.entity, components::DeformableMeshComponent{
                                     .bind_mesh = pending.primitive->mesh,
-                                    .skinned_mesh = pending.primitive->mesh,
+                                    .cpu_deformed_mesh = pending.primitive->mesh,
                                     .vertex_influences = pending.primitive->vertex_influences,
                                     .joint_entities = std::move(joint_entities),
-                                    .inverse_bind_matrices = pending.primitive->inverse_bind_matrices,
+                                    .inverse_bind_matrices =
+                                        pending.primitive->inverse_bind_matrices,
+                                    .base_morph_weights = morph_weights,
+                                    .morph_weights = morph_weights,
                                     .render_transform_entity = skin_render_transform_entity,
                                     .skin_index = pending.primitive->skin_index,
-                                    .skinning_path = components::SkinningPath::Gpu,
-                                    .diagnostic = "Waiting for first skinning palette update",
-                                    .override_render_transform = true,
+                                    .path = components::DeformationPath::Gpu,
+                                    .diagnostic = "Waiting for first deformation update",
+                                    .morph_weights_dirty = true,
+                                    .override_render_transform = pending.primitive->skinned(),
                                     .enabled = true});
     }
   };
@@ -886,21 +893,13 @@ GlbSceneImportResult instantiateGlbScenePrefab(
                                      .mesh_key = mesh_id != renderer::kInvalidMesh ? mesh_key : "",
                                      .visible = true});
       if (primitive.morphable()) {
-        std::vector<float> morph_weights = primitive.morph_weights;
-        morph_weights.resize(mesh_asset.morph_targets.size(), 0.0f);
-        world.add(primitive_entity, components::MorphTargetComponent{
-                                        .bind_mesh = mesh_asset,
-                                        .deformed_mesh = mesh_asset,
-                                        .base_weights = morph_weights,
-                                        .weights = morph_weights,
-                                        .weights_dirty = true,
-                                        .enabled = true});
         if (prefab_node_index < result.morph_entities_by_node_index.size()) {
           result.morph_entities_by_node_index[prefab_node_index].push_back(primitive_entity);
         }
       }
-      if (primitive.skinned()) {
-        pending_skins.push_back(PendingSkin{.entity = primitive_entity, .primitive = &primitive});
+      if (primitive.skinned() || primitive.morphable()) {
+        pending_deformations.push_back(
+            PendingDeformation{.entity = primitive_entity, .primitive = &primitive});
       }
 
       const scene::NodeId primitive_node = scene.createNode(primitive_entity);
@@ -943,7 +942,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
   if (options.create_synthetic_root) {
     const ecs::Entity root_entity = world.createEntity();
     const std::string root_name =
-        prefab.source_path.stem().empty() ? std::string("Imported GLB") : prefab.source_path.stem().string();
+        prefab.source_path.stem().empty() ? std::string("Imported glTF") : prefab.source_path.stem().string();
     world.setName(root_entity, root_name);
     world.add(root_entity, components::TransformComponent{});
     const scene::NodeId root_node = scene.createNode(root_entity);
@@ -952,7 +951,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
     instantiate_node(prefab.root_node, root_node);
     result.root_entity = root_entity;
     result.root_node = root_node;
-    attach_pending_skins();
+    attach_pending_deformations();
     if (!prefab.animations.empty()) {
       world.add(root_entity, components::AnimatorComponent{
                                  .clips = prefab.animations,
@@ -975,7 +974,7 @@ GlbSceneImportResult instantiateGlbScenePrefab(
   result.root_entity = root_entity;
   result.root_node = root_node;
   skin_render_transform_entity = root_entity;
-  attach_pending_skins();
+  attach_pending_deformations();
   if (!prefab.animations.empty()) {
     world.add(root_entity, components::AnimatorComponent{
                                .clips = prefab.animations,
@@ -994,14 +993,14 @@ GlbSceneImportResult instantiateGlbScenePrefab(
   return result;
 }
 
-GlbSceneImportResult importGlbScene(ecs::World& world,
+GltfSceneImportResult importGltfScene(ecs::World& world,
                                     scene::Scene& scene,
                                     renderer::GraphicsDevice& device,
                                     const std::filesystem::path& path,
-                                    const GlbSceneImportOptions& options,
+                                    const GltfSceneImportOptions& options,
                                     renderer::MaterialLibrary* materials) {
-  const GlbScenePrefab prefab = loadGlbScenePrefab(path, options.load);
-  return instantiateGlbScenePrefab(world, scene, device, prefab, options.instantiate, materials);
+  const GltfScenePrefab prefab = loadGltfScenePrefab(path, options.load);
+  return instantiateGltfScenePrefab(world, scene, device, prefab, options.instantiate, materials);
 }
 
 }  // namespace karma::scene

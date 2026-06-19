@@ -99,6 +99,9 @@ class DiligentBackend final : public Backend {
   void setMaterialFloat(renderer::MaterialId material, std::string_view name, float value) override;
 
   renderer::TextureId createTexture(const renderer::TextureDesc& desc) override;
+  bool supportsTextureFormat(renderer::TextureFormat format) const override;
+  bool uploadTexture(renderer::TextureId texture,
+                     const renderer::TextureUploadData& upload) override;
   void destroyTexture(renderer::TextureId texture) override;
 
   renderer::RenderTargetId createRenderTarget(const renderer::RenderTargetDesc& desc) override;

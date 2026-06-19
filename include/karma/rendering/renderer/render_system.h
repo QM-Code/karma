@@ -16,7 +16,18 @@
 #include "karma/rendering/renderer/device.h"
 #include "karma/world/scene/scene.h"
 
+namespace karma::content {
+struct AssetPackageHandle;
+}
+
 namespace karma::renderer {
+
+/// \ingroup karma_rendering
+/// Opaque handle for renderer assets pinned by explicit prewarm.
+struct RenderPrewarmHandle {
+  uint64_t id = 0u;
+  bool valid() const { return id != 0u; }
+};
 
 /// \ingroup karma_rendering
 /// Extracts ECS render data and submits it to `GraphicsDevice`.
@@ -33,6 +44,14 @@ class RenderSystem {
 
   /// Extracts the world/scene for one frame and submits render data.
   void update(ecs::World& world, scene::Scene& scene, float dt, float interpolation_alpha);
+  /// Uploads and pins selected assets until `releasePrewarm` is called.
+  RenderPrewarmHandle prewarmAssets(const std::vector<std::string>& mesh_keys,
+                                    const std::vector<std::string>& material_keys,
+                                    const std::vector<std::string>& texture_keys = {});
+  /// Uploads and pins renderer-facing assets from a loaded package handle.
+  RenderPrewarmHandle prewarmPackage(const karma::content::AssetPackageHandle& package);
+  /// Releases assets pinned by a previous prewarm call.
+  bool releasePrewarm(RenderPrewarmHandle handle);
 
  private:
   struct RenderRecord {
@@ -62,9 +81,20 @@ class RenderSystem {
     std::vector<std::string> texture_asset_keys;
   };
 
+  struct SharedMaterialAlias {
+    std::string fingerprint;
+    uint32_t ref_count = 0;
+  };
+
   struct SharedTextureResource {
     renderer::TextureId texture = renderer::kInvalidTexture;
     uint32_t ref_count = 0;
+  };
+
+  struct PrewarmRecord {
+    std::vector<std::string> mesh_asset_keys;
+    std::vector<std::string> material_keys;
+    std::vector<std::string> texture_keys;
   };
 
   static uint64_t entityKey(ecs::Entity entity) {
@@ -96,7 +126,9 @@ class RenderSystem {
   std::unordered_map<uint64_t, RenderRecord> records_;
   std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
   std::unordered_map<std::string, SharedMaterialResource> shared_materials_;
+  std::unordered_map<std::string, SharedMaterialAlias> shared_material_aliases_;
   std::unordered_map<std::string, SharedTextureResource> shared_textures_;
+  std::unordered_map<uint64_t, PrewarmRecord> prewarm_records_;
   std::unordered_map<std::string, renderer::RenderTargetId> render_targets_by_key_;
   std::unordered_map<std::string, bool> warned_missing_mesh_asset_keys_;
   std::unordered_map<std::string, bool> warned_missing_material_keys_;
@@ -106,6 +138,7 @@ class RenderSystem {
   float last_env_intensity_ = -1.0f;
   bool last_env_draw_skybox_ = false;
   bool warned_no_camera_ = false;
+  uint64_t next_prewarm_id_ = 1u;
 };
 
 }  // namespace karma::renderer

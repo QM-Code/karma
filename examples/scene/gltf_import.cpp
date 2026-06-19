@@ -1,4 +1,5 @@
 #include "demo_asset_paths.h"
+#include "scene_helpers.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -15,6 +16,8 @@ namespace karma::demo {
 
 namespace {
 
+constexpr const char* kWorldWithLightsSceneKey = "examples/scene/world_with_lights";
+
 struct SceneBounds {
   glm::vec3 min{0.0f};
   glm::vec3 max{0.0f};
@@ -25,39 +28,6 @@ struct LookAngles {
   float yaw = 0.0f;
   float pitch = 0.0f;
 };
-
-void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
-  if (!bounds.valid) {
-    bounds.min = point;
-    bounds.max = point;
-    bounds.valid = true;
-    return;
-  }
-
-  bounds.min = glm::min(bounds.min, point);
-  bounds.max = glm::max(bounds.max, point);
-}
-
-SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
-  SceneBounds geometry_bounds{};
-  SceneBounds fallback_bounds{};
-
-  for (const auto& node : prefab.nodes) {
-    const glm::vec3 world_pos = math::toGlm(node.world_position);
-    expandBounds(fallback_bounds, world_pos);
-
-    const glm::vec3 world_scale = math::toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(math::toGlm(node.world_rotation));
-    for (const auto& primitive : node.primitives) {
-      for (const glm::vec3& vertex : primitive.mesh.vertices) {
-        const glm::vec3 scaled = vertex * world_scale;
-        expandBounds(geometry_bounds, world_pos + rotation * scaled);
-      }
-    }
-  }
-
-  return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
-}
 
 LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   const glm::vec3 direction = glm::normalize(target - eye);
@@ -82,31 +52,30 @@ class GltfSceneImportExample final : public app::GameInterface {
     input->bindKey("cam_right", platform::Key::D);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    const std::filesystem::path scene_path = resolveExampleAssetPath("world-with-lights.glb");
-    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
-        scene_path,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = true,
-        });
-
-    if (!prefab.valid()) {
-      spdlog::error("Failed to load gltf scene prefab from {}", scene_path.string());
+    const content::GltfSceneAsset* scene_asset =
+        assets->findGltfSceneAsset(kWorldWithLightsSceneKey);
+    if (scene_asset == nullptr) {
+      spdlog::error("Missing packaged glTF scene '{}'", kWorldWithLightsSceneKey);
       spawnCamera(SceneBounds{});
       return;
     }
 
-    const SceneBounds bounds = computePrefabBounds(prefab);
-    const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
+    const helpers::GltfSceneAssetBounds asset_bounds =
+        helpers::computeGltfSceneAssetBounds(*assets, *scene_asset);
+    const SceneBounds bounds{.min = asset_bounds.min,
+                             .max = asset_bounds.max,
+                             .valid = asset_bounds.valid};
+    const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
         *world,
         *scene,
         *assets,
-        prefab,
+        *scene_asset,
         scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
         });
     if (!imported.valid()) {
-      spdlog::error("Failed to instantiate gltf scene from {}", scene_path.string());
+      spdlog::error("Failed to instantiate packaged glTF scene '{}'",
+                    kWorldWithLightsSceneKey);
     }
 
     spawnCamera(bounds);
@@ -210,6 +179,8 @@ int main() {
   config.enable_anisotropy = true;
   config.anisotropy_level = 16;
   config.generate_mipmaps = true;
+  config.startup_asset_packages.push_back(
+      karma::demo::resolveExampleAssetPath("scene/world_with_lights"));
 
   engine.start(game, config);
   while (engine.isRunning()) {

@@ -187,7 +187,6 @@ if (KARMA_PHYSICS_BACKEND_JOLT)
     src/simulation/physics/backends/jolt/character_controller_jolt.cpp
     src/simulation/physics/backends/jolt/shape_factory.cpp
     src/simulation/physics/backends/jolt/soft_body_jolt.cpp
-    src/simulation/physics/backends/jolt/static_body_jolt.cpp
     src/simulation/physics/backends/jolt/vehicle_jolt.cpp
   )
 endif()
@@ -197,7 +196,6 @@ if (KARMA_PHYSICS_BACKEND_BULLET)
     src/simulation/physics/backends/bullet/physics_world_bullet.cpp
     src/simulation/physics/backends/bullet/rigid_body_bullet.cpp
     src/simulation/physics/backends/bullet/character_controller_bullet.cpp
-    src/simulation/physics/backends/bullet/static_body_bullet.cpp
   )
 endif()
 list(APPEND KARMA_INSTALL_TARGETS karma_simulation_physics)
@@ -282,6 +280,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
 endif()
 
 karma_add_static(karma_content
+  src/content/assets/asset_cache.cpp
   src/content/assets/asset_package.cpp
   src/content/assets/asset_registry.cpp
   src/content/importers/gltf_document.cpp
@@ -302,6 +301,10 @@ target_link_libraries(karma_content
     karma_world
     karma_simulation_animation
 )
+if (KARMA_ENABLE_KTX2)
+  target_compile_definitions(karma_content PUBLIC KARMA_ENABLE_KTX2)
+  target_compile_definitions(karma_content PRIVATE KARMA_KTX_SOFTWARE_TAG="${KARMA_KTX_SOFTWARE_TAG}")
+endif()
 if (KARMA_ENABLE_NAVIGATION)
   target_sources(karma_content PRIVATE
     src/content/navigation/nav_geometry.cpp

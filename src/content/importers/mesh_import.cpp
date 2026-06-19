@@ -1,4 +1,4 @@
-#include "karma/content/importers/mesh_import.h"
+#include "mesh_import_internal.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>

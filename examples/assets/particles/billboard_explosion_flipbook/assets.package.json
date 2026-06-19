@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/core_flipbook",
+      "path": "../../prefabs/explosion/particles/explosion_core_flipbook.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/smoke_flipbook",
+      "path": "../../prefabs/explosion/particles/explosion_smoke_flipbook.kpeffect"
+    }
+  ]
+}

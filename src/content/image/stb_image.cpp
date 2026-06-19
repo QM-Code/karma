@@ -291,11 +291,13 @@ std::optional<ScalarImage> loadImageFileScalarImage(
 
 }  // namespace
 
-std::optional<Rgba8Image> loadRgba8Image(const std::filesystem::path& path) {
+std::optional<Rgba8Image> loadRgba8Image(
+    const std::filesystem::path& path,
+    const Rgba8ImageLoadOptions& options) {
   int width = 0;
   int height = 0;
   int components = 0;
-  stbi_set_flip_vertically_on_load(0);
+  stbi_set_flip_vertically_on_load(options.flip_y ? 1 : 0);
   stbi_uc* decoded = stbi_load(path.string().c_str(), &width, &height, &components, 4);
   if (decoded == nullptr || width <= 0 || height <= 0) {
     if (lowercaseExtension(path) == ".exr") {
@@ -307,6 +309,41 @@ std::optional<Rgba8Image> loadRgba8Image(const std::filesystem::path& path) {
     } else {
       spdlog::error("Image load failed: {}", path.string());
     }
+    if (decoded != nullptr) {
+      stbi_image_free(decoded);
+    }
+    return std::nullopt;
+  }
+
+  Rgba8Image image{};
+  image.width = width;
+  image.height = height;
+  const std::size_t byte_count =
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
+  image.pixels.assign(decoded, decoded + byte_count);
+  stbi_image_free(decoded);
+  return image;
+}
+
+std::optional<Rgba8Image> loadRgba8ImageFromMemory(const std::uint8_t* data,
+                                                   std::size_t size,
+                                                   const Rgba8ImageLoadOptions& options) {
+  if (data == nullptr || size == 0u ||
+      size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return std::nullopt;
+  }
+
+  int width = 0;
+  int height = 0;
+  int components = 0;
+  stbi_set_flip_vertically_on_load(options.flip_y ? 1 : 0);
+  stbi_uc* decoded = stbi_load_from_memory(data,
+                                           static_cast<int>(size),
+                                           &width,
+                                           &height,
+                                           &components,
+                                           4);
+  if (decoded == nullptr || width <= 0 || height <= 0) {
     if (decoded != nullptr) {
       stbi_image_free(decoded);
     }

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "examples/rendering/damaged_helmet",
+      "path": "../../diligent_gltf_viewer/models/DamagedHelmet/DamagedHelmet.gltf",
+      "import_lights": false
+    }
+  ]
+}

@@ -36,7 +36,6 @@ public:
                                                            const glm::vec3& position,
                                                            const karma::physics::PhysicsMaterial& material) override;
     std::unique_ptr<PhysicsCharacterControllerBackend> createCharacterController(const glm::vec3& size) override;
-    std::unique_ptr<PhysicsStaticBodyBackend> createStaticMesh(const std::string& meshPath) override;
     bool raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const override;
     bool raycastDetailed(const glm::vec3& from,
                          const glm::vec3& to,

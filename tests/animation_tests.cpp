@@ -12,10 +12,10 @@
 #include "karma/world/components/deformable_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
-#include "karma/content/importers/gltf_scene_import.h"
 #include "karma/world/scene/scene.h"
 #include "karma/world/scene/transform_hierarchy.h"
 #include "../src/content/importers/gltf_scene_animation_import.h"
+#include "../src/content/importers/gltf_scene_import_internal.h"
 #include "../src/content/importers/gltf_scene_mesh_import.h"
 
 #include <algorithm>

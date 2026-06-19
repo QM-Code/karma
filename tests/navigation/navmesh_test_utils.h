@@ -19,14 +19,12 @@
 #include "karma/world/components/character_controller.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/ecs/world.h"
-#include "karma/content/importers/mesh_import.h"
 #include "karma/simulation/navigation/nav_geometry.h"
 #include "karma/simulation/navigation/nav_crowd.h"
 #include "karma/simulation/navigation/nav_mesh.h"
 #include "karma/simulation/navigation/nav_query.h"
 #include "karma/simulation/navigation/nav_tile_cache.h"
 #include "karma/simulation/navigation/navigation_system.h"
-#include "karma/content/importers/gltf_scene_import.h"
 #include "karma/content/navigation/nav_tile_cache.h"
 
 #ifdef NDEBUG

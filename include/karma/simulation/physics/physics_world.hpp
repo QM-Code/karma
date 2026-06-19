@@ -5,7 +5,6 @@
 #include "karma/simulation/physics/character_controller.hpp"
 #include "karma/simulation/physics/rigid_body.hpp"
 #include "karma/simulation/physics/soft_body.hpp"
-#include "karma/simulation/physics/static_body.hpp"
 #include "karma/simulation/physics/vehicle.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -55,9 +54,6 @@ public:
 
     /// Creates a character-controller body with an explicit size.
     CharacterController createCharacterController(const glm::vec3& size);
-
-    /// Creates static mesh collision geometry.
-    StaticBody createStaticMesh(const std::string& meshPath);
 
     /// Performs a simple raycast.
     bool raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const;

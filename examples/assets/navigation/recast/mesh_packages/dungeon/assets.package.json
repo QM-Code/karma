@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "mesh",
+      "key": "examples/navigation/recast/dungeon",
+      "path": "../../meshes/dungeon.obj"
+    }
+  ]
+}

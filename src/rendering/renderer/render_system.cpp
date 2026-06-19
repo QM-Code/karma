@@ -5,11 +5,14 @@
 #include <cstring>
 #include <filesystem>
 #include <optional>
+#include <sstream>
+#include <type_traits>
 #include <unordered_set>
 #include <variant>
 #include <vector>
 #include <spdlog/spdlog.h>
 
+#include "karma/content/assets/asset_package.h"
 #include "karma/core/time.h"
 #include "render_system/debug_draw.h"
 #include "render_system/extractors.h"
@@ -70,6 +73,104 @@ renderer::PostProcessSettings resolvePostProcessSettings(const content::AssetReg
     return assets->resolvePostProcessProfile(key);
   }
   return {};
+}
+
+template <typename T>
+void appendScalar(std::ostringstream& stream, std::string_view name, const T& value) {
+  stream << name << '=' << value << ';';
+}
+
+void appendColor(std::ostringstream& stream, std::string_view name, const math::Color& value) {
+  stream << name << '=' << value.r << ',' << value.g << ',' << value.b << ',' << value.a << ';';
+}
+
+void appendMaterialParameter(std::ostringstream& stream,
+                             const renderer::MaterialParameterValue& value) {
+  std::visit(
+      [&](const auto& typed) {
+        using Value = std::decay_t<decltype(typed)>;
+        if constexpr (std::is_same_v<Value, bool>) {
+          stream << (typed ? "true" : "false");
+        } else if constexpr (std::is_same_v<Value, renderer::Color>) {
+          stream << typed.r << ',' << typed.g << ',' << typed.b << ',' << typed.a;
+        } else if constexpr (std::is_same_v<Value, glm::vec2>) {
+          stream << typed.x << ',' << typed.y;
+        } else if constexpr (std::is_same_v<Value, glm::vec3>) {
+          stream << typed.x << ',' << typed.y << ',' << typed.z;
+        } else if constexpr (std::is_same_v<Value, glm::vec4>) {
+          stream << typed.x << ',' << typed.y << ',' << typed.z << ',' << typed.w;
+        } else {
+          stream << typed;
+        }
+      },
+      value);
+}
+
+std::string materialFingerprint(const renderer::ResolvedMaterialDesc& resolved) {
+  std::ostringstream stream;
+  stream << "pipeline=" << resolved.pipeline.name << ';'
+         << "vs=" << resolved.pipeline.vertex_shader_path.generic_string() << ';'
+         << "ps=" << resolved.pipeline.fragment_shader_path.generic_string() << ';'
+         << "ve=" << resolved.pipeline.vertex_entry_point << ';'
+         << "pe=" << resolved.pipeline.fragment_entry_point << ';';
+  std::vector<std::string> defines = resolved.pipeline.defines;
+  std::sort(defines.begin(), defines.end());
+  for (const std::string& define : defines) {
+    stream << "define=" << define << ';';
+  }
+
+  const renderer::MaterialDesc& material = resolved.surface;
+  appendColor(stream, "base_color", material.base_color);
+  appendColor(stream, "emissive_color", material.emissive_color);
+  appendScalar(stream, "metallic", material.metallic);
+  appendScalar(stream, "roughness", material.roughness);
+  appendScalar(stream, "normal_scale", material.normal_scale);
+  appendScalar(stream, "occlusion_strength", material.occlusion_strength);
+  appendScalar(stream, "emissive_strength", material.emissive_strength);
+  appendScalar(stream, "clearcoat", material.clearcoat);
+  appendScalar(stream, "clearcoat_roughness", material.clearcoat_roughness);
+  appendColor(stream, "sheen_color", material.sheen_color);
+  appendScalar(stream, "sheen_roughness", material.sheen_roughness);
+  appendScalar(stream, "anisotropy", material.anisotropy);
+  appendScalar(stream, "transmission", material.transmission);
+  appendScalar(stream, "ior", material.ior);
+  appendScalar(stream, "thickness", material.thickness);
+  appendScalar(stream, "attenuation_distance", material.attenuation_distance);
+  appendColor(stream, "attenuation_color", material.attenuation_color);
+  appendScalar(stream, "analytic_sphere_normals", material.analytic_sphere_normals);
+  appendScalar(stream, "unlit", material.unlit);
+  appendScalar(stream, "transparent", material.transparent);
+  appendScalar(stream, "blend_mode", static_cast<uint32_t>(material.blend_mode));
+  appendScalar(stream, "depth_test", material.depth_test);
+  appendScalar(stream, "depth_write", material.depth_write);
+  appendScalar(stream, "wireframe", material.wireframe);
+  appendScalar(stream, "double_sided", material.double_sided);
+
+  std::vector<std::string> param_keys;
+  param_keys.reserve(resolved.params.size());
+  for (const auto& [key, value] : resolved.params) {
+    (void)value;
+    param_keys.push_back(key);
+  }
+  std::sort(param_keys.begin(), param_keys.end());
+  for (const std::string& key : param_keys) {
+    stream << "param:" << key << '=';
+    appendMaterialParameter(stream, resolved.params.at(key));
+    stream << ';';
+  }
+
+  std::vector<std::string> texture_keys;
+  texture_keys.reserve(resolved.textures.size());
+  for (const auto& [alias, texture_key] : resolved.textures) {
+    texture_keys.push_back(alias + "=" + texture_key);
+  }
+  std::sort(texture_keys.begin(), texture_keys.end());
+  for (const std::string& texture : texture_keys) {
+    stream << "texture:" << texture << ';';
+  }
+  stream << "asset=" << resolved.material_asset_path.generic_string()
+         << '#' << resolved.material_asset_index << ';';
+  return stream.str();
 }
 
 }
@@ -252,23 +353,30 @@ renderer::TextureId RenderSystem::acquireSharedTexture(const std::string& textur
 
   const content::TextureAsset* texture_asset = assets_->findTextureAsset(texture_key);
   if (texture_asset == nullptr ||
-      texture_asset->desc.format != renderer::TextureFormat::RGBA8 ||
       texture_asset->desc.width <= 0 ||
-      texture_asset->desc.height <= 0 ||
-      texture_asset->bytes.size() != static_cast<std::size_t>(texture_asset->desc.width) *
-                                       static_cast<std::size_t>(texture_asset->desc.height) * 4u) {
+      texture_asset->desc.height <= 0) {
+    return renderer::kInvalidTexture;
+  }
+
+  const content::TextureRuntimeCapabilities capabilities{
+      .bc7_unorm = device_.supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM),
+      .bc7_srgb = device_.supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM_SRGB),
+  };
+  auto prepared = content::prepareTextureUpload(*texture_asset, capabilities);
+  if (!prepared.has_value()) {
     return renderer::kInvalidTexture;
   }
 
   SharedTextureResource shared{};
-  shared.texture = device_.createTexture(texture_asset->desc);
+  shared.texture = device_.createTexture(prepared->desc);
   if (shared.texture == renderer::kInvalidTexture) {
     return renderer::kInvalidTexture;
   }
-  device_.updateTextureRGBA8(shared.texture,
-                             texture_asset->desc.width,
-                             texture_asset->desc.height,
-                             texture_asset->bytes.data());
+  const bool uploaded = device_.uploadTexture(shared.texture, prepared->upload);
+  if (!uploaded) {
+    device_.destroyTexture(shared.texture);
+    return renderer::kInvalidTexture;
+  }
   shared.ref_count = 1u;
   shared_it = shared_textures_.emplace(texture_key, std::move(shared)).first;
   return shared_it->second.texture;
@@ -300,20 +408,38 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
 
   const bool diag_enabled = renderSystemDiagEnabled();
   const auto cache_start = core::SteadyClock::now();
-  auto shared_it = shared_materials_.find(material_key);
-  if (shared_it == shared_materials_.end()) {
-    std::optional<renderer::ResolvedMaterialDesc> resolved;
-    if (assets_ != nullptr) {
-      resolved = assets_->resolveMaterial(material_key);
-    }
-    if (!resolved.has_value()) {
-      if (!warned_missing_material_keys_.contains(material_key)) {
-        spdlog::warn("Karma: material key '{}' was not registered; using mesh slot default",
-                     material_key);
-        warned_missing_material_keys_.emplace(material_key, true);
+  auto alias_it = shared_material_aliases_.find(material_key);
+  if (alias_it != shared_material_aliases_.end()) {
+    auto shared_it = shared_materials_.find(alias_it->second.fingerprint);
+    if (shared_it != shared_materials_.end()) {
+      alias_it->second.ref_count += 1u;
+      shared_it->second.ref_count += 1u;
+      if (diag_enabled) {
+        spdlog::info("RenderSystem material cache hit material='{}' took {:.2f} ms",
+                     material_key,
+                     core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
       }
-      return renderer::kInvalidMaterial;
+      return shared_it->second.material;
     }
+    shared_material_aliases_.erase(alias_it);
+  }
+
+  std::optional<renderer::ResolvedMaterialDesc> resolved;
+  if (assets_ != nullptr) {
+    resolved = assets_->resolveMaterial(material_key);
+  }
+  if (!resolved.has_value()) {
+    if (!warned_missing_material_keys_.contains(material_key)) {
+      spdlog::warn("Karma: material key '{}' was not registered; using mesh slot default",
+                   material_key);
+      warned_missing_material_keys_.emplace(material_key, true);
+    }
+    return renderer::kInvalidMaterial;
+  }
+
+  const std::string fingerprint = materialFingerprint(*resolved);
+  auto shared_it = shared_materials_.find(fingerprint);
+  if (shared_it == shared_materials_.end()) {
 
     std::vector<std::string> acquired_texture_keys;
     acquired_texture_keys.reserve(resolved->textures.size());
@@ -341,14 +467,14 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
     }
     shared.ref_count = 1;
     shared.texture_asset_keys = std::move(acquired_texture_keys);
-    shared_it = shared_materials_.emplace(material_key, std::move(shared)).first;
+    shared_it = shared_materials_.emplace(fingerprint, std::move(shared)).first;
     if (diag_enabled) {
       spdlog::info("RenderSystem material cache miss material='{}' took {:.2f} ms",
                    material_key,
                    core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
     }
   } else {
-    shared_it->second.ref_count += 1;
+    shared_it->second.ref_count += 1u;
     if (diag_enabled) {
       spdlog::info("RenderSystem material cache hit material='{}' took {:.2f} ms",
                    material_key,
@@ -356,6 +482,10 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
     }
   }
 
+  shared_material_aliases_[material_key] = SharedMaterialAlias{
+      .fingerprint = fingerprint,
+      .ref_count = 1u,
+  };
   return shared_it->second.material;
 }
 
@@ -364,7 +494,19 @@ void RenderSystem::releaseSharedMaterial(const std::string& material_key) {
     return;
   }
 
-  auto shared_it = shared_materials_.find(material_key);
+  auto alias_it = shared_material_aliases_.find(material_key);
+  if (alias_it == shared_material_aliases_.end()) {
+    return;
+  }
+  const std::string fingerprint = alias_it->second.fingerprint;
+  if (alias_it->second.ref_count > 0u) {
+    alias_it->second.ref_count -= 1u;
+  }
+  if (alias_it->second.ref_count == 0u) {
+    shared_material_aliases_.erase(alias_it);
+  }
+
+  auto shared_it = shared_materials_.find(fingerprint);
   if (shared_it == shared_materials_.end()) {
     return;
   }
@@ -380,6 +522,87 @@ void RenderSystem::releaseSharedMaterial(const std::string& material_key) {
     }
     shared_materials_.erase(shared_it);
   }
+}
+
+RenderPrewarmHandle RenderSystem::prewarmAssets(
+    const std::vector<std::string>& mesh_keys,
+    const std::vector<std::string>& material_keys,
+    const std::vector<std::string>& texture_keys) {
+  PrewarmRecord record{};
+  record.mesh_asset_keys.reserve(mesh_keys.size());
+  record.material_keys.reserve(material_keys.size());
+  record.texture_keys.reserve(texture_keys.size());
+
+  for (const std::string& mesh_key : mesh_keys) {
+    RenderRecord mesh_record{};
+    acquireSharedMesh(mesh_key, mesh_record);
+    if (mesh_record.mesh != renderer::kInvalidMesh) {
+      record.mesh_asset_keys.push_back(mesh_key);
+    }
+  }
+
+  for (const std::string& material_key : material_keys) {
+    if (acquireSharedMaterial(material_key) != renderer::kInvalidMaterial) {
+      record.material_keys.push_back(material_key);
+    }
+  }
+
+  for (const std::string& texture_key : texture_keys) {
+    if (acquireSharedTexture(texture_key) != renderer::kInvalidTexture) {
+      record.texture_keys.push_back(texture_key);
+    }
+  }
+
+  if (record.mesh_asset_keys.empty() &&
+      record.material_keys.empty() &&
+      record.texture_keys.empty()) {
+    return {};
+  }
+
+  const RenderPrewarmHandle handle{.id = next_prewarm_id_++};
+  prewarm_records_.emplace(handle.id, std::move(record));
+  return handle;
+}
+
+RenderPrewarmHandle RenderSystem::prewarmPackage(
+    const karma::content::AssetPackageHandle& package) {
+  std::vector<std::string> mesh_keys;
+  std::vector<std::string> material_keys;
+  std::vector<std::string> texture_keys;
+  mesh_keys.reserve(package.assets.size());
+  material_keys.reserve(package.assets.size());
+  texture_keys.reserve(package.assets.size());
+  for (const auto& asset : package.assets) {
+    if (asset.type == "mesh") {
+      mesh_keys.push_back(asset.key);
+    } else if (asset.type == "material") {
+      material_keys.push_back(asset.key);
+    } else if (asset.type == "texture" || asset.type == "texture_rgba8") {
+      texture_keys.push_back(asset.key);
+    }
+  }
+  return prewarmAssets(mesh_keys, material_keys, texture_keys);
+}
+
+bool RenderSystem::releasePrewarm(RenderPrewarmHandle handle) {
+  if (!handle.valid()) {
+    return false;
+  }
+  auto it = prewarm_records_.find(handle.id);
+  if (it == prewarm_records_.end()) {
+    return false;
+  }
+  for (const std::string& material_key : it->second.material_keys) {
+    releaseSharedMaterial(material_key);
+  }
+  for (const std::string& texture_key : it->second.texture_keys) {
+    releaseSharedTexture(texture_key);
+  }
+  for (const std::string& mesh_key : it->second.mesh_asset_keys) {
+    releaseSharedMesh(mesh_key);
+  }
+  prewarm_records_.erase(it);
+  return true;
 }
 
 void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/,

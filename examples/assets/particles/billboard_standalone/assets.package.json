@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "particle_effect",
+      "key": "spark_fountain",
+      "path": "../spark_fountain.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "glow_halo",
+      "path": "../glow_halo.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "smoke_plume",
+      "path": "../smoke_plume.kpeffect"
+    }
+  ]
+}

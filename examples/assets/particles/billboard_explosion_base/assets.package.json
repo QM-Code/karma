@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/flash",
+      "path": "../../prefabs/explosion/particles/explosion_flash.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/fireball",
+      "path": "../../prefabs/explosion/particles/explosion_fireball.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/smoke",
+      "path": "../../prefabs/explosion/particles/explosion_smoke.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/heat",
+      "path": "../../prefabs/explosion/particles/explosion_heat.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/shock_ring",
+      "path": "../../prefabs/explosion/particles/explosion_shock_ring.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/dust_ring",
+      "path": "../../prefabs/explosion/particles/explosion_dust_ring.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/scorch",
+      "path": "../../prefabs/explosion/particles/explosion_scorch.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/debris",
+      "path": "../../prefabs/explosion/particles/explosion_debris.kpeffect"
+    },
+    {
+      "type": "particle_effect",
+      "key": "prefabs/explosion/embers",
+      "path": "../../prefabs/explosion/particles/explosion_embers.kpeffect"
+    }
+  ]
+}

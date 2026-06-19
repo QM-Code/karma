@@ -84,7 +84,6 @@
 #include "karma/content/prefabs/component_serializer_registry.h"
 #include "karma/content/assets/asset_package.h"
 #include "karma/content/assets/asset_registry.h"
-#include "karma/content/importers/mesh_import.h"
 #include "karma/content/materials/material_loader.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/rendering/renderer/camera_picking.h"

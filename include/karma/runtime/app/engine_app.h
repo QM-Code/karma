@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "karma/core/math/types.h"
+#include "karma/content/assets/asset_package.h"
 #include "karma/content/assets/asset_registry.h"
 #include "karma/runtime/app/game_interface.h"
 #include "karma/runtime/app/runtime_module.h"
@@ -47,6 +48,9 @@ struct EngineConfig {
   struct LoadingSplashConfig {
     bool enabled = true;
     int target_fps = 30;
+    /// Delay the first splash frame so fast warm starts do not flash it.
+    /// Set to 0 to show the splash immediately.
+    int show_after_ms = 750;
     std::filesystem::path image_path{"docs/logo.png"};
     math::Color background{0.0f, 0.0f, 0.0f, 1.0f};
     math::Color accent{0.24f, 0.56f, 1.0f, 1.0f};
@@ -92,6 +96,10 @@ struct EngineConfig {
   float lighting_exposure = 1.0f;
   /// Startup default post-process profile used by cameras with empty keys.
   renderer::PostProcessSettings post_process{};
+  /// Asset packages imported before `GameInterface::onStart`.
+  std::vector<std::filesystem::path> startup_asset_packages;
+  /// Prewarm startup packages after initial content and systems are committed.
+  bool prewarm_startup_packages = true;
 };
 
 /// \ingroup karma_runtime
@@ -137,7 +145,10 @@ class EngineApp {
   bool ensureLoadingSplashTexture();
   void releaseLoadingSplashTexture();
   bool renderLoadingSplash(float progress);
-  bool presentInitialLoadingSplash(float progress);
+  bool shouldRenderLoadingSplash(core::SteadyClock::time_point startup_start) const;
+  bool renderLoadingSplashIfDue(float progress, core::SteadyClock::time_point startup_start);
+  bool presentInitialLoadingSplash(float progress,
+                                   core::SteadyClock::time_point startup_start);
   void warmUpRenderer();
   RuntimeModuleContext makeRuntimeModuleContext();
 #if defined(KARMA_DEBUG_UI)
@@ -159,6 +170,8 @@ class EngineApp {
   ecs::World world_;
   scene::Scene scene_;
   content::AssetRegistry assets_;
+  std::vector<content::AssetPackageHandle> startup_asset_package_handles_;
+  renderer::RenderPrewarmHandle startup_prewarm_handle_{};
   renderer::TextureId loading_splash_texture_ = renderer::kInvalidTexture;
   int loading_splash_texture_width_ = 0;
   int loading_splash_texture_height_ = 0;

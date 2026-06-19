@@ -472,21 +472,29 @@ renderer::TextureId ParticleSystem::resolveTextureAsset(const std::string& textu
 
   const content::TextureAsset* texture = assets_->findTextureAsset(texture_key);
   if (texture == nullptr ||
-      texture->desc.format != renderer::TextureFormat::RGBA8 ||
       texture->desc.width <= 0 ||
-      texture->desc.height <= 0 ||
-      texture->bytes.size() != static_cast<std::size_t>(texture->desc.width) *
-                                   static_cast<std::size_t>(texture->desc.height) * 4u) {
+      texture->desc.height <= 0) {
     return renderer::kInvalidTexture;
   }
 
-  renderer::TextureId id = device_->createTexture(texture->desc);
+  const content::TextureRuntimeCapabilities capabilities{
+      .bc7_unorm = device_->supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM),
+      .bc7_srgb = device_->supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM_SRGB),
+  };
+  auto prepared = content::prepareTextureUpload(*texture, capabilities);
+  if (!prepared.has_value()) {
+    return renderer::kInvalidTexture;
+  }
+
+  renderer::TextureId id = device_->createTexture(prepared->desc);
   if (id != renderer::kInvalidTexture) {
-    device_->updateTextureRGBA8(id,
-                                texture->desc.width,
-                                texture->desc.height,
-                                texture->bytes.data());
-    texture_asset_cache_[texture_key] = id;
+    const bool uploaded = device_->uploadTexture(id, prepared->upload);
+    if (uploaded) {
+      texture_asset_cache_[texture_key] = id;
+    } else {
+      device_->destroyTexture(id);
+      id = renderer::kInvalidTexture;
+    }
   }
   return id;
 }

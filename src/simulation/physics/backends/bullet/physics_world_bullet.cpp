@@ -1,7 +1,6 @@
 #include "karma/simulation/physics/backends/bullet/physics_world_bullet.hpp"
 #include "karma/simulation/physics/backends/bullet/character_controller_bullet.hpp"
 #include "karma/simulation/physics/backends/bullet/rigid_body_bullet.hpp"
-#include "karma/simulation/physics/backends/bullet/static_body_bullet.hpp"
 #include <btBulletDynamicsCommon.h>
 #include <BulletCollision/CollisionDispatch/btGhostObject.h>
 #include <cmath>
@@ -182,10 +181,6 @@ std::unique_ptr<PhysicsRigidBodyBackend> PhysicsWorldBullet::createBoxBody(const
 std::unique_ptr<PhysicsCharacterControllerBackend> PhysicsWorldBullet::createCharacterController(const glm::vec3& size) {
     const glm::vec3 halfExtents = size * 0.5f;
     return std::make_unique<PhysicsCharacterControllerBullet>(this, halfExtents, glm::vec3(0.0f, 2.0f, 0.0f));
-}
-
-std::unique_ptr<PhysicsStaticBodyBackend> PhysicsWorldBullet::createStaticMesh(const std::string& meshPath) {
-    return PhysicsStaticBodyBullet::fromMesh(this, meshPath);
 }
 
 bool PhysicsWorldBullet::raycast(const glm::vec3& from,

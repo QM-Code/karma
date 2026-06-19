@@ -5,6 +5,7 @@
 #include "karma/runtime/input/input_system.h"
 #include "karma/simulation/physics/physics_world.hpp"
 #include "karma/rendering/renderer/device.h"
+#include "karma/rendering/renderer/render_system.h"
 #include "karma/world/scene/scene.h"
 #include "karma/world/systems/system_graph.h"
 
@@ -44,6 +45,8 @@ class GameInterface {
   physics::World* physics = nullptr;
   /// Borrowed graphics device. Null in headless builds.
   renderer::GraphicsDevice* graphics = nullptr;
+  /// Borrowed render system. Null in headless builds.
+  renderer::RenderSystem* renderer = nullptr;
   /// Borrowed normalized runtime asset registry.
   content::AssetRegistry* assets = nullptr;
   /// Borrowed optional system graph.
@@ -53,6 +56,7 @@ class GameInterface {
   friend class EngineApp;
   void bindContext(ecs::World& world, scene::Scene& scene, input::InputSystem& input,
                    physics::World& physics, renderer::GraphicsDevice* graphics,
+                   renderer::RenderSystem* renderer,
                    content::AssetRegistry& assets,
                    systems::SystemGraph& systems) {
     this->world = &world;
@@ -60,6 +64,7 @@ class GameInterface {
     this->input = &input;
     this->physics = &physics;
     this->graphics = graphics;
+    this->renderer = renderer;
     this->assets = &assets;
     this->systems = &systems;
   }

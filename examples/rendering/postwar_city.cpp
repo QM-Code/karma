@@ -16,6 +16,8 @@ namespace karma::demo {
 
 namespace {
 
+constexpr const char* kPostwarCitySceneKey = "examples/rendering/postwar_city";
+
 struct SceneBounds {
   glm::vec3 min{0.0f};
   glm::vec3 max{0.0f};
@@ -36,26 +38,6 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   }
   bounds.min = glm::min(bounds.min, point);
   bounds.max = glm::max(bounds.max, point);
-}
-
-SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
-  SceneBounds geometry_bounds{};
-  SceneBounds fallback_bounds{};
-
-  for (const auto& node : prefab.nodes) {
-    const glm::vec3 world_pos = math::toGlm(node.world_position);
-    expandBounds(fallback_bounds, world_pos);
-
-    const glm::vec3 world_scale = math::toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(math::toGlm(node.world_rotation));
-    for (const auto& primitive : node.primitives) {
-      for (const glm::vec3& vertex : primitive.mesh.vertices) {
-        expandBounds(geometry_bounds, world_pos + rotation * (vertex * world_scale));
-      }
-    }
-  }
-
-  return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
 }
 
 LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
@@ -82,41 +64,37 @@ class PostwarCityExample final : public app::GameInterface {
     input->bindKey("cam_up", platform::Key::E);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    const std::filesystem::path city_path =
-        resolveExampleAssetPath("postwar_city_-_exterior_scene.glb");
-    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
-        city_path,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
-    if (!prefab.valid()) {
-      spdlog::error("Failed to load postwar city GLB from {}", city_path.string());
-      spawnLighting(SceneBounds{});
-      spawnCamera(SceneBounds{});
-      spawnEnvironment();
-      return;
+    SceneBounds bounds{};
+    bool spawned_city = false;
+
+    if (const content::GltfSceneAsset* cached_scene =
+            assets->findGltfSceneAsset(kPostwarCitySceneKey)) {
+      const helpers::GltfSceneAssetBounds asset_bounds =
+          helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
+      bounds = SceneBounds{.min = asset_bounds.min,
+                           .max = asset_bounds.max,
+                           .valid = asset_bounds.valid};
+      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+          *world,
+          *scene,
+          *assets,
+          *cached_scene,
+          scene::GltfSceneInstantiateOptions{
+              .create_synthetic_root = false,
+              .autoplay_animations = false,
+          });
+      spawned_city = imported.valid();
+      if (spawned_city) {
+        logSceneSummary(*cached_scene, bounds);
+      } else {
+        spdlog::error("Failed to instantiate cached postwar city scene '{}'",
+                      kPostwarCitySceneKey);
+      }
     }
 
-    for (const std::string& diagnostic : prefab.diagnostics) {
-      spdlog::warn("Postwar city import diagnostic: {}", diagnostic);
+    if (!spawned_city) {
+      spdlog::error("Postwar city scene was not available from the asset package");
     }
-
-    const SceneBounds bounds = computePrefabBounds(prefab);
-    const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
-        *world,
-        *scene,
-        *assets,
-        prefab,
-        scene::GltfSceneInstantiateOptions{
-            .create_synthetic_root = false,
-            .autoplay_animations = false,
-        });
-    if (!imported.valid()) {
-      spdlog::error("Failed to instantiate postwar city GLB from {}", city_path.string());
-    }
-
-    logSceneSummary(city_path, prefab, bounds);
     spawnLighting(bounds);
     spawnCamera(bounds);
     spawnEnvironment();
@@ -190,39 +168,33 @@ class PostwarCityExample final : public app::GameInterface {
   void onShutdown() override {}
 
  private:
-  void logSceneSummary(const std::filesystem::path& city_path,
-                       const scene::GltfScenePrefab& prefab,
+  void logSceneSummary(const content::GltfSceneAsset& scene_asset,
                        const SceneBounds& bounds) const {
-    std::size_t primitive_count = 0u;
-    std::size_t vertex_count = 0u;
-    std::size_t triangle_count = 0u;
-    for (const auto& node : prefab.nodes) {
-      primitive_count += node.primitives.size();
-      for (const auto& primitive : node.primitives) {
-        vertex_count += primitive.mesh.vertices.size();
-        triangle_count += primitive.mesh.indices.size() / 3u;
-      }
-    }
+    const helpers::GltfSceneAssetStats stats =
+        helpers::summarizeGltfSceneAsset(*assets, scene_asset);
+    const std::filesystem::path city_path = scene_asset.source_path.empty()
+                                               ? resolveExampleAssetPath("postwar_city_-_exterior_scene.glb")
+                                               : scene_asset.source_path;
 
     if (bounds.valid) {
       const glm::vec3 size = bounds.max - bounds.min;
       spdlog::info(
           "Postwar city loaded '{}': nodes={}, primitives={}, vertices={}, triangles={}, bounds=({:.2f}, {:.2f}, {:.2f})",
           city_path.string(),
-          prefab.nodes.size(),
-          primitive_count,
-          vertex_count,
-          triangle_count,
+          stats.node_count,
+          stats.primitive_count,
+          stats.vertex_count,
+          stats.triangle_count,
           size.x,
           size.y,
           size.z);
     } else {
       spdlog::info("Postwar city loaded '{}': nodes={}, primitives={}, vertices={}, triangles={}",
                    city_path.string(),
-                   prefab.nodes.size(),
-                   primitive_count,
-                   vertex_count,
-                   triangle_count);
+                   stats.node_count,
+                   stats.primitive_count,
+                   stats.vertex_count,
+                   stats.triangle_count);
     }
   }
 
@@ -320,6 +292,8 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.65f;
   config.lighting_exposure = 1.05f;
+  config.startup_asset_packages.push_back(
+      karma::demo::resolveExampleAssetPath("rendering/postwar_city"));
 
   engine.start(game, config);
   while (engine.isRunning()) {

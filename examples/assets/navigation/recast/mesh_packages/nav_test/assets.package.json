@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "mesh",
+      "key": "examples/navigation/recast/nav_test",
+      "path": "../../meshes/nav_test.obj"
+    }
+  ]
+}

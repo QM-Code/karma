@@ -24,6 +24,8 @@ constexpr float kCasterScale = 0.65f;
 constexpr float kLightMarkerScale = 0.2f;
 constexpr int kMaxSafeLightCount = 16;
 constexpr float kLightAnimationSpeedScale = 2.0f;
+constexpr const char* kLightStressWorldSceneKey = "examples/rendering/light_stress/world";
+constexpr const char* kLightStressMarkerMeshKey = "examples/rendering/light_stress/shot";
 
 math::Color hsvToColor(float hue_degrees, float saturation, float value) {
   const float hue = std::fmod(std::max(hue_degrees, 0.0f), 360.0f) / 60.0f;
@@ -85,7 +87,9 @@ class LocalLightProbeExample final : public app::GameInterface {
     input->bindKey("cam_fast", platform::Key::LeftShift);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    marker_mesh_ = importExampleMeshAsset(assets, "shot.glb");
+    marker_mesh_ = assets->findMeshAsset(kLightStressMarkerMeshKey) != nullptr
+                       ? std::string(kLightStressMarkerMeshKey)
+                       : importExampleMeshAsset(assets, "shot.glb");
     environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
     registerTintMaterial(*assets, "light_receiver", math::Color{0.82f, 0.82f, 0.82f, 1.0f});
     registerTintMaterial(*assets, "shadow_caster", math::Color{0.22f, 0.24f, 0.28f, 1.0f});
@@ -219,35 +223,30 @@ class LocalLightProbeExample final : public app::GameInterface {
   }
 
   void spawnBackdrop() {
-    const std::filesystem::path world_path = resolveExampleAssetPath("world.glb");
     bool spawned_world = false;
-    const scene::GltfScenePrefab world_prefab = scene::loadGltfScenePrefab(
-        world_path,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
-    if (world_prefab.valid()) {
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
+
+    if (const content::GltfSceneAsset* cached_world =
+            assets->findGltfSceneAsset(kLightStressWorldSceneKey)) {
+      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
-          world_prefab,
+          *cached_world,
           scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = true,
-              .asset_key_prefix = "examples/light_stress/world",
+              .autoplay_animations = false,
           });
       if (imported.valid()) {
         world->setName(imported.root_entity, "World");
         spawned_world = true;
       } else {
-        spdlog::error("Failed to instantiate textured world scene from {}", world_path.string());
+        spdlog::error("Failed to instantiate cached textured world scene '{}'",
+                      kLightStressWorldSceneKey);
       }
-    } else {
-      spdlog::error("Failed to load textured world scene from {}", world_path.string());
     }
 
     if (!spawned_world) {
+      spdlog::error("Light stress world scene was not available from the asset package");
       const ecs::Entity world_entity = world->createEntity();
       world->setName(world_entity, "World");
       world->add(world_entity, components::TransformComponent{});
@@ -604,6 +603,8 @@ int main(int argc, char** argv) {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.85f;
   config.lighting_exposure = 1.1f;
+  config.startup_asset_packages.push_back(
+      karma::demo::resolveExampleAssetPath("rendering/light_stress"));
 
   if (unsafe_stress_mode) {
     config.forward_plus_tile_size = 8;

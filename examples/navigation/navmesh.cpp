@@ -3,15 +3,11 @@
 #include "karma/karma.h"
 
 #include <cmath>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include <spdlog/spdlog.h>
-
-#include "karma/content/importers/mesh_import.h"
 
 namespace karma::demo {
 namespace {
@@ -21,19 +17,6 @@ constexpr float kTargetMarkerY = 0.45f;
 
 math::Vec3 toMarkerVisualPoint(const math::Vec3& nav_point) {
   return {nav_point.x, kTargetMarkerY, nav_point.z};
-}
-
-geometry::MeshData combineMeshes(const std::vector<geometry::MeshData>& meshes) {
-  geometry::MeshData combined;
-  for (const geometry::MeshData& mesh : meshes) {
-    const uint32_t base = static_cast<uint32_t>(combined.vertices.size());
-    combined.vertices.insert(combined.vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
-    combined.indices.reserve(combined.indices.size() + mesh.indices.size());
-    for (const uint32_t index : mesh.indices) {
-      combined.indices.push_back(base + index);
-    }
-  }
-  return combined;
 }
 
 }  // namespace
@@ -97,13 +80,13 @@ class NavMeshSceneExample final : public app::GameInterface {
     const std::string tank_mesh_key = importExampleMeshAsset(assets, "tank_final.glb");
 
     world_entity_ = helpers::spawnMeshAsset(*world, "World", world_mesh_key, {});
-    const std::filesystem::path world_mesh_path = resolveExampleAssetPath("world.glb");
-    const std::vector<geometry::MeshData> world_meshes =
-        content::importMeshes(world_mesh_path);
+    std::shared_ptr<geometry::MeshData> world_nav_mesh;
+    if (const geometry::MeshData* mesh = assets->findMeshAsset(world_mesh_key)) {
+      world_nav_mesh = std::make_shared<geometry::MeshData>(*mesh);
+    }
     world->add(world_entity_, components::NavMeshSurfaceComponent{
                                 .area = navigation::kNavAreaDefault,
-                                .mesh_data =
-                                    std::make_shared<geometry::MeshData>(combineMeshes(world_meshes)),
+                                .mesh_data = std::move(world_nav_mesh),
                                 .mesh_asset_key = world_mesh_key,
                             });
 

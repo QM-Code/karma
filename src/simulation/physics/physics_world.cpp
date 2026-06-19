@@ -71,13 +71,6 @@ CharacterController World::createCharacterController(const glm::vec3& size) {
     return CharacterController(backend_->createCharacterController(size));
 }
 
-StaticBody World::createStaticMesh(const std::string& meshPath) {
-    if (!backend_) {
-        return StaticBody();
-    }
-    return StaticBody(backend_->createStaticMesh(meshPath));
-}
-
 bool World::raycast(const glm::vec3& from,
                     const glm::vec3& to,
                     glm::vec3& hitPoint,

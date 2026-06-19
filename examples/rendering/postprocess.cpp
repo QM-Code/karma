@@ -15,6 +15,7 @@ namespace karma::demo {
 namespace {
 
 constexpr const char* kPostProcessProfileKey = "diligentfx/postprocess";
+constexpr const char* kPostProcessSceneKey = "examples/rendering/damaged_helmet";
 
 glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
@@ -43,21 +44,6 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   }
   bounds.min = glm::min(bounds.min, point);
   bounds.max = glm::max(bounds.max, point);
-}
-
-SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
-  SceneBounds bounds{};
-  for (const auto& node : prefab.nodes) {
-    const glm::vec3 world_pos = toGlm(node.world_position);
-    const glm::vec3 world_scale = toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
-    for (const auto& primitive : node.primitives) {
-      for (const glm::vec3& vertex : primitive.mesh.vertices) {
-        expandBounds(bounds, world_pos + rotation * (vertex * world_scale));
-      }
-    }
-  }
-  return bounds;
 }
 
 float boundsRadius(const SceneBounds& bounds) {
@@ -91,33 +77,36 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
     input->bindMouse("orbit", platform::MouseButton::Right);
     input->bindKey("reset", platform::Key::R, input::Trigger::Pressed);
 
-    const std::filesystem::path model_path =
-        resolveExampleAssetPath("diligent_gltf_viewer/models/DamagedHelmet/DamagedHelmet.gltf");
-    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
-        model_path,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
+    SceneBounds bounds{};
+    bool spawned_model = false;
 
-    if (!prefab.valid()) {
-      spdlog::error("Failed to load postprocess demo model from {}", model_path.string());
-    } else {
-      for (const std::string& diagnostic : prefab.diagnostics) {
-        spdlog::warn("Postprocess demo import diagnostic: {}", diagnostic);
-      }
-      scene::instantiateGltfScenePrefab(
+    if (const content::GltfSceneAsset* cached_scene =
+            assets->findGltfSceneAsset(kPostProcessSceneKey)) {
+      const helpers::GltfSceneAssetBounds asset_bounds =
+          helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
+      bounds = SceneBounds{.min = asset_bounds.min,
+                           .max = asset_bounds.max,
+                           .valid = asset_bounds.valid};
+      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
-          prefab,
+          *cached_scene,
           scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = true,
           });
+      spawned_model = imported.valid();
+      if (!spawned_model) {
+        spdlog::error("Failed to instantiate cached postprocess demo model '{}'",
+                      kPostProcessSceneKey);
+      }
     }
 
-    const SceneBounds bounds = prefab.valid() ? computePrefabBounds(prefab) : SceneBounds{};
+    if (!spawned_model) {
+      spdlog::error("Postprocess demo model was not available from the asset package");
+    }
+
     const glm::vec3 center = bounds.valid ? (bounds.min + bounds.max) * 0.5f
                                           : glm::vec3(0.0f, 0.75f, 0.0f);
     const float radius = boundsRadius(bounds);
@@ -301,6 +290,8 @@ int main() {
       karma::demo::resolveExampleAssetPath("diligent_gltf_viewer/textures/papermill.ktx");
   config.environment_intensity = 1.0f;
   config.environment_draw_skybox = true;
+  config.startup_asset_packages.push_back(
+      karma::demo::resolveExampleAssetPath("rendering/damaged_helmet"));
 
   engine.start(game, config);
   while (engine.isRunning()) {

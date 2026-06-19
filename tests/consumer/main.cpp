@@ -1,5 +1,6 @@
 #include <karma/headless.h>
-#include <karma/content/importers/mesh_import.h>
+
+#include <string>
 
 int main() {
   static_assert(karma::core::VersionMajor == 0);
@@ -12,6 +13,11 @@ int main() {
     return 1;
   }
 
-  const auto meshes = karma::content::importMeshes("karma_consumer_smoke_missing.glb");
-  return meshes.empty() ? 0 : 2;
+  karma::content::AssetRegistry assets;
+  std::string diagnostic;
+  const auto package =
+      karma::content::importAssetPackage(assets,
+                                         "karma_consumer_smoke_missing",
+                                         &diagnostic);
+  return package.has_value() ? 2 : 0;
 }

@@ -1,5 +1,8 @@
 #include "navmesh_test_utils.h"
 
+#include "karma/content/assets/asset_package.h"
+#include "karma/content/assets/asset_registry.h"
+
 namespace karma::tests::navigation {
 
 void testNavigationSystemBuildsAndMovesAgent() {
@@ -292,20 +295,23 @@ void testReplacementRequestKeepsCurrentPathMoving() {
 }
 
 void testExampleWorldGlbCanBake() {
-  const std::filesystem::path world_path =
-      resolveRepoPath("examples/assets/world.glb");
-  assert(std::filesystem::exists(world_path));
+  const std::filesystem::path package_path =
+      resolveRepoPath("examples/assets/common_meshes/world");
+  assert(std::filesystem::exists(package_path / "assets.package.json"));
+  karma::content::AssetRegistry assets;
+  std::string diagnostic;
+  auto package = karma::content::importAssetPackage(assets, package_path, &diagnostic);
+  assert(package.has_value());
+  assert(diagnostic.empty());
 
   karma::ecs::World world;
   const auto world_entity = world.createEntity();
   world.add(world_entity, karma::components::TransformComponent{});
-  const std::vector<karma::geometry::MeshData> meshes =
-      karma::content::importMeshes(world_path);
-  assert(!meshes.empty());
-  constexpr const char* kWorldMeshKey = "runtime/navigation/world";
+  constexpr const char* kWorldMeshKey = "examples/mesh/world";
+  const karma::geometry::MeshData* mesh = assets.findMeshAsset(kWorldMeshKey);
+  assert(mesh != nullptr);
   world.add(world_entity, karma::components::NavMeshSurfaceComponent{
-                              .mesh_data =
-                                  std::make_shared<karma::geometry::MeshData>(combineMeshes(meshes)),
+                              .mesh_data = std::make_shared<karma::geometry::MeshData>(*mesh),
                               .mesh_asset_key = kWorldMeshKey,
                           });
 

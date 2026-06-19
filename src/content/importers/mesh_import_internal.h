@@ -7,8 +7,6 @@
 
 namespace karma::content {
 
-/// \ingroup karma_content
-/// Imports mesh geometry from a file into shared world-layer mesh data.
 std::vector<geometry::MeshData> importMeshes(const std::filesystem::path& path);
 
 }  // namespace karma::content

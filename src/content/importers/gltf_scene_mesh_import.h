@@ -5,7 +5,7 @@
 #include <unordered_map>
 
 #include "gltf_document.h"
-#include "karma/content/importers/gltf_scene_import.h"
+#include "gltf_scene_import_internal.h"
 
 namespace karma::scene {
 

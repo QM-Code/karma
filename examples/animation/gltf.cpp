@@ -23,6 +23,8 @@ namespace karma::demo {
 
 namespace {
 
+constexpr const char* kDefaultAnimationSceneKey = "examples/animation/dustbound_wayfarer";
+
 struct SceneBounds {
   glm::vec3 min{0.0f};
   glm::vec3 max{0.0f};
@@ -33,41 +35,6 @@ struct LookAngles {
   float yaw = 0.0f;
   float pitch = 0.0f;
 };
-
-void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
-  if (!bounds.valid) {
-    bounds.min = point;
-    bounds.max = point;
-    bounds.valid = true;
-    return;
-  }
-  bounds.min = glm::min(bounds.min, point);
-  bounds.max = glm::max(bounds.max, point);
-}
-
-SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
-  SceneBounds geometry_bounds{};
-  SceneBounds fallback_bounds{};
-
-  for (const auto& node : prefab.nodes) {
-    const glm::vec3 world_pos = math::toGlm(node.world_position);
-    expandBounds(fallback_bounds, world_pos);
-
-    const glm::vec3 world_scale = math::toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(math::toGlm(node.world_rotation));
-    for (const auto& primitive : node.primitives) {
-      for (const glm::vec3& vertex : primitive.mesh.vertices) {
-        if (primitive.skinned()) {
-          expandBounds(geometry_bounds, vertex);
-        } else {
-          expandBounds(geometry_bounds, world_pos + rotation * (vertex * world_scale));
-        }
-      }
-    }
-  }
-
-  return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
-}
 
 LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   const glm::vec3 direction = glm::normalize(target - eye);
@@ -126,62 +93,67 @@ int rootMotionModeIndex(components::RootMotionMode mode) {
 
 class GltfAnimationExample final : public app::GameInterface {
  public:
-  explicit GltfAnimationExample(std::filesystem::path model_path)
-      : model_path_(std::move(model_path)) {}
+  GltfAnimationExample(std::string scene_asset_key, std::string display_name)
+      : scene_asset_key_(std::move(scene_asset_key)),
+        display_name_(std::move(display_name)) {}
 
   void onStart() override {
     input->bindKey("toggle_deformation_path", platform::Key::G, input::Trigger::Pressed);
 
-    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
-        model_path_,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
-    if (!prefab.valid()) {
-      spdlog::error("Failed to load animation model from {}", model_path_.string());
+    const content::GltfSceneAsset* scene_asset =
+        assets->findGltfSceneAsset(scene_asset_key_);
+    if (scene_asset == nullptr) {
+      spdlog::error("Missing packaged animation scene '{}'", scene_asset_key_);
       spawnCamera(SceneBounds{});
       return;
     }
 
-    spdlog::info("Loaded animation model '{}': {} nodes, {} clips, {} skeletons, {} skins",
-                 model_path_.string(),
-                 prefab.nodes.size(),
-                 prefab.animations.size(),
-                 prefab.skeletons.size(),
-                 prefab.skins.size());
-    for (const auto& clip : prefab.animations) {
-      spdlog::info("Animation clip '{}': {:.3f}s, {} transform channels, {} morph tracks",
-                   clip.name,
-                   clip.duration_seconds,
-                   clip.channels.size(),
-                   clip.morph_target_tracks.size());
+    const helpers::GltfSceneAssetStats stats =
+        helpers::summarizeGltfSceneAsset(*assets, *scene_asset);
+    spdlog::info("Loaded animation scene '{}': {} nodes, {} meshes, {} triangles, {} clips, {} skeletons, {} skins",
+                 scene_asset_key_,
+                 stats.node_count,
+                 scene_asset->mesh_asset_keys.size(),
+                 stats.triangle_count,
+                 scene_asset->animation_clip_keys.size(),
+                 scene_asset->skeleton_keys.size(),
+                 scene_asset->skin_keys.size());
+    for (const std::string& clip_key : scene_asset->animation_clip_keys) {
+      if (const animation::AnimationClip* clip = assets->findAnimationClip(clip_key)) {
+        spdlog::info("Animation clip '{}': {:.3f}s, {} transform channels, {} morph tracks",
+                     clip->name,
+                     clip->duration_seconds,
+                     clip->channels.size(),
+                     clip->morph_target_tracks.size());
+      }
     }
-    for (const auto& diagnostic : prefab.diagnostics) {
-      spdlog::warn("Animation model import diagnostic: {}", diagnostic);
-    }
-    if (!prefab.skins.empty()) {
+    if (!scene_asset->skin_keys.empty()) {
+      const animation::Skin* skin = assets->findSkin(scene_asset->skin_keys.front());
       spdlog::info("Skin '{}': {} joints",
-                   prefab.skins.front().name,
-                   prefab.skins.front().joint_node_indices.size());
+                   skin != nullptr ? skin->name : scene_asset->skin_keys.front(),
+                   skin != nullptr ? skin->joint_node_indices.size() : 0u);
     }
-    root_motion_node_index_ = defaultRootMotionNodeIndex(prefab);
+    root_motion_node_index_ = defaultRootMotionNodeIndex(*scene_asset);
     root_motion_node_index_ui_ = root_motion_node_index_ == animation::kInvalidAnimationIndex
                                      ? -1
                                      : static_cast<int>(root_motion_node_index_);
 
-    bounds_ = computePrefabBounds(prefab);
-    const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
+    const helpers::GltfSceneAssetBounds asset_bounds =
+        helpers::computeGltfSceneAssetBounds(*assets, *scene_asset);
+    bounds_ = SceneBounds{.min = asset_bounds.min,
+                          .max = asset_bounds.max,
+                          .valid = asset_bounds.valid};
+    const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
         *world,
         *scene,
         *assets,
-        prefab,
+        *scene_asset,
         scene::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
             .autoplay_animations = true,
         });
     if (!imported.valid()) {
-      spdlog::error("Failed to instantiate animation model from {}", model_path_.string());
+      spdlog::error("Failed to instantiate animation scene '{}'", scene_asset_key_);
     } else {
       imported_root_ = imported.root_entity;
       imported_entities_ = imported.entities;
@@ -246,8 +218,7 @@ class GltfAnimationExample final : public app::GameInterface {
       return;
     }
 
-    const std::string asset_name = model_path_.filename().string();
-    ImGui::TextWrapped("%s", asset_name.c_str());
+    ImGui::TextWrapped("%s", display_name_.c_str());
     if (animator == nullptr) {
       ImGui::TextUnformatted("Animator unavailable");
       ImGui::End();
@@ -264,17 +235,23 @@ class GltfAnimationExample final : public app::GameInterface {
   }
 
  private:
-  static uint32_t defaultRootMotionNodeIndex(const scene::GltfScenePrefab& prefab) {
-    if (!prefab.skeletons.empty() && !prefab.skeletons.front().root_joint_indices.empty()) {
-      const uint32_t joint_index = prefab.skeletons.front().root_joint_indices.front();
-      if (joint_index < prefab.skeletons.front().joints.size()) {
-        return prefab.skeletons.front().joints[joint_index].node_index;
+  uint32_t defaultRootMotionNodeIndex(const content::GltfSceneAsset& scene_asset) const {
+    for (const std::string& skeleton_key : scene_asset.skeleton_keys) {
+      const animation::Skeleton* skeleton = assets->findSkeleton(skeleton_key);
+      if (skeleton != nullptr && !skeleton->root_joint_indices.empty()) {
+        const uint32_t joint_index = skeleton->root_joint_indices.front();
+        if (joint_index < skeleton->joints.size()) {
+          return skeleton->joints[joint_index].node_index;
+        }
       }
     }
-    if (!prefab.skins.empty() && !prefab.skins.front().joint_node_indices.empty()) {
-      return prefab.skins.front().joint_node_indices.front();
+    for (const std::string& skin_key : scene_asset.skin_keys) {
+      const animation::Skin* skin = assets->findSkin(skin_key);
+      if (skin != nullptr && !skin->joint_node_indices.empty()) {
+        return skin->joint_node_indices.front();
+      }
     }
-    return prefab.root_node;
+    return scene_asset.root_node;
   }
 
   components::AnimatorComponent* liveAnimator() {
@@ -614,7 +591,8 @@ class GltfAnimationExample final : public app::GameInterface {
                  path == components::DeformationPath::Gpu ? "GPU" : "CPU reference");
   }
 
-  std::filesystem::path model_path_;
+  std::string scene_asset_key_;
+  std::string display_name_;
   ecs::Entity imported_root_{};
   std::vector<ecs::Entity> imported_entities_;
   std::vector<std::string> clip_names_;
@@ -635,14 +613,24 @@ class GltfAnimationExample final : public app::GameInterface {
 }  // namespace karma::demo
 
 int main(int argc, char** argv) {
-  std::filesystem::path model_path = karma::demo::resolveExamplePath(
-      "examples/assets/animation_model/source/dustbound_wayfarer_merged_animations.glb");
+  std::filesystem::path package_path =
+      karma::demo::resolveExampleAssetPath("animation/dustbound_wayfarer");
+  std::string scene_asset_key = karma::demo::kDefaultAnimationSceneKey;
+  std::string display_name = "dustbound_wayfarer_merged_animations.glb";
   if (argc > 1 && argv[1] != nullptr && std::string_view(argv[1]).size() > 0u) {
-    model_path = karma::demo::resolveExamplePath(argv[1]);
+    package_path = karma::demo::resolveExamplePath(argv[1]);
+    display_name = package_path.filename().string();
+    if (argc > 2 && argv[2] != nullptr && std::string_view(argv[2]).size() > 0u) {
+      scene_asset_key = argv[2];
+    } else {
+      spdlog::warn("Custom animation package '{}' provided without a scene asset key; using '{}'",
+                   package_path.string(),
+                   scene_asset_key);
+    }
   }
 
   karma::app::EngineApp engine;
-  karma::demo::GltfAnimationExample game(model_path);
+  karma::demo::GltfAnimationExample game(scene_asset_key, display_name);
   engine.setUi(karma::imgui::createUiLayer(
       [&game](karma::app::UIContext& ctx) { game.drawUi(ctx); }));
 
@@ -655,6 +643,7 @@ int main(int argc, char** argv) {
   config.enable_anisotropy = true;
   config.anisotropy_level = 16;
   config.generate_mipmaps = true;
+  config.startup_asset_packages.push_back(package_path);
 
   engine.start(game, config);
   while (engine.isRunning()) {

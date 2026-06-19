@@ -1,4 +1,4 @@
-#include "karma/content/importers/gltf_scene_import.h"
+#include "gltf_scene_import_internal.h"
 
 #include <algorithm>
 #include <cctype>
@@ -694,6 +694,7 @@ void registerPrimitiveMaterial(const GltfScenePrefab& prefab,
     material.material_asset_path = prefab.source_path;
     material.material_asset_index = primitive.source_material_index;
     material.imported_material = std::move(imported_material);
+    assets.registerImportedMaterialTextures(material_key, material);
     assets.registerMaterialAsset(material_key, std::move(material));
   } else {
     (void)node_index;
@@ -1067,6 +1068,239 @@ GltfSceneImportResult instantiateGltfScenePrefab(
                                .loop = true,
                                .playing = options.autoplay_animations});
   }
+  updateWorldTransforms(world, scene);
+  return result;
+}
+
+GltfSceneImportResult instantiateGltfSceneAsset(
+    ecs::World& world,
+    scene::Scene& scene,
+    content::AssetRegistry& assets,
+    const content::GltfSceneAsset& asset,
+    const GltfSceneInstantiateOptions& options) {
+  GltfSceneImportResult result{};
+  if (!asset.valid()) {
+    return result;
+  }
+
+  result.node_entities_by_index.resize(asset.nodes.size());
+  result.morph_entities_by_node_index.resize(asset.nodes.size());
+
+  struct PendingDeformation {
+    ecs::Entity entity{};
+    std::string mesh_key;
+    const content::GltfSceneAssetPrimitive* primitive = nullptr;
+  };
+  std::vector<PendingDeformation> pending_deformations;
+  ecs::Entity skin_render_transform_entity{};
+
+  auto vertex_influences_from_mesh = [](const geometry::MeshData& mesh) {
+    std::vector<components::VertexSkinInfluence> influences;
+    const std::size_t count = std::min(mesh.joint_indices.size(), mesh.joint_weights.size());
+    influences.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+      influences.push_back(components::VertexSkinInfluence{
+          .joints = mesh.joint_indices[index],
+          .weights = mesh.joint_weights[index],
+      });
+    }
+    return influences;
+  };
+
+  auto attach_pending_deformations = [&]() {
+    for (const PendingDeformation& pending : pending_deformations) {
+      if (!world.isAlive(pending.entity) || pending.primitive == nullptr) {
+        continue;
+      }
+      const geometry::MeshData* mesh = assets.findMeshAsset(pending.mesh_key);
+      if (mesh == nullptr) {
+        continue;
+      }
+
+      std::vector<ecs::Entity> joint_entities;
+      joint_entities.reserve(pending.primitive->joint_node_indices.size());
+      for (const uint32_t joint_node_index : pending.primitive->joint_node_indices) {
+        if (joint_node_index < result.node_entities_by_index.size()) {
+          joint_entities.push_back(result.node_entities_by_index[joint_node_index]);
+        } else {
+          joint_entities.push_back({});
+        }
+      }
+
+      std::vector<float> morph_weights = pending.primitive->morph_weights;
+      morph_weights.resize(mesh->morph_targets.size(), 0.0f);
+      world.add(pending.entity, components::DeformableMeshComponent{
+                                    .bind_mesh = *mesh,
+                                    .cpu_deformed_mesh = *mesh,
+                                    .vertex_influences = vertex_influences_from_mesh(*mesh),
+                                    .joint_entities = std::move(joint_entities),
+                                    .inverse_bind_matrices =
+                                        pending.primitive->inverse_bind_matrices,
+                                    .base_morph_weights = morph_weights,
+                                    .morph_weights = morph_weights,
+                                    .render_transform_entity = skin_render_transform_entity,
+                                    .skin_index = pending.primitive->skin_index,
+                                    .path = components::DeformationPath::Gpu,
+                                    .diagnostic = "Waiting for first deformation update",
+                                    .morph_weights_dirty = true,
+                                    .override_render_transform =
+                                        !pending.primitive->joint_node_indices.empty(),
+                                    .enabled = true});
+    }
+  };
+
+  std::function<std::pair<ecs::Entity, scene::NodeId>(uint32_t, scene::NodeId)> instantiate_node;
+  instantiate_node = [&](uint32_t node_index,
+                         scene::NodeId parent_node) -> std::pair<ecs::Entity, scene::NodeId> {
+    const content::GltfSceneAssetNode& asset_node = asset.nodes[node_index];
+    const ecs::Entity entity = world.createEntity();
+    world.setName(entity, asset_node.name.empty() ? ("Node " + std::to_string(node_index))
+                                                  : asset_node.name);
+    world.add(entity, components::TransformComponent{
+                           asset_node.local_position,
+                           asset_node.local_rotation,
+                           asset_node.local_scale});
+    if (asset_node.has_light) {
+      world.add(entity, asset_node.light);
+    }
+
+    const scene::NodeId scene_node = scene.createNode(entity);
+    if (parent_node != scene::Node::kInvalidId) {
+      scene.reparent(scene_node, parent_node);
+    }
+    result.entities.push_back(entity);
+    result.node_entities_by_index[node_index] = entity;
+
+    for (std::size_t primitive_index = 0; primitive_index < asset_node.primitives.size();
+         ++primitive_index) {
+      const content::GltfSceneAssetPrimitive& primitive = asset_node.primitives[primitive_index];
+      if (primitive.mesh_key.empty()) {
+        continue;
+      }
+
+      const ecs::Entity primitive_entity = world.createEntity();
+      const std::string primitive_name =
+          primitive.name.empty()
+              ? (asset_node.name.empty() ? "Primitive " + std::to_string(primitive_index)
+                                         : asset_node.name + " Mesh")
+              : primitive.name;
+      world.setName(primitive_entity, primitive_name);
+      world.add(primitive_entity, components::TransformComponent{
+                                      {},
+                                      {},
+                                      {1.0f, 1.0f, 1.0f}});
+      world.add(primitive_entity, components::MeshComponent{
+                                      .mesh_asset_key = primitive.mesh_key,
+                                      .visible = true,
+                                  });
+
+      const geometry::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
+      const bool morphable = mesh != nullptr && !mesh->morph_targets.empty();
+      const bool skinned =
+          mesh != nullptr &&
+          !primitive.joint_node_indices.empty() &&
+          mesh->joint_indices.size() == mesh->vertices.size() &&
+          mesh->joint_weights.size() == mesh->vertices.size();
+      if (morphable && node_index < result.morph_entities_by_node_index.size()) {
+        result.morph_entities_by_node_index[node_index].push_back(primitive_entity);
+      }
+      if (morphable || skinned) {
+        pending_deformations.push_back(PendingDeformation{
+            .entity = primitive_entity,
+            .mesh_key = primitive.mesh_key,
+            .primitive = &primitive,
+        });
+      }
+
+      const scene::NodeId primitive_node = scene.createNode(primitive_entity);
+      scene.reparent(primitive_node, scene_node);
+      result.entities.push_back(primitive_entity);
+    }
+
+    for (const uint32_t child_index : asset_node.children) {
+      if (child_index < asset.nodes.size()) {
+        instantiate_node(child_index, scene_node);
+      }
+    }
+
+    return {entity, scene_node};
+  };
+
+  auto collect_animation_clips = [&]() {
+    std::vector<animation::AnimationClip> clips;
+    clips.reserve(asset.animation_clip_keys.size());
+    for (const std::string& key : asset.animation_clip_keys) {
+      if (const animation::AnimationClip* clip = assets.findAnimationClip(key)) {
+        clips.push_back(*clip);
+      }
+    }
+    return clips;
+  };
+  auto collect_skeletons = [&]() {
+    std::vector<animation::Skeleton> skeletons;
+    skeletons.reserve(asset.skeleton_keys.size());
+    for (const std::string& key : asset.skeleton_keys) {
+      if (const animation::Skeleton* skeleton = assets.findSkeleton(key)) {
+        skeletons.push_back(*skeleton);
+      }
+    }
+    return skeletons;
+  };
+  auto collect_skins = [&]() {
+    std::vector<animation::Skin> skins;
+    skins.reserve(asset.skin_keys.size());
+    for (const std::string& key : asset.skin_keys) {
+      if (const animation::Skin* skin = assets.findSkin(key)) {
+        skins.push_back(*skin);
+      }
+    }
+    return skins;
+  };
+  auto attach_animator = [&](ecs::Entity root_entity) {
+    std::vector<animation::AnimationClip> clips = collect_animation_clips();
+    if (clips.empty()) {
+      return;
+    }
+    world.add(root_entity, components::AnimatorComponent{
+                               .clips = std::move(clips),
+                               .node_entities_by_index = result.node_entities_by_index,
+                               .morph_entities_by_node_index =
+                                   result.morph_entities_by_node_index,
+                               .skeletons = collect_skeletons(),
+                               .skins = collect_skins(),
+                               .current_clip_index = 0,
+                               .time_seconds = 0.0f,
+                               .speed = 1.0f,
+                               .loop = true,
+                               .playing = options.autoplay_animations});
+  };
+
+  if (options.create_synthetic_root) {
+    const ecs::Entity root_entity = world.createEntity();
+    const std::string root_name =
+        asset.source_path.stem().empty() ? std::string("Cached glTF")
+                                         : asset.source_path.stem().string();
+    world.setName(root_entity, root_name);
+    world.add(root_entity, components::TransformComponent{});
+    const scene::NodeId root_node = scene.createNode(root_entity);
+    result.entities.push_back(root_entity);
+    skin_render_transform_entity = root_entity;
+    instantiate_node(asset.root_node, root_node);
+    result.root_entity = root_entity;
+    result.root_node = root_node;
+    attach_pending_deformations();
+    attach_animator(root_entity);
+    updateWorldTransforms(world, scene);
+    return result;
+  }
+
+  const auto [root_entity, root_node] =
+      instantiate_node(asset.root_node, scene::Node::kInvalidId);
+  result.root_entity = root_entity;
+  result.root_node = root_node;
+  skin_render_transform_entity = root_entity;
+  attach_pending_deformations();
+  attach_animator(root_entity);
   updateWorldTransforms(world, scene);
   return result;
 }

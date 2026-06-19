@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "examples/rendering/material_assignment/world",
+      "path": "../../world.glb",
+      "import_lights": false
+    },
+    {
+      "type": "gltf_scene",
+      "key": "examples/rendering/material_assignment/tank",
+      "path": "../../tank_final.glb",
+      "import_lights": false
+    }
+  ]
+}

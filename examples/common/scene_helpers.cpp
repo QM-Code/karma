@@ -4,6 +4,8 @@
 #include <utility>
 #include <vector>
 
+#include <glm/gtc/quaternion.hpp>
+
 #include "karma/content/assets/asset_registry.h"
 #include "karma/rendering/renderer/device.h"
 #include "karma/world/components/audio_listener.h"
@@ -39,6 +41,25 @@ void appendQuad(geometry::MeshData& mesh,
   mesh.indices.insert(mesh.indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
 }
 
+glm::vec3 toGlm(const math::Vec3& v) {
+  return {v.x, v.y, v.z};
+}
+
+glm::quat toGlm(const math::Quat& q) {
+  return {q.w, q.x, q.y, q.z};
+}
+
+void expandBounds(GltfSceneAssetBounds& bounds, const glm::vec3& point) {
+  if (!bounds.valid) {
+    bounds.min = point;
+    bounds.max = point;
+    bounds.valid = true;
+    return;
+  }
+  bounds.min = glm::min(bounds.min, point);
+  bounds.max = glm::max(bounds.max, point);
+}
+
 }  // namespace
 
 geometry::MeshData makeBoxMesh(const glm::vec3& half_extents) {
@@ -60,6 +81,49 @@ geometry::MeshData makeBoxMesh(const glm::vec3& half_extents) {
              {max.x, max.y, max.z}, {max.x, max.y, min.z}, {1.0f, 0.0f, 0.0f});
 
   return mesh;
+}
+
+GltfSceneAssetBounds computeGltfSceneAssetBounds(const content::AssetRegistry& assets,
+                                                 const content::GltfSceneAsset& scene) {
+  GltfSceneAssetBounds geometry_bounds{};
+  GltfSceneAssetBounds fallback_bounds{};
+
+  for (const content::GltfSceneAssetNode& node : scene.nodes) {
+    const glm::vec3 world_pos = toGlm(node.world_position);
+    expandBounds(fallback_bounds, world_pos);
+
+    const glm::vec3 world_scale = toGlm(node.world_scale);
+    const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
+    for (const content::GltfSceneAssetPrimitive& primitive : node.primitives) {
+      const geometry::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
+      if (mesh == nullptr) {
+        continue;
+      }
+      for (const glm::vec3& vertex : mesh->vertices) {
+        expandBounds(geometry_bounds, world_pos + rotation * (vertex * world_scale));
+      }
+    }
+  }
+
+  return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
+}
+
+GltfSceneAssetStats summarizeGltfSceneAsset(const content::AssetRegistry& assets,
+                                            const content::GltfSceneAsset& scene) {
+  GltfSceneAssetStats stats{};
+  stats.node_count = scene.nodes.size();
+  for (const content::GltfSceneAssetNode& node : scene.nodes) {
+    stats.primitive_count += node.primitives.size();
+    for (const content::GltfSceneAssetPrimitive& primitive : node.primitives) {
+      const geometry::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
+      if (mesh == nullptr) {
+        continue;
+      }
+      stats.vertex_count += mesh->vertices.size();
+      stats.triangle_count += mesh->indices.size() / 3u;
+    }
+  }
+  return stats;
 }
 
 ecs::Entity spawnMesh(ecs::World& world,

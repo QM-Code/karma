@@ -160,6 +160,16 @@ TextureId GraphicsDevice::createTexture(const TextureDesc& desc) {
   return backend_ ? backend_->createTexture(desc) : kInvalidTexture;
 }
 
+bool GraphicsDevice::supportsTextureFormat(TextureFormat format) const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->supportsTextureFormat(format) : false;
+}
+
+bool GraphicsDevice::uploadTexture(TextureId texture, const TextureUploadData& upload) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return backend_ ? backend_->uploadTexture(texture, upload) : false;
+}
+
 void GraphicsDevice::destroyTexture(TextureId texture) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (backend_) {

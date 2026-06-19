@@ -16,6 +16,8 @@
 namespace karma::demo {
 namespace {
 
+constexpr const char* kDamagedHelmetSceneKey = "examples/rendering/damaged_helmet";
+
 glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
 }
@@ -50,26 +52,6 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   bounds.max = glm::max(bounds.max, point);
 }
 
-SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
-  SceneBounds geometry_bounds{};
-  SceneBounds fallback_bounds{};
-
-  for (const auto& node : prefab.nodes) {
-    const glm::vec3 world_pos = toGlm(node.world_position);
-    expandBounds(fallback_bounds, world_pos);
-
-    const glm::vec3 world_scale = toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
-    for (const auto& primitive : node.primitives) {
-      for (const glm::vec3& vertex : primitive.mesh.vertices) {
-        expandBounds(geometry_bounds, world_pos + rotation * (vertex * world_scale));
-      }
-    }
-  }
-
-  return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
-}
-
 LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   const glm::vec3 direction = glm::normalize(target - eye);
   if (!std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(direction.z)) {
@@ -92,8 +74,10 @@ float boundsRadius(const SceneBounds& bounds, float fallback_radius) {
 
 class DiligentGltfViewerExample final : public app::GameInterface {
  public:
-  explicit DiligentGltfViewerExample(std::filesystem::path model_path)
-      : model_path_(std::move(model_path)) {}
+  explicit DiligentGltfViewerExample(std::filesystem::path source_hint,
+                                     std::string scene_asset_key = {})
+      : source_hint_(std::move(source_hint)),
+        scene_asset_key_(std::move(scene_asset_key)) {}
 
   void onStart() override {
     input->bindMouse("viewer_orbit", platform::MouseButton::Right);
@@ -107,40 +91,39 @@ class DiligentGltfViewerExample final : public app::GameInterface {
     input->bindKey("viewer_zoom_out", platform::Key::X);
     input->bindKey("viewer_reset", platform::Key::R, input::Trigger::Pressed);
 
-    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
-        model_path_,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
-
-    if (!prefab.valid()) {
-      spdlog::error("Failed to load Diligent GLTFViewer model from {}", model_path_.string());
-      spawnLighting(SceneBounds{});
-      spawnCamera(SceneBounds{});
-      spawnEnvironment();
-      return;
+    SceneBounds bounds{};
+    bool spawned_scene = false;
+    if (!scene_asset_key_.empty()) {
+      if (const content::GltfSceneAsset* cached_scene =
+              assets->findGltfSceneAsset(scene_asset_key_)) {
+        const helpers::GltfSceneAssetBounds asset_bounds =
+            helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
+        bounds = SceneBounds{.min = asset_bounds.min,
+                             .max = asset_bounds.max,
+                             .valid = asset_bounds.valid};
+        const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+            *world,
+            *scene,
+            *assets,
+            *cached_scene,
+            scene::GltfSceneInstantiateOptions{
+                .create_synthetic_root = false,
+                .autoplay_animations = true,
+            });
+        spawned_scene = imported.valid();
+        if (spawned_scene) {
+          logSceneSummary(*cached_scene, bounds);
+        } else {
+          spdlog::error("Failed to instantiate cached Diligent GLTFViewer model '{}'",
+                        scene_asset_key_);
+        }
+      } else {
+        spdlog::error("Missing packaged Diligent GLTFViewer model '{}'", scene_asset_key_);
+      }
     }
-
-    for (const std::string& diagnostic : prefab.diagnostics) {
-      spdlog::warn("Diligent GLTFViewer import diagnostic: {}", diagnostic);
+    if (!spawned_scene) {
+      spdlog::error("Diligent GLTFViewer model was not available from the asset package");
     }
-
-    const SceneBounds bounds = computePrefabBounds(prefab);
-    const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
-        *world,
-        *scene,
-        *assets,
-        prefab,
-        scene::GltfSceneInstantiateOptions{
-            .create_synthetic_root = false,
-            .autoplay_animations = true,
-        });
-    if (!imported.valid()) {
-      spdlog::error("Failed to instantiate Diligent GLTFViewer model from {}", model_path_.string());
-    }
-
-    logSceneSummary(prefab, bounds);
     spawnLighting(bounds);
     spawnCamera(bounds);
     spawnEnvironment();
@@ -247,40 +230,35 @@ class DiligentGltfViewerExample final : public app::GameInterface {
   void onShutdown() override {}
 
  private:
-  void logSceneSummary(const scene::GltfScenePrefab& prefab, const SceneBounds& bounds) const {
-    std::size_t primitive_count = 0u;
-    std::size_t vertex_count = 0u;
-    std::size_t triangle_count = 0u;
-    for (const auto& node : prefab.nodes) {
-      primitive_count += node.primitives.size();
-      for (const auto& primitive : node.primitives) {
-        vertex_count += primitive.mesh.vertices.size();
-        triangle_count += primitive.mesh.indices.size() / 3u;
-      }
-    }
+  void logSceneSummary(const content::GltfSceneAsset& scene_asset,
+                       const SceneBounds& bounds) const {
+    const helpers::GltfSceneAssetStats stats =
+        helpers::summarizeGltfSceneAsset(*assets, scene_asset);
+    const std::filesystem::path source_path =
+        scene_asset.source_path.empty() ? source_hint_ : scene_asset.source_path;
 
     if (bounds.valid) {
       const glm::vec3 size = bounds.max - bounds.min;
       spdlog::info(
           "Diligent GLTFViewer model loaded '{}': nodes={}, primitives={}, vertices={}, triangles={}, animations={}, bounds=({:.2f}, {:.2f}, {:.2f})",
-          model_path_.string(),
-          prefab.nodes.size(),
-          primitive_count,
-          vertex_count,
-          triangle_count,
-          prefab.animations.size(),
+          source_path.string(),
+          stats.node_count,
+          stats.primitive_count,
+          stats.vertex_count,
+          stats.triangle_count,
+          scene_asset.animation_clip_keys.size(),
           size.x,
           size.y,
           size.z);
     } else {
       spdlog::info(
           "Diligent GLTFViewer model loaded '{}': nodes={}, primitives={}, vertices={}, triangles={}, animations={}",
-          model_path_.string(),
-          prefab.nodes.size(),
-          primitive_count,
-          vertex_count,
-          triangle_count,
-          prefab.animations.size());
+          source_path.string(),
+          stats.node_count,
+          stats.primitive_count,
+          stats.vertex_count,
+          stats.triangle_count,
+          scene_asset.animation_clip_keys.size());
     }
   }
 
@@ -383,7 +361,8 @@ class DiligentGltfViewerExample final : public app::GameInterface {
     target_camera_pitch_ = default_camera_pitch_;
   }
 
-  std::filesystem::path model_path_;
+  std::filesystem::path source_hint_;
+  std::string scene_asset_key_;
   ecs::Entity camera_entity_{};
   math::Vec3 orbit_center_{};
   math::Vec3 target_orbit_center_{};
@@ -404,14 +383,24 @@ class DiligentGltfViewerExample final : public app::GameInterface {
 }  // namespace karma::demo
 
 int main(int argc, char** argv) {
-  std::filesystem::path model_path =
-      karma::demo::resolveExampleAssetPath("diligent_gltf_viewer/models/DamagedHelmet/DamagedHelmet.gltf");
+  std::filesystem::path package_path =
+      karma::demo::resolveExampleAssetPath("rendering/damaged_helmet");
+  std::string scene_asset_key = "examples/rendering/damaged_helmet";
   if (argc > 1 && argv[1] != nullptr && std::string(argv[1]).size() > 0u) {
-    model_path = karma::demo::resolveExamplePath(argv[1]);
+    package_path = karma::demo::resolveExamplePath(argv[1]);
+    if (argc > 2 && argv[2] != nullptr && std::string(argv[2]).size() > 0u) {
+      scene_asset_key = argv[2];
+    } else {
+      spdlog::warn("Custom GLTF viewer package '{}' provided without a scene asset key; using '{}'",
+                   package_path.string(),
+                   scene_asset_key);
+    }
   }
 
   karma::app::EngineApp engine;
-  karma::demo::DiligentGltfViewerExample game(model_path);
+  karma::demo::DiligentGltfViewerExample game(
+      package_path,
+      scene_asset_key);
 
   karma::app::EngineConfig config;
   config.window.title = "Karma Diligent GLTF Viewer";
@@ -434,6 +423,7 @@ int main(int argc, char** argv) {
       karma::demo::resolveExampleAssetPath("diligent_gltf_viewer/textures/papermill.ktx");
   config.environment_intensity = 1.0f;
   config.environment_draw_skybox = true;
+  config.startup_asset_packages.push_back(package_path);
 
   engine.start(game, config);
   while (engine.isRunning()) {

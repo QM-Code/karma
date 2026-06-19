@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "examples/rendering/bloom_city",
+      "path": "../../diligentfx_bloom/models/postwar_city_-_exterior_scene.glb",
+      "import_lights": false
+    }
+  ]
+}

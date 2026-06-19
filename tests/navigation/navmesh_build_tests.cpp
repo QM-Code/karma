@@ -100,18 +100,19 @@ void testNearestPolyFlagsAndSnapshotRefresh() {
 }
 
 void testGlbPrefabCollectionAppliesWorldTransform() {
-  karma::scene::GltfScenePrefab prefab;
-  prefab.root_node = 0;
-  prefab.nodes.resize(1);
-  prefab.nodes[0].world_position = {10.0f, 2.0f, -3.0f};
-  prefab.nodes[0].world_scale = {2.0f, 1.0f, 2.0f};
-  prefab.nodes[0].primitives.push_back({
-      .name = "Plane",
-      .mesh = makePlaneMesh(1.0f),
-  });
+  karma::ecs::World world;
+  const karma::ecs::Entity surface = world.createEntity();
+  karma::components::TransformComponent transform{};
+  transform.setPosition({10.0f, 2.0f, -3.0f});
+  transform.setScale({2.0f, 1.0f, 2.0f});
+  world.add(surface, transform);
+  world.add(surface, karma::components::NavMeshSurfaceComponent{
+                         .mesh_data =
+                             std::make_shared<karma::geometry::MeshData>(makePlaneMesh(1.0f)),
+                     });
 
   const karma::navigation::NavMeshInputGeometry geometry =
-      karma::navigation::collectNavMeshGeometry(prefab);
+      karma::navigation::collectNavMeshGeometry(world);
   assert(geometry.vertices.size() == 4);
   assert(geometry.indices.size() == 6);
   assert(std::abs(geometry.vertices[0].x - 8.0f) < 0.001f);

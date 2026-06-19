@@ -16,6 +16,11 @@
 namespace karma::demo {
 
 namespace {
+constexpr const char* kMaterialAssignmentWorldSceneKey =
+    "examples/rendering/material_assignment/world";
+constexpr const char* kMaterialAssignmentTankSceneKey =
+    "examples/rendering/material_assignment/tank";
+
 math::Color materialColor(std::string_view key) {
   if (key == "tank_red") {
     return {1.0f, 0.35f, 0.30f, 1.0f};
@@ -100,15 +105,10 @@ class MaterialAssignmentExample final : public app::GameInterface {
         .intensity = 18.0f,
         .range = 24.0f});
 
-    const std::filesystem::path tank_path = resolveExampleAssetPath("tank_final.glb");
-    const scene::GltfScenePrefab tank_prefab = scene::loadGltfScenePrefab(
-        tank_path,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
-    if (!tank_prefab.valid()) {
-      spdlog::error("Failed to load textured tank scene from {}", tank_path.string());
+    const content::GltfSceneAsset* tank_asset =
+        assets->findGltfSceneAsset(kMaterialAssignmentTankSceneKey);
+    if (tank_asset == nullptr) {
+      spdlog::error("Material assignment tank scene was not available from the asset package");
       tank_mesh_ = importExampleMeshAsset(assets, "tank_final.glb");
     }
 
@@ -121,7 +121,7 @@ class MaterialAssignmentExample final : public app::GameInterface {
 
     for (size_t i = 0; i < spawns.size(); ++i) {
       const auto& spawn = spawns[i];
-      const ecs::Entity entity = spawnTank(spawn, i, tank_prefab);
+      const ecs::Entity entity = spawnTank(spawn, i, tank_asset);
       tanks_[i] = TankEntry{
           .entity = entity,
           .base_position = spawn.position,
@@ -167,35 +167,30 @@ class MaterialAssignmentExample final : public app::GameInterface {
   };
 
   void spawnWorld() {
-    const std::filesystem::path world_path = resolveExampleAssetPath("world.glb");
     bool spawned_world = false;
-    const scene::GltfScenePrefab world_prefab = scene::loadGltfScenePrefab(
-        world_path,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
-    if (world_prefab.valid()) {
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
+
+    if (const content::GltfSceneAsset* cached_world =
+            assets->findGltfSceneAsset(kMaterialAssignmentWorldSceneKey)) {
+      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
-          world_prefab,
+          *cached_world,
           scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = true,
-              .asset_key_prefix = "examples/material_assignment/world",
+              .autoplay_animations = false,
           });
       if (imported.valid()) {
         world->setName(imported.root_entity, "World");
         spawned_world = true;
       } else {
-        spdlog::error("Failed to instantiate textured world scene from {}", world_path.string());
+        spdlog::error("Failed to instantiate cached textured world scene '{}'",
+                      kMaterialAssignmentWorldSceneKey);
       }
-    } else {
-      spdlog::error("Failed to load textured world scene from {}", world_path.string());
     }
 
     if (!spawned_world) {
+      spdlog::error("Material assignment world scene was not available from the asset package");
       const ecs::Entity world_entity = world->createEntity();
       world->setName(world_entity, "World");
       world->add(world_entity, components::TransformComponent{});
@@ -209,18 +204,18 @@ class MaterialAssignmentExample final : public app::GameInterface {
 
   ecs::Entity spawnTank(const SpawnDesc& spawn,
                         size_t spawn_index,
-                        const scene::GltfScenePrefab& tank_prefab) {
-    if (tank_prefab.valid()) {
-      const std::string asset_key_prefix =
-          "examples/material_assignment/tanks/" + std::to_string(spawn_index);
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
+                        const content::GltfSceneAsset* tank_asset) {
+    const std::string asset_key_prefix =
+        "examples/material_assignment/tanks/" + std::to_string(spawn_index);
+    if (tank_asset != nullptr) {
+      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
-          tank_prefab,
+          *tank_asset,
           scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = true,
-              .asset_key_prefix = asset_key_prefix,
+              .autoplay_animations = false,
           });
       if (imported.valid()) {
         world->setName(imported.root_entity, spawn.name);
@@ -235,7 +230,7 @@ class MaterialAssignmentExample final : public app::GameInterface {
         }
         return imported.root_entity;
       }
-      spdlog::error("Failed to instantiate textured tank scene for {}", spawn.name);
+      spdlog::error("Failed to instantiate cached textured tank scene for {}", spawn.name);
     }
 
     return spawnFallbackTank(spawn);
@@ -338,6 +333,8 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.85f;
   config.lighting_exposure = 1.1f;
+  config.startup_asset_packages.push_back(
+      karma::demo::resolveExampleAssetPath("rendering/material_assignment"));
 
   engine.start(game, config);
   while (engine.isRunning()) {

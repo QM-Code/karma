@@ -81,7 +81,8 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     examples/common/scene_helpers.cpp)
 
   karma_add_graphical_example(scene_gltf_import scene gltf_import
-    examples/scene/gltf_import.cpp)
+    examples/scene/gltf_import.cpp
+    examples/common/scene_helpers.cpp)
   karma_add_graphical_example(animation_gltf animation gltf
     examples/animation/gltf.cpp
     examples/common/scene_helpers.cpp)

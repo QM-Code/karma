@@ -3,7 +3,6 @@
 #include "karma/simulation/physics/backends/jolt/constraint_jolt.hpp"
 #include "karma/simulation/physics/backends/jolt/rigid_body_jolt.hpp"
 #include "shape_factory.h"
-#include "karma/simulation/physics/backends/jolt/static_body_jolt.hpp"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
@@ -544,10 +543,6 @@ std::unique_ptr<PhysicsCharacterControllerBackend> PhysicsWorldJolt::createChara
     controller->setAngularVelocity(glm::vec3(0.0f));
     spdlog::info("Created kinematic character controller");
     return controller;
-}
-
-std::unique_ptr<PhysicsStaticBodyBackend> PhysicsWorldJolt::createStaticMesh(const std::string& meshPath) {
-    return PhysicsStaticBodyJolt::fromMesh(this, meshPath);
 }
 
 bool PhysicsWorldJolt::raycast(const glm::vec3& from, const glm::vec3& to, glm::vec3& hitPoint, glm::vec3& hitNormal) const {

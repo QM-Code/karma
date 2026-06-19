@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 #include <glm/glm.hpp>
@@ -13,6 +14,7 @@
 
 namespace karma::content {
 class AssetRegistry;
+struct GltfSceneAsset;
 }
 
 namespace karma::components {
@@ -29,7 +31,26 @@ class GraphicsDevice;
 
 namespace karma::demo::helpers {
 
+struct GltfSceneAssetBounds {
+  glm::vec3 min{0.0f};
+  glm::vec3 max{0.0f};
+  bool valid = false;
+};
+
+struct GltfSceneAssetStats {
+  std::size_t node_count = 0u;
+  std::size_t primitive_count = 0u;
+  std::size_t vertex_count = 0u;
+  std::size_t triangle_count = 0u;
+};
+
 geometry::MeshData makeBoxMesh(const glm::vec3& half_extents);
+
+GltfSceneAssetBounds computeGltfSceneAssetBounds(const content::AssetRegistry& assets,
+                                                 const content::GltfSceneAsset& scene);
+
+GltfSceneAssetStats summarizeGltfSceneAsset(const content::AssetRegistry& assets,
+                                            const content::GltfSceneAsset& scene);
 
 ecs::Entity spawnMesh(ecs::World& world,
                       std::string name,

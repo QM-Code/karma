@@ -1,121 +1,40 @@
 #pragma once
 
 #include <cstdint>
-#include <filesystem>
-#include <limits>
-#include <memory>
 #include <string>
 #include <vector>
 
-#include "karma/simulation/animation/animation_clip.h"
-#include "karma/world/components/light.h"
-#include "karma/world/components/deformable_mesh.h"
-#include "karma/world/ecs/world.h"
-#include "karma/rendering/renderer/material.h"
-#include "karma/world/scene/scene.h"
+#include "karma/world/ecs/entity.h"
+#include "karma/world/scene/node.h"
 
 namespace karma::content {
 class AssetRegistry;
+struct GltfSceneAsset;
 }  // namespace karma::content
 
+namespace karma::ecs {
+class World;
+}  // namespace karma::ecs
+
 namespace karma::scene {
+class Scene;
 
 /// \ingroup karma_content
 /// Sentinel node id for imported glTF scene data.
-constexpr uint32_t kInvalidGltfSceneNode = std::numeric_limits<uint32_t>::max();
-/// Sentinel material index for imported glTF scene data.
-constexpr uint32_t kInvalidGltfSceneMaterial = std::numeric_limits<uint32_t>::max();
+constexpr uint32_t kInvalidGltfSceneNode = Node::kInvalidId;
 
 /// \ingroup karma_content
-/// Controls which glTF scene data is loaded.
-struct GltfSceneLoadOptions {
-  bool import_meshes = true;
-  bool import_lights = true;
-};
-
-/// \ingroup karma_content
-/// Controls how a loaded glTF scene prefab is instantiated into ECS/scene data.
+/// Controls how a registered glTF scene asset is instantiated into ECS/scene data.
 struct GltfSceneInstantiateOptions {
   bool create_synthetic_root = false;
   bool autoplay_animations = true;
-  /// Logical asset key namespace used for meshes/materials created while
-  /// instantiating this scene. When empty, a stable namespace is derived from
-  /// the source model name and source path hash.
+  /// Retained for older call sites. Registered glTF scene assets already carry
+  /// deterministic mesh/material keys, so this is ignored for asset instantiation.
   std::string asset_key_prefix;
 };
 
 /// \ingroup karma_content
-/// Combined glTF load and instantiate options for `importGltfScene`.
-struct GltfSceneImportOptions {
-  GltfSceneLoadOptions load{};
-  GltfSceneInstantiateOptions instantiate{};
-};
-
-/// \ingroup karma_content
-/// One renderable primitive inside an imported glTF node.
-struct GltfScenePrefabPrimitive {
-  std::string name;
-  geometry::MeshData mesh;
-  renderer::MaterialDesc material;
-  /// Renderer-facing material index in the Assimp material table.
-  uint32_t source_material_index = kInvalidGltfSceneMaterial;
-  /// Raw glTF primitive material index before backend/importer material remapping.
-  uint32_t source_gltf_material_index = kInvalidGltfSceneMaterial;
-  uint32_t source_mesh_index = kInvalidGltfSceneNode;
-  uint32_t skin_index = animation::kInvalidAnimationIndex;
-  /// Default morph target weights authored on the source glTF mesh.
-  std::vector<float> morph_weights;
-  std::vector<components::VertexSkinInfluence> vertex_influences;
-  std::vector<uint32_t> joint_node_indices;
-  std::vector<glm::mat4> inverse_bind_matrices;
-
-  /// Returns true when the primitive has skinning payloads.
-  bool skinned() const {
-    return !joint_node_indices.empty() && vertex_influences.size() == mesh.vertices.size();
-  }
-
-  /// Returns true when the primitive has morph target payloads.
-  bool morphable() const {
-    return !mesh.morph_targets.empty();
-  }
-};
-
-/// \ingroup karma_content
-/// Imported glTF node with transforms, light, mesh primitives, and children.
-struct GltfScenePrefabNode {
-  std::string name;
-  math::Vec3 local_position{};
-  math::Quat local_rotation{};
-  math::Vec3 local_scale{1.0f, 1.0f, 1.0f};
-  math::Vec3 world_position{};
-  math::Quat world_rotation{};
-  math::Vec3 world_scale{1.0f, 1.0f, 1.0f};
-  bool has_light = false;
-  components::LightComponent light{};
-  std::vector<GltfScenePrefabPrimitive> primitives;
-  std::vector<uint32_t> children;
-};
-
-/// \ingroup karma_content
-/// In-memory glTF scene prefab before ECS instantiation.
-struct GltfScenePrefab {
-  std::filesystem::path source_path;
-  uint32_t root_node = kInvalidGltfSceneNode;
-  std::vector<GltfScenePrefabNode> nodes;
-  std::vector<std::shared_ptr<const renderer::ImportedMaterialData>> imported_materials;
-  std::vector<animation::Skeleton> skeletons;
-  std::vector<animation::Skin> skins;
-  std::vector<animation::AnimationClip> animations;
-  std::vector<std::string> diagnostics;
-
-  /// Returns true when root node metadata is valid.
-  bool valid() const {
-    return root_node != kInvalidGltfSceneNode && root_node < nodes.size();
-  }
-};
-
-/// \ingroup karma_content
-/// ECS/scene entities created from a glTF scene prefab.
+/// ECS/scene entities created from a registered glTF scene asset.
 struct GltfSceneImportResult {
   ecs::Entity root_entity{};
   scene::NodeId root_node = scene::Node::kInvalidId;
@@ -130,23 +49,12 @@ struct GltfSceneImportResult {
   }
 };
 
-/// Loads a glTF scene into an in-memory prefab.
-GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
-                                    const GltfSceneLoadOptions& options = {});
-
-/// Instantiates a loaded glTF scene prefab into world and scene data.
-GltfSceneImportResult instantiateGltfScenePrefab(
+/// Instantiates cached/registered glTF scene metadata into world and scene data.
+GltfSceneImportResult instantiateGltfSceneAsset(
     ecs::World& world,
     scene::Scene& scene,
     content::AssetRegistry& assets,
-    const GltfScenePrefab& prefab,
+    const content::GltfSceneAsset& asset,
     const GltfSceneInstantiateOptions& options = {});
-
-/// Loads and instantiates a glTF scene in one call.
-GltfSceneImportResult importGltfScene(ecs::World& world,
-                                      scene::Scene& scene,
-                                      content::AssetRegistry& assets,
-                                      const std::filesystem::path& path,
-                                      const GltfSceneImportOptions& options = {});
 
 }  // namespace karma::scene

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "examples/scene/world_with_lights",
+      "path": "../../world-with-lights.glb",
+      "import_lights": true
+    }
+  ]
+}

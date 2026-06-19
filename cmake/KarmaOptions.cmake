@@ -26,6 +26,7 @@ option(KARMA_NETWORK_BACKEND_ENET "Use ENet network backend" ON)
 option(KARMA_PHYSICS_BACKEND_JOLT "Use Jolt physics backend" ON)
 option(KARMA_PHYSICS_BACKEND_BULLET "Use Bullet physics backend" OFF)
 option(KARMA_ENABLE_NAVIGATION "Build Recast/Detour navigation support" ON)
+option(KARMA_ENABLE_KTX2 "Enable KTX2/BasisU texture compression support" ON)
 option(KARMA_FETCH_DEPS "Fetch third-party dependencies if missing" ON)
 option(KARMA_ASSIMP_MINIMAL_IMPORTERS
   "When fetching Assimp, build only GLTF/GLB, OBJ, and STL import support" ON)
@@ -39,6 +40,7 @@ option(KARMA_DILIGENT_REPACK_XXHASH
   "Repack Diligent's bundled xxHash archive on affected Unix toolchains" OFF)
 set(KARMA_DILIGENT_TAG "v2.5.5" CACHE STRING "DiligentCore git tag/branch to fetch")
 set(KARMA_JOLT_TAG "v5.5.0" CACHE STRING "JoltPhysics git tag/branch to fetch")
+set(KARMA_KTX_SOFTWARE_TAG "v4.4.2" CACHE STRING "KTX-Software git tag/branch to fetch")
 
 if (KARMA_HEADLESS)
   set(KARMA_BUILD_HEADLESS_PROFILE ON CACHE BOOL "Build the karma::headless profile target" FORCE)

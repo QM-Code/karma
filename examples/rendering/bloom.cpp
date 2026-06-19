@@ -22,6 +22,7 @@ constexpr const char* kMagentaSignMaterial = "diligentfx_bloom/material/sign_mag
 constexpr const char* kAmberSignMaterial = "diligentfx_bloom/material/sign_amber";
 constexpr const char* kRoadGlowMaterial = "diligentfx_bloom/material/road_glow";
 constexpr const char* kBloomPostProcessProfileKey = "diligentfx/bloom";
+constexpr const char* kBloomSceneKey = "examples/rendering/bloom_city";
 
 glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
@@ -55,26 +56,6 @@ void expandBounds(SceneBounds& bounds, const glm::vec3& point) {
   }
   bounds.min = glm::min(bounds.min, point);
   bounds.max = glm::max(bounds.max, point);
-}
-
-SceneBounds computePrefabBounds(const scene::GltfScenePrefab& prefab) {
-  SceneBounds geometry_bounds{};
-  SceneBounds fallback_bounds{};
-
-  for (const auto& node : prefab.nodes) {
-    const glm::vec3 world_pos = toGlm(node.world_position);
-    expandBounds(fallback_bounds, world_pos);
-
-    const glm::vec3 world_scale = toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
-    for (const auto& primitive : node.primitives) {
-      for (const glm::vec3& vertex : primitive.mesh.vertices) {
-        expandBounds(geometry_bounds, world_pos + rotation * (vertex * world_scale));
-      }
-    }
-  }
-
-  return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
 }
 
 float boundsRadius(const SceneBounds& bounds) {
@@ -125,36 +106,32 @@ class DiligentFxBloomExample final : public app::GameInterface {
     input->bindKey("bloom_radius_decrease", platform::Key::LeftBracket);
     input->bindKey("bloom_radius_increase", platform::Key::RightBracket);
 
-    const std::filesystem::path city_path =
-        resolveExampleAssetPath("diligentfx_bloom/models/postwar_city_-_exterior_scene.glb");
-    const scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(
-        city_path,
-        scene::GltfSceneLoadOptions{
-            .import_meshes = true,
-            .import_lights = false,
-        });
-
     SceneBounds bounds{};
-    if (!prefab.valid()) {
-      spdlog::error("Failed to load bloom scene GLB from {}", city_path.string());
-    } else {
-      for (const std::string& diagnostic : prefab.diagnostics) {
-        spdlog::warn("Bloom scene import diagnostic: {}", diagnostic);
-      }
-
-      bounds = computePrefabBounds(prefab);
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfScenePrefab(
+    bool spawned_city = false;
+    if (const content::GltfSceneAsset* cached_scene =
+            assets->findGltfSceneAsset(kBloomSceneKey)) {
+      const helpers::GltfSceneAssetBounds asset_bounds =
+          helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
+      bounds = SceneBounds{.min = asset_bounds.min,
+                           .max = asset_bounds.max,
+                           .valid = asset_bounds.valid};
+      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
-          prefab,
+          *cached_scene,
           scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = false,
           });
-      if (!imported.valid()) {
-        spdlog::error("Failed to instantiate bloom scene GLB from {}", city_path.string());
+      spawned_city = imported.valid();
+      if (!spawned_city) {
+        spdlog::error("Failed to instantiate cached bloom scene '{}'", kBloomSceneKey);
       }
+    }
+
+    if (!spawned_city) {
+      spdlog::error("Bloom scene was not available from the asset package");
     }
 
     registerBloomResources();
@@ -568,6 +545,8 @@ int main() {
       karma::demo::resolveExampleAssetPath("golden_gate_hills_4k.hdr");
   config.environment_intensity = 0.18f;
   config.environment_draw_skybox = true;
+  config.startup_asset_packages.push_back(
+      karma::demo::resolveExampleAssetPath("rendering/bloom_city"));
 
   engine.start(game, config);
   while (engine.isRunning()) {

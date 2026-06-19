@@ -261,9 +261,10 @@ void EngineApp::initSubsystems() {
   auto stage_start = init_start;
   auto log_init_stage = [&](const char* name, core::SteadyClock::time_point end) {
     if (startup_diag) {
-      spdlog::info("Engine startup diag: area=runtime_init stage={} ms={:.2f}",
+      spdlog::info("Engine startup diag: area=runtime_init stage={} ms={:.2f} total_ms={:.2f}",
                    name,
-                   core::elapsedMilliseconds(stage_start, end));
+                   core::elapsedMilliseconds(stage_start, end),
+                   core::elapsedMilliseconds(init_start, end));
     }
     stage_start = end;
   };
@@ -337,9 +338,11 @@ void EngineApp::warmUpRenderer() {
                        const core::SteadyClock::time_point start,
                        const core::SteadyClock::time_point end) {
     if (startup_diag) {
-      spdlog::info("Renderer warm-up stage '{}' took {:.2f} ms",
+      spdlog::info("Renderer warm-up stage '{}' start_ms={:.2f} ms={:.2f} total_ms={:.2f}",
                    name,
-                   core::elapsedMilliseconds(start, end));
+                   core::elapsedMilliseconds(warmup_start, start),
+                   core::elapsedMilliseconds(start, end),
+                   core::elapsedMilliseconds(warmup_start, end));
     }
   };
   log_stage("sync scene", section_start, section_end);
@@ -436,6 +439,16 @@ void EngineApp::shutdownSubsystems() {
   }
   debug_ui_context_.reset();
 #endif
+  if (render_system_ && startup_prewarm_handle_.valid()) {
+    render_system_->releasePrewarm(startup_prewarm_handle_);
+    startup_prewarm_handle_ = {};
+  }
+  for (auto it = startup_asset_package_handles_.rbegin();
+       it != startup_asset_package_handles_.rend();
+       ++it) {
+    content::unloadAssetPackage(assets_, *it);
+  }
+  startup_asset_package_handles_.clear();
   render_system_.reset();
   prefabs::clearPrefabAssetPackages();
   particle_system_.reset();
@@ -673,8 +686,33 @@ bool EngineApp::renderLoadingSplash(float progress) {
   return true;
 }
 
-bool EngineApp::presentInitialLoadingSplash(float progress) {
+bool EngineApp::shouldRenderLoadingSplash(
+    core::SteadyClock::time_point startup_start) const {
+  if (!config_.loading_splash.enabled) {
+    return false;
+  }
+  if (loading_splash_presented_) {
+    return true;
+  }
+  const int show_after_ms = std::max(0, config_.loading_splash.show_after_ms);
+  return core::elapsedMillisecondsSince(startup_start) >=
+         static_cast<double>(show_after_ms);
+}
+
+bool EngineApp::renderLoadingSplashIfDue(
+    float progress, core::SteadyClock::time_point startup_start) {
+  if (!shouldRenderLoadingSplash(startup_start)) {
+    return true;
+  }
+  return renderLoadingSplash(progress);
+}
+
+bool EngineApp::presentInitialLoadingSplash(
+    float progress, core::SteadyClock::time_point startup_start) {
   if (!config_.loading_splash.enabled || !window_ || !graphics_) {
+    return true;
+  }
+  if (!shouldRenderLoadingSplash(startup_start)) {
     return true;
   }
 
@@ -722,29 +760,33 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                const core::SteadyClock::time_point start,
                                const core::SteadyClock::time_point end) {
     if (startup_diag) {
-      spdlog::info("Engine startup stage '{}' took {:.2f} ms",
+      spdlog::info("Engine startup timeline: stage='{}' start_ms={:.2f} ms={:.2f} total_ms={:.2f}",
                    name,
-                   core::elapsedMilliseconds(start, end));
+                   core::elapsedMilliseconds(startup_start, start),
+                   core::elapsedMilliseconds(start, end),
+                   core::elapsedMilliseconds(startup_start, end));
     }
+  };
+  auto finish_startup_stage = [&](const char* name) {
+    section_end = core::SteadyClock::now();
+    log_startup_stage(name, section_start, section_end);
+    section_start = section_end;
   };
 
   initSubsystems();
-  section_end = core::SteadyClock::now();
-  log_startup_stage("init subsystems", section_start, section_end);
+  finish_startup_stage("init subsystems");
 
-  if (!presentInitialLoadingSplash(0.05f)) {
+  if (!presentInitialLoadingSplash(0.05f, startup_start)) {
     shutdownSubsystems();
     return;
   }
+  finish_startup_stage("initial loading splash checkpoint");
 
 #if defined(KARMA_DEBUG_UI)
-  section_start = section_end;
   debug_ui_ = createDebugOverlayUi();
-  section_end = core::SteadyClock::now();
-  log_startup_stage("debug ui", section_start, section_end);
+  finish_startup_stage("debug ui");
 #endif
 
-  section_start = section_end;
   if (graphics_) {
     graphics_->setGenerateMips(config_.generate_mipmaps);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
@@ -769,40 +811,53 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                         config_.local_light_directional_shadow_lift_strength);
     graphics_->setExposure(config_.lighting_exposure);
   }
-  section_end = core::SteadyClock::now();
-  log_startup_stage("graphics settings", section_start, section_end);
+  finish_startup_stage("graphics settings");
 
-  if (!renderLoadingSplash(0.18f)) {
+  if (!renderLoadingSplashIfDue(0.18f, startup_start)) {
     shutdownSubsystems();
     return;
   }
+  finish_startup_stage("loading splash checkpoint after graphics settings");
+
+  startup_asset_package_handles_.clear();
+  for (const std::filesystem::path& package_path : config_.startup_asset_packages) {
+    const std::filesystem::path resolved_package_path = resolveStartupPath(package_path);
+    std::string diagnostic;
+    auto package = content::importAssetPackage(assets_, resolved_package_path, &diagnostic);
+    if (!package.has_value()) {
+      spdlog::error("Failed to import startup asset package '{}': {}",
+                    resolved_package_path.string(),
+                    diagnostic);
+      shutdownSubsystems();
+      return;
+    }
+    startup_asset_package_handles_.push_back(std::move(*package));
+  }
+  finish_startup_stage("startup asset packages");
 
   game_ = &game;
   running_ = true;
   accumulator_ = 0.0f;
   fixed_tick_ = 0;
   last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
-  section_start = section_end;
   game_->bindContext(world_,
                      scene_,
                      input_,
                      physics_,
                      graphics_.get(),
+                     render_system_.get(),
                      assets_,
                      systems_);
-  section_end = core::SteadyClock::now();
-  log_startup_stage("bind game context", section_start, section_end);
+  finish_startup_stage("bind game context");
 
   prefabs::bindPrefabAssetRegistry(&assets_);
 
-  section_start = section_end;
   for (auto& module : runtime_modules_) {
     if (module) {
       module->onAttach(makeRuntimeModuleContext());
     }
   }
-  section_end = core::SteadyClock::now();
-  log_startup_stage("runtime module attach", section_start, section_end);
+  finish_startup_stage("runtime module attach");
 
   auto shutdown_started_game = [&]() {
     if (game_) {
@@ -812,41 +867,100 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     game_ = nullptr;
   };
 
-  section_start = section_end;
   bool startup_close_requested = false;
   std::exception_ptr startup_exception;
+  core::SteadyClock::time_point game_on_start_body_start = section_start;
+  core::SteadyClock::time_point game_on_start_body_end = section_start;
+  core::SteadyClock::time_point game_on_start_wait_start = section_start;
+  core::SteadyClock::time_point game_on_start_wait_end = section_start;
+  int startup_wait_poll_count = 0;
+  int startup_wait_sleep_count = 0;
+  int startup_wait_splash_frames = 0;
+  double startup_wait_poll_ms = 0.0;
+  double startup_wait_sleep_ms = 0.0;
+  double startup_wait_splash_ms = 0.0;
   if (config_.loading_splash.enabled) {
     std::atomic<bool> startup_done{false};
     std::thread startup_thread([&]() {
+      game_on_start_body_start = core::SteadyClock::now();
       try {
         game_->onStart();
       } catch (...) {
         startup_exception = std::current_exception();
       }
+      game_on_start_body_end = core::SteadyClock::now();
       startup_done.store(true, std::memory_order_release);
     });
 
     const int target_fps = std::clamp(config_.loading_splash.target_fps, 1, 240);
     const auto frame_interval = std::chrono::milliseconds(1000 / target_fps);
     const auto async_start_time = core::SteadyClock::now();
+    game_on_start_wait_start = async_start_time;
     auto next_frame_time = std::chrono::steady_clock::now();
     while (!startup_done.load(std::memory_order_acquire)) {
       const double elapsed_seconds = core::elapsedSeconds(async_start_time,
                                                           core::SteadyClock::now());
       const float progress =
           std::min(0.58f, 0.18f + static_cast<float>(elapsed_seconds) * 0.10f);
+      if (!shouldRenderLoadingSplash(startup_start)) {
+        if (!startup_close_requested && window_) {
+          const auto poll_start = core::SteadyClock::now();
+          window_->pollEvents();
+          startup_close_requested = window_->shouldClose();
+          window_->clearEvents();
+          startup_wait_poll_ms +=
+              core::elapsedMilliseconds(poll_start, core::SteadyClock::now());
+          ++startup_wait_poll_count;
+        }
+        const auto sleep_start = core::SteadyClock::now();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        startup_wait_sleep_ms +=
+            core::elapsedMilliseconds(sleep_start, core::SteadyClock::now());
+        ++startup_wait_sleep_count;
+        next_frame_time = std::chrono::steady_clock::now();
+        continue;
+      }
+      const auto now = std::chrono::steady_clock::now();
+      if (now < next_frame_time) {
+        const auto sleep_start = core::SteadyClock::now();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        startup_wait_sleep_ms +=
+            core::elapsedMilliseconds(sleep_start, core::SteadyClock::now());
+        ++startup_wait_sleep_count;
+        continue;
+      }
+      const auto splash_start = core::SteadyClock::now();
       if (!startup_close_requested && !renderLoadingSplash(progress)) {
         startup_close_requested = true;
       }
-      next_frame_time += frame_interval;
-      std::this_thread::sleep_until(next_frame_time);
+      startup_wait_splash_ms +=
+          core::elapsedMilliseconds(splash_start, core::SteadyClock::now());
+      ++startup_wait_splash_frames;
+      next_frame_time = std::chrono::steady_clock::now() + frame_interval;
     }
     startup_thread.join();
+    game_on_start_wait_end = core::SteadyClock::now();
   } else {
+    game_on_start_body_start = core::SteadyClock::now();
     game_->onStart();
+    game_on_start_body_end = core::SteadyClock::now();
+    game_on_start_wait_start = game_on_start_body_start;
+    game_on_start_wait_end = game_on_start_body_end;
   }
-  section_end = core::SteadyClock::now();
-  log_startup_stage("game onStart", section_start, section_end);
+  finish_startup_stage("game onStart");
+  if (startup_diag) {
+    spdlog::info(
+        "Engine startup diag: area=game_onStart body_ms={:.2f} wait_loop_ms={:.2f} "
+        "polls={} poll_ms={:.2f} sleeps={} sleep_ms={:.2f} splash_frames={} splash_ms={:.2f}",
+        core::elapsedMilliseconds(game_on_start_body_start, game_on_start_body_end),
+        core::elapsedMilliseconds(game_on_start_wait_start, game_on_start_wait_end),
+        startup_wait_poll_count,
+        startup_wait_poll_ms,
+        startup_wait_sleep_count,
+        startup_wait_sleep_ms,
+        startup_wait_splash_frames,
+        startup_wait_splash_ms);
+  }
 
   if (startup_exception) {
     shutdownSubsystems();
@@ -854,15 +968,18 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     std::rethrow_exception(startup_exception);
   }
 
-  if (startup_close_requested || !renderLoadingSplash(0.62f)) {
+  if (startup_close_requested) {
     shutdown_started_game();
     return;
   }
+  if (!renderLoadingSplashIfDue(0.62f, startup_start)) {
+    shutdown_started_game();
+    return;
+  }
+  finish_startup_stage("loading splash checkpoint after game onStart");
 
-  section_start = section_end;
   systems_.update(world_, 0.0f);
-  section_end = core::SteadyClock::now();
-  log_startup_stage("initial systems update", section_start, section_end);
+  finish_startup_stage("initial systems update");
 #if defined(KARMA_ENABLE_NAVIGATION)
   if (startup_diag) {
     if (const auto* nav_system = systems_.findSystem<navigation::NavigationSystem>()) {
@@ -879,7 +996,6 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
 #endif
 
   if (graphics_) {
-    section_start = section_end;
     std::filesystem::path startup_environment_path;
     if (const content::EnvironmentMapAsset* environment =
             assets_.findEnvironmentMap(kStartupEnvironmentMapAssetKey)) {
@@ -890,18 +1006,45 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                                  config_.environment_draw_skybox);
     spdlog::info("Engine environment setup took {:.2f} ms",
                  core::elapsedMillisecondsSince(section_start));
-    section_end = core::SteadyClock::now();
-    log_startup_stage("engine environment setup", section_start, section_end);
+    finish_startup_stage("engine environment setup");
   }
-  if (!renderLoadingSplash(0.84f)) {
+  if (render_system_ && config_.prewarm_startup_packages &&
+      !startup_asset_package_handles_.empty()) {
+    std::vector<std::string> mesh_keys;
+    std::vector<std::string> material_keys;
+    std::vector<std::string> texture_keys;
+    for (const auto& package : startup_asset_package_handles_) {
+      for (const auto& asset : package.assets) {
+        if (asset.type == "mesh") {
+          mesh_keys.push_back(asset.key);
+        } else if (asset.type == "material") {
+          material_keys.push_back(asset.key);
+        } else if (asset.type == "texture" || asset.type == "texture_rgba8") {
+          texture_keys.push_back(asset.key);
+        }
+      }
+    }
+    finish_startup_stage("startup asset prewarm collect keys");
+    if (!renderLoadingSplashIfDue(0.74f, startup_start)) {
+      shutdown_started_game();
+      return;
+    }
+    finish_startup_stage("loading splash checkpoint before asset prewarm");
+    startup_prewarm_handle_ =
+        render_system_->prewarmAssets(mesh_keys, material_keys, texture_keys);
+    finish_startup_stage("startup asset prewarm");
+  }
+  if (loading_splash_presented_ && !renderLoadingSplash(0.84f)) {
     shutdown_started_game();
     return;
   }
-  warmUpRenderer();
-  if (startup_diag) {
-    spdlog::info("Engine startup through warm-up took {:.2f} ms",
-                 core::elapsedMillisecondsSince(startup_start));
+  if (loading_splash_presented_) {
+    finish_startup_stage("final loading splash frame");
   }
+  warmUpRenderer();
+  finish_startup_stage("renderer warm-up");
+  spdlog::info("Engine startup through warm-up took {:.2f} ms",
+               core::elapsedMilliseconds(startup_start, section_end));
   accumulator_ = 0.0f;
   last_time_ = core::SteadyClock::now();
 }

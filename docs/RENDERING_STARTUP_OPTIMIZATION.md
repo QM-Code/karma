@@ -218,6 +218,58 @@ Relative to the previous clean diagnostic run, startup through warm-up improved
 from 3248.99 ms to 2574.39 ms. Device-init forward pipeline creation dropped
 from two graphics PSOs at 821.88 ms to one opaque graphics PSO at 379.13 ms.
 
+## June 19 Package And Warm-Start Pass
+
+The latest pass moved rendering examples onto startup asset packages so example
+`onStart` code no longer parses source GLB/GLTF files directly. The engine now
+imports configured `EngineConfig::startup_asset_packages` before game startup,
+then prewarms package meshes, materials, and textures through `RenderSystem`.
+Package assets are unloaded on shutdown after the render prewarm handle is
+released.
+
+Rendering examples using the package path:
+
+- `rendering_gltf_viewer`
+- `rendering_bloom`
+- `rendering_light_stress`
+- `rendering_material_assignment`
+- `rendering_postprocess`
+- `rendering_postwar_city`
+
+The package path works with the asset-cache v2 layer documented in
+`docs/ASSET_CACHE_V2_AND_RUNTIME_TEXTURES.md`. Warm package imports restore
+typed blobs from cache without running source importers. Cold imports still
+parse the source assets, write persistent blobs, then write the package
+manifest.
+
+Startup timing logs are more verbose. `KARMA_ENGINE_STARTUP_DIAG=1` now prints
+stage start offsets, stage durations, and running totals. The `game_onStart`
+diagnostic also reports wait-loop time, event polling time, sleep time, splash
+frame count, and splash render time so hidden loading-screen work is visible.
+
+The loading splash is no longer forced to appear immediately. By default,
+`EngineConfig::LoadingSplashConfig::show_after_ms` is 750 ms, which avoids a
+short splash flash on fast warm starts. Set `show_after_ms = 0` for examples or
+games that should show the splash as soon as startup begins.
+
+For runtime texture warmup, `RenderSystem` now prepares uploaded texture data
+through the content helper that can transcode cached KTX2 Basis payloads to BC7
+when `KARMA_TEXTURE_BC7=1` and the backend reports BC7 support. Otherwise the
+RGBA8 fallback is uploaded. This avoids re-decoding source textures on warm
+package runs while keeping a fallback path for devices without BC7.
+
+Recommended warm-start diagnostic command:
+
+```bash
+env \
+  KARMA_ENGINE_STARTUP_DIAG=1 \
+  KARMA_RENDER_RESOURCE_DIAG=1 \
+  KARMA_RENDER_PIPELINE_DIAG=1 \
+  KARMA_RENDER_TEXTURE_IMPORT_DIAG=1 \
+  KARMA_TEXTURE_BC7=1 \
+  ./build/examples/rendering/gltf_viewer
+```
+
 ## Particle Scene-Demand Prewarm Pass
 
 The next pass stopped running the full particle resource prewarm for render

@@ -11,7 +11,8 @@
 #include <string_view>
 #include <vector>
 
-#include "karma/content/importers/mesh_import.h"
+#include "karma/content/assets/asset_package.h"
+#include "karma/content/assets/asset_registry.h"
 #include "karma/simulation/navigation/nav_geometry.h"
 
 namespace karma::demo {
@@ -91,7 +92,20 @@ inline MeshGeometry loadMeshGeometry(std::string_view mesh_file) {
   const std::filesystem::path mesh_path =
       std::filesystem::path("meshes") / std::filesystem::path{mesh_file};
   out.path = recastAssetPath(mesh_path.generic_string());
-  out.meshes = content::importMeshes(out.path);
+  std::filesystem::path logical{mesh_file};
+  logical.replace_extension();
+  const std::string key =
+      "examples/navigation/recast/" + logical.generic_string();
+  content::AssetRegistry assets;
+  std::string diagnostic;
+  (void)content::importAssetPackage(
+      assets,
+      recastAssetPath(
+          (std::filesystem::path("mesh_packages") / logical).generic_string()),
+      &diagnostic);
+  if (const geometry::MeshData* mesh = assets.findMeshAsset(key)) {
+    out.meshes.push_back(*mesh);
+  }
   for (const geometry::MeshData& mesh : out.meshes) {
     navigation::appendGeometry(out.geometry, mesh);
   }

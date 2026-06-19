@@ -1,5 +1,6 @@
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
+#include "karma/content/assets/asset_package.h"
 
 #include <algorithm>
 #include <array>
@@ -68,15 +69,6 @@ inline constexpr std::string_view kExplosionTextureCoreFlipbook =
     "prefabs/explosion/explosion00_flipbook";
 inline constexpr std::string_view kExplosionTextureSmokeFlipbook =
     "prefabs/explosion/explosion01_smoke_flipbook";
-
-std::filesystem::path explosionPackageAssetPath(std::string_view relative_path) {
-  std::filesystem::path path =
-      resolveExampleAssetPath(std::string(kExplosionPackageAssetRoot));
-  if (!relative_path.empty()) {
-    path /= std::filesystem::path(std::string(relative_path));
-  }
-  return path;
-}
 
 float scaleExplosionValue(float value) {
   return value * kExplosionVisualScale;
@@ -576,38 +568,21 @@ void registerParticleEffects(content::AssetRegistry& assets,
                              bool has_explosion_flipbook_texture,
                              bool has_explosion_smoke_flipbook_texture,
                              bool use_fast_flipbook_effects) {
-  auto import_effect = [&](std::string_view key, const std::filesystem::path& path) {
-    assets.importParticleEffect(std::string(key), path);
+  auto import_package = [&](std::string_view path) {
+    std::string diagnostic;
+    if (!content::importAssetPackage(assets, resolveExampleAssetPath(path), &diagnostic)) {
+      spdlog::error("Failed to import particle package '{}': {}",
+                    path,
+                    diagnostic);
+    }
   };
-  import_effect("spark_fountain", resolveExampleAssetPath("particles/spark_fountain.kpeffect"));
-  import_effect("glow_halo", resolveExampleAssetPath("particles/glow_halo.kpeffect"));
-  import_effect("smoke_plume", resolveExampleAssetPath("particles/smoke_plume.kpeffect"));
-  import_effect(kExplosionEffectFlash, explosionPackageAssetPath("particles/explosion_flash.kpeffect"));
-  import_effect(kExplosionEffectFireball,
-                explosionPackageAssetPath("particles/explosion_fireball.kpeffect"));
-  import_effect(kExplosionEffectSmoke, explosionPackageAssetPath("particles/explosion_smoke.kpeffect"));
-  import_effect(kExplosionEffectHeat, explosionPackageAssetPath("particles/explosion_heat.kpeffect"));
-  import_effect(kExplosionEffectShockRing,
-                explosionPackageAssetPath("particles/explosion_shock_ring.kpeffect"));
-  import_effect(kExplosionEffectDustRing,
-                explosionPackageAssetPath("particles/explosion_dust_ring.kpeffect"));
-  import_effect(kExplosionEffectScorch,
-                explosionPackageAssetPath("particles/explosion_scorch.kpeffect"));
-  import_effect(kExplosionEffectDebris, explosionPackageAssetPath("particles/explosion_debris.kpeffect"));
-  import_effect(kExplosionEffectEmbers, explosionPackageAssetPath("particles/explosion_embers.kpeffect"));
-  if (has_explosion_flipbook_texture) {
-    import_effect(
-        kExplosionEffectCoreFlipbook,
-        use_fast_flipbook_effects
-            ? explosionPackageAssetPath("particles/explosion_core_flipbook_fast.kpeffect")
-            : explosionPackageAssetPath("particles/explosion_core_flipbook.kpeffect"));
-  }
-  if (has_explosion_smoke_flipbook_texture) {
-    import_effect(
-        kExplosionEffectSmokeFlipbook,
-        use_fast_flipbook_effects
-            ? explosionPackageAssetPath("particles/explosion_smoke_flipbook_fast.kpeffect")
-            : explosionPackageAssetPath("particles/explosion_smoke_flipbook.kpeffect"));
+
+  import_package("particles/billboard_standalone");
+  import_package("particles/billboard_explosion_base");
+  if (has_explosion_flipbook_texture || has_explosion_smoke_flipbook_texture) {
+    import_package(use_fast_flipbook_effects
+                       ? "particles/billboard_explosion_flipbook_fast"
+                       : "particles/billboard_explosion_flipbook");
   }
 }
 

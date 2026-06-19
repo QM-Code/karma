@@ -62,6 +62,25 @@ class Backend {
   virtual void setMaterialFloat(renderer::MaterialId material, std::string_view name, float value) = 0;
 
   virtual renderer::TextureId createTexture(const renderer::TextureDesc& desc) = 0;
+  virtual bool supportsTextureFormat(renderer::TextureFormat format) const {
+    switch (format) {
+      case renderer::TextureFormat::RGBA8:
+      case renderer::TextureFormat::RGB8:
+      case renderer::TextureFormat::R8:
+        return true;
+      case renderer::TextureFormat::BC7_RGBA_UNORM:
+      case renderer::TextureFormat::BC7_RGBA_UNORM_SRGB:
+      case renderer::TextureFormat::KTX2_BASIS_UASTC:
+        return false;
+    }
+    return false;
+  }
+  virtual bool uploadTexture(renderer::TextureId texture,
+                             const renderer::TextureUploadData& upload) {
+    (void)texture;
+    (void)upload;
+    return false;
+  }
   virtual void destroyTexture(renderer::TextureId texture) = 0;
 
   virtual renderer::RenderTargetId createRenderTarget(const renderer::RenderTargetDesc& desc) = 0;

@@ -69,6 +69,10 @@ class GraphicsDevice {
 
   /// Creates a texture from descriptor data.
   TextureId createTexture(const TextureDesc& desc);
+  /// Returns true when the active backend can create and sample a texture format.
+  bool supportsTextureFormat(TextureFormat format) const;
+  /// Uploads prepared texture subresources when the backend supports the format.
+  bool uploadTexture(TextureId texture, const TextureUploadData& upload);
   /// Destroys a texture.
   void destroyTexture(TextureId texture);
 

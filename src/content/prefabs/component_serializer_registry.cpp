@@ -15,6 +15,7 @@
 #include "karma/world/components/collider.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/light_pulse.h"
+#include "karma/world/components/instanced_mesh.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/particle_effect.h"
 #include "karma/world/components/particle_effect_override.h"
@@ -42,6 +43,70 @@ Json toJson(const math::Quat& value) {
 
 Json toJson(const math::Color& value) {
   return Json::array({value.r, value.g, value.b, value.a});
+}
+
+const char* instanceLayoutName(renderer::InstanceGpuLayout layout) {
+  switch (layout) {
+    case renderer::InstanceGpuLayout::Matrix4x4Params:
+      return "matrix4x4_params";
+    case renderer::InstanceGpuLayout::PositionYawScaleParams:
+      return "position_yaw_scale_params";
+  }
+  return "matrix4x4_params";
+}
+
+bool readInstanceLayout(const Json& object,
+                        std::string_view key,
+                        renderer::InstanceGpuLayout& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "matrix4x4_params") {
+    out = renderer::InstanceGpuLayout::Matrix4x4Params;
+    return true;
+  }
+  if (value == "position_yaw_scale_params") {
+    out = renderer::InstanceGpuLayout::PositionYawScaleParams;
+    return true;
+  }
+  return false;
+}
+
+const char* instanceLodRenderModeName(renderer::InstanceLodRenderMode mode) {
+  switch (mode) {
+    case renderer::InstanceLodRenderMode::Mesh:
+      return "mesh";
+    case renderer::InstanceLodRenderMode::UprightBillboard:
+      return "upright_billboard";
+  }
+  return "mesh";
+}
+
+bool readInstanceLodRenderMode(const Json& object,
+                               std::string_view key,
+                               renderer::InstanceLodRenderMode& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "mesh") {
+    out = renderer::InstanceLodRenderMode::Mesh;
+    return true;
+  }
+  if (value == "upright_billboard") {
+    out = renderer::InstanceLodRenderMode::UprightBillboard;
+    return true;
+  }
+  return false;
 }
 
 bool readFloatValue(const Json& value, float& out) {
@@ -97,6 +162,22 @@ bool readUint32(const Json& object, std::string_view key, uint32_t& out) {
     return false;
   }
   out = static_cast<uint32_t>(value);
+  return true;
+}
+
+bool readUint64(const Json& object, std::string_view key, uint64_t& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_number_unsigned() && !it->is_number_integer()) {
+    return false;
+  }
+  const int64_t value = it->get<int64_t>();
+  if (value < 0) {
+    return false;
+  }
+  out = static_cast<uint64_t>(value);
   return true;
 }
 
@@ -669,6 +750,212 @@ std::optional<components::MeshComponent> deserializeMesh(const Json& json) {
       }
     }
   }
+  return component;
+}
+
+Json serializeInstancedMesh(const components::InstancedMeshComponent& component) {
+  Json materials = Json::array();
+  for (const auto& binding : component.materials) {
+    materials.push_back(Json{
+        {"slot", binding.slot},
+        {"material_key", binding.material_key},
+    });
+  }
+
+  Json lods = Json::array();
+  for (const auto& lod : component.lods) {
+    Json lod_materials = Json::array();
+    for (const auto& binding : lod.materials) {
+      lod_materials.push_back(Json{
+          {"slot", binding.slot},
+          {"material_key", binding.material_key},
+      });
+    }
+    lods.push_back(Json{
+        {"start_distance", lod.start_distance},
+        {"mesh_asset_key", lod.mesh_asset_key},
+        {"materials", std::move(lod_materials)},
+        {"render_mode", instanceLodRenderModeName(lod.render_mode)},
+        {"shadow_visible", lod.shadow_visible},
+    });
+  }
+
+  Json instances = Json::array();
+  for (const auto& instance : component.instances) {
+    instances.push_back(Json{
+        {"position", toJson(instance.position)},
+        {"rotation", toJson(instance.rotation)},
+        {"scale", toJson(instance.scale)},
+        {"params", Json::array({instance.params[0],
+                                instance.params[1],
+                                instance.params[2],
+                                instance.params[3]})},
+    });
+  }
+
+  Json planar_instances = Json::array();
+  for (const auto& instance : component.planar_instances) {
+    planar_instances.push_back(Json{
+        {"position", toJson(instance.position)},
+        {"yaw_radians", instance.yaw_radians},
+        {"scale", toJson(instance.scale)},
+        {"params", Json::array({instance.params[0],
+                                instance.params[1],
+                                instance.params[2],
+                                instance.params[3]})},
+    });
+  }
+
+  Json out = Json{
+      {"mesh_asset_key", component.mesh_asset_key},
+      {"materials", std::move(materials)},
+      {"gpu_layout", instanceLayoutName(component.gpu_layout)},
+      {"instances", std::move(instances)},
+      {"planar_instances", std::move(planar_instances)},
+      {"instance_revision", component.instance_revision},
+      {"dynamic", component.dynamic},
+      {"visible", component.visible},
+      {"shadow_visible", component.shadow_visible},
+  };
+  if (!lods.empty()) {
+    out["lods"] = std::move(lods);
+  }
+  return out;
+}
+
+std::optional<components::InstancedMeshComponent> deserializeInstancedMesh(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::InstancedMeshComponent component{};
+  if (!readString(json, "mesh_asset_key", component.mesh_asset_key) ||
+      !readInstanceLayout(json, "gpu_layout", component.gpu_layout) ||
+      !readUint64(json, "instance_revision", component.instance_revision) ||
+      !readBool(json, "dynamic", component.dynamic) ||
+      !readBool(json, "visible", component.visible) ||
+      !readBool(json, "shadow_visible", component.shadow_visible)) {
+    return std::nullopt;
+  }
+
+  if (const auto materials_it = json.find("materials"); materials_it != json.end()) {
+    if (!materials_it->is_array()) {
+      return std::nullopt;
+    }
+    component.materials.reserve(materials_it->size());
+    for (const Json& material_json : *materials_it) {
+      if (!material_json.is_object()) {
+        return std::nullopt;
+      }
+      components::MeshMaterialAssignment binding{};
+      if (!readUint32(material_json, "slot", binding.slot) ||
+          !readString(material_json, "material_key", binding.material_key)) {
+        return std::nullopt;
+      }
+      if (!binding.material_key.empty()) {
+        component.materials.push_back(std::move(binding));
+      }
+    }
+  }
+
+  if (const auto lods_it = json.find("lods"); lods_it != json.end()) {
+    if (!lods_it->is_array() ||
+        lods_it->size() > components::kMaxInstancedMeshLodLevels) {
+      return std::nullopt;
+    }
+    component.lods.reserve(lods_it->size());
+    for (const Json& lod_json : *lods_it) {
+      if (!lod_json.is_object()) {
+        return std::nullopt;
+      }
+      components::InstancedMeshLodLevel lod{};
+      if (!readFloat(lod_json, "start_distance", lod.start_distance) ||
+          !readString(lod_json, "mesh_asset_key", lod.mesh_asset_key) ||
+          !readInstanceLodRenderMode(lod_json, "render_mode", lod.render_mode) ||
+          !readBool(lod_json, "shadow_visible", lod.shadow_visible)) {
+        return std::nullopt;
+      }
+      if (const auto lod_materials_it = lod_json.find("materials");
+          lod_materials_it != lod_json.end()) {
+        if (!lod_materials_it->is_array()) {
+          return std::nullopt;
+        }
+        lod.materials.reserve(lod_materials_it->size());
+        for (const Json& material_json : *lod_materials_it) {
+          if (!material_json.is_object()) {
+            return std::nullopt;
+          }
+          components::MeshMaterialAssignment binding{};
+          if (!readUint32(material_json, "slot", binding.slot) ||
+              !readString(material_json, "material_key", binding.material_key)) {
+            return std::nullopt;
+          }
+          if (!binding.material_key.empty()) {
+            lod.materials.push_back(std::move(binding));
+          }
+        }
+      }
+      component.lods.push_back(std::move(lod));
+    }
+  }
+
+  if (const auto instances_it = json.find("instances"); instances_it != json.end()) {
+    if (!instances_it->is_array()) {
+      return std::nullopt;
+    }
+    component.instances.reserve(instances_it->size());
+    for (const Json& instance_json : *instances_it) {
+      if (!instance_json.is_object()) {
+        return std::nullopt;
+      }
+      components::MeshInstance instance{};
+      if (!readVec3(instance_json, "position", instance.position) ||
+          !readQuat(instance_json, "rotation", instance.rotation) ||
+          !readVec3(instance_json, "scale", instance.scale)) {
+        return std::nullopt;
+      }
+      if (const auto params_it = instance_json.find("params"); params_it != instance_json.end()) {
+        if (!params_it->is_array() || params_it->size() != instance.params.size()) {
+          return std::nullopt;
+        }
+        for (size_t i = 0; i < instance.params.size(); ++i) {
+          if (!readFloatValue((*params_it)[i], instance.params[i])) {
+            return std::nullopt;
+          }
+        }
+      }
+      component.instances.push_back(instance);
+    }
+  }
+
+  if (const auto instances_it = json.find("planar_instances"); instances_it != json.end()) {
+    if (!instances_it->is_array()) {
+      return std::nullopt;
+    }
+    component.planar_instances.reserve(instances_it->size());
+    for (const Json& instance_json : *instances_it) {
+      if (!instance_json.is_object()) {
+        return std::nullopt;
+      }
+      components::PlanarMeshInstance instance{};
+      if (!readVec3(instance_json, "position", instance.position) ||
+          !readFloat(instance_json, "yaw_radians", instance.yaw_radians) ||
+          !readVec3(instance_json, "scale", instance.scale)) {
+        return std::nullopt;
+      }
+      if (const auto params_it = instance_json.find("params"); params_it != instance_json.end()) {
+        if (!params_it->is_array() || params_it->size() != instance.params.size()) {
+          return std::nullopt;
+        }
+        for (size_t i = 0; i < instance.params.size(); ++i) {
+          if (!readFloatValue((*params_it)[i], instance.params[i])) {
+            return std::nullopt;
+          }
+        }
+      }
+      component.planar_instances.push_back(instance);
+    }
+  }
+
   return component;
 }
 
@@ -2166,6 +2453,8 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "TransformComponent", serializeTransform, deserializeTransform);
   registerComponent<components::MeshComponent>(
       registry, "MeshComponent", serializeMesh, deserializeMesh);
+  registerComponent<components::InstancedMeshComponent>(
+      registry, "InstancedMeshComponent", serializeInstancedMesh, deserializeInstancedMesh);
   registerComponent<components::AnimatorComponent>(
       registry, "AnimatorComponent", serializeAnimator, deserializeAnimator);
   registerComponent<components::LightComponent>(

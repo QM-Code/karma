@@ -9,6 +9,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <string>
@@ -20,12 +21,15 @@
 #include "karma/content/assets/asset_registry.h"
 #include "karma/content/prefabs/prefab.h"
 #include "karma/core/math/glm.h"
+#include "karma/core/math/quat.h"
 #include "karma/core/time.h"
 #include "karma/runtime/debug/debug_overlay.h"
 #include "karma/simulation/collision/collision_event_system.h"
 #if defined(KARMA_ENABLE_NAVIGATION)
 #include "karma/simulation/navigation/navigation_system.h"
 #endif
+#include "karma/world/components/camera.h"
+#include "karma/world/components/transform.h"
 #include "karma/world/geometry/mesh_data.h"
 #include "karma/world/scene/transform_hierarchy.h"
 
@@ -57,6 +61,19 @@ float envFloat(const char* value, float fallback) {
   } catch (const std::exception&) {
     return fallback;
   }
+}
+
+uint32_t envUint(const char* value, uint32_t fallback) {
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  if (end == value) {
+    return fallback;
+  }
+  return static_cast<uint32_t>(
+      std::min<unsigned long>(parsed, std::numeric_limits<uint32_t>::max()));
 }
 
 std::filesystem::path resolveStartupPath(const std::filesystem::path& path) {
@@ -286,11 +303,12 @@ void EngineApp::initSubsystems() {
   log_init_stage("input bind window", core::SteadyClock::now());
 
   if (window_) {
-    graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_);
+    renderer::GraphicsDeviceCreateInfo graphics_create_info{};
+    graphics_create_info.vsync = config_.vsync;
+    graphics_create_info.present_mode = config_.present_mode;
+    graphics_create_info.execution_mode = config_.renderer_execution_mode;
+    graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_, graphics_create_info);
     log_init_stage("graphics device create", core::SteadyClock::now());
-
-    graphics_->setVsync(config_.vsync);
-    log_init_stage("graphics vsync apply", core::SteadyClock::now());
 
     render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_, assets_);
     log_init_stage("render system create", core::SteadyClock::now());
@@ -364,61 +382,171 @@ void EngineApp::warmUpRenderer() {
   frame.width = fb_width;
   frame.height = fb_height;
   frame.delta_time = 0.0f;
-  section_start = section_end;
-  graphics_->beginFrame(frame);
-  section_end = core::SteadyClock::now();
-  log_stage("begin frame", section_start, section_end);
 
-  section_start = section_end;
-  animation_system_.update(world_, scene_, 0.0f);
-  section_end = core::SteadyClock::now();
-  log_stage("animation", section_start, section_end);
-
-  section_start = section_end;
-  scene::updateWorldTransforms(world_, scene_);
-  section_end = core::SteadyClock::now();
-  log_stage("scene transforms", section_start, section_end);
-
-  section_start = section_end;
-  deformation_system_.update(world_, scene_, *graphics_, &assets_);
-  section_end = core::SteadyClock::now();
-  log_stage("mesh deformation", section_start, section_end);
-
-  if (particle_system_) {
-    section_start = section_end;
-    light_pulse_system_.update(world_, 0.0f);
-    section_end = core::SteadyClock::now();
-    log_stage("light pulse", section_start, section_end);
-
-    section_start = section_end;
-    particle_system_->update(world_, 0.0f, 1.0f);
-    section_end = core::SteadyClock::now();
-    log_stage("particles", section_start, section_end);
-  }
-
-  section_start = section_end;
-  for (auto& module : runtime_modules_) {
-    if (module) {
-      module->onWarmUp(world_);
+  const bool include_ui_prewarm =
+      user_ui_ != nullptr
+#if defined(KARMA_DEBUG_UI)
+      || debug_ui_ != nullptr
+#endif
+      ;
+  auto log_pass_stage = [&](std::string_view pass,
+                            const char* name,
+                            const core::SteadyClock::time_point start,
+                            const core::SteadyClock::time_point end) {
+    if (startup_diag) {
+      spdlog::info("Renderer warm-up stage '{} {}' start_ms={:.2f} ms={:.2f} total_ms={:.2f}",
+                   pass,
+                   name,
+                   core::elapsedMilliseconds(warmup_start, start),
+                   core::elapsedMilliseconds(start, end),
+                   core::elapsedMilliseconds(warmup_start, end));
     }
+  };
+  auto run_warmup_frame = [&](std::string_view pass, bool run_module_warmup) {
+    section_start = section_end;
+    graphics_->beginFrame(frame);
+    section_end = core::SteadyClock::now();
+    log_pass_stage(pass, "begin frame", section_start, section_end);
+
+    section_start = section_end;
+    graphics_->prewarmRendererResources(include_ui_prewarm);
+    section_end = core::SteadyClock::now();
+    log_pass_stage(pass, "renderer resource prewarm", section_start, section_end);
+
+    section_start = section_end;
+    animation_system_.update(world_, scene_, 0.0f);
+    section_end = core::SteadyClock::now();
+    log_pass_stage(pass, "animation", section_start, section_end);
+
+    section_start = section_end;
+    scene::updateWorldTransforms(world_, scene_);
+    section_end = core::SteadyClock::now();
+    log_pass_stage(pass, "scene transforms", section_start, section_end);
+
+    section_start = section_end;
+    deformation_system_.update(world_, scene_, *graphics_, &assets_);
+    section_end = core::SteadyClock::now();
+    log_pass_stage(pass, "mesh deformation", section_start, section_end);
+
+    if (particle_system_) {
+      section_start = section_end;
+      light_pulse_system_.update(world_, 0.0f);
+      section_end = core::SteadyClock::now();
+      log_pass_stage(pass, "light pulse", section_start, section_end);
+
+      section_start = section_end;
+      particle_system_->update(world_, 0.0f, 1.0f);
+      section_end = core::SteadyClock::now();
+      log_pass_stage(pass, "particles", section_start, section_end);
+    }
+
+    if (run_module_warmup) {
+      section_start = section_end;
+      for (auto& module : runtime_modules_) {
+        if (module) {
+          module->onWarmUp(world_);
+        }
+      }
+      section_end = core::SteadyClock::now();
+      log_pass_stage(pass, "runtime modules", section_start, section_end);
+    }
+
+    section_start = section_end;
+    render_system_->update(world_, scene_, 0.0f, 1.0f);
+    section_end = core::SteadyClock::now();
+    log_pass_stage(pass, "render system update", section_start, section_end);
+
+    section_start = section_end;
+    graphics_->endFrame(true);
+    section_end = core::SteadyClock::now();
+    log_pass_stage(pass, "end frame", section_start, section_end);
+  };
+
+  struct CameraWarmupRestore {
+    ecs::Entity entity{};
+    math::Quat local_rotation{};
+  };
+
+  auto run_camera_sweep = [&](uint32_t steps) {
+    if (steps == 0u) {
+      return;
+    }
+
+    std::vector<CameraWarmupRestore> cameras;
+    world_.forEach<components::CameraComponent, components::TransformComponent>(
+        [&](const ecs::Entity entity) {
+          const auto& camera = world_.get<components::CameraComponent>(entity);
+          if (!camera.is_primary) {
+            return true;
+          }
+          const auto& transform = world_.get<components::TransformComponent>(entity);
+          cameras.push_back(CameraWarmupRestore{
+              .entity = entity,
+              .local_rotation = transform.localRotation(),
+          });
+          return true;
+        });
+    if (cameras.empty()) {
+      spdlog::info("Renderer camera sweep warm-up skipped: no primary camera");
+      return;
+    }
+
+    constexpr float kPi = 3.14159265358979323846f;
+    for (uint32_t step = 0; step < steps; ++step) {
+      const float yaw =
+          (static_cast<float>(step + 1u) / static_cast<float>(steps + 1u)) * 2.0f * kPi;
+      const math::Quat yaw_rotation = math::fromYawPitch(yaw, 0.0f);
+      for (const CameraWarmupRestore& camera : cameras) {
+        if (!world_.isAlive(camera.entity) ||
+            !world_.has<components::TransformComponent>(camera.entity)) {
+          continue;
+        }
+        auto& transform = world_.get<components::TransformComponent>(camera.entity);
+        transform.setRotation(math::mul(yaw_rotation, camera.local_rotation));
+      }
+      const std::string pass_name =
+          "camera_sweep" + std::to_string(static_cast<unsigned long long>(step + 1u));
+      run_warmup_frame(pass_name, false);
+    }
+
+    for (const CameraWarmupRestore& camera : cameras) {
+      if (!world_.isAlive(camera.entity) ||
+          !world_.has<components::TransformComponent>(camera.entity)) {
+        continue;
+      }
+      auto& transform = world_.get<components::TransformComponent>(camera.entity);
+      transform.setRotation(camera.local_rotation);
+    }
+    scene::updateWorldTransforms(world_, scene_);
+  };
+
+  run_warmup_frame("pass1", true);
+  run_warmup_frame("pass2", false);
+  run_camera_sweep(config_.renderer_warmup_camera_sweep_steps);
+  run_warmup_frame("validation", false);
+  const renderer::RendererFrameTimingStats warmup_validation_timing =
+      graphics_->getRendererFrameTimingStats();
+  const renderer::InstancingStats warmup_validation_instancing =
+      graphics_->getInstancingStats();
+  constexpr uint64_t kWarmupValidationInstanceUploadWarningBytes = 1024u;
+  if (warmup_validation_timing.resource_creation_count > 0u ||
+      warmup_validation_timing.pipeline_creation_count > 0u ||
+      warmup_validation_instancing.instance_upload_bytes >
+          kWarmupValidationInstanceUploadWarningBytes) {
+    spdlog::warn(
+        "Renderer warm-up validation created resources: resources={} ({:.2f} ms) "
+        "pipelines={} ({:.2f} ms) instance_uploads={} bytes={} upload_ms={:.2f}",
+        warmup_validation_timing.resource_creation_count,
+        warmup_validation_timing.resource_creation_ms,
+        warmup_validation_timing.pipeline_creation_count,
+        warmup_validation_timing.pipeline_creation_ms,
+        warmup_validation_instancing.instance_buffer_updates,
+        warmup_validation_instancing.instance_upload_bytes,
+        warmup_validation_instancing.instance_upload_ms);
   }
-  section_end = core::SteadyClock::now();
-  log_stage("runtime modules", section_start, section_end);
 
   section_start = section_end;
-  render_system_->update(world_, scene_, 0.0f, 1.0f);
-  section_end = core::SteadyClock::now();
-  log_stage("render system update", section_start, section_end);
-
-  section_start = section_end;
-  graphics_->endFrame();
-  section_end = core::SteadyClock::now();
-  log_stage("end frame", section_start, section_end);
-
-  section_start = section_end;
-  if (auto* backend = graphics_->backend()) {
-    backend->flushRenderStateCache();
-  }
+  graphics_->flushRenderStateCache();
   section_end = core::SteadyClock::now();
   log_stage("render state cache flush", section_start, section_end);
 
@@ -669,7 +797,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
   stage_start = stage_end;
   graphics_->beginFrame(frame);
   graphics_->renderUi(draw_data);
-  graphics_->endFrame();
+  graphics_->endFrame(true);
   stage_end = core::SteadyClock::now();
   if (startup_diag) {
     spdlog::info("Engine startup diag: area=loading_splash stage=graphics frame ms={:.2f}",
@@ -677,7 +805,9 @@ bool EngineApp::renderLoadingSplash(float progress) {
   }
   loading_splash_presented_ = true;
 #if !defined(KARMA_RENDER_BACKEND_DILIGENT)
-  window_->swapBuffers();
+      if (!skip_present_this_frame) {
+        window_->swapBuffers();
+      }
 #endif
   if (startup_diag) {
     spdlog::info("Engine startup diag: area=loading_splash stage=frame total ms={:.2f}",
@@ -747,7 +877,53 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
   if (const char* vsync_env = std::getenv("KARMA_ENGINE_VSYNC")) {
     config_.vsync = envFlagEnabled(vsync_env);
+    config_.present_mode = renderer::PresentMode::Auto;
     spdlog::info("KARMA_ENGINE_VSYNC override: {}", config_.vsync ? "on" : "off");
+  }
+  if (const char* frame_pacing_env = std::getenv("KARMA_ENGINE_FRAME_PACING_FPS")) {
+    config_.frame_pacing_fps =
+        std::max(0.0f, envFloat(frame_pacing_env, config_.frame_pacing_fps));
+    spdlog::info("KARMA_ENGINE_FRAME_PACING_FPS override: {:.2f}",
+                 config_.frame_pacing_fps);
+  }
+  if (const char* frame_pacing_env = std::getenv("KARMA_ENGINE_FRAME_PACE_FPS")) {
+    config_.frame_pacing_fps =
+        std::max(0.0f, envFloat(frame_pacing_env, config_.frame_pacing_fps));
+    spdlog::info("KARMA_ENGINE_FRAME_PACE_FPS override: {:.2f}",
+                 config_.frame_pacing_fps);
+  }
+  if (const char* skip_present_env =
+          std::getenv("KARMA_ENGINE_SKIP_PRESENT_ON_MOUSE_BUTTON")) {
+    config_.skip_present_on_mouse_button = envFlagEnabled(skip_present_env);
+    spdlog::info("KARMA_ENGINE_SKIP_PRESENT_ON_MOUSE_BUTTON override: {}",
+                 config_.skip_present_on_mouse_button ? "on" : "off");
+  }
+  if (const char* skip_present_frames_env =
+          std::getenv("KARMA_ENGINE_MOUSE_BUTTON_PRESENT_SKIP_FRAMES")) {
+    config_.mouse_button_present_skip_frames =
+        envUint(skip_present_frames_env, config_.mouse_button_present_skip_frames);
+    spdlog::info("KARMA_ENGINE_MOUSE_BUTTON_PRESENT_SKIP_FRAMES override: {}",
+                 config_.mouse_button_present_skip_frames);
+  }
+  if (const char* camera_sweep_env =
+          std::getenv("KARMA_RENDER_WARMUP_CAMERA_SWEEP_STEPS")) {
+    config_.renderer_warmup_camera_sweep_steps =
+        envUint(camera_sweep_env, config_.renderer_warmup_camera_sweep_steps);
+    spdlog::info("KARMA_RENDER_WARMUP_CAMERA_SWEEP_STEPS override: {}",
+                 config_.renderer_warmup_camera_sweep_steps);
+  }
+  config_.frame_pacing_fps = std::max(0.0f, config_.frame_pacing_fps);
+  if (config_.skip_present_on_mouse_button) {
+    spdlog::info("Engine will skip swapchain present for {} frame(s) after mouse-button events",
+                 config_.mouse_button_present_skip_frames);
+  }
+  if (config_.renderer_warmup_camera_sweep_steps > 0u) {
+    spdlog::info("Renderer camera sweep warm-up enabled: {} extra views",
+                 config_.renderer_warmup_camera_sweep_steps);
+  }
+  next_frame_pace_time_ = {};
+  if (config_.frame_pacing_fps > 0.0f) {
+    spdlog::info("Engine frame pacing enabled at {:.2f} FPS", config_.frame_pacing_fps);
   }
   fixed_dt_ = config_.fixed_dt;
   const char* debug_env = std::getenv("KARMA_ENGINE_EDITOR_DEBUG");
@@ -839,6 +1015,8 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   running_ = true;
   accumulator_ = 0.0f;
   fixed_tick_ = 0;
+  frame_tick_ = 0;
+  last_mouse_button_frame_tick_ = std::numeric_limits<uint64_t>::max();
   last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
   game_->bindContext(world_,
                      scene_,
@@ -1047,6 +1225,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                core::elapsedMilliseconds(startup_start, section_end));
   accumulator_ = 0.0f;
   last_time_ = core::SteadyClock::now();
+  next_frame_pace_time_ = {};
 }
 
 void EngineApp::requestStop() {
@@ -1080,10 +1259,44 @@ void EngineApp::syncSceneEntities() {
   last_synced_entity_version_ = entity_version;
 }
 
+double EngineApp::applyFramePacing() {
+  if (config_.frame_pacing_fps <= 0.0f) {
+    next_frame_pace_time_ = {};
+    return 0.0;
+  }
+
+  const auto frame_interval =
+      std::chrono::duration_cast<core::SteadyClock::duration>(
+          std::chrono::duration<double>(1.0 / static_cast<double>(config_.frame_pacing_fps)));
+  if (frame_interval <= core::SteadyClock::duration::zero()) {
+    next_frame_pace_time_ = {};
+    return 0.0;
+  }
+
+  const auto before_sleep = core::SteadyClock::now();
+  if (next_frame_pace_time_ == core::SteadyClock::time_point{}) {
+    next_frame_pace_time_ = before_sleep + frame_interval;
+    return 0.0;
+  }
+
+  double sleep_ms = 0.0;
+  if (before_sleep < next_frame_pace_time_) {
+    std::this_thread::sleep_until(next_frame_pace_time_);
+    sleep_ms = core::elapsedMilliseconds(before_sleep, core::SteadyClock::now());
+  }
+
+  const auto after_sleep = core::SteadyClock::now();
+  while (next_frame_pace_time_ <= after_sleep) {
+    next_frame_pace_time_ += frame_interval;
+  }
+  return sleep_ms;
+}
+
 void EngineApp::tick() {
   if (!running_ || !game_) {
     return;
   }
+  const uint64_t frame_tick = frame_tick_++;
 
   if (!frame_diag_initialized_) {
     frame_diag_initialized_ = true;
@@ -1092,11 +1305,12 @@ void EngineApp::tick() {
         std::max(0.0f, envFloat(std::getenv("KARMA_ENGINE_FRAME_DIAG_THRESHOLD_MS"),
                                 frame_diag_threshold_ms_));
     if (frame_diag_enabled_) {
-      spdlog::info("KARMA_ENGINE_FRAME_DIAG enabled; format=events_v2 logging frames >= {:.2f} ms",
+      spdlog::info("KARMA_ENGINE_FRAME_DIAG enabled; format=events_v3 logging frames >= {:.2f} ms",
                    frame_diag_threshold_ms_);
     }
   }
 
+  const double frame_pace_ms = applyFramePacing();
   const auto tick_start = core::SteadyClock::now();
   const auto now = core::SteadyClock::now();
   const float raw_frame_dt = core::elapsedSeconds(last_time_, now);
@@ -1146,6 +1360,10 @@ void EngineApp::tick() {
       }
     }
 
+    if (mouse_button_events > 0u) {
+      last_mouse_button_frame_tick_ = frame_tick;
+    }
+
     event_section_start = event_section_end;
     for (const auto& event : window_->events()) {
       if (user_ui_) {
@@ -1179,6 +1397,15 @@ void EngineApp::tick() {
   }
   auto section_end = core::SteadyClock::now();
   const double events_ms = core::elapsedMilliseconds(section_start, section_end);
+  const int64_t mouse_button_event_age =
+      last_mouse_button_frame_tick_ == std::numeric_limits<uint64_t>::max()
+          ? -1
+          : static_cast<int64_t>(frame_tick - last_mouse_button_frame_tick_);
+  const bool skip_present_this_frame =
+      config_.skip_present_on_mouse_button &&
+      mouse_button_event_age >= 0 &&
+      mouse_button_event_age <
+          static_cast<int64_t>(config_.mouse_button_present_skip_frames);
 
   if (!running_) {
     if (game_) {
@@ -1311,6 +1538,7 @@ void EngineApp::tick() {
     frame.width = fb_width;
     frame.height = fb_height;
     frame.delta_time = frame_dt;
+    frame.present = !skip_present_this_frame;
 
     section_start = section_end;
     graphics_->beginFrame(frame);
@@ -1374,21 +1602,55 @@ void EngineApp::tick() {
   const auto tick_end = core::SteadyClock::now();
   const double tick_total_ms = core::elapsedMilliseconds(tick_start, tick_end);
   const double raw_frame_ms = static_cast<double>(raw_frame_dt) * 1000.0;
+  renderer::RendererFrameTimingStats frame_timing_stats{};
+  if (frame_diag_enabled_ && graphics_) {
+    frame_timing_stats = graphics_->getRendererFrameTimingStats();
+  }
   if (frame_diag_enabled_ &&
       (raw_frame_ms >= static_cast<double>(frame_diag_threshold_ms_) ||
-       tick_total_ms >= static_cast<double>(frame_diag_threshold_ms_))) {
+       tick_total_ms >= static_cast<double>(frame_diag_threshold_ms_) ||
+       frame_timing_stats.render_thread_frame_ms >= frame_diag_threshold_ms_ ||
+       frame_timing_stats.swapchain_present_ms >= frame_diag_threshold_ms_ ||
+       skip_present_this_frame)) {
+    renderer::InstancingStats instancing_stats{};
+    renderer::RendererCommandStats command_stats{};
+    renderer::ForwardPlusStats forward_plus_stats{};
+    if (graphics_) {
+      instancing_stats = graphics_->getInstancingStats();
+      command_stats = graphics_->getRendererCommandStats();
+      forward_plus_stats = graphics_->getForwardPlusStats();
+    }
+    const uint32_t command_draws =
+        command_stats.draw + command_stats.draw_indexed +
+        command_stats.draw_indirect + command_stats.draw_indexed_indirect +
+        command_stats.multi_draw + command_stats.multi_draw_indexed;
     spdlog::info(
-        "Engine frame diag: raw_dt={:.3f}ms clamped_dt={:.3f}ms tick={:.3f}ms "
+        "Engine frame diag: raw_dt={:.3f}ms clamped_dt={:.3f}ms tick={:.3f}ms pace={:.3f}ms "
         "events={:.3f}[poll={:.3f} ui={:.3f} input={:.3f} clear={:.3f} close={:.3f} "
-        "count={} mb={} mm={} focus={} resize={}] "
+        "count={} mb={} mb_age={} mm={} focus={} resize={} skip_present={}] "
         "fixed={:.3f}({}) game={:.3f} light_pulse={:.3f} "
         "sync_scene={:.3f} animation={:.3f} scene_xform={:.3f} mesh_deform={:.3f} audio={:.3f} "
         "fb={:.3f} ui_frame={:.3f} begin={:.3f} particles={:.3f} modules={:.3f} "
         "render_system={:.3f} render_layer={:.3f} render_ui={:.3f} end_frame={:.3f} "
-        "swap={:.3f} alpha={:.3f} accumulator={:.3f}",
+        "swap={:.3f} alpha={:.3f} accumulator={:.3f} "
+        "renderer_backend=[submitted={} completed={} dropped={} queue={} "
+        "record={:.3f} submit={:.3f} rt_wait={:.3f} rt_frame={:.3f} cmd_wait={:.3f} "
+        "layers={} draws={} layer={:.3f} post={:.3f} present_copy={:.3f} "
+        "present={:.3f} skipped_present={} skip_flush={:.3f} ui={:.3f} "
+        "stages=[target={:.3f} clear={:.3f} camera={:.3f} env={:.3f} fplus={:.3f} "
+        "shadow={:.3f} terrain={:.3f} collect={:.3f} opaque={:.3f} transparent={:.3f} "
+        "particle_res={:.3f} particle={:.3f} line_res={:.3f} line={:.3f}] "
+        "resize={}:{:.3f} res_create={}:{:.3f} pipeline_create={}:{:.3f}] "
+        "inst=[submitted={} drawn={} culled_batches={} draw_calls={} uploads={} bytes={} "
+        "gpu_cull=[batches={} dispatch={} candidates={} indirect={}] "
+        "lod=[buckets={} dispatch={} candidates={} indirect={} fallback={}] "
+        "extract={:.3f} collect={:.3f} upload={:.3f}] "
+        "cmd_totals=[draws={} update_buffer={} copy_texture={} dispatch={}] "
+        "forward_plus=[active={} cpu={} lights={} tiles={}x{} overflow={}]",
         raw_frame_ms,
         static_cast<double>(frame_dt) * 1000.0,
         tick_total_ms,
+        frame_pace_ms,
         events_ms,
         poll_events_ms,
         ui_events_ms,
@@ -1397,9 +1659,11 @@ void EngineApp::tick() {
         should_close_ms,
         event_count,
         mouse_button_events,
+        mouse_button_event_age,
         mouse_move_events,
         window_focus_events,
         window_resize_events,
+        skip_present_this_frame ? 1 : 0,
         fixed_ms,
         fixed_steps,
         game_update_ms,
@@ -1420,7 +1684,73 @@ void EngineApp::tick() {
         end_frame_ms,
         swap_buffers_ms,
         render_alpha,
-        accumulator_);
+        accumulator_,
+        frame_timing_stats.submitted_frames,
+        frame_timing_stats.completed_frames,
+        frame_timing_stats.dropped_frames,
+        frame_timing_stats.render_queue_depth,
+        frame_timing_stats.frame_record_ms,
+        frame_timing_stats.frame_submit_ms,
+        frame_timing_stats.render_thread_wait_ms,
+        frame_timing_stats.render_thread_frame_ms,
+        frame_timing_stats.render_thread_command_wait_ms,
+        frame_timing_stats.render_layer_count,
+        frame_timing_stats.render_layer_draws,
+        frame_timing_stats.render_layer_total_ms,
+        frame_timing_stats.post_process_ms,
+        frame_timing_stats.present_copy_ms,
+        frame_timing_stats.swapchain_present_ms,
+        frame_timing_stats.skipped_presents,
+        frame_timing_stats.skipped_present_flush_ms,
+        frame_timing_stats.render_ui_ms,
+        frame_timing_stats.target_setup_ms,
+        frame_timing_stats.clear_ms,
+        frame_timing_stats.camera_setup_ms,
+        frame_timing_stats.environment_ms,
+        frame_timing_stats.forward_plus_ms,
+        frame_timing_stats.shadow_ms,
+        frame_timing_stats.terrain_ms,
+        frame_timing_stats.forward_collect_ms,
+        frame_timing_stats.opaque_ms,
+        frame_timing_stats.transparent_ms,
+        frame_timing_stats.particle_resources_ms,
+        frame_timing_stats.particle_pass_ms,
+        frame_timing_stats.line_resources_ms,
+        frame_timing_stats.line_draw_ms,
+        frame_timing_stats.resize_events,
+        frame_timing_stats.resize_ms,
+        frame_timing_stats.resource_creation_count,
+        frame_timing_stats.resource_creation_ms,
+        frame_timing_stats.pipeline_creation_count,
+        frame_timing_stats.pipeline_creation_ms,
+        instancing_stats.submitted_instances,
+        instancing_stats.drawn_instances,
+        instancing_stats.culled_batches,
+        instancing_stats.draw_calls,
+        instancing_stats.instance_buffer_updates,
+        instancing_stats.instance_upload_bytes,
+        instancing_stats.gpu_culling_batches,
+        instancing_stats.gpu_culling_dispatches,
+        instancing_stats.gpu_culling_candidate_instances,
+        instancing_stats.gpu_indirect_draws,
+        instancing_stats.lod_bucket_count,
+        instancing_stats.lod_culling_dispatches,
+        instancing_stats.lod_candidate_instances,
+        instancing_stats.lod_indirect_draws,
+        instancing_stats.lod_fallbacks,
+        instancing_stats.render_system_extraction_ms,
+        instancing_stats.forward_state_collection_ms,
+        instancing_stats.instance_upload_ms,
+        command_draws,
+        command_stats.update_buffer,
+        command_stats.copy_texture,
+        command_stats.dispatch_compute,
+        forward_plus_stats.active,
+        forward_plus_stats.cpu_fallback,
+        forward_plus_stats.local_light_count,
+        forward_plus_stats.tiles_x,
+        forward_plus_stats.tiles_y,
+        forward_plus_stats.overflow_risk);
   }
 
   if (!running_) {

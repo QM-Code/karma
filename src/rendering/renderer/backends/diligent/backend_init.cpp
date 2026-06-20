@@ -84,6 +84,36 @@ Diligent::Uint32 adapterIdFromEnv(const char* name) {
   return static_cast<Diligent::Uint32>(parsed);
 }
 
+Diligent::Uint32 uintFromEnv(const char* name,
+                             Diligent::Uint32 fallback,
+                             Diligent::Uint32 min_value,
+                             Diligent::Uint32 max_value) {
+  const char* value = std::getenv(name);
+  if (!value || value[0] == '\0') {
+    return fallback;
+  }
+
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  if (!end || *end != '\0' || parsed > std::numeric_limits<Diligent::Uint32>::max()) {
+    std::fprintf(stderr, "[Karma] Ignoring invalid %s=%s\n", name, value);
+    std::fflush(stderr);
+    return fallback;
+  }
+
+  const Diligent::Uint32 clamped =
+      std::clamp(static_cast<Diligent::Uint32>(parsed), min_value, max_value);
+  if (clamped != parsed) {
+    std::fprintf(stderr,
+                 "[Karma] Clamping %s=%s to %u\n",
+                 name,
+                 value,
+                 static_cast<unsigned>(clamped));
+    std::fflush(stderr);
+  }
+  return clamped;
+}
+
 Diligent::Uint32 chooseVulkanAdapter(Diligent::IEngineFactoryVk& factory) {
   Diligent::Uint32 adapter_count = 0;
   factory.EnumerateAdapters(Diligent::Version{}, adapter_count, nullptr);
@@ -235,6 +265,7 @@ cbuffer Constants
     float4 g_LocalLightColorIntensity[64];
     float4 g_LocalLightSpotParams[64];
     float4 g_LocalLightMeta;
+    float4 g_InstanceParams;
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
     float4 g_MaterialParams2;
@@ -273,6 +304,7 @@ struct VSInput
     float4 ModelCol1 : ATTRIB5;
     float4 ModelCol2 : ATTRIB6;
     float4 ModelCol3 : ATTRIB7;
+    float4 InstanceParams : ATTRIB11;
     float4 JointIndices : ATTRIB8;
     float4 JointWeights : ATTRIB9;
     uint VertexId : SV_VertexID;
@@ -320,10 +352,37 @@ VSOutput main(VSInput input)
             local_pos = skinned_pos.xyz / max(skinned_pos.w, 1.0e-5);
         }
     }
-    float4 world_pos = input.ModelCol0 * local_pos.x +
-                       input.ModelCol1 * local_pos.y +
-                       input.ModelCol2 * local_pos.z +
-                       input.ModelCol3;
+    uint shading_mode = (uint)round(g_MaterialParams0.x);
+    if (shading_mode == 7u)
+    {
+        float blade_height = saturate(1.0 - input.UV.y);
+        float sway_weight = blade_height * blade_height;
+        float phase = g_LocalLightMeta.w * 1.7 +
+                      input.InstanceParams.x * 0.13 +
+                      input.InstanceParams.y * 0.19;
+        local_pos.x += sin(phase + local_pos.y * 2.4) * 0.055 * sway_weight;
+        local_pos.z += cos(phase * 0.73 + local_pos.y * 1.9) * 0.035 * sway_weight;
+    }
+    float4 world_pos;
+    if (g_InstanceParams.x > 0.5)
+    {
+        float3 scale = input.ModelCol1.xyz;
+        float yaw = input.ModelCol0.w;
+        float s = sin(yaw);
+        float c = cos(yaw);
+        float3 scaled = local_pos * scale;
+        float3 rotated = float3(scaled.x * c + scaled.z * s,
+                                scaled.y,
+                                -scaled.x * s + scaled.z * c);
+        world_pos = float4(rotated + input.ModelCol0.xyz, 1.0);
+    }
+    else
+    {
+        world_pos = input.ModelCol0 * local_pos.x +
+                    input.ModelCol1 * local_pos.y +
+                    input.ModelCol2 * local_pos.z +
+                    input.ModelCol3;
+    }
     output.Pos = mul(g_MVP, world_pos);
     return output;
 }
@@ -389,10 +448,26 @@ void DiligentBackend::recreateShadowMap() {
   }
   if (shadow_map_srv_) {
     for (auto* pso : {pipeline_state_.RawPtr(),
+                      opaque_double_sided_pipeline_state_.RawPtr(),
                       transparent_pipeline_state_.RawPtr(),
                       transparent_double_sided_pipeline_state_.RawPtr(),
                       additive_pipeline_state_.RawPtr(),
                       additive_double_sided_pipeline_state_.RawPtr()}) {
+      if (!pso) {
+        continue;
+      }
+      if (auto* var =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap")) {
+        var->Set(shadow_map_srv_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+      if (auto* var =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap")) {
+        var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_,
+                 Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+    }
+    for (auto& pso_ref : compact_forward_pipeline_states_) {
+      auto* pso = pso_ref.RawPtr();
       if (!pso) {
         continue;
       }
@@ -467,10 +542,22 @@ void DiligentBackend::recreatePointShadowMap() {
   }
 
   for (auto* pso : {pipeline_state_.RawPtr(),
+                    opaque_double_sided_pipeline_state_.RawPtr(),
                     transparent_pipeline_state_.RawPtr(),
                     transparent_double_sided_pipeline_state_.RawPtr(),
                     additive_pipeline_state_.RawPtr(),
                     additive_double_sided_pipeline_state_.RawPtr()}) {
+    if (!pso) {
+      continue;
+    }
+    if (auto* var = pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                                 "g_PointShadowMap")) {
+      var->Set(point_shadow_map_srv_ ? point_shadow_map_srv_ : shadow_map_srv_,
+               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+    }
+  }
+  for (auto& pso_ref : compact_forward_pipeline_states_) {
+    auto* pso = pso_ref.RawPtr();
     if (!pso) {
       continue;
     }
@@ -528,7 +615,16 @@ void DiligentBackend::recreateShadowPipeline() {
   shadow_graphics.DepthStencilDesc.DepthWriteEnable = true;
   shadow_graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
 
-  constexpr Diligent::Uint32 kInstanceStride = static_cast<Diligent::Uint32>(sizeof(float) * 16);
+  constexpr Diligent::Uint32 kInstanceStride =
+      static_cast<Diligent::Uint32>(sizeof(float) * 20);
+  const Diligent::Uint32 model_col1_offset =
+      static_cast<Diligent::Uint32>(sizeof(float) * 4);
+  const Diligent::Uint32 model_col2_offset =
+      static_cast<Diligent::Uint32>(sizeof(float) * 8);
+  const Diligent::Uint32 model_col3_offset =
+      static_cast<Diligent::Uint32>(sizeof(float) * 12);
+  const Diligent::Uint32 params_offset =
+      static_cast<Diligent::Uint32>(sizeof(float) * 16);
   Diligent::LayoutElement layout_elems[] = {
       Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
@@ -542,15 +638,19 @@ void DiligentBackend::recreateShadowPipeline() {
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 4),
+                              model_col1_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 8),
+                              model_col2_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 12),
+                              model_col3_offset,
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{11, 1, 4, Diligent::VT_FLOAT32, false,
+                              params_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE}
   };
@@ -575,7 +675,10 @@ void DiligentBackend::recreateShadowPipeline() {
 
   const auto shadow_pso_start = core::SteadyClock::now();
   shadow_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(shadow_pso);
-  logRenderPipelineDiag("shadow", "Karma Shadow Pipeline", shadow_pso_start, core::SteadyClock::now());
+  recordPipelineCreation("shadow",
+                         "Karma Shadow Pipeline",
+                         shadow_pso_start,
+                         core::SteadyClock::now());
   if (!shadow_pipeline_state_) {
     return;
   }
@@ -592,7 +695,12 @@ void DiligentBackend::recreateShadowPipeline() {
       variable->Set(deformation_constants_);
     }
   }
+  const auto shadow_srb_start = core::SteadyClock::now();
   shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
+  recordResourceCreation("shadow",
+                         "Karma Shadow Pipeline SRB",
+                         shadow_srb_start,
+                         core::SteadyClock::now());
 }
 
 void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const {
@@ -636,34 +744,95 @@ void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineStat
   }
 }
 
-Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
-    ForwardPipelineVariant variant) {
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState>* out_pso = nullptr;
-  const char* name = "Karma Pipeline";
+size_t DiligentBackend::forwardPipelineVariantIndex(ForwardPipelineVariant variant) {
   switch (variant) {
     case ForwardPipelineVariant::Opaque:
-      out_pso = std::addressof(pipeline_state_);
-      name = "Karma Pipeline";
+      return 0u;
+    case ForwardPipelineVariant::OpaqueDoubleSided:
+      return 1u;
+    case ForwardPipelineVariant::DepthPrepass:
+      return 2u;
+    case ForwardPipelineVariant::Transparent:
+      return 3u;
+    case ForwardPipelineVariant::TransparentDoubleSided:
+      return 4u;
+    case ForwardPipelineVariant::Additive:
+      return 5u;
+    case ForwardPipelineVariant::AdditiveDoubleSided:
+      return 6u;
+  }
+  return 0u;
+}
+
+size_t DiligentBackend::instanceGpuLayoutIndex(renderer::InstanceGpuLayout layout) {
+  switch (layout) {
+    case renderer::InstanceGpuLayout::Matrix4x4Params:
+      return 0u;
+    case renderer::InstanceGpuLayout::PositionYawScaleParams:
+      return 1u;
+  }
+  return 0u;
+}
+
+Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
+    ForwardPipelineVariant variant,
+    renderer::InstanceGpuLayout layout) {
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState>* out_pso = nullptr;
+  const char* name = "Karma Pipeline";
+  const bool compact_layout = layout == renderer::InstanceGpuLayout::PositionYawScaleParams;
+  if (compact_layout) {
+    out_pso = std::addressof(compact_forward_pipeline_states_[forwardPipelineVariantIndex(variant)]);
+  } else {
+    switch (variant) {
+      case ForwardPipelineVariant::Opaque:
+        out_pso = std::addressof(pipeline_state_);
+        break;
+      case ForwardPipelineVariant::OpaqueDoubleSided:
+        out_pso = std::addressof(opaque_double_sided_pipeline_state_);
+        break;
+      case ForwardPipelineVariant::DepthPrepass:
+        out_pso = std::addressof(depth_prepass_pipeline_state_);
+        break;
+      case ForwardPipelineVariant::Transparent:
+        out_pso = std::addressof(transparent_pipeline_state_);
+        break;
+      case ForwardPipelineVariant::TransparentDoubleSided:
+        out_pso = std::addressof(transparent_double_sided_pipeline_state_);
+        break;
+      case ForwardPipelineVariant::Additive:
+        out_pso = std::addressof(additive_pipeline_state_);
+        break;
+      case ForwardPipelineVariant::AdditiveDoubleSided:
+        out_pso = std::addressof(additive_double_sided_pipeline_state_);
+        break;
+    }
+  }
+  switch (variant) {
+    case ForwardPipelineVariant::Opaque:
+      name = compact_layout ? "Karma Pipeline Compact" : "Karma Pipeline";
+      break;
+    case ForwardPipelineVariant::OpaqueDoubleSided:
+      name = compact_layout ? "Karma Pipeline Compact (DoubleSided)"
+                            : "Karma Pipeline (DoubleSided)";
       break;
     case ForwardPipelineVariant::DepthPrepass:
-      out_pso = std::addressof(depth_prepass_pipeline_state_);
-      name = "Karma Depth Prepass Pipeline";
+      name = compact_layout ? "Karma Depth Prepass Pipeline Compact"
+                            : "Karma Depth Prepass Pipeline";
       break;
     case ForwardPipelineVariant::Transparent:
-      out_pso = std::addressof(transparent_pipeline_state_);
-      name = "Karma Transparent Pipeline";
+      name = compact_layout ? "Karma Transparent Pipeline Compact"
+                            : "Karma Transparent Pipeline";
       break;
     case ForwardPipelineVariant::TransparentDoubleSided:
-      out_pso = std::addressof(transparent_double_sided_pipeline_state_);
-      name = "Karma Transparent Pipeline (DoubleSided)";
+      name = compact_layout ? "Karma Transparent Pipeline Compact (DoubleSided)"
+                            : "Karma Transparent Pipeline (DoubleSided)";
       break;
     case ForwardPipelineVariant::Additive:
-      out_pso = std::addressof(additive_pipeline_state_);
-      name = "Karma Additive Pipeline";
+      name = compact_layout ? "Karma Additive Pipeline Compact" : "Karma Additive Pipeline";
       break;
     case ForwardPipelineVariant::AdditiveDoubleSided:
-      out_pso = std::addressof(additive_double_sided_pipeline_state_);
-      name = "Karma Additive Pipeline (DoubleSided)";
+      name = compact_layout ? "Karma Additive Pipeline Compact (DoubleSided)"
+                            : "Karma Additive Pipeline (DoubleSided)";
       break;
   }
 
@@ -702,7 +871,8 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   graphics.DepthStencilDesc.DepthWriteEnable = true;
   graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
 
-  const bool double_sided = variant == ForwardPipelineVariant::TransparentDoubleSided ||
+  const bool double_sided = variant == ForwardPipelineVariant::OpaqueDoubleSided ||
+                            variant == ForwardPipelineVariant::TransparentDoubleSided ||
                             variant == ForwardPipelineVariant::AdditiveDoubleSided;
   const bool transparent = variant == ForwardPipelineVariant::Transparent ||
                            variant == ForwardPipelineVariant::TransparentDoubleSided ||
@@ -710,6 +880,9 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
                            variant == ForwardPipelineVariant::AdditiveDoubleSided;
   const bool additive = variant == ForwardPipelineVariant::Additive ||
                         variant == ForwardPipelineVariant::AdditiveDoubleSided;
+  if (!depth_prepass && !transparent) {
+    graphics.BlendDesc.AlphaToCoverageEnable = true;
+  }
   if (double_sided) {
     graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
   }
@@ -727,7 +900,22 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
     blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
   }
 
-  constexpr Diligent::Uint32 kInstanceStride = static_cast<Diligent::Uint32>(sizeof(float) * 16);
+  const Diligent::Uint32 kInstanceStride =
+      static_cast<Diligent::Uint32>(renderer::instanceGpuLayoutStride(layout));
+  const Diligent::Uint32 model_col1_offset =
+      static_cast<Diligent::Uint32>(sizeof(float) * 4);
+  const Diligent::Uint32 model_col2_offset =
+      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+          ? 0u
+          : static_cast<Diligent::Uint32>(sizeof(float) * 8);
+  const Diligent::Uint32 model_col3_offset =
+      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+          ? static_cast<Diligent::Uint32>(sizeof(float) * 4)
+          : static_cast<Diligent::Uint32>(sizeof(float) * 12);
+  const Diligent::Uint32 params_offset =
+      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+          ? static_cast<Diligent::Uint32>(sizeof(float) * 8)
+          : static_cast<Diligent::Uint32>(sizeof(float) * 16);
   Diligent::LayoutElement layout_elems[] = {
       Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
@@ -741,15 +929,19 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 4),
+                              model_col1_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 8),
+                              model_col2_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 12),
+                              model_col3_offset,
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{11, 1, 4, Diligent::VT_FLOAT32, false,
+                              params_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE}
   };
@@ -778,6 +970,7 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
       {Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerData", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SceneColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
@@ -824,30 +1017,52 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
 
   const auto pso_start = core::SteadyClock::now();
   *out_pso = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
-  logRenderPipelineDiag("forward", name, pso_start, core::SteadyClock::now());
+  recordPipelineCreation("forward", name, pso_start, core::SteadyClock::now());
   bindForwardPipelineStaticResources(out_pso->RawPtr());
   if (depth_prepass && *out_pso) {
+    const auto depth_srb_start = core::SteadyClock::now();
     (*out_pso)->CreateShaderResourceBinding(&depth_prepass_srb_, true);
+    recordResourceCreation("forward", "depth prepass SRB", depth_srb_start, core::SteadyClock::now());
   }
   if (!depth_prepass && default_base_color_ && default_normal_ && default_metallic_roughness_ &&
       default_occlusion_ && default_emissive_) {
+    auto initialize_default_for_variant =
+        [&](Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb) {
+      initializeDefaultMaterialBinding(out_pso->RawPtr(), srb);
+    };
     switch (variant) {
       case ForwardPipelineVariant::Opaque:
-        initializeDefaultMaterialBinding(out_pso->RawPtr(), default_material_srb_);
+        initialize_default_for_variant(compact_layout
+                                           ? compact_default_material_srbs_[forwardPipelineVariantIndex(variant)]
+                                           : default_material_srb_);
+        break;
+      case ForwardPipelineVariant::OpaqueDoubleSided:
+        initialize_default_for_variant(
+            compact_layout
+                ? compact_default_material_srbs_[forwardPipelineVariantIndex(variant)]
+                : opaque_double_sided_default_material_srb_);
         break;
       case ForwardPipelineVariant::Transparent:
-        initializeDefaultMaterialBinding(out_pso->RawPtr(), transparent_default_material_srb_);
+        initialize_default_for_variant(compact_layout
+                                           ? compact_default_material_srbs_[forwardPipelineVariantIndex(variant)]
+                                           : transparent_default_material_srb_);
         break;
       case ForwardPipelineVariant::TransparentDoubleSided:
-        initializeDefaultMaterialBinding(out_pso->RawPtr(),
-                                         transparent_double_sided_default_material_srb_);
+        initialize_default_for_variant(
+            compact_layout
+                ? compact_default_material_srbs_[forwardPipelineVariantIndex(variant)]
+                : transparent_double_sided_default_material_srb_);
         break;
       case ForwardPipelineVariant::Additive:
-        initializeDefaultMaterialBinding(out_pso->RawPtr(), additive_default_material_srb_);
+        initialize_default_for_variant(compact_layout
+                                           ? compact_default_material_srbs_[forwardPipelineVariantIndex(variant)]
+                                           : additive_default_material_srb_);
         break;
       case ForwardPipelineVariant::AdditiveDoubleSided:
-        initializeDefaultMaterialBinding(out_pso->RawPtr(),
-                                         additive_double_sided_default_material_srb_);
+        initialize_default_for_variant(
+            compact_layout
+                ? compact_default_material_srbs_[forwardPipelineVariantIndex(variant)]
+                : additive_double_sided_default_material_srb_);
         break;
       case ForwardPipelineVariant::DepthPrepass:
         break;
@@ -858,7 +1073,8 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
 
 Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
     const MaterialRecord& material,
-    ForwardPipelineVariant variant) {
+    ForwardPipelineVariant variant,
+    renderer::InstanceGpuLayout layout) {
   if (variant == ForwardPipelineVariant::DepthPrepass ||
       !materialUsesCustomForwardPipeline(material)) {
     return nullptr;
@@ -877,6 +1093,8 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
           : std::string("main");
 
   std::string cache_key = std::to_string(static_cast<uint32_t>(variant));
+  cache_key.append("|layout=");
+  cache_key.append(std::to_string(static_cast<uint32_t>(layout)));
   cache_key.push_back('|');
   cache_key.append(vertex_path.string());
   cache_key.push_back('|');
@@ -922,8 +1140,14 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
     std::string value;
   };
   std::vector<ParsedDefine> parsed_defines;
-  parsed_defines.reserve(material.pipeline.defines.size() + 1u);
+  parsed_defines.reserve(material.pipeline.defines.size() + 2u);
   parsed_defines.push_back(ParsedDefine{.name = "KARMA_CUSTOM_MATERIAL", .value = "1"});
+  if (layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+    parsed_defines.push_back(ParsedDefine{
+        .name = "KARMA_INSTANCE_LAYOUT_POSITION_YAW_SCALE",
+        .value = "1",
+    });
+  }
   for (const std::string& define : material.pipeline.defines) {
     if (define.empty()) {
       continue;
@@ -973,6 +1197,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
   }
 
   const bool double_sided = material.desc.double_sided ||
+                            variant == ForwardPipelineVariant::OpaqueDoubleSided ||
                             variant == ForwardPipelineVariant::TransparentDoubleSided ||
                             variant == ForwardPipelineVariant::AdditiveDoubleSided;
   const bool transparent = variant == ForwardPipelineVariant::Transparent ||
@@ -981,7 +1206,6 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
                            variant == ForwardPipelineVariant::AdditiveDoubleSided;
   const bool additive = variant == ForwardPipelineVariant::Additive ||
                         variant == ForwardPipelineVariant::AdditiveDoubleSided;
-
   std::string pso_name = "Karma Custom Material Pipeline";
   if (transparent) {
     pso_name.append(additive ? " Additive" : " Transparent");
@@ -1009,6 +1233,11 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
   graphics.DepthStencilDesc.DepthEnable = material.desc.depth_test;
   graphics.DepthStencilDesc.DepthWriteEnable = transparent ? false : material.desc.depth_write;
   graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
+  if (!transparent &&
+      material.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Masked &&
+      material.desc.alpha_to_coverage) {
+    graphics.BlendDesc.AlphaToCoverageEnable = true;
+  }
   if (transparent) {
     auto& blend = graphics.BlendDesc.RenderTargets[0];
     blend.BlendEnable = true;
@@ -1022,8 +1251,22 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
     blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
   }
 
-  constexpr Diligent::Uint32 kInstanceStride =
-      static_cast<Diligent::Uint32>(sizeof(float) * 16);
+  const Diligent::Uint32 kInstanceStride =
+      static_cast<Diligent::Uint32>(renderer::instanceGpuLayoutStride(layout));
+  const Diligent::Uint32 model_col1_offset =
+      static_cast<Diligent::Uint32>(sizeof(float) * 4);
+  const Diligent::Uint32 model_col2_offset =
+      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+          ? 0u
+          : static_cast<Diligent::Uint32>(sizeof(float) * 8);
+  const Diligent::Uint32 model_col3_offset =
+      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+          ? static_cast<Diligent::Uint32>(sizeof(float) * 4)
+          : static_cast<Diligent::Uint32>(sizeof(float) * 12);
+  const Diligent::Uint32 params_offset =
+      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+          ? static_cast<Diligent::Uint32>(sizeof(float) * 8)
+          : static_cast<Diligent::Uint32>(sizeof(float) * 16);
   Diligent::LayoutElement layout_elems[] = {
       Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
@@ -1037,15 +1280,19 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{5, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 4),
+                              model_col1_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{6, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 8),
+                              model_col2_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
       Diligent::LayoutElement{7, 1, 4, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(sizeof(float) * 12),
+                              model_col3_offset,
+                              kInstanceStride,
+                              Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE},
+      Diligent::LayoutElement{11, 1, 4, Diligent::VT_FLOAT32, false,
+                              params_offset,
                               kInstanceStride,
                               Diligent::INPUT_ELEMENT_FREQUENCY_PER_INSTANCE}
   };
@@ -1068,6 +1315,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
       {Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SamplerData", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_PIXEL, "g_SceneColor", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_SceneDepth", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
@@ -1095,7 +1343,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
 
   const auto pso_start = core::SteadyClock::now();
   cached.pso = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
-  logRenderPipelineDiag("custom_forward", pso_name.c_str(), pso_start, core::SteadyClock::now());
+  recordPipelineCreation("custom_forward", pso_name.c_str(), pso_start, core::SteadyClock::now());
   if (!cached.pso) {
     spdlog::warn("Failed to create custom material pipeline: vertex='{}' fragment='{}'",
                  vertex_path.string(),
@@ -1147,6 +1395,8 @@ void DiligentBackend::initializeDevice() {
   }
   engine_ci.Features.ShaderResourceRuntimeArray = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
   engine_ci.Features.Tessellation = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
+  engine_ci.DynamicHeapSize = 64u << 20;
+  engine_ci.DynamicHeapPageSize = 4u << 20;
   engine_ci.AdapterId = chooseVulkanAdapter(*factory);
   mark_stage("factory and adapter selection");
 
@@ -1158,7 +1408,11 @@ void DiligentBackend::initializeDevice() {
     sc_desc.DepthBufferFormat = Diligent::TEX_FORMAT_D24_UNORM_S8_UINT;
     sc_desc.Width = static_cast<Diligent::Uint32>(current_width_);
     sc_desc.Height = static_cast<Diligent::Uint32>(current_height_);
-    sc_desc.BufferCount = 2;
+    sc_desc.BufferCount =
+        uintFromEnv("KARMA_RENDER_SWAPCHAIN_BUFFERS", 2u, 2u, 8u);
+    if (std::getenv("KARMA_RENDER_SWAPCHAIN_BUFFERS") != nullptr) {
+      spdlog::info("Requested Vulkan swapchain buffer count: {}", sc_desc.BufferCount);
+    }
     sc_desc.Usage = Diligent::SWAP_CHAIN_USAGE_RENDER_TARGET;
     factory->CreateDeviceAndContextsVk(engine_ci, &device_, &context_);
     if (device_) {
@@ -1269,6 +1523,7 @@ cbuffer Constants
     float4 g_LocalLightColorIntensity[64];
     float4 g_LocalLightSpotParams[64];
     float4 g_LocalLightMeta;
+    float4 g_InstanceParams;
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
     float4 g_MaterialParams2;
@@ -1307,6 +1562,7 @@ struct VSInput
     float4 ModelCol1 : ATTRIB5;
     float4 ModelCol2 : ATTRIB6;
     float4 ModelCol3 : ATTRIB7;
+    float4 InstanceParams : ATTRIB11;
     float4 JointIndices : ATTRIB8;
     float4 JointWeights : ATTRIB9;
     uint VertexId : SV_VertexID;
@@ -1320,6 +1576,7 @@ struct VSOutput
     float2 UV1 : TEXCOORD1;
     float4 Tangent : TEXCOORD2;
     float3 WorldPos : TEXCOORD3;
+    float4 InstanceParams : TEXCOORD4;
 };
 
 VSOutput main(VSInput input)
@@ -1375,18 +1632,95 @@ VSOutput main(VSInput input)
                 mul((float3x3)g_DeformationMatrices[min(joints.w, joint_count - 1u)], local_tangent) * weights.w;
         }
     }
-    float4 world_pos = input.ModelCol0 * local_pos.x +
-                       input.ModelCol1 * local_pos.y +
-                       input.ModelCol2 * local_pos.z +
-                       input.ModelCol3;
+    uint shading_mode = (uint)round(g_MaterialParams0.x);
+    if (shading_mode == 7u)
+    {
+        float blade_height = saturate(1.0 - input.UV.y);
+        float sway_weight = blade_height * blade_height;
+        float phase = g_LocalLightMeta.w * 1.7 +
+                      input.InstanceParams.x * 0.13 +
+                      input.InstanceParams.y * 0.19;
+        local_pos.x += sin(phase + local_pos.y * 2.4) * 0.055 * sway_weight;
+        local_pos.z += cos(phase * 0.73 + local_pos.y * 1.9) * 0.035 * sway_weight;
+    }
+    float4 world_pos;
+    float3 world_normal;
+    float3 world_tangent;
+    if (g_InstanceParams.x > 0.5)
+    {
+        float3 scale = input.ModelCol1.xyz;
+        float3 safe_scale = max(abs(scale), float3(1.0e-5, 1.0e-5, 1.0e-5));
+        float3 scaled = local_pos * scale;
+        float3 normal_scaled = local_normal / safe_scale;
+        if (g_InstanceParams.y > 0.5)
+        {
+            float3 center = input.ModelCol0.xyz;
+            float3 up_axis = float3(0.0, 1.0, 0.0);
+            float3 forward_axis = g_CameraPos.xyz - center;
+            forward_axis.y = 0.0;
+            if (dot(forward_axis, forward_axis) <= 1.0e-6)
+            {
+                forward_axis = float3(0.0, 0.0, 1.0);
+            }
+            else
+            {
+                forward_axis = normalize(forward_axis);
+            }
+            float3 right_axis = cross(up_axis, forward_axis);
+            if (dot(right_axis, right_axis) <= 1.0e-6)
+            {
+                right_axis = float3(1.0, 0.0, 0.0);
+            }
+            else
+            {
+                right_axis = normalize(right_axis);
+            }
+            forward_axis = normalize(cross(right_axis, up_axis));
+            float3 billboard_pos =
+                right_axis * scaled.x + up_axis * scaled.y + forward_axis * scaled.z;
+            world_pos = float4(billboard_pos + center, 1.0);
+            world_normal = right_axis * normal_scaled.x +
+                           up_axis * normal_scaled.y +
+                           forward_axis * normal_scaled.z;
+            world_tangent = right_axis * local_tangent.x +
+                            up_axis * local_tangent.y +
+                            forward_axis * local_tangent.z;
+        }
+        else
+        {
+            float yaw = input.ModelCol0.w;
+            float s = sin(yaw);
+            float c = cos(yaw);
+            float3 rotated = float3(scaled.x * c + scaled.z * s,
+                                    scaled.y,
+                                    -scaled.x * s + scaled.z * c);
+            world_pos = float4(rotated + input.ModelCol0.xyz, 1.0);
+            world_normal = float3(normal_scaled.x * c + normal_scaled.z * s,
+                                  normal_scaled.y,
+                                  -normal_scaled.x * s + normal_scaled.z * c);
+            world_tangent = float3(local_tangent.x * c + local_tangent.z * s,
+                                   local_tangent.y,
+                                   -local_tangent.x * s + local_tangent.z * c);
+        }
+    }
+    else
+    {
+        world_pos = input.ModelCol0 * local_pos.x +
+                    input.ModelCol1 * local_pos.y +
+                    input.ModelCol2 * local_pos.z +
+                    input.ModelCol3;
+        world_normal = input.ModelCol0.xyz * local_normal.x +
+                       input.ModelCol1.xyz * local_normal.y +
+                       input.ModelCol2.xyz * local_normal.z;
+        world_tangent = local_tangent;
+    }
     output.Pos = mul(g_MVP, world_pos);
     output.WorldPos = world_pos.xyz;
-    output.Normal = normalize(input.ModelCol0.xyz * local_normal.x +
-                              input.ModelCol1.xyz * local_normal.y +
-                              input.ModelCol2.xyz * local_normal.z);
+    output.Normal = normalize(world_normal);
     output.UV = input.UV;
     output.UV1 = input.UV1;
-    output.Tangent = float4(normalize(local_tangent), input.Tangent.w);
+    output.Tangent = float4(normalize(world_tangent), input.Tangent.w);
+    output.InstanceParams = input.InstanceParams;
     return output;
 }
 )";
@@ -1424,6 +1758,7 @@ cbuffer Constants
     float4 g_LocalLightColorIntensity[64];
     float4 g_LocalLightSpotParams[64];
     float4 g_LocalLightMeta;
+    float4 g_InstanceParams;
     float4 g_MaterialParams0;
     float4 g_MaterialParams1;
     float4 g_MaterialParams2;
@@ -1455,6 +1790,7 @@ Texture2D<float> g_SceneDepth;
 Texture2DArray<float> g_ShadowMap;
 Texture2DArray<float> g_PointShadowMap;
 SamplerState g_SamplerColor;
+SamplerState g_SamplerClamp;
 SamplerState g_SamplerData;
 SamplerComparisonState g_ShadowSampler;
 
@@ -1479,6 +1815,7 @@ struct PSInput
     float2 UV1 : TEXCOORD1;
     float4 Tangent : TEXCOORD2;
     float3 WorldPos : TEXCOORD3;
+    float4 InstanceParams : TEXCOORD4;
     bool FrontFace : SV_IsFrontFace;
 };
 
@@ -1489,6 +1826,19 @@ float2 MaterialUV(float2 uv0, float2 uv1, uint slot)
     float2 uv = lerp(uv0, uv1, step(0.5, row0.w));
     return float2(dot(row0.xy, uv) + row0.z,
                   dot(row1.xy, uv) + row1.z);
+}
+
+float Bayer4x4(float2 pixel)
+{
+    static const float values[16] =
+    {
+        0.0, 8.0, 2.0, 10.0,
+        12.0, 4.0, 14.0, 6.0,
+        3.0, 11.0, 1.0, 9.0,
+        15.0, 7.0, 13.0, 5.0
+    };
+    uint2 p = uint2(pixel) & 3u;
+    return (values[p.y * 4u + p.x] + 0.5) / 16.0;
 }
 
 float SampleCascadeShadow(uint cascade_idx,
@@ -2289,6 +2639,10 @@ float4 main(PSInput input) : SV_TARGET
 {
     const float PI = 3.14159265;
     float3 geom_n = normalize(input.Normal);
+    if (!input.FrontFace)
+    {
+        geom_n = -geom_n;
+    }
     float3 n = geom_n;
     float3 t = normalize(input.Tangent.xyz);
     float3 b = normalize(cross(geom_n, t) * input.Tangent.w);
@@ -2304,6 +2658,20 @@ float4 main(PSInput input) : SV_TARGET
     float2 sheen_roughness_uv = MaterialUV(input.UV, input.UV1, 9u);
     float2 transmission_uv = MaterialUV(input.UV, input.UV1, 10u);
     float2 thickness_uv = MaterialUV(input.UV, input.UV1, 11u);
+    uint shading_mode = (uint)round(g_MaterialParams0.x);
+    bool standard_material = shading_mode == 0u;
+    bool foliage_material = shading_mode == 7u;
+    bool surface_material = standard_material || foliage_material;
+    bool surface_unlit = surface_material && g_MaterialParams2.z > 0.5;
+    if (foliage_material)
+    {
+        uint base_width = 1u;
+        uint base_height = 1u;
+        g_BaseColorTex.GetDimensions(base_width, base_height);
+        float2 base_texel = 0.5 / max(float2((float)base_width, (float)base_height),
+                                      float2(1.0, 1.0));
+        base_uv = clamp(base_uv, base_texel, float2(1.0, 1.0) - base_texel);
+    }
     float3 normal_tex = g_NormalTex.Sample(g_SamplerData, normal_uv).xyz * 2.0 - 1.0;
     normal_tex.xy *= g_PbrParams.w;
     normal_tex = normalize(normal_tex);
@@ -2318,7 +2686,9 @@ float4 main(PSInput input) : SV_TARGET
                   clearcoat_normal_tex.z * geom_n);
     float3 l_dir = normalize(-g_LightDir.xyz);
     float ndotl = max(dot(n, l_dir), 0.0);
-    float4 base_tex = g_BaseColorTex.Sample(g_SamplerColor, base_uv);
+    float4 base_tex = foliage_material
+        ? g_BaseColorTex.Sample(g_SamplerClamp, base_uv)
+        : g_BaseColorTex.Sample(g_SamplerColor, base_uv);
     float3 emissive_tex = g_EmissiveTex.Sample(g_SamplerColor, emissive_uv).rgb;
     float occlusion = g_OcclusionTex.Sample(g_SamplerData, occlusion_uv).r;
     float2 mr = g_MetallicRoughnessTex.Sample(g_SamplerData, metallic_roughness_uv).bg;
@@ -2327,8 +2697,6 @@ float4 main(PSInput input) : SV_TARGET
 
     float3 base_color = g_BaseColorFactor.rgb * base_tex.rgb;
     float3 emissive = g_EmissiveFactor.rgb * emissive_tex;
-    uint shading_mode = (uint)round(g_MaterialParams0.x);
-    bool standard_material = shading_mode == 0u;
 
     float3 v = normalize(g_CameraPos.xyz - input.WorldPos);
     if (dot(clearcoat_n, v) < 0.0)
@@ -2600,8 +2968,62 @@ float4 main(PSInput input) : SV_TARGET
             }
         }
     }
-    float base_alpha = saturate(g_BaseColorFactor.a * base_tex.a);
-    if (standard_material && g_MaterialParams6.w > 0.5)
+    float alpha_tex = base_tex.a;
+    float base_alpha = saturate(g_BaseColorFactor.a * alpha_tex);
+    if (surface_material && g_MaterialParams2.w >= 0.0)
+    {
+        float cutoff = saturate(g_MaterialParams2.w);
+        float softness = max(g_MaterialParams1.x, 0.0);
+        bool alpha_to_coverage = g_MaterialParams1.z > 0.5 && g_MaterialParams1.w > 0.5;
+        bool dither_mask = !alpha_to_coverage && (g_MaterialParams1.y > 0.5 || g_MaterialParams1.z > 0.5);
+        if (softness > 1.0e-5)
+        {
+            float coverage = saturate((base_alpha - (cutoff - softness * 0.5)) / softness);
+            if (alpha_to_coverage)
+            {
+                if (coverage <= 0.0)
+                {
+                    discard;
+                }
+            }
+            else if (dither_mask)
+            {
+                if (coverage <= Bayer4x4(input.Pos.xy))
+                {
+                    discard;
+                }
+            }
+            else if (coverage <= 0.0)
+            {
+                discard;
+            }
+            base_alpha = coverage;
+        }
+        else if (base_alpha < cutoff)
+        {
+            discard;
+        }
+    }
+    if (foliage_material)
+    {
+        float height_tint = saturate(1.0 - base_uv.y);
+        float root_tint = saturate(base_uv.y);
+        float3 foliage_ramp = lerp(float3(0.44, 0.53, 0.25),
+                                   float3(0.76, 0.84, 0.44),
+                                   height_tint);
+        float wrap_light = saturate(ndotl * 0.72 + 0.28);
+        float3 foliage_base = base_color * foliage_ramp;
+        float3 ambient_term = foliage_base * (0.24 + 0.18 * saturate(g_EnvParams.x));
+        float3 directional_term =
+            foliage_base * g_LightColor.rgb * lifted_shadow * (0.42 + 0.46 * wrap_light);
+        lit = ambient_term + directional_term + lit_local * 0.35 + emissive;
+        lit *= lerp(0.82, 1.0, height_tint) * lerp(0.88, 1.0, 1.0 - root_tint * 0.35);
+    }
+    else if (surface_unlit)
+    {
+        lit = base_color + emissive;
+    }
+    else if (standard_material && g_MaterialParams6.w > 0.5)
     {
         float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
         float clearcoat_reflection_strength =
@@ -3315,6 +3737,12 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   sampler_color.AddressW = Diligent::TEXTURE_ADDRESS_WRAP;
   device_->CreateSampler(sampler_color, &sampler_color_);
 
+  Diligent::SamplerDesc sampler_color_clamp = sampler_color;
+  sampler_color_clamp.AddressU = Diligent::TEXTURE_ADDRESS_CLAMP;
+  sampler_color_clamp.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
+  sampler_color_clamp.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
+  device_->CreateSampler(sampler_color_clamp, &sampler_color_clamp_);
+
   Diligent::SamplerDesc sampler_data{};
   sampler_data.MinFilter = Diligent::FILTER_TYPE_LINEAR;
   sampler_data.MagFilter = Diligent::FILTER_TYPE_LINEAR;
@@ -3398,10 +3826,10 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
 
     const auto forward_plus_pso_start = core::SteadyClock::now();
     forward_plus_compute_pso_ = device_with_cache_.CreateComputePipelineState(forward_plus_pso_ci);
-    logRenderPipelineDiag("forward",
-                          "Karma Forward+ Compute Pipeline",
-                          forward_plus_pso_start,
-                          core::SteadyClock::now());
+    recordPipelineCreation("forward",
+                           "Karma Forward+ Compute Pipeline",
+                           forward_plus_pso_start,
+                           core::SteadyClock::now());
     if (forward_plus_compute_pso_) {
       Diligent::BufferDesc fp_cb_desc{};
       fp_cb_desc.Name = "Karma Forward+ Compute Constants";
@@ -3409,14 +3837,24 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
       fp_cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
       fp_cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
       fp_cb_desc.Size = sizeof(ForwardPlusComputeConstants);
+      const auto fp_cb_start = core::SteadyClock::now();
       device_->CreateBuffer(fp_cb_desc, nullptr, &forward_plus_compute_cb_);
+      recordResourceCreation("forward",
+                             "forward plus constants buffer",
+                             fp_cb_start,
+                             core::SteadyClock::now());
       if (forward_plus_compute_cb_) {
         if (auto* var = forward_plus_compute_pso_->GetStaticVariableByName(
                 Diligent::SHADER_TYPE_COMPUTE, "ForwardPlusConstants")) {
           var->Set(forward_plus_compute_cb_);
         }
       }
+      const auto fp_srb_start = core::SteadyClock::now();
       forward_plus_compute_pso_->CreateShaderResourceBinding(&forward_plus_compute_srb_, true);
+      recordResourceCreation("forward",
+                             "forward plus compute SRB",
+                             fp_srb_start,
+                             core::SteadyClock::now());
       if (forward_plus_compute_srb_) {
         forward_plus_compute_lights_var_ = forward_plus_compute_srb_->GetVariableByName(
             Diligent::SHADER_TYPE_COMPUTE, "g_ForwardPlusLights");
@@ -3439,8 +3877,8 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                              default_occlusion_tex_);
   default_emissive_ = createSolidTextureSRV(255, 255, 255, 255, true, "DefaultEmissive",
                                             default_emissive_tex_);
-  default_env_ = createSolidTextureSRV(0, 0, 0, 255, true, "DefaultEnv",
-                                       default_env_tex_);
+  default_env_ = createSolidCubeTextureSRV(0, 0, 0, 255, true, "DefaultEnv",
+                                           default_env_tex_);
   env_srv_ = default_env_;
   mark_stage("default textures");
 
@@ -3480,7 +3918,12 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   mark_stage("shadow pipeline and fallback depth");
 
   if (pipeline_state_) {
+    const auto main_srb_start = core::SteadyClock::now();
     pipeline_state_->CreateShaderResourceBinding(&shader_resources_, true);
+    recordResourceCreation("forward",
+                           "main shader resources SRB",
+                           main_srb_start,
+                           core::SteadyClock::now());
     initializeDefaultMaterialBinding(pipeline_state_.RawPtr(), default_material_srb_);
     if (shader_resources_) {
       if (auto* var = shader_resources_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {

@@ -1104,8 +1104,16 @@ int main() {
   assert(assets.resolvePostProcessProfile(kDefaultPostProfile).depth_of_field_enabled);
   assert(assets.resolvePostProcessProfile("missing").depth_of_field_enabled);
 
+  karma::renderer::PostProcessSettings empty_key_default{};
+  empty_key_default.temporal_antialiasing_enabled = true;
+  empty_key_default.taa_feedback = 0.82f;
+  assert(assets.registerPostProcessProfile("", empty_key_default));
+  assert(assets.resolvePostProcessProfile("").temporal_antialiasing_enabled);
+  assert(assets.resolvePostProcessProfile("missing").temporal_antialiasing_enabled);
+  assert(assets.resolvePostProcessProfile("missing").taa_feedback == 0.82f);
+
   assets.unregisterPostProcessProfile("cinematic");
-  assert(assets.resolvePostProcessProfile("cinematic").depth_of_field_enabled);
+  assert(assets.resolvePostProcessProfile("cinematic").temporal_antialiasing_enabled);
 
   testTerrainHeadlessNoopApi();
   testDeformationHeadlessNoopApi();

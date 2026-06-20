@@ -47,6 +47,50 @@ struct RendererCommandStats {
 };
 
 /// \ingroup karma_rendering
+/// CPU-side renderer timing and resource-creation counters for the most recent
+/// completed backend frame.
+struct RendererFrameTimingStats {
+  uint64_t submitted_frames = 0;
+  uint64_t completed_frames = 0;
+  uint64_t dropped_frames = 0;
+  uint32_t render_queue_depth = 0;
+  float frame_record_ms = 0.0f;
+  float frame_submit_ms = 0.0f;
+  float render_thread_wait_ms = 0.0f;
+  float render_thread_frame_ms = 0.0f;
+  float render_thread_command_wait_ms = 0.0f;
+  uint32_t render_layer_count = 0;
+  uint32_t render_layer_draws = 0;
+  float render_layer_total_ms = 0.0f;
+  float target_setup_ms = 0.0f;
+  float clear_ms = 0.0f;
+  float camera_setup_ms = 0.0f;
+  float environment_ms = 0.0f;
+  float forward_plus_ms = 0.0f;
+  float shadow_ms = 0.0f;
+  float terrain_ms = 0.0f;
+  float forward_collect_ms = 0.0f;
+  float opaque_ms = 0.0f;
+  float transparent_ms = 0.0f;
+  float particle_resources_ms = 0.0f;
+  float particle_pass_ms = 0.0f;
+  float line_resources_ms = 0.0f;
+  float line_draw_ms = 0.0f;
+  float post_process_ms = 0.0f;
+  float present_copy_ms = 0.0f;
+  float render_ui_ms = 0.0f;
+  float swapchain_present_ms = 0.0f;
+  float skipped_present_flush_ms = 0.0f;
+  float resource_creation_ms = 0.0f;
+  float pipeline_creation_ms = 0.0f;
+  float resize_ms = 0.0f;
+  uint32_t resource_creation_count = 0;
+  uint32_t pipeline_creation_count = 0;
+  uint32_t resize_events = 0;
+  uint32_t skipped_presents = 0;
+};
+
+/// \ingroup karma_rendering
 /// Forward+ light-culling diagnostics.
 struct ForwardPlusStats {
   uint32_t tile_size = 16;
@@ -58,6 +102,31 @@ struct ForwardPlusStats {
   bool active = false;
   bool cpu_fallback = false;
   bool overflow_risk = false;
+};
+
+/// \ingroup karma_rendering
+/// Instanced-rendering diagnostics for the most recent backend frame.
+struct InstancingStats {
+  uint32_t submitted_batches = 0;
+  uint32_t submitted_instances = 0;
+  uint32_t drawn_batches = 0;
+  uint32_t drawn_instances = 0;
+  uint32_t culled_batches = 0;
+  uint32_t draw_calls = 0;
+  uint32_t instance_buffer_updates = 0;
+  uint32_t gpu_culling_batches = 0;
+  uint32_t gpu_culling_dispatches = 0;
+  uint32_t gpu_culling_candidate_instances = 0;
+  uint32_t gpu_indirect_draws = 0;
+  uint32_t lod_bucket_count = 0;
+  uint32_t lod_culling_dispatches = 0;
+  uint32_t lod_candidate_instances = 0;
+  uint32_t lod_indirect_draws = 0;
+  uint32_t lod_fallbacks = 0;
+  uint64_t instance_upload_bytes = 0;
+  float render_system_extraction_ms = 0.0f;
+  float forward_state_collection_ms = 0.0f;
+  float instance_upload_ms = 0.0f;
 };
 
 /// \ingroup karma_rendering

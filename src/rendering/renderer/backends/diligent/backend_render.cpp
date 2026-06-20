@@ -21,10 +21,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 
@@ -163,11 +165,49 @@ bool isFiniteVec3(const glm::vec3& value) {
   return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
+bool renderLayerFrameDiagEnabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("KARMA_RENDER_LAYER_FRAME_DIAG");
+    return value != nullptr && value[0] != '\0' &&
+           std::strcmp(value, "0") != 0 &&
+           std::strcmp(value, "false") != 0 &&
+           std::strcmp(value, "FALSE") != 0 &&
+           std::strcmp(value, "off") != 0 &&
+           std::strcmp(value, "OFF") != 0;
+  }();
+  return enabled;
+}
+
+float renderLayerFrameDiagFloat(const char* name, float fallback) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char* end = nullptr;
+  const float parsed = std::strtof(value, &end);
+  return end == value ? fallback : parsed;
+}
+
+struct RenderLayerStageTiming {
+  const char* name = "";
+  double ms = 0.0;
+};
+
 }  // namespace
 
 void DiligentBackend::renderLayer(renderer::LayerId layer,
                                   renderer::RenderTargetId target,
                                   const renderer::PostProcessSettings& post_process) {
+  const bool frame_layer_diag = renderLayerFrameDiagEnabled();
+  const float frame_layer_diag_threshold_ms =
+      std::max(0.0f,
+               renderLayerFrameDiagFloat("KARMA_RENDER_LAYER_FRAME_DIAG_THRESHOLD_MS", 20.0f));
+  const float frame_layer_diag_stage_threshold_ms =
+      std::max(0.0f,
+               renderLayerFrameDiagFloat(
+                   "KARMA_RENDER_LAYER_FRAME_DIAG_STAGE_THRESHOLD_MS",
+                   renderLayerFrameDiagFloat("KARMA_RENDER_LAYER_STAGE_DIAG_THRESHOLD_MS",
+                                             0.25f)));
   const bool startup_layer_diag = [] {
     if (!startupDiagnosticsEnabled()) {
       return false;
@@ -181,8 +221,17 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
   }();
   const auto layer_start = core::SteadyClock::now();
   auto stage_start = layer_start;
+  std::vector<RenderLayerStageTiming> stage_timings;
+  if (frame_layer_diag) {
+    stage_timings.reserve(32);
+  }
   auto mark_stage = [&](const char* stage) {
     const auto stage_end = core::SteadyClock::now();
+    const double stage_ms = core::elapsedMilliseconds(stage_start, stage_end);
+    recordRenderLayerStageTiming(stage, stage_ms);
+    if (frame_layer_diag) {
+      stage_timings.push_back(RenderLayerStageTiming{stage, stage_ms});
+    }
     if (startup_layer_diag) {
       logStartupDiag("diligent_render_layer", stage, stage_start, stage_end);
     }
@@ -238,6 +287,100 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
   }
   mark_stage("target setup");
 
+  Diligent::Uint32 draw_count = 0;
+  auto log_layer_diag = [&](const char* reason) {
+    const auto layer_end = core::SteadyClock::now();
+    const double total_ms = core::elapsedMilliseconds(layer_start, layer_end);
+    if (frame_active_) {
+      current_frame_timing_stats_.render_layer_count += 1u;
+      current_frame_timing_stats_.render_layer_total_ms += static_cast<float>(total_ms);
+      current_frame_timing_stats_.render_layer_draws += draw_count;
+    }
+    if (startup_layer_diag) {
+      logStartupDiag("diligent_render_layer", "total", layer_start, layer_end);
+    }
+    if (!frame_layer_diag) {
+      return;
+    }
+    if (total_ms < static_cast<double>(frame_layer_diag_threshold_ms)) {
+      return;
+    }
+    const auto command_stats = getRendererCommandStats();
+    const uint32_t command_draws =
+        command_stats.draw + command_stats.draw_indexed +
+        command_stats.draw_indirect + command_stats.draw_indexed_indirect +
+        command_stats.multi_draw + command_stats.multi_draw_indexed;
+    spdlog::info(
+        "Diligent render layer diag: reason={} layer={} target={} total={:.3f}ms "
+        "size={}x{} camera_active={} post_enabled={} taa={} draws={} "
+        "inst=[submitted={} drawn={} culled_batches={} draw_calls={} uploads={} bytes={} "
+        "gpu_cull=[batches={} dispatch={} candidates={} indirect={}] "
+        "lod=[buckets={} dispatch={} candidates={} indirect={} fallback={}] "
+        "collect={:.3f} upload={:.3f}] cmd_totals=[draws={} update_buffer={} copy_texture={} dispatch={}] "
+        "stages=[target={:.3f} clear={:.3f} camera={:.3f} env={:.3f} fplus={:.3f} "
+        "shadow={:.3f} terrain={:.3f} collect={:.3f} opaque={:.3f} transparent={:.3f} "
+        "particle_res={:.3f} particle={:.3f} line_res={:.3f} line={:.3f} post={:.3f} copy={:.3f}] "
+        "frame_timing=[res_create={}:{:.3f} pipeline_create={}:{:.3f} resize={}:{:.3f}]",
+        reason,
+        layer,
+        target,
+        total_ms,
+        render_width,
+        render_height,
+        camera_active_,
+        post_process.enabled,
+        post_process.temporal_antialiasing_enabled,
+        draw_count,
+        instancing_stats_.submitted_instances,
+        instancing_stats_.drawn_instances,
+        instancing_stats_.culled_batches,
+        instancing_stats_.draw_calls,
+        instancing_stats_.instance_buffer_updates,
+        instancing_stats_.instance_upload_bytes,
+        instancing_stats_.gpu_culling_batches,
+        instancing_stats_.gpu_culling_dispatches,
+        instancing_stats_.gpu_culling_candidate_instances,
+        instancing_stats_.gpu_indirect_draws,
+        instancing_stats_.lod_bucket_count,
+        instancing_stats_.lod_culling_dispatches,
+        instancing_stats_.lod_candidate_instances,
+        instancing_stats_.lod_indirect_draws,
+        instancing_stats_.lod_fallbacks,
+        instancing_stats_.forward_state_collection_ms,
+        instancing_stats_.instance_upload_ms,
+        command_draws,
+        command_stats.update_buffer,
+        command_stats.copy_texture,
+        command_stats.dispatch_compute,
+        current_frame_timing_stats_.target_setup_ms,
+        current_frame_timing_stats_.clear_ms,
+        current_frame_timing_stats_.camera_setup_ms,
+        current_frame_timing_stats_.environment_ms,
+        current_frame_timing_stats_.forward_plus_ms,
+        current_frame_timing_stats_.shadow_ms,
+        current_frame_timing_stats_.terrain_ms,
+        current_frame_timing_stats_.forward_collect_ms,
+        current_frame_timing_stats_.opaque_ms,
+        current_frame_timing_stats_.transparent_ms,
+        current_frame_timing_stats_.particle_resources_ms,
+        current_frame_timing_stats_.particle_pass_ms,
+        current_frame_timing_stats_.line_resources_ms,
+        current_frame_timing_stats_.line_draw_ms,
+        current_frame_timing_stats_.post_process_ms,
+        current_frame_timing_stats_.present_copy_ms,
+        current_frame_timing_stats_.resource_creation_count,
+        current_frame_timing_stats_.resource_creation_ms,
+        current_frame_timing_stats_.pipeline_creation_count,
+        current_frame_timing_stats_.pipeline_creation_ms,
+        current_frame_timing_stats_.resize_events,
+        current_frame_timing_stats_.resize_ms);
+    for (const RenderLayerStageTiming& timing : stage_timings) {
+      if (timing.ms >= static_cast<double>(frame_layer_diag_stage_threshold_ms)) {
+        spdlog::info("Diligent render layer stage: {} {:.3f}ms", timing.name, timing.ms);
+      }
+    }
+  };
+
   auto present_active_target = [&]() {
     if (!rendering_to_default_target || !present_source_texture || !present_destination_texture) {
       return;
@@ -283,9 +426,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     clear_active_target(black, true);
     present_active_target();
     mark_stage("clear inactive camera");
-    if (startup_layer_diag) {
-      logStartupDiag("diligent_render_layer", "total", layer_start, core::SteadyClock::now());
-    }
+    log_layer_diag("inactive_camera");
     return;
   }
 
@@ -298,9 +439,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     }
     present_active_target();
     mark_stage("missing draw resources");
-    if (startup_layer_diag) {
-      logStartupDiag("diligent_render_layer", "total", layer_start, core::SteadyClock::now());
-    }
+    log_layer_diag("missing_draw_resources");
     return;
   }
   bool use_custom_shader_override = !camera_.shader_override_fragment_path.empty();
@@ -473,7 +612,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     desc.ElementByteStride = element_stride;
     desc.Size = static_cast<Diligent::Uint64>(new_capacity) *
                 static_cast<Diligent::Uint64>(element_stride);
+    const auto buffer_start = core::SteadyClock::now();
     device_->CreateBuffer(desc, nullptr, &buffer);
+    recordResourceCreation("forward_plus", name, buffer_start, core::SteadyClock::now());
     if (!buffer) {
       return false;
     }
@@ -722,6 +863,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
   };
   bind_forward_plus_to_srb(shader_resources_);
   bind_forward_plus_to_srb(default_material_srb_);
+  bind_forward_plus_to_srb(opaque_double_sided_default_material_srb_);
   bind_forward_plus_to_srb(transparent_default_material_srb_);
   bind_forward_plus_to_srb(transparent_double_sided_default_material_srb_);
   bind_forward_plus_to_srb(additive_default_material_srb_);
@@ -729,11 +871,16 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
   bind_forward_plus_to_srb(camera_override_srb_);
   bind_shadow_to_srb(shader_resources_);
   bind_shadow_to_srb(default_material_srb_);
+  bind_shadow_to_srb(opaque_double_sided_default_material_srb_);
   bind_shadow_to_srb(transparent_default_material_srb_);
   bind_shadow_to_srb(transparent_double_sided_default_material_srb_);
   bind_shadow_to_srb(additive_default_material_srb_);
   bind_shadow_to_srb(additive_double_sided_default_material_srb_);
   bind_shadow_to_srb(camera_override_srb_);
+  for (auto& srb : compact_default_material_srbs_) {
+    bind_forward_plus_to_srb(srb);
+    bind_shadow_to_srb(srb);
+  }
   for (auto& entry : materials_) {
     bind_forward_plus_to_srb(entry.second.srb);
     bind_forward_plus_to_srb(entry.second.transparent_srb);
@@ -745,6 +892,14 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     bind_shadow_to_srb(entry.second.transparent_double_sided_srb);
     bind_shadow_to_srb(entry.second.additive_srb);
     bind_shadow_to_srb(entry.second.additive_double_sided_srb);
+    for (auto& srb : entry.second.layout_srbs) {
+      bind_forward_plus_to_srb(srb);
+      bind_shadow_to_srb(srb);
+    }
+    for (auto& srb : entry.second.layout_custom_srbs) {
+      bind_forward_plus_to_srb(srb);
+      bind_shadow_to_srb(srb);
+    }
   }
   mark_stage("forward plus setup");
 
@@ -848,7 +1003,6 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     logged_frame = true;
   }
 
-  Diligent::Uint32 draw_count = 0;
   Diligent::Uint32 skipped_hidden = 0;
   Diligent::Uint32 skipped_missing_vb = 0;
   Diligent::Uint32 skipped_missing_mesh = 0;
@@ -1002,6 +1156,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
 
   ForwardLayerState forward_state{};
   ForwardLayerStats forward_stats{};
+  const auto forward_collect_start = core::SteadyClock::now();
   collectForwardLayerState(layer,
                            view_proj,
                            camera_.position,
@@ -1009,11 +1164,15 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
                            is_gl,
                            forward_state,
                            forward_stats);
+  instancing_stats_.forward_state_collection_ms =
+      static_cast<float>(core::elapsedMilliseconds(forward_collect_start,
+                                                   core::SteadyClock::now()));
   mark_stage("collect forward state");
   skipped_hidden += forward_stats.skipped_hidden;
   skipped_missing_vb += forward_stats.skipped_missing_vb;
   skipped_missing_mesh += forward_stats.skipped_missing_mesh;
   skipped_layer += forward_stats.skipped_layer;
+  instancing_stats_.culled_batches += forward_stats.instanced_culled_batches;
 
   draw_count += renderOpaqueForwardLayer(forward_state,
                                          base_constants,
@@ -1022,7 +1181,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
                                          rtv,
                                          dsv,
                                          render_width,
-                                         render_height);
+                                         render_height,
+                                         is_gl);
   mark_stage("opaque pass");
 
   bool has_particle_work = !particle_emitter_runtime_states_.empty();
@@ -1168,7 +1328,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
         vb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
         vb_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(LineVertex));
         line_vb_.Release();
+        const auto line_buffer_start = core::SteadyClock::now();
         device_->CreateBuffer(vb_desc, nullptr, &line_vb_);
+        recordResourceCreation("line", "dynamic vertex buffer resize", line_buffer_start, core::SteadyClock::now());
         if (!line_vb_) {
           line_vb_size_ = 0;
           return;
@@ -1277,9 +1439,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
 
   present_active_target();
   mark_stage("present copy");
-  if (startup_layer_diag) {
-    logStartupDiag("diligent_render_layer", "total", layer_start, core::SteadyClock::now());
-  }
+  log_layer_diag("complete");
 
   if (particle_stats_log_enabled_) {
     const double frame_seconds =

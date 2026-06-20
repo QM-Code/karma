@@ -67,6 +67,10 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     examples/rendering/light_stress.cpp)
   karma_add_graphical_example(rendering_material_assignment rendering material_assignment
     examples/rendering/material_assignment.cpp)
+  karma_add_graphical_example(rendering_grass_card rendering grass_card
+    examples/rendering/grass_card.cpp)
+  karma_add_graphical_example(rendering_grass_field rendering grass_field
+    examples/rendering/grass_field.cpp)
   karma_add_graphical_example(rendering_postwar_city rendering postwar_city
     examples/rendering/postwar_city.cpp
     examples/common/scene_helpers.cpp)

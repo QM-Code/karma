@@ -71,6 +71,8 @@ std::optional<PreparedTextureUpload> prepareTextureUpload(
 struct TextureImportOptions {
   bool srgb = false;
   bool generate_mips = true;
+  bool alpha_bleed = false;
+  float alpha_coverage_cutoff = 0.5f;
   TextureAsset::Semantic semantic = TextureAsset::Semantic::Color;
   bool prefer_compressed = true;
 };

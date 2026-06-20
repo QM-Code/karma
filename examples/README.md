@@ -56,6 +56,12 @@ Shared example helpers live in `examples/common/`.
 - `rendering/material_assignment.cpp`: target `rendering_material_assignment`,
   output `examples/rendering/material_assignment`. Runtime material assignment
   example with side-by-side GLB tints.
+- `rendering/grass_card.cpp`: target `rendering_grass_card`, output
+  `examples/rendering/grass_card`. Simple material scene with a lit ground
+  plane, free camera, and transparent double-sided upright grass image plane.
+- `rendering/grass_field.cpp`: target `rendering_grass_field`, output
+  `examples/rendering/grass_field`. Instanced grass field over a 100x80 ground
+  plane using masked alpha and per-instance transform/parameter payloads.
 - `rendering/terrain.cpp`: target `rendering_terrain`, output
   `examples/rendering/terrain`. Fixed-size heightmap terrain renderer sample
   using `examples/assets/Heightmap.png`, with GPU tessellation when available

@@ -67,6 +67,7 @@ struct DrawConstants {
   float local_light_color_intensity[64][4];
   float local_light_spot_params[64][4];
   float local_light_meta[4];
+  float instance_params[4];
   float material_params0[4];
   float material_params1[4];
   float material_params2[4];
@@ -86,6 +87,22 @@ struct ForwardPlusComputeConstants {
   float view_proj[16];
   float forward_plus_params[4];
   float screen_params[4];
+};
+
+struct InstancedGpuCullingConstants {
+  float view_proj[16];
+  float mesh_bounds[4];
+  float camera_position[4];
+  float distance_params[4];
+  uint32_t params[4];
+};
+
+struct InstancedIndexedIndirectArgs {
+  uint32_t num_indices = 0u;
+  uint32_t num_instances = 0u;
+  uint32_t first_index_location = 0u;
+  uint32_t base_vertex = 0u;
+  uint32_t first_instance_location = 0u;
 };
 
 struct alignas(16) CameraOverrideUserConstants {

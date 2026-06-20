@@ -10,6 +10,7 @@
 #include "karma/content/assets/asset_registry.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/deformable_mesh.h"
+#include "karma/world/components/instanced_mesh.h"
 #include "karma/world/components/transform.h"
 #include "karma/world/components/visibility.h"
 #include "karma/world/ecs/world.h"
@@ -54,6 +55,21 @@ class RenderSystem {
   bool releasePrewarm(RenderPrewarmHandle handle);
 
  private:
+  struct InstancedLodRecord {
+    float start_distance = 0.0f;
+    std::string mesh_asset_key;
+    std::vector<geometry::MeshMaterialSlot> material_slots;
+    std::vector<components::MeshMaterialAssignment> component_materials;
+    std::vector<std::string> acquired_material_keys;
+    std::vector<renderer::DrawMaterialBinding> material_bindings;
+    renderer::MeshId mesh = renderer::kInvalidMesh;
+    glm::vec3 bounds_center{0.0f};
+    float bounds_radius = 0.0f;
+    bool bounds_valid = false;
+    renderer::InstanceLodRenderMode render_mode = renderer::InstanceLodRenderMode::Mesh;
+    bool shadow_visible = false;
+  };
+
   struct RenderRecord {
     std::string mesh_asset_key;
     std::vector<geometry::MeshMaterialSlot> material_slots;
@@ -64,6 +80,17 @@ class RenderSystem {
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
+    renderer::InstanceGpuLayout cached_instance_layout =
+        renderer::InstanceGpuLayout::Matrix4x4Params;
+    uint64_t cached_instance_revision = UINT64_MAX;
+    size_t cached_instance_count = 0;
+    bool cached_instance_dynamic = false;
+    bool cached_instance_bounds_valid = false;
+    glm::vec3 cached_instance_bounds_center{0.0f};
+    float cached_instance_bounds_radius = 0.0f;
+    std::vector<renderer::InstanceData> cached_instances;
+    std::vector<renderer::PlanarInstanceData> cached_planar_instances;
+    std::vector<InstancedLodRecord> instanced_lods;
   };
 
   struct SharedMeshResource {
@@ -101,19 +128,32 @@ class RenderSystem {
     return (static_cast<uint64_t>(entity.index) << 32) |
            static_cast<uint64_t>(entity.generation);
   }
+  static uint64_t instancedEntityKey(ecs::Entity entity) {
+    return entityKey(entity) | (uint64_t{1} << 63);
+  }
   static ecs::Entity entityFromKey(uint64_t key) {
     ecs::Entity entity{};
     entity.index = static_cast<uint32_t>(key >> 32);
     entity.generation = static_cast<uint32_t>(key & 0xFFFFFFFFu);
     return entity;
   }
+  static ecs::Entity entityFromInstancedKey(uint64_t key) {
+    return entityFromKey(key & ~(uint64_t{1} << 63));
+  }
 
   void releaseRecord(uint64_t key, RenderRecord& record);
   void cleanupStaleRecords(ecs::World& world);
+  void cleanupStaleInstancedRecords(ecs::World& world);
   void releaseMeshBinding(RenderRecord& record);
   void releaseMaterialBinding(RenderRecord& record);
+  void releaseInstancedLodBindings(RenderRecord& record);
+  bool syncInstancedLodBindings(const components::InstancedMeshComponent& instanced,
+                                RenderRecord& record);
   void bindMesh(const components::MeshComponent& mesh, RenderRecord& record);
+  void bindMesh(const std::string& mesh_asset_key, RenderRecord& record);
   void bindMaterial(const components::MeshComponent& mesh, RenderRecord& record);
+  void bindMaterial(const std::vector<components::MeshMaterialAssignment>& materials,
+                    RenderRecord& record);
   void acquireSharedMesh(const std::string& mesh_asset_key, RenderRecord& record);
   void releaseSharedMesh(const std::string& mesh_asset_key);
   renderer::MaterialId acquireSharedMaterial(const std::string& material_key);
@@ -124,6 +164,7 @@ class RenderSystem {
   GraphicsDevice& device_;
   const content::AssetRegistry* assets_ = nullptr;
   std::unordered_map<uint64_t, RenderRecord> records_;
+  std::unordered_map<uint64_t, RenderRecord> instanced_records_;
   std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
   std::unordered_map<std::string, SharedMaterialResource> shared_materials_;
   std::unordered_map<std::string, SharedMaterialAlias> shared_material_aliases_;

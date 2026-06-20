@@ -96,7 +96,8 @@ float4 main(PSInput input) : SV_TARGET
 
 void DiligentBackend::ensureUiResources() {
   static bool logged_once = false;
-  if (ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ && ui_pso_texture_scissor_) {
+  if (ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ &&
+      ui_pso_texture_scissor_ && ui_cb_ && ui_vb_ && ui_ib_) {
     return;
   }
   if (!device_) {
@@ -151,7 +152,9 @@ void DiligentBackend::ensureUiResources() {
     cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
     cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     cb_desc.Size = sizeof(UiConstants);
+    const auto cb_start = core::SteadyClock::now();
     device_->CreateBuffer(cb_desc, nullptr, &ui_cb_);
+    recordResourceCreation("ui", "constants buffer", cb_start, core::SteadyClock::now());
   }
 
   static const Diligent::ShaderResourceVariableDesc kUiTextureVars[] = {
@@ -215,7 +218,9 @@ void DiligentBackend::ensureUiResources() {
           static_cast<Diligent::Uint32>(std::size(kUiTextureSamplers));
     }
 
+    const auto pso_start = core::SteadyClock::now();
     out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    recordPipelineCreation("ui", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return;
     }
@@ -227,7 +232,9 @@ void DiligentBackend::ensureUiResources() {
       }
     }
 
+    const auto srb_start = core::SteadyClock::now();
     out_pso->CreateShaderResourceBinding(&out_srb, true);
+    recordResourceCreation("ui", name, srb_start, core::SteadyClock::now());
   };
 
   create_pipeline(ps_color, false, false, "Karma UI Color PSO",
@@ -244,6 +251,32 @@ void DiligentBackend::ensureUiResources() {
   if (ui_srb_texture_scissor_ && !ui_texture_scissor_var_) {
     ui_texture_scissor_var_ =
         ui_srb_texture_scissor_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture");
+  }
+
+  if (!ui_vb_) {
+    ui_vb_size_ = 8192;
+    Diligent::BufferDesc desc{};
+    desc.Name = "Karma UI VB";
+    desc.Usage = Diligent::USAGE_DYNAMIC;
+    desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
+    desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::renderer::UIVertex));
+    const auto vb_start = core::SteadyClock::now();
+    device_->CreateBuffer(desc, nullptr, &ui_vb_);
+    recordResourceCreation("ui", "vertex buffer", vb_start, core::SteadyClock::now());
+  }
+
+  if (!ui_ib_) {
+    ui_ib_size_ = 16384;
+    Diligent::BufferDesc desc{};
+    desc.Name = "Karma UI IB";
+    desc.Usage = Diligent::USAGE_DYNAMIC;
+    desc.BindFlags = Diligent::BIND_INDEX_BUFFER;
+    desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
+    desc.Size = static_cast<Diligent::Uint32>(ui_ib_size_ * sizeof(uint32_t));
+    const auto ib_start = core::SteadyClock::now();
+    device_->CreateBuffer(desc, nullptr, &ui_ib_);
+    recordResourceCreation("ui", "index buffer", ib_start, core::SteadyClock::now());
   }
 
   if (!logged_once &&
@@ -263,8 +296,17 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
     return;
   }
 
+  const auto ui_start = core::SteadyClock::now();
+  auto finish_ui_timing = [&]() {
+    if (frame_active_) {
+      current_frame_timing_stats_.render_ui_ms +=
+          static_cast<float>(core::elapsedMilliseconds(ui_start, core::SteadyClock::now()));
+    }
+  };
+
   ensureUiResources();
   if (!ui_cb_) {
+    finish_ui_timing();
     return;
   }
 
@@ -277,7 +319,9 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::renderer::UIVertex));
     ui_vb_.Release();
+    const auto vb_start = core::SteadyClock::now();
     device_->CreateBuffer(desc, nullptr, &ui_vb_);
+    recordResourceCreation("ui", "vertex buffer", vb_start, core::SteadyClock::now());
   }
 
   if (ui_ib_size_ < draw_data.indices.size()) {
@@ -289,10 +333,13 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     desc.Size = static_cast<Diligent::Uint32>(ui_ib_size_ * sizeof(uint32_t));
     ui_ib_.Release();
+    const auto ib_start = core::SteadyClock::now();
     device_->CreateBuffer(desc, nullptr, &ui_ib_);
+    recordResourceCreation("ui", "index buffer", ib_start, core::SteadyClock::now());
   }
 
   if (!ui_vb_ || !ui_ib_) {
+    finish_ui_timing();
     return;
   }
 
@@ -439,6 +486,7 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
     draw.Flags = kUiDrawFlags;
     context_->DrawIndexed(draw);
   }
+  finish_ui_timing();
 }
 
 }  // namespace karma::renderer_backend

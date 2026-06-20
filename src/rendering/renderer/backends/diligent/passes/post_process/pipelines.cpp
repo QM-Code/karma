@@ -46,7 +46,9 @@ bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format
     cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
     cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     cb_desc.Size = sizeof(post_process::PostProcessConstants);
+    const auto cb_start = core::SteadyClock::now();
     device_->CreateBuffer(cb_desc, nullptr, &post_process_cb_);
+    recordResourceCreation("post_process", "constants buffer", cb_start, core::SteadyClock::now());
     if (!post_process_cb_) {
       return false;
     }
@@ -133,7 +135,7 @@ bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format
 
     const auto pso_start = core::SteadyClock::now();
     out_pass.pso = device_with_cache_.CreateGraphicsPipelineState(pso);
-    logRenderPipelineDiag("post_process", pipeline_name, pso_start, core::SteadyClock::now());
+    recordPipelineCreation("post_process", pipeline_name, pso_start, core::SteadyClock::now());
     if (!out_pass.pso) {
       return false;
     }
@@ -144,7 +146,9 @@ bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format
       var->Set(post_process_cb_);
     }
 
+    const auto srb_start = core::SteadyClock::now();
     out_pass.pso->CreateShaderResourceBinding(&out_pass.srb, true);
+    recordResourceCreation("post_process", pipeline_name, srb_start, core::SteadyClock::now());
     if (!out_pass.srb) {
       post_process::releasePass(out_pass);
       return false;

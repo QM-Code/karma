@@ -88,7 +88,7 @@ bool DiligentBackend::ensureCameraOverridePipeline(const renderer::CameraData& c
   graphics.DepthStencilDesc.DepthEnable = true;
   graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
 
-  constexpr Diligent::Uint32 kInstanceStride = static_cast<Diligent::Uint32>(sizeof(float) * 16);
+  constexpr Diligent::Uint32 kInstanceStride = static_cast<Diligent::Uint32>(sizeof(float) * 20);
   Diligent::LayoutElement layout_elems[] = {
       Diligent::LayoutElement{0, 0, 3, Diligent::VT_FLOAT32, false},
       Diligent::LayoutElement{1, 0, 3, Diligent::VT_FLOAT32, false},
@@ -125,7 +125,12 @@ bool DiligentBackend::ensureCameraOverridePipeline(const renderer::CameraData& c
   pso_ci.PSODesc.ResourceLayout.ImmutableSamplers = nullptr;
   pso_ci.PSODesc.ResourceLayout.NumImmutableSamplers = 0;
 
+  const auto pso_start = core::SteadyClock::now();
   camera_override_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
+  recordPipelineCreation("camera_override",
+                         "Karma Camera Override Pipeline",
+                         pso_start,
+                         core::SteadyClock::now());
   if (!camera_override_pipeline_state_) {
     return false;
   }
@@ -154,7 +159,12 @@ bool DiligentBackend::ensureCameraOverridePipeline(const renderer::CameraData& c
       variable->Set(camera_override_user_constants_);
     }
   }
+  const auto srb_start = core::SteadyClock::now();
   camera_override_pipeline_state_->CreateShaderResourceBinding(&camera_override_srb_, true);
+  recordResourceCreation("camera_override",
+                         "camera override SRB",
+                         srb_start,
+                         core::SteadyClock::now());
   camera_override_vertex_path_ = camera.shader_override_vertex_path;
   camera_override_fragment_path_ = camera.shader_override_fragment_path;
   return true;

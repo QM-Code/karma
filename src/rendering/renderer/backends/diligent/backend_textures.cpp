@@ -10,6 +10,8 @@
 #include <Graphics/GraphicsEngine/interface/Texture.h>
 #include <Graphics/GraphicsEngine/interface/GraphicsTypes.h>
 
+#include <array>
+
 namespace karma::renderer_backend {
 
 Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSRV(
@@ -111,6 +113,54 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createSolidText
     Diligent::RefCntAutoPtr<Diligent::ITexture>& out_texture) {
   unsigned char pixel[4] = {r, g, b, a};
   return createTextureSRV(pixel, 1, 1, srgb, false, name, out_texture);
+}
+
+Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createSolidCubeTextureSRV(
+    unsigned char r,
+    unsigned char g,
+    unsigned char b,
+    unsigned char a,
+    bool srgb,
+    const char* name,
+    Diligent::RefCntAutoPtr<Diligent::ITexture>& out_texture) {
+  if (!device_) {
+    return {};
+  }
+
+  std::array<unsigned char, 4> pixel{r, g, b, a};
+  std::array<Diligent::TextureSubResData, 6> subresources{};
+  for (auto& subresource : subresources) {
+    subresource.pData = pixel.data();
+    subresource.Stride = 4;
+  }
+
+  Diligent::TextureDesc desc{};
+  desc.Name = name;
+  desc.Type = Diligent::RESOURCE_DIM_TEX_CUBE;
+  desc.Width = 1;
+  desc.Height = 1;
+  desc.ArraySize = 6;
+  desc.MipLevels = 1;
+  desc.Format = srgb ? Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB
+                     : Diligent::TEX_FORMAT_RGBA8_UNORM;
+  desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+
+  Diligent::TextureData init{};
+  init.pSubResources = subresources.data();
+  init.NumSubresources = static_cast<Diligent::Uint32>(subresources.size());
+  device_->CreateTexture(desc, &init, &out_texture);
+  if (!out_texture) {
+    return {};
+  }
+
+  Diligent::ITextureView* raw_view =
+      out_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+  if (!raw_view) {
+    return {};
+  }
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
+  srv = raw_view;
+  return srv;
 }
 
 Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFromAssimp(

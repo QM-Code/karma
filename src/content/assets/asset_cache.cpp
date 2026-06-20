@@ -939,6 +939,11 @@ Json materialDescJson(const renderer::MaterialDesc& material) {
       {"attenuation_color", colorJson(material.attenuation_color)},
       {"analytic_sphere_normals", material.analytic_sphere_normals},
       {"unlit", material.unlit},
+      {"alpha_mode", static_cast<uint32_t>(material.alpha_mode)},
+      {"alpha_cutoff", floatJson(material.alpha_cutoff)},
+      {"alpha_softness", floatJson(material.alpha_softness)},
+      {"alpha_dither", material.alpha_dither},
+      {"alpha_to_coverage", material.alpha_to_coverage},
       {"transparent", material.transparent},
       {"blend_mode", static_cast<uint32_t>(material.blend_mode)},
       {"depth_test", material.depth_test},
@@ -980,7 +985,19 @@ bool readMaterialDescJson(const Json& json, renderer::MaterialDesc& material) {
   }
   parsed.analytic_sphere_normals = json.value("analytic_sphere_normals", parsed.analytic_sphere_normals);
   parsed.unlit = json.value("unlit", parsed.unlit);
+  parsed.alpha_mode = static_cast<renderer::MaterialDesc::AlphaMode>(
+      json.value("alpha_mode", static_cast<uint32_t>(parsed.alpha_mode)));
+  if (!read_float_field("alpha_cutoff", parsed.alpha_cutoff) ||
+      !read_float_field("alpha_softness", parsed.alpha_softness)) {
+    return false;
+  }
+  parsed.alpha_dither = json.value("alpha_dither", parsed.alpha_dither);
+  parsed.alpha_to_coverage = json.value("alpha_to_coverage", parsed.alpha_to_coverage);
   parsed.transparent = json.value("transparent", parsed.transparent);
+  if (parsed.transparent &&
+      parsed.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
+    parsed.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+  }
   parsed.blend_mode = static_cast<renderer::MaterialDesc::BlendMode>(
       json.value("blend_mode", static_cast<uint32_t>(parsed.blend_mode)));
   parsed.depth_test = json.value("depth_test", parsed.depth_test);

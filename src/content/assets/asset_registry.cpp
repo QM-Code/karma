@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -14,6 +15,7 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -227,9 +229,9 @@ constexpr ktx_uint32_t kKtxVkFormatRgba8Srgb = 43u;
 
 std::string_view textureImporterVersion() {
 #if defined(KARMA_ENABLE_KTX2)
-  return "texture-ktx2-uastc-v2";
+  return "texture-ktx2-uastc-v5";
 #else
-  return "texture-rgba8-v3";
+  return "texture-rgba8-v6";
 #endif
 }
 
@@ -452,11 +454,259 @@ std::optional<PreparedTextureUpload> transcodeKtx2Upload(const TextureAsset& tex
 }
 #endif
 
+void bleedTransparentRgb(Rgba8Image& image) {
+  if (!image.valid()) {
+    return;
+  }
+
+  constexpr uint8_t kVisibleAlphaThreshold = 8u;
+  const int width = image.width;
+  const int height = image.height;
+  const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+  std::vector<uint8_t> filled(pixel_count, 0u);
+  std::vector<size_t> queue;
+  queue.reserve(pixel_count);
+  for (size_t index = 0; index < pixel_count; ++index) {
+    if (image.pixels[index * 4u + 3u] <= kVisibleAlphaThreshold) {
+      continue;
+    }
+    filled[index] = 1u;
+    queue.push_back(index);
+  }
+  if (queue.empty()) {
+    return;
+  }
+
+  for (size_t head = 0; head < queue.size(); ++head) {
+    const size_t index = queue[head];
+    const int x = static_cast<int>(index % static_cast<size_t>(width));
+    const int y = static_cast<int>(index / static_cast<size_t>(width));
+    const size_t source_offset = index * 4u;
+
+    for (int oy = -1; oy <= 1; ++oy) {
+      for (int ox = -1; ox <= 1; ++ox) {
+        if (ox == 0 && oy == 0) {
+          continue;
+        }
+        const int nx = x + ox;
+        const int ny = y + oy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+          continue;
+        }
+        const size_t neighbor = static_cast<size_t>(ny) * static_cast<size_t>(width) +
+                                static_cast<size_t>(nx);
+        if (filled[neighbor] != 0u) {
+          continue;
+        }
+
+        const size_t neighbor_offset = neighbor * 4u;
+        image.pixels[neighbor_offset + 0u] = image.pixels[source_offset + 0u];
+        image.pixels[neighbor_offset + 1u] = image.pixels[source_offset + 1u];
+        image.pixels[neighbor_offset + 2u] = image.pixels[source_offset + 2u];
+        filled[neighbor] = 1u;
+        queue.push_back(neighbor);
+      }
+    }
+  }
+}
+
+uint32_t fullMipLevelCount(int width, int height) {
+  uint32_t levels = 1u;
+  int current_width = std::max(1, width);
+  int current_height = std::max(1, height);
+  while (current_width > 1 || current_height > 1) {
+    current_width = std::max(1, current_width / 2);
+    current_height = std::max(1, current_height / 2);
+    ++levels;
+  }
+  return levels;
+}
+
+float alphaCoverage(const Rgba8Image& image, float cutoff) {
+  if (!image.valid()) {
+    return 0.0f;
+  }
+  const float threshold = std::clamp(cutoff, 0.0f, 1.0f) * 255.0f;
+  const size_t pixel_count = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+  if (pixel_count == 0u) {
+    return 0.0f;
+  }
+  size_t covered = 0u;
+  for (size_t i = 0; i < pixel_count; ++i) {
+    if (static_cast<float>(image.pixels[i * 4u + 3u]) >= threshold) {
+      ++covered;
+    }
+  }
+  return static_cast<float>(covered) / static_cast<float>(pixel_count);
+}
+
+float scaledAlphaCoverage(const Rgba8Image& image, float scale, float cutoff) {
+  if (!image.valid()) {
+    return 0.0f;
+  }
+  const float threshold = std::clamp(cutoff, 0.0f, 1.0f);
+  const size_t pixel_count = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+  if (pixel_count == 0u) {
+    return 0.0f;
+  }
+  size_t covered = 0u;
+  for (size_t i = 0; i < pixel_count; ++i) {
+    const float alpha =
+        std::clamp((static_cast<float>(image.pixels[i * 4u + 3u]) / 255.0f) * scale,
+                   0.0f,
+                   1.0f);
+    if (alpha >= threshold) {
+      ++covered;
+    }
+  }
+  return static_cast<float>(covered) / static_cast<float>(pixel_count);
+}
+
+void scaleAlphaToCoverage(Rgba8Image& image, float target_coverage, float cutoff) {
+  if (!image.valid() || target_coverage <= 0.0f) {
+    return;
+  }
+
+  float low = 0.0f;
+  float high = 1.0f;
+  for (int i = 0; i < 8 && scaledAlphaCoverage(image, high, cutoff) < target_coverage; ++i) {
+    high *= 2.0f;
+  }
+  for (int i = 0; i < 16; ++i) {
+    const float mid = (low + high) * 0.5f;
+    if (scaledAlphaCoverage(image, mid, cutoff) < target_coverage) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  const size_t pixel_count = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+  for (size_t i = 0; i < pixel_count; ++i) {
+    const size_t alpha_offset = i * 4u + 3u;
+    const float scaled =
+        std::clamp((static_cast<float>(image.pixels[alpha_offset]) / 255.0f) * high,
+                   0.0f,
+                   1.0f);
+    image.pixels[alpha_offset] =
+        static_cast<uint8_t>(std::clamp(std::round(scaled * 255.0f), 0.0f, 255.0f));
+  }
+}
+
+Rgba8Image downsampleAlphaWeighted(const Rgba8Image& source) {
+  Rgba8Image out{};
+  if (!source.valid()) {
+    return out;
+  }
+
+  out.width = std::max(1, source.width / 2);
+  out.height = std::max(1, source.height / 2);
+  out.pixels.resize(static_cast<size_t>(out.width) * static_cast<size_t>(out.height) * 4u);
+
+  for (int y = 0; y < out.height; ++y) {
+    for (int x = 0; x < out.width; ++x) {
+      uint32_t alpha_sum = 0u;
+      uint32_t count = 0u;
+      float weighted_r = 0.0f;
+      float weighted_g = 0.0f;
+      float weighted_b = 0.0f;
+      uint32_t fallback_r = 0u;
+      uint32_t fallback_g = 0u;
+      uint32_t fallback_b = 0u;
+
+      for (int oy = 0; oy < 2; ++oy) {
+        for (int ox = 0; ox < 2; ++ox) {
+          const int sx = std::min(source.width - 1, x * 2 + ox);
+          const int sy = std::min(source.height - 1, y * 2 + oy);
+          const size_t source_offset =
+              (static_cast<size_t>(sy) * static_cast<size_t>(source.width) +
+               static_cast<size_t>(sx)) * 4u;
+          const uint32_t alpha = source.pixels[source_offset + 3u];
+          alpha_sum += alpha;
+          weighted_r += static_cast<float>(source.pixels[source_offset + 0u]) *
+                        static_cast<float>(alpha);
+          weighted_g += static_cast<float>(source.pixels[source_offset + 1u]) *
+                        static_cast<float>(alpha);
+          weighted_b += static_cast<float>(source.pixels[source_offset + 2u]) *
+                        static_cast<float>(alpha);
+          fallback_r += source.pixels[source_offset + 0u];
+          fallback_g += source.pixels[source_offset + 1u];
+          fallback_b += source.pixels[source_offset + 2u];
+          ++count;
+        }
+      }
+
+      const size_t out_offset =
+          (static_cast<size_t>(y) * static_cast<size_t>(out.width) +
+           static_cast<size_t>(x)) * 4u;
+      if (alpha_sum > 0u) {
+        out.pixels[out_offset + 0u] =
+            static_cast<uint8_t>(std::clamp(weighted_r / static_cast<float>(alpha_sum),
+                                           0.0f,
+                                           255.0f));
+        out.pixels[out_offset + 1u] =
+            static_cast<uint8_t>(std::clamp(weighted_g / static_cast<float>(alpha_sum),
+                                           0.0f,
+                                           255.0f));
+        out.pixels[out_offset + 2u] =
+            static_cast<uint8_t>(std::clamp(weighted_b / static_cast<float>(alpha_sum),
+                                           0.0f,
+                                           255.0f));
+      } else {
+        out.pixels[out_offset + 0u] = static_cast<uint8_t>(fallback_r / count);
+        out.pixels[out_offset + 1u] = static_cast<uint8_t>(fallback_g / count);
+        out.pixels[out_offset + 2u] = static_cast<uint8_t>(fallback_b / count);
+      }
+      out.pixels[out_offset + 3u] = static_cast<uint8_t>(alpha_sum / count);
+    }
+  }
+
+  bleedTransparentRgb(out);
+  return out;
+}
+
+void appendRgba8Mip(TextureAsset& texture, const Rgba8Image& mip, uint32_t level) {
+  const size_t offset = texture.bytes.size();
+  texture.bytes.insert(texture.bytes.end(), mip.pixels.begin(), mip.pixels.end());
+  texture.subresources.push_back(renderer::TextureUploadSubresource{
+      .mip_level = level,
+      .array_layer = 0u,
+      .width = mip.width,
+      .height = mip.height,
+      .offset = offset,
+      .size = mip.pixels.size(),
+      .row_stride = static_cast<std::size_t>(mip.width) * 4u,
+  });
+}
+
+void buildAlphaAwareMipChain(TextureAsset& texture, Rgba8Image base_image, float alpha_coverage_cutoff) {
+  texture.desc.generate_mips = false;
+  texture.desc.mip_levels = fullMipLevelCount(base_image.width, base_image.height);
+  texture.payload_format = TextureAsset::PayloadFormat::RGBA8;
+  texture.bytes.clear();
+  texture.subresources.clear();
+  texture.subresources.reserve(texture.desc.mip_levels);
+
+  bleedTransparentRgb(base_image);
+  appendRgba8Mip(texture, base_image, 0u);
+  Rgba8Image current = std::move(base_image);
+  for (uint32_t level = 1u; level < texture.desc.mip_levels; ++level) {
+    const float target_coverage = alphaCoverage(current, alpha_coverage_cutoff);
+    current = downsampleAlphaWeighted(current);
+    scaleAlphaToCoverage(current, target_coverage, alpha_coverage_cutoff);
+    bleedTransparentRgb(current);
+    appendRgba8Mip(texture, current, level);
+  }
+}
+
 TextureAsset makeTextureAssetFromImage(Rgba8Image image,
                                        bool srgb,
                                        bool generate_mips,
                                        TextureAsset::Semantic semantic,
-                                       bool prefer_compressed) {
+                                       bool prefer_compressed,
+                                       bool alpha_aware_mips = false,
+                                       float alpha_coverage_cutoff = 0.5f) {
   TextureAsset texture{};
   texture.desc.width = image.width;
   texture.desc.height = image.height;
@@ -464,6 +714,12 @@ TextureAsset makeTextureAssetFromImage(Rgba8Image image,
   texture.desc.srgb = srgb;
   texture.desc.generate_mips = generate_mips;
   texture.semantic = semantic;
+
+  if (generate_mips && alpha_aware_mips) {
+    buildAlphaAwareMipChain(texture, std::move(image), alpha_coverage_cutoff);
+    texture.content_hash = textureContentHash(texture);
+    return texture;
+  }
 
   if (prefer_compressed) {
     auto ktx2 = encodeKtx2Uastc(image,
@@ -792,6 +1048,8 @@ bool importTextureAsset(AssetRegistry& assets,
   const nlohmann::json cache_options{
       {"srgb", options.srgb},
       {"generate_mips", options.generate_mips},
+      {"alpha_bleed", options.alpha_bleed},
+      {"alpha_coverage_cutoff", options.alpha_coverage_cutoff},
       {"semantic", static_cast<uint32_t>(options.semantic)},
       {"prefer_compressed", options.prefer_compressed},
       {"texture_profile", "ktx2_basis_uastc_zstd_rgba8_fallback"},
@@ -810,11 +1068,16 @@ bool importTextureAsset(AssetRegistry& assets,
   if (!image.has_value() || !image->valid()) {
     return false;
   }
+  if (options.alpha_bleed) {
+    bleedTransparentRgb(*image);
+  }
   TextureAsset texture = makeTextureAssetFromImage(std::move(*image),
                                                    options.srgb,
                                                    options.generate_mips,
                                                    options.semantic,
-                                                   options.prefer_compressed);
+                                                   options.prefer_compressed,
+                                                   options.alpha_bleed && options.generate_mips,
+                                                   options.alpha_coverage_cutoff);
   std::string diagnostic;
   (void)cache.writeTexture(cache_key, texture, &diagnostic);
   return assets.registerTextureAsset(key, std::move(texture));
@@ -1099,7 +1362,9 @@ std::optional<renderer::ResolvedMaterialDesc> AssetRegistry::resolveMaterial(
 
 bool AssetRegistry::registerPostProcessProfile(const std::string& key,
                                                renderer::PostProcessSettings profile) {
-  if (!isValidAssetKey(key)) {
+  const bool default_profile_key =
+      key.empty() || key == renderer::kDefaultPostProcessProfileKey;
+  if (!default_profile_key && !isValidAssetKey(key)) {
     return false;
   }
   impl_->post_process_profiles.registerProfile(key, profile);

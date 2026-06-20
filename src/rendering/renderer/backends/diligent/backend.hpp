@@ -1,5 +1,6 @@
 #pragma once
 
+#include "karma/core/time.h"
 #include "karma/rendering/renderer/backend.hpp"
 
 #include "passes/pass_shared.h"
@@ -72,16 +73,19 @@ enum class MaterialPipelineKind : uint32_t {
   ScreenWave = 4,
   SphereGlowVolume = 5,
   VolumetricSolid = 6,
+  Foliage = 7,
 };
 
 class DiligentBackend final : public Backend {
  public:
-  explicit DiligentBackend(karma::platform::Window& window);
+	  explicit DiligentBackend(karma::platform::Window& window,
+	                           const renderer::GraphicsDeviceCreateInfo& create_info = {});
   ~DiligentBackend() override;
 
   void beginFrame(const renderer::FrameInfo& frame) override;
   void endFrame() override;
   void resize(int width, int height) override;
+  void prewarmRendererResources(bool include_ui) override;
   void flushRenderStateCache() override;
 
   renderer::MeshId createMesh(const geometry::MeshData& mesh) override;
@@ -127,6 +131,7 @@ class DiligentBackend final : public Backend {
   renderer::DeformationStats getDeformationStats() const override;
 
   void submit(const renderer::DrawItem& item) override;
+  void submitInstanced(const renderer::InstancedDrawItem& item) override;
   void submitParticles(renderer::ParticleBatch batch) override;
   void submitPackedParticles(renderer::PackedParticleBatch batch) override;
   void submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) override;
@@ -153,8 +158,12 @@ class DiligentBackend final : public Backend {
                               int max_lights_per_tile,
                               int max_local_lights) override;
   renderer::ForwardPlusStats getForwardPlusStats() const override;
+  void setInstancingCpuTimings(float render_system_extraction_ms,
+                               float forward_state_collection_ms) override;
+  renderer::InstancingStats getInstancingStats() const override;
   renderer::ParticlePassStats getParticlePassStats() const override;
   renderer::RendererCommandStats getRendererCommandStats() const override;
+  renderer::RendererFrameTimingStats getRendererFrameTimingStats() const override;
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,
@@ -275,6 +284,7 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::ITextureView> thickness_srv;
     std::array<glm::vec4, kTextureCoordSlotCount> texcoord_row0{};
     std::array<glm::vec4, kTextureCoordSlotCount> texcoord_row1{};
+    static constexpr size_t kForwardSrbSlotCount = 14u;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_double_sided_srb;
@@ -285,6 +295,10 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_transparent_double_sided_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_additive_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_additive_double_sided_srb;
+    std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>, kForwardSrbSlotCount>
+        layout_srbs;
+    std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>, kForwardSrbSlotCount>
+        layout_custom_srbs;
   };
 
   struct ImportedMaterialTemplateCacheEntry {
@@ -317,9 +331,64 @@ class DiligentBackend final : public Backend {
     std::vector<renderer::DrawMaterialBinding> materials;
     renderer::DeformationId deformation = renderer::kInvalidDeformation;
     glm::mat4 transform{1.0f};
+    glm::vec4 params{0.0f};
     bool visible = true;
     bool shadow_visible = true;
     bool transform_changed = true;
+  };
+
+  struct InstancedRecord {
+    struct LodRecord {
+      float start_distance = 0.0f;
+      renderer::MeshId mesh = renderer::kInvalidMesh;
+      renderer::MaterialId material = renderer::kInvalidMaterial;
+      std::vector<renderer::DrawMaterialBinding> materials;
+      renderer::InstanceLodRenderMode render_mode = renderer::InstanceLodRenderMode::Mesh;
+      glm::vec3 bounds_center{0.0f};
+      float bounds_radius = 0.0f;
+      bool bounds_valid = false;
+      bool shadow_visible = false;
+      Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culled_instance_buffer;
+      Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culled_instance_uav;
+      size_t gpu_culled_instance_buffer_capacity_bytes = 0;
+      Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culling_indirect_args_buffer;
+      Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culling_indirect_args_uav;
+    };
+
+    renderer::LayerId layer = 0;
+    renderer::MeshId mesh = renderer::kInvalidMesh;
+    renderer::MaterialId material = renderer::kInvalidMaterial;
+    std::vector<renderer::DrawMaterialBinding> materials;
+    std::vector<LodRecord> lods;
+    renderer::InstanceGpuLayout gpu_layout = renderer::InstanceGpuLayout::Matrix4x4Params;
+    std::vector<renderer::InstanceData> instances;
+    std::vector<renderer::PlanarInstanceData> planar_instances;
+    uint64_t revision = 0;
+    glm::vec3 bounds_center{0.0f};
+    float bounds_radius = 0.0f;
+    bool bounds_valid = false;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> instance_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> instance_srv;
+    size_t instance_buffer_capacity_bytes = 0;
+    bool instance_buffer_dirty = true;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culled_instance_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culled_instance_uav;
+    size_t gpu_culled_instance_buffer_capacity_bytes = 0;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culling_indirect_args_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culling_indirect_args_uav;
+    bool dynamic = false;
+    bool visible = true;
+    bool shadow_visible = true;
+
+    size_t instanceCount() const {
+      switch (gpu_layout) {
+        case renderer::InstanceGpuLayout::Matrix4x4Params:
+          return instances.size();
+        case renderer::InstanceGpuLayout::PositionYawScaleParams:
+          return planar_instances.size();
+      }
+      return 0u;
+    }
   };
 
   struct DeformationRecord {
@@ -399,6 +468,8 @@ class DiligentBackend final : public Backend {
     Diligent::Uint32 index_count = 0;
     bool indexed = false;
     bool deformed = false;
+    renderer::InstanceGpuLayout gpu_layout = renderer::InstanceGpuLayout::Matrix4x4Params;
+    renderer::InstanceLodRenderMode render_mode = renderer::InstanceLodRenderMode::Mesh;
 
     bool operator==(const ForwardBatchKey& other) const {
       return mesh == other.mesh &&
@@ -406,13 +477,18 @@ class DiligentBackend final : public Backend {
              index_offset == other.index_offset &&
              index_count == other.index_count &&
              indexed == other.indexed &&
-             deformed == other.deformed;
+             deformed == other.deformed &&
+             gpu_layout == other.gpu_layout &&
+             render_mode == other.render_mode;
     }
   };
 
   struct ForwardBatch {
     ForwardBatchKey key{};
-    std::vector<glm::mat4> transforms;
+    std::vector<renderer::InstanceData> instances;
+    renderer::InstanceId instanced_record = renderer::kInvalidInstance;
+    Diligent::Uint32 persistent_instance_count = 0;
+    uint32_t instanced_lod_index = UINT32_MAX;
   };
 
   struct TransparentForwardDraw {
@@ -423,6 +499,7 @@ class DiligentBackend final : public Backend {
 
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
+    glm::vec4 params{0.0f};
     renderer::DeformationId deformation = renderer::kInvalidDeformation;
     float depth = 0.0f;
     SceneSampleMode scene_sample_mode = SceneSampleMode::None;
@@ -431,6 +508,7 @@ class DiligentBackend final : public Backend {
   struct DeformedForwardDraw {
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
+    glm::vec4 params{0.0f};
     renderer::DeformationId deformation = renderer::kInvalidDeformation;
   };
 
@@ -448,6 +526,7 @@ class DiligentBackend final : public Backend {
     Diligent::Uint32 skipped_missing_vb = 0;
     Diligent::Uint32 skipped_missing_mesh = 0;
     Diligent::Uint32 skipped_layer = 0;
+    Diligent::Uint32 instanced_culled_batches = 0;
   };
 
   struct ParticlePassContext {
@@ -538,12 +617,19 @@ class DiligentBackend final : public Backend {
 
   enum class ForwardPipelineVariant {
     Opaque,
+    OpaqueDoubleSided,
     DepthPrepass,
     Transparent,
     TransparentDoubleSided,
     Additive,
     AdditiveDoubleSided,
   };
+  static constexpr size_t kForwardPipelineVariantCount = 7u;
+  static constexpr size_t kInstanceGpuLayoutCount = 2u;
+  static constexpr size_t kForwardSrbSlotCount =
+      kForwardPipelineVariantCount * kInstanceGpuLayoutCount;
+  static size_t forwardPipelineVariantIndex(ForwardPipelineVariant variant);
+  static size_t instanceGpuLayoutIndex(renderer::InstanceGpuLayout layout);
 
   struct CustomForwardPipeline {
     Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
@@ -563,14 +649,43 @@ class DiligentBackend final : public Backend {
   TerrainPipelineSet* ensureTerrainResources(Diligent::TEXTURE_FORMAT rtv_format,
                                              Diligent::TEXTURE_FORMAT dsv_format);
   void ensureParticleResources();
-  Diligent::IPipelineState* ensureForwardPipeline(ForwardPipelineVariant variant);
+  void recordRenderLayerStageTiming(const char* stage, double ms);
+  void recordResourceCreation(const char* area,
+                              const char* stage,
+                              core::SteadyClock::time_point start,
+                              core::SteadyClock::time_point end);
+  void recordPipelineCreation(const char* area,
+                              const char* stage,
+                              core::SteadyClock::time_point start,
+                              core::SteadyClock::time_point end);
+  Diligent::IPipelineState* ensureForwardPipeline(
+      ForwardPipelineVariant variant,
+      renderer::InstanceGpuLayout layout = renderer::InstanceGpuLayout::Matrix4x4Params);
   Diligent::IPipelineState* ensureCustomForwardPipeline(const MaterialRecord& material,
-                                                        ForwardPipelineVariant variant);
+                                                        ForwardPipelineVariant variant,
+                                                        renderer::InstanceGpuLayout layout =
+                                                            renderer::InstanceGpuLayout::
+                                                                Matrix4x4Params);
   void bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const;
   bool materialUsesCustomForwardPipeline(const MaterialRecord& material) const;
   Diligent::IShaderResourceBinding* ensureMaterialForwardSrb(MaterialRecord& material,
                                                              ForwardPipelineVariant variant,
-                                                             bool custom_pipeline);
+                                                             bool custom_pipeline,
+                                                             renderer::InstanceGpuLayout layout =
+                                                                 renderer::InstanceGpuLayout::
+                                                                     Matrix4x4Params);
+  bool ensureInstancedRecordBuffer(InstancedRecord& record);
+  bool instancedGpuCullingEnabled() const;
+  bool ensureInstancedGpuCullingResources();
+  bool ensureInstancedGpuLodCullingResources();
+  bool ensureInstancedGpuCullingOutputBuffers(
+      size_t instance_count,
+      Diligent::RefCntAutoPtr<Diligent::IBuffer>& visible_buffer,
+      Diligent::RefCntAutoPtr<Diligent::IBufferView>& visible_uav,
+      size_t& visible_buffer_capacity_bytes,
+      Diligent::RefCntAutoPtr<Diligent::IBuffer>& indirect_args_buffer,
+      Diligent::RefCntAutoPtr<Diligent::IBufferView>& indirect_args_uav);
+  bool ensureInstancedGpuCullingRecordBuffers(InstancedRecord& record);
   void initializeMaterialBindingForPipeline(
       MaterialRecord& record,
       Diligent::IPipelineState* pso,
@@ -633,6 +748,14 @@ class DiligentBackend final : public Backend {
                                                                         bool srgb,
                                                                         const char* name,
                                                                         Diligent::RefCntAutoPtr<Diligent::ITexture>& out_texture);
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> createSolidCubeTextureSRV(
+      unsigned char r,
+      unsigned char g,
+      unsigned char b,
+      unsigned char a,
+      bool srgb,
+      const char* name,
+      Diligent::RefCntAutoPtr<Diligent::ITexture>& out_texture);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> loadTextureFromAssimp(const aiScene& scene,
                                                                         const std::string& model_key,
                                                                         const std::filesystem::path& base_dir,
@@ -673,8 +796,9 @@ class DiligentBackend final : public Backend {
     bool exists = false;
     std::uintmax_t size = 0;
   };
-  RenderStateCacheFileInfo renderStateCacheFileInfo() const;
-  void saveRenderStateCache(std::string_view reason);
+	  RenderStateCacheFileInfo renderStateCacheFileInfo() const;
+	  void saveRenderStateCache(std::string_view reason);
+	  void applyDiligentPresentEnvironment() const;
 
   karma::platform::Window* window_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IRenderDevice> device_;
@@ -684,16 +808,19 @@ class DiligentBackend final : public Backend {
   std::filesystem::path render_state_cache_path_;
   bool shader_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 19;
+  std::uint32_t shader_cache_version_ = 29;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_vs_;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_ps_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> opaque_double_sided_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_prepass_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> transparent_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> transparent_double_sided_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> additive_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> additive_double_sided_pipeline_state_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IPipelineState>, kForwardPipelineVariantCount>
+      compact_forward_pipeline_states_;
   std::unordered_map<std::string, CustomForwardPipeline> custom_forward_pipelines_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> camera_override_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> camera_override_srb_;
@@ -704,12 +831,17 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shader_resources_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> depth_prepass_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> default_material_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>
+      opaque_double_sided_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> transparent_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>
       transparent_double_sided_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> additive_default_material_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>
       additive_double_sided_default_material_srb_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>,
+             kForwardPipelineVariantCount>
+      compact_default_material_srbs_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shadow_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> constants_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> deformation_constants_;
@@ -720,6 +852,7 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBuffer> fallback_morph_delta_buffer_;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> fallback_morph_delta_srv_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_color_;
+  Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_color_clamp_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> sampler_data_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> terrain_color_sampler_;
   Diligent::RefCntAutoPtr<Diligent::ISampler> terrain_height_sampler_;
@@ -771,7 +904,8 @@ class DiligentBackend final : public Backend {
                                             Diligent::ITextureView* active_rtv,
                                             Diligent::ITextureView* active_dsv,
                                             int render_width,
-                                            int render_height);
+                                            int render_height,
+                                            bool is_gl);
   Diligent::Uint32 renderTransparentForwardDraws(
       const std::vector<TransparentForwardDraw>& draws,
       const DrawConstants& base_constants,
@@ -832,6 +966,17 @@ class DiligentBackend final : public Backend {
   Diligent::IShaderResourceVariable* forward_plus_compute_tile_counts_var_ = nullptr;
   Diligent::IShaderResourceVariable* forward_plus_compute_tile_indices_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> forward_plus_compute_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> instanced_gpu_culling_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> instanced_gpu_culling_srb_;
+  Diligent::IShaderResourceVariable* instanced_gpu_culling_source_var_ = nullptr;
+  Diligent::IShaderResourceVariable* instanced_gpu_culling_visible_var_ = nullptr;
+  Diligent::IShaderResourceVariable* instanced_gpu_culling_args_var_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> instanced_gpu_culling_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> instanced_gpu_lod_culling_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> instanced_gpu_lod_culling_srb_;
+  Diligent::IShaderResourceVariable* instanced_gpu_lod_culling_source_var_ = nullptr;
+  std::array<Diligent::IShaderResourceVariable*, 4> instanced_gpu_lod_culling_visible_vars_{};
+  std::array<Diligent::IShaderResourceVariable*, 4> instanced_gpu_lod_culling_args_vars_{};
   Diligent::RefCntAutoPtr<Diligent::ISampler> ui_sampler_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_no_depth_;
@@ -1071,6 +1216,7 @@ class DiligentBackend final : public Backend {
   std::unordered_map<renderer::TerrainId, TerrainRecord> terrains_;
   std::unordered_map<renderer::DeformationId, DeformationRecord> deformations_;
   std::unordered_map<renderer::InstanceId, InstanceRecord> instances_;
+  std::unordered_map<renderer::InstanceId, InstancedRecord> instanced_records_;
   std::vector<TerrainSubmission> terrain_submissions_;
   std::vector<ParticleBatchRecord> particle_batches_;
   std::vector<ParticleEmitterSubmission> particle_emitter_submissions_;
@@ -1085,9 +1231,10 @@ class DiligentBackend final : public Backend {
   std::vector<renderer::LightData> lights_;
   std::filesystem::path environment_map_;
   float environment_intensity_ = 0.0f;
-  bool draw_skybox_ = true;
-  bool vsync_enabled_ = true;
-  int env_debug_mode_ = 0;
+	  bool draw_skybox_ = true;
+	  bool vsync_enabled_ = true;
+	  renderer::PresentMode present_mode_ = renderer::PresentMode::Auto;
+	  int env_debug_mode_ = 0;
   bool warned_env_debug_ = false;
   bool warned_env_bind_missing_ = false;
   bool anisotropy_enabled_ = false;
@@ -1154,14 +1301,20 @@ class DiligentBackend final : public Backend {
   int forward_plus_tile_size_ = 16;
   int forward_plus_max_lights_per_tile_ = 128;
   renderer::ForwardPlusStats forward_plus_stats_{};
+  renderer::InstancingStats instancing_stats_{};
   renderer::ParticlePassStats particle_pass_stats_{};
   renderer::TerrainStats terrain_stats_{};
+  renderer::RendererFrameTimingStats current_frame_timing_stats_{};
+  renderer::RendererFrameTimingStats last_frame_timing_stats_{};
   renderer::ParticlePassStats particle_stats_log_totals_{};
   double particle_stats_log_elapsed_seconds_ = 0.0;
   float last_frame_delta_seconds_ = 0.0f;
   uint32_t particle_stats_log_frame_count_ = 0;
   bool particle_stats_log_initialized_ = false;
   bool particle_stats_log_enabled_ = false;
+  bool warned_instanced_gpu_culling_unsupported_ = false;
+  bool frame_active_ = false;
+  bool present_frame_ = true;
   bool warned_line_thickness_ = false;
   int current_width_ = 0;
   int current_height_ = 0;

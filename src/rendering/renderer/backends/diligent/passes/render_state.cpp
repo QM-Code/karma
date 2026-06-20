@@ -119,21 +119,32 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
 
   bind_env_to_srb(shader_resources_);
   bind_env_to_srb(default_material_srb_);
+  bind_env_to_srb(opaque_double_sided_default_material_srb_);
   bind_env_to_srb(transparent_default_material_srb_);
   bind_env_to_srb(transparent_double_sided_default_material_srb_);
   bind_env_to_srb(additive_default_material_srb_);
   bind_env_to_srb(additive_double_sided_default_material_srb_);
+  for (auto& srb : compact_default_material_srbs_) {
+    bind_env_to_srb(srb);
+  }
   for (auto& entry : materials_) {
     bind_env_to_srb(entry.second.srb);
     bind_env_to_srb(entry.second.transparent_srb);
     bind_env_to_srb(entry.second.transparent_double_sided_srb);
     bind_env_to_srb(entry.second.additive_srb);
     bind_env_to_srb(entry.second.additive_double_sided_srb);
+    for (auto& srb : entry.second.layout_srbs) {
+      bind_env_to_srb(srb);
+    }
+    for (auto& srb : entry.second.layout_custom_srbs) {
+      bind_env_to_srb(srb);
+    }
   }
 }
 
 void DiligentBackend::setVsync(bool enabled) {
   vsync_enabled_ = enabled;
+  present_mode_ = renderer::PresentMode::Auto;
   if (vsync_enabled_) {
     spdlog::info(
         "Diligent Vulkan present policy: vsync FIFO/FIFO_RELAXED pacing enabled");
@@ -166,6 +177,13 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
   Diligent::RefCntAutoPtr<Diligent::ISampler> next_sampler_color;
   device_->CreateSampler(sampler_color, &next_sampler_color);
 
+  Diligent::SamplerDesc sampler_color_clamp = sampler_color;
+  sampler_color_clamp.AddressU = Diligent::TEXTURE_ADDRESS_CLAMP;
+  sampler_color_clamp.AddressV = Diligent::TEXTURE_ADDRESS_CLAMP;
+  sampler_color_clamp.AddressW = Diligent::TEXTURE_ADDRESS_CLAMP;
+  Diligent::RefCntAutoPtr<Diligent::ISampler> next_sampler_color_clamp;
+  device_->CreateSampler(sampler_color_clamp, &next_sampler_color_clamp);
+
   Diligent::SamplerDesc sampler_data{};
   sampler_data.MinFilter = Diligent::FILTER_TYPE_LINEAR;
   sampler_data.MagFilter = Diligent::FILTER_TYPE_LINEAR;
@@ -177,6 +195,7 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
   device_->CreateSampler(sampler_data, &next_sampler_data);
 
   sampler_color_ = std::move(next_sampler_color);
+  sampler_color_clamp_ = std::move(next_sampler_color_clamp);
   sampler_data_ = std::move(next_sampler_data);
 
   for (auto& entry : materials_) {
@@ -191,12 +210,46 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
       if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
         var->Set(sampler_color_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
       }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp")) {
+        var->Set(sampler_color_clamp_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
+        var->Set(sampler_data_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+    }
+    for (auto& srb_ref : entry.second.layout_srbs) {
+      auto* srb = srb_ref.RawPtr();
+      if (!srb) {
+        continue;
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
+        var->Set(sampler_color_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp")) {
+        var->Set(sampler_color_clamp_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
+        var->Set(sampler_data_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+    }
+    for (auto& srb_ref : entry.second.layout_custom_srbs) {
+      auto* srb = srb_ref.RawPtr();
+      if (!srb) {
+        continue;
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
+        var->Set(sampler_color_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp")) {
+        var->Set(sampler_color_clamp_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
       if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
         var->Set(sampler_data_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
       }
     }
   }
   for (auto* srb : {default_material_srb_.RawPtr(),
+                    opaque_double_sided_default_material_srb_.RawPtr(),
                     transparent_default_material_srb_.RawPtr(),
                     transparent_double_sided_default_material_srb_.RawPtr(),
                     additive_default_material_srb_.RawPtr(),
@@ -206,6 +259,24 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
     }
     if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
       var->Set(sampler_color_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp")) {
+      var->Set(sampler_color_clamp_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
+      var->Set(sampler_data_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+    }
+  }
+  for (auto& srb_ref : compact_default_material_srbs_) {
+    auto* srb = srb_ref.RawPtr();
+    if (!srb) {
+      continue;
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
+      var->Set(sampler_color_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+    }
+    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp")) {
+      var->Set(sampler_color_clamp_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
     if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
       var->Set(sampler_data_, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
@@ -232,6 +303,20 @@ void DiligentBackend::setForwardPlusSettings(int tile_size,
 
 renderer::ForwardPlusStats DiligentBackend::getForwardPlusStats() const {
   return forward_plus_stats_;
+}
+
+void DiligentBackend::setInstancingCpuTimings(float render_system_extraction_ms,
+                                              float forward_state_collection_ms) {
+  if (render_system_extraction_ms >= 0.0f) {
+    instancing_stats_.render_system_extraction_ms = render_system_extraction_ms;
+  }
+  if (forward_state_collection_ms >= 0.0f) {
+    instancing_stats_.forward_state_collection_ms = forward_state_collection_ms;
+  }
+}
+
+renderer::InstancingStats DiligentBackend::getInstancingStats() const {
+  return instancing_stats_;
 }
 
 renderer::ParticlePassStats DiligentBackend::getParticlePassStats() const {
@@ -280,6 +365,10 @@ renderer::RendererCommandStats DiligentBackend::getRendererCommandStats() const 
   out.total_lines = stats.GetTotalLineCount();
   out.total_points = stats.GetTotalPointCount();
   return out;
+}
+
+renderer::RendererFrameTimingStats DiligentBackend::getRendererFrameTimingStats() const {
+  return last_frame_timing_stats_;
 }
 
 void DiligentBackend::setParticleSystemStats(const renderer::ParticlePassStats& stats) {

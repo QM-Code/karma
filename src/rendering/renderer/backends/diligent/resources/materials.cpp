@@ -69,6 +69,9 @@ renderer::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
   }
 
   desc.transparent = desc.base_color.a < 0.999f;
+  if (desc.transparent) {
+    desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+  }
   return desc;
 }
 
@@ -236,6 +239,9 @@ MaterialPipelineKind pipelineKind(std::string_view name) {
   if (name == "volumetric_solid") {
     return MaterialPipelineKind::VolumetricSolid;
   }
+  if (name == "foliage") {
+    return MaterialPipelineKind::Foliage;
+  }
   return MaterialPipelineKind::Standard;
 }
 
@@ -379,13 +385,21 @@ void DiligentBackend::initializeMaterialBindingForPipeline(
     return;
   }
 
+  const auto srb_start = core::SteadyClock::now();
   pso->CreateShaderResourceBinding(&srb, true);
+  recordResourceCreation("material_bindings",
+                         "material forward SRB",
+                         srb_start,
+                         core::SteadyClock::now());
   if (!srb) {
     return;
   }
 
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
     var->Set(sampler_color_);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp")) {
+    var->Set(sampler_color_clamp_);
   }
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
     var->Set(sampler_data_);
@@ -537,6 +551,12 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   record.custom_transparent_double_sided_srb.Release();
   record.custom_additive_srb.Release();
   record.custom_additive_double_sided_srb.Release();
+  for (auto& srb : record.layout_srbs) {
+    srb.Release();
+  }
+  for (auto& srb : record.layout_custom_srbs) {
+    srb.Release();
+  }
   logRenderResourceDiag("material_bindings", "total", total_start, core::SteadyClock::now());
 }
 
@@ -549,51 +569,70 @@ bool DiligentBackend::materialUsesCustomForwardPipeline(const MaterialRecord& ma
 Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
     MaterialRecord& material,
     ForwardPipelineVariant variant,
-    bool custom_pipeline) {
+    bool custom_pipeline,
+    renderer::InstanceGpuLayout layout) {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>* target = nullptr;
   Diligent::IPipelineState* pso = nullptr;
+  const size_t layout_slot = forwardPipelineVariantIndex(variant) * kInstanceGpuLayoutCount +
+                             instanceGpuLayoutIndex(layout);
 
   if (custom_pipeline) {
-    pso = ensureCustomForwardPipeline(material, variant);
-    switch (variant) {
-      case ForwardPipelineVariant::Opaque:
-        target = std::addressof(material.custom_srb);
-        break;
-      case ForwardPipelineVariant::Transparent:
-        target = std::addressof(material.custom_transparent_srb);
-        break;
-      case ForwardPipelineVariant::TransparentDoubleSided:
-        target = std::addressof(material.custom_transparent_double_sided_srb);
-        break;
-      case ForwardPipelineVariant::Additive:
-        target = std::addressof(material.custom_additive_srb);
-        break;
-      case ForwardPipelineVariant::AdditiveDoubleSided:
-        target = std::addressof(material.custom_additive_double_sided_srb);
-        break;
-      case ForwardPipelineVariant::DepthPrepass:
-        return nullptr;
+    pso = ensureCustomForwardPipeline(material, variant, layout);
+    if (layout != renderer::InstanceGpuLayout::Matrix4x4Params ||
+        variant == ForwardPipelineVariant::OpaqueDoubleSided) {
+      target = std::addressof(material.layout_custom_srbs[layout_slot]);
+    } else {
+      switch (variant) {
+        case ForwardPipelineVariant::Opaque:
+          target = std::addressof(material.custom_srb);
+          break;
+        case ForwardPipelineVariant::OpaqueDoubleSided:
+          target = std::addressof(material.layout_custom_srbs[layout_slot]);
+          break;
+        case ForwardPipelineVariant::Transparent:
+          target = std::addressof(material.custom_transparent_srb);
+          break;
+        case ForwardPipelineVariant::TransparentDoubleSided:
+          target = std::addressof(material.custom_transparent_double_sided_srb);
+          break;
+        case ForwardPipelineVariant::Additive:
+          target = std::addressof(material.custom_additive_srb);
+          break;
+        case ForwardPipelineVariant::AdditiveDoubleSided:
+          target = std::addressof(material.custom_additive_double_sided_srb);
+          break;
+        case ForwardPipelineVariant::DepthPrepass:
+          return nullptr;
+      }
     }
   } else {
-    pso = ensureForwardPipeline(variant);
-    switch (variant) {
-      case ForwardPipelineVariant::Opaque:
-        target = std::addressof(material.srb);
-        break;
-      case ForwardPipelineVariant::Transparent:
-        target = std::addressof(material.transparent_srb);
-        break;
-      case ForwardPipelineVariant::TransparentDoubleSided:
-        target = std::addressof(material.transparent_double_sided_srb);
-        break;
-      case ForwardPipelineVariant::Additive:
-        target = std::addressof(material.additive_srb);
-        break;
-      case ForwardPipelineVariant::AdditiveDoubleSided:
-        target = std::addressof(material.additive_double_sided_srb);
-        break;
-      case ForwardPipelineVariant::DepthPrepass:
-        return nullptr;
+    pso = ensureForwardPipeline(variant, layout);
+    if (layout != renderer::InstanceGpuLayout::Matrix4x4Params ||
+        variant == ForwardPipelineVariant::OpaqueDoubleSided) {
+      target = std::addressof(material.layout_srbs[layout_slot]);
+    } else {
+      switch (variant) {
+        case ForwardPipelineVariant::Opaque:
+          target = std::addressof(material.srb);
+          break;
+        case ForwardPipelineVariant::OpaqueDoubleSided:
+          target = std::addressof(material.layout_srbs[layout_slot]);
+          break;
+        case ForwardPipelineVariant::Transparent:
+          target = std::addressof(material.transparent_srb);
+          break;
+        case ForwardPipelineVariant::TransparentDoubleSided:
+          target = std::addressof(material.transparent_double_sided_srb);
+          break;
+        case ForwardPipelineVariant::Additive:
+          target = std::addressof(material.additive_srb);
+          break;
+        case ForwardPipelineVariant::AdditiveDoubleSided:
+          target = std::addressof(material.additive_double_sided_srb);
+          break;
+        case ForwardPipelineVariant::DepthPrepass:
+          return nullptr;
+      }
     }
   }
 
@@ -614,13 +653,21 @@ void DiligentBackend::initializeDefaultMaterialBinding(
     return;
   }
 
+  const auto srb_start = core::SteadyClock::now();
   pso->CreateShaderResourceBinding(&out_srb, true);
+  recordResourceCreation("material_bindings",
+                         "default material SRB",
+                         srb_start,
+                         core::SteadyClock::now());
   if (!out_srb) {
     return;
   }
 
   if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerColor")) {
     var->Set(sampler_color_);
+  }
+  if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerClamp")) {
+    var->Set(sampler_color_clamp_);
   }
   if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SamplerData")) {
     var->Set(sampler_data_);
@@ -1198,6 +1245,7 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
     record.desc.transmission = transmission;
     if (transmission > 0.001f) {
       record.desc.transparent = true;
+      record.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
     }
   }
   float ior = 1.5f;
@@ -1438,6 +1486,10 @@ void DiligentBackend::applyResolvedMaterial(
   const renderer::MaterialDesc& material = resolved.surface;
   record.pipeline = resolved.pipeline;
   record.desc = material;
+  if (record.desc.transparent &&
+      record.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
+    record.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+  }
   record.base_color_factor = glm::vec4(material.base_color.r,
                                        material.base_color.g,
                                        material.base_color.b,
@@ -1587,7 +1639,7 @@ void DiligentBackend::applyResolvedMaterial(
       assign_custom_material_param(index, param_it->second);
     }
   }
-  record.blend_mode = material.blend_mode;
+  record.blend_mode = record.desc.blend_mode;
   auto assign_texture_handle =
       [&](std::initializer_list<const char*> keys,
           Diligent::RefCntAutoPtr<Diligent::ITextureView>& target) {
@@ -1656,6 +1708,10 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
   initializeTextureCoordTransforms(record);
   record.pipeline = resolved.pipeline;
   record.desc = material;
+  if (record.desc.transparent &&
+      record.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
+    record.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+  }
   record.base_color_factor = glm::vec4(material.base_color.r,
                                        material.base_color.g,
                                        material.base_color.b,
@@ -1805,7 +1861,7 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
       assign_custom_material_param(index, param_it->second);
     }
   }
-  record.blend_mode = material.blend_mode;
+  record.blend_mode = record.desc.blend_mode;
   auto assign_texture_handle =
       [&](std::initializer_list<const char*> keys,
           Diligent::RefCntAutoPtr<Diligent::ITextureView>& target) {
@@ -1941,6 +1997,10 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material,
   }
 
   it->second.desc = desc;
+  if (it->second.desc.transparent &&
+      it->second.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
+    it->second.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+  }
   it->second.base_color_factor = glm::vec4(desc.base_color.r,
                                            desc.base_color.g,
                                            desc.base_color.b,
@@ -1968,7 +2028,7 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material,
                                            desc.attenuation_color.g,
                                            desc.attenuation_color.b);
   it->second.analytic_sphere_normals = desc.analytic_sphere_normals;
-  it->second.blend_mode = desc.blend_mode;
+  it->second.blend_mode = it->second.desc.blend_mode;
   it->second.base_color_srv = {};
   initializeMaterialBindings(it->second);
 }

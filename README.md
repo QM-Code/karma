@@ -239,8 +239,9 @@ build into category directories under `build/examples/`:
   emitted under `build/examples/physics`.
 - `rendering_gltf_viewer`, `rendering_postprocess`, `rendering_bloom`,
   `rendering_postwar_city`, `rendering_light_stress`,
-  `rendering_material_assignment`, and `rendering_terrain`: rendering inspection
-  and stress samples.
+  `rendering_material_assignment`, `rendering_grass_card`,
+  `rendering_grass_field`, and
+  `rendering_terrain`: rendering inspection and stress samples.
 - `scene_gltf_import` and `animation_gltf`: authored glTF/GLB scene import,
   animation, deformation, and skinning paths.
 - `particles_*`, `effects_*`, and `prefabs_*`: particle, visual effect, and
@@ -337,11 +338,18 @@ Useful environment flags:
 - `KARMA_DISABLE_DEPTH_PREPASS=1` / `KARMA_FORCE_DEPTH_PREPASS=1`: override the
   guarded forward depth-prepass policy for renderer triage.
 
+## Known Issues
+
+Known runtime and platform caveats are tracked in
+[Known Issues](docs/KNOWN_ISSUES.md). This currently includes the Linux NVIDIA
+Vulkan mouse-click present stall observed in dense grass rendering tests.
+
 ## Documentation
 
 Start with:
 
 - [Usage Guide](docs/ENGINE_USAGE.md)
+- [Known Issues](docs/KNOWN_ISSUES.md)
 - [Consumer Profiles And Versioning](docs/CONSUMER_PROFILES.md)
 - [API Documentation](docs/API.md)
 - [Implementation Notes](docs/ENGINE_IMPLEMENTATION.md)

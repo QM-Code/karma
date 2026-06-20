@@ -144,6 +144,10 @@ Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_fo
 }  // namespace
 
 void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
+  current_frame_timing_stats_ = {};
+  frame_active_ = true;
+  present_frame_ = frame.present;
+
   if (!particle_stats_log_initialized_) {
     particle_stats_log_initialized_ = true;
     if (const char* value = std::getenv("KARMA_PARTICLE_STATS")) {
@@ -160,6 +164,7 @@ void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
     resize(frame.width, frame.height);
   }
   particle_pass_stats_ = {};
+  instancing_stats_ = {};
   last_frame_delta_seconds_ = std::max(frame.delta_time, 0.0f);
   accumulated_time_seconds_ += static_cast<double>(std::max(frame.delta_time, 0.0f));
   if (accumulated_time_seconds_ >= kWrappedShaderTimeSeconds) {
@@ -179,8 +184,21 @@ void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
 }
 
 void DiligentBackend::endFrame() {
-  if (swap_chain_) {
+  if (swap_chain_ && present_frame_) {
+    const auto present_start = core::SteadyClock::now();
     swap_chain_->Present(vsync_enabled_ ? 1u : 0u);
+    const auto present_end = core::SteadyClock::now();
+    current_frame_timing_stats_.swapchain_present_ms +=
+        static_cast<float>(core::elapsedMilliseconds(present_start, present_end));
+  } else if (swap_chain_) {
+    if (context_) {
+      const auto flush_start = core::SteadyClock::now();
+      context_->Flush();
+      const auto flush_end = core::SteadyClock::now();
+      current_frame_timing_stats_.skipped_present_flush_ms +=
+          static_cast<float>(core::elapsedMilliseconds(flush_start, flush_end));
+    }
+    current_frame_timing_stats_.skipped_presents += 1u;
   }
   if (!line_vertices_depth_.empty()) {
     line_vertices_depth_.clear();
@@ -188,6 +206,8 @@ void DiligentBackend::endFrame() {
   if (!line_vertices_no_depth_.empty()) {
     line_vertices_no_depth_.clear();
   }
+  last_frame_timing_stats_ = current_frame_timing_stats_;
+  frame_active_ = false;
 }
 
 void DiligentBackend::resize(int width, int height) {
@@ -195,6 +215,7 @@ void DiligentBackend::resize(int width, int height) {
     return;
   }
 
+  const auto resize_start = core::SteadyClock::now();
   current_width_ = width;
   current_height_ = height;
   if (swap_chain_) {
@@ -207,6 +228,49 @@ void DiligentBackend::resize(int width, int height) {
     if (target.desc.width <= 0 || target.desc.height <= 0) {
       recreateRenderTargetResources(target, width, height);
     }
+  }
+  const auto resize_end = core::SteadyClock::now();
+  if (frame_active_) {
+    current_frame_timing_stats_.resize_events += 1u;
+    current_frame_timing_stats_.resize_ms +=
+        static_cast<float>(core::elapsedMilliseconds(resize_start, resize_end));
+  }
+}
+
+void DiligentBackend::prewarmRendererResources(bool include_ui) {
+  if (!device_) {
+    return;
+  }
+
+  const int width = std::max(current_width_, 1);
+  const int height = std::max(current_height_, 1);
+  const Diligent::TEXTURE_FORMAT color_format =
+      swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
+                  : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+
+  ensureDefaultSceneResources(width, height);
+  ensureForwardPipeline(ForwardPipelineVariant::Opaque,
+                        renderer::InstanceGpuLayout::Matrix4x4Params);
+  ensureForwardPipeline(ForwardPipelineVariant::Opaque,
+                        renderer::InstanceGpuLayout::PositionYawScaleParams);
+  ensureForwardPipeline(ForwardPipelineVariant::OpaqueDoubleSided,
+                        renderer::InstanceGpuLayout::Matrix4x4Params);
+  ensureForwardPipeline(ForwardPipelineVariant::OpaqueDoubleSided,
+                        renderer::InstanceGpuLayout::PositionYawScaleParams);
+  ensureForwardPipeline(ForwardPipelineVariant::DepthPrepass,
+                        renderer::InstanceGpuLayout::Matrix4x4Params);
+  ensureForwardPipeline(ForwardPipelineVariant::DepthPrepass,
+                        renderer::InstanceGpuLayout::PositionYawScaleParams);
+  ensureInstancedGpuCullingResources();
+  ensureInstancedGpuLodCullingResources();
+  if (!shadow_pipeline_state_) {
+    recreateShadowPipeline();
+  }
+  ensurePostProcessResources(width, height, color_format);
+  ensurePostProcessPipelines(color_format);
+  ensureLineResources();
+  if (include_ui) {
+    ensureUiResources();
   }
 }
 
@@ -243,7 +307,9 @@ void DiligentBackend::ensureDefaultSceneResources(int width, int height) {
   color_desc.Format = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
                                   : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
   color_desc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
+  const auto color_start = core::SteadyClock::now();
   device_->CreateTexture(color_desc, nullptr, &default_scene_color_tex_);
+  recordResourceCreation("default_scene", "color texture", color_start, core::SteadyClock::now());
   if (!default_scene_color_tex_) {
     return;
   }
@@ -267,7 +333,9 @@ void DiligentBackend::ensureDefaultSceneResources(int width, int height) {
   depth_desc.Format = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                   : Diligent::TEX_FORMAT_D32_FLOAT;
   depth_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
+  const auto depth_start = core::SteadyClock::now();
   device_->CreateTexture(depth_desc, nullptr, &default_scene_depth_tex_);
+  recordResourceCreation("default_scene", "depth texture", depth_start, core::SteadyClock::now());
   if (!default_scene_depth_tex_) {
     default_scene_color_tex_.Release();
     default_scene_color_srv_.Release();
@@ -335,7 +403,9 @@ void DiligentBackend::ensureParticleSceneCopyResources(int width,
   copy_desc.MipLevels = 1;
   copy_desc.Format = format;
   copy_desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+  const auto copy_start = core::SteadyClock::now();
   device_->CreateTexture(copy_desc, nullptr, &particle_scene_color_copy_tex_);
+  recordResourceCreation("particle_scene_copy", "color texture", copy_start, core::SteadyClock::now());
   if (!particle_scene_color_copy_tex_) {
     return;
   }
@@ -382,7 +452,9 @@ void DiligentBackend::ensureParticleHalfResAlphaResources(int width,
   alpha_desc.MipLevels = 1;
   alpha_desc.Format = format;
   alpha_desc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
+  const auto alpha_start = core::SteadyClock::now();
   device_->CreateTexture(alpha_desc, nullptr, &particle_half_res_alpha_tex_);
+  recordResourceCreation("particle_scene_copy", "half res alpha texture", alpha_start, core::SteadyClock::now());
   if (!particle_half_res_alpha_tex_) {
     return;
   }
@@ -424,7 +496,9 @@ void DiligentBackend::ensureParticleFallbackDepthResource() {
   desc.MipLevels = 1;
   desc.Format = Diligent::TEX_FORMAT_R32_FLOAT;
   desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
+  const auto fallback_start = core::SteadyClock::now();
   device_->CreateTexture(desc, &init_data, &particle_fallback_depth_tex_);
+  recordResourceCreation("particle_scene_copy", "fallback depth texture", fallback_start, core::SteadyClock::now());
   if (!particle_fallback_depth_tex_) {
     return;
   }
@@ -457,8 +531,158 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   record.materials = item.materials;
   record.deformation = item.deformation;
   record.transform = item.transform;
+  record.params = item.instance_params;
   record.visible = item.visible;
   record.shadow_visible = item.shadow_visible;
+}
+
+void DiligentBackend::submitInstanced(const renderer::InstancedDrawItem& item) {
+  const size_t item_instance_count = item.instanceCount();
+  if (item.instance == renderer::kInvalidInstance || item_instance_count == 0u) {
+    return;
+  }
+
+  if (meshes_.find(item.mesh) == meshes_.end()) {
+    return;
+  }
+
+  auto it = instanced_records_.find(item.instance);
+  if (it == instanced_records_.end()) {
+    it = instanced_records_.emplace(item.instance, InstancedRecord{}).first;
+  }
+  auto& record = it->second;
+  const bool payload_changed = item.payload_changed ||
+                               item.dynamic ||
+                               record.mesh != item.mesh ||
+                               record.revision != item.revision ||
+                               record.gpu_layout != item.gpu_layout ||
+                               record.instanceCount() != item_instance_count;
+  record.layer = item.layer;
+  record.mesh = item.mesh;
+  record.material = item.material;
+  record.materials = item.materials;
+  if (record.lods.size() > item.lods.size()) {
+    record.lods.resize(item.lods.size());
+  }
+  record.lods.reserve(item.lods.size());
+  for (size_t lod_index = 0; lod_index < item.lods.size(); ++lod_index) {
+    if (lod_index >= record.lods.size()) {
+      record.lods.emplace_back();
+    }
+    const renderer::InstancedLodDrawDesc& item_lod = item.lods[lod_index];
+    InstancedRecord::LodRecord& lod = record.lods[lod_index];
+    lod.start_distance = item_lod.start_distance;
+    lod.mesh = item_lod.mesh;
+    lod.material = item_lod.material;
+    lod.materials = item_lod.materials;
+    lod.render_mode = item_lod.render_mode;
+    lod.bounds_center = item_lod.bounds_center;
+    lod.bounds_radius = item_lod.bounds_radius;
+    lod.bounds_valid = item_lod.bounds_valid;
+    lod.shadow_visible = item_lod.shadow_visible;
+  }
+  record.gpu_layout = item.gpu_layout;
+  record.revision = item.revision;
+  record.bounds_center = item.bounds_center;
+  record.bounds_radius = item.bounds_radius;
+  record.bounds_valid = item.bounds_valid;
+  record.dynamic = item.dynamic;
+  record.visible = item.visible;
+  record.shadow_visible = item.shadow_visible;
+  if (payload_changed) {
+    record.instances.clear();
+    record.planar_instances.clear();
+    if (item.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+      record.planar_instances.assign(item.planar_instances.begin(), item.planar_instances.end());
+    } else {
+      record.instances.assign(item.instances.begin(), item.instances.end());
+    }
+    record.instance_buffer_dirty = true;
+    if (!record.dynamic) {
+      ensureInstancedRecordBuffer(record);
+    }
+  }
+  instancing_stats_.submitted_batches += 1u;
+  instancing_stats_.submitted_instances +=
+      static_cast<uint32_t>(std::min<size_t>(item_instance_count,
+                                             std::numeric_limits<uint32_t>::max()));
+}
+
+bool DiligentBackend::ensureInstancedRecordBuffer(InstancedRecord& record) {
+  if (!device_ || !context_ || record.instanceCount() == 0u) {
+    return false;
+  }
+
+  const void* payload_data = nullptr;
+  size_t payload_bytes = 0u;
+  const size_t payload_stride = renderer::instanceGpuLayoutStride(record.gpu_layout);
+  if (record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+    payload_data = record.planar_instances.data();
+    payload_bytes = record.planar_instances.size() * sizeof(renderer::PlanarInstanceData);
+  } else {
+    payload_data = record.instances.data();
+    payload_bytes = record.instances.size() * sizeof(renderer::InstanceData);
+  }
+  if (!payload_data || payload_bytes == 0u ||
+      payload_bytes > static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max())) {
+    return false;
+  }
+
+  if (!record.instance_buffer || record.instance_buffer_capacity_bytes < payload_bytes) {
+    const size_t next_capacity =
+        std::max(payload_bytes,
+                 record.instance_buffer_capacity_bytes > 0u
+                     ? record.instance_buffer_capacity_bytes * 2u
+                     : static_cast<size_t>(128u) *
+                           renderer::instanceGpuLayoutStride(record.gpu_layout));
+    Diligent::BufferDesc desc{};
+    desc.Name = "Karma Persistent Instance Buffer";
+    desc.Usage = Diligent::USAGE_DEFAULT;
+    desc.BindFlags = Diligent::BIND_VERTEX_BUFFER | Diligent::BIND_SHADER_RESOURCE;
+    desc.CPUAccessFlags = Diligent::CPU_ACCESS_NONE;
+    desc.Mode = Diligent::BUFFER_MODE_STRUCTURED;
+    desc.ElementByteStride = static_cast<Diligent::Uint32>(payload_stride);
+    desc.Size = static_cast<Diligent::Uint64>(next_capacity);
+    record.instance_buffer.Release();
+    record.instance_srv.Release();
+    const auto buffer_start = core::SteadyClock::now();
+    device_->CreateBuffer(desc, nullptr, &record.instance_buffer);
+    recordResourceCreation("instancing", "persistent instance buffer", buffer_start, core::SteadyClock::now());
+    if (!record.instance_buffer) {
+      record.instance_buffer_capacity_bytes = 0u;
+      return false;
+    }
+    record.instance_srv = record.instance_buffer->GetDefaultView(
+        Diligent::BUFFER_VIEW_SHADER_RESOURCE);
+    if (!record.instance_srv) {
+      record.instance_buffer.Release();
+      record.instance_buffer_capacity_bytes = 0u;
+      return false;
+    }
+    record.instance_buffer_capacity_bytes = next_capacity;
+    record.instance_buffer_dirty = true;
+  }
+
+  if (record.instance_buffer_dirty) {
+    const auto upload_start = core::SteadyClock::now();
+    context_->UpdateBuffer(record.instance_buffer,
+                           0,
+                           static_cast<Diligent::Uint32>(payload_bytes),
+                           payload_data,
+                           Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    const auto upload_end = core::SteadyClock::now();
+    instancing_stats_.instance_buffer_updates += 1u;
+    instancing_stats_.instance_upload_bytes += static_cast<uint64_t>(payload_bytes);
+    instancing_stats_.instance_upload_ms +=
+        static_cast<float>(core::elapsedMilliseconds(upload_start, upload_end));
+    record.instance_buffer_dirty = false;
+  }
+  if (!record.dynamic &&
+      record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams &&
+      instancedGpuCullingEnabled()) {
+    ensureInstancedGpuCullingRecordBuffers(record);
+  }
+  return record.instance_buffer != nullptr && record.instance_srv != nullptr;
 }
 
 void DiligentBackend::submitParticles(renderer::ParticleBatch batch) {
@@ -550,6 +774,7 @@ void DiligentBackend::retireInstance(renderer::InstanceId instance) {
     return;
   }
   instances_.erase(instance);
+  instanced_records_.erase(instance);
   auto particle_it = particle_emitter_runtime_states_.find(static_cast<uint64_t>(instance));
   if (particle_it == particle_emitter_runtime_states_.end()) {
     return;

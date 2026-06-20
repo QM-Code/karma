@@ -131,7 +131,7 @@ void DiligentBackend::ensureLineResources() {
 
     const auto pso_start = core::SteadyClock::now();
     out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
-    logRenderPipelineDiag("line", name, pso_start, core::SteadyClock::now());
+    recordPipelineCreation("line", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return false;
     }
@@ -139,7 +139,9 @@ void DiligentBackend::ensureLineResources() {
             out_pso->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
       var->Set(line_cb_);
     }
+    const auto srb_start = core::SteadyClock::now();
     out_pso->CreateShaderResourceBinding(&out_srb, true);
+    recordResourceCreation("line", name, srb_start, core::SteadyClock::now());
     return true;
   };
 
@@ -149,7 +151,9 @@ void DiligentBackend::ensureLineResources() {
   cb_desc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
   cb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
   cb_desc.Size = sizeof(LineConstants);
+  const auto cb_start = core::SteadyClock::now();
   device_->CreateBuffer(cb_desc, nullptr, &line_cb_);
+  recordResourceCreation("line", "constants buffer", cb_start, core::SteadyClock::now());
 
   if (!line_cb_) {
     return;
@@ -167,7 +171,9 @@ void DiligentBackend::ensureLineResources() {
     vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     vb_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
     vb_desc.Size = static_cast<Diligent::Uint32>(line_vb_size_ * sizeof(LineVertex));
+    const auto vb_start = core::SteadyClock::now();
     device_->CreateBuffer(vb_desc, nullptr, &line_vb_);
+    recordResourceCreation("line", "vertex buffer", vb_start, core::SteadyClock::now());
     if (!line_vb_) {
       line_vb_size_ = 0;
     }

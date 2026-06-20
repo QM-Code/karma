@@ -226,6 +226,9 @@ void DiligentBackend::updateTextureRGBA8(renderer::TextureId texture,
   context_->UpdateTexture(record.texture, 0, 0, box, subres,
                           Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
                           Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+  if (record.desc.generate_mips && record.srv) {
+    context_->GenerateMips(record.srv);
+  }
 }
 
 }  // namespace karma::renderer_backend

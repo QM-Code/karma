@@ -702,31 +702,9 @@ void DiligentBackend::ensureEnvironmentResources() {
   mark_stage("pipeline setup");
 
   if (environment_map_.empty()) {
-    if (!env_cubemap_tex_) {
-      Diligent::TextureDesc desc{};
-      desc.Name = "Karma Env Default Cube";
-      desc.Type = Diligent::RESOURCE_DIM_TEX_CUBE;
-      desc.Width = 1;
-      desc.Height = 1;
-      desc.ArraySize = 6;
-      desc.MipLevels = 1;
-      desc.Format = Diligent::TEX_FORMAT_RGBA8_UNORM;
-      desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
-      unsigned char pixel[4] = {0, 0, 0, 255};
-      Diligent::TextureSubResData subres{};
-      subres.pData = pixel;
-      subres.Stride = 4;
-      Diligent::TextureData init{};
-      init.pSubResources = &subres;
-      init.NumSubresources = 1;
-      device_->CreateTexture(desc, &init, &env_cubemap_tex_);
-      if (env_cubemap_tex_) {
-        env_cubemap_srv_ = env_cubemap_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      }
-    }
-    env_cubemap_srv_ = env_cubemap_srv_ ? env_cubemap_srv_ : default_env_;
-    env_irradiance_srv_ = env_cubemap_srv_;
-    env_prefilter_srv_ = env_cubemap_srv_;
+    env_cubemap_srv_ = default_env_;
+    env_irradiance_srv_ = default_env_;
+    env_prefilter_srv_ = default_env_;
     env_brdf_lut_srv_ = default_base_color_;
     env_dirty_ = false;
     mark_stage("default environment");

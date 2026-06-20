@@ -1,18 +1,23 @@
 #include "karma/rendering/renderer/render_system.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <type_traits>
 #include <unordered_set>
 #include <variant>
 #include <vector>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
 #include "karma/content/assets/asset_package.h"
+#include "karma/core/math/glm.h"
 #include "karma/core/time.h"
 #include "render_system/debug_draw.h"
 #include "render_system/extractors.h"
@@ -73,6 +78,143 @@ renderer::PostProcessSettings resolvePostProcessSettings(const content::AssetReg
     return assets->resolvePostProcessProfile(key);
   }
   return {};
+}
+
+glm::mat4 toInstanceTransform(const components::MeshInstance& instance) {
+  glm::mat4 transform = glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
+  transform *= glm::mat4_cast(math::toGlm(instance.rotation));
+  transform = glm::scale(transform, math::toGlm(instance.scale));
+  return transform;
+}
+
+renderer::InstanceData toRendererInstance(const components::MeshInstance& instance) {
+  renderer::InstanceData out{};
+  out.transform = toInstanceTransform(instance);
+  out.params = glm::vec4(instance.params[0],
+                         instance.params[1],
+                         instance.params[2],
+                         instance.params[3]);
+  return out;
+}
+
+renderer::PlanarInstanceData toRendererPlanarInstance(
+    const components::PlanarMeshInstance& instance) {
+  renderer::PlanarInstanceData out{};
+  out.position_yaw = glm::vec4(instance.position.x,
+                               instance.position.y,
+                               instance.position.z,
+                               instance.yaw_radians);
+  out.scale_pad = glm::vec4(instance.scale.x, instance.scale.y, instance.scale.z, 0.0f);
+  out.params = glm::vec4(instance.params[0],
+                         instance.params[1],
+                         instance.params[2],
+                         instance.params[3]);
+  return out;
+}
+
+glm::mat4 toPlanarInstanceTransform(const components::PlanarMeshInstance& instance) {
+  glm::mat4 transform = glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
+  transform = glm::rotate(transform, instance.yaw_radians, glm::vec3(0.0f, 1.0f, 0.0f));
+  transform = glm::scale(transform, math::toGlm(instance.scale));
+  return transform;
+}
+
+float maxTransformScale(const glm::mat4& transform) {
+  const float sx = glm::length(glm::vec3(transform[0]));
+  const float sy = glm::length(glm::vec3(transform[1]));
+  const float sz = glm::length(glm::vec3(transform[2]));
+  return std::max(sx, std::max(sy, sz));
+}
+
+void mergeSphere(glm::vec3& center,
+                 float& radius,
+                 bool& valid,
+                 const glm::vec3& next_center,
+                 float next_radius) {
+  if (next_radius <= 0.0f) {
+    return;
+  }
+  if (!valid) {
+    center = next_center;
+    radius = next_radius;
+    valid = true;
+    return;
+  }
+  const glm::vec3 delta = next_center - center;
+  const float distance = glm::length(delta);
+  if (distance + next_radius <= radius) {
+    return;
+  }
+  if (distance + radius <= next_radius) {
+    center = next_center;
+    radius = next_radius;
+    return;
+  }
+  if (distance <= 1.0e-5f) {
+    radius = std::max(radius, next_radius);
+    return;
+  }
+  const float new_radius = (radius + distance + next_radius) * 0.5f;
+  center += delta * ((new_radius - radius) / distance);
+  radius = new_radius;
+}
+
+template <typename RenderRecordT>
+void rebuildCachedInstances(const components::InstancedMeshComponent& instanced,
+                            RenderRecordT& record) {
+  record.cached_instance_layout = instanced.gpu_layout;
+  record.cached_instance_revision = instanced.instance_revision;
+  record.cached_instance_dynamic = instanced.dynamic;
+  record.cached_instance_bounds_valid = false;
+  record.cached_instance_bounds_center = glm::vec3(0.0f);
+  record.cached_instance_bounds_radius = 0.0f;
+  record.cached_instances.clear();
+  record.cached_planar_instances.clear();
+
+  if (instanced.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+    record.cached_planar_instances.reserve(instanced.planar_instances.size());
+    for (const auto& instance : instanced.planar_instances) {
+      record.cached_planar_instances.push_back(toRendererPlanarInstance(instance));
+      if (record.bounds_valid) {
+        const glm::mat4 transform = toPlanarInstanceTransform(instance);
+        const glm::vec3 center =
+            glm::vec3(transform * glm::vec4(record.bounds_center, 1.0f));
+        mergeSphere(record.cached_instance_bounds_center,
+                    record.cached_instance_bounds_radius,
+                    record.cached_instance_bounds_valid,
+                    center,
+                    record.bounds_radius * maxTransformScale(transform));
+      }
+    }
+    record.cached_instance_count = record.cached_planar_instances.size();
+    return;
+  }
+
+  record.cached_instances.reserve(instanced.instances.size());
+  for (const auto& instance : instanced.instances) {
+    renderer::InstanceData renderer_instance = toRendererInstance(instance);
+    if (record.bounds_valid) {
+      const glm::vec3 center =
+          glm::vec3(renderer_instance.transform * glm::vec4(record.bounds_center, 1.0f));
+      mergeSphere(record.cached_instance_bounds_center,
+                  record.cached_instance_bounds_radius,
+                  record.cached_instance_bounds_valid,
+                  center,
+                  record.bounds_radius * maxTransformScale(renderer_instance.transform));
+    }
+    record.cached_instances.push_back(renderer_instance);
+  }
+  record.cached_instance_count = record.cached_instances.size();
+}
+
+size_t authoredInstanceCount(const components::InstancedMeshComponent& instanced) {
+  switch (instanced.gpu_layout) {
+    case renderer::InstanceGpuLayout::Matrix4x4Params:
+      return instanced.instances.size();
+    case renderer::InstanceGpuLayout::PositionYawScaleParams:
+      return instanced.planar_instances.size();
+  }
+  return 0u;
 }
 
 template <typename T>
@@ -139,6 +281,11 @@ std::string materialFingerprint(const renderer::ResolvedMaterialDesc& resolved) 
   appendColor(stream, "attenuation_color", material.attenuation_color);
   appendScalar(stream, "analytic_sphere_normals", material.analytic_sphere_normals);
   appendScalar(stream, "unlit", material.unlit);
+  appendScalar(stream, "alpha_mode", static_cast<uint32_t>(material.alpha_mode));
+  appendScalar(stream, "alpha_cutoff", material.alpha_cutoff);
+  appendScalar(stream, "alpha_softness", material.alpha_softness);
+  appendScalar(stream, "alpha_dither", material.alpha_dither);
+  appendScalar(stream, "alpha_to_coverage", material.alpha_to_coverage);
   appendScalar(stream, "transparent", material.transparent);
   appendScalar(stream, "blend_mode", static_cast<uint32_t>(material.blend_mode));
   appendScalar(stream, "depth_test", material.depth_test);
@@ -177,6 +324,7 @@ std::string materialFingerprint(const renderer::ResolvedMaterialDesc& resolved) 
 
 void RenderSystem::releaseRecord(uint64_t key, RenderRecord& record) {
   device_.retireInstance(static_cast<InstanceId>(key));
+  releaseInstancedLodBindings(record);
   releaseMaterialBinding(record);
   releaseMeshBinding(record);
 }
@@ -193,6 +341,20 @@ void RenderSystem::cleanupStaleRecords(ecs::World& world) {
     }
     releaseRecord(it->first, it->second);
     it = records_.erase(it);
+  }
+}
+
+void RenderSystem::cleanupStaleInstancedRecords(ecs::World& world) {
+  for (auto it = instanced_records_.begin(); it != instanced_records_.end();) {
+    const ecs::Entity entity = entityFromInstancedKey(it->first);
+    const bool stale = !world.isAlive(entity) ||
+                       !world.has<components::InstancedMeshComponent>(entity);
+    if (!stale) {
+      ++it;
+      continue;
+    }
+    releaseRecord(it->first, it->second);
+    it = instanced_records_.erase(it);
   }
 }
 
@@ -215,9 +377,102 @@ void RenderSystem::releaseMaterialBinding(RenderRecord& record) {
   record.material_bindings.clear();
 }
 
+void RenderSystem::releaseInstancedLodBindings(RenderRecord& record) {
+  for (auto& lod : record.instanced_lods) {
+    for (const std::string& material_key : lod.acquired_material_keys) {
+      releaseSharedMaterial(material_key);
+    }
+    lod.acquired_material_keys.clear();
+    lod.material_bindings.clear();
+    releaseSharedMesh(lod.mesh_asset_key);
+    lod.mesh_asset_key.clear();
+    lod.mesh = renderer::kInvalidMesh;
+    lod.bounds_center = glm::vec3(0.0f);
+    lod.bounds_radius = 0.0f;
+    lod.bounds_valid = false;
+  }
+  record.instanced_lods.clear();
+}
+
+bool RenderSystem::syncInstancedLodBindings(
+    const components::InstancedMeshComponent& instanced,
+    RenderRecord& record) {
+  std::vector<components::InstancedMeshLodLevel> desired;
+  desired.reserve(std::min(instanced.lods.size(), components::kMaxInstancedMeshLodLevels));
+  for (const auto& lod : instanced.lods) {
+    if (desired.size() >= components::kMaxInstancedMeshLodLevels) {
+      break;
+    }
+    if (lod.mesh_asset_key.empty()) {
+      continue;
+    }
+    desired.push_back(lod);
+  }
+  std::sort(desired.begin(), desired.end(), [](const auto& a, const auto& b) {
+    return a.start_distance < b.start_distance;
+  });
+
+  bool needs_rebind = desired.size() != record.instanced_lods.size();
+  if (!needs_rebind) {
+    for (size_t i = 0; i < desired.size(); ++i) {
+      const auto& wanted = desired[i];
+      const auto& current = record.instanced_lods[i];
+      if (wanted.start_distance != current.start_distance ||
+          wanted.mesh_asset_key != current.mesh_asset_key ||
+          wanted.materials != current.component_materials ||
+          wanted.render_mode != current.render_mode ||
+          wanted.shadow_visible != current.shadow_visible) {
+        needs_rebind = true;
+        break;
+      }
+    }
+  }
+  if (!needs_rebind) {
+    return false;
+  }
+
+  releaseInstancedLodBindings(record);
+  record.instanced_lods.reserve(desired.size());
+  for (const auto& wanted : desired) {
+    InstancedLodRecord lod_record{};
+    lod_record.start_distance = std::max(wanted.start_distance, 0.0f);
+    lod_record.render_mode = wanted.render_mode;
+    lod_record.shadow_visible = wanted.shadow_visible;
+
+    RenderRecord mesh_record{};
+    acquireSharedMesh(wanted.mesh_asset_key, mesh_record);
+    if (mesh_record.mesh == renderer::kInvalidMesh) {
+      continue;
+    }
+    lod_record.mesh_asset_key = wanted.mesh_asset_key;
+    lod_record.mesh = mesh_record.mesh;
+    lod_record.bounds_center = mesh_record.bounds_center;
+    lod_record.bounds_radius = mesh_record.bounds_radius;
+    lod_record.bounds_valid = mesh_record.bounds_valid;
+    lod_record.material_slots = std::move(mesh_record.material_slots);
+
+    if (lod_record.mesh != renderer::kInvalidMesh) {
+      device_.getMeshMaterialSlots(lod_record.mesh, lod_record.material_slots);
+    }
+
+    RenderRecord material_record{};
+    material_record.material_slots = lod_record.material_slots;
+    bindMaterial(wanted.materials, material_record);
+    lod_record.component_materials = wanted.materials;
+    lod_record.acquired_material_keys = std::move(material_record.acquired_material_keys);
+    lod_record.material_bindings = std::move(material_record.material_bindings);
+    record.instanced_lods.push_back(std::move(lod_record));
+  }
+  return true;
+}
+
 void RenderSystem::bindMesh(const components::MeshComponent& mesh, RenderRecord& record) {
-  record.mesh_asset_key = mesh.mesh_asset_key;
-  acquireSharedMesh(mesh.mesh_asset_key, record);
+  bindMesh(mesh.mesh_asset_key, record);
+}
+
+void RenderSystem::bindMesh(const std::string& mesh_asset_key, RenderRecord& record) {
+  record.mesh_asset_key = mesh_asset_key;
+  acquireSharedMesh(mesh_asset_key, record);
   record.material_slots.clear();
   if (record.mesh != renderer::kInvalidMesh) {
     device_.getMeshMaterialSlots(record.mesh, record.material_slots);
@@ -225,17 +480,22 @@ void RenderSystem::bindMesh(const components::MeshComponent& mesh, RenderRecord&
 }
 
 void RenderSystem::bindMaterial(const components::MeshComponent& mesh, RenderRecord& record) {
-  record.component_materials = mesh.materials;
+  bindMaterial(mesh.materials, record);
+}
+
+void RenderSystem::bindMaterial(const std::vector<components::MeshMaterialAssignment>& materials,
+                                RenderRecord& record) {
+  record.component_materials = materials;
   record.material_bindings.clear();
   record.acquired_material_keys.clear();
 
   uint32_t slot_count = static_cast<uint32_t>(record.material_slots.size());
-  for (const auto& binding : mesh.materials) {
+  for (const auto& binding : materials) {
     slot_count = std::max(slot_count, binding.slot + 1u);
   }
 
   auto assigned_material_for_slot = [&](uint32_t slot) -> const std::string* {
-    for (const auto& binding : mesh.materials) {
+    for (const auto& binding : materials) {
       if (binding.slot == slot && !binding.material_key.empty()) {
         return &binding.material_key;
       }
@@ -629,6 +889,16 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       bindMesh(mesh_binding, record);
       bindMaterial(mesh_binding, record);
     }
+    for (auto& [key, record] : instanced_records_) {
+      (void)key;
+      const std::string mesh_asset_key = record.mesh_asset_key;
+      const std::vector<components::MeshMaterialAssignment> materials = record.component_materials;
+      releaseInstancedLodBindings(record);
+      releaseMaterialBinding(record);
+      releaseMeshBinding(record);
+      bindMesh(mesh_asset_key, record);
+      bindMaterial(materials, record);
+    }
     last_asset_registry_version_ = assets_->version();
   }
   section_end = core::SteadyClock::now();
@@ -912,7 +1182,131 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
   section_start = section_end;
 
+  size_t instanced_entity_count = 0;
+  size_t instanced_instance_count = 0;
+  size_t new_instanced_record_count = 0;
+  size_t rebuilt_instanced_payload_count = 0;
+  world.forEach<components::InstancedMeshComponent>([&](const ecs::Entity entity) {
+    ++instanced_entity_count;
+    const auto& instanced = world.get<components::InstancedMeshComponent>(entity);
+
+    bool visible = instanced.visible;
+    if (world.has<components::VisibilityComponent>(entity)) {
+      visible = visible && world.get<components::VisibilityComponent>(entity).visible;
+    }
+
+    const uint64_t key = instancedEntityKey(entity);
+    auto it = instanced_records_.find(key);
+    bool binding_changed = false;
+    if (it == instanced_records_.end()) {
+      RenderRecord record;
+      const auto bind_mesh_start = core::SteadyClock::now();
+      bindMesh(instanced.mesh_asset_key, record);
+      const auto bind_mesh_end = core::SteadyClock::now();
+      if (diag_enabled) {
+        spdlog::info("RenderSystem new instanced record entity={}:{} mesh='{}' bindMesh took {:.2f} ms",
+                     entity.index,
+                     entity.generation,
+                     instanced.mesh_asset_key.empty() ? "<empty>" : instanced.mesh_asset_key,
+                     core::elapsedMilliseconds(bind_mesh_start, bind_mesh_end));
+      }
+
+      const auto bind_material_start = bind_mesh_end;
+      bindMaterial(instanced.materials, record);
+      const auto bind_material_end = core::SteadyClock::now();
+      if (diag_enabled) {
+        spdlog::info(
+            "RenderSystem new instanced record entity={}:{} material_slots={} bindMaterial took {:.2f} ms",
+            entity.index,
+            entity.generation,
+            instanced.materials.size(),
+            core::elapsedMilliseconds(bind_material_start, bind_material_end));
+      }
+      it = instanced_records_.emplace(key, std::move(record)).first;
+      ++new_instanced_record_count;
+      binding_changed = true;
+    } else {
+      const bool mesh_binding_changed = it->second.mesh_asset_key != instanced.mesh_asset_key;
+
+      if (mesh_binding_changed) {
+        releaseMaterialBinding(it->second);
+        releaseMeshBinding(it->second);
+        bindMesh(instanced.mesh_asset_key, it->second);
+        bindMaterial(instanced.materials, it->second);
+        binding_changed = true;
+      } else {
+        const bool material_binding_changed =
+            it->second.component_materials != instanced.materials;
+        if (material_binding_changed) {
+          releaseMaterialBinding(it->second);
+          bindMaterial(instanced.materials, it->second);
+          binding_changed = true;
+        }
+      }
+    }
+    const bool lod_binding_changed = syncInstancedLodBindings(instanced, it->second);
+    (void)lod_binding_changed;
+
+    const size_t instance_count = authoredInstanceCount(instanced);
+    const bool payload_changed =
+        instanced.dynamic ||
+        binding_changed ||
+        it->second.cached_instance_layout != instanced.gpu_layout ||
+        it->second.cached_instance_revision != instanced.instance_revision ||
+        it->second.cached_instance_count != instance_count;
+    if (payload_changed) {
+      rebuildCachedInstances(instanced, it->second);
+      ++rebuilt_instanced_payload_count;
+    }
+
+    InstancedDrawItem item{};
+    item.instance = static_cast<InstanceId>(key);
+    item.mesh = it->second.mesh;
+    item.materials = it->second.material_bindings;
+    item.lods.reserve(it->second.instanced_lods.size());
+    for (const auto& lod : it->second.instanced_lods) {
+      item.lods.push_back(renderer::InstancedLodDrawDesc{
+          .start_distance = lod.start_distance,
+          .mesh = lod.mesh,
+          .materials = lod.material_bindings,
+          .render_mode = lod.render_mode,
+          .bounds_center = lod.bounds_center,
+          .bounds_radius = lod.bounds_radius,
+          .bounds_valid = lod.bounds_valid,
+          .shadow_visible = lod.shadow_visible,
+      });
+    }
+    item.gpu_layout = instanced.gpu_layout;
+    item.instances = it->second.cached_instances;
+    item.planar_instances = it->second.cached_planar_instances;
+    item.payload_changed = payload_changed;
+    item.revision = instanced.instance_revision;
+    item.bounds_center = it->second.cached_instance_bounds_center;
+    item.bounds_radius = it->second.cached_instance_bounds_radius;
+    item.bounds_valid = it->second.cached_instance_bounds_valid;
+    item.layer = 0;
+    item.dynamic = instanced.dynamic;
+    item.visible = visible;
+    item.shadow_visible = visible && instanced.shadow_visible;
+    instanced_instance_count += item.instanceCount();
+    device_.submitInstanced(item);
+  });
+  section_end = core::SteadyClock::now();
+  device_.setInstancingCpuTimings(
+      static_cast<float>(core::elapsedMilliseconds(section_start, section_end)));
+  if (diag_enabled) {
+    spdlog::info(
+        "RenderSystem stage 'instanced mesh submit' took {:.2f} ms (batches={} instances={} new_records={} rebuilt_payloads={})",
+        core::elapsedMilliseconds(section_start, section_end),
+        instanced_entity_count,
+        instanced_instance_count,
+        new_instanced_record_count,
+        rebuilt_instanced_payload_count);
+  }
+  section_start = section_end;
+
   cleanupStaleRecords(world);
+  cleanupStaleInstancedRecords(world);
   section_end = core::SteadyClock::now();
   logRenderSystemStage(diag_enabled, "stale record cleanup", section_start, section_end);
   section_start = section_end;

@@ -32,6 +32,13 @@ struct MaterialDesc {
     Additive = 1,
   };
 
+  /// Alpha handling for standard surface rendering.
+  enum class AlphaMode : uint32_t {
+    Opaque = 0,
+    Masked = 1,
+    Blend = 2,
+  };
+
   math::Color base_color{1.0f, 1.0f, 1.0f, 1.0f};
   math::Color emissive_color{0.0f, 0.0f, 0.0f, 1.0f};
   float metallic = 1.0f;
@@ -51,6 +58,11 @@ struct MaterialDesc {
   math::Color attenuation_color{1.0f, 1.0f, 1.0f, 1.0f};
   bool analytic_sphere_normals = false;
   bool unlit = false;
+  AlphaMode alpha_mode = AlphaMode::Opaque;
+  float alpha_cutoff = 0.5f;
+  float alpha_softness = 0.0f;
+  bool alpha_dither = false;
+  bool alpha_to_coverage = false;
   bool transparent = false;
   BlendMode blend_mode = BlendMode::Alpha;
   bool depth_test = true;

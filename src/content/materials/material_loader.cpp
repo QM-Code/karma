@@ -172,6 +172,7 @@ bool parsePipeline(const Json& root,
     out.name = name_it->get<std::string>();
   }
   const bool built_in = out.name == "standard" ||
+                        out.name == "foliage" ||
                         out.name == "energy_shell" ||
                         out.name == "wave_volume" ||
                         out.name == "screen_wave" ||
@@ -305,6 +306,11 @@ bool parseRenderState(const Json& root, renderer::MaterialDesc& out, std::string
   const Json& state = *it;
   if (!fieldAllowed(state,
                     {"transparent",
+                     "alpha_mode",
+                     "alpha_cutoff",
+                     "alpha_softness",
+                     "alpha_dither",
+                     "alpha_to_coverage",
                      "depth_test",
                      "depth_write",
                      "wireframe",
@@ -315,6 +321,10 @@ bool parseRenderState(const Json& root, renderer::MaterialDesc& out, std::string
     return false;
   }
   if (!readBool(state, "transparent", out.transparent, diagnostic) ||
+      !readFloat(state, "alpha_cutoff", out.alpha_cutoff, diagnostic) ||
+      !readFloat(state, "alpha_softness", out.alpha_softness, diagnostic) ||
+      !readBool(state, "alpha_dither", out.alpha_dither, diagnostic) ||
+      !readBool(state, "alpha_to_coverage", out.alpha_to_coverage, diagnostic) ||
       !readBool(state, "depth_test", out.depth_test, diagnostic) ||
       !readBool(state, "depth_write", out.depth_write, diagnostic) ||
       !readBool(state, "wireframe", out.wireframe, diagnostic) ||
@@ -333,6 +343,26 @@ bool parseRenderState(const Json& root, renderer::MaterialDesc& out, std::string
     } else {
       return fail(diagnostic, "render_state.blend_mode must be 'alpha' or 'additive'");
     }
+  }
+  if (const auto alpha_it = state.find("alpha_mode"); alpha_it != state.end()) {
+    if (!alpha_it->is_string()) {
+      return fail(diagnostic, "render_state.alpha_mode must be a string");
+    }
+    const std::string alpha = alpha_it->get<std::string>();
+    if (alpha == "opaque") {
+      out.alpha_mode = renderer::MaterialDesc::AlphaMode::Opaque;
+      out.transparent = false;
+    } else if (alpha == "masked") {
+      out.alpha_mode = renderer::MaterialDesc::AlphaMode::Masked;
+      out.transparent = false;
+    } else if (alpha == "blend") {
+      out.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+      out.transparent = true;
+    } else {
+      return fail(diagnostic, "render_state.alpha_mode must be 'opaque', 'masked', or 'blend'");
+    }
+  } else if (out.transparent && out.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
+    out.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
   }
   return true;
 }

@@ -68,7 +68,9 @@ void DiligentBackend::ensurePostProcessResources(int width,
     desc.MipLevels = 1;
     desc.Format = format;
     desc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
+    const auto texture_start = core::SteadyClock::now();
     device_->CreateTexture(desc, nullptr, &texture);
+    recordResourceCreation("post_process", name, texture_start, core::SteadyClock::now());
     if (!texture) {
       return false;
     }

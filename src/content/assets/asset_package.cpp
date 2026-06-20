@@ -270,6 +270,22 @@ bool importEntry(AssetRegistry& assets,
       }
       options.generate_mips = it->get<bool>();
     }
+    if (const auto it = entry.find("alpha_bleed"); it != entry.end()) {
+      if (!it->is_boolean()) {
+        return fail(diagnostic, "texture_rgba8.alpha_bleed must be a boolean");
+      }
+      options.alpha_bleed = it->get<bool>();
+    }
+    if (const auto it = entry.find("alpha_coverage_cutoff"); it != entry.end()) {
+      if (!it->is_number()) {
+        return fail(diagnostic, "texture_rgba8.alpha_coverage_cutoff must be a number");
+      }
+      options.alpha_coverage_cutoff = it->get<float>();
+      if (options.alpha_coverage_cutoff < 0.0f || options.alpha_coverage_cutoff > 1.0f) {
+        return fail(diagnostic,
+                    "texture_rgba8.alpha_coverage_cutoff must be between 0 and 1");
+      }
+    }
     if (!detail::importTextureAsset(assets, key, source_path, options)) {
       return fail(diagnostic, "failed to import texture asset: " + source_path.string());
     }

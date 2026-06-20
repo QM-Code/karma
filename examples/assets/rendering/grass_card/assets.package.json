@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "texture_rgba8",
+      "key": "examples/rendering/grass_card/grass_texture",
+      "path": "../../terrain/grass.png",
+      "srgb": true,
+      "generate_mips": true,
+      "alpha_bleed": true,
+      "alpha_coverage_cutoff": 0.28
+    }
+  ]
+}

@@ -134,6 +134,9 @@ renderer::MaterialDesc buildMaterialDesc(const aiMaterial& material) {
   }
 
   desc.transparent = desc.base_color.a < 0.999f;
+  if (desc.transparent) {
+    desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+  }
   return desc;
 }
 
@@ -334,6 +337,7 @@ renderer::ImportedMaterialData buildImportedMaterialData(const aiScene& scene,
     data.material.transmission = transmission;
     if (transmission > 0.001f) {
       data.material.transparent = true;
+      data.material.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
     }
   }
   if (float ior = 1.5f; material.Get(AI_MATKEY_REFRACTI, ior) == AI_SUCCESS) {

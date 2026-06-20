@@ -86,6 +86,47 @@ bool envFlagEnabled(const char* value) {
          std::strcmp(value, "OFF") != 0;
 }
 
+void setProcessEnvironment(const char* name, const char* value, bool overwrite) {
+  if (!overwrite && std::getenv(name) != nullptr) {
+    return;
+  }
+#if defined(_WIN32)
+  _putenv_s(name, value);
+#else
+  setenv(name, value, 1);
+#endif
+}
+
+const char* presentModeEnvironmentValue(renderer::PresentMode mode) {
+  switch (mode) {
+    case renderer::PresentMode::Auto:
+      return "auto";
+    case renderer::PresentMode::Immediate:
+      return "immediate";
+    case renderer::PresentMode::Mailbox:
+      return "mailbox";
+    case renderer::PresentMode::Fifo:
+      return "fifo";
+    case renderer::PresentMode::FifoRelaxed:
+      return "fifo_relaxed";
+  }
+  return nullptr;
+}
+
+bool presentModeUsesVsync(renderer::PresentMode mode, bool fallback_vsync) {
+  switch (mode) {
+    case renderer::PresentMode::Auto:
+      return fallback_vsync;
+    case renderer::PresentMode::Immediate:
+    case renderer::PresentMode::Mailbox:
+      return false;
+    case renderer::PresentMode::Fifo:
+    case renderer::PresentMode::FifoRelaxed:
+      return true;
+  }
+  return fallback_vsync;
+}
+
 FileInfo inspectFile(const std::filesystem::path& path) {
   FileInfo info{};
   if (path.empty()) {
@@ -117,13 +158,17 @@ bool startupDiagnosticsEnabled() {
 
 bool renderResourceDiagnosticsEnabled() {
   static const bool enabled =
-      startupDiagnosticsEnabled() || envFlagEnabled(std::getenv("KARMA_RENDER_RESOURCE_DIAG"));
+      startupDiagnosticsEnabled() || envFlagEnabled(std::getenv("KARMA_RENDER_RESOURCE_DIAG")) ||
+      envFlagEnabled(std::getenv("KARMA_ENGINE_FRAME_DIAG")) ||
+      envFlagEnabled(std::getenv("KARMA_RENDER_LAYER_FRAME_DIAG"));
   return enabled;
 }
 
 bool renderPipelineDiagnosticsEnabled() {
   static const bool enabled =
-      startupDiagnosticsEnabled() || envFlagEnabled(std::getenv("KARMA_RENDER_PIPELINE_DIAG"));
+      startupDiagnosticsEnabled() || envFlagEnabled(std::getenv("KARMA_RENDER_PIPELINE_DIAG")) ||
+      envFlagEnabled(std::getenv("KARMA_ENGINE_FRAME_DIAG")) ||
+      envFlagEnabled(std::getenv("KARMA_RENDER_LAYER_FRAME_DIAG"));
   return enabled;
 }
 
@@ -171,6 +216,81 @@ void logRenderPipelineDiag(const char* area,
                area ? area : "unknown",
                stage ? stage : "unknown",
                core::elapsedMilliseconds(start, end));
+}
+
+void DiligentBackend::recordRenderLayerStageTiming(const char* stage, double ms) {
+  if (!frame_active_) {
+    return;
+  }
+  const float stage_ms = static_cast<float>(ms);
+  if (stage == nullptr) {
+    return;
+  }
+  if (std::strcmp(stage, "target setup") == 0) {
+    current_frame_timing_stats_.target_setup_ms += stage_ms;
+  } else if (std::strcmp(stage, "clear target") == 0 ||
+             std::strcmp(stage, "clear inactive camera") == 0 ||
+             std::strcmp(stage, "missing draw resources") == 0) {
+    current_frame_timing_stats_.clear_ms += stage_ms;
+  } else if (std::strcmp(stage, "camera setup") == 0) {
+    current_frame_timing_stats_.camera_setup_ms += stage_ms;
+  } else if (std::strcmp(stage, "environment resources") == 0 ||
+             std::strcmp(stage, "skybox") == 0) {
+    current_frame_timing_stats_.environment_ms += stage_ms;
+  } else if (std::strcmp(stage, "forward plus setup") == 0) {
+    current_frame_timing_stats_.forward_plus_ms += stage_ms;
+  } else if (std::strcmp(stage, "shadow layer") == 0) {
+    current_frame_timing_stats_.shadow_ms += stage_ms;
+  } else if (std::strcmp(stage, "terrain pass") == 0) {
+    current_frame_timing_stats_.terrain_ms += stage_ms;
+  } else if (std::strcmp(stage, "collect forward state") == 0) {
+    current_frame_timing_stats_.forward_collect_ms += stage_ms;
+  } else if (std::strcmp(stage, "opaque pass") == 0) {
+    current_frame_timing_stats_.opaque_ms += stage_ms;
+  } else if (std::strcmp(stage, "transparent pre-particle pass") == 0 ||
+             std::strcmp(stage, "transparent post-particle pass") == 0) {
+    current_frame_timing_stats_.transparent_ms += stage_ms;
+  } else if (std::strcmp(stage, "particle resources prewarm") == 0 ||
+             std::strcmp(stage, "particle resources skipped") == 0) {
+    current_frame_timing_stats_.particle_resources_ms += stage_ms;
+  } else if (std::strcmp(stage, "particle pass") == 0 ||
+             std::strcmp(stage, "particle pass skipped") == 0) {
+    current_frame_timing_stats_.particle_pass_ms += stage_ms;
+  } else if (std::strcmp(stage, "line resources ensure") == 0) {
+    current_frame_timing_stats_.line_resources_ms += stage_ms;
+  } else if (std::strcmp(stage, "line draw") == 0) {
+    current_frame_timing_stats_.line_draw_ms += stage_ms;
+  } else if (std::strcmp(stage, "post process") == 0) {
+    current_frame_timing_stats_.post_process_ms += stage_ms;
+  } else if (std::strcmp(stage, "present copy") == 0) {
+    current_frame_timing_stats_.present_copy_ms += stage_ms;
+  }
+}
+
+void DiligentBackend::recordResourceCreation(const char* area,
+                                             const char* stage,
+                                             core::SteadyClock::time_point start,
+                                             core::SteadyClock::time_point end) {
+  logRenderResourceDiag(area, stage, start, end);
+  if (!frame_active_) {
+    return;
+  }
+  current_frame_timing_stats_.resource_creation_count += 1u;
+  current_frame_timing_stats_.resource_creation_ms +=
+      static_cast<float>(core::elapsedMilliseconds(start, end));
+}
+
+void DiligentBackend::recordPipelineCreation(const char* area,
+                                             const char* stage,
+                                             core::SteadyClock::time_point start,
+                                             core::SteadyClock::time_point end) {
+  logRenderPipelineDiag(area, stage, start, end);
+  if (!frame_active_) {
+    return;
+  }
+  current_frame_timing_stats_.pipeline_creation_count += 1u;
+  current_frame_timing_stats_.pipeline_creation_ms +=
+      static_cast<float>(core::elapsedMilliseconds(start, end));
 }
 
 void logRenderTextureImportDiag(const char* area,
@@ -416,10 +536,13 @@ std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh) {
   return data;
 }
 
-DiligentBackend::DiligentBackend(karma::platform::Window& window)
+DiligentBackend::DiligentBackend(karma::platform::Window& window,
+                                 const renderer::GraphicsDeviceCreateInfo& create_info)
     : window_(&window) {
   const auto constructor_start = core::SteadyClock::now();
   auto stage_start = constructor_start;
+  present_mode_ = create_info.present_mode;
+  vsync_enabled_ = presentModeUsesVsync(present_mode_, create_info.vsync);
   if (const char* env = std::getenv("KARMA_ENV_DEBUG")) {
     env_debug_mode_ = std::atoi(env);
   }
@@ -485,6 +608,7 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window)
   logStartupDiag("diligent_backend", "framebuffer query", stage_start, stage_end);
 
   stage_start = stage_end;
+  applyDiligentPresentEnvironment();
   initializeDevice();
   stage_end = core::SteadyClock::now();
   logStartupDiag("diligent_backend", "initialize device", stage_start, stage_end);
@@ -519,6 +643,15 @@ void DiligentBackend::saveRenderStateCache(std::string_view reason) {
           core::elapsedMilliseconds(start, end));
     }
   }
+}
+
+void DiligentBackend::applyDiligentPresentEnvironment() const {
+  setProcessEnvironment("KARMA_DILIGENT_INITIAL_VSYNC",
+                        vsync_enabled_ ? "1" : "0",
+                        true);
+  setProcessEnvironment("KARMA_DILIGENT_API_PRESENT_MODE",
+                        presentModeEnvironmentValue(present_mode_),
+                        true);
 }
 
 void DiligentBackend::flushRenderStateCache() {

@@ -167,8 +167,34 @@ class MaterialLibrary {
       if (const auto* color = asColor(value)) material.attenuation_color = *color;
     } else if (name == "unlit") {
       if (const auto* b = asBool(value)) material.unlit = *b;
+    } else if (name == "alpha_cutoff") {
+      if (const auto* f = asFloat(value)) material.alpha_cutoff = *f;
+    } else if (name == "alpha_softness") {
+      if (const auto* f = asFloat(value)) material.alpha_softness = *f;
+    } else if (name == "alpha_dither") {
+      if (const auto* b = asBool(value)) material.alpha_dither = *b;
+    } else if (name == "alpha_to_coverage") {
+      if (const auto* b = asBool(value)) material.alpha_to_coverage = *b;
+    } else if (name == "alpha_mode") {
+      if (const auto* s = asString(value)) {
+        if (*s == "opaque") {
+          material.alpha_mode = MaterialDesc::AlphaMode::Opaque;
+          material.transparent = false;
+        } else if (*s == "masked") {
+          material.alpha_mode = MaterialDesc::AlphaMode::Masked;
+          material.transparent = false;
+        } else if (*s == "blend") {
+          material.alpha_mode = MaterialDesc::AlphaMode::Blend;
+          material.transparent = true;
+        }
+      }
     } else if (name == "transparent") {
-      if (const auto* b = asBool(value)) material.transparent = *b;
+      if (const auto* b = asBool(value)) {
+        material.transparent = *b;
+        if (*b && material.alpha_mode == MaterialDesc::AlphaMode::Opaque) {
+          material.alpha_mode = MaterialDesc::AlphaMode::Blend;
+        }
+      }
     } else if (name == "depth_test") {
       if (const auto* b = asBool(value)) material.depth_test = *b;
     } else if (name == "depth_write") {

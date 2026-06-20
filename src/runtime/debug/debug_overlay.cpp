@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <string>
@@ -1215,6 +1216,87 @@ void DebugOverlayLayer::drawRendererTab() {
     return;
   }
 
+  if (ImGui::CollapsingHeader("Frame Timings", ImGuiTreeNodeFlags_DefaultOpen)) {
+    const renderer::RendererFrameTimingStats timing =
+        graphics_->getRendererFrameTimingStats();
+    ImGui::Text("Frames: submitted %llu, completed %llu, dropped %llu, queue %u",
+                static_cast<unsigned long long>(timing.submitted_frames),
+                static_cast<unsigned long long>(timing.completed_frames),
+                static_cast<unsigned long long>(timing.dropped_frames),
+                static_cast<unsigned int>(timing.render_queue_depth));
+    ImGui::Text("Record/Submit/Render Thread: %.3f / %.3f / %.3f ms",
+                timing.frame_record_ms,
+                timing.frame_submit_ms,
+                timing.render_thread_frame_ms);
+    ImGui::Text("Render Thread Wait / Sync Command Wait: %.3f / %.3f ms",
+                timing.render_thread_wait_ms,
+                timing.render_thread_command_wait_ms);
+    ImGui::Separator();
+    ImGui::Text("Render Layers: %u, draws %u, %.3f ms",
+                static_cast<unsigned int>(timing.render_layer_count),
+                static_cast<unsigned int>(timing.render_layer_draws),
+                timing.render_layer_total_ms);
+    ImGui::Text("Layer Setup/Clear/Camera: %.3f / %.3f / %.3f ms",
+                timing.target_setup_ms,
+                timing.clear_ms,
+                timing.camera_setup_ms);
+    ImGui::Text("Env/Forward+/Shadow: %.3f / %.3f / %.3f ms",
+                timing.environment_ms,
+                timing.forward_plus_ms,
+                timing.shadow_ms);
+    ImGui::Text("Terrain/Collect/Opaque/Transparent: %.3f / %.3f / %.3f / %.3f ms",
+                timing.terrain_ms,
+                timing.forward_collect_ms,
+                timing.opaque_ms,
+                timing.transparent_ms);
+    ImGui::Text("Particles/Lines/Post: %.3f / %.3f / %.3f ms",
+                timing.particle_pass_ms,
+                timing.line_draw_ms,
+                timing.post_process_ms);
+    ImGui::Text("Present Copy / Swapchain Present: %.3f / %.3f ms",
+                timing.present_copy_ms,
+                timing.swapchain_present_ms);
+    ImGui::Text("Skipped Presents: %u, flush %.3f ms",
+                static_cast<unsigned int>(timing.skipped_presents),
+                timing.skipped_present_flush_ms);
+    ImGui::Text("UI: %.3f ms", timing.render_ui_ms);
+    ImGui::Separator();
+    ImGui::Text("Resource Creates: %u in %.3f ms",
+                static_cast<unsigned int>(timing.resource_creation_count),
+                timing.resource_creation_ms);
+    ImGui::Text("Pipeline Creates: %u in %.3f ms",
+                static_cast<unsigned int>(timing.pipeline_creation_count),
+                timing.pipeline_creation_ms);
+    ImGui::Text("Resize Events: %u in %.3f ms",
+                static_cast<unsigned int>(timing.resize_events),
+                timing.resize_ms);
+  }
+
+  if (ImGui::CollapsingHeader("Instancing", ImGuiTreeNodeFlags_DefaultOpen)) {
+    const renderer::InstancingStats stats = graphics_->getInstancingStats();
+    ImGui::Text("Submitted/Drawn: %u / %u",
+                static_cast<unsigned int>(stats.submitted_instances),
+                static_cast<unsigned int>(stats.drawn_instances));
+    ImGui::Text("Batches Culled/Draw Calls: %u / %u",
+                static_cast<unsigned int>(stats.culled_batches),
+                static_cast<unsigned int>(stats.draw_calls));
+    ImGui::Text("Uploads: %u, %llu bytes, %.3f ms",
+                static_cast<unsigned int>(stats.instance_buffer_updates),
+                static_cast<unsigned long long>(stats.instance_upload_bytes),
+                stats.instance_upload_ms);
+    ImGui::Text("GPU Culling: batches %u, dispatches %u, candidates %u, indirect %u",
+                static_cast<unsigned int>(stats.gpu_culling_batches),
+                static_cast<unsigned int>(stats.gpu_culling_dispatches),
+                static_cast<unsigned int>(stats.gpu_culling_candidate_instances),
+                static_cast<unsigned int>(stats.gpu_indirect_draws));
+    ImGui::Text("LOD: buckets %u, dispatches %u, candidates %u, indirect %u, fallback %u",
+                static_cast<unsigned int>(stats.lod_bucket_count),
+                static_cast<unsigned int>(stats.lod_culling_dispatches),
+                static_cast<unsigned int>(stats.lod_candidate_instances),
+                static_cast<unsigned int>(stats.lod_indirect_draws),
+                static_cast<unsigned int>(stats.lod_fallbacks));
+  }
+
   if (ImGui::CollapsingHeader("Shadows", ImGuiTreeNodeFlags_DefaultOpen)) {
     bool shadow_changed = false;
     shadow_changed |= editInt("Map Size", shadow_map_size_);
@@ -1468,7 +1550,44 @@ void DebugOverlayLayer::drawPerformanceTab(float frame_ms, float framerate) {
     if (frame_time_history_count_ > 0) {
       average_ms /= static_cast<float>(frame_time_history_count_);
     }
-    ImGui::Text("Current: %.2f ms (%.1f FPS)", frame_ms, framerate);
+
+    renderer::RendererFrameTimingStats renderer_timing{};
+    if (graphics_) {
+      renderer_timing = graphics_->getRendererFrameTimingStats();
+      const auto now = std::chrono::steady_clock::now();
+      if (!render_fps_initialized_) {
+        render_fps_initialized_ = true;
+        render_fps_last_completed_frames_ = renderer_timing.completed_frames;
+        render_fps_last_sample_ = now;
+      } else {
+        const float elapsed_seconds =
+            std::chrono::duration<float>(now - render_fps_last_sample_).count();
+        if (elapsed_seconds >= 0.25f) {
+          const uint64_t completed_delta =
+              renderer_timing.completed_frames >= render_fps_last_completed_frames_
+                  ? renderer_timing.completed_frames - render_fps_last_completed_frames_
+                  : 0u;
+          render_completed_fps_ =
+              elapsed_seconds > 0.0f ? static_cast<float>(completed_delta) / elapsed_seconds : 0.0f;
+          render_fps_last_completed_frames_ = renderer_timing.completed_frames;
+          render_fps_last_sample_ = now;
+        }
+      }
+    }
+
+    ImGui::Text("Game/UI: %.2f ms (%.1f FPS)", frame_ms, framerate);
+    if (graphics_) {
+      const float render_completed_ms =
+          render_completed_fps_ > 0.0f ? 1000.0f / render_completed_fps_ : 0.0f;
+      ImGui::Text("Renderer Completed: %.2f ms (%.1f FPS)",
+                  render_completed_ms,
+                  render_completed_fps_);
+      ImGui::Text("Renderer Frames: submitted %llu, completed %llu, dropped %llu, queue %u",
+                  static_cast<unsigned long long>(renderer_timing.submitted_frames),
+                  static_cast<unsigned long long>(renderer_timing.completed_frames),
+                  static_cast<unsigned long long>(renderer_timing.dropped_frames),
+                  static_cast<unsigned int>(renderer_timing.render_queue_depth));
+    }
     ImGui::Text("Recent Avg: %.2f ms", average_ms);
     ImGui::Text("Recent Max: %.2f ms", max_recent_ms);
     ImGui::Text("Worst: %.2f ms", worst_frame_ms_);
@@ -1493,6 +1612,10 @@ void DebugOverlayLayer::resetFramePacingStats() {
   frame_time_history_count_ = 0;
   hitch_count_ = 0;
   worst_frame_ms_ = 0.0f;
+  render_fps_initialized_ = false;
+  render_fps_last_completed_frames_ = 0;
+  render_fps_last_sample_ = {};
+  render_completed_fps_ = 0.0f;
 }
 
 void DebugOverlayLayer::onShutdown() {

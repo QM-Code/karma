@@ -27,11 +27,12 @@ namespace karma::renderer_backend {
 
 namespace {
 
-struct alignas(16) InstanceTransformData {
+struct alignas(16) InstanceGpuData {
   float col0[4];
   float col1[4];
   float col2[4];
   float col3[4];
+  float params[4];
 };
 
 template <typename T, bool KeepStrongReferences = false>
@@ -39,13 +40,33 @@ T* getMappedData(Diligent::MapHelper<T, KeepStrongReferences>& map) {
   return static_cast<T*>(map);
 }
 
-InstanceTransformData packInstanceTransform(const glm::mat4& transform) {
-  InstanceTransformData out{};
+bool uploadInstanceData(Diligent::IDeviceContext* context,
+                        Diligent::IBuffer* buffer,
+                        const InstanceGpuData* instances,
+                        size_t instance_count) {
+  if (!context || !buffer || !instances || instance_count == 0) {
+    return false;
+  }
+
+  Diligent::PVoid mapped_data = nullptr;
+  context->MapBuffer(buffer, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD, mapped_data);
+  if (mapped_data != nullptr) {
+    std::memcpy(mapped_data, instances, instance_count * sizeof(InstanceGpuData));
+  }
+  context->UnmapBuffer(buffer, Diligent::MAP_WRITE);
+  return mapped_data != nullptr;
+}
+
+InstanceGpuData packInstanceTransform(const glm::mat4& transform,
+                                      const glm::vec4& params = glm::vec4(0.0f)) {
+  InstanceGpuData out{};
   const float* ptr = glm::value_ptr(transform);
   std::memcpy(out.col0, ptr, sizeof(out.col0));
   std::memcpy(out.col1, ptr + 4, sizeof(out.col1));
   std::memcpy(out.col2, ptr + 8, sizeof(out.col2));
   std::memcpy(out.col3, ptr + 12, sizeof(out.col3));
+  const float* param_ptr = glm::value_ptr(params);
+  std::memcpy(out.params, param_ptr, sizeof(out.params));
   return out;
 }
 
@@ -78,13 +99,13 @@ struct ShadowBatchKeyHash {
 
 struct ShadowBatch {
   ShadowBatchKey key{};
-  std::vector<InstanceTransformData> transforms;
+  std::vector<InstanceGpuData> transforms;
   std::vector<glm::vec4> bounds_spheres;
 };
 
 struct DeformedShadowDraw {
   ShadowBatchKey key{};
-  InstanceTransformData transform{};
+  InstanceGpuData transform{};
   glm::vec4 bounds_sphere{0.0f};
   renderer::DeformationId deformation = renderer::kInvalidDeformation;
 };
@@ -155,6 +176,16 @@ glm::vec4 transformBoundingSphere(const glm::mat4& world,
   const glm::vec3 center = glm::vec3(world * glm::vec4(local_center, 1.0f));
   const float radius = local_radius * maxTransformScale(world);
   return glm::vec4(center, radius);
+}
+
+glm::mat4 planarInstanceTransform(const renderer::PlanarInstanceData& instance) {
+  const glm::vec3 position(instance.position_yaw);
+  const float yaw = instance.position_yaw.w;
+  const glm::vec3 scale(instance.scale_pad);
+  glm::mat4 transform = glm::translate(glm::mat4(1.0f), position);
+  transform = glm::rotate(transform, yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+  transform = glm::scale(transform, scale);
+  return transform;
 }
 
 bool sphereIntersectsClipVolume(const glm::mat4& clip_from_world,
@@ -398,6 +429,15 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       }
     }
   }
+  if (!directional_shadow_needs_update) {
+    for (const auto& entry : instanced_records_) {
+      const auto& record = entry.second;
+      if (record.layer == layer && record.shadow_visible && record.instanceCount() > 0u) {
+        directional_shadow_needs_update = true;
+        break;
+      }
+    }
+  }
   if (!directional_shadow_needs_update && directional_shadow_cache_valid_) {
     out_state.cascade_splits = cached_cascade_splits_;
   } else {
@@ -505,7 +545,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
     ib_desc.Usage = Diligent::USAGE_DYNAMIC;
     ib_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     ib_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    ib_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(InstanceTransformData));
+    ib_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(InstanceGpuData));
     instance_vb_.Release();
     device_->CreateBuffer(ib_desc, nullptr, &instance_vb_);
     if (!instance_vb_) {
@@ -641,6 +681,15 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
         }
       }
     }
+    if (!moving_shadow_caster_affects_point_shadow) {
+      for (const auto& entry : instanced_records_) {
+        const auto& record = entry.second;
+        if (record.layer == layer && record.shadow_visible && record.instanceCount() > 0u) {
+          moving_shadow_caster_affects_point_shadow = true;
+          break;
+        }
+      }
+    }
   }
   point_shadow_force_full_refresh =
       point_shadow_force_full_refresh || moving_shadow_caster_affects_point_shadow;
@@ -706,17 +755,18 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
   deformed_shadow_draws.clear();
   shadow_batch_lookup.clear();
   if (render_directional_shadows || render_point_shadows) {
-    shadow_batches.reserve(instances_.size());
+    shadow_batches.reserve(instances_.size() + instanced_records_.size());
     deformed_shadow_draws.reserve(instances_.size() / 4 + 1);
-    shadow_batch_lookup.reserve(instances_.size());
+    shadow_batch_lookup.reserve(instances_.size() + instanced_records_.size());
     auto append_shadow_batch = [&](const ShadowBatchKey& key,
                                    const glm::mat4& transform,
+                                   const glm::vec4& params,
                                    const glm::vec4& bounds_sphere,
                                    renderer::DeformationId deformation) {
       if (key.deformed) {
         deformed_shadow_draws.push_back(DeformedShadowDraw{
             .key = key,
-            .transform = packInstanceTransform(transform),
+            .transform = packInstanceTransform(transform, params),
             .bounds_sphere = bounds_sphere,
             .deformation = deformation,
         });
@@ -729,7 +779,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
         shadow_batch_lookup.emplace(key, idx);
         it = shadow_batch_lookup.find(key);
       }
-      shadow_batches[it->second].transforms.push_back(packInstanceTransform(transform));
+      shadow_batches[it->second].transforms.push_back(packInstanceTransform(transform, params));
       shadow_batches[it->second].bounds_spheres.push_back(bounds_sphere);
     };
 
@@ -761,6 +811,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
           };
           append_shadow_batch(key,
                               instance.transform,
+                              instance.params,
                               world_bounds_sphere,
                               instance.deformation);
         }
@@ -774,8 +825,66 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
         };
         append_shadow_batch(key,
                             instance.transform,
+                            instance.params,
                             world_bounds_sphere,
                             instance.deformation);
+      }
+    }
+    for (const auto& entry : instanced_records_) {
+      const auto& record = entry.second;
+      if (record.layer != layer || !record.shadow_visible || record.instanceCount() == 0u) {
+        continue;
+      }
+      auto mesh_it = meshes_.find(record.mesh);
+      if (mesh_it == meshes_.end()) {
+        continue;
+      }
+      const auto& mesh = mesh_it->second;
+      if (!mesh.vertex_buffer) {
+        continue;
+      }
+      const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
+      auto append_instanced_shadow = [&](const glm::mat4& transform, const glm::vec4& params) {
+        const glm::vec4 world_bounds_sphere =
+            transformBoundingSphere(transform, mesh.bounds_center, mesh.bounds_radius);
+        if (!mesh.submeshes.empty()) {
+          for (const auto& submesh : mesh.submeshes) {
+            const ShadowBatchKey key{
+                .mesh = record.mesh,
+                .index_offset = submesh.index_offset,
+                .index_count = submesh.index_count,
+                .indexed = indexed_mesh && submesh.index_count > 0,
+                .deformed = false,
+            };
+            append_shadow_batch(key,
+                                transform,
+                                params,
+                                world_bounds_sphere,
+                                renderer::kInvalidDeformation);
+          }
+        } else {
+          const ShadowBatchKey key{
+              .mesh = record.mesh,
+              .index_offset = 0,
+              .index_count = mesh.index_count,
+              .indexed = indexed_mesh,
+              .deformed = false,
+          };
+          append_shadow_batch(key,
+                              transform,
+                              params,
+                              world_bounds_sphere,
+                              renderer::kInvalidDeformation);
+        }
+      };
+      if (record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+        for (const renderer::PlanarInstanceData& instance : record.planar_instances) {
+          append_instanced_shadow(planarInstanceTransform(instance), instance.params);
+        }
+      } else {
+        for (const renderer::InstanceData& instance : record.instances) {
+          append_instanced_shadow(instance.transform, instance.params);
+        }
       }
     }
     std::sort(shadow_batches.begin(),
@@ -794,7 +903,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
               });
   }
 
-  thread_local std::vector<InstanceTransformData> filtered_shadow_transforms;
+  thread_local std::vector<InstanceGpuData> filtered_shadow_transforms;
   filtered_shadow_transforms.clear();
   auto draw_shadow_batches = [&](const DrawConstants& pass_constants, auto&& sphere_visible) {
     Diligent::IBuffer* bound_mesh_vb = nullptr;
@@ -847,16 +956,11 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       if (!ensure_instance_buffer(filtered_shadow_transforms.size())) {
         continue;
       }
-      {
-        Diligent::MapHelper<InstanceTransformData> instance_map(
-            context_, instance_vb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
-        auto* mapped_instances = getMappedData(instance_map);
-        if (mapped_instances == nullptr) {
-          continue;
-        }
-        std::memcpy(mapped_instances,
-                    filtered_shadow_transforms.data(),
-                    filtered_shadow_transforms.size() * sizeof(InstanceTransformData));
+      if (!uploadInstanceData(context_,
+                              instance_vb_,
+                              filtered_shadow_transforms.data(),
+                              filtered_shadow_transforms.size())) {
+        continue;
       }
 
       Diligent::IBuffer* mesh_vb = mesh.vertex_buffer.RawPtr();
@@ -925,14 +1029,8 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       if (!ensure_instance_buffer(1)) {
         continue;
       }
-      {
-        Diligent::MapHelper<InstanceTransformData> instance_map(
-            context_, instance_vb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
-        auto* mapped_instances = getMappedData(instance_map);
-        if (mapped_instances == nullptr) {
-          continue;
-        }
-        *mapped_instances = draw.transform;
+      if (!uploadInstanceData(context_, instance_vb_, &draw.transform, 1)) {
+        continue;
       }
 
       Diligent::IBuffer* mesh_vb = mesh.vertex_buffer.RawPtr();

@@ -20,6 +20,7 @@
 #include "karma/features/visual/particles/particle_system.h"
 #include "karma/rendering/renderer/particle_stats_report.h"
 #include "karma/world/components/collider.h"
+#include "karma/world/components/instanced_mesh.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/light_pulse.h"
 #include "karma/world/components/mesh.h"
@@ -378,6 +379,80 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
   KARMA_REQUIRE(nearly(light.color.r, 0.5f));
   KARMA_REQUIRE(nearly(light.intensity, 4.0f));
   KARMA_REQUIRE(nearly(light.range, 12.0f));
+}
+
+void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
+  karma::ecs::World world;
+  karma::scene::Scene scene;
+  const karma::ecs::Entity root = world.createEntity();
+  scene.createNode(root);
+  world.setName(root, "Grass Chunk");
+  world.add(root, karma::components::InstancedMeshComponent{
+                      .mesh_asset_key = "assets/grass_cluster",
+                      .materials = {karma::components::MeshMaterialAssignment{
+                          .slot = 0,
+                          .material_key = "grass_near",
+                      }},
+                      .lods = {karma::components::InstancedMeshLodLevel{
+                          .start_distance = 28.0f,
+                          .mesh_asset_key = "assets/grass_billboard",
+                          .materials = {karma::components::MeshMaterialAssignment{
+                              .slot = 0,
+                              .material_key = "grass_far",
+                          }},
+                          .render_mode = karma::renderer::InstanceLodRenderMode::UprightBillboard,
+                          .shadow_visible = false,
+                      }},
+                      .gpu_layout = karma::renderer::InstanceGpuLayout::PositionYawScaleParams,
+                      .planar_instances = {karma::components::PlanarMeshInstance{
+                          .position = {1.0f, 0.0f, 2.0f},
+                          .yaw_radians = 0.5f,
+                          .scale = {1.0f, 2.0f, 1.0f},
+                      }},
+                      .instance_revision = 3u,
+                      .dynamic = false,
+                      .visible = true,
+                      .shadow_visible = false,
+                  });
+
+  const std::filesystem::path path = dir / "instanced_lod.json";
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+  const Json saved = readJson(path);
+  const Json& serialized = saved["nodes"][0]["components"]["InstancedMeshComponent"];
+  KARMA_REQUIRE(serialized["lods"].is_array());
+  KARMA_REQUIRE(serialized["lods"].size() == 1);
+  KARMA_REQUIRE(serialized["lods"][0]["start_distance"] == 28.0f);
+  KARMA_REQUIRE(serialized["lods"][0]["mesh_asset_key"] == "assets/grass_billboard");
+  KARMA_REQUIRE(serialized["lods"][0]["render_mode"] == "upright_billboard");
+  KARMA_REQUIRE(serialized["lods"][0]["materials"][0]["material_key"] == "grass_far");
+
+  karma::ecs::World loaded_world;
+  karma::scene::Scene loaded_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  const auto& loaded =
+      loaded_world.get<karma::components::InstancedMeshComponent>(instance->root);
+  KARMA_REQUIRE(loaded.lods.size() == 1);
+  KARMA_REQUIRE(nearly(loaded.lods[0].start_distance, 28.0f));
+  KARMA_REQUIRE(loaded.lods[0].mesh_asset_key == "assets/grass_billboard");
+  KARMA_REQUIRE(loaded.lods[0].materials.size() == 1);
+  KARMA_REQUIRE(loaded.lods[0].materials[0].material_key == "grass_far");
+  KARMA_REQUIRE(loaded.lods[0].render_mode ==
+                karma::renderer::InstanceLodRenderMode::UprightBillboard);
+  KARMA_REQUIRE(!loaded.lods[0].shadow_visible);
+
+  Json legacy = saved;
+  legacy["nodes"][0]["components"]["InstancedMeshComponent"].erase("lods");
+  const std::filesystem::path legacy_path = dir / "instanced_lod_legacy.json";
+  writeText(legacy_path, legacy.dump(2));
+  karma::ecs::World legacy_world;
+  karma::scene::Scene legacy_scene;
+  const auto legacy_instance =
+      karma::prefabs::instantiatePrefab(legacy_world, legacy_scene, legacy_path);
+  KARMA_REQUIRE(legacy_instance.has_value());
+  const auto& legacy_component =
+      legacy_world.get<karma::components::InstancedMeshComponent>(legacy_instance->root);
+  KARMA_REQUIRE(legacy_component.lods.empty());
 }
 
 void testColliderComponentPrefabRoundTrips(const std::filesystem::path& dir) {
@@ -1603,6 +1678,7 @@ void testParticleStatsReportFormatting() {
 int main() {
   const std::filesystem::path dir = makeTempDir();
   testSaveLoadSingleEntity(dir);
+  testInstancedMeshLodPrefabRoundTrip(dir);
   testColliderComponentPrefabRoundTrips(dir);
   testHierarchyRoundTrip(dir);
   testUnknownComponentFails(dir);

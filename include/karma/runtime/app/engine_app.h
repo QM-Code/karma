@@ -65,6 +65,23 @@ struct EngineConfig {
   // Present(0), where Diligent prefers MAILBOX, then IMMEDIATE, then FIFO if neither
   // low-latency mode is supported. Set true to force FIFO/FIFO_RELAXED vblank pacing.
   bool vsync = false;
+  /// Optional explicit swapchain present mode. `Auto` uses the `vsync` policy.
+  renderer::PresentMode present_mode = renderer::PresentMode::Auto;
+  /// Renderer execution ownership. Threaded keeps backend present off the game thread.
+  renderer::RendererExecutionMode renderer_execution_mode =
+      renderer::RendererExecutionMode::Threaded;
+  /// Optional CPU-side frame-start cap. 0 disables it. This is useful with low-latency
+  /// present modes that can otherwise run into swapchain acquire/present pacing stalls.
+  float frame_pacing_fps = 0.0f;
+  /// Skips swapchain present on frames that consumed mouse-button events. This is
+  /// an opt-in workaround for Linux compositor/driver present stalls on clicks.
+  bool skip_present_on_mouse_button = false;
+  /// Number of game frames to skip after a mouse-button event when the workaround
+  /// above is enabled. The event frame counts as the first frame.
+  uint32_t mouse_button_present_skip_frames = 2;
+  /// Extra startup warm-up frames that rotate the primary camera around yaw.
+  /// Useful for examples that show driver hitches when first looking at new views.
+  uint32_t renderer_warmup_camera_sweep_steps = 0;
   bool fullscreen = false;
   bool cursor_visible = true;
   /// Source path imported as the startup default environment map asset.
@@ -150,6 +167,7 @@ class EngineApp {
   bool presentInitialLoadingSplash(float progress,
                                    core::SteadyClock::time_point startup_start);
   void warmUpRenderer();
+  double applyFramePacing();
   RuntimeModuleContext makeRuntimeModuleContext();
 #if defined(KARMA_DEBUG_UI)
   std::unique_ptr<UiLayer> createDebugOverlayUi();
@@ -196,7 +214,10 @@ class EngineApp {
   float fixed_dt_ = 1.0f / 60.0f;
   float accumulator_ = 0.0f;
   uint64_t fixed_tick_ = 0;
+  uint64_t frame_tick_ = 0;
+  uint64_t last_mouse_button_frame_tick_ = std::numeric_limits<uint64_t>::max();
   core::SteadyClock::time_point last_time_{};
+  core::SteadyClock::time_point next_frame_pace_time_{};
 };
 
 }  // namespace karma::app

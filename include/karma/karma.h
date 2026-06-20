@@ -27,6 +27,7 @@
 #include "karma/world/components/layers.h"
 #include "karma/world/components/light.h"
 #include "karma/world/components/light_pulse.h"
+#include "karma/world/components/instanced_mesh.h"
 #include "karma/world/components/mesh.h"
 #include "karma/world/components/deformable_mesh.h"
 #include "karma/world/components/nav_crowd.h"

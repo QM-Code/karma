@@ -325,6 +325,14 @@ To force the depth prepass even on guarded drivers:
 KARMA_FORCE_DEPTH_PREPASS=1 ./build/examples/prefabs/gallery
 ```
 
+Instanced GPU culling is enabled by default for static compact planar
+instanced batches on backends that support indirect indexed draws. Disable it
+for A/B profiling or driver triage:
+
+```bash
+KARMA_RENDER_GPU_CULLING=0 ./build/examples/rendering/grass_field 50000
+```
+
 For frame pacing and input-latency triage, enable engine frame diagnostics:
 
 ```bash
@@ -337,6 +345,26 @@ The frame log splits event handling into poll, UI dispatch, input update, event
 clearing, and close checks. It also reports input event counts for mouse button,
 mouse move, focus, and resize events. Use the `fb` bucket to spot framebuffer
 size/query stalls and `end_frame` to spot renderer present or acquire stalls.
+With the threaded renderer, render-thread spikes can now trigger this log even
+when the game thread is below the threshold. Mouse diagnostics include `mb_age`,
+`skip_present`, backend `skipped_present`, and `skip_flush` so click-correlated
+present stalls can be separated from input/event processing.
+
+For Linux compositor/driver click stalls, apps can opt into skipping swapchain
+present for a small number of frames after mouse-button events:
+
+```bash
+KARMA_ENGINE_SKIP_PRESENT_ON_MOUSE_BUTTON=1 \
+KARMA_ENGINE_MOUSE_BUTTON_PRESENT_SKIP_FRAMES=2 \
+./build/examples/rendering/grass_field
+```
+
+For first-look renderer/driver warm-up, apps can add startup camera-orientation
+prewarm frames. The camera is restored before gameplay begins:
+
+```bash
+KARMA_RENDER_WARMUP_CAMERA_SWEEP_STEPS=8 ./build/examples/rendering/grass_field
+```
 
 ## Present Mode Policy
 Karma defaults to the low-latency present path for the Diligent Vulkan backend.
@@ -352,6 +380,21 @@ This avoids FIFO/FIFO_RELAXED stalls observed on some Linux Vulkan surfaces, whe
 mailbox is not supported, the backend may use immediate mode; that removes the
 stall at the cost of possible tearing unless the app caps frame rate elsewhere.
 
+For low-latency present runs, set `config.frame_pacing_fps` or override it with
+`KARMA_ENGINE_FRAME_PACING_FPS` to cap frame starts before input polling and
+rendering. Frame diagnostics report this explicit wait as `pace=...`. To move
+normal compositor throttling out of the renderer `present` bucket, choose a cap
+below the observed present-paced frame rate:
+
+```bash
+KARMA_ENGINE_FRAME_PACING_FPS=30 ./build/examples/rendering/grass_field 50000
+```
+
+The dense grass-field example applies this 30 FPS pacing by default when started
+with 50,000 instances because some Vulkan compositor/driver combinations
+otherwise produce periodic 90-115 ms acquire/present stalls during camera
+movement. Set `KARMA_ENGINE_FRAME_PACING_FPS=0` to profile the uncapped path.
+
 Set `config.vsync = true` or use `KARMA_ENGINE_VSYNC=1` to opt into
 FIFO/FIFO_RELAXED vblank pacing:
 
@@ -361,6 +404,11 @@ KARMA_ENGINE_VSYNC=1 ./build/examples/navigation/navmesh
 
 Use this when tear-free pacing is more important than input latency, or when the
 target driver/compositor does not exhibit FIFO present stalls.
+
+For Vulkan present-stall experiments, `KARMA_RENDER_SWAPCHAIN_BUFFERS` overrides
+the requested swapchain image count. Values are clamped to `[2, 8]`, and the
+default remains `2`. Treat this as a diagnostic knob: extra images can change
+where a driver blocks without necessarily reducing total hitch time.
 
 ## Post-Process Profiles
 Cameras select post-processing by name through

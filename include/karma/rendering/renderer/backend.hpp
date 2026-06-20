@@ -27,6 +27,40 @@ namespace karma::platform {
 class Window;
 }
 
+namespace karma::renderer {
+
+/// Startup present-mode preference for backends with explicit swapchain present modes.
+///
+/// `Auto` preserves the existing `vsync` policy: vsync on selects a vblank-paced
+/// mode, vsync off selects the backend's low-latency preference. The explicit
+/// values request a concrete mode when the platform supports it.
+enum class PresentMode {
+  Auto,
+  Immediate,
+  Mailbox,
+  Fifo,
+  FifoRelaxed,
+};
+
+/// Renderer/backend execution ownership.
+///
+/// `Threaded` records frames on the game thread and executes backend work,
+/// including swapchain present, on a dedicated render thread. `Synchronous`
+/// preserves the single-threaded execution model and is mainly useful for
+/// tests, debugging, and backend bring-up.
+enum class RendererExecutionMode {
+  Threaded,
+  Synchronous,
+};
+
+struct GraphicsDeviceCreateInfo {
+  bool vsync = false;
+  PresentMode present_mode = PresentMode::Auto;
+  RendererExecutionMode execution_mode = RendererExecutionMode::Threaded;
+};
+
+}  // namespace karma::renderer
+
 namespace karma::renderer_backend {
 
 /// \ingroup karma_rendering
@@ -43,6 +77,9 @@ class Backend {
   virtual void beginFrame(const renderer::FrameInfo& frame) = 0;
   virtual void endFrame() = 0;
   virtual void resize(int width, int height) = 0;
+  /// Creates renderer variants that are normally lazy but expected in the
+  /// startup-visible scene.
+  virtual void prewarmRendererResources(bool include_ui) { (void)include_ui; }
   /// Allows backends with explicit render-state caches to persist warm-up work.
   virtual void flushRenderStateCache() {}
 
@@ -129,6 +166,7 @@ class Backend {
   virtual renderer::DeformationStats getDeformationStats() const { return {}; }
 
   virtual void submit(const renderer::DrawItem& item) = 0;
+  virtual void submitInstanced(const renderer::InstancedDrawItem& item) = 0;
   virtual void submitParticles(renderer::ParticleBatch batch) = 0;
   virtual void submitPackedParticles(renderer::PackedParticleBatch batch) = 0;
   virtual void submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) = 0;
@@ -156,8 +194,15 @@ class Backend {
                                       int max_lights_per_tile,
                                       int max_local_lights) = 0;
   virtual renderer::ForwardPlusStats getForwardPlusStats() const = 0;
+  virtual void setInstancingCpuTimings(float render_system_extraction_ms,
+                                       float forward_state_collection_ms) {
+    (void)render_system_extraction_ms;
+    (void)forward_state_collection_ms;
+  }
+  virtual renderer::InstancingStats getInstancingStats() const = 0;
   virtual renderer::ParticlePassStats getParticlePassStats() const = 0;
   virtual renderer::RendererCommandStats getRendererCommandStats() const = 0;
+  virtual renderer::RendererFrameTimingStats getRendererFrameTimingStats() const = 0;
   virtual void setShadowSettings(float bias,
                                  int map_size,
                                  int pcf_radius,
@@ -181,6 +226,8 @@ class Backend {
 };
 
 /// Creates the configured graphics backend for a platform window.
-std::unique_ptr<Backend> CreateGraphicsBackend(karma::platform::Window& window);
+std::unique_ptr<Backend> CreateGraphicsBackend(
+    karma::platform::Window& window,
+    const renderer::GraphicsDeviceCreateInfo& create_info = {});
 
 }  // namespace karma::renderer_backend

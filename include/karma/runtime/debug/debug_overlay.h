@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -114,6 +115,10 @@ class DebugOverlayLayer final : public app::UiLayer {
   uint64_t hitch_count_ = 0;
   float worst_frame_ms_ = 0.0f;
   float hitch_threshold_ms_ = 25.0f;
+  bool render_fps_initialized_ = false;
+  uint64_t render_fps_last_completed_frames_ = 0;
+  std::chrono::steady_clock::time_point render_fps_last_sample_{};
+  float render_completed_fps_ = 0.0f;
 };
 
 }  // namespace karma::debug

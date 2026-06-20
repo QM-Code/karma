@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -31,15 +32,22 @@ class RenderSystem;
 class GraphicsDevice {
  public:
   /// Creates the configured graphics backend for `window`.
-  explicit GraphicsDevice(karma::platform::Window& window);
+  explicit GraphicsDevice(karma::platform::Window& window,
+                          const GraphicsDeviceCreateInfo& create_info = {});
   ~GraphicsDevice();
 
   /// Begins a frame with viewport/timing data.
   void beginFrame(const FrameInfo& frame);
   /// Ends and presents the current frame.
-  void endFrame();
+  void endFrame(bool wait_for_completion = false);
+  /// Waits until all queued renderer work has completed.
+  void waitIdle();
   /// Resizes backend swapchain/framebuffer resources.
   void resize(int width, int height);
+  /// Prewarms lazily-created renderer resources expected by startup scenes.
+  void prewarmRendererResources(bool include_ui = false);
+  /// Persists backend pipeline/render-state cache work when supported.
+  void flushRenderStateCache();
   /// Returns the current framebuffer size.
   void getFramebufferSize(int& width, int& height) const;
 
@@ -111,6 +119,8 @@ class GraphicsDevice {
 
   /// Submits one mesh draw item.
   void submit(const DrawItem& item);
+  /// Submits one shared mesh draw with many instances.
+  void submitInstanced(const InstancedDrawItem& item);
   /// Submits a compatibility particle batch.
   void submitParticles(ParticleBatch batch);
   /// Submits a packed particle batch.
@@ -156,10 +166,17 @@ class GraphicsDevice {
   void setForwardPlusSettings(int tile_size, int max_lights_per_tile, int max_local_lights);
   /// Returns latest Forward+ diagnostics.
   ForwardPlusStats getForwardPlusStats() const;
+  /// Updates CPU-side instancing timings measured outside the backend.
+  void setInstancingCpuTimings(float render_system_extraction_ms,
+                               float forward_state_collection_ms = -1.0f);
+  /// Returns latest instanced-rendering diagnostics.
+  InstancingStats getInstancingStats() const;
   /// Returns latest particle-pass diagnostics.
   ParticlePassStats getParticlePassStats() const;
   /// Returns renderer backend command counters.
   RendererCommandStats getRendererCommandStats() const;
+  /// Returns renderer backend frame timings for the most recently completed frame.
+  RendererFrameTimingStats getRendererFrameTimingStats() const;
   /// Configures directional shadow bias/map settings.
   void setShadowSettings(float bias,
                          int map_size,
@@ -189,14 +206,15 @@ class GraphicsDevice {
   /// Renders provider-neutral UI draw data.
   void renderUi(const karma::renderer::UIDrawData& draw_data);
   /// Returns the backend implementation for narrow diagnostics/interops.
-  renderer_backend::Backend* backend() { return backend_.get(); }
+  renderer_backend::Backend* backend();
   /// Returns the backend implementation for narrow diagnostics/interops.
-  const renderer_backend::Backend* backend() const { return backend_.get(); }
+  const renderer_backend::Backend* backend() const;
 
  private:
   friend class RenderSystem;
   friend class karma::animation::DeformationSystem;
   friend class karma::particles::ParticleSystem;
+  class RenderScheduler;
 
   /// Registers or replaces a runtime mesh backing a content mesh asset.
   MeshId registerRuntimeMesh(const std::string& key, const geometry::MeshData& mesh);
@@ -205,7 +223,7 @@ class GraphicsDevice {
   /// Returns a registered runtime mesh id, or `kInvalidMesh`.
   MeshId findRuntimeMesh(const std::string& key) const;
 
-  std::unique_ptr<renderer_backend::Backend> backend_;
+  std::unique_ptr<RenderScheduler> scheduler_;
   struct RuntimeMeshRegistration {
     MeshId mesh = kInvalidMesh;
     geometry::MeshData data;
@@ -215,5 +233,7 @@ class GraphicsDevice {
   int framebuffer_width_ = 0;
   int framebuffer_height_ = 0;
 };
+
+using Renderer = GraphicsDevice;
 
 }  // namespace karma::renderer

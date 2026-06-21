@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -16,6 +17,44 @@
 namespace demo = karma::examples::network_demo;
 
 namespace {
+
+std::optional<karma::network::ServerListing> discoverLanServer(uint16_t game_port) {
+  const uint16_t discovery_port = karma::network::defaultLanDiscoveryPort(game_port);
+  karma::network::LanServerBrowser browser(
+      karma::network::LanDiscoveryConfig{
+          .discovery_port = discovery_port,
+          .app_id = demo::kDemoAppId,
+          .game_port = game_port,
+          .entry_ttl = std::chrono::milliseconds(1500),
+      });
+  const auto started = browser.start();
+  if (!started.ok()) {
+    spdlog::error("Client: failed to start LAN browser on discovery port {}",
+                  discovery_port);
+    return std::nullopt;
+  }
+
+  browser.sendQuery();
+  auto next_query = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+  std::vector<karma::network::ServerListEvent> events;
+  while (std::chrono::steady_clock::now() < deadline) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= next_query) {
+      browser.sendQuery();
+      next_query = now + std::chrono::milliseconds(250);
+    }
+
+    events.clear();
+    browser.poll(now, events);
+    const auto listings = browser.cache().list();
+    if (!listings.empty()) {
+      return listings.front();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  return std::nullopt;
+}
 
 void runClient(const std::string& host,
                uint16_t port,
@@ -88,7 +127,7 @@ void runClient(const std::string& host,
 
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 4) {
-    spdlog::info("Usage: {} <host> [port] [name]", argv[0]);
+    spdlog::info("Usage: {} <host|--lan> [port] [name]", argv[0]);
     spdlog::info("Run two client processes with one network_server.");
     return argc < 2 ? 1 : 0;
   }
@@ -97,6 +136,20 @@ int main(int argc, char** argv) {
   const uint16_t port =
       argc >= 3 ? static_cast<uint16_t>(std::stoi(argv[2])) : demo::kDefaultPort;
   const std::string name = argc >= 4 ? argv[3] : "karma-client";
+  if (host == "--lan") {
+    auto discovered = discoverLanServer(port);
+    if (!discovered) {
+      spdlog::error("Client: no LAN server discovered for app id {}", demo::kDemoAppId);
+      return 1;
+    }
+    spdlog::info("Client: discovered '{}' at {}:{}",
+                 discovered->name,
+                 discovered->connect_endpoint.ip,
+                 discovered->connect_endpoint.port);
+    runClient(discovered->connect_endpoint.ip, discovered->connect_endpoint.port, name);
+    return 0;
+  }
+
   runClient(host, port, name);
   return 0;
 }

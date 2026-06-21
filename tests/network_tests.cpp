@@ -3,6 +3,7 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -25,6 +26,8 @@
 #include "karma/components.h"
 #include "karma/world.h"
 
+#include "../examples/network/http_master_adapter.h"
+
 namespace {
 
 constexpr uint32_t kAppId = 0x4B544553u;  // KTES
@@ -38,6 +41,179 @@ void expect(bool condition, const char* message) {
 std::span<const std::byte> bytesOf(const std::string& value) {
   return {reinterpret_cast<const std::byte*>(value.data()), value.size()};
 }
+
+class FakeLanSocket;
+
+class FakeLanDatagramBus {
+ public:
+  void registerSocket(FakeLanSocket& socket);
+  void unregisterSocket(FakeLanSocket& socket);
+  void deliver(const FakeLanSocket& sender,
+               const karma::network::Endpoint& target,
+               std::span<const std::byte> payload);
+
+ private:
+  std::vector<FakeLanSocket*> sockets;
+};
+
+class FakeLanSocket final : public karma::network::ILanDatagramSocket {
+ public:
+  FakeLanSocket(FakeLanDatagramBus& bus, std::string ip)
+      : bus_(bus), ip_(std::move(ip)) {}
+
+  ~FakeLanSocket() override { close(); }
+
+  karma::network::LanDiscoveryResult open(uint16_t port,
+                                          bool enable_broadcast = true) override {
+    (void)enable_broadcast;
+    close();
+    local_ = karma::network::Endpoint{.ip = ip_, .port = port};
+    open_ = true;
+    bus_.registerSocket(*this);
+    return {.status = karma::network::LanDiscoveryStatus::Ok};
+  }
+
+  void close() override {
+    if (open_) {
+      bus_.unregisterSocket(*this);
+    }
+    open_ = false;
+    inbox_.clear();
+  }
+
+  bool isOpen() const override { return open_; }
+
+  karma::network::LanDiscoveryResult sendTo(
+      const karma::network::Endpoint& endpoint,
+      std::span<const std::byte> payload) override {
+    if (!open_) {
+      return {.status = karma::network::LanDiscoveryStatus::NotOpen};
+    }
+    if (payload.size() > karma::network::kLanDiscoveryMaxDatagramSize) {
+      return {.status = karma::network::LanDiscoveryStatus::OversizedPacket};
+    }
+    bus_.deliver(*this, endpoint, payload);
+    return {
+        .status = karma::network::LanDiscoveryStatus::Ok,
+        .bytes = payload.size(),
+    };
+  }
+
+  karma::network::LanDiscoveryResult receive(
+      karma::network::Endpoint& from,
+      std::vector<std::byte>& payload) override {
+    if (!open_) {
+      return {.status = karma::network::LanDiscoveryStatus::NotOpen};
+    }
+    if (inbox_.empty()) {
+      return {.status = karma::network::LanDiscoveryStatus::WouldBlock};
+    }
+    Datagram datagram = std::move(inbox_.front());
+    inbox_.pop_front();
+    from = datagram.from;
+    payload = std::move(datagram.payload);
+    return {
+        .status = karma::network::LanDiscoveryStatus::Ok,
+        .bytes = payload.size(),
+    };
+  }
+
+  const karma::network::Endpoint& localEndpoint() const { return local_; }
+
+  void enqueue(karma::network::Endpoint from, std::span<const std::byte> payload) {
+    inbox_.push_back(Datagram{
+        .from = std::move(from),
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    });
+  }
+
+ private:
+  struct Datagram {
+    karma::network::Endpoint from;
+    std::vector<std::byte> payload;
+  };
+
+  FakeLanDatagramBus& bus_;
+  std::string ip_;
+  bool open_ = false;
+  karma::network::Endpoint local_{};
+  std::deque<Datagram> inbox_;
+};
+
+void FakeLanDatagramBus::registerSocket(FakeLanSocket& socket) {
+  sockets.push_back(&socket);
+}
+
+void FakeLanDatagramBus::unregisterSocket(FakeLanSocket& socket) {
+  sockets.erase(std::remove(sockets.begin(), sockets.end(), &socket), sockets.end());
+}
+
+void FakeLanDatagramBus::deliver(const FakeLanSocket& sender,
+                                 const karma::network::Endpoint& target,
+                                 std::span<const std::byte> payload) {
+  const bool broadcast = target.ip.empty() || target.ip == "255.255.255.255";
+  for (FakeLanSocket* socket : sockets) {
+    if (!socket || !socket->isOpen()) {
+      continue;
+    }
+    const auto& local = socket->localEndpoint();
+    if (local.port != target.port) {
+      continue;
+    }
+    if (!broadcast && local.ip != target.ip) {
+      continue;
+    }
+    socket->enqueue(sender.localEndpoint(), payload);
+  }
+}
+
+class FakeMasterServerClient final : public karma::network::IMasterServerClient {
+ public:
+  bool publish(const karma::network::ServerListing& listing) override {
+    published.push_back(listing);
+    return true;
+  }
+
+  bool unpublish(const std::string& server_id) override {
+    unpublished.push_back(server_id);
+    return true;
+  }
+
+  bool requestList(const karma::network::MasterServerQuery& query) override {
+    queries.push_back(query);
+    return true;
+  }
+
+  void poll(std::vector<karma::network::MasterServerEvent>& out_events) override {
+    out_events.insert(out_events.end(),
+                      std::make_move_iterator(events.begin()),
+                      std::make_move_iterator(events.end()));
+    events.clear();
+  }
+
+  std::vector<karma::network::ServerListing> published;
+  std::vector<std::string> unpublished;
+  std::vector<karma::network::MasterServerQuery> queries;
+  std::vector<karma::network::MasterServerEvent> events;
+};
+
+class FakeHttpMasterTransport final
+    : public karma::examples::network_demo::IHttpMasterTransport {
+ public:
+  bool send(const karma::examples::network_demo::HttpMasterRequest& request,
+            karma::examples::network_demo::HttpMasterResponse& response) override {
+    requests.push_back(request);
+    response = next_response;
+    return send_ok;
+  }
+
+  bool send_ok = true;
+  karma::examples::network_demo::HttpMasterResponse next_response{
+      .status = 200,
+      .body = "{}",
+  };
+  std::vector<karma::examples::network_demo::HttpMasterRequest> requests;
+};
 
 struct FakeLink {
   karma::network::PeerId server_peer{1};
@@ -272,6 +448,427 @@ void testNetworkRoleHelpers() {
   expect(listen.isClient(), "listen server should be a client role");
   expect(listen.isAuthority(), "listen server should be an authority role");
   expect(listen.local_peer.value == 42, "role context should preserve local peer id");
+}
+
+void testLanDiscoveryPacketProtocol() {
+  expect(karma::network::defaultLanDiscoveryPort(27015) == 27016,
+         "default LAN discovery port should be game port plus one");
+  expect(karma::network::defaultLanDiscoveryPort(65535) == 65535,
+         "default LAN discovery port should clamp at uint16 max");
+  const auto generated_listing =
+      karma::network::makeLanServerListing(kAppId, 27015, "Generated", "arena", "dm");
+  expect(generated_listing.server_id.rfind("lan-", 0) == 0,
+         "LAN helper should generate stable prefixed server id");
+  expect(generated_listing.connect_endpoint.port == 27015,
+         "LAN helper should set connect endpoint port");
+
+  karma::network::ServerListing listing{
+      .server_id = "server-a",
+      .connect_endpoint = karma::network::Endpoint{.ip = "", .port = 27015},
+      .game_port = 27015,
+      .app_id = kAppId,
+      .protocol_version = 3,
+      .name = "Karma Test Server",
+      .map = "arena",
+      .mode = "dm",
+      .current_players = 2,
+      .max_players = 8,
+      .attributes = {{"region", "local"}, {"build", "debug"}},
+      .ttl = std::chrono::milliseconds(5000),
+  };
+
+  auto query = karma::network::encodeLanDiscoveryQuery(kAppId, 77);
+  expect(query.ok(), "LAN query should encode");
+  auto decoded_query = karma::network::decodeLanDiscoveryPacket(query.bytes, kAppId);
+  expect(decoded_query.ok(), "LAN query should decode");
+  expect(decoded_query.packet.message_type == karma::network::LanDiscoveryMessageType::Query,
+         "LAN query type should round trip");
+  expect(decoded_query.packet.nonce == 77, "LAN query nonce should round trip");
+
+  auto encoded = karma::network::encodeLanDiscoveryAdvertisement(listing, 99);
+  expect(encoded.ok(), "LAN advertisement should encode");
+  expect(encoded.bytes.size() <= karma::network::kLanDiscoveryMaxDatagramSize,
+         "LAN advertisement should fit datagram cap");
+
+  auto decoded = karma::network::decodeLanDiscoveryPacket(encoded.bytes, kAppId);
+  expect(decoded.ok(), "LAN advertisement should decode");
+  expect(decoded.packet.message_type ==
+             karma::network::LanDiscoveryMessageType::Advertisement,
+         "LAN advertisement type should round trip");
+  expect(decoded.packet.nonce == 99, "LAN advertisement nonce should round trip");
+  expect(decoded.packet.listing.server_id == listing.server_id,
+         "LAN server id should round trip");
+  expect(decoded.packet.listing.game_port == listing.game_port,
+         "LAN game port should round trip");
+  expect(decoded.packet.listing.attributes.at("region") == "local",
+         "LAN attributes should round trip");
+
+  expect(karma::network::decodeLanDiscoveryPacket(encoded.bytes, kAppId + 1).status ==
+             karma::network::LanDiscoveryDecodeStatus::AppIdMismatch,
+         "LAN app id mismatch should be rejected");
+
+  auto bad_version = encoded.bytes;
+  bad_version[4] = std::byte{0xFF};
+  expect(karma::network::decodeLanDiscoveryPacket(bad_version, kAppId).status ==
+             karma::network::LanDiscoveryDecodeStatus::UnsupportedVersion,
+         "LAN unsupported version should be rejected");
+
+  auto malformed = encoded.bytes;
+  malformed.pop_back();
+  expect(karma::network::decodeLanDiscoveryPacket(malformed, kAppId).status ==
+             karma::network::LanDiscoveryDecodeStatus::Malformed,
+         "LAN malformed advertisement should be rejected");
+
+  listing.name.assign(1300, 'x');
+  expect(karma::network::encodeLanDiscoveryAdvertisement(listing).status ==
+             karma::network::LanDiscoveryStatus::OversizedPacket,
+         "LAN oversized metadata should fail instead of truncating");
+}
+
+void testServerListCache() {
+  using clock = std::chrono::steady_clock;
+  const auto now = clock::time_point(std::chrono::milliseconds(1000));
+
+  karma::network::ServerListCache cache;
+  karma::network::ServerListing lan{
+      .server_id = "stable",
+      .connect_endpoint = karma::network::Endpoint{.ip = "10.0.0.1", .port = 27015},
+      .game_port = 27015,
+      .app_id = kAppId,
+      .name = "First",
+      .current_players = 1,
+      .max_players = 4,
+  };
+
+  expect(cache.upsert(lan,
+                      karma::network::ServerListSource::Lan,
+                      now,
+                      std::chrono::milliseconds(100)) ==
+             karma::network::ServerListEventType::Found,
+         "server cache should report new LAN entry");
+  expect(cache.size() == 1, "server cache should contain one LAN entry");
+
+  lan.connect_endpoint.ip = "10.0.0.2";
+  lan.current_players = 2;
+  expect(cache.upsert(lan,
+                      karma::network::ServerListSource::Lan,
+                      now + std::chrono::milliseconds(10),
+                      std::chrono::milliseconds(100)) ==
+             karma::network::ServerListEventType::Updated,
+         "server cache should replace by stable server id");
+  expect(cache.size() == 1, "server cache should keep stable id replacement singular");
+  expect(!cache.findByEndpoint({"10.0.0.1", 27015}).has_value(),
+         "server cache should remove the old endpoint index");
+  const auto updated = cache.findByServerId("stable");
+  expect(updated.has_value() && updated->connect_endpoint.ip == "10.0.0.2",
+         "server cache should expose the replaced endpoint");
+
+  karma::network::ServerListing master{
+      .server_id = "master",
+      .connect_endpoint = karma::network::Endpoint{.ip = "203.0.113.5", .port = 27015},
+      .game_port = 27015,
+      .app_id = kAppId,
+      .name = "Master",
+  };
+  cache.upsert(master, karma::network::ServerListSource::Master, now);
+  expect(cache.size() == 2, "server cache should store master entries");
+
+  karma::network::ServerListQuery query{
+      .source = karma::network::ServerListSource::Master,
+      .app_id = kAppId,
+      .attributes = {},
+      .sort = karma::network::ServerListSort::PlayerCount,
+      .descending = true,
+  };
+  auto queried = cache.list(query);
+  expect(queried.size() == 1 && queried.front().server_id == "master",
+         "server cache query should filter by source and app id");
+
+  karma::network::ServerListing full{
+      .server_id = "full",
+      .connect_endpoint = karma::network::Endpoint{.ip = "203.0.113.6", .port = 27016},
+      .game_port = 27016,
+      .app_id = kAppId,
+      .name = "Full",
+      .current_players = 4,
+      .max_players = 4,
+      .attributes = {{"region", "local"}},
+  };
+  cache.upsert(full, karma::network::ServerListSource::Master, now);
+  query.source.reset();
+  query.attributes = {{"region", "local"}};
+  query.hide_full = true;
+  queried = cache.list(query);
+  expect(queried.empty(), "server cache query should hide full matching entries");
+  query.hide_full = false;
+  query.pinned_server_ids = {"full"};
+  queried = cache.list(query);
+  expect(queried.size() == 1 && queried.front().server_id == "full",
+         "server cache query should preserve pinned ordering");
+  cache.removeByServerId("full");
+
+  auto expired = cache.expire(now + std::chrono::milliseconds(200),
+                              karma::network::ServerListSource::Lan);
+  expect(expired.size() == 1 && expired.front().server_id == "stable",
+         "server cache should expire LAN entries by TTL");
+  expect(cache.size() == 1 && cache.findByServerId("master").has_value(),
+         "server cache should leave master entries when expiring LAN source");
+
+  karma::network::ServerListing removed;
+  expect(cache.removeByServerId("master", &removed) && removed.server_id == "master",
+         "server cache should remove by server id");
+  expect(cache.empty(), "server cache should be empty after removals");
+}
+
+void testLanAdvertiserBrowserWithFakeSocket() {
+  using clock = std::chrono::steady_clock;
+  const auto now = clock::time_point(std::chrono::milliseconds(1000));
+
+  FakeLanDatagramBus bus;
+  karma::network::LanDiscoveryConfig config{
+      .discovery_port = 30123,
+      .app_id = kAppId,
+      .game_port = 30124,
+      .listing = karma::network::ServerListing{
+          .server_id = "lan-server",
+          .name = "LAN Server",
+          .map = "yard",
+          .mode = "coop",
+          .current_players = 1,
+          .max_players = 4,
+          .attributes = {{"motd", "hello"}},
+      },
+      .beacon_interval = std::chrono::milliseconds(50),
+      .entry_ttl = std::chrono::milliseconds(100),
+  };
+
+  karma::network::LanServerAdvertiser advertiser(
+      config,
+      std::make_unique<FakeLanSocket>(bus, "10.1.0.10"));
+  karma::network::LanServerBrowser browser(
+      config,
+      std::make_unique<FakeLanSocket>(bus, "10.1.0.20"));
+
+  expect(advertiser.start().ok(), "LAN advertiser should start with fake socket");
+  expect(browser.start().ok(), "LAN browser should start with fake socket");
+
+  std::vector<karma::network::ServerListEvent> events;
+  expect(advertiser.poll(now).ok(), "LAN advertiser should emit initial beacon");
+  expect(browser.poll(now, events).ok(), "LAN browser should poll initial beacon");
+  expect(events.size() == 1 &&
+             events.front().type == karma::network::ServerListEventType::Found,
+         "LAN browser should report found server from beacon");
+  auto listings = browser.cache().list();
+  expect(listings.size() == 1, "LAN browser cache should contain discovered server");
+  expect(listings.front().connect_endpoint.ip == "10.1.0.10",
+         "LAN browser should use sender IP when advertisement omits one");
+  expect(listings.front().connect_endpoint.port == config.game_port,
+         "LAN browser should use advertised game port");
+
+  auto updated = advertiser.listing();
+  updated.current_players = 2;
+  updated.name = "LAN Server Updated";
+  advertiser.updateListing(updated);
+
+  events.clear();
+  expect(browser.sendQuery(123).ok(), "LAN browser should send explicit query");
+  expect(advertiser.poll(now + std::chrono::milliseconds(10)).ok(),
+         "LAN advertiser should respond to explicit query");
+  expect(browser.poll(now + std::chrono::milliseconds(10), events).ok(),
+         "LAN browser should receive explicit query response");
+  expect(std::any_of(events.begin(),
+                     events.end(),
+                     [](const karma::network::ServerListEvent& event) {
+                       return event.type == karma::network::ServerListEventType::Updated &&
+                              event.listing.current_players == 2;
+                     }),
+         "LAN browser should report metadata updates");
+
+  events.clear();
+  expect(browser.poll(now + std::chrono::milliseconds(200), events).ok(),
+         "LAN browser should poll expiry");
+  expect(events.size() == 1 &&
+             events.front().type == karma::network::ServerListEventType::Expired,
+         "LAN browser should emit expired event after TTL");
+  expect(browser.cache().empty(), "LAN browser cache should remove expired entries");
+}
+
+void testNativeLanDatagramSocketLoopback() {
+  const auto base = static_cast<uint16_t>(
+      39000 + (std::chrono::steady_clock::now().time_since_epoch().count() % 1000));
+  for (uint16_t attempt = 0; attempt < 8; ++attempt) {
+    const uint16_t sender_port = static_cast<uint16_t>(base + attempt * 2);
+    const uint16_t receiver_port = static_cast<uint16_t>(sender_port + 1);
+    auto sender = karma::network::createLanDatagramSocket();
+    auto receiver = karma::network::createLanDatagramSocket();
+    if (!sender || !receiver) {
+      throw std::runtime_error("native LAN datagram socket factory should create sockets");
+    }
+    if (!sender->open(sender_port, false).ok()) {
+      continue;
+    }
+    if (!receiver->open(receiver_port, false).ok()) {
+      continue;
+    }
+
+    auto listing = karma::network::makeLanServerListing(
+        kAppId,
+        27100,
+        "Native Loopback",
+        "loop",
+        "smoke",
+        "native-loopback");
+    listing.connect_endpoint.ip = "127.0.0.1";
+    listing.ttl = std::chrono::milliseconds(1000);
+    auto encoded = karma::network::encodeLanDiscoveryAdvertisement(listing, 44);
+    expect(encoded.ok(), "native socket smoke advertisement should encode");
+    expect(sender->sendTo({"127.0.0.1", receiver_port}, encoded.bytes).ok(),
+           "native socket smoke should send loopback datagram");
+
+    karma::network::Endpoint from;
+    std::vector<std::byte> payload;
+    for (int i = 0; i < 50; ++i) {
+      const auto received = receiver->receive(from, payload);
+      if (received.ok()) {
+        const auto decoded = karma::network::decodeLanDiscoveryPacket(payload, kAppId);
+        expect(decoded.ok(), "native socket smoke should decode loopback payload");
+        expect(decoded.packet.listing.server_id == "native-loopback",
+               "native socket smoke should preserve listing");
+        expect(from.ip == "127.0.0.1", "native socket smoke should report sender IP");
+        return;
+      }
+      if (!received.wouldBlock()) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    throw std::runtime_error("native LAN datagram socket should receive loopback payload");
+  }
+  throw std::runtime_error("native LAN datagram socket should bind a test port");
+}
+
+void testServerDirectoryMasterAbstraction() {
+  using clock = std::chrono::steady_clock;
+  const auto now = clock::time_point(std::chrono::milliseconds(1000));
+
+  karma::network::ServerDirectory directory;
+  auto master = std::make_unique<FakeMasterServerClient>();
+  auto* master_ptr = master.get();
+  directory.setMasterClient(std::move(master));
+
+  karma::network::ServerListing listing{
+      .server_id = "master-server",
+      .connect_endpoint = karma::network::Endpoint{.ip = "198.51.100.10", .port = 27015},
+      .game_port = 27015,
+      .app_id = kAppId,
+      .name = "Master Listed",
+      .attributes = {{"playlist", "ranked"}},
+  };
+
+  expect(directory.publishToMaster(listing), "directory should delegate publish");
+  expect(master_ptr->published.size() == 1 &&
+             master_ptr->published.front().attributes.at("playlist") == "ranked",
+         "master publish should preserve listing attributes");
+  expect(directory.unpublishFromMaster("master-server"),
+         "directory should delegate unpublish");
+  expect(master_ptr->unpublished.size() == 1 &&
+             master_ptr->unpublished.front() == "master-server",
+         "master unpublish should preserve server id");
+
+  karma::network::MasterServerQuery query{
+      .filters = {{"mode", "coop"}},
+      .attributes = {{"ticket", "abc"}},
+  };
+  expect(directory.requestMasterList(query), "directory should delegate master list query");
+  expect(master_ptr->queries.size() == 1 &&
+             master_ptr->queries.front().filters.at("mode") == "coop" &&
+             master_ptr->queries.front().attributes.at("ticket") == "abc",
+         "master query should preserve open-ended filters and attributes");
+
+  master_ptr->events.push_back(karma::network::MasterServerEvent{
+      .type = karma::network::MasterServerEventType::Listing,
+      .listing = listing,
+      .attributes = {{"source", "fake"}},
+  });
+
+  std::vector<karma::network::ServerListEvent> events;
+  directory.poll(now, events);
+  expect(events.size() == 1 &&
+             events.front().type == karma::network::ServerListEventType::Found,
+         "directory should add master listings to cache");
+  expect(directory.cache().findByServerId("master-server").has_value(),
+         "directory cache should expose master listing");
+
+  master_ptr->events.push_back(karma::network::MasterServerEvent{
+      .type = karma::network::MasterServerEventType::Removed,
+      .server_id = "master-server",
+  });
+  events.clear();
+  directory.poll(now + std::chrono::milliseconds(10), events);
+  expect(events.size() == 1 &&
+             events.front().type == karma::network::ServerListEventType::Removed,
+         "directory should remove master listings from cache");
+  expect(directory.cache().empty(), "directory cache should be empty after master removal");
+}
+
+void testHttpMasterAdapterReference() {
+  auto transport = std::make_unique<FakeHttpMasterTransport>();
+  auto* transport_ptr = transport.get();
+  karma::examples::network_demo::HttpMasterServerClient client(std::move(transport),
+                                                               "test-token");
+
+  karma::network::ServerListing listing{
+      .server_id = "http-master",
+      .connect_endpoint = karma::network::Endpoint{.ip = "198.51.100.20", .port = 28015},
+      .game_port = 28015,
+      .app_id = kAppId,
+      .name = "HTTP Master",
+      .map = "arena",
+      .mode = "dm",
+      .current_players = 3,
+      .max_players = 10,
+      .attributes = {{"region", "test"}},
+  };
+
+  expect(client.publish(listing), "HTTP master adapter should publish");
+  expect(transport_ptr->requests.size() == 1, "HTTP master publish should send one request");
+  expect(transport_ptr->requests.front().method == "POST" &&
+             transport_ptr->requests.front().path == "/servers",
+         "HTTP master publish should use server endpoint");
+  expect(transport_ptr->requests.front().headers.at("authorization") ==
+             "Bearer test-token",
+         "HTTP master publish should set bearer token");
+  std::vector<karma::network::MasterServerEvent> events;
+  client.poll(events);
+  expect(events.size() == 1 &&
+             events.front().type == karma::network::MasterServerEventType::Published,
+         "HTTP master publish should emit a published event");
+
+  transport_ptr->next_response = {
+      .status = 200,
+      .body = R"({"servers":[{"server_id":"listed","connect_endpoint":{"ip":"203.0.113.12","port":28016},"game_port":28016,"app_id":1263813971,"protocol_version":1,"name":"Listed","map":"arena","mode":"dm","current_players":1,"max_players":8,"attributes":{"region":"test"}}]})",
+  };
+  karma::network::MasterServerQuery query{
+      .filters = {{"mode", "dm"}},
+      .attributes = {{"ticket", "abc"}},
+  };
+  expect(client.requestList(query), "HTTP master adapter should request list");
+  expect(transport_ptr->requests.back().method == "POST" &&
+             transport_ptr->requests.back().path == "/servers/query",
+         "HTTP master request list should use query endpoint");
+  events.clear();
+  client.poll(events);
+  expect(events.size() == 1 &&
+             events.front().type == karma::network::MasterServerEventType::Listing,
+         "HTTP master request list should emit listing events");
+  expect(events.front().listing.server_id == "listed" &&
+             events.front().listing.attributes.at("region") == "test",
+         "HTTP master adapter should parse listing metadata");
+
+  expect(client.unpublish("listed"), "HTTP master adapter should unpublish");
+  expect(transport_ptr->requests.back().method == "DELETE" &&
+             transport_ptr->requests.back().path == "/servers/listed",
+         "HTTP master unpublish should use delete endpoint");
 }
 
 #if defined(KARMA_NETWORK_BACKEND_ENET)
@@ -1052,6 +1649,12 @@ void testNetworkRuntimeModuleStats() {
 int main() {
   testProtocolRoundTrip();
   testNetworkRoleHelpers();
+  testLanDiscoveryPacketProtocol();
+  testServerListCache();
+  testLanAdvertiserBrowserWithFakeSocket();
+  testNativeLanDatagramSocketLoopback();
+  testServerDirectoryMasterAbstraction();
+  testHttpMasterAdapterReference();
 #if defined(KARMA_NETWORK_BACKEND_ENET)
   testEnetLoopbackTransport();
 #endif

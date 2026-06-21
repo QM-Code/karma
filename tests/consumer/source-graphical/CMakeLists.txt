@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(karma_source_graphical_consumer_smoke LANGUAGES CXX)
+project(karma_source_graphical_consumer_smoke LANGUAGES CXX C)
 
 if (NOT DEFINED KARMA_SOURCE_DIR)
   message(FATAL_ERROR "Set KARMA_SOURCE_DIR to the Karma source tree.")

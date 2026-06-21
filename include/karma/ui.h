@@ -50,6 +50,8 @@ std::unique_ptr<app::UiLayer> createUiLayer(ImGuiLayerConfig config = {});
 }  // namespace karma::ui::imgui
 
 
+#if defined(KARMA_ENABLE_RMLUI)
+
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -95,3 +97,5 @@ std::unique_ptr<app::UiLayer> createUiLayer(RmlUiLayerCallbacks callbacks,
                                             RmlUiLayerConfig config = {});
 
 }  // namespace karma::ui::rmlui
+
+#endif  // defined(KARMA_ENABLE_RMLUI)

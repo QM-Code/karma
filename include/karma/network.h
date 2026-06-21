@@ -9,8 +9,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -200,6 +204,395 @@ enum class Delivery {
 struct Endpoint {
   std::string ip;
   uint16_t port = 0;
+};
+
+/// \ingroup karma_platform
+/// Source used to populate a server-list entry.
+enum class ServerListSource {
+  Lan,
+  Master
+};
+
+/// \ingroup karma_platform
+/// Typed server metadata used by LAN discovery and master-list integrations.
+struct ServerListing {
+  std::string server_id;
+  Endpoint connect_endpoint{};
+  uint16_t game_port = 0;
+  uint32_t app_id = 0;
+  uint16_t protocol_version = kProtocolVersion;
+  std::string name;
+  std::string map;
+  std::string mode;
+  uint16_t current_players = 0;
+  uint16_t max_players = 0;
+  std::unordered_map<std::string, std::string> attributes;
+  ServerListSource source = ServerListSource::Lan;
+  std::chrono::steady_clock::time_point last_seen{};
+  std::chrono::milliseconds ttl{0};
+  std::chrono::steady_clock::time_point expires_at{};
+};
+
+/// \ingroup karma_platform
+/// Server-list cache event kind.
+enum class ServerListEventType {
+  Found,
+  Updated,
+  Removed,
+  Expired
+};
+
+/// \ingroup karma_platform
+/// Server-list cache event.
+struct ServerListEvent {
+  ServerListEventType type = ServerListEventType::Found;
+  ServerListing listing{};
+};
+
+/// \ingroup karma_platform
+/// Sort order used by `ServerListCache::list(ServerListQuery)`.
+enum class ServerListSort {
+  ServerId,
+  Name,
+  Source,
+  PlayerCount,
+  Capacity,
+  LastSeen,
+  Endpoint
+};
+
+/// \ingroup karma_platform
+/// Open-ended cache query for server-browser consumers.
+struct ServerListQuery {
+  std::optional<ServerListSource> source;
+  std::optional<uint32_t> app_id;
+  std::string text;
+  std::string map;
+  std::string mode;
+  bool hide_full = false;
+  std::unordered_map<std::string, std::string> attributes;
+  std::vector<std::string> pinned_server_ids;
+  ServerListSort sort = ServerListSort::Name;
+  bool descending = false;
+};
+
+/// \ingroup karma_platform
+/// Reusable cache for LAN and master-list server results.
+class ServerListCache {
+ public:
+  ServerListEventType upsert(ServerListing listing,
+                             ServerListSource source,
+                             std::chrono::steady_clock::time_point now,
+                             std::chrono::milliseconds ttl = std::chrono::milliseconds{0});
+  bool removeByServerId(const std::string& server_id,
+                        ServerListing* removed = nullptr);
+  bool removeByEndpoint(const Endpoint& endpoint,
+                        ServerListing* removed = nullptr);
+  std::vector<ServerListing> expire(
+      std::chrono::steady_clock::time_point now,
+      std::optional<ServerListSource> source = std::nullopt);
+
+  std::optional<ServerListing> findByServerId(const std::string& server_id) const;
+  std::optional<ServerListing> findByEndpoint(const Endpoint& endpoint) const;
+  std::vector<ServerListing> list() const;
+  std::vector<ServerListing> list(const ServerListQuery& query) const;
+  std::size_t size() const { return entries_.size(); }
+  bool empty() const { return entries_.empty(); }
+  void clear();
+
+ private:
+  static std::string endpointKey(const Endpoint& endpoint);
+  static std::string listingKey(const ServerListing& listing);
+  bool removeByKey(const std::string& key, ServerListing* removed);
+  void indexListing(const std::string& key, const ServerListing& listing);
+  void unindexListing(const std::string& key, const ServerListing& listing);
+
+  std::unordered_map<std::string, ServerListing> entries_;
+  std::unordered_map<std::string, std::string> id_to_key_;
+  std::unordered_map<std::string, std::string> endpoint_to_key_;
+};
+
+/// \ingroup karma_platform
+/// LAN discovery runtime configuration.
+struct LanDiscoveryConfig {
+  uint16_t discovery_port = 0;
+  uint32_t app_id = 0;
+  uint16_t game_port = 0;
+  ServerListing listing{};
+  std::chrono::milliseconds beacon_interval{1000};
+  std::chrono::milliseconds entry_ttl{5000};
+};
+
+/// \ingroup karma_platform
+/// Default convention for LAN discovery ports: `game_port + 1`, clamped at `65535`.
+uint16_t defaultLanDiscoveryPort(uint16_t game_port);
+/// \ingroup karma_platform
+/// Creates a stable server id from app id, game port, and an optional process/game salt.
+std::string makeLanServerId(uint32_t app_id,
+                            uint16_t game_port,
+                            const std::string& salt = {});
+/// \ingroup karma_platform
+/// Builds a normalized LAN listing with a generated stable id when `server_id` is empty.
+ServerListing makeLanServerListing(uint32_t app_id,
+                                   uint16_t game_port,
+                                   std::string name,
+                                   std::string map = {},
+                                   std::string mode = {},
+                                   std::string server_id = {});
+
+/// \ingroup karma_platform
+/// LAN discovery wire protocol version.
+inline constexpr uint16_t kLanDiscoveryVersion = 1;
+/// \ingroup karma_platform
+/// LAN discovery packet magic for malformed datagram rejection.
+inline constexpr uint32_t kLanDiscoveryMagic = 0x4B444953u;  // KDIS
+/// \ingroup karma_platform
+/// Maximum LAN discovery datagram size.
+inline constexpr std::size_t kLanDiscoveryMaxDatagramSize = 1200;
+
+/// \ingroup karma_platform
+/// LAN discovery datagram kind.
+enum class LanDiscoveryMessageType : uint8_t {
+  Query = 1,
+  Advertisement = 2
+};
+
+/// \ingroup karma_platform
+/// LAN discovery operation status.
+enum class LanDiscoveryStatus {
+  Ok,
+  NotOpen,
+  InvalidConfig,
+  BindFailed,
+  WouldBlock,
+  EncodeFailed,
+  OversizedPacket,
+  BackendError
+};
+
+/// \ingroup karma_platform
+/// Result for LAN discovery socket and send operations.
+struct LanDiscoveryResult {
+  LanDiscoveryStatus status = LanDiscoveryStatus::BackendError;
+  std::size_t bytes = 0;
+
+  constexpr bool ok() const { return status == LanDiscoveryStatus::Ok; }
+  constexpr bool wouldBlock() const { return status == LanDiscoveryStatus::WouldBlock; }
+};
+
+/// \ingroup karma_platform
+/// LAN discovery decode status.
+enum class LanDiscoveryDecodeStatus {
+  Ok,
+  TooSmall,
+  BadMagic,
+  UnsupportedVersion,
+  UnknownMessageType,
+  AppIdMismatch,
+  Malformed,
+  OversizedPacket
+};
+
+/// \ingroup karma_platform
+/// Decoded LAN discovery datagram.
+struct LanDiscoveryPacket {
+  LanDiscoveryMessageType message_type = LanDiscoveryMessageType::Query;
+  uint32_t app_id = 0;
+  uint64_t nonce = 0;
+  ServerListing listing{};
+};
+
+/// \ingroup karma_platform
+/// LAN discovery packet encode result.
+struct LanDiscoveryEncodeResult {
+  LanDiscoveryStatus status = LanDiscoveryStatus::EncodeFailed;
+  std::vector<std::byte> bytes;
+
+  bool ok() const { return status == LanDiscoveryStatus::Ok; }
+};
+
+/// \ingroup karma_platform
+/// LAN discovery packet decode result.
+struct LanDiscoveryDecodeResult {
+  LanDiscoveryDecodeStatus status = LanDiscoveryDecodeStatus::Malformed;
+  LanDiscoveryPacket packet{};
+
+  bool ok() const { return status == LanDiscoveryDecodeStatus::Ok; }
+};
+
+/// \ingroup karma_platform
+/// Encodes a LAN discovery query datagram.
+LanDiscoveryEncodeResult encodeLanDiscoveryQuery(uint32_t app_id, uint64_t nonce = 0);
+/// \ingroup karma_platform
+/// Encodes a LAN discovery advertisement datagram.
+LanDiscoveryEncodeResult encodeLanDiscoveryAdvertisement(const ServerListing& listing,
+                                                         uint64_t nonce = 0);
+/// \ingroup karma_platform
+/// Decodes a LAN discovery datagram. Set `expected_app_id` to `0` to skip app id matching.
+LanDiscoveryDecodeResult decodeLanDiscoveryPacket(std::span<const std::byte> bytes,
+                                                  uint32_t expected_app_id = 0,
+                                                  uint16_t expected_version =
+                                                      kLanDiscoveryVersion);
+
+/// \ingroup karma_platform
+/// Minimal nonblocking UDP datagram socket used by LAN discovery.
+class ILanDatagramSocket {
+ public:
+  virtual ~ILanDatagramSocket() = default;
+
+  virtual LanDiscoveryResult open(uint16_t port, bool enable_broadcast = true) = 0;
+  virtual void close() = 0;
+  virtual bool isOpen() const = 0;
+  virtual LanDiscoveryResult sendTo(const Endpoint& endpoint,
+                                    std::span<const std::byte> payload) = 0;
+  virtual LanDiscoveryResult receive(Endpoint& from,
+                                     std::vector<std::byte>& payload) = 0;
+};
+
+/// \ingroup karma_platform
+/// Creates the platform UDP socket used by LAN discovery.
+std::unique_ptr<ILanDatagramSocket> createLanDatagramSocket();
+
+/// \ingroup karma_platform
+/// Poll-driven LAN server advertiser using UDP broadcast.
+class LanServerAdvertiser {
+ public:
+  explicit LanServerAdvertiser(LanDiscoveryConfig config);
+  LanServerAdvertiser(LanDiscoveryConfig config,
+                      std::unique_ptr<ILanDatagramSocket> socket);
+  ~LanServerAdvertiser();
+
+  LanDiscoveryResult start();
+  void stop();
+  bool isRunning() const { return running_; }
+
+  const ServerListing& listing() const { return listing_; }
+  void updateListing(ServerListing listing);
+
+  LanDiscoveryResult advertiseNow(uint64_t nonce = 0);
+  LanDiscoveryResult poll(std::chrono::steady_clock::time_point now);
+
+ private:
+  void normalizeListing();
+  LanDiscoveryResult sendAdvertisement(const Endpoint& endpoint, uint64_t nonce);
+
+  LanDiscoveryConfig config_;
+  std::unique_ptr<ILanDatagramSocket> socket_;
+  ServerListing listing_{};
+  bool running_ = false;
+  std::optional<std::chrono::steady_clock::time_point> next_beacon_;
+};
+
+/// \ingroup karma_platform
+/// Poll-driven LAN server browser using UDP broadcast.
+class LanServerBrowser {
+ public:
+  explicit LanServerBrowser(LanDiscoveryConfig config);
+  LanServerBrowser(LanDiscoveryConfig config,
+                   std::unique_ptr<ILanDatagramSocket> socket);
+  LanServerBrowser(LanDiscoveryConfig config,
+                   ServerListCache& cache,
+                   std::unique_ptr<ILanDatagramSocket> socket = {});
+  ~LanServerBrowser();
+
+  LanDiscoveryResult start();
+  void stop();
+  bool isRunning() const { return running_; }
+
+  ServerListCache& cache() { return *cache_; }
+  const ServerListCache& cache() const { return *cache_; }
+
+  LanDiscoveryResult sendQuery(uint64_t nonce = 0);
+  LanDiscoveryResult poll(std::chrono::steady_clock::time_point now,
+                          std::vector<ServerListEvent>& out_events);
+
+ private:
+  void handleAdvertisement(const LanDiscoveryPacket& packet,
+                           const Endpoint& sender,
+                           std::chrono::steady_clock::time_point now,
+                           std::vector<ServerListEvent>& out_events);
+
+  LanDiscoveryConfig config_;
+  std::unique_ptr<ILanDatagramSocket> socket_;
+  ServerListCache owned_cache_;
+  ServerListCache* cache_ = nullptr;
+  bool running_ = false;
+  uint64_t next_nonce_ = 1;
+};
+
+/// \ingroup karma_platform
+/// Open-ended master-list query parameters.
+struct MasterServerQuery {
+  std::unordered_map<std::string, std::string> filters;
+  std::unordered_map<std::string, std::string> attributes;
+};
+
+/// \ingroup karma_platform
+/// Master-list event kind.
+enum class MasterServerEventType {
+  Listing,
+  Removed,
+  Published,
+  Unpublished,
+  Error
+};
+
+/// \ingroup karma_platform
+/// Master-list event produced by game- or library-provided transports.
+struct MasterServerEvent {
+  MasterServerEventType type = MasterServerEventType::Listing;
+  ServerListing listing{};
+  std::string server_id;
+  std::string error;
+  std::unordered_map<std::string, std::string> attributes;
+};
+
+/// \ingroup karma_platform
+/// Abstract master-list client. Karma does not prescribe HTTP, auth, or schema details.
+class IMasterServerClient {
+ public:
+  virtual ~IMasterServerClient() = default;
+
+  virtual bool publish(const ServerListing& listing) = 0;
+  virtual bool unpublish(const std::string& server_id) = 0;
+  virtual bool requestList(const MasterServerQuery& query) = 0;
+  virtual void poll(std::vector<MasterServerEvent>& out_events) = 0;
+};
+
+/// \ingroup karma_platform
+/// Combines LAN discovery and master-list events into one cache.
+class ServerDirectory {
+ public:
+  ServerDirectory();
+  explicit ServerDirectory(ServerListCache cache);
+  ~ServerDirectory();
+
+  ServerListCache& cache() { return cache_; }
+  const ServerListCache& cache() const { return cache_; }
+
+  LanServerBrowser& enableLanDiscovery(LanDiscoveryConfig config);
+  LanServerBrowser& enableLanDiscovery(LanDiscoveryConfig config,
+                                       std::unique_ptr<ILanDatagramSocket> socket);
+  void disableLanDiscovery();
+  LanServerBrowser* lanBrowser() { return lan_browser_.get(); }
+  const LanServerBrowser* lanBrowser() const { return lan_browser_.get(); }
+
+  void setMasterClient(std::unique_ptr<IMasterServerClient> client);
+  IMasterServerClient* masterClient() { return master_client_.get(); }
+  const IMasterServerClient* masterClient() const { return master_client_.get(); }
+
+  bool publishToMaster(const ServerListing& listing);
+  bool unpublishFromMaster(const std::string& server_id);
+  bool requestMasterList(const MasterServerQuery& query);
+
+  void poll(std::chrono::steady_clock::time_point now,
+            std::vector<ServerListEvent>& out_events);
+
+ private:
+  ServerListCache cache_;
+  std::unique_ptr<LanServerBrowser> lan_browser_;
+  std::unique_ptr<IMasterServerClient> master_client_;
+  std::vector<MasterServerEvent> master_events_;
 };
 
 /// \ingroup karma_platform

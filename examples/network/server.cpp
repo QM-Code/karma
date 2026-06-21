@@ -1,5 +1,7 @@
 #include <chrono>
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -27,6 +29,30 @@ void runServer(uint16_t port) {
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
   karma::world::World world;
+
+  karma::network::ServerListing advertised_listing =
+      karma::network::makeLanServerListing(demo::kDemoAppId,
+                                           port,
+                                           "Karma Network Demo",
+                                           "demo",
+                                           "replication",
+                                           "karma-demo-" + std::to_string(port));
+  advertised_listing.max_players = 16;
+  advertised_listing.attributes = {{"example", "network"}};
+  const uint16_t discovery_port = karma::network::defaultLanDiscoveryPort(port);
+  karma::network::LanServerAdvertiser lan_advertiser(
+      karma::network::LanDiscoveryConfig{
+          .discovery_port = discovery_port,
+          .app_id = demo::kDemoAppId,
+          .game_port = port,
+          .listing = advertised_listing,
+      });
+  const auto discovery_started = lan_advertiser.start();
+  if (discovery_started.ok()) {
+    spdlog::info("Server: advertising on LAN discovery port {}", discovery_port);
+  } else {
+    spdlog::warn("Server: LAN discovery disabled");
+  }
 
   std::unordered_map<uint32_t, karma::world::Entity> players;
   std::unordered_map<uint32_t, demo::PlayerInput> inputs;
@@ -121,6 +147,14 @@ void runServer(uint16_t port) {
 
   spdlog::info("Server: listening on {}", port);
   while (true) {
+    advertised_listing.current_players = static_cast<uint16_t>(
+        std::min<std::size_t>(players.size(),
+                              std::numeric_limits<uint16_t>::max()));
+    lan_advertiser.updateListing(advertised_listing);
+    if (lan_advertiser.isRunning()) {
+      lan_advertiser.poll(std::chrono::steady_clock::now());
+    }
+
     network_module.onFrameBegin(world, 0.016f);
 
     for (auto& [peer_value, entity] : players) {

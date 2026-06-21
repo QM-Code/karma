@@ -154,6 +154,10 @@ if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_graphical_example(network_client network client
     examples/network/client.cpp
     examples/network/shared.cpp)
+  if (KARMA_BUILD_IMGUI_DEMO)
+    karma_add_graphical_example(network_discovery_directory network discovery_directory
+      examples/network/discovery_directory.cpp)
+  endif()
 endif()
 
 if (KARMA_ENABLE_NAVIGATION AND TARGET karma::headless)

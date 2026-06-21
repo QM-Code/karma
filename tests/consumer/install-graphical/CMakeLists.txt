@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(karma_install_graphical_consumer_smoke LANGUAGES CXX)
+project(karma_install_graphical_consumer_smoke LANGUAGES CXX C)
 
 option(KARMA_CONFIG_FETCH_DEPS "Allow karmaConfig.cmake to fetch missing package dependencies" OFF)
 find_package(karma CONFIG REQUIRED)

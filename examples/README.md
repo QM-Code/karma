@@ -143,3 +143,10 @@ Shared example helpers live in `examples/common/`.
   `examples/network/server`.
 - `network/client.cpp`: target `network_client`, output
   `examples/network/client`.
+- `network/discovery_directory.cpp`: target `network_discovery_directory`,
+  output `examples/network/discovery_directory`. Graphical server-directory lab
+  for LAN advertise/query/cache events, embedded local server probes, cache
+  sorting/filtering/pinning, fake master-list integration, and selected-server
+  client connection probes. `network/http_master_adapter.h` is a header-only
+  reference adapter for wiring `IMasterServerClient` to a game-provided JSON
+  HTTP transport.

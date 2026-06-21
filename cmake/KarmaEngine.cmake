@@ -322,12 +322,17 @@ endif()
 list(APPEND KARMA_INSTALL_TARGETS karma_content)
 
 karma_add_static(karma_platform_network
+  src/platform/network/discovery.cpp
   src/platform/network/protocol.cpp
   src/platform/network/session.cpp
   src/platform/network/transport_factory.cpp
 )
 target_link_libraries(karma_platform_network PUBLIC karma_core)
 karma_link_build_and_install(karma_platform_network PUBLIC KARMA_NETWORK_LINK_LIBS KARMA_INSTALL_LINK_LIBS)
+if (WIN32)
+  target_compile_definitions(karma_platform_network PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_link_libraries(karma_platform_network PRIVATE ws2_32)
+endif()
 if (KARMA_NETWORK_BACKEND_ENET)
   target_compile_definitions(karma_platform_network PUBLIC KARMA_NETWORK_BACKEND_ENET)
   target_sources(karma_platform_network PRIVATE
@@ -508,6 +513,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
         ${KARMA_RMLUI_BUILD_LINK}
         $<INSTALL_INTERFACE:$<1:RmlUi::Core>>
     )
+    target_compile_definitions(karma_features_ui_rmlui PUBLIC KARMA_ENABLE_RMLUI)
     list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_rmlui)
   endif()
 endif()

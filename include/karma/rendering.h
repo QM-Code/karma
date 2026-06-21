@@ -612,6 +612,58 @@ struct ResolvedMaterialDesc {
   }
 };
 
+/// \ingroup karma_rendering
+/// Convenience settings for a standard non-metal diffuse material.
+struct DiffuseMaterialDesc {
+  math::Color base_color{1.0f, 1.0f, 1.0f, 1.0f};
+  float roughness = 1.0f;
+  bool double_sided = false;
+  bool unlit = false;
+};
+
+/// Creates a standard non-metal diffuse material surface.
+inline MaterialDesc createDiffuseMaterial(const DiffuseMaterialDesc& desc = {}) {
+  MaterialDesc material{};
+  material.base_color = desc.base_color;
+  material.metallic = 0.0f;
+  material.roughness = desc.roughness;
+  material.double_sided = desc.double_sided;
+  material.unlit = desc.unlit;
+  if (desc.base_color.a < 1.0f) {
+    material.alpha_mode = MaterialDesc::AlphaMode::Blend;
+    material.transparent = true;
+    material.depth_write = false;
+  }
+  return material;
+}
+
+/// Creates a standard non-metal diffuse material surface.
+inline MaterialDesc createDiffuseMaterial(math::Color base_color, float roughness = 1.0f) {
+  DiffuseMaterialDesc desc{};
+  desc.base_color = base_color;
+  desc.roughness = roughness;
+  return createDiffuseMaterial(desc);
+}
+
+/// Creates a material asset descriptor for a standard non-metal diffuse material.
+inline MaterialAssetDesc createDiffuseMaterialAsset(std::string material_key,
+                                                   const DiffuseMaterialDesc& desc = {}) {
+  MaterialAssetDesc asset{};
+  asset.material_key = std::move(material_key);
+  asset.surface = createDiffuseMaterial(desc);
+  return asset;
+}
+
+/// Creates a material asset descriptor for a standard non-metal diffuse material.
+inline MaterialAssetDesc createDiffuseMaterialAsset(std::string material_key,
+                                                   math::Color base_color,
+                                                   float roughness = 1.0f) {
+  DiffuseMaterialDesc desc{};
+  desc.base_color = base_color;
+  desc.roughness = roughness;
+  return createDiffuseMaterialAsset(std::move(material_key), desc);
+}
+
 }  // namespace karma::rendering
 
 

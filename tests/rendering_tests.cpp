@@ -15,6 +15,7 @@
 #include "karma/assets.h"
 #include "karma/assets.h"
 #include "karma/assets.h"
+#include <glm/common.hpp>
 #include <glm/mat4x4.hpp>
 
 #include "karma/assets.h"
@@ -107,6 +108,82 @@ karma::world::MeshData makeTriangleMesh() {
                    {0.0f, 0.0f, 1.0f}};
   mesh.indices = {0u, 1u, 2u};
   return mesh;
+}
+
+void testPrimitiveMeshAndDiffuseMaterialHelpers() {
+  const karma::world::MeshData cube = karma::world::createCubeMesh(2.0f, "material/default");
+  assert(cube.vertices.size() == 24u);
+  assert(cube.normals.size() == cube.vertices.size());
+  assert(cube.uvs.size() == cube.vertices.size());
+  assert(cube.tangents.size() == cube.vertices.size());
+  assert(cube.indices.size() == 36u);
+  assert(cube.material_slots.size() == 1u);
+  assert(cube.material_slots.front().default_material_key == "material/default");
+  assert(cube.submeshes.size() == 1u);
+  assert(cube.submeshes.front().index_count == cube.indices.size());
+
+  glm::vec3 min_bounds = cube.vertices.front();
+  glm::vec3 max_bounds = cube.vertices.front();
+  for (const glm::vec3& vertex : cube.vertices) {
+    min_bounds = glm::min(min_bounds, vertex);
+    max_bounds = glm::max(max_bounds, vertex);
+  }
+  assert(nearly(min_bounds.x, -1.0f));
+  assert(nearly(max_bounds.x, 1.0f));
+  assert(nearly(min_bounds.y, -1.0f));
+  assert(nearly(max_bounds.y, 1.0f));
+  assert(nearly(min_bounds.z, -1.0f));
+  assert(nearly(max_bounds.z, 1.0f));
+
+  const karma::world::MeshData sphere = karma::world::createSphereMesh(
+      karma::world::SphereMeshDesc{
+          .radius = 1.0f,
+          .segments = 8u,
+          .rings = 4u,
+          .material_key = "material/sphere",
+      });
+  assert(sphere.vertices.size() == 45u);
+  assert(sphere.indices.size() == 192u);
+  assert(sphere.material_slots.front().default_material_key == "material/sphere");
+  assert(nearly(sphere.vertices.front().y, 1.0f));
+
+  const karma::world::MeshData capsule = karma::world::createCapsuleMesh(
+      karma::world::CapsuleMeshDesc{
+          .radius = 0.5f,
+          .cylinder_height = 1.0f,
+          .segments = 8u,
+          .hemisphere_rings = 4u,
+          .material_key = "material/capsule",
+      });
+  assert(capsule.vertices.size() == 90u);
+  assert(capsule.indices.size() == 432u);
+  min_bounds = capsule.vertices.front();
+  max_bounds = capsule.vertices.front();
+  for (const glm::vec3& vertex : capsule.vertices) {
+    min_bounds = glm::min(min_bounds, vertex);
+    max_bounds = glm::max(max_bounds, vertex);
+  }
+  assert(nearly(max_bounds.y, 1.0f));
+  assert(nearly(min_bounds.y, -1.0f));
+
+  const karma::rendering::MaterialDesc blue =
+      karma::rendering::createDiffuseMaterial({0.1f, 0.2f, 0.8f, 1.0f}, 0.65f);
+  assert(nearly(blue.base_color.b, 0.8f));
+  assert(nearly(blue.roughness, 0.65f));
+  assert(nearly(blue.metallic, 0.0f));
+  assert(!blue.transparent);
+  assert(blue.alpha_mode == karma::rendering::MaterialDesc::AlphaMode::Opaque);
+
+  karma::rendering::DiffuseMaterialDesc transparent_desc{};
+  transparent_desc.base_color = {1.0f, 0.2f, 0.1f, 0.45f};
+  transparent_desc.double_sided = true;
+  const karma::rendering::MaterialAssetDesc transparent =
+      karma::rendering::createDiffuseMaterialAsset("material/glass", transparent_desc);
+  assert(transparent.material_key == "material/glass");
+  assert(transparent.surface.transparent);
+  assert(!transparent.surface.depth_write);
+  assert(transparent.surface.double_sided);
+  assert(transparent.surface.alpha_mode == karma::rendering::MaterialDesc::AlphaMode::Blend);
 }
 
 void testAssetRegistryRegisterResolveUnregister() {
@@ -1065,6 +1142,7 @@ void testDeformationHeadlessNoopApi() {
 }  // namespace
 
 int main() {
+  testPrimitiveMeshAndDiffuseMaterialHelpers();
   testAssetRegistryMaterialInheritance();
   testMaterialFileLoading();
   testAssetKeyValidationAndPackages();

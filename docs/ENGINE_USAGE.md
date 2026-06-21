@@ -931,6 +931,37 @@ Trigger pattern:
 - Prefer `CollisionListenerComponent` + `CollisionEventsComponent` for normal `enter/stay/exit` gameplay.
 - Use the raw collider query helpers when you need one-off tests, custom filtering, or ad hoc spatial logic outside the engine-owned collision event path.
 
+## Runtime Primitives
+Karma exposes small CPU mesh generators for common runtime primitives. Register
+the returned `world::MeshData` with `AssetRegistry`, then reference the key from
+`MeshComponent` like any imported mesh.
+
+```cpp
+#include "karma/karma.h"
+
+assets->registerMaterialAsset(
+    "materials/red",
+    karma::rendering::createDiffuseMaterial({0.8f, 0.1f, 0.08f, 1.0f}, 0.7f));
+
+assets->registerMeshAsset(
+    "primitives/sphere",
+    karma::world::createSphereMesh(karma::world::SphereMeshDesc{
+        .radius = 0.5f,
+        .segments = 32u,
+        .rings = 16u,
+        .material_key = "materials/red",
+    }));
+
+auto entity = world->createEntity();
+world->add(entity, karma::components::TransformComponent{});
+world->add(entity, karma::components::MeshComponent{
+    .mesh_asset_key = "primitives/sphere",
+});
+```
+
+Available helpers include `createPlaneMesh`, `createBoxMesh`,
+`createCubeMesh`, `createSphereMesh`, and `createCapsuleMesh`.
+
 ## Runtime Materials
 `GameInterface` exposes runtime material assets through the `assets` registry.
 The intended workflow is:

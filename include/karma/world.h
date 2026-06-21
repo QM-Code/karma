@@ -443,6 +443,56 @@ struct MeshData {
   std::vector<MeshMaterialSlot> material_slots;
 };
 
+/// \ingroup karma_world
+/// Sphere mesh generation settings.
+struct SphereMeshDesc {
+  float radius = 0.5f;
+  uint32_t segments = 32u;
+  uint32_t rings = 16u;
+  std::string material_key;
+};
+
+/// \ingroup karma_world
+/// Capsule mesh generation settings. The capsule is aligned to the Y axis.
+struct CapsuleMeshDesc {
+  float radius = 0.5f;
+  float cylinder_height = 1.0f;
+  uint32_t segments = 32u;
+  uint32_t hemisphere_rings = 8u;
+  std::string material_key;
+};
+
+/// Creates a centered XZ plane with upward normals.
+MeshData createPlaneMesh(float width = 1.0f,
+                         float depth = 1.0f,
+                         std::string material_key = {});
+
+/// Creates a centered box from half extents.
+MeshData createBoxMesh(const math::Vec3& half_extents,
+                       std::string material_key = {});
+
+/// Creates a centered cube from full edge size.
+MeshData createCubeMesh(float size = 1.0f, std::string material_key = {});
+
+/// Creates a UV sphere aligned to the Y axis.
+MeshData createSphereMesh(const SphereMeshDesc& desc = {});
+
+/// Creates a UV sphere aligned to the Y axis.
+MeshData createSphereMesh(float radius,
+                          uint32_t segments = 32u,
+                          uint32_t rings = 16u,
+                          std::string material_key = {});
+
+/// Creates a capsule aligned to the Y axis.
+MeshData createCapsuleMesh(const CapsuleMeshDesc& desc = {});
+
+/// Creates a capsule aligned to the Y axis.
+MeshData createCapsuleMesh(float radius,
+                           float cylinder_height,
+                           uint32_t segments = 32u,
+                           uint32_t hemisphere_rings = 8u,
+                           std::string material_key = {});
+
 }  // namespace karma::world
 
 

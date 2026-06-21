@@ -60,6 +60,7 @@ karma_add_static(karma_world
   src/world/components/animator.cpp
   src/world/components/transform.cpp
   src/world/ecs/collider_queries.cpp
+  src/world/geometry/primitive_meshes.cpp
   src/world/scene/transform_hierarchy.cpp
 )
 target_link_libraries(karma_world PUBLIC karma_core)

@@ -1,10 +1,10 @@
-#include "karma/media/audio/backends/sdl/clip.hpp"
+#include "private/audio/backends/sdl/clip.hpp"
 
 #include <algorithm>
 
 #include <spdlog/spdlog.h>
 
-namespace karma::audio_backend {
+namespace karma::audio::backend {
 
 SdlAudioClip::SdlAudioClip(std::vector<float> samples, int channels, int max_instances)
     : samples_(std::move(samples)),
@@ -66,4 +66,4 @@ void SdlAudioClip::setSpatialization(bool) {}
 
 void SdlAudioClip::setDistanceRange(float, float) {}
 
-}  // namespace karma::audio_backend
+}  // namespace karma::audio::backend

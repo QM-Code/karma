@@ -1,9 +1,9 @@
-#include "karma/platform/network/session.h"
+#include "karma/network.h"
 
 #include <algorithm>
 #include <utility>
 
-namespace karma::net {
+namespace karma::network {
 namespace {
 
 MessageType customMessageType(Delivery delivery) {
@@ -617,4 +617,4 @@ void ClientSession::emitProtocolError(PeerId peer,
   });
 }
 
-}  // namespace karma::net
+}  // namespace karma::network

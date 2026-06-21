@@ -22,9 +22,9 @@
 #endif
 #endif
 
-#include "karma/content/assets/asset_cache.h"
+#include "karma/assets.h"
 
-namespace karma::content::detail {
+namespace karma::assets::detail {
 
 std::string textureContentHash(const TextureAsset& texture) {
   if (!texture.content_hash.empty()) {
@@ -193,12 +193,12 @@ std::optional<PreparedTextureUpload> prepareRgba8Upload(const TextureAsset& text
 
   PreparedTextureUpload prepared{};
   prepared.desc = texture.desc;
-  prepared.desc.format = renderer::TextureFormat::RGBA8;
+  prepared.desc.format = rendering::TextureFormat::RGBA8;
   prepared.desc.mip_levels = 1u;
-  prepared.upload.format = renderer::TextureFormat::RGBA8;
+  prepared.upload.format = rendering::TextureFormat::RGBA8;
   prepared.upload.bytes.assign(bytes->begin(),
                                bytes->begin() + static_cast<std::ptrdiff_t>(expected));
-  prepared.upload.subresources.push_back(renderer::TextureUploadSubresource{
+  prepared.upload.subresources.push_back(rendering::TextureUploadSubresource{
       .mip_level = 0u,
       .array_layer = 0u,
       .width = prepared.desc.width,
@@ -252,9 +252,9 @@ std::optional<PreparedTextureUpload> transcodeKtx2Upload(const TextureAsset& tex
   prepared.desc.height = static_cast<int>(ktx->baseHeight);
   prepared.desc.generate_mips = false;
   prepared.desc.mip_levels = std::max(1u, static_cast<uint32_t>(ktx->numLevels));
-  prepared.desc.format = bc7 ? (texture.desc.srgb ? renderer::TextureFormat::BC7_RGBA_UNORM_SRGB
-                                                  : renderer::TextureFormat::BC7_RGBA_UNORM)
-                             : renderer::TextureFormat::RGBA8;
+  prepared.desc.format = bc7 ? (texture.desc.srgb ? rendering::TextureFormat::BC7_RGBA_UNORM_SRGB
+                                                  : rendering::TextureFormat::BC7_RGBA_UNORM)
+                             : rendering::TextureFormat::RGBA8;
   prepared.upload.format = prepared.desc.format;
   prepared.upload.bytes.assign(data, data + data_size);
   prepared.upload.subresources.reserve(prepared.desc.mip_levels);
@@ -273,7 +273,7 @@ std::optional<PreparedTextureUpload> transcodeKtx2Upload(const TextureAsset& tex
     if (image_size == 0u || image_size > prepared.upload.bytes.size() - offset) {
       return std::nullopt;
     }
-    prepared.upload.subresources.push_back(renderer::TextureUploadSubresource{
+    prepared.upload.subresources.push_back(rendering::TextureUploadSubresource{
         .mip_level = level,
         .array_layer = 0u,
         .width = width,
@@ -503,7 +503,7 @@ Rgba8Image downsampleAlphaWeighted(const Rgba8Image& source) {
 void appendRgba8Mip(TextureAsset& texture, const Rgba8Image& mip, uint32_t level) {
   const size_t offset = texture.bytes.size();
   texture.bytes.insert(texture.bytes.end(), mip.pixels.begin(), mip.pixels.end());
-  texture.subresources.push_back(renderer::TextureUploadSubresource{
+  texture.subresources.push_back(rendering::TextureUploadSubresource{
       .mip_level = level,
       .array_layer = 0u,
       .width = mip.width,
@@ -544,7 +544,7 @@ TextureAsset makeTextureAssetFromImage(Rgba8Image image,
   TextureAsset texture{};
   texture.desc.width = image.width;
   texture.desc.height = image.height;
-  texture.desc.format = renderer::TextureFormat::RGBA8;
+  texture.desc.format = rendering::TextureFormat::RGBA8;
   texture.desc.srgb = srgb;
   texture.desc.generate_mips = generate_mips;
   texture.semantic = semantic;
@@ -571,7 +571,7 @@ TextureAsset makeTextureAssetFromImage(Rgba8Image image,
 
   texture.payload_format = TextureAsset::PayloadFormat::RGBA8;
   texture.bytes = std::move(image.pixels);
-  texture.subresources.push_back(renderer::TextureUploadSubresource{
+  texture.subresources.push_back(rendering::TextureUploadSubresource{
       .mip_level = 0u,
       .array_layer = 0u,
       .width = texture.desc.width,
@@ -606,9 +606,9 @@ std::string sanitizeTextureKeySegment(std::string_view value) {
   return out.empty() ? std::string("texture") : out;
 }
 
-std::string importedTextureAlias(renderer::ImportedMaterialTextureSemantic semantic,
+std::string importedTextureAlias(rendering::ImportedMaterialTextureSemantic semantic,
                                  std::string_view fallback) {
-  using Semantic = renderer::ImportedMaterialTextureSemantic;
+  using Semantic = rendering::ImportedMaterialTextureSemantic;
   switch (semantic) {
     case Semantic::BaseColor:
       return "base_color";
@@ -638,9 +638,9 @@ std::string importedTextureAlias(renderer::ImportedMaterialTextureSemantic seman
   return sanitizeTextureKeySegment(fallback);
 }
 
-TextureAsset::Semantic importedTextureSemantic(renderer::ImportedMaterialTextureSemantic semantic,
+TextureAsset::Semantic importedTextureSemantic(rendering::ImportedMaterialTextureSemantic semantic,
                                                bool srgb) {
-  using Semantic = renderer::ImportedMaterialTextureSemantic;
+  using Semantic = rendering::ImportedMaterialTextureSemantic;
   if (semantic == Semantic::Normal ||
       semantic == Semantic::ClearcoatNormal) {
     return TextureAsset::Semantic::Normal;
@@ -656,7 +656,7 @@ TextureAsset::Semantic importedTextureSemantic(renderer::ImportedMaterialTexture
 }
 
 std::optional<Rgba8Image> decodeImportedTexture(
-    const renderer::ImportedMaterialTexture& texture) {
+    const rendering::ImportedMaterialTexture& texture) {
   if (texture.embedded) {
     if (texture.source_bytes.empty()) {
       return std::nullopt;
@@ -681,7 +681,7 @@ std::optional<Rgba8Image> decodeImportedTexture(
   return loadRgba8Image(texture.resolved_path, Rgba8ImageLoadOptions{.flip_y = true});
 }
 
-std::string importedTextureSourceHash(const renderer::ImportedMaterialTexture& texture) {
+std::string importedTextureSourceHash(const rendering::ImportedMaterialTexture& texture) {
   if (texture.embedded && !texture.source_bytes.empty()) {
     return hashBytes(texture.source_bytes.data(), texture.source_bytes.size());
   }
@@ -693,9 +693,9 @@ std::string importedTextureSourceHash(const renderer::ImportedMaterialTexture& t
   return hashString(texture.source_key);
 }
 
-}  // namespace karma::content::detail
+}  // namespace karma::assets::detail
 
-namespace karma::content {
+namespace karma::assets {
 
 std::optional<PreparedTextureUpload> prepareTextureUpload(
     const TextureAsset& texture,
@@ -728,8 +728,8 @@ std::optional<PreparedTextureUpload> prepareTextureUpload(
     if (!texture.subresources.empty() && !texture.bytes.empty()) {
       PreparedTextureUpload prepared{};
       prepared.desc = texture.desc;
-      prepared.desc.format = renderer::TextureFormat::RGBA8;
-      prepared.upload.format = renderer::TextureFormat::RGBA8;
+      prepared.desc.format = rendering::TextureFormat::RGBA8;
+      prepared.upload.format = rendering::TextureFormat::RGBA8;
       prepared.upload.subresources = texture.subresources;
       prepared.upload.bytes = texture.bytes;
       return prepared.valid() ? std::optional<PreparedTextureUpload>{std::move(prepared)}
@@ -741,4 +741,4 @@ std::optional<PreparedTextureUpload> prepareTextureUpload(
   return detail::prepareRgba8Upload(texture);
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

@@ -23,21 +23,21 @@ Declare the source in an asset package and instantiate the registered scene
 asset:
 
 ```cpp
-karma::content::AssetRegistry assets;
+karma::assets::AssetRegistry assets;
 std::string diagnostic;
 auto package =
-    karma::content::importAssetPackage(assets, "assets/character", &diagnostic);
+    karma::assets::importAssetPackage(assets, "assets/character", &diagnostic);
 if (!package.has_value()) {
   return;
 }
 
-const karma::content::GltfSceneAsset* character =
+const karma::assets::GltfSceneAsset* character =
     assets.findGltfSceneAsset("characters/hero");
 if (character == nullptr) {
   return;
 }
 
-auto imported = karma::scene::instantiateGltfSceneAsset(
+auto imported = karma::world::instantiateGltfSceneAsset(
     *world,
     *scene,
     assets,
@@ -67,13 +67,13 @@ External image and buffer paths are resolved relative to the source `.gltf`.
 
 ## Imported Data
 
-`karma::content::GltfSceneAsset` is the package-imported scene metadata. It
+`karma::assets::GltfSceneAsset` is the package-imported scene metadata. It
 contains:
 
 - `nodes`: glTF node names, local/world transforms, lights, and renderable mesh
   primitive asset keys.
 - `animation_clip_keys`: registered renderer-agnostic
-  `karma::animation::AnimationClip` assets.
+  `karma::world::AnimationClip` assets.
 - `skeleton_keys` and `skin_keys`: registered joint topology and skin binding
   assets used by skinned primitives.
 - `mesh_asset_keys`, `texture_asset_keys`, and `material_keys`: deterministic
@@ -92,12 +92,12 @@ still targetable at runtime.
 
 ## Clip Ownership
 
-`karma::animation::AnimationClip` is plain engine data. A clip has a name,
+`karma::world::AnimationClip` is plain engine data. A clip has a name,
 duration, transform channels, morph target tracks, optional events, and optional
 root-motion data. It does not hold a GLB handle, renderer handle, mesh pointer,
 or file path.
 
-Imported clips are registered in `karma::content::AssetRegistry` and copied into
+Imported clips are registered in `karma::assets::AssetRegistry` and copied into
 `karma::components::AnimatorComponent::clips` during scene asset instantiation.
 The animator also receives the node and morph binding maps needed to apply clip
 channels to the current ECS instance.
@@ -142,7 +142,7 @@ Engine-owned animation update order is:
    renderable primitive entities.
 4. Animation events and root-motion deltas are mirrored to their gameplay
    buffer components.
-5. `scene::updateWorldTransforms(...)` composes final world transforms.
+5. `world::updateWorldTransforms(...)` composes final world transforms.
 6. `DeformationSystem` builds joint palettes and updates renderer deformation
    resources.
 7. `RenderSystem` submits visible meshes and `DeformationId` handles.
@@ -157,8 +157,8 @@ primitives.
 
 The renderer owns deformation resources:
 
-- `karma::renderer::DeformationId`
-- `karma::renderer::DeformationDesc`
+- `karma::rendering::DeformationId`
+- `karma::rendering::DeformationDesc`
 - `GraphicsDevice::createDeformation(...)`
 - `GraphicsDevice::updateDeformation(...)`
 - `GraphicsDevice::destroyDeformation(...)`
@@ -170,8 +170,8 @@ buffer limit.
 
 CPU helpers remain available for tests and diagnostics:
 
-- `karma::animation::skinMesh(...)`
-- `karma::animation::morphMesh(...)`
+- `karma::world::skinMesh(...)`
+- `karma::world::morphMesh(...)`
 
 Runtime CPU deformation is selected only with
 `karma::components::DeformationPath::CpuReference`.
@@ -183,12 +183,12 @@ semantics yet.
 
 Use:
 
-- `karma::animation::Skeleton`
-- `karma::animation::SkeletonMap`
-- `karma::animation::SkeletonMapEntry`
-- `karma::animation::RetargetOptions`
-- `karma::animation::validateSkeletonMap(...)`
-- `karma::animation::retargetClip(...)`
+- `karma::world::Skeleton`
+- `karma::world::SkeletonMap`
+- `karma::world::SkeletonMapEntry`
+- `karma::world::RetargetOptions`
+- `karma::world::validateSkeletonMap(...)`
+- `karma::world::retargetClip(...)`
 
 The map connects source joint indices to target joint indices and can include a
 rest-pose correction matrix per mapped joint. Retargeting writes a new

@@ -36,8 +36,8 @@ binary `.glb` and JSON `.gltf` sources.
 ## Asset Boundaries
 
 The source `.glb` or `.gltf` is only an import container. Package `gltf_scene`
-entries register clips as plain `karma::animation::AnimationClip` assets and
-store their keys on `karma::content::GltfSceneAsset`. After instantiation, those
+entries register clips as plain `karma::world::AnimationClip` assets and
+store their keys on `karma::assets::GltfSceneAsset`. After instantiation, those
 clips are copied into `AnimatorComponent::clips`.
 
 Clips are not tied to the source file bytes, renderer resources, or mesh
@@ -64,7 +64,7 @@ explicit `SkeletonMap`.
 - Multiple skins and skeletons.
 - Joint names, joint parent indices, joint node indices, inverse bind matrices.
 - Node, joint, and morph-weight animation channel mappings.
-- CPU reference deformation with shared `geometry::MeshData` joint/weight
+- CPU reference deformation with shared `world::MeshData` joint/weight
   payloads retained.
 - Renderer-facing joint indices, joint weights, and morph deltas for GPU
   deformation.

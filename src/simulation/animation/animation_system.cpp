@@ -1,4 +1,4 @@
-#include "karma/simulation/animation/animation_system.h"
+#include "karma/world.h"
 
 #include <algorithm>
 #include <cmath>
@@ -7,14 +7,14 @@
 #include <unordered_set>
 #include <vector>
 
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
-#include "karma/simulation/animation/pose.h"
-#include "karma/world/components/animator.h"
-#include "karma/world/components/deformable_mesh.h"
-#include "karma/world/components/transform.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/world.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
-namespace karma::animation {
+namespace karma::world {
 
 namespace {
 
@@ -420,15 +420,15 @@ void setMorphWeights(components::DeformableMeshComponent& deformation,
 }
 
 void applyMorphWeightsToEntities(
-    ecs::World& world,
-    const std::vector<std::vector<ecs::Entity>>& morph_entities_by_node_index,
+    world::World& world,
+    const std::vector<std::vector<world::Entity>>& morph_entities_by_node_index,
     const std::unordered_map<uint32_t, AccumulatedMorphWeights>& accumulated) {
   for (const auto& [target_node_index, value] : accumulated) {
     if (target_node_index >= morph_entities_by_node_index.size()) {
       continue;
     }
     const std::vector<float> weights = finalizeMorphWeights(value);
-    for (const ecs::Entity entity : morph_entities_by_node_index[target_node_index]) {
+    for (const world::Entity entity : morph_entities_by_node_index[target_node_index]) {
       if (!world.isAlive(entity) || !world.has<components::DeformableMeshComponent>(entity)) {
         continue;
       }
@@ -437,9 +437,9 @@ void applyMorphWeightsToEntities(
   }
 }
 
-std::vector<float> baseMorphWeightsForNode(ecs::World& world,
-                                           const std::vector<ecs::Entity>& entities) {
-  for (const ecs::Entity entity : entities) {
+std::vector<float> baseMorphWeightsForNode(world::World& world,
+                                           const std::vector<world::Entity>& entities) {
+  for (const world::Entity entity : entities) {
     if (!world.isAlive(entity) || !world.has<components::DeformableMeshComponent>(entity)) {
       continue;
     }
@@ -451,12 +451,12 @@ std::vector<float> baseMorphWeightsForNode(ecs::World& world,
   return {};
 }
 
-void applyLocalPoseToEntities(ecs::World& world,
-                              const std::vector<ecs::Entity>& node_entities_by_index,
+void applyLocalPoseToEntities(world::World& world,
+                              const std::vector<world::Entity>& node_entities_by_index,
                               const LocalPose& pose) {
   const size_t count = std::min(node_entities_by_index.size(), pose.nodes.size());
   for (size_t node_index = 0; node_index < count; ++node_index) {
-    const ecs::Entity target = node_entities_by_index[node_index];
+    const world::Entity target = node_entities_by_index[node_index];
     if (!world.isAlive(target) || !world.has<components::TransformComponent>(target)) {
       continue;
     }
@@ -474,10 +474,10 @@ void applyLocalPoseToEntities(ecs::World& world,
   }
 }
 
-void applyWeightedClipSamples(ecs::World& world,
+void applyWeightedClipSamples(world::World& world,
                               const std::vector<AnimationClip>& clips,
-                              const std::vector<ecs::Entity>& node_entities_by_index,
-                              const std::vector<std::vector<ecs::Entity>>&
+                              const std::vector<world::Entity>& node_entities_by_index,
+                              const std::vector<std::vector<world::Entity>>&
                                   morph_entities_by_node_index,
                               const std::vector<WeightedClipSample>& samples) {
   std::unordered_map<uint32_t, AccumulatedTransform> accumulated;
@@ -648,8 +648,8 @@ SampledTransform sampleRootMotion(const AnimationClip& clip, uint32_t node_index
   return out;
 }
 
-void updateRootMotion(ecs::World& world,
-                      ecs::Entity owner,
+void updateRootMotion(world::World& world,
+                      world::Entity owner,
                       components::AnimatorComponent& animator,
                       const AnimationClip& clip,
                       float previous_time,
@@ -721,8 +721,8 @@ void appendRootMotionDelta(SampledTransform& dst, const SampledTransform& delta)
   }
 }
 
-void prepareRootMotionComponent(ecs::World& world,
-                                ecs::Entity entity,
+void prepareRootMotionComponent(world::World& world,
+                                world::Entity entity,
                                 components::AnimatorComponent& animator) {
   if (!world.has<components::RootMotionComponent>(entity)) {
     return;
@@ -732,8 +732,8 @@ void prepareRootMotionComponent(ecs::World& world,
   animator.root_motion_node_index = root_motion.root_motion_node_index;
 }
 
-void publishAnimatorSideChannels(ecs::World& world,
-                                 ecs::Entity entity,
+void publishAnimatorSideChannels(world::World& world,
+                                 world::Entity entity,
                                  const components::AnimatorComponent& animator) {
   if (world.has<components::AnimationEventBufferComponent>(entity)) {
     auto& buffer = world.get<components::AnimationEventBufferComponent>(entity);
@@ -763,8 +763,8 @@ void publishAnimatorSideChannels(ecs::World& world,
   root_motion.has_unconsumed_delta = hasSampledTransform(root_motion.delta);
 }
 
-void updateSimpleAnimator(ecs::World& world,
-                          ecs::Entity entity,
+void updateSimpleAnimator(world::World& world,
+                          world::Entity entity,
                           components::AnimatorComponent& animator,
                           float dt) {
   if (animator.clips.empty() || animator.current_clip_index >= animator.clips.size()) {
@@ -835,8 +835,8 @@ void updateSimpleAnimator(ecs::World& world,
                            samples);
 }
 
-void updateStateMachineAnimator(ecs::World& world,
-                                ecs::Entity entity,
+void updateStateMachineAnimator(world::World& world,
+                                world::Entity entity,
                                 components::AnimatorComponent& animator,
                                 float dt) {
   if (animator.state_machine.states.empty()) {
@@ -969,11 +969,11 @@ void updateStateMachineAnimator(ecs::World& world,
 
 }  // namespace
 
-void AnimationSystem::update(ecs::World& world, scene::Scene& scene, float dt) {
+void AnimationSystem::update(world::World& world, world::Scene& scene, float dt) {
   (void)scene;
 
-  const std::vector<ecs::Entity> animators = world.view<components::AnimatorComponent>();
-  for (const ecs::Entity entity : animators) {
+  const std::vector<world::Entity> animators = world.view<components::AnimatorComponent>();
+  for (const world::Entity entity : animators) {
     auto& animator = world.get<components::AnimatorComponent>(entity);
     animator.event_queue.clear();
     animator.root_motion_delta = SampledTransform{};
@@ -983,4 +983,4 @@ void AnimationSystem::update(ecs::World& world, scene::Scene& scene, float dt) {
   }
 }
 
-}  // namespace karma::animation
+}  // namespace karma::world

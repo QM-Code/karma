@@ -1,8 +1,8 @@
-#include "karma/runtime/input/input_system.h"
+#include "karma/app.h"
 
-#include "karma/platform/window/window.h"
+#include "karma/platform.h"
 
-namespace karma::input {
+namespace karma::app {
 
 namespace {
 bool isKeyDown(const platform::Window& window, platform::Key key) {
@@ -126,4 +126,4 @@ void InputSystem::clear() {
   mouse_delta_y_ = 0.0f;
 }
 
-}  // namespace karma::input
+}  // namespace karma::app

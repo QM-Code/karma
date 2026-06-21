@@ -39,7 +39,7 @@ struct OrbSpec {
 };
 
 struct RootAnimation {
-  ecs::Entity root{};
+  world::Entity root{};
   math::Vec3 base_position{};
   float base_yaw = 0.0f;
   float phase = 0.0f;
@@ -53,7 +53,7 @@ struct ExplosionGalleryItem {
 };
 
 struct ActiveExplosionInstance {
-  ecs::Entity root{};
+  world::Entity root{};
   float destroy_time = 0.0f;
 };
 
@@ -135,32 +135,32 @@ class ScopedStartupTimer {
   core::SteadyClock::time_point start_;
 };
 
-void setPrefabParticlePlayback(ecs::World& world,
+void setPrefabParticlePlayback(world::World& world,
                                const prefabs::PrefabInstance& instance,
                                bool enabled) {
-  for (const ecs::Entity entity : instance.entities) {
+  for (const world::Entity entity : instance.entities) {
     if (world.isAlive(entity) && world.has<components::ParticleEmitterComponent>(entity)) {
-      particles::setEffectPlayback(world, entity, enabled, enabled);
+      visual::particles::setEffectPlayback(world, entity, enabled, enabled);
     }
   }
 }
 
-void restartPrefabParticleEffects(ecs::World& world, const prefabs::PrefabInstance& instance) {
-  for (const ecs::Entity entity : instance.entities) {
+void restartPrefabParticleEffects(world::World& world, const prefabs::PrefabInstance& instance) {
+  for (const world::Entity entity : instance.entities) {
     if (world.isAlive(entity)) {
-      particles::restartEffect(world, entity);
+      visual::particles::restartEffect(world, entity);
     }
   }
 }
 
-void applyOrbAccent(ecs::World& world,
-                    content::AssetRegistry* assets,
+void applyOrbAccent(world::World& world,
+                    assets::AssetRegistry* assets,
                     const prefabs::PrefabInstance& instance,
                     const math::Color& color,
                     std::string_view shell_material_key) {
   auto setStartAndEndColor =
       [&](std::string_view name, math::Color start_color, math::Color end_color) {
-        const ecs::Entity entity = instance.find(name);
+        const world::Entity entity = instance.find(name);
         if (world.isAlive(entity) &&
             world.has<components::ParticleEffectOverrideComponent>(entity)) {
           auto& effect_override =
@@ -183,7 +183,7 @@ void applyOrbAccent(ecs::World& world,
                       {1.0f, 1.0f, 1.0f, 0.90f},
                       {1.0f, 1.0f, 1.0f, 0.0f});
 
-  const ecs::Entity shell_entity = instance.find("shell");
+  const world::Entity shell_entity = instance.find("shell");
   if (!shell_material_key.empty() && assets != nullptr && world.isAlive(shell_entity) &&
       world.has<components::MeshComponent>(shell_entity)) {
     auto& shell_mesh = world.get<components::MeshComponent>(shell_entity);
@@ -191,7 +191,7 @@ void applyOrbAccent(ecs::World& world,
     const math::Color shell_tint =
         withAlpha(mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.18f), 1.0f);
 
-    renderer::MaterialDesc shell_material{};
+    rendering::MaterialDesc shell_material{};
     shell_material.base_color = shell_tint;
     shell_material.emissive_color = {
         color.r * 0.28f,
@@ -211,7 +211,7 @@ void applyOrbAccent(ecs::World& world,
     }};
   }
 
-  const ecs::Entity light_entity = instance.find("glow");
+  const world::Entity light_entity = instance.find("glow");
   if (world.isAlive(light_entity) && world.has<components::LightComponent>(light_entity)) {
     world.get<components::LightComponent>(light_entity).color =
         mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.22f);
@@ -233,8 +233,8 @@ class ParticleGalleryExample final : public app::GameInterface {
     input->bindKey("cam_down", platform::Key::Q);
     input->bindKey("cam_fast", platform::Key::LeftShift);
     input->bindMouse("cam_look", platform::MouseButton::Right);
-    input->bindKey("toggle_particles", platform::Key::Space, input::Trigger::Pressed);
-    input->bindKey("restart_explosions", platform::Key::R, input::Trigger::Pressed);
+    input->bindKey("toggle_particles", platform::Key::Space, app::Trigger::Pressed);
+    input->bindKey("restart_explosions", platform::Key::R, app::Trigger::Pressed);
 
     world_mesh_ = importExampleMeshAsset(assets, "world.glb");
     log_stats_ = envFlagEnabled("KARMA_PARTICLE_GALLERY_STATS");
@@ -333,8 +333,8 @@ class ParticleGalleryExample final : public app::GameInterface {
 
     int fb_width = 0;
     int fb_height = 0;
-    renderer::ForwardPlusStats forward_stats{};
-    renderer::ParticlePassStats particle_stats{};
+    rendering::ForwardPlusStats forward_stats{};
+    rendering::ParticlePassStats particle_stats{};
     if (graphics != nullptr) {
       graphics->getFramebufferSize(fb_width, fb_height);
       forward_stats = graphics->getForwardPlusStats();
@@ -513,7 +513,7 @@ class ParticleGalleryExample final : public app::GameInterface {
   }
 
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
@@ -523,7 +523,7 @@ class ParticleGalleryExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 46.0f, 0.0f});
@@ -664,7 +664,7 @@ class ParticleGalleryExample final : public app::GameInterface {
   }
 
   std::string world_mesh_;
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   std::vector<prefabs::PrefabInstance> persistent_instances_{};
   std::vector<RootAnimation> beams_{};
   std::vector<RootAnimation> orbs_{};

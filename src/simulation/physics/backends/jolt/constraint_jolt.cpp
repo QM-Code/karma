@@ -1,10 +1,10 @@
-#include "karma/simulation/physics/backends/jolt/constraint_jolt.hpp"
+#include "private/physics/backends/jolt/constraint_jolt.hpp"
 
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
 
 #include <Jolt/Physics/Constraints/Constraint.h>
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 PhysicsConstraintJolt::PhysicsConstraintJolt(PhysicsWorldJolt* world, JPH::Constraint* constraint)
     : world_(world), constraint_(constraint) {}
@@ -36,4 +36,4 @@ std::uintptr_t PhysicsConstraintJolt::nativeHandle() const {
     return reinterpret_cast<std::uintptr_t>(constraint_.GetPtr());
 }
 
-}  // namespace karma::physics_backend
+}  // namespace karma::physics::backend

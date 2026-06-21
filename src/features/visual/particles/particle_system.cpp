@@ -1,4 +1,4 @@
-#include "karma/features/visual/particles/particle_system.h"
+#include "karma/visual.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -7,20 +7,20 @@
 #include <string>
 #include <tuple>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/core/time.h"
-#include "karma/rendering/renderer/device.h"
-#include "karma/world/components/particle_effect.h"
-#include "karma/world/components/particle_effect_override.h"
-#include "karma/world/components/particle_emitter.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/visibility.h"
+#include "karma/assets.h"
+#include "karma/core.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
-namespace karma::particles {
+namespace karma::visual::particles {
 
 namespace {
 
-uint64_t entityKey(ecs::Entity entity) {
+uint64_t entityKey(world::Entity entity) {
   return (static_cast<uint64_t>(entity.index) << 32) |
          static_cast<uint64_t>(entity.generation);
 }
@@ -249,108 +249,108 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   }
 }
 
-renderer::ParticleBlendMode toRendererBlendMode(components::ParticleBlendMode mode) {
+rendering::ParticleBlendMode toRendererBlendMode(components::ParticleBlendMode mode) {
   switch (mode) {
     case components::ParticleBlendMode::Additive:
-      return renderer::ParticleBlendMode::Additive;
+      return rendering::ParticleBlendMode::Additive;
     case components::ParticleBlendMode::Alpha:
-      return renderer::ParticleBlendMode::Alpha;
+      return rendering::ParticleBlendMode::Alpha;
     case components::ParticleBlendMode::Distortion:
-      return renderer::ParticleBlendMode::Distortion;
+      return rendering::ParticleBlendMode::Distortion;
   }
-  return renderer::ParticleBlendMode::Additive;
+  return rendering::ParticleBlendMode::Additive;
 }
 
-renderer::ParticleAlignment toRendererAlignment(components::ParticleAlignment alignment) {
+rendering::ParticleAlignment toRendererAlignment(components::ParticleAlignment alignment) {
   switch (alignment) {
     case components::ParticleAlignment::Billboard:
-      return renderer::ParticleAlignment::Billboard;
+      return rendering::ParticleAlignment::Billboard;
     case components::ParticleAlignment::Ground:
-      return renderer::ParticleAlignment::Ground;
+      return rendering::ParticleAlignment::Ground;
   }
-  return renderer::ParticleAlignment::Billboard;
+  return rendering::ParticleAlignment::Billboard;
 }
 
-renderer::ParticleShadingMode toRendererShadingMode(components::ParticleShadingMode mode) {
+rendering::ParticleShadingMode toRendererShadingMode(components::ParticleShadingMode mode) {
   switch (mode) {
     case components::ParticleShadingMode::Standard:
-      return renderer::ParticleShadingMode::Standard;
+      return rendering::ParticleShadingMode::Standard;
     case components::ParticleShadingMode::Shell:
-      return renderer::ParticleShadingMode::Shell;
+      return rendering::ParticleShadingMode::Shell;
   }
-  return renderer::ParticleShadingMode::Standard;
+  return rendering::ParticleShadingMode::Standard;
 }
 
-renderer::ParticleSourceShape toRendererSourceShape(components::ParticleSourceShape shape) {
+rendering::ParticleSourceShape toRendererSourceShape(components::ParticleSourceShape shape) {
   switch (shape) {
     case components::ParticleSourceShape::Box:
-      return renderer::ParticleSourceShape::Box;
+      return rendering::ParticleSourceShape::Box;
     case components::ParticleSourceShape::Sphere:
-      return renderer::ParticleSourceShape::Sphere;
+      return rendering::ParticleSourceShape::Sphere;
     case components::ParticleSourceShape::SphereSurface:
-      return renderer::ParticleSourceShape::SphereSurface;
+      return rendering::ParticleSourceShape::SphereSurface;
     case components::ParticleSourceShape::Disc:
-      return renderer::ParticleSourceShape::Disc;
+      return rendering::ParticleSourceShape::Disc;
     case components::ParticleSourceShape::Ring:
-      return renderer::ParticleSourceShape::Ring;
+      return rendering::ParticleSourceShape::Ring;
     case components::ParticleSourceShape::Cylinder:
-      return renderer::ParticleSourceShape::Cylinder;
+      return rendering::ParticleSourceShape::Cylinder;
     case components::ParticleSourceShape::Capsule:
-      return renderer::ParticleSourceShape::Capsule;
+      return rendering::ParticleSourceShape::Capsule;
     case components::ParticleSourceShape::Cone:
-      return renderer::ParticleSourceShape::Cone;
+      return rendering::ParticleSourceShape::Cone;
     case components::ParticleSourceShape::Line:
-      return renderer::ParticleSourceShape::Line;
+      return rendering::ParticleSourceShape::Line;
     case components::ParticleSourceShape::Path:
-      return renderer::ParticleSourceShape::Path;
+      return rendering::ParticleSourceShape::Path;
     case components::ParticleSourceShape::TrailPath:
-      return renderer::ParticleSourceShape::TrailPath;
+      return rendering::ParticleSourceShape::TrailPath;
     case components::ParticleSourceShape::MeshSurface:
-      return renderer::ParticleSourceShape::MeshSurface;
+      return rendering::ParticleSourceShape::MeshSurface;
   }
-  return renderer::ParticleSourceShape::Box;
+  return rendering::ParticleSourceShape::Box;
 }
 
-renderer::ParticleSourceSamplingMode toRendererSourceSampling(
+rendering::ParticleSourceSamplingMode toRendererSourceSampling(
     components::ParticleSourceSamplingMode sampling) {
   switch (sampling) {
     case components::ParticleSourceSamplingMode::Random:
-      return renderer::ParticleSourceSamplingMode::Random;
+      return rendering::ParticleSourceSamplingMode::Random;
     case components::ParticleSourceSamplingMode::Sequential:
-      return renderer::ParticleSourceSamplingMode::Sequential;
+      return rendering::ParticleSourceSamplingMode::Sequential;
     case components::ParticleSourceSamplingMode::Vertices:
-      return renderer::ParticleSourceSamplingMode::Vertices;
+      return rendering::ParticleSourceSamplingMode::Vertices;
   }
-  return renderer::ParticleSourceSamplingMode::Random;
+  return rendering::ParticleSourceSamplingMode::Random;
 }
 
-renderer::ParticleSourceDistribution toRendererSourceDistribution(
+rendering::ParticleSourceDistribution toRendererSourceDistribution(
     components::ParticleSourceDistribution distribution) {
   switch (distribution) {
     case components::ParticleSourceDistribution::Uniform:
-      return renderer::ParticleSourceDistribution::Uniform;
+      return rendering::ParticleSourceDistribution::Uniform;
     case components::ParticleSourceDistribution::Surface:
-      return renderer::ParticleSourceDistribution::Surface;
+      return rendering::ParticleSourceDistribution::Surface;
     case components::ParticleSourceDistribution::Edge:
-      return renderer::ParticleSourceDistribution::Edge;
+      return rendering::ParticleSourceDistribution::Edge;
   }
-  return renderer::ParticleSourceDistribution::Uniform;
+  return rendering::ParticleSourceDistribution::Uniform;
 }
 
-renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
-    ecs::Entity entity,
+rendering::ParticleEmitterGpuDesc makeRendererEmitterDesc(
+    world::Entity entity,
     uint32_t emitter_index,
     const components::ParticleEmitterComponent& emitter,
     const components::TransformComponent& transform,
-    renderer::TextureId texture,
-    renderer::MeshId source_mesh,
+    rendering::TextureId texture,
+    rendering::MeshId source_mesh,
     const math::Vec3& source_mesh_bounds_center,
     float source_mesh_bounds_radius,
     uint32_t restart_count,
     bool visible,
     float dt,
     float interpolation_alpha) {
-  renderer::ParticleEmitterGpuDesc desc{};
+  rendering::ParticleEmitterGpuDesc desc{};
   desc.instance_id = hashCombine(entityKey(entity), static_cast<uint64_t>(emitter_index) + 1ull);
   if (desc.instance_id == 0u) {
     desc.instance_id = 1u;
@@ -366,7 +366,7 @@ renderer::ParticleEmitterGpuDesc makeRendererEmitterDesc(
   desc.loop = emitter.loop;
   desc.emit_burst_on_start = emitter.emit_burst_on_start;
   desc.local_space = emitter.local_space;
-  desc.layer = static_cast<renderer::LayerId>(emitter.layer);
+  desc.layer = static_cast<rendering::LayerId>(emitter.layer);
   desc.depth_test = emitter.depth_test;
   desc.blend_mode = toRendererBlendMode(emitter.blend_mode);
   desc.alignment = toRendererAlignment(emitter.alignment);
@@ -453,7 +453,7 @@ void ParticleSystem::releaseTextureCache() {
   if (device_ != nullptr) {
     for (const auto& [key, texture] : texture_asset_cache_) {
       (void)key;
-      if (texture != renderer::kInvalidTexture) {
+      if (texture != rendering::kInvalidTexture) {
         device_->destroyTexture(texture);
       }
     }
@@ -461,52 +461,52 @@ void ParticleSystem::releaseTextureCache() {
   texture_asset_cache_.clear();
 }
 
-renderer::TextureId ParticleSystem::resolveTextureAsset(const std::string& texture_key) {
+rendering::TextureId ParticleSystem::resolveTextureAsset(const std::string& texture_key) {
   if (texture_key.empty() || assets_ == nullptr || device_ == nullptr) {
-    return renderer::kInvalidTexture;
+    return rendering::kInvalidTexture;
   }
   if (const auto it = texture_asset_cache_.find(texture_key);
       it != texture_asset_cache_.end()) {
     return it->second;
   }
 
-  const content::TextureAsset* texture = assets_->findTextureAsset(texture_key);
+  const assets::TextureAsset* texture = assets_->findTextureAsset(texture_key);
   if (texture == nullptr ||
       texture->desc.width <= 0 ||
       texture->desc.height <= 0) {
-    return renderer::kInvalidTexture;
+    return rendering::kInvalidTexture;
   }
 
-  const content::TextureRuntimeCapabilities capabilities{
-      .bc7_unorm = device_->supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM),
-      .bc7_srgb = device_->supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM_SRGB),
+  const assets::TextureRuntimeCapabilities capabilities{
+      .bc7_unorm = device_->supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM),
+      .bc7_srgb = device_->supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM_SRGB),
   };
-  auto prepared = content::prepareTextureUpload(*texture, capabilities);
+  auto prepared = assets::prepareTextureUpload(*texture, capabilities);
   if (!prepared.has_value()) {
-    return renderer::kInvalidTexture;
+    return rendering::kInvalidTexture;
   }
 
-  renderer::TextureId id = device_->createTexture(prepared->desc);
-  if (id != renderer::kInvalidTexture) {
+  rendering::TextureId id = device_->createTexture(prepared->desc);
+  if (id != rendering::kInvalidTexture) {
     const bool uploaded = device_->uploadTexture(id, prepared->upload);
     if (uploaded) {
       texture_asset_cache_[texture_key] = id;
     } else {
       device_->destroyTexture(id);
-      id = renderer::kInvalidTexture;
+      id = rendering::kInvalidTexture;
     }
   }
   return id;
 }
 
-uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
+uint32_t ParticleSystem::syncEffectBindings(world::World& world) {
   if (assets_ == nullptr) {
     return 0u;
   }
 
   uint32_t binding_updates = 0u;
   const uint64_t asset_version = assets_->version();
-  world.forEach<components::ParticleEffectComponent>([&](const ecs::Entity entity) {
+  world.forEach<components::ParticleEffectComponent>([&](const world::Entity entity) {
     auto& effect = world.get<components::ParticleEffectComponent>(entity);
     if (!effect.auto_apply || effect.effect_key.empty()) {
       return;
@@ -567,20 +567,20 @@ uint32_t ParticleSystem::syncEffectBindings(ecs::World& world) {
   return binding_updates;
 }
 
-void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alpha) {
+void ParticleSystem::update(world::World& world, float dt, float interpolation_alpha) {
   if (assets_ != nullptr && assets_->textureVersion() != last_texture_version_) {
     releaseTextureCache();
     last_texture_version_ = assets_->textureVersion();
   }
 
-  renderer::ParticlePassStats frame_stats{};
+  rendering::ParticlePassStats frame_stats{};
   const auto sync_start = core::SteadyClock::now();
   frame_stats.effect_binding_updates = syncEffectBindings(world);
   frame_stats.sync_effect_bindings_ms =
       core::elapsedMilliseconds(sync_start, core::SteadyClock::now());
 
   const auto submit_start = core::SteadyClock::now();
-  auto emitter_visible = [&](ecs::Entity entity,
+  auto emitter_visible = [&](world::Entity entity,
                              const components::ParticleEmitterComponent& emitter) {
     bool visible = emitter.enabled;
     if (world.has<components::VisibilityComponent>(entity)) {
@@ -590,24 +590,24 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
   };
 
   auto resolve_source_mesh = [&](const components::ParticleEmitterComponent& emitter) {
-    renderer::MeshId mesh = renderer::kInvalidMesh;
+    rendering::MeshId mesh = rendering::kInvalidMesh;
     if (device_ != nullptr &&
         assets_ != nullptr &&
         !emitter.source_mesh_asset_key.empty()) {
       const auto cache_it = mesh_asset_cache_.find(emitter.source_mesh_asset_key);
       if (cache_it != mesh_asset_cache_.end()) {
         mesh = cache_it->second;
-      } else if (const geometry::MeshData* mesh_asset =
+      } else if (const world::MeshData* mesh_asset =
                      assets_->findMeshAsset(emitter.source_mesh_asset_key)) {
         mesh = device_->registerRuntimeMesh(emitter.source_mesh_asset_key, *mesh_asset);
-        if (mesh != renderer::kInvalidMesh) {
+        if (mesh != rendering::kInvalidMesh) {
           mesh_asset_cache_[emitter.source_mesh_asset_key] = mesh;
         }
       }
     }
     math::Vec3 bounds_center{};
     float bounds_radius = 0.0f;
-    if (device_ != nullptr && mesh != renderer::kInvalidMesh) {
+    if (device_ != nullptr && mesh != rendering::kInvalidMesh) {
       glm::vec3 center{0.0f, 0.0f, 0.0f};
       float radius = 0.0f;
       if (device_->getMeshBounds(mesh, center, radius)) {
@@ -615,10 +615,10 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
         bounds_radius = radius;
       }
     }
-    return std::tuple<renderer::MeshId, math::Vec3, float>{mesh, bounds_center, bounds_radius};
+    return std::tuple<rendering::MeshId, math::Vec3, float>{mesh, bounds_center, bounds_radius};
   };
 
-  auto submit_emitter = [&](ecs::Entity entity,
+  auto submit_emitter = [&](world::Entity entity,
                             uint32_t emitter_index,
                             const components::ParticleEmitterComponent& emitter,
                             const components::TransformComponent& transform,
@@ -635,10 +635,10 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
       return;
     }
 
-    const renderer::TextureId texture = resolveTextureAsset(emitter.texture_key);
+    const rendering::TextureId texture = resolveTextureAsset(emitter.texture_key);
     const auto [source_mesh, source_mesh_bounds_center, source_mesh_bounds_radius] =
         resolve_source_mesh(emitter);
-    const renderer::ParticleEmitterGpuDesc desc =
+    const rendering::ParticleEmitterGpuDesc desc =
         makeRendererEmitterDesc(entity,
                                 emitter_index,
                                 emitter,
@@ -657,7 +657,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
 
   if (assets_ != nullptr) {
     world.forEach<components::ParticleEffectComponent, components::TransformComponent>(
-        [&](const ecs::Entity entity) {
+        [&](const world::Entity entity) {
       const auto& effect = world.get<components::ParticleEffectComponent>(entity);
       if (!effect.auto_apply || effect.effect_key.empty()) {
         return;
@@ -709,7 +709,7 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
   }
 
   world.forEach<components::ParticleEmitterComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (world.has<components::ParticleEffectComponent>(entity) &&
         world.get<components::ParticleEffectComponent>(entity).auto_apply) {
       return;
@@ -736,9 +736,9 @@ void ParticleSystem::update(ecs::World& world, float dt, float interpolation_alp
   }
 }
 
-std::size_t ParticleSystem::liveParticleCount(ecs::Entity entity) const {
+std::size_t ParticleSystem::liveParticleCount(world::Entity entity) const {
   (void)entity;
   return 0u;
 }
 
-}  // namespace karma::particles
+}  // namespace karma::visual::particles

@@ -6,7 +6,7 @@
 
 #include <assimp/scene.h>
 
-namespace karma::scene {
+namespace karma::world {
 
 namespace {
 
@@ -22,33 +22,33 @@ std::string safeName(std::string_view base, std::string_view fallback) {
   return base.empty() ? std::string(fallback) : std::string(base);
 }
 
-animation::InterpolationMode parseInterpolation(const Json& sampler) {
+world::InterpolationMode parseInterpolation(const Json& sampler) {
   const std::string interpolation = sampler.value("interpolation", std::string("LINEAR"));
   if (interpolation == "STEP") {
-    return animation::InterpolationMode::Step;
+    return world::InterpolationMode::Step;
   }
   if (interpolation == "CUBICSPLINE") {
-    return animation::InterpolationMode::CubicSpline;
+    return world::InterpolationMode::CubicSpline;
   }
-  return animation::InterpolationMode::Linear;
+  return world::InterpolationMode::Linear;
 }
 
-animation::AnimationChannel& findOrCreateChannel(animation::AnimationClip& clip,
+world::AnimationChannel& findOrCreateChannel(world::AnimationClip& clip,
                                                  uint32_t target_node_index,
                                                  const GltfScenePrefab& prefab) {
   const auto it = std::find_if(clip.channels.begin(),
                                clip.channels.end(),
-                               [&](const animation::AnimationChannel& channel) {
+                               [&](const world::AnimationChannel& channel) {
                                  return channel.target_node_index == target_node_index;
                                });
   if (it != clip.channels.end()) {
     return *it;
   }
 
-  animation::AnimationChannel channel{};
+  world::AnimationChannel channel{};
   channel.target_node_index = target_node_index;
   for (size_t skin_index = 0; skin_index < prefab.skins.size(); ++skin_index) {
-    const animation::Skin& skin = prefab.skins[skin_index];
+    const world::Skin& skin = prefab.skins[skin_index];
     const auto joint_it = std::find(skin.joint_node_indices.begin(),
                                     skin.joint_node_indices.end(),
                                     target_node_index);
@@ -65,11 +65,11 @@ animation::AnimationChannel& findOrCreateChannel(animation::AnimationClip& clip,
 
 }  // namespace
 
-std::vector<animation::AnimationClip> loadGltfAnimationClips(
+std::vector<world::AnimationClip> loadGltfAnimationClips(
     const GltfDocument& doc,
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
     const GltfScenePrefab& prefab) {
-  std::vector<animation::AnimationClip> clips;
+  std::vector<world::AnimationClip> clips;
   if (!doc.valid() ||
       !doc.json.contains("animations") ||
       !doc.json["animations"].is_array()) {
@@ -87,7 +87,7 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
       continue;
     }
 
-    animation::AnimationClip clip{};
+    world::AnimationClip clip{};
     clip.name = source.value("name", "Animation " + std::to_string(animation_index));
     clip.ticks_per_second = 1.0f;
     clip.source_index = static_cast<uint32_t>(animation_index);
@@ -115,7 +115,7 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
       }
       const uint32_t target_node_index = prefab_node_it->second;
       const std::string path = channel_json["target"].value("path", std::string{});
-      const animation::InterpolationMode interpolation = parseInterpolation(sampler);
+      const world::InterpolationMode interpolation = parseInterpolation(sampler);
 
       std::vector<float> times;
       size_t key_count = 0;
@@ -131,16 +131,16 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
         if (!readFloatAccessor(doc, sampler["output"].get<uint32_t>(), 3, values, &output_count)) {
           continue;
         }
-        const bool cubic = interpolation == animation::InterpolationMode::CubicSpline;
+        const bool cubic = interpolation == world::InterpolationMode::CubicSpline;
         if ((!cubic && output_count < key_count) || (cubic && output_count < key_count * 3)) {
           continue;
         }
-        std::vector<animation::Vec3Keyframe> keys;
+        std::vector<world::Vec3Keyframe> keys;
         keys.reserve(key_count);
         for (size_t key_index = 0; key_index < key_count; ++key_index) {
           const size_t base = cubic ? key_index * 9 : key_index * 3;
           const size_t value_base = cubic ? base + 3 : base;
-          animation::Vec3Keyframe key{};
+          world::Vec3Keyframe key{};
           key.time_seconds = times[key_index];
           key.value = {values[value_base], values[value_base + 1], values[value_base + 2]};
           if (cubic) {
@@ -149,7 +149,7 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
           }
           keys.push_back(key);
         }
-        animation::AnimationChannel& channel =
+        world::AnimationChannel& channel =
             findOrCreateChannel(clip, target_node_index, prefab);
         if (path == "translation") {
           channel.position_interpolation = interpolation;
@@ -164,16 +164,16 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
         if (!readFloatAccessor(doc, sampler["output"].get<uint32_t>(), 4, values, &output_count)) {
           continue;
         }
-        const bool cubic = interpolation == animation::InterpolationMode::CubicSpline;
+        const bool cubic = interpolation == world::InterpolationMode::CubicSpline;
         if ((!cubic && output_count < key_count) || (cubic && output_count < key_count * 3)) {
           continue;
         }
-        std::vector<animation::QuatKeyframe> keys;
+        std::vector<world::QuatKeyframe> keys;
         keys.reserve(key_count);
         for (size_t key_index = 0; key_index < key_count; ++key_index) {
           const size_t base = cubic ? key_index * 12 : key_index * 4;
           const size_t value_base = cubic ? base + 4 : base;
-          animation::QuatKeyframe key{};
+          world::QuatKeyframe key{};
           key.time_seconds = times[key_index];
           key.value = {values[value_base],
                        values[value_base + 1],
@@ -188,7 +188,7 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
           }
           keys.push_back(key);
         }
-        animation::AnimationChannel& channel =
+        world::AnimationChannel& channel =
             findOrCreateChannel(clip, target_node_index, prefab);
         channel.rotation_interpolation = interpolation;
         channel.rotation_keys = std::move(keys);
@@ -198,13 +198,13 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
         if (!readFloatAccessor(doc, sampler["output"].get<uint32_t>(), 1, values, &output_count)) {
           continue;
         }
-        const bool cubic = interpolation == animation::InterpolationMode::CubicSpline;
+        const bool cubic = interpolation == world::InterpolationMode::CubicSpline;
         const size_t divisor = key_count * (cubic ? 3 : 1);
         if (divisor == 0 || output_count < divisor || (output_count % divisor) != 0) {
           continue;
         }
         const size_t morph_target_count = output_count / divisor;
-        animation::MorphTargetTrack track{};
+        world::MorphTargetTrack track{};
         track.target_node_index = target_node_index;
         const Json& target_node_json = doc.json["nodes"][gltf_target_node];
         if (target_node_json.contains("mesh") && target_node_json["mesh"].is_number_unsigned()) {
@@ -213,7 +213,7 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
         track.interpolation = interpolation;
         track.weight_keys.reserve(key_count);
         for (size_t key_index = 0; key_index < key_count; ++key_index) {
-          animation::MorphWeightKeyframe key{};
+          world::MorphWeightKeyframe key{};
           key.time_seconds = times[key_index];
           key.values.resize(morph_target_count);
           if (cubic) {
@@ -244,10 +244,10 @@ std::vector<animation::AnimationClip> loadGltfAnimationClips(
   return clips;
 }
 
-std::vector<animation::AnimationClip> loadAnimationClips(
+std::vector<world::AnimationClip> loadAnimationClips(
     const aiScene& scene,
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name) {
-  std::vector<animation::AnimationClip> clips;
+  std::vector<world::AnimationClip> clips;
   clips.reserve(scene.mNumAnimations);
 
   for (unsigned int animation_index = 0; animation_index < scene.mNumAnimations; ++animation_index) {
@@ -258,7 +258,7 @@ std::vector<animation::AnimationClip> loadAnimationClips(
 
     const double ticks_per_second =
         source->mTicksPerSecond > 0.0 ? source->mTicksPerSecond : 1.0;
-    animation::AnimationClip clip{};
+    world::AnimationClip clip{};
     clip.name = safeName(source->mName.C_Str(), "Animation " + std::to_string(animation_index));
     clip.ticks_per_second = static_cast<float>(ticks_per_second);
     clip.duration_seconds = static_cast<float>(source->mDuration / ticks_per_second);
@@ -274,7 +274,7 @@ std::vector<animation::AnimationClip> loadAnimationClips(
         continue;
       }
 
-      animation::AnimationChannel channel{};
+      world::AnimationChannel channel{};
       channel.target_node_index = node_it->second;
       channel.position_keys.reserve(source_channel->mNumPositionKeys);
       channel.rotation_keys.reserve(source_channel->mNumRotationKeys);
@@ -282,21 +282,21 @@ std::vector<animation::AnimationClip> loadAnimationClips(
 
       for (unsigned int key_index = 0; key_index < source_channel->mNumPositionKeys; ++key_index) {
         const aiVectorKey& key = source_channel->mPositionKeys[key_index];
-        channel.position_keys.push_back(animation::Vec3Keyframe{
+        channel.position_keys.push_back(world::Vec3Keyframe{
             .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
             .value = toVec3(key.mValue),
         });
       }
       for (unsigned int key_index = 0; key_index < source_channel->mNumRotationKeys; ++key_index) {
         const aiQuatKey& key = source_channel->mRotationKeys[key_index];
-        channel.rotation_keys.push_back(animation::QuatKeyframe{
+        channel.rotation_keys.push_back(world::QuatKeyframe{
             .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
             .value = toQuat(key.mValue),
         });
       }
       for (unsigned int key_index = 0; key_index < source_channel->mNumScalingKeys; ++key_index) {
         const aiVectorKey& key = source_channel->mScalingKeys[key_index];
-        channel.scale_keys.push_back(animation::Vec3Keyframe{
+        channel.scale_keys.push_back(world::Vec3Keyframe{
             .time_seconds = static_cast<float>(key.mTime / ticks_per_second),
             .value = toVec3(key.mValue),
         });
@@ -313,4 +313,4 @@ std::vector<animation::AnimationClip> loadAnimationClips(
   return clips;
 }
 
-}  // namespace karma::scene
+}  // namespace karma::world

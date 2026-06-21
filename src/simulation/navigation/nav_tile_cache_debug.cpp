@@ -1,15 +1,15 @@
-#include "karma/simulation/navigation/nav_tile_cache.h"
+#include "karma/navigation.h"
 
 #include <cmath>
 
-#include "karma/rendering/renderer/device.h"
+#include "karma/rendering.h"
 
 namespace karma::navigation {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-math::Vec3 add(const math::Vec3& a, const math::Vec3& b) {
+math::Vec3 addVec(const math::Vec3& a, const math::Vec3& b) {
   return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
@@ -19,7 +19,7 @@ math::Vec3 rotateYaw(const math::Vec3& point, float yaw) {
   return {point.x * c - point.z * s, point.y, point.x * s + point.z * c};
 }
 
-void drawCircle(renderer::GraphicsDevice& graphics,
+void drawCircle(rendering::GraphicsDevice& graphics,
                 const math::Vec3& center,
                 float radius,
                 const math::Color& color,
@@ -38,7 +38,7 @@ void drawCircle(renderer::GraphicsDevice& graphics,
   }
 }
 
-void drawBox(renderer::GraphicsDevice& graphics,
+void drawBox(rendering::GraphicsDevice& graphics,
              const math::Vec3& center,
              const math::Vec3& half_extents,
              float yaw,
@@ -56,7 +56,7 @@ void drawBox(renderer::GraphicsDevice& graphics,
   };
   math::Vec3 corners[8];
   for (int i = 0; i < 8; ++i) {
-    corners[i] = add(center, rotateYaw(local[i], yaw));
+    corners[i] = addVec(center, rotateYaw(local[i], yaw));
   }
 
   const int edges[12][2] = {
@@ -71,7 +71,7 @@ void drawBox(renderer::GraphicsDevice& graphics,
 
 }  // namespace
 
-void NavTileCache::debugDraw(renderer::GraphicsDevice& graphics,
+void NavTileCache::debugDraw(rendering::GraphicsDevice& graphics,
                              const math::Color& color,
                              bool depth_test,
                              bool draw_tile_bounds) const {

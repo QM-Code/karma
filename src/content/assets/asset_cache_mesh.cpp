@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
-#include "karma/content/assets/asset_cache.h"
+#include "karma/assets.h"
 
-namespace karma::content::detail {
+namespace karma::assets::detail {
 
 namespace {
 
@@ -189,7 +189,7 @@ bool readBinaryVector(const std::vector<uint8_t>& bytes,
   return true;
 }
 
-std::vector<uint8_t> serializeMeshPayload(const geometry::MeshData& mesh) {
+std::vector<uint8_t> serializeMeshPayload(const world::MeshData& mesh) {
   std::vector<uint8_t> payload;
   appendBinaryVector(payload, mesh.vertices, appendVec3);
   appendBinaryVector(payload, mesh.normals, appendVec3);
@@ -225,9 +225,9 @@ std::vector<uint8_t> serializeMeshPayload(const geometry::MeshData& mesh) {
   return payload;
 }
 
-bool parseMeshPayload(const std::vector<uint8_t>& payload, geometry::MeshData& mesh) {
+bool parseMeshPayload(const std::vector<uint8_t>& payload, world::MeshData& mesh) {
   std::size_t offset = 0u;
-  geometry::MeshData parsed{};
+  world::MeshData parsed{};
   if (!readBinaryVector(payload, offset, parsed.vertices, readVec3Binary) ||
       !readBinaryVector(payload, offset, parsed.normals, readVec3Binary) ||
       !readBinaryVector(payload, offset, parsed.uvs, readVec2Binary) ||
@@ -249,7 +249,7 @@ bool parseMeshPayload(const std::vector<uint8_t>& payload, geometry::MeshData& m
   }
   parsed.morph_targets.reserve(morph_target_count);
   for (std::size_t i = 0u; i < morph_target_count; ++i) {
-    geometry::MeshData::MorphTarget target{};
+    world::MeshData::MorphTarget target{};
     if (!readBinaryVector(payload, offset, target.position_deltas, readVec3Binary) ||
         !readBinaryVector(payload, offset, target.normal_deltas, readVec3Binary) ||
         !readBinaryVector(payload, offset, target.tangent_deltas, readVec3Binary)) {
@@ -264,7 +264,7 @@ bool parseMeshPayload(const std::vector<uint8_t>& payload, geometry::MeshData& m
   }
   parsed.submeshes.reserve(submesh_count);
   for (std::size_t i = 0u; i < submesh_count; ++i) {
-    geometry::MeshSubmesh submesh{};
+    world::MeshSubmesh submesh{};
     if (!readU32(payload, offset, submesh.index_offset) ||
         !readU32(payload, offset, submesh.index_count) ||
         !readU32(payload, offset, submesh.material_slot)) {
@@ -279,7 +279,7 @@ bool parseMeshPayload(const std::vector<uint8_t>& payload, geometry::MeshData& m
   }
   parsed.material_slots.reserve(material_slot_count);
   for (std::size_t i = 0u; i < material_slot_count; ++i) {
-    geometry::MeshMaterialSlot slot{};
+    world::MeshMaterialSlot slot{};
     if (!readString(payload, offset, slot.name) ||
         !readString(payload, offset, slot.default_material_key)) {
       return false;
@@ -294,7 +294,7 @@ bool parseMeshPayload(const std::vector<uint8_t>& payload, geometry::MeshData& m
   return true;
 }
 
-std::vector<uint8_t> serializeMeshBlob(const geometry::MeshData& mesh) {
+std::vector<uint8_t> serializeMeshBlob(const world::MeshData& mesh) {
   std::vector<uint8_t> out;
   out.insert(out.end(), kMagic.begin(), kMagic.end());
   appendU32(out, AssetCache::kSchemaVersion);
@@ -303,7 +303,7 @@ std::vector<uint8_t> serializeMeshBlob(const geometry::MeshData& mesh) {
   return out;
 }
 
-std::optional<geometry::MeshData> deserializeMeshBlob(const std::vector<uint8_t>& bytes,
+std::optional<world::MeshData> deserializeMeshBlob(const std::vector<uint8_t>& bytes,
                                                       std::string* diagnostic) {
   if (bytes.size() < kMagic.size() + 8u ||
       !std::equal(kMagic.begin(), kMagic.end(), bytes.begin())) {
@@ -339,7 +339,7 @@ std::optional<geometry::MeshData> deserializeMeshBlob(const std::vector<uint8_t>
         const std::vector<uint8_t> payload(
             bytes.begin() + static_cast<std::ptrdiff_t>(offset),
             bytes.begin() + static_cast<std::ptrdiff_t>(offset + chunk_size));
-        geometry::MeshData mesh{};
+        world::MeshData mesh{};
         if (!parseMeshPayload(payload, mesh)) {
           if (diagnostic != nullptr) {
             *diagnostic = "cache mesh payload failed validation";
@@ -364,13 +364,13 @@ std::optional<geometry::MeshData> deserializeMeshBlob(const std::vector<uint8_t>
 
 }  // namespace
 
-std::vector<uint8_t> serializeMesh(const geometry::MeshData& mesh) {
+std::vector<uint8_t> serializeMesh(const world::MeshData& mesh) {
   return serializeMeshBlob(mesh);
 }
 
-std::optional<geometry::MeshData> deserializeMesh(const std::vector<uint8_t>& bytes,
+std::optional<world::MeshData> deserializeMesh(const std::vector<uint8_t>& bytes,
                                                   std::string* diagnostic) {
   return deserializeMeshBlob(bytes, diagnostic);
 }
 
-}  // namespace karma::content::detail
+}  // namespace karma::assets::detail

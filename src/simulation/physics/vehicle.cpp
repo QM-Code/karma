@@ -1,48 +1,53 @@
-#include "karma/simulation/physics/vehicle.hpp"
+#include "karma/physics.h"
 
 #include <utility>
 
-#include "karma/simulation/physics/backend.hpp"
+#include "private/physics/objects.hpp"
 
 namespace karma::physics {
 
-Vehicle::Vehicle(std::unique_ptr<karma::physics_backend::PhysicsVehicleBackend> backend)
-    : backend_(std::move(backend)) {}
+Vehicle::Vehicle() = default;
+
+Vehicle::Vehicle(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl)) {}
+
+Vehicle::Vehicle(Vehicle&& other) noexcept = default;
+Vehicle& Vehicle::operator=(Vehicle&& other) noexcept = default;
 
 Vehicle::~Vehicle() {
     destroy();
 }
 
 bool Vehicle::isValid() const {
-    return backend_ && backend_->isValid();
+    return impl_ && impl_->backend && impl_->backend->isValid();
 }
 
 void Vehicle::setInput(const PhysicsVehicleInput& input) {
-    if (backend_) {
-        backend_->setInput(input);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setInput(input);
     }
 }
 
 PhysicsVehicleState Vehicle::getState() const {
-    return backend_ ? backend_->getState() : PhysicsVehicleState{};
+    return impl_ && impl_->backend ? impl_->backend->getState() : PhysicsVehicleState{};
 }
 
 void Vehicle::setEnabled(bool enabled) {
-    if (backend_) {
-        backend_->setEnabled(enabled);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setEnabled(enabled);
     }
 }
 
 void Vehicle::destroy() {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return;
     }
-    backend_->destroy();
-    backend_.reset();
+    impl_->backend->destroy();
+    impl_.reset();
 }
 
 std::uintptr_t Vehicle::nativeHandle() const {
-    return backend_ ? backend_->nativeHandle() : 0;
+    return impl_ && impl_->backend ? impl_->backend->nativeHandle() : 0;
 }
 
 }  // namespace karma::physics

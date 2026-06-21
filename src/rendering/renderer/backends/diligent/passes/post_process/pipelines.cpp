@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format) {
   using post_process::ShaderFallback;
@@ -217,4 +217,4 @@ bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format
   return true;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

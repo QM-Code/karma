@@ -3,18 +3,18 @@
 #include <algorithm>
 #include <cmath>
 
-#include "karma/core/math/vec3.h"
-#include "karma/simulation/navigation/nav_geometry.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_mesh_agent.h"
-#include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/math.h"
+#include "karma/navigation.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace karma::navigation::detail {
 
-void rebuildNavMeshes(ecs::World& world, const content::AssetRegistry* assets) {
-  world.forEach<components::NavMeshComponent>([&](ecs::Entity entity) {
+void rebuildNavMeshes(world::World& world, const assets::AssetRegistry* assets) {
+  world.forEach<components::NavMeshComponent>([&](world::Entity entity) {
     auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
     if (!nav_mesh.enabled) {
       return;
@@ -66,13 +66,13 @@ void rebuildNavMeshes(ecs::World& world, const content::AssetRegistry* assets) {
   });
 }
 
-void moveAgents(ecs::World& world, float dt) {
+void moveAgents(world::World& world, float dt) {
   if (dt <= 0.0f) {
     return;
   }
 
   world.forEach<components::NavMeshAgentComponent, components::TransformComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& agent = world.get<components::NavMeshAgentComponent>(entity);
         if (!agent.enabled ||
             agent.path.empty() ||

@@ -1,13 +1,13 @@
-#include "karma/simulation/animation/animation_clip.h"
+#include "karma/world.h"
 
 #include <algorithm>
 #include <cmath>
 
-#include "karma/core/math/quat.h"
-#include "karma/core/math/scalar.h"
-#include "karma/core/math/vec3.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/math.h"
 
-namespace karma::animation {
+namespace karma::world {
 
 namespace {
 
@@ -236,4 +236,4 @@ void sampleAnimationClip(
   sampleAnimationClip(clip, time_seconds, loop, on_sample, {});
 }
 
-}  // namespace karma::animation
+}  // namespace karma::world

@@ -1,4 +1,4 @@
-#include "karma/platform/window/window.h"
+#include "karma/platform.h"
 
 namespace karma::platform {
 

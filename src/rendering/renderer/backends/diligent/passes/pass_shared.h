@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 struct alignas(16) LineConstants {
   float view_proj[16];
@@ -61,7 +61,7 @@ struct ParticleVertex {
   float uv[2] = {0.0f, 0.0f};
 };
 
-using ParticleInstanceGpu = renderer::ParticlePackedInstance;
+using ParticleInstanceGpu = rendering::ParticlePackedInstance;
 
 struct alignas(16) ParticleGpuMeshSample {
   float p0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -235,4 +235,4 @@ struct alignas(16) ParticleGpuStatsReadback {
 constexpr std::size_t kParticleQuadVertexCount = 6;
 constexpr std::size_t kParticleGpuTextureTableSize = 128;
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

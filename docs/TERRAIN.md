@@ -1,7 +1,7 @@
 # Terrain Rendering
 
 Karma terrain is authored with `components::TerrainComponent` and driven by
-`terrain::TerrainRuntimeModule`. The terrain plane is XZ and height displaces Y.
+`visual::terrain::TerrainRuntimeModule`. The terrain plane is XZ and height displaces Y.
 
 Sources:
 

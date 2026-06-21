@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "physics_example_common.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 
 #include <imgui.h>
 
@@ -115,9 +115,9 @@ class ConstraintUi final {
 };
 
 struct Pair {
-  ecs::Entity anchor{};
-  ecs::Entity body{};
-  ecs::Entity constraint{};
+  world::Entity anchor{};
+  world::Entity body{};
+  world::Entity constraint{};
   math::Vec3 anchor_position{};
   math::Vec3 body_position{};
 };
@@ -373,7 +373,7 @@ class ConstraintLabGame final : public app::GameInterface {
 
   std::shared_ptr<ConstraintState> state_;
   CameraRig camera_{};
-  std::vector<ecs::Entity> entities_;
+  std::vector<world::Entity> entities_;
   std::vector<Pair> pairs_;
 };
 
@@ -386,7 +386,7 @@ int main() {
   auto state = std::make_shared<karma::demo::physics_examples::ConstraintState>();
   karma::demo::physics_examples::ConstraintLabGame game(state);
   auto ui = std::make_shared<karma::demo::physics_examples::ConstraintUi>(state);
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [ui](karma::app::UIContext& ctx) { ui->draw(ctx); }));
 
   karma::app::EngineConfig config;

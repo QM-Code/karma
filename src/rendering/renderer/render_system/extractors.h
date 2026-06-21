@@ -4,13 +4,13 @@
 #include <glm/vec3.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "karma/rendering/renderer/camera.h"
-#include "karma/rendering/renderer/lights.h"
-#include "karma/world/components/camera.h"
-#include "karma/world/components/light.h"
-#include "karma/world/components/transform.h"
+#include "karma/rendering.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
-namespace karma::renderer::render_system {
+namespace karma::rendering::render_system {
 
 glm::vec3 toGlm(const math::Vec3& v);
 glm::quat toGlm(const math::Quat& q);
@@ -29,4 +29,4 @@ LightData toLightData(const components::LightComponent& light,
                       const components::TransformComponent& transform,
                       float interpolation_alpha);
 
-}  // namespace karma::renderer::render_system
+}  // namespace karma::rendering::render_system

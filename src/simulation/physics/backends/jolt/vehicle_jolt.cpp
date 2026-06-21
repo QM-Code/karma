@@ -1,6 +1,6 @@
-#include "karma/simulation/physics/backends/jolt/vehicle_jolt.hpp"
+#include "private/physics/backends/jolt/vehicle_jolt.hpp"
 
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -262,7 +262,7 @@ float nonZeroRatio(float value) {
 
 }  // namespace
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 PhysicsVehicleJolt::PhysicsVehicleJolt(PhysicsWorldJolt* world,
                                        JPH::VehicleConstraint* vehicle,
@@ -454,4 +454,4 @@ void PhysicsWorldJolt::removeVehicle(JPH::VehicleConstraint* constraint) {
     physicsSystem()->RemoveConstraint(constraint);
 }
 
-}  // namespace karma::physics_backend
+}  // namespace karma::physics::backend

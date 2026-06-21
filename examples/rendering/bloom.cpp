@@ -76,8 +76,8 @@ LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   };
 }
 
-renderer::MaterialDesc emissiveMaterial(const math::Color& color, float strength) {
-  renderer::MaterialDesc material{};
+rendering::MaterialDesc emissiveMaterial(const math::Color& color, float strength) {
+  rendering::MaterialDesc material{};
   material.base_color = {color.r * 0.35f, color.g * 0.35f, color.b * 0.35f, 1.0f};
   material.emissive_color = color;
   material.emissive_strength = strength;
@@ -98,9 +98,9 @@ class DiligentFxBloomExample final : public app::GameInterface {
     input->bindKey("cam_right", platform::Key::D);
     input->bindKey("cam_down", platform::Key::Q);
     input->bindKey("cam_up", platform::Key::E);
-    input->bindKey("cam_reset", platform::Key::R, input::Trigger::Pressed);
+    input->bindKey("cam_reset", platform::Key::R, app::Trigger::Pressed);
     input->bindMouse("cam_look", platform::MouseButton::Right);
-    input->bindKey("bloom_toggle", platform::Key::B, input::Trigger::Pressed);
+    input->bindKey("bloom_toggle", platform::Key::B, app::Trigger::Pressed);
     input->bindKey("bloom_decrease", platform::Key::Minus);
     input->bindKey("bloom_increase", platform::Key::Equal);
     input->bindKey("bloom_radius_decrease", platform::Key::LeftBracket);
@@ -108,19 +108,19 @@ class DiligentFxBloomExample final : public app::GameInterface {
 
     SceneBounds bounds{};
     bool spawned_city = false;
-    if (const content::GltfSceneAsset* cached_scene =
+    if (const assets::GltfSceneAsset* cached_scene =
             assets->findGltfSceneAsset(kBloomSceneKey)) {
       const helpers::GltfSceneAssetBounds asset_bounds =
           helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
       bounds = SceneBounds{.min = asset_bounds.min,
                            .max = asset_bounds.max,
                            .valid = asset_bounds.valid};
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+      const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
           *cached_scene,
-          scene::GltfSceneInstantiateOptions{
+          world::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = false,
           });
@@ -230,14 +230,14 @@ class DiligentFxBloomExample final : public app::GameInterface {
                                  emissiveMaterial({0.17f, 0.95f, 1.0f, 1.0f}, 7.0f));
   }
 
-  ecs::Entity spawnScaledMesh(const std::string& name,
+  world::Entity spawnScaledMesh(const std::string& name,
                               const std::string& mesh_key,
                               const std::string& material_key,
                               const glm::vec3& position,
                               const glm::vec3& scale,
                               const math::Quat& rotation = {},
                               bool shadow_visible = false) {
-    const ecs::Entity entity = world->createEntity();
+    const world::Entity entity = world->createEntity();
     world->setName(entity, name);
     components::TransformComponent transform{};
     transform.setPosition(toMath(position));
@@ -453,7 +453,7 @@ class DiligentFxBloomExample final : public app::GameInterface {
   }
 
   void configurePostProcess() {
-    post_process_ = renderer::PostProcessSettings{};
+    post_process_ = rendering::PostProcessSettings{};
     post_process_.bloom_enabled = true;
     post_process_.bloom_threshold = 0.48f;
     post_process_.bloom_intensity = 0.95f;
@@ -501,8 +501,8 @@ class DiligentFxBloomExample final : public app::GameInterface {
     }
   }
 
-  ecs::Entity camera_entity_{};
-  renderer::PostProcessSettings post_process_{};
+  world::Entity camera_entity_{};
+  rendering::PostProcessSettings post_process_{};
   math::Vec3 default_camera_position_{};
   float default_camera_yaw_ = 0.0f;
   float default_camera_pitch_ = 0.0f;

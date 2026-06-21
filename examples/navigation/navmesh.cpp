@@ -25,7 +25,7 @@ class NavMeshSceneExample final : public app::GameInterface {
  public:
   void onStart() override {
     nav_diag_.initializeFromEnvironment();
-    input->bindMouse("move_to", platform::MouseButton::Left, input::Trigger::Pressed);
+    input->bindMouse("move_to", platform::MouseButton::Left, app::Trigger::Pressed);
     buildScene();
     createNavigation();
     spawnCameraRig();
@@ -80,9 +80,9 @@ class NavMeshSceneExample final : public app::GameInterface {
     const std::string tank_mesh_key = importExampleMeshAsset(assets, "tank_final.glb");
 
     world_entity_ = helpers::spawnMeshAsset(*world, "World", world_mesh_key, {});
-    std::shared_ptr<geometry::MeshData> world_nav_mesh;
-    if (const geometry::MeshData* mesh = assets->findMeshAsset(world_mesh_key)) {
-      world_nav_mesh = std::make_shared<geometry::MeshData>(*mesh);
+    std::shared_ptr<world::MeshData> world_nav_mesh;
+    if (const world::MeshData* mesh = assets->findMeshAsset(world_mesh_key)) {
+      world_nav_mesh = std::make_shared<world::MeshData>(*mesh);
     }
     world->add(world_entity_, components::NavMeshSurfaceComponent{
                                 .area = navigation::kNavAreaDefault,
@@ -231,8 +231,8 @@ class NavMeshSceneExample final : public app::GameInterface {
 
     const auto& camera_transform = world->get<components::TransformComponent>(camera_entity_);
     const auto& camera = world->get<components::CameraComponent>(camera_entity_);
-    renderer::ScreenRay ray;
-    if (!renderer::screenPointToWorldRay(mouse_x,
+    rendering::ScreenRay ray;
+    if (!rendering::screenPointToWorldRay(mouse_x,
                                          mouse_y,
                                          width,
                                          height,
@@ -322,11 +322,11 @@ class NavMeshSceneExample final : public app::GameInterface {
   math::Vec3 start_{0.0f, 0.0f, 0.0f};
   math::Vec3 camera_follow_offset_{0.0f, 10.0f, 18.0f};
   float camera_pitch_ = -0.5f;
-  ecs::Entity world_entity_{};
-  ecs::Entity nav_mesh_entity_{};
-  ecs::Entity player_entity_{};
-  ecs::Entity target_marker_entity_{};
-  ecs::Entity camera_entity_{};
+  world::Entity world_entity_{};
+  world::Entity nav_mesh_entity_{};
+  world::Entity player_entity_{};
+  world::Entity target_marker_entity_{};
+  world::Entity camera_entity_{};
   bool bake_result_reported_ = false;
 };
 

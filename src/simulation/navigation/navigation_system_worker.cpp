@@ -1,5 +1,5 @@
-#include "karma/simulation/navigation/navigation_system.h"
-#include "karma/simulation/navigation/nav_query.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
 
 #include <algorithm>
 #include <condition_variable>
@@ -10,11 +10,11 @@
 #include <utility>
 #include <vector>
 
-#include "karma/core/time.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_mesh_agent.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/core.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 #include "detail/navigation_system_helpers.h"
 
 namespace karma::navigation {
@@ -23,8 +23,8 @@ namespace {
 using detail::entityKey;
 
 struct PathJob {
-  ecs::Entity agent_entity{};
-  ecs::Entity nav_mesh_entity{};
+  world::Entity agent_entity{};
+  world::Entity nav_mesh_entity{};
   uint64_t request_id = 0;
   uint64_t nav_mesh_build_version = 0;
   std::shared_ptr<const NavMeshSnapshot> snapshot;
@@ -37,8 +37,8 @@ struct PathJob {
 };
 
 struct PathResult {
-  ecs::Entity agent_entity{};
-  ecs::Entity nav_mesh_entity{};
+  world::Entity agent_entity{};
+  world::Entity nav_mesh_entity{};
   uint64_t request_id = 0;
   uint64_t nav_mesh_build_version = 0;
   double worker_queue_wait_ms = 0.0;
@@ -158,16 +158,16 @@ struct NavigationSystem::WorkerState {
   std::deque<PathJob> jobs;
   std::vector<PathResult> completed;
   std::shared_ptr<const NavMeshSnapshot> cached_snapshot;
-  ecs::Entity cached_nav_mesh_entity{};
+  world::Entity cached_nav_mesh_entity{};
   uint64_t cached_nav_mesh_build_version = 0;
   std::unique_ptr<NavQuery> cached_query;
   bool stop = false;
   std::thread worker;
 };
 
-void NavigationSystem::submitPathRequests(ecs::World& world) {
+void NavigationSystem::submitPathRequests(world::World& world) {
   world.forEach<components::NavMeshAgentComponent, components::TransformComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& agent = world.get<components::NavMeshAgentComponent>(entity);
         if (!agent.enabled || !agent.path_requested || !agent.has_destination) {
           return;
@@ -228,7 +228,7 @@ void NavigationSystem::submitPathRequests(ecs::World& world) {
       });
 }
 
-void NavigationSystem::applyCompletedPaths(ecs::World& world) {
+void NavigationSystem::applyCompletedPaths(world::World& world) {
   std::vector<PathResult> results = worker_->takeCompleted();
   for (PathResult& result : results) {
     if (!world.isAlive(result.agent_entity) ||
@@ -289,7 +289,7 @@ void NavigationSystem::applyCompletedPaths(ecs::World& world) {
   }
 }
 
-NavigationSystem::NavigationSystem(const content::AssetRegistry* assets)
+NavigationSystem::NavigationSystem(const assets::AssetRegistry* assets)
     : worker_(std::make_unique<WorkerState>()), assets_(assets) {}
 
 NavigationSystem::~NavigationSystem() = default;

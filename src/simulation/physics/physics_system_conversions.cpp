@@ -5,10 +5,10 @@
 #include <functional>
 #include <type_traits>
 
-#include "karma/core/math/glm.h"
-#include "karma/core/math/vec3.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/visibility.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::physics::system_internal {
 
@@ -22,7 +22,7 @@ math::Vec3 negateVec3(const math::Vec3& v) {
   return {-v.x, -v.y, -v.z};
 }
 
-int colliderShapeKind(const ecs::World& world, ecs::Entity entity) {
+int colliderShapeKind(const world::World& world, world::Entity entity) {
   if (!world.has<components::ColliderComponent>(entity)) {
     return -1;
   }
@@ -38,34 +38,34 @@ int colliderShapeKind(const ecs::World& world, ecs::Entity entity) {
   }
 }
 
-components::ColliderShapeType colliderShape(const ecs::World& world, ecs::Entity entity) {
+components::ColliderShapeType colliderShape(const world::World& world, world::Entity entity) {
   if (!world.has<components::ColliderComponent>(entity)) {
     return components::ColliderShapeType::Box;
   }
   return components::colliderShapeType(world.get<components::ColliderComponent>(entity).shape);
 }
 
-bool colliderIsTrigger(const ecs::World& world, ecs::Entity entity) {
+bool colliderIsTrigger(const world::World& world, world::Entity entity) {
   return world.has<components::ColliderComponent>(entity) &&
          world.get<components::ColliderComponent>(entity).is_trigger;
 }
 
-bool hasPhysicsCollider(const ecs::World& world, ecs::Entity entity) {
+bool hasPhysicsCollider(const world::World& world, world::Entity entity) {
   return world.has<components::ColliderComponent>(entity);
 }
 
-ecs::Entity entityFromKey(uint64_t key) {
+world::Entity entityFromKey(uint64_t key) {
   return {static_cast<uint32_t>(key >> 32), static_cast<uint32_t>(key & 0xFFFFFFFFu)};
 }
 
-bool collisionEnabled(ecs::World& world, ecs::Entity entity) {
+bool collisionEnabled(world::World& world, world::Entity entity) {
   if (!world.has<components::VisibilityComponent>(entity)) {
     return true;
   }
   return world.get<components::VisibilityComponent>(entity).collision_layer_mask != 0;
 }
 
-uint32_t collisionLayers(const ecs::World& world, ecs::Entity entity) {
+uint32_t collisionLayers(const world::World& world, world::Entity entity) {
   if (world.has<components::PhysicsCollisionFilterComponent>(entity)) {
     return world.get<components::PhysicsCollisionFilterComponent>(entity).layers;
   }
@@ -75,7 +75,7 @@ uint32_t collisionLayers(const ecs::World& world, ecs::Entity entity) {
   return 1u;
 }
 
-bool matchesCollisionLayerMask(const ecs::World& world, ecs::Entity entity, uint32_t mask) {
+bool matchesCollisionLayerMask(const world::World& world, world::Entity entity, uint32_t mask) {
   return (collisionLayers(world, entity) & mask) != 0u;
 }
 
@@ -97,7 +97,7 @@ float maxAbsScaleXZ(const math::Vec3& scale) {
   return std::max(std::abs(scale.x), std::abs(scale.z));
 }
 
-PhysicsMaterial materialForEntity(const ecs::World& world, ecs::Entity entity) {
+PhysicsMaterial materialForEntity(const world::World& world, world::Entity entity) {
   if (!world.has<components::PhysicsMaterialComponent>(entity)) {
     return {};
   }
@@ -108,7 +108,7 @@ PhysicsMaterial materialForEntity(const ecs::World& world, ecs::Entity entity) {
   };
 }
 
-PhysicsCollisionFilter collisionFilterForEntity(const ecs::World& world, ecs::Entity entity) {
+PhysicsCollisionFilter collisionFilterForEntity(const world::World& world, world::Entity entity) {
   if (!world.has<components::PhysicsCollisionFilterComponent>(entity)) {
     return {};
   }
@@ -809,8 +809,8 @@ std::size_t softBodySignature(const PhysicsSoftBodyDesc& desc) {
   return seed;
 }
 
-PhysicsShapeDesc buildShapeDesc(const ecs::World& world,
-                                ecs::Entity entity,
+PhysicsShapeDesc buildShapeDesc(const world::World& world,
+                                world::Entity entity,
                                 const components::TransformComponent& transform,
                                 const MeshColliderGeometryResolver& resolve_mesh_geometry) {
   const math::Vec3 scale = transform.getScale();
@@ -899,8 +899,8 @@ PhysicsShapeDesc buildShapeDesc(const ecs::World& world,
   return shape;
 }
 
-PhysicsBodyDesc buildBodyDesc(const ecs::World& world,
-                              ecs::Entity entity,
+PhysicsBodyDesc buildBodyDesc(const world::World& world,
+                              world::Entity entity,
                               const components::TransformComponent& transform,
                               const components::RigidbodyComponent* rigidbody,
                               PhysicsMotionType fallback_motion,
@@ -941,8 +941,8 @@ PhysicsBodyDesc buildBodyDesc(const ecs::World& world,
   return desc;
 }
 
-glm::vec3 groundProbeDimensions(const ecs::World& world,
-                                ecs::Entity entity,
+glm::vec3 groundProbeDimensions(const world::World& world,
+                                world::Entity entity,
                                 const components::TransformComponent& transform) {
   const math::Vec3 scale = transform.getScale();
   if (!world.has<components::ColliderComponent>(entity)) {
@@ -977,7 +977,7 @@ glm::vec3 groundProbeDimensions(const ecs::World& world,
       collider.shape);
 }
 
-ControllerShapeInfo controllerShapeInfo(const ecs::World& world, ecs::Entity entity) {
+ControllerShapeInfo controllerShapeInfo(const world::World& world, world::Entity entity) {
   if (!world.has<components::ColliderComponent>(entity)) {
     return {};
   }

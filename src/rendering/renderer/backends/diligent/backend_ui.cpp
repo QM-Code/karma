@@ -16,7 +16,7 @@
 #include <cstddef>
 #include <cstring>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 #if defined(NDEBUG)
@@ -135,14 +135,14 @@ void DiligentBackend::ensureUiResources() {
 
   Diligent::LayoutElement layout[] = {
       Diligent::LayoutElement{0, 0, 2, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(offsetof(karma::renderer::UIVertex, x)),
-                              static_cast<Diligent::Uint32>(sizeof(karma::renderer::UIVertex))},
+                              static_cast<Diligent::Uint32>(offsetof(karma::rendering::UIVertex, x)),
+                              static_cast<Diligent::Uint32>(sizeof(karma::rendering::UIVertex))},
       Diligent::LayoutElement{1, 0, 2, Diligent::VT_FLOAT32, false,
-                              static_cast<Diligent::Uint32>(offsetof(karma::renderer::UIVertex, u)),
-                              static_cast<Diligent::Uint32>(sizeof(karma::renderer::UIVertex))},
+                              static_cast<Diligent::Uint32>(offsetof(karma::rendering::UIVertex, u)),
+                              static_cast<Diligent::Uint32>(sizeof(karma::rendering::UIVertex))},
       Diligent::LayoutElement{2, 0, 4, Diligent::VT_UINT8, true,
-                              static_cast<Diligent::Uint32>(offsetof(karma::renderer::UIVertex, rgba)),
-                              static_cast<Diligent::Uint32>(sizeof(karma::renderer::UIVertex))}
+                              static_cast<Diligent::Uint32>(offsetof(karma::rendering::UIVertex, rgba)),
+                              static_cast<Diligent::Uint32>(sizeof(karma::rendering::UIVertex))}
   };
 
   if (!ui_cb_) {
@@ -260,7 +260,7 @@ void DiligentBackend::ensureUiResources() {
     desc.Usage = Diligent::USAGE_DYNAMIC;
     desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::renderer::UIVertex));
+    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::rendering::UIVertex));
     const auto vb_start = core::SteadyClock::now();
     device_->CreateBuffer(desc, nullptr, &ui_vb_);
     recordResourceCreation("ui", "vertex buffer", vb_start, core::SteadyClock::now());
@@ -285,7 +285,7 @@ void DiligentBackend::ensureUiResources() {
   }
 }
 
-void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
+void DiligentBackend::renderUi(const karma::rendering::UIDrawData& draw_data) {
   if (!context_ || !swap_chain_) {
     return;
   }
@@ -317,7 +317,7 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
     desc.Usage = Diligent::USAGE_DYNAMIC;
     desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::renderer::UIVertex));
+    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::rendering::UIVertex));
     ui_vb_.Release();
     const auto vb_start = core::SteadyClock::now();
     device_->CreateBuffer(desc, nullptr, &ui_vb_);
@@ -344,10 +344,10 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
   }
 
   {
-    Diligent::MapHelper<karma::renderer::UIVertex> vb_map(context_, ui_vb_, Diligent::MAP_WRITE,
+    Diligent::MapHelper<karma::rendering::UIVertex> vb_map(context_, ui_vb_, Diligent::MAP_WRITE,
                                                      Diligent::MAP_FLAG_DISCARD);
     std::memcpy(vb_map, draw_data.vertices.data(),
-                draw_data.vertices.size() * sizeof(karma::renderer::UIVertex));
+                draw_data.vertices.size() * sizeof(karma::rendering::UIVertex));
   }
   {
     Diligent::MapHelper<uint32_t> ib_map(context_, ui_ib_, Diligent::MAP_WRITE,
@@ -451,8 +451,8 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
       Diligent::ITextureView* desired = default_base_color_;
       const bool is_render_target_handle = (cmd.texture & kRenderTargetTextureHandleBit) != 0u;
       if (is_render_target_handle) {
-        const renderer::RenderTargetId target_id =
-            static_cast<renderer::RenderTargetId>(cmd.texture & ~kRenderTargetTextureHandleBit);
+        const rendering::RenderTargetId target_id =
+            static_cast<rendering::RenderTargetId>(cmd.texture & ~kRenderTargetTextureHandleBit);
         auto target_it = targets_.find(target_id);
         if (target_it != targets_.end() && target_it->second.color_srv) {
           desired = target_it->second.color_srv;
@@ -489,4 +489,4 @@ void DiligentBackend::renderUi(const karma::renderer::UIDrawData& draw_data) {
   finish_ui_timing();
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

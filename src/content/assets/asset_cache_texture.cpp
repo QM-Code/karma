@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "karma/content/assets/asset_cache.h"
+#include "karma/assets.h"
 
-namespace karma::content::detail {
+namespace karma::assets::detail {
 
 namespace {
 
@@ -143,7 +143,7 @@ bool parseTextureDesc(const std::vector<uint8_t>& payload, TextureAsset& texture
   }
   texture.desc.width = static_cast<int>(width);
   texture.desc.height = static_cast<int>(height);
-  texture.desc.format = static_cast<renderer::TextureFormat>(format);
+  texture.desc.format = static_cast<rendering::TextureFormat>(format);
   texture.desc.srgb = srgb != 0u;
   texture.desc.generate_mips = generate_mips != 0u;
   texture.desc.mip_levels = std::max(1u, mip_levels);
@@ -172,7 +172,7 @@ bool parseSubresources(const std::vector<uint8_t>& payload, TextureAsset& textur
         !readU64(payload, offset, row_stride)) {
       return false;
     }
-    texture.subresources.push_back(renderer::TextureUploadSubresource{
+    texture.subresources.push_back(rendering::TextureUploadSubresource{
         .mip_level = mip,
         .array_layer = layer,
         .width = static_cast<int>(width),
@@ -257,4 +257,4 @@ std::optional<TextureAsset> deserializeTexture(const std::vector<uint8_t>& bytes
   return deserializeTextureBlob(bytes, diagnostic);
 }
 
-}  // namespace karma::content::detail
+}  // namespace karma::assets::detail

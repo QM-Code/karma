@@ -9,9 +9,9 @@
 #include <unordered_map>
 #include <utility>
 
-#include "karma/rendering/renderer/material.h"
+#include "karma/rendering.h"
 
-namespace karma::renderer {
+namespace karma::rendering {
 
 /// \ingroup karma_rendering
 /// Internal keyed registry of shared material assets and reusable material variants.
@@ -267,4 +267,4 @@ class MaterialLibrary {
   uint64_t version_ = 0;
 };
 
-}  // namespace karma::renderer
+}  // namespace karma::rendering

@@ -11,7 +11,7 @@
 #include <DetourTileCacheBuilder.h>
 #include <Recast.h>
 
-#include "karma/simulation/navigation/nav_tile_cache.h"
+#include "karma/navigation.h"
 
 class dtNavMesh;
 

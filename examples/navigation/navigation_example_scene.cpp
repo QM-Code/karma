@@ -6,13 +6,13 @@
 
 #include <imgui.h>
 
-#include "karma/simulation/navigation/nav_geometry.h"
-#include "karma/simulation/navigation/nav_types.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
 
 namespace karma::demo::navigation_examples {
 namespace {
 
-void appendVertex(geometry::MeshData& mesh,
+void appendVertex(world::MeshData& mesh,
                   const math::Vec3& position,
                   const math::Vec3& normal = {0.0f, 1.0f, 0.0f}) {
   mesh.vertices.push_back({position.x, position.y, position.z});
@@ -21,7 +21,7 @@ void appendVertex(geometry::MeshData& mesh,
   mesh.tangents.push_back({1.0f, 0.0f, 0.0f, 1.0f});
 }
 
-void appendQuadMesh(geometry::MeshData& mesh,
+void appendQuadMesh(world::MeshData& mesh,
                     const math::Vec3& a,
                     const math::Vec3& b,
                     const math::Vec3& c,
@@ -34,11 +34,11 @@ void appendQuadMesh(geometry::MeshData& mesh,
   mesh.indices.insert(mesh.indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
 }
 
-geometry::MeshData makeQuadMesh(const math::Vec3& a,
+world::MeshData makeQuadMesh(const math::Vec3& a,
                                 const math::Vec3& b,
                                 const math::Vec3& c,
                                 const math::Vec3& d) {
-  geometry::MeshData mesh;
+  world::MeshData mesh;
   appendQuadMesh(mesh, a, b, c, d);
   return mesh;
 }
@@ -58,13 +58,13 @@ SurfaceBuild makeOpenSurface(float half_extent) {
 
 SurfaceBuild makeRingSurface() {
   SurfaceBuild out;
-  const std::array<geometry::MeshData, 4> quads = {
+  const std::array<world::MeshData, 4> quads = {
       makeQuadMesh({-8.0f, 0.0f, -8.0f}, {-1.4f, 0.0f, -8.0f}, {-1.4f, 0.0f, 8.0f}, {-8.0f, 0.0f, 8.0f}),
       makeQuadMesh({ 1.4f, 0.0f, -8.0f}, { 8.0f, 0.0f, -8.0f}, { 8.0f, 0.0f, 8.0f}, { 1.4f, 0.0f, 8.0f}),
       makeQuadMesh({-1.4f, 0.0f, -8.0f}, { 1.4f, 0.0f, -8.0f}, { 1.4f, 0.0f, -1.4f}, {-1.4f, 0.0f, -1.4f}),
       makeQuadMesh({-1.4f, 0.0f,  1.4f}, { 1.4f, 0.0f,  1.4f}, { 1.4f, 0.0f, 8.0f}, {-1.4f, 0.0f, 8.0f}),
   };
-  for (const geometry::MeshData& quad : quads) {
+  for (const world::MeshData& quad : quads) {
     const uint32_t base = static_cast<uint32_t>(out.mesh.vertices.size());
     out.mesh.vertices.insert(out.mesh.vertices.end(), quad.vertices.begin(), quad.vertices.end());
     out.mesh.normals.insert(out.mesh.normals.end(), quad.normals.begin(), quad.normals.end());
@@ -80,11 +80,11 @@ SurfaceBuild makeRingSurface() {
 
 SurfaceBuild makeOffMeshSurface() {
   SurfaceBuild out;
-  const geometry::MeshData left =
+  const world::MeshData left =
       makeQuadMesh({-8.0f, 0.0f, -4.0f}, {-1.5f, 0.0f, -4.0f}, {-1.5f, 0.0f, 4.0f}, {-8.0f, 0.0f, 4.0f});
-  const geometry::MeshData right =
+  const world::MeshData right =
       makeQuadMesh({1.5f, 0.0f, -4.0f}, {8.0f, 0.0f, -4.0f}, {8.0f, 0.0f, 4.0f}, {1.5f, 0.0f, 4.0f});
-  const geometry::MeshData water =
+  const world::MeshData water =
       makeQuadMesh({-1.5f, -0.03f, -4.0f}, {1.5f, -0.03f, -4.0f}, {1.5f, -0.03f, 4.0f}, {-1.5f, -0.03f, 4.0f});
   for (const auto* mesh : {&left, &right, &water}) {
     const uint32_t base = static_cast<uint32_t>(out.mesh.vertices.size());

@@ -6,9 +6,9 @@
 #include <string_view>
 
 #include "demo_asset_paths.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 #include "karma/karma.h"
-#include "karma/world/components/environment.h"
+#include "karma/components.h"
 
 #include <imgui.h>
 
@@ -68,7 +68,7 @@ class DemoUiContent final {
     ImGui::ColorEdit3("Tint", tint_);
     if (png_texture_) {
       ImGui::Text("PNG:");
-      ImGui::Image(imgui::toTextureId(png_texture_.handle),
+      ImGui::Image(ui::imgui::toTextureId(png_texture_.handle),
                    ImVec2(static_cast<float>(png_texture_.width),
                           static_cast<float>(png_texture_.height)));
     }
@@ -187,7 +187,7 @@ class DemoGame : public app::GameInterface {
   void onShutdown() override {}
 
  private:
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;
@@ -201,7 +201,7 @@ int main() {
   karma::demo::DemoGame game;
 
   auto ui_content = std::make_shared<karma::demo::DemoUiContent>();
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [ui_content](karma::app::UIContext& ctx) { ui_content->draw(ctx); }));
 
   karma::app::EngineConfig config;

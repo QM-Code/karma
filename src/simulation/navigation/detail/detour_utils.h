@@ -7,8 +7,8 @@
 #include <DetourNavMeshQuery.h>
 #include <DetourStatus.h>
 
-#include "karma/core/math/types.h"
-#include "karma/simulation/navigation/nav_types.h"
+#include "karma/math.h"
+#include "karma/navigation.h"
 
 namespace karma::navigation::detail {
 

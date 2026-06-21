@@ -1,4 +1,4 @@
-#include "karma/simulation/physics/physics_system.h"
+#include "karma/physics.h"
 #include "physics_system_internal.h"
 
 #include <optional>
@@ -28,7 +28,7 @@ const MeshColliderGeometry* PhysicsSystem::resolveMeshColliderGeometry(std::stri
   auto [inserted, _] = mesh_collider_geometry_cache_.emplace(std::move(key), std::move(*resolved));
   return &inserted->second;
 }
-void PhysicsSystem::update(ecs::World& world, float dt) {
+void PhysicsSystem::update(world::World& world, float dt) {
   // Keep backend object lifecycle, input commands, simulation stepping,
   // state publication, and event publication as separate ownership phases.
   syncSimulationObjects(world);
@@ -38,27 +38,27 @@ void PhysicsSystem::update(ecs::World& world, float dt) {
   publishSimulationEvents(world);
   cleanupStale(world);
 }
-void PhysicsSystem::syncSimulationObjects(ecs::World& world) {
+void PhysicsSystem::syncSimulationObjects(world::World& world) {
   syncRigidBodies(world);
   syncVehicles(world);
   syncConstraints(world);
   syncSoftBodies(world);
   syncCharacterControllerObject(world);
 }
-void PhysicsSystem::applySimulationInputs(ecs::World& world, float dt) {
+void PhysicsSystem::applySimulationInputs(world::World& world, float dt) {
   applyCharacterControllerInput(world, dt);
   applyBodyForces(world);
 }
 void PhysicsSystem::stepSimulation(float dt) {
   physics_.update(dt);
 }
-void PhysicsSystem::publishSimulationResults(ecs::World& world) {
+void PhysicsSystem::publishSimulationResults(world::World& world) {
   syncDynamicBodies(world);
   syncCharacterControllerTransform(world);
   syncVehicles(world);
   syncSoftBodies(world);
 }
-void PhysicsSystem::publishSimulationEvents(ecs::World& world) {
+void PhysicsSystem::publishSimulationEvents(world::World& world) {
   syncContactEvents(world);
   syncGroundContacts(world);
 }

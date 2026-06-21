@@ -78,7 +78,7 @@ The root `VERSION` file is the source of truth for:
 
 - `project(karma VERSION ...)`
 - generated package version files
-- generated public header `<karma/core/version.h>`
+- generated public header `<karma/version.h>`
 
 Karma uses SemVer `0.x` while the engine API is still moving quickly. Breaking
 changes are allowed before `1.0.0`, but the version should still be updated

@@ -1,10 +1,10 @@
-#include "karma/world/scene/transform_hierarchy.h"
+#include "karma/world.h"
 
-#include "karma/core/math/vec3.h"
-#include "karma/world/components/transform.h"
-#include "karma/core/math/quat.h"
+#include "karma/math.h"
+#include "karma/components.h"
+#include "karma/math.h"
 
-namespace karma::scene {
+namespace karma::world {
 
 namespace {
 
@@ -27,7 +27,7 @@ ComposedTransform composeTransform(const components::TransformComponent& parent,
 
 }  // namespace
 
-void updateWorldTransforms(ecs::World& world, const Scene& scene) {
+void updateWorldTransforms(world::World& world, const Scene& scene) {
   auto update_node = [&](auto&& self,
                          NodeId node_id,
                          const components::TransformComponent* parent_transform,
@@ -76,4 +76,4 @@ void updateWorldTransforms(ecs::World& world, const Scene& scene) {
   }
 }
 
-}  // namespace karma::scene
+}  // namespace karma::world

@@ -23,7 +23,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 
@@ -71,7 +71,7 @@ InstanceGpuData packInstanceTransform(const glm::mat4& transform,
 }
 
 struct ShadowBatchKey {
-  renderer::MeshId mesh = renderer::kInvalidMesh;
+  rendering::MeshId mesh = rendering::kInvalidMesh;
   Diligent::Uint32 index_offset = 0;
   Diligent::Uint32 index_count = 0;
   bool indexed = false;
@@ -107,7 +107,7 @@ struct DeformedShadowDraw {
   ShadowBatchKey key{};
   InstanceGpuData transform{};
   glm::vec4 bounds_sphere{0.0f};
-  renderer::DeformationId deformation = renderer::kInvalidDeformation;
+  rendering::DeformationId deformation = rendering::kInvalidDeformation;
 };
 
 #if defined(NDEBUG)
@@ -116,7 +116,7 @@ constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_NONE;
 constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
 #endif
 
-glm::mat4 buildLightView(const renderer::DirectionalLightData& light) {
+glm::mat4 buildLightView(const rendering::DirectionalLightData& light) {
   glm::vec3 dir = light.direction;
   if (glm::length(dir) < 1e-4f) {
     dir = glm::vec3(0.3f, -1.0f, 0.2f);
@@ -178,7 +178,7 @@ glm::vec4 transformBoundingSphere(const glm::mat4& world,
   return glm::vec4(center, radius);
 }
 
-glm::mat4 planarInstanceTransform(const renderer::PlanarInstanceData& instance) {
+glm::mat4 planarInstanceTransform(const rendering::PlanarInstanceData& instance) {
   const glm::vec3 position(instance.position_yaw);
   const float yaw = instance.position_yaw.w;
   const glm::vec3 scale(instance.scale_pad);
@@ -241,7 +241,7 @@ const std::array<glm::vec3, 6> kPointShadowFaceUps{
 
 }  // namespace
 
-void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
+void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
                                         float aspect,
                                         const glm::mat4& depth_fix,
                                         const glm::vec3& camera_position,
@@ -266,8 +266,8 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
     if (source_index >= lights_.size()) {
       continue;
     }
-    const renderer::LightData& source_light = lights_[source_index];
-    if (source_light.type != renderer::LightType::Point || !source_light.casts_shadows) {
+    const rendering::LightData& source_light = lights_[source_index];
+    if (source_light.type != rendering::LightType::Point || !source_light.casts_shadows) {
       continue;
     }
     const glm::vec3 to_camera = source_light.position - camera_position;
@@ -309,7 +309,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
   if (shadow_light_dir.y > 0.0f) {
     shadow_light_dir = -shadow_light_dir;
   }
-  renderer::DirectionalLightData shadow_light = directional_light_;
+  rendering::DirectionalLightData shadow_light = directional_light_;
   shadow_light.direction = shadow_light_dir;
   const glm::mat4 stable_light_view = buildLightView(shadow_light);
 
@@ -423,7 +423,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       const auto& instance = entry.second;
       if (instance.layer == layer &&
           instance.shadow_visible &&
-          instance.deformation != renderer::kInvalidDeformation) {
+          instance.deformation != rendering::kInvalidDeformation) {
         directional_shadow_needs_update = true;
         break;
       }
@@ -628,7 +628,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
     }
     const int32_t source_index =
         static_cast<int32_t>(out_state.point_shadow_light_source_indices[slot]);
-    const renderer::LightData& light = out_state.point_shadow_lights[slot];
+    const rendering::LightData& light = out_state.point_shadow_lights[slot];
     const bool slot_identity_changed = point_shadow_slot_source_index_[slot] != source_index;
     const bool slot_position_changed =
         glm::length(light.position - point_shadow_slot_position_[slot]) >
@@ -669,7 +669,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       }
       const glm::vec3 caster_center{bounds_sphere.x, bounds_sphere.y, bounds_sphere.z};
       for (Diligent::Uint32 slot = 0; slot < out_state.point_shadow_light_count; ++slot) {
-        const renderer::LightData& point_light = out_state.point_shadow_lights[slot];
+        const rendering::LightData& point_light = out_state.point_shadow_lights[slot];
         const float influence_radius = std::max(point_light.range, 0.0f) + bounds_sphere.w;
         if (influence_radius <= 0.0f) {
           continue;
@@ -762,7 +762,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
                                    const glm::mat4& transform,
                                    const glm::vec4& params,
                                    const glm::vec4& bounds_sphere,
-                                   renderer::DeformationId deformation) {
+                                   rendering::DeformationId deformation) {
       if (key.deformed) {
         deformed_shadow_draws.push_back(DeformedShadowDraw{
             .key = key,
@@ -807,7 +807,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
               .index_offset = submesh.index_offset,
               .index_count = submesh.index_count,
               .indexed = indexed_mesh && submesh.index_count > 0,
-              .deformed = instance.deformation != renderer::kInvalidDeformation,
+              .deformed = instance.deformation != rendering::kInvalidDeformation,
           };
           append_shadow_batch(key,
                               instance.transform,
@@ -821,7 +821,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
             .index_offset = 0,
             .index_count = mesh.index_count,
             .indexed = indexed_mesh,
-            .deformed = instance.deformation != renderer::kInvalidDeformation,
+            .deformed = instance.deformation != rendering::kInvalidDeformation,
         };
         append_shadow_batch(key,
                             instance.transform,
@@ -860,7 +860,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
                                 transform,
                                 params,
                                 world_bounds_sphere,
-                                renderer::kInvalidDeformation);
+                                rendering::kInvalidDeformation);
           }
         } else {
           const ShadowBatchKey key{
@@ -874,15 +874,15 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
                               transform,
                               params,
                               world_bounds_sphere,
-                              renderer::kInvalidDeformation);
+                              rendering::kInvalidDeformation);
         }
       };
-      if (record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
-        for (const renderer::PlanarInstanceData& instance : record.planar_instances) {
+      if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
+        for (const rendering::PlanarInstanceData& instance : record.planar_instances) {
           append_instanced_shadow(planarInstanceTransform(instance), instance.params);
         }
       } else {
-        for (const renderer::InstanceData& instance : record.instances) {
+        for (const rendering::InstanceData& instance : record.instances) {
           append_instanced_shadow(instance.transform, instance.params);
         }
       }
@@ -945,12 +945,12 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
       if (shadow_srb_) {
         if (!bindDeformationResources(shadow_srb_,
                                       mesh,
-                                      renderer::kInvalidDeformation)) {
+                                      rendering::kInvalidDeformation)) {
           continue;
         }
         context_->CommitShaderResources(shadow_srb_,
                                         Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-      } else if (!updateDeformationConstants(mesh, renderer::kInvalidDeformation)) {
+      } else if (!updateDeformationConstants(mesh, rendering::kInvalidDeformation)) {
         continue;
       }
       if (!ensure_instance_buffer(filtered_shadow_transforms.size())) {
@@ -1217,7 +1217,7 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
         continue;
       }
 
-      const renderer::LightData& point_light = out_state.point_shadow_lights[point_idx];
+      const rendering::LightData& point_light = out_state.point_shadow_lights[point_idx];
       const float range_ws = std::max(point_light.range, 0.1f);
       const float near_plane = std::max(range_ws * 0.02f, 0.05f);
       const float far_plane = std::max(range_ws, near_plane + 0.1f);
@@ -1335,4 +1335,4 @@ void DiligentBackend::renderShadowLayer(renderer::LayerId layer,
   out_state.point_shadow_ready = out_state.point_shadow_ready && any_point_shadow_slot_valid;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

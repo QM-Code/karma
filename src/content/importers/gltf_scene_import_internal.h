@@ -9,15 +9,15 @@
 
 #include <glm/mat4x4.hpp>
 
-#include "karma/content/importers/gltf_scene_import.h"
-#include "karma/rendering/renderer/material.h"
-#include "karma/simulation/animation/animation_clip.h"
-#include "karma/world/components/deformable_mesh.h"
-#include "karma/world/components/light.h"
-#include "karma/world/geometry/mesh_data.h"
-#include "karma/world/scene/scene.h"
+#include "karma/assets.h"
+#include "karma/rendering.h"
+#include "karma/world.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
-namespace karma::scene {
+namespace karma::world {
 
 /// Sentinel material index for imported glTF scene data.
 constexpr uint32_t kInvalidGltfSceneMaterial = std::numeric_limits<uint32_t>::max();
@@ -44,14 +44,14 @@ struct GltfSceneImportOptions {
 /// One renderable primitive inside an imported glTF node.
 struct GltfScenePrefabPrimitive {
   std::string name;
-  geometry::MeshData mesh;
-  renderer::MaterialDesc material;
+  world::MeshData mesh;
+  rendering::MaterialDesc material;
   /// Renderer-facing material index in the Assimp material table.
   uint32_t source_material_index = kInvalidGltfSceneMaterial;
   /// Raw glTF primitive material index before backend/importer material remapping.
   uint32_t source_gltf_material_index = kInvalidGltfSceneMaterial;
   uint32_t source_mesh_index = kInvalidGltfSceneNode;
-  uint32_t skin_index = animation::kInvalidAnimationIndex;
+  uint32_t skin_index = world::kInvalidAnimationIndex;
   /// Default morph target weights authored on the source glTF mesh.
   std::vector<float> morph_weights;
   std::vector<components::VertexSkinInfluence> vertex_influences;
@@ -87,10 +87,10 @@ struct GltfScenePrefab {
   std::filesystem::path source_path;
   uint32_t root_node = kInvalidGltfSceneNode;
   std::vector<GltfScenePrefabNode> nodes;
-  std::vector<std::shared_ptr<const renderer::ImportedMaterialData>> imported_materials;
-  std::vector<animation::Skeleton> skeletons;
-  std::vector<animation::Skin> skins;
-  std::vector<animation::AnimationClip> animations;
+  std::vector<std::shared_ptr<const rendering::ImportedMaterialData>> imported_materials;
+  std::vector<world::Skeleton> skeletons;
+  std::vector<world::Skin> skins;
+  std::vector<world::AnimationClip> animations;
   std::vector<std::string> diagnostics;
 
   bool valid() const {
@@ -102,16 +102,16 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
                                     const GltfSceneLoadOptions& options = {});
 
 GltfSceneImportResult instantiateGltfScenePrefab(
-    ecs::World& world,
-    scene::Scene& scene,
-    content::AssetRegistry& assets,
+    world::World& world,
+    world::Scene& scene,
+    assets::AssetRegistry& assets,
     const GltfScenePrefab& prefab,
     const GltfScenePrefabInstantiateOptions& options = {});
 
-GltfSceneImportResult importGltfScene(ecs::World& world,
-                                      scene::Scene& scene,
-                                      content::AssetRegistry& assets,
+GltfSceneImportResult importGltfScene(world::World& world,
+                                      world::Scene& scene,
+                                      assets::AssetRegistry& assets,
                                       const std::filesystem::path& path,
                                       const GltfSceneImportOptions& options = {});
 
-}  // namespace karma::scene
+}  // namespace karma::world

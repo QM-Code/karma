@@ -10,7 +10,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace karma::demo {
 
@@ -67,19 +67,19 @@ class PostwarCityExample final : public app::GameInterface {
     SceneBounds bounds{};
     bool spawned_city = false;
 
-    if (const content::GltfSceneAsset* cached_scene =
+    if (const assets::GltfSceneAsset* cached_scene =
             assets->findGltfSceneAsset(kPostwarCitySceneKey)) {
       const helpers::GltfSceneAssetBounds asset_bounds =
           helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
       bounds = SceneBounds{.min = asset_bounds.min,
                            .max = asset_bounds.max,
                            .valid = asset_bounds.valid};
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+      const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
           *cached_scene,
-          scene::GltfSceneInstantiateOptions{
+          world::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = false,
           });
@@ -168,7 +168,7 @@ class PostwarCityExample final : public app::GameInterface {
   void onShutdown() override {}
 
  private:
-  void logSceneSummary(const content::GltfSceneAsset& scene_asset,
+  void logSceneSummary(const assets::GltfSceneAsset& scene_asset,
                        const SceneBounds& bounds) const {
     const helpers::GltfSceneAssetStats stats =
         helpers::summarizeGltfSceneAsset(*assets, scene_asset);
@@ -256,7 +256,7 @@ class PostwarCityExample final : public app::GameInterface {
                               true);
   }
 
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;

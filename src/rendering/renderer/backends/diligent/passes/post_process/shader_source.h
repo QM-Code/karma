@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace karma::renderer_backend::post_process {
+namespace karma::rendering::backend::post_process {
 
 enum class ShaderFallback {
   FullscreenTriangle,
@@ -14,4 +14,4 @@ enum class ShaderFallback {
 
 std::string loadShader(const char* filename, ShaderFallback fallback);
 
-}  // namespace karma::renderer_backend::post_process
+}  // namespace karma::rendering::backend::post_process

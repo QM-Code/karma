@@ -1,4 +1,4 @@
-#include "karma/content/prefabs/component_serializer_registry.h"
+#include "karma/prefabs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,22 +10,22 @@
 #include <variant>
 #include <vector>
 
-#include "karma/world/components/animator.h"
-#include "karma/world/components/character_controller.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/light.h"
-#include "karma/world/components/light_pulse.h"
-#include "karma/world/components/instanced_mesh.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/particle_effect.h"
-#include "karma/world/components/particle_effect_override.h"
-#include "karma/world/components/particle_emitter.h"
-#include "karma/world/components/rigidbody.h"
-#include "karma/world/components/tag.h"
-#include "karma/world/components/terrain.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/visibility.h"
-#include "karma/world/components/volumetric.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::prefabs {
 
@@ -45,11 +45,11 @@ Json toJson(const math::Color& value) {
   return Json::array({value.r, value.g, value.b, value.a});
 }
 
-const char* instanceLayoutName(renderer::InstanceGpuLayout layout) {
+const char* instanceLayoutName(rendering::InstanceGpuLayout layout) {
   switch (layout) {
-    case renderer::InstanceGpuLayout::Matrix4x4Params:
+    case rendering::InstanceGpuLayout::Matrix4x4Params:
       return "matrix4x4_params";
-    case renderer::InstanceGpuLayout::PositionYawScaleParams:
+    case rendering::InstanceGpuLayout::PositionYawScaleParams:
       return "position_yaw_scale_params";
   }
   return "matrix4x4_params";
@@ -57,7 +57,7 @@ const char* instanceLayoutName(renderer::InstanceGpuLayout layout) {
 
 bool readInstanceLayout(const Json& object,
                         std::string_view key,
-                        renderer::InstanceGpuLayout& out) {
+                        rendering::InstanceGpuLayout& out) {
   const auto it = object.find(key);
   if (it == object.end()) {
     return true;
@@ -67,21 +67,21 @@ bool readInstanceLayout(const Json& object,
   }
   const std::string value = it->get<std::string>();
   if (value == "matrix4x4_params") {
-    out = renderer::InstanceGpuLayout::Matrix4x4Params;
+    out = rendering::InstanceGpuLayout::Matrix4x4Params;
     return true;
   }
   if (value == "position_yaw_scale_params") {
-    out = renderer::InstanceGpuLayout::PositionYawScaleParams;
+    out = rendering::InstanceGpuLayout::PositionYawScaleParams;
     return true;
   }
   return false;
 }
 
-const char* instanceLodRenderModeName(renderer::InstanceLodRenderMode mode) {
+const char* instanceLodRenderModeName(rendering::InstanceLodRenderMode mode) {
   switch (mode) {
-    case renderer::InstanceLodRenderMode::Mesh:
+    case rendering::InstanceLodRenderMode::Mesh:
       return "mesh";
-    case renderer::InstanceLodRenderMode::UprightBillboard:
+    case rendering::InstanceLodRenderMode::UprightBillboard:
       return "upright_billboard";
   }
   return "mesh";
@@ -89,7 +89,7 @@ const char* instanceLodRenderModeName(renderer::InstanceLodRenderMode mode) {
 
 bool readInstanceLodRenderMode(const Json& object,
                                std::string_view key,
-                               renderer::InstanceLodRenderMode& out) {
+                               rendering::InstanceLodRenderMode& out) {
   const auto it = object.find(key);
   if (it == object.end()) {
     return true;
@@ -99,11 +99,11 @@ bool readInstanceLodRenderMode(const Json& object,
   }
   const std::string value = it->get<std::string>();
   if (value == "mesh") {
-    out = renderer::InstanceLodRenderMode::Mesh;
+    out = rendering::InstanceLodRenderMode::Mesh;
     return true;
   }
   if (value == "upright_billboard") {
-    out = renderer::InstanceLodRenderMode::UprightBillboard;
+    out = rendering::InstanceLodRenderMode::UprightBillboard;
     return true;
   }
   return false;
@@ -1062,7 +1062,7 @@ std::optional<components::AnimatorComponent> deserializeAnimator(const Json& jso
       if (!clip_json.is_object()) {
         return std::nullopt;
       }
-      animation::AnimationClip clip{};
+      world::AnimationClip clip{};
       if (!readString(clip_json, "name", clip.name)) {
         return std::nullopt;
       }
@@ -1122,7 +1122,7 @@ std::optional<components::AnimatorComponent> deserializeAnimator(const Json& jso
       }
       components::AnimatorState state{};
       std::string motion_type;
-      uint32_t clip_index = animation::kInvalidAnimationIndex;
+      uint32_t clip_index = world::kInvalidAnimationIndex;
       if (!readString(state_json, "name", state.name) ||
           !readString(state_json, "motion_type", motion_type) ||
           !readUint32(state_json, "clip_index", clip_index) ||
@@ -1146,7 +1146,7 @@ std::optional<components::AnimatorComponent> deserializeAnimator(const Json& jso
             children_it != blend_it->end() && children_it->is_array()) {
           for (const Json& child_json : *children_it) {
             components::AnimatorBlendTree1DChild child{};
-            uint32_t child_clip = animation::kInvalidAnimationIndex;
+            uint32_t child_clip = world::kInvalidAnimationIndex;
             if (!readUint32(child_json, "clip_index", child_clip) ||
                 !readFloat(child_json, "threshold", child.threshold) ||
                 !readFloat(child_json, "speed", child.speed)) {
@@ -2389,16 +2389,16 @@ void registerComponent(ComponentSerializerRegistry& registry,
   registry.registerSerializer(ComponentSerializer{
       .type_name = std::move(type_name),
       .has =
-          [](const ecs::World& world, ecs::Entity entity) {
+          [](const world::World& world, world::Entity entity) {
             return world.has<Component>(entity);
           },
       .serialize =
-          [serialize = std::move(serialize)](const ecs::World& world, ecs::Entity entity) {
+          [serialize = std::move(serialize)](const world::World& world, world::Entity entity) {
             return serialize(world.get<Component>(entity));
           },
       .deserialize =
           [deserialize = std::move(deserialize)](
-              ecs::World& world, ecs::Entity entity, const Json& json) {
+              world::World& world, world::Entity entity, const Json& json) {
             std::optional<Component> component = deserialize(json);
             if (!component.has_value()) {
               return false;

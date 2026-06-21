@@ -1,4 +1,4 @@
-#include "karma/content/prefabs/prefab.h"
+#include "karma/prefabs.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -12,12 +12,12 @@
 
 #include <spdlog/spdlog.h>
 
-#include "karma/content/assets/asset_package.h"
-#include "karma/content/prefabs/component_serializer_registry.h"
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
-#include "karma/world/components/tag.h"
-#include "karma/world/scene/transform_hierarchy.h"
+#include "karma/assets.h"
+#include "karma/prefabs.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace karma::prefabs {
 
@@ -258,22 +258,22 @@ Json toJson(const PrefabDocument& document) {
   };
 }
 
-uint64_t entityKey(ecs::Entity entity) {
+uint64_t entityKey(world::Entity entity) {
   return (static_cast<uint64_t>(entity.index) << 32u) |
          static_cast<uint64_t>(entity.generation);
 }
 
 struct CachedPrefabPackage {
-  content::AssetRegistry* assets = nullptr;
-  content::AssetPackageHandle handle;
+  assets::AssetRegistry* assets = nullptr;
+  assets::AssetPackageHandle handle;
   uint32_t ref_count = 0u;
 };
 
 std::unordered_map<std::string, CachedPrefabPackage> g_cached_prefab_packages;
 std::unordered_map<uint64_t, std::string> g_package_by_root_entity;
-content::AssetRegistry* g_default_prefab_assets = nullptr;
+assets::AssetRegistry* g_default_prefab_assets = nullptr;
 
-std::string packageCacheKey(content::AssetRegistry* assets,
+std::string packageCacheKey(assets::AssetRegistry* assets,
                             const std::filesystem::path& manifest_path) {
   std::error_code ec;
   std::filesystem::path absolute = std::filesystem::absolute(manifest_path, ec);
@@ -287,17 +287,17 @@ std::string packageCacheKey(content::AssetRegistry* assets,
 struct PackageAcquireResult {
   bool success = true;
   std::string cache_key;
-  std::optional<content::AssetPackageHandle> handle;
+  std::optional<assets::AssetPackageHandle> handle;
 };
 
-PackageAcquireResult acquirePrefabPackage(content::AssetRegistry* assets,
+PackageAcquireResult acquirePrefabPackage(assets::AssetRegistry* assets,
                                           const std::filesystem::path& prefab_path) {
   PackageAcquireResult result{};
   if (assets == nullptr) {
     assets = g_default_prefab_assets;
   }
   const std::filesystem::path manifest_path =
-      content::resolveAssetPackagePath(prefab_path.parent_path());
+      assets::resolveAssetPackagePath(prefab_path.parent_path());
   std::error_code ec;
   if (!std::filesystem::exists(manifest_path, ec)) {
     return result;
@@ -325,8 +325,8 @@ PackageAcquireResult acquirePrefabPackage(content::AssetRegistry* assets,
   }
 
   std::string diagnostic;
-  std::optional<content::AssetPackageHandle> package =
-      content::importAssetPackage(*assets, manifest_path, &diagnostic);
+  std::optional<assets::AssetPackageHandle> package =
+      assets::importAssetPackage(*assets, manifest_path, &diagnostic);
   if (!package.has_value()) {
     spdlog::error("Failed to import prefab asset package '{}': {}",
                   manifest_path.string(),
@@ -357,45 +357,45 @@ void releasePrefabPackageByKey(const std::string& cache_key) {
   }
   if (cached_it->second.ref_count == 0u) {
     if (cached_it->second.assets != nullptr) {
-      content::unloadAssetPackage(*cached_it->second.assets, cached_it->second.handle);
+      assets::unloadAssetPackage(*cached_it->second.assets, cached_it->second.handle);
     }
     g_cached_prefab_packages.erase(cached_it);
   }
 }
 
-std::string entityName(const ecs::World& world, ecs::Entity entity) {
+std::string entityName(const world::World& world, world::Entity entity) {
   if (!world.isAlive(entity) || !world.has<components::TagComponent>(entity)) {
     return {};
   }
   return world.get<components::TagComponent>(entity).name;
 }
 
-void collectSubtree(const ecs::World& world,
-                    const scene::Scene& scene,
-                    scene::NodeId node_id,
-                    std::vector<scene::NodeId>& out_nodes) {
+void collectSubtree(const world::World& world,
+                    const world::Scene& scene,
+                    world::NodeId node_id,
+                    std::vector<world::NodeId>& out_nodes) {
   if (!scene.isAlive(node_id)) {
     return;
   }
-  const scene::Node& node = scene.get(node_id);
+  const world::Node& node = scene.get(node_id);
   if (!node.entity.isValid() || !world.isAlive(node.entity)) {
     return;
   }
   out_nodes.push_back(node_id);
-  for (const scene::NodeId child : node.children) {
+  for (const world::NodeId child : node.children) {
     collectSubtree(world, scene, child, out_nodes);
   }
 }
 
-PrefabDocument buildDocument(const ecs::World& world,
-                             const scene::Scene& scene,
-                             ecs::Entity root,
+PrefabDocument buildDocument(const world::World& world,
+                             const world::Scene& scene,
+                             world::Entity root,
                              const PrefabSaveOptions& options) {
   ensureBuiltinComponentSerializers();
   const ComponentSerializerRegistry& registry = componentSerializerRegistry();
 
-  std::vector<scene::NodeId> scene_nodes;
-  const scene::NodeId root_node = scene.findNode(root);
+  std::vector<world::NodeId> scene_nodes;
+  const world::NodeId root_node = scene.findNode(root);
   if (options.include_children && scene.isAlive(root_node)) {
     collectSubtree(world, scene, root_node, scene_nodes);
   } else if (scene.isAlive(root_node)) {
@@ -405,14 +405,14 @@ PrefabDocument buildDocument(const ecs::World& world,
   PrefabDocument document{};
   document.root = 0;
 
-  std::unordered_map<scene::NodeId, size_t> index_by_node;
+  std::unordered_map<world::NodeId, size_t> index_by_node;
   if (!scene_nodes.empty()) {
     document.nodes.reserve(scene_nodes.size());
     for (size_t index = 0; index < scene_nodes.size(); ++index) {
       index_by_node[scene_nodes[index]] = index;
     }
     for (size_t index = 0; index < scene_nodes.size(); ++index) {
-      const scene::Node& scene_node = scene.get(scene_nodes[index]);
+      const world::Node& scene_node = scene.get(scene_nodes[index]);
       PrefabNode prefab_node{};
       prefab_node.id = static_cast<uint32_t>(index);
       prefab_node.name = entityName(world, scene_node.entity);
@@ -450,24 +450,24 @@ PrefabDocument buildDocument(const ecs::World& world,
   return document;
 }
 
-void destroyCreated(ecs::World& world,
-                    scene::Scene& scene,
-                    const std::vector<ecs::Entity>& entities,
-                    const std::vector<scene::NodeId>& nodes) {
+void destroyCreated(world::World& world,
+                    world::Scene& scene,
+                    const std::vector<world::Entity>& entities,
+                    const std::vector<world::NodeId>& nodes) {
   for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
     if (scene.isAlive(*it)) {
       scene.destroyNode(*it);
     }
   }
-  for (const ecs::Entity entity : entities) {
+  for (const world::Entity entity : entities) {
     if (world.isAlive(entity)) {
       world.destroyEntity(entity);
     }
   }
 }
 
-bool deserializeComponents(ecs::World& world,
-                           ecs::Entity entity,
+bool deserializeComponents(world::World& world,
+                           world::Entity entity,
                            const PrefabNode& node,
                            const std::filesystem::path& path) {
   ComponentSerializerRegistry& registry = componentSerializerRegistry();
@@ -511,8 +511,8 @@ bool deserializeComponents(ecs::World& world,
   return true;
 }
 
-void applyRootTransform(ecs::World& world,
-                        ecs::Entity root,
+void applyRootTransform(world::World& world,
+                        world::Entity root,
                         const components::TransformComponent& root_transform) {
   components::TransformComponent saved{};
   if (world.has<components::TransformComponent>(root)) {
@@ -524,30 +524,30 @@ void applyRootTransform(ecs::World& world,
   world.add(root, final_transform);
 }
 
-void ensureTransformsForHierarchy(ecs::World& world, ecs::Entity entity) {
+void ensureTransformsForHierarchy(world::World& world, world::Entity entity) {
   if (!world.has<components::TransformComponent>(entity)) {
     world.add(entity, components::TransformComponent{});
   }
 }
 
-void collectSubtreeNodes(const scene::Scene& scene,
-                         scene::NodeId root,
-                         std::vector<scene::NodeId>& out_nodes) {
+void collectSubtreeNodes(const world::Scene& scene,
+                         world::NodeId root,
+                         std::vector<world::NodeId>& out_nodes) {
   if (!scene.isAlive(root)) {
     return;
   }
   out_nodes.push_back(root);
-  const scene::Node& node = scene.get(root);
-  for (const scene::NodeId child : node.children) {
+  const world::Node& node = scene.get(root);
+  for (const world::NodeId child : node.children) {
     collectSubtreeNodes(scene, child, out_nodes);
   }
 }
 
 }  // namespace
 
-bool savePrefab(const ecs::World& world,
-                const scene::Scene& scene,
-                ecs::Entity root,
+bool savePrefab(const world::World& world,
+                const world::Scene& scene,
+                world::Entity root,
                 const std::filesystem::path& input_path,
                 const PrefabSaveOptions& options) {
   if (!world.isAlive(root)) {
@@ -583,8 +583,8 @@ bool savePrefab(const ecs::World& world,
 }
 
 std::optional<PrefabInstance> instantiatePrefab(
-    ecs::World& world,
-    scene::Scene& scene,
+    world::World& world,
+    world::Scene& scene,
     const std::filesystem::path& input_path,
     const PrefabInstantiateDesc& desc) {
   ensureBuiltinComponentSerializers();
@@ -599,14 +599,14 @@ std::optional<PrefabInstance> instantiatePrefab(
   }
 
   PrefabInstance instance{};
-  std::vector<ecs::Entity> created_entities;
-  std::vector<scene::NodeId> created_nodes;
+  std::vector<world::Entity> created_entities;
+  std::vector<world::NodeId> created_nodes;
   created_entities.reserve(document->nodes.size());
   created_nodes.reserve(document->nodes.size());
 
   for (size_t index = 0; index < document->nodes.size(); ++index) {
-    ecs::Entity entity = world.createEntity();
-    scene::NodeId scene_node = scene.createNode(entity);
+    world::Entity entity = world.createEntity();
+    world::NodeId scene_node = scene.createNode(entity);
     created_entities.push_back(entity);
     created_nodes.push_back(scene_node);
     instance.entities.push_back(entity);
@@ -654,11 +654,11 @@ std::optional<PrefabInstance> instantiatePrefab(
     g_package_by_root_entity[entityKey(instance.root)] = package.cache_key;
   }
   applyRootTransform(world, instance.root, desc.root_transform);
-  scene::updateWorldTransforms(world, scene);
+  world::updateWorldTransforms(world, scene);
   return instance;
 }
 
-bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root) {
+bool destroyPrefab(world::World& world, world::Scene& scene, world::Entity root) {
   if (!world.isAlive(root)) {
     return false;
   }
@@ -671,20 +671,20 @@ bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root) {
     g_package_by_root_entity.erase(package_it);
   }
 
-  const scene::NodeId root_node = scene.findNode(root);
+  const world::NodeId root_node = scene.findNode(root);
   if (!scene.isAlive(root_node)) {
     world.destroyEntity(root);
     releasePrefabPackageByKey(package_key);
     return true;
   }
 
-  std::vector<scene::NodeId> nodes;
+  std::vector<world::NodeId> nodes;
   collectSubtreeNodes(scene, root_node, nodes);
 
-  std::vector<ecs::Entity> entities;
+  std::vector<world::Entity> entities;
   entities.reserve(nodes.size());
-  for (const scene::NodeId node_id : nodes) {
-    const scene::Node& node = scene.get(node_id);
+  for (const world::NodeId node_id : nodes) {
+    const world::Node& node = scene.get(node_id);
     if (node.entity.isValid()) {
       entities.push_back(node.entity);
     }
@@ -695,7 +695,7 @@ bool destroyPrefab(ecs::World& world, scene::Scene& scene, ecs::Entity root) {
       scene.destroyNode(*it);
     }
   }
-  for (const ecs::Entity entity : entities) {
+  for (const world::Entity entity : entities) {
     if (world.isAlive(entity)) {
       world.destroyEntity(entity);
     }
@@ -708,7 +708,7 @@ void clearPrefabAssetPackages() {
   for (auto& [key, cached] : g_cached_prefab_packages) {
     (void)key;
     if (cached.assets != nullptr) {
-      content::unloadAssetPackage(*cached.assets, cached.handle);
+      assets::unloadAssetPackage(*cached.assets, cached.handle);
     }
   }
   g_cached_prefab_packages.clear();
@@ -716,7 +716,7 @@ void clearPrefabAssetPackages() {
   g_default_prefab_assets = nullptr;
 }
 
-void bindPrefabAssetRegistry(content::AssetRegistry* assets) {
+void bindPrefabAssetRegistry(assets::AssetRegistry* assets) {
   g_default_prefab_assets = assets;
 }
 

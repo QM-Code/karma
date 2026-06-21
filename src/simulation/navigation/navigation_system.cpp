@@ -1,9 +1,9 @@
-#include "karma/simulation/navigation/navigation_system.h"
+#include "karma/navigation.h"
 
-#include "karma/core/time.h"
-#include "karma/world/components/nav_crowd.h"
-#include "karma/world/components/nav_mesh_agent.h"
-#include "karma/world/ecs/world.h"
+#include "karma/core.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 #include "detail/navigation_system_helpers.h"
 
 namespace karma::navigation {
@@ -15,7 +15,7 @@ using detail::rebuildNavMeshes;
 using detail::syncCrowds;
 using detail::syncTileCaches;
 
-void NavigationSystem::update(ecs::World& world, float dt) {
+void NavigationSystem::update(world::World& world, float dt) {
   const auto update_start = core::SteadyClock::now();
   auto section_start = update_start;
   rebuildNavMeshes(world, assets_);
@@ -41,8 +41,8 @@ void NavigationSystem::update(ecs::World& world, float dt) {
   stats_.last_update_ms = core::elapsedMilliseconds(update_start, section_end);
 }
 
-bool NavigationSystem::requestMoveTo(ecs::World& world,
-                                     ecs::Entity agent_entity,
+bool NavigationSystem::requestMoveTo(world::World& world,
+                                     world::Entity agent_entity,
                                      const math::Vec3& destination) {
   if (!world.isAlive(agent_entity) ||
       !world.has<components::NavMeshAgentComponent>(agent_entity)) {
@@ -63,7 +63,7 @@ bool NavigationSystem::requestMoveTo(ecs::World& world,
   return true;
 }
 
-void NavigationSystem::clearPath(ecs::World& world, ecs::Entity agent_entity) {
+void NavigationSystem::clearPath(world::World& world, world::Entity agent_entity) {
   if (!world.isAlive(agent_entity) ||
       !world.has<components::NavMeshAgentComponent>(agent_entity)) {
     return;
@@ -82,8 +82,8 @@ void NavigationSystem::clearPath(ecs::World& world, ecs::Entity agent_entity) {
   agent.current_velocity = {};
 }
 
-bool NavigationSystem::requestCrowdMoveTo(ecs::World& world,
-                                          ecs::Entity agent_entity,
+bool NavigationSystem::requestCrowdMoveTo(world::World& world,
+                                          world::Entity agent_entity,
                                           const math::Vec3& destination) {
   if (!world.isAlive(agent_entity) ||
       !world.has<components::NavCrowdAgentComponent>(agent_entity)) {
@@ -100,8 +100,8 @@ bool NavigationSystem::requestCrowdMoveTo(ecs::World& world,
   return true;
 }
 
-bool NavigationSystem::requestCrowdVelocity(ecs::World& world,
-                                            ecs::Entity agent_entity,
+bool NavigationSystem::requestCrowdVelocity(world::World& world,
+                                            world::Entity agent_entity,
                                             const math::Vec3& velocity) {
   if (!world.isAlive(agent_entity) ||
       !world.has<components::NavCrowdAgentComponent>(agent_entity)) {
@@ -117,7 +117,7 @@ bool NavigationSystem::requestCrowdVelocity(ecs::World& world,
   return true;
 }
 
-void NavigationSystem::clearCrowdTarget(ecs::World& world, ecs::Entity agent_entity) {
+void NavigationSystem::clearCrowdTarget(world::World& world, world::Entity agent_entity) {
   if (!world.isAlive(agent_entity) ||
       !world.has<components::NavCrowdAgentComponent>(agent_entity)) {
     return;

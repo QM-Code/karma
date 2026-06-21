@@ -11,21 +11,21 @@
 #include <thread>
 #include <utility>
 
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_mesh_agent.h"
-#include "karma/world/components/nav_crowd.h"
-#include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/character_controller.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
-#include "karma/simulation/navigation/nav_geometry.h"
-#include "karma/simulation/navigation/nav_crowd.h"
-#include "karma/simulation/navigation/nav_mesh.h"
-#include "karma/simulation/navigation/nav_query.h"
-#include "karma/simulation/navigation/nav_tile_cache.h"
-#include "karma/simulation/navigation/navigation_system.h"
-#include "karma/content/navigation/nav_tile_cache.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
+#include "karma/assets.h"
 
 #ifdef NDEBUG
 #undef assert
@@ -42,10 +42,10 @@
 namespace karma::tests::navigation {
 
 std::filesystem::path resolveRepoPath(const std::filesystem::path& relative);
-karma::geometry::MeshData makePlaneMesh(float half_extent = 5.0f);
-karma::geometry::MeshData combineMeshes(const std::vector<karma::geometry::MeshData>& meshes);
+karma::world::MeshData makePlaneMesh(float half_extent = 5.0f);
+karma::world::MeshData combineMeshes(const std::vector<karma::world::MeshData>& meshes);
 karma::navigation::NavMeshInputGeometry makePlaneGeometry(float half_extent = 5.0f);
-void appendQuad(karma::geometry::MeshData& mesh,
+void appendQuad(karma::world::MeshData& mesh,
                 const karma::math::Vec3& a,
                 const karma::math::Vec3& b,
                 const karma::math::Vec3& c,

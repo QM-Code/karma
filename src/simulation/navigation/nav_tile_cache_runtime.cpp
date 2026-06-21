@@ -1,5 +1,5 @@
-#include "karma/simulation/navigation/nav_tile_cache.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
 
 #include <cmath>
 #include <vector>

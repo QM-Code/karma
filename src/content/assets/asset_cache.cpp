@@ -1,4 +1,4 @@
-#include "karma/content/assets/asset_cache.h"
+#include "karma/assets.h"
 
 #include "asset_cache_serializers.h"
 
@@ -18,7 +18,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace karma::content {
+namespace karma::assets {
 
 namespace {
 
@@ -269,7 +269,7 @@ bool AssetCache::writeTexture(std::string_view cache_key,
   return ok;
 }
 
-std::optional<geometry::MeshData> AssetCache::readMesh(std::string_view cache_key,
+std::optional<world::MeshData> AssetCache::readMesh(std::string_view cache_key,
                                                        std::string* diagnostic) {
   if (!enabled()) {
     return std::nullopt;
@@ -282,7 +282,7 @@ std::optional<geometry::MeshData> AssetCache::readMesh(std::string_view cache_ke
 }
 
 bool AssetCache::writeMesh(std::string_view cache_key,
-                           const geometry::MeshData& mesh,
+                           const world::MeshData& mesh,
                            std::string* diagnostic) {
   if (!enabled() || cache_key.empty()) {
     return false;
@@ -294,7 +294,7 @@ bool AssetCache::writeMesh(std::string_view cache_key,
   return ok;
 }
 
-std::optional<renderer::MaterialAssetDesc> AssetCache::readMaterialAsset(
+std::optional<rendering::MaterialAssetDesc> AssetCache::readMaterialAsset(
     std::string_view cache_key,
     std::string* diagnostic) {
   if (!enabled()) {
@@ -308,7 +308,7 @@ std::optional<renderer::MaterialAssetDesc> AssetCache::readMaterialAsset(
 }
 
 bool AssetCache::writeMaterialAsset(std::string_view cache_key,
-                                    const renderer::MaterialAssetDesc& material,
+                                    const rendering::MaterialAssetDesc& material,
                                     std::string* diagnostic) {
   if (!enabled() || cache_key.empty()) {
     return false;
@@ -322,7 +322,7 @@ bool AssetCache::writeMaterialAsset(std::string_view cache_key,
   return ok;
 }
 
-std::optional<renderer::MaterialVariantDesc> AssetCache::readMaterialVariant(
+std::optional<rendering::MaterialVariantDesc> AssetCache::readMaterialVariant(
     std::string_view cache_key,
     std::string* diagnostic) {
   if (!enabled()) {
@@ -336,7 +336,7 @@ std::optional<renderer::MaterialVariantDesc> AssetCache::readMaterialVariant(
 }
 
 bool AssetCache::writeMaterialVariant(std::string_view cache_key,
-                                      const renderer::MaterialVariantDesc& material,
+                                      const rendering::MaterialVariantDesc& material,
                                       std::string* diagnostic) {
   if (!enabled() || cache_key.empty()) {
     return false;
@@ -350,7 +350,7 @@ bool AssetCache::writeMaterialVariant(std::string_view cache_key,
   return ok;
 }
 
-std::optional<particles::ParticleEffectAsset> AssetCache::readParticleEffect(
+std::optional<visual::particles::ParticleEffectAsset> AssetCache::readParticleEffect(
     std::string_view cache_key,
     std::string* diagnostic) {
   if (!enabled()) {
@@ -364,7 +364,7 @@ std::optional<particles::ParticleEffectAsset> AssetCache::readParticleEffect(
 }
 
 bool AssetCache::writeParticleEffect(std::string_view cache_key,
-                                     const particles::ParticleEffectAsset& effect,
+                                     const visual::particles::ParticleEffectAsset& effect,
                                      std::string* diagnostic) {
   if (!enabled() || cache_key.empty()) {
     return false;
@@ -405,7 +405,7 @@ bool AssetCache::writeGltfScene(std::string_view cache_key,
   return ok;
 }
 
-std::optional<animation::AnimationClip> AssetCache::readAnimationClip(
+std::optional<world::AnimationClip> AssetCache::readAnimationClip(
     std::string_view cache_key,
     std::string* diagnostic) {
   if (!enabled()) {
@@ -419,7 +419,7 @@ std::optional<animation::AnimationClip> AssetCache::readAnimationClip(
 }
 
 bool AssetCache::writeAnimationClip(std::string_view cache_key,
-                                    const animation::AnimationClip& clip,
+                                    const world::AnimationClip& clip,
                                     std::string* diagnostic) {
   if (!enabled() || cache_key.empty()) {
     return false;
@@ -433,7 +433,7 @@ bool AssetCache::writeAnimationClip(std::string_view cache_key,
   return ok;
 }
 
-std::optional<animation::Skeleton> AssetCache::readSkeleton(std::string_view cache_key,
+std::optional<world::Skeleton> AssetCache::readSkeleton(std::string_view cache_key,
                                                             std::string* diagnostic) {
   if (!enabled()) {
     return std::nullopt;
@@ -446,7 +446,7 @@ std::optional<animation::Skeleton> AssetCache::readSkeleton(std::string_view cac
 }
 
 bool AssetCache::writeSkeleton(std::string_view cache_key,
-                               const animation::Skeleton& skeleton,
+                               const world::Skeleton& skeleton,
                                std::string* diagnostic) {
   if (!enabled() || cache_key.empty()) {
     return false;
@@ -460,7 +460,7 @@ bool AssetCache::writeSkeleton(std::string_view cache_key,
   return ok;
 }
 
-std::optional<animation::Skin> AssetCache::readSkin(std::string_view cache_key,
+std::optional<world::Skin> AssetCache::readSkin(std::string_view cache_key,
                                                     std::string* diagnostic) {
   if (!enabled()) {
     return std::nullopt;
@@ -473,7 +473,7 @@ std::optional<animation::Skin> AssetCache::readSkin(std::string_view cache_key,
 }
 
 bool AssetCache::writeSkin(std::string_view cache_key,
-                           const animation::Skin& skin,
+                           const world::Skin& skin,
                            std::string* diagnostic) {
   if (!enabled() || cache_key.empty()) {
     return false;
@@ -613,4 +613,4 @@ std::optional<std::string> hashFile(const std::filesystem::path& path) {
   return hashBytes(bytes->data(), bytes->size());
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

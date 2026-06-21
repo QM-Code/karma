@@ -1,14 +1,14 @@
-#include "karma/rendering/renderer/backend.hpp"
+#include "private/rendering/backend.hpp"
 
 #if defined(KARMA_RENDER_BACKEND_DILIGENT)
 #include "backends/diligent/backend.hpp"
 #endif
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 std::unique_ptr<Backend> CreateGraphicsBackend(
     karma::platform::Window& window,
-    const renderer::GraphicsDeviceCreateInfo& create_info) {
+    const rendering::GraphicsDeviceCreateInfo& create_info) {
 #if defined(KARMA_RENDER_BACKEND_DILIGENT)
   return std::make_unique<DiligentBackend>(window, create_info);
 #else
@@ -18,4 +18,4 @@ std::unique_ptr<Backend> CreateGraphicsBackend(
 #endif
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

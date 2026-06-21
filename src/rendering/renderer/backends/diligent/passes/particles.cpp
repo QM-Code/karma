@@ -15,7 +15,7 @@
 #include <iterator>
 #include <string>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 static constexpr const char* kParticleVS = R"(
@@ -2671,7 +2671,7 @@ void DiligentBackend::ensureParticleResources() {
 
   auto create_pipeline = [&](const char* name,
                              bool depth_test,
-                             renderer::ParticleBlendMode blend_mode,
+                             rendering::ParticleBlendMode blend_mode,
                              bool premultiplied_alpha,
                              Diligent::RefCntAutoPtr<Diligent::IPipelineState>& out_pso,
                              Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb) {
@@ -2694,7 +2694,7 @@ void DiligentBackend::ensureParticleResources() {
 
     auto& blend = graphics.BlendDesc.RenderTargets[0];
     blend.BlendEnable = true;
-    const bool alpha_like = blend_mode != renderer::ParticleBlendMode::Additive;
+    const bool alpha_like = blend_mode != rendering::ParticleBlendMode::Additive;
     blend.SrcBlend = premultiplied_alpha ? Diligent::BLEND_FACTOR_ONE
                                          : Diligent::BLEND_FACTOR_SRC_ALPHA;
     blend.DestBlend = alpha_like ? Diligent::BLEND_FACTOR_INV_SRC_ALPHA
@@ -2739,7 +2739,7 @@ void DiligentBackend::ensureParticleResources() {
 
   auto create_global_pipeline = [&](const char* name,
                                     bool depth_test,
-                                    renderer::ParticleBlendMode blend_mode,
+                                    rendering::ParticleBlendMode blend_mode,
                                     bool premultiplied_alpha,
                                     ParticleGlobalPipeline& out_pipeline) {
     if (!global_vs || !global_ps) {
@@ -2765,7 +2765,7 @@ void DiligentBackend::ensureParticleResources() {
 
     auto& blend = graphics.BlendDesc.RenderTargets[0];
     blend.BlendEnable = true;
-    const bool alpha_like = blend_mode != renderer::ParticleBlendMode::Additive;
+    const bool alpha_like = blend_mode != rendering::ParticleBlendMode::Additive;
     blend.SrcBlend = premultiplied_alpha ? Diligent::BLEND_FACTOR_ONE
                                          : Diligent::BLEND_FACTOR_SRC_ALPHA;
     blend.DestBlend = alpha_like ? Diligent::BLEND_FACTOR_INV_SRC_ALPHA
@@ -2830,69 +2830,69 @@ void DiligentBackend::ensureParticleResources() {
 
   create_pipeline("Karma Particle Pipeline Additive (Depth)",
                   true,
-                  renderer::ParticleBlendMode::Additive,
+                  rendering::ParticleBlendMode::Additive,
                   true,
                   particle_pipeline_state_additive_depth_,
                   particle_srb_additive_depth_);
   create_pipeline("Karma Particle Pipeline Additive (NoDepth)",
                   false,
-                  renderer::ParticleBlendMode::Additive,
+                  rendering::ParticleBlendMode::Additive,
                   true,
                   particle_pipeline_state_additive_no_depth_,
                   particle_srb_additive_no_depth_);
   create_pipeline("Karma Particle Pipeline Alpha (Depth)",
                   true,
-                  renderer::ParticleBlendMode::Alpha,
+                  rendering::ParticleBlendMode::Alpha,
                   true,
                   particle_pipeline_state_alpha_depth_,
                   particle_srb_alpha_depth_);
   create_pipeline("Karma Particle Pipeline Alpha (NoDepth)",
                   false,
-                  renderer::ParticleBlendMode::Alpha,
+                  rendering::ParticleBlendMode::Alpha,
                   true,
                   particle_pipeline_state_alpha_no_depth_,
                   particle_srb_alpha_no_depth_);
   create_pipeline("Karma Particle Pipeline Alpha (HalfRes)",
                   false,
-                  renderer::ParticleBlendMode::Alpha,
+                  rendering::ParticleBlendMode::Alpha,
                   true,
                   particle_pipeline_state_alpha_half_res_,
                   particle_srb_alpha_half_res_);
   create_pipeline("Karma Particle Pipeline Distortion (Depth)",
                   true,
-                  renderer::ParticleBlendMode::Distortion,
+                  rendering::ParticleBlendMode::Distortion,
                   false,
                   particle_pipeline_state_distortion_depth_,
                   particle_srb_distortion_depth_);
   create_pipeline("Karma Particle Pipeline Distortion (NoDepth)",
                   false,
-                  renderer::ParticleBlendMode::Distortion,
+                  rendering::ParticleBlendMode::Distortion,
                   false,
                   particle_pipeline_state_distortion_no_depth_,
                   particle_srb_distortion_no_depth_);
   create_global_pipeline("Karma Particle Global Pipeline Alpha (Depth)",
                          true,
-                         renderer::ParticleBlendMode::Alpha,
+                         rendering::ParticleBlendMode::Alpha,
                          true,
                          particle_global_alpha_depth_);
   create_global_pipeline("Karma Particle Global Pipeline Alpha (NoDepth)",
                          false,
-                         renderer::ParticleBlendMode::Alpha,
+                         rendering::ParticleBlendMode::Alpha,
                          true,
                          particle_global_alpha_no_depth_);
   create_global_pipeline("Karma Particle Global Pipeline Alpha (HalfRes)",
                          false,
-                         renderer::ParticleBlendMode::Alpha,
+                         rendering::ParticleBlendMode::Alpha,
                          true,
                          particle_global_alpha_half_res_);
   create_global_pipeline("Karma Particle Global Pipeline Distortion (Depth)",
                          true,
-                         renderer::ParticleBlendMode::Distortion,
+                         rendering::ParticleBlendMode::Distortion,
                          false,
                          particle_global_distortion_depth_);
   create_global_pipeline("Karma Particle Global Pipeline Distortion (NoDepth)",
                          false,
-                         renderer::ParticleBlendMode::Distortion,
+                         rendering::ParticleBlendMode::Distortion,
                          false,
                          particle_global_distortion_no_depth_);
   mark_stage("graphics pso and srb");
@@ -3062,4 +3062,4 @@ void DiligentBackend::ensureParticleResources() {
   logRenderResourceDiag("particle_resources", "total", total_start, core::SteadyClock::now());
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

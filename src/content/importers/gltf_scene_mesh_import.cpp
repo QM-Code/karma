@@ -4,7 +4,7 @@
 #include <cmath>
 #include <utility>
 
-namespace karma::scene {
+namespace karma::world {
 
 namespace {
 
@@ -71,7 +71,7 @@ bool readVec4Attribute(const GltfDocument& doc,
   return true;
 }
 
-std::vector<glm::vec4> generateTangents(const geometry::MeshData& mesh) {
+std::vector<glm::vec4> generateTangents(const world::MeshData& mesh) {
   std::vector<glm::vec4> tangents(mesh.vertices.size(), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
   if (mesh.vertices.empty() ||
       mesh.normals.size() != mesh.vertices.size() ||
@@ -135,14 +135,14 @@ std::vector<glm::vec4> generateTangents(const geometry::MeshData& mesh) {
 
 bool buildMeshDataFromGltfPrimitive(const GltfDocument& doc,
                                     const Json& source_primitive,
-                                    geometry::MeshData& out) {
+                                    world::MeshData& out) {
   if (!source_primitive.contains("attributes") ||
       !source_primitive["attributes"].is_object()) {
     return false;
   }
   const Json& attributes = source_primitive["attributes"];
 
-  geometry::MeshData mesh{};
+  world::MeshData mesh{};
   if (!readVec3Attribute(doc, attributes, "POSITION", mesh.vertices) ||
       mesh.vertices.empty()) {
     return false;
@@ -198,7 +198,7 @@ bool buildMeshDataFromGltfPrimitive(const GltfDocument& doc,
       if (!target_json.is_object()) {
         continue;
       }
-      geometry::MeshData::MorphTarget target{};
+      world::MeshData::MorphTarget target{};
       bool has_target_data = false;
       if (readVec3Attribute(doc, target_json, "POSITION", target.position_deltas) &&
           target.position_deltas.size() == mesh.vertices.size()) {
@@ -284,7 +284,7 @@ void populateGltfMeshData(const GltfDocument& doc,
     }
     for (size_t primitive_index = 0; primitive_index < primitive_count; ++primitive_index) {
       const Json& source_primitive = mesh["primitives"][primitive_index];
-      geometry::MeshData mesh_data{};
+      world::MeshData mesh_data{};
       if (buildMeshDataFromGltfPrimitive(doc, source_primitive, mesh_data)) {
         primitives[primitive_index].morph_weights =
             readMorphWeights(mesh, mesh_data.morph_targets.size());
@@ -301,4 +301,4 @@ void populateGltfMeshData(const GltfDocument& doc,
   }
 }
 
-}  // namespace karma::scene
+}  // namespace karma::world

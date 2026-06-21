@@ -1,17 +1,17 @@
 #include "navmesh_test_utils.h"
 
-#include "karma/content/assets/asset_package.h"
-#include "karma/content/assets/asset_registry.h"
+#include "karma/assets.h"
+#include "karma/assets.h"
 
 namespace karma::tests::navigation {
 
 void testNavigationSystemBuildsAndMovesAgent() {
-  karma::ecs::World world;
+  karma::world::World world;
 
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
-                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::world::MeshData>(makePlaneMesh()),
                      });
 
   const auto nav_entity = world.createEntity();
@@ -65,9 +65,9 @@ void testNavigationSystemBuildsAndMovesAgent() {
 }
 
 void testNavigationSystemTileCacheObstacleComponent() {
-  karma::ecs::World world;
+  karma::world::World world;
 
-  auto surface_mesh = std::make_shared<karma::geometry::MeshData>();
+  auto surface_mesh = std::make_shared<karma::world::MeshData>();
   appendQuad(*surface_mesh,
              {-5.0f, 0.0f, -1.0f},
              {5.0f, 0.0f, -1.0f},
@@ -127,12 +127,12 @@ void testNavigationSystemTileCacheObstacleComponent() {
 }
 
 void testNavigationSystemCrowdAgentComponent() {
-  karma::ecs::World world;
+  karma::world::World world;
 
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
-                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::world::MeshData>(makePlaneMesh()),
                      });
 
   const auto nav_entity = world.createEntity();
@@ -183,12 +183,12 @@ void testNavigationSystemCrowdAgentComponent() {
 }
 
 void testCrowdAgentCharacterControllerVelocityMode() {
-  karma::ecs::World world;
+  karma::world::World world;
 
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
-                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::world::MeshData>(makePlaneMesh()),
                      });
 
   const auto nav_entity = world.createEntity();
@@ -232,12 +232,12 @@ void testCrowdAgentCharacterControllerVelocityMode() {
 }
 
 void testReplacementRequestKeepsCurrentPathMoving() {
-  karma::ecs::World world;
+  karma::world::World world;
 
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
-                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::world::MeshData>(makePlaneMesh()),
                      });
 
   const auto nav_entity = world.createEntity();
@@ -298,20 +298,20 @@ void testExampleWorldGlbCanBake() {
   const std::filesystem::path package_path =
       resolveRepoPath("examples/assets/common_meshes/world");
   assert(std::filesystem::exists(package_path / "assets.package.json"));
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   std::string diagnostic;
-  auto package = karma::content::importAssetPackage(assets, package_path, &diagnostic);
+  auto package = karma::assets::importAssetPackage(assets, package_path, &diagnostic);
   assert(package.has_value());
   assert(diagnostic.empty());
 
-  karma::ecs::World world;
+  karma::world::World world;
   const auto world_entity = world.createEntity();
   world.add(world_entity, karma::components::TransformComponent{});
   constexpr const char* kWorldMeshKey = "examples/mesh/world";
-  const karma::geometry::MeshData* mesh = assets.findMeshAsset(kWorldMeshKey);
+  const karma::world::MeshData* mesh = assets.findMeshAsset(kWorldMeshKey);
   assert(mesh != nullptr);
   world.add(world_entity, karma::components::NavMeshSurfaceComponent{
-                              .mesh_data = std::make_shared<karma::geometry::MeshData>(*mesh),
+                              .mesh_data = std::make_shared<karma::world::MeshData>(*mesh),
                               .mesh_asset_key = kWorldMeshKey,
                           });
 

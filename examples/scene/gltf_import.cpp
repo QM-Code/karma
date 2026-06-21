@@ -10,7 +10,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace karma::demo {
 
@@ -52,7 +52,7 @@ class GltfSceneImportExample final : public app::GameInterface {
     input->bindKey("cam_right", platform::Key::D);
     input->bindMouse("cam_look", platform::MouseButton::Right);
 
-    const content::GltfSceneAsset* scene_asset =
+    const assets::GltfSceneAsset* scene_asset =
         assets->findGltfSceneAsset(kWorldWithLightsSceneKey);
     if (scene_asset == nullptr) {
       spdlog::error("Missing packaged glTF scene '{}'", kWorldWithLightsSceneKey);
@@ -65,12 +65,12 @@ class GltfSceneImportExample final : public app::GameInterface {
     const SceneBounds bounds{.min = asset_bounds.min,
                              .max = asset_bounds.max,
                              .valid = asset_bounds.valid};
-    const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+    const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
         *world,
         *scene,
         *assets,
         *scene_asset,
-        scene::GltfSceneInstantiateOptions{
+        world::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
         });
     if (!imported.valid()) {
@@ -159,7 +159,7 @@ class GltfSceneImportExample final : public app::GameInterface {
         .is_primary = true});
   }
 
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;

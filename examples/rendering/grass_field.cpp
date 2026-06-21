@@ -1,5 +1,5 @@
 #include "demo_asset_paths.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -74,15 +74,15 @@ float demoEnvFloat(const char* name, float fallback) {
   return end == value ? fallback : parsed;
 }
 
-renderer::PostProcessSettings makeGrassPostProcessSettings(bool taa_enabled) {
-  renderer::PostProcessSettings settings{};
+rendering::PostProcessSettings makeGrassPostProcessSettings(bool taa_enabled) {
+  rendering::PostProcessSettings settings{};
   settings.temporal_antialiasing_enabled = taa_enabled;
   settings.taa_feedback = 0.82f;
   settings.taa_sharpening = 0.04f;
   return settings;
 }
 
-void appendVertex(geometry::MeshData& mesh,
+void appendVertex(world::MeshData& mesh,
                   const glm::vec3& position,
                   const glm::vec3& normal,
                   const glm::vec2& uv,
@@ -93,10 +93,10 @@ void appendVertex(geometry::MeshData& mesh,
   mesh.tangents.push_back(tangent);
 }
 
-geometry::MeshData makeGroundPlane(float width, float depth, std::string material_key) {
+world::MeshData makeGroundPlane(float width, float depth, std::string material_key) {
   const float half_width = width * 0.5f;
   const float half_depth = depth * 0.5f;
-  geometry::MeshData mesh{};
+  world::MeshData mesh{};
   appendVertex(mesh,
                {-half_width, 0.0f, -half_depth},
                {0.0f, 1.0f, 0.0f},
@@ -118,19 +118,19 @@ geometry::MeshData makeGroundPlane(float width, float depth, std::string materia
                {0.0f, 8.0f},
                {1.0f, 0.0f, 0.0f, 1.0f});
   mesh.indices = {0u, 2u, 1u, 0u, 3u, 2u};
-  mesh.submeshes.push_back(geometry::MeshSubmesh{
+  mesh.submeshes.push_back(world::MeshSubmesh{
       .index_offset = 0u,
       .index_count = static_cast<uint32_t>(mesh.indices.size()),
       .material_slot = 0u,
   });
-  mesh.material_slots.push_back(geometry::MeshMaterialSlot{
+  mesh.material_slots.push_back(world::MeshMaterialSlot{
       .name = "Ground",
       .default_material_key = std::move(material_key),
   });
   return mesh;
 }
 
-void appendGrassBladeCard(geometry::MeshData& mesh,
+void appendGrassBladeCard(world::MeshData& mesh,
                           float angle,
                           float width,
                           float height,
@@ -149,31 +149,31 @@ void appendGrassBladeCard(geometry::MeshData& mesh,
   mesh.indices.insert(mesh.indices.end(), {base, base + 1u, base + 2u, base, base + 2u, base + 3u});
 }
 
-geometry::MeshData makeGrassClusterMesh(float width, float height, std::string material_key) {
-  geometry::MeshData mesh{};
+world::MeshData makeGrassClusterMesh(float width, float height, std::string material_key) {
+  world::MeshData mesh{};
   appendGrassBladeCard(mesh, 0.0f, width, height, {0.0f, 0.0f, 1.0f});
   appendGrassBladeCard(mesh, kPi * 0.5f, width, height, {1.0f, 0.0f, 0.0f});
-  mesh.submeshes.push_back(geometry::MeshSubmesh{
+  mesh.submeshes.push_back(world::MeshSubmesh{
       .index_offset = 0u,
       .index_count = static_cast<uint32_t>(mesh.indices.size()),
       .material_slot = 0u,
   });
-  mesh.material_slots.push_back(geometry::MeshMaterialSlot{
+  mesh.material_slots.push_back(world::MeshMaterialSlot{
       .name = "Grass",
       .default_material_key = std::move(material_key),
   });
   return mesh;
 }
 
-geometry::MeshData makeGrassBillboardMesh(float width, float height, std::string material_key) {
-  geometry::MeshData mesh{};
+world::MeshData makeGrassBillboardMesh(float width, float height, std::string material_key) {
+  world::MeshData mesh{};
   appendGrassBladeCard(mesh, 0.0f, width, height, {0.0f, 0.0f, 1.0f});
-  mesh.submeshes.push_back(geometry::MeshSubmesh{
+  mesh.submeshes.push_back(world::MeshSubmesh{
       .index_offset = 0u,
       .index_count = static_cast<uint32_t>(mesh.indices.size()),
       .material_slot = 0u,
   });
-  mesh.material_slots.push_back(geometry::MeshMaterialSlot{
+  mesh.material_slots.push_back(world::MeshMaterialSlot{
       .name = "Grass Billboard",
       .default_material_key = std::move(material_key),
   });
@@ -237,12 +237,12 @@ void fillGrassInstanceChunks(
   }
 }
 
-ecs::Entity spawnMeshEntity(ecs::World& world,
+world::Entity spawnMeshEntity(world::World& world,
                             std::string name,
                             std::string mesh_key,
                             const math::Vec3& position,
                             bool shadow_visible) {
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   components::TransformComponent transform{};
   transform.setPosition(position);
@@ -366,7 +366,7 @@ class GrassFieldExample final : public app::GameInterface {
   void registerAssets() {
     environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
 
-    renderer::MaterialDesc ground_material{};
+    rendering::MaterialDesc ground_material{};
     ground_material.base_color = {0.30f, 0.41f, 0.28f, 1.0f};
     ground_material.metallic = 0.0f;
     ground_material.roughness = 0.88f;
@@ -377,13 +377,13 @@ class GrassFieldExample final : public app::GameInterface {
                     kGrassTextureKey);
     }
 
-    renderer::MaterialAssetDesc grass_material{};
+    rendering::MaterialAssetDesc grass_material{};
     grass_material.pipeline.name = "foliage";
     grass_material.surface.base_color = {0.78f, 0.90f, 0.56f, 1.0f};
     grass_material.surface.metallic = 0.0f;
     grass_material.surface.roughness = 0.82f;
     grass_material.surface.unlit = false;
-    grass_material.surface.alpha_mode = renderer::MaterialDesc::AlphaMode::Masked;
+    grass_material.surface.alpha_mode = rendering::MaterialDesc::AlphaMode::Masked;
     grass_material.surface.alpha_cutoff = 0.28f;
     grass_material.surface.alpha_softness = 0.16f;
     grass_material.surface.alpha_dither = true;
@@ -417,7 +417,7 @@ class GrassFieldExample final : public app::GameInterface {
     grass_entities_.reserve(kGrassChunkCount);
     components::InstancedMeshComponent instanced_grass{};
     instanced_grass.mesh_asset_key = kGrassMeshKey;
-    instanced_grass.gpu_layout = renderer::InstanceGpuLayout::PositionYawScaleParams;
+    instanced_grass.gpu_layout = rendering::InstanceGpuLayout::PositionYawScaleParams;
     instanced_grass.instance_revision = 1;
     instanced_grass.dynamic = false;
     instanced_grass.visible = true;
@@ -425,7 +425,7 @@ class GrassFieldExample final : public app::GameInterface {
     configureGrassLods(instanced_grass);
     grass_instance_count_ = 0u;
     for (uint32_t index = 0; index < kGrassChunkCount; ++index) {
-      const ecs::Entity grass = world->createEntity();
+      const world::Entity grass = world->createEntity();
       world->setName(grass, "Instanced Grass Chunk " + std::to_string(index));
       world->add(grass, components::TransformComponent{});
       auto chunk_component = instanced_grass;
@@ -443,12 +443,12 @@ class GrassFieldExample final : public app::GameInterface {
     fillGrassInstanceChunks(count, grass_chunk_scratch_);
     grass_instance_count_ = 0u;
     for (uint32_t index = 0; index < kGrassChunkCount && index < grass_entities_.size(); ++index) {
-      const ecs::Entity grass = grass_entities_[index];
+      const world::Entity grass = grass_entities_[index];
       if (!world->isAlive(grass) || !world->has<components::InstancedMeshComponent>(grass)) {
         continue;
       }
       auto& instanced_grass = world->get<components::InstancedMeshComponent>(grass);
-      instanced_grass.gpu_layout = renderer::InstanceGpuLayout::PositionYawScaleParams;
+      instanced_grass.gpu_layout = rendering::InstanceGpuLayout::PositionYawScaleParams;
       configureGrassLods(instanced_grass);
       if (instanced_grass.planar_instances.capacity() < kGrassChunkReserve) {
         instanced_grass.planar_instances.reserve(kGrassChunkReserve);
@@ -477,13 +477,13 @@ class GrassFieldExample final : public app::GameInterface {
             .slot = 0u,
             .material_key = kGrassBillboardMaterialKey,
         }},
-        .render_mode = renderer::InstanceLodRenderMode::UprightBillboard,
+        .render_mode = rendering::InstanceLodRenderMode::UprightBillboard,
         .shadow_visible = false,
     });
   }
 
   void applyGrassLodSettings() {
-    for (const ecs::Entity grass : grass_entities_) {
+    for (const world::Entity grass : grass_entities_) {
       if (!world->isAlive(grass) || !world->has<components::InstancedMeshComponent>(grass)) {
         continue;
       }
@@ -493,7 +493,7 @@ class GrassFieldExample final : public app::GameInterface {
   }
 
   void spawnEnvironment() {
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                .environment_map_asset_key = environment_map_,
@@ -503,7 +503,7 @@ class GrassFieldExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 12.0f, 0.0f});
@@ -517,7 +517,7 @@ class GrassFieldExample final : public app::GameInterface {
         .shadow_extent = 80.0f,
     });
 
-    const ecs::Entity fill = world->createEntity();
+    const world::Entity fill = world->createEntity();
     world->setName(fill, "Soft Fill");
     components::TransformComponent fill_transform{};
     fill_transform.setPosition({-8.0f, 4.0f, 7.0f});
@@ -665,11 +665,11 @@ class GrassFieldExample final : public app::GameInterface {
         camera_pitch_);
   }
 
-  ecs::Entity camera_entity_{};
-  std::vector<ecs::Entity> grass_entities_;
+  world::Entity camera_entity_{};
+  std::vector<world::Entity> grass_entities_;
   std::vector<std::vector<components::PlanarMeshInstance>> grass_chunk_scratch_;
   std::string environment_map_;
-  renderer::PostProcessSettings post_process_settings_{makeGrassPostProcessSettings(true)};
+  rendering::PostProcessSettings post_process_settings_{makeGrassPostProcessSettings(true)};
   uint32_t initial_grass_instance_count_ = kGrassInstanceCount;
   uint32_t grass_instance_count_ = 0;
   int requested_grass_instances_ = static_cast<int>(kGrassInstanceCount);
@@ -695,13 +695,13 @@ int main(int argc, char** argv) {
   const uint32_t initial_grass_count =
       karma::demo::parseInitialGrassInstanceCount(argc, argv);
   karma::demo::GrassFieldExample game(initial_grass_count);
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [&game](karma::app::UIContext& ctx) { game.drawUi(ctx); }));
 
   karma::app::EngineConfig config{};
   config.window.title = "Karma Grass Field Example";
   config.window.samples = 1;
-  config.present_mode = karma::renderer::PresentMode::Immediate;
+  config.present_mode = karma::rendering::PresentMode::Immediate;
   config.skip_present_on_mouse_button = true;
   config.mouse_button_present_skip_frames = 2u;
   config.renderer_warmup_camera_sweep_steps = 8u;

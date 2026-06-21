@@ -133,13 +133,13 @@ JPH::RefConst<JPH::Shape> createCompoundShape(const karma::physics::PhysicsShape
   }
 
   if (desc.children.size() == 1) {
-    return karma::physics_backend::jolt::createShape(desc.children.front(), temp_allocator, error);
+    return karma::physics::backend::jolt::createShape(desc.children.front(), temp_allocator, error);
   }
 
   JPH::StaticCompoundShapeSettings settings;
   for (const auto& child : desc.children) {
     JPH::RefConst<JPH::Shape> child_shape =
-        karma::physics_backend::jolt::createShape(child, temp_allocator, error);
+        karma::physics::backend::jolt::createShape(child, temp_allocator, error);
     if (child_shape == nullptr) {
       return nullptr;
     }
@@ -237,7 +237,7 @@ JPH::RefConst<JPH::Shape> createBaseShape(const karma::physics::PhysicsShapeDesc
 
 }  // namespace
 
-namespace karma::physics_backend::jolt {
+namespace karma::physics::backend::jolt {
 
 JPH::RefConst<JPH::Shape> createShape(const karma::physics::PhysicsShapeDesc& desc,
                                       JPH::TempAllocator& temp_allocator,
@@ -246,4 +246,4 @@ JPH::RefConst<JPH::Shape> createShape(const karma::physics::PhysicsShapeDesc& de
   return applyLocalTransform(shape, desc.center, desc.rotation, error);
 }
 
-}  // namespace karma::physics_backend::jolt
+}  // namespace karma::physics::backend::jolt

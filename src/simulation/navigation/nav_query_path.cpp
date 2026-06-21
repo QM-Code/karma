@@ -1,5 +1,5 @@
-#include "karma/simulation/navigation/nav_query.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
 
 #include <algorithm>
 #include <cfloat>

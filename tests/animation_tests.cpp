@@ -3,17 +3,17 @@
 #endif
 #include <cassert>
 
-#include "karma/simulation/animation/animation_clip.h"
-#include "karma/simulation/animation/animation_system.h"
-#include "karma/simulation/animation/deformation_system.h"
-#include "karma/simulation/animation/pose.h"
-#include "karma/simulation/animation/retarget.h"
-#include "karma/world/components/animator.h"
-#include "karma/world/components/deformable_mesh.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
-#include "karma/world/scene/scene.h"
-#include "karma/world/scene/transform_hierarchy.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/world.h"
 #include "../src/content/importers/gltf_scene_animation_import.h"
 #include "../src/content/importers/gltf_scene_import_internal.h"
 #include "../src/content/importers/gltf_scene_mesh_import.h"
@@ -30,7 +30,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace {
 
@@ -280,7 +280,7 @@ bool writeSplitWeightGlb(const std::filesystem::path& path) {
   return out.good();
 }
 
-glm::mat4 gltfNodeLocalMatrix(const karma::scene::GltfDocument& doc, uint32_t node_index) {
+glm::mat4 gltfNodeLocalMatrix(const karma::world::GltfDocument& doc, uint32_t node_index) {
   if (!doc.valid() ||
       !doc.json.contains("nodes") ||
       !doc.json["nodes"].is_array() ||
@@ -330,7 +330,7 @@ glm::mat4 gltfNodeLocalMatrix(const karma::scene::GltfDocument& doc, uint32_t no
   return matrix;
 }
 
-std::vector<glm::mat4> buildGltfWorldMatrices(const karma::scene::GltfDocument& doc) {
+std::vector<glm::mat4> buildGltfWorldMatrices(const karma::world::GltfDocument& doc) {
   std::vector<glm::mat4> matrices;
   if (!doc.valid() || !doc.json.contains("nodes") || !doc.json["nodes"].is_array()) {
     return matrices;
@@ -376,7 +376,7 @@ std::vector<glm::mat4> buildGltfWorldMatrices(const karma::scene::GltfDocument& 
 }
 
 std::unordered_map<std::string, uint32_t> buildPrefabNodeMap(
-    const karma::scene::GltfScenePrefab& prefab) {
+    const karma::world::GltfScenePrefab& prefab) {
   std::unordered_map<std::string, uint32_t> out;
   for (uint32_t i = 0; i < prefab.nodes.size(); ++i) {
     if (!prefab.nodes[i].name.empty()) {
@@ -386,14 +386,14 @@ std::unordered_map<std::string, uint32_t> buildPrefabNodeMap(
   return out;
 }
 
-karma::animation::PoseHierarchy buildPrefabPoseHierarchy(
-    const karma::scene::GltfScenePrefab& prefab) {
-  karma::animation::PoseHierarchy hierarchy{};
-  hierarchy.parent_indices.assign(prefab.nodes.size(), karma::animation::kInvalidAnimationIndex);
+karma::world::PoseHierarchy buildPrefabPoseHierarchy(
+    const karma::world::GltfScenePrefab& prefab) {
+  karma::world::PoseHierarchy hierarchy{};
+  hierarchy.parent_indices.assign(prefab.nodes.size(), karma::world::kInvalidAnimationIndex);
   hierarchy.rest_local_transforms.resize(prefab.nodes.size());
   for (uint32_t node_index = 0; node_index < prefab.nodes.size(); ++node_index) {
     const auto& node = prefab.nodes[node_index];
-    hierarchy.rest_local_transforms[node_index] = karma::animation::PoseTransform{
+    hierarchy.rest_local_transforms[node_index] = karma::world::PoseTransform{
         .position = node.local_position,
         .rotation = node.local_rotation,
         .scale = node.local_scale,
@@ -435,11 +435,11 @@ glm::mat4 toMatrix(const karma::components::TransformComponent& transform) {
   return composeTransform(transform.getPosition(), transform.getRotation(), transform.getScale());
 }
 
-karma::animation::AnimationClip makeMoveClip(float end_x) {
-  karma::animation::AnimationClip clip{};
+karma::world::AnimationClip makeMoveClip(float end_x) {
+  karma::world::AnimationClip clip{};
   clip.name = "Move";
   clip.duration_seconds = 1.0f;
-  clip.channels.push_back(karma::animation::AnimationChannel{
+  clip.channels.push_back(karma::world::AnimationChannel{
       .target_node_index = 1,
       .position_keys = {
           {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f}},
@@ -450,33 +450,33 @@ karma::animation::AnimationClip makeMoveClip(float end_x) {
 }
 
 void testClipSampling() {
-  const std::vector<karma::animation::Vec3Keyframe> vec_keys{
+  const std::vector<karma::world::Vec3Keyframe> vec_keys{
       {.time_seconds = 0.5f, .value = {1.0f, 2.0f, 3.0f}},
       {.time_seconds = 1.5f, .value = {3.0f, 6.0f, 9.0f}},
   };
-  const auto before = karma::animation::sampleVec3Keyframes(vec_keys, 0.0f);
+  const auto before = karma::world::sampleVec3Keyframes(vec_keys, 0.0f);
   assert(before && near(before->x, 1.0f));
 
-  const auto middle = karma::animation::sampleVec3Keyframes(vec_keys, 1.0f);
+  const auto middle = karma::world::sampleVec3Keyframes(vec_keys, 1.0f);
   assert(middle && near(middle->x, 2.0f) && near(middle->y, 4.0f) && near(middle->z, 6.0f));
 
-  const auto after = karma::animation::sampleVec3Keyframes(vec_keys, 2.0f);
+  const auto after = karma::world::sampleVec3Keyframes(vec_keys, 2.0f);
   assert(after && near(after->x, 3.0f));
 
-  karma::animation::AnimationClip clip{};
+  karma::world::AnimationClip clip{};
   clip.duration_seconds = 1.0f;
-  assert(near(karma::animation::normalizeAnimationTime(clip, 1.25f, true), 0.25f));
+  assert(near(karma::world::normalizeAnimationTime(clip, 1.25f, true), 0.25f));
 
-  const std::vector<karma::animation::QuatKeyframe> quat_keys{
+  const std::vector<karma::world::QuatKeyframe> quat_keys{
       {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f, 1.0f}},
       {.time_seconds = 1.0f, .value = {0.0f, 1.0f, 0.0f, 0.0f}},
   };
-  const auto rot = karma::animation::sampleQuatKeyframes(quat_keys, 0.5f);
+  const auto rot = karma::world::sampleQuatKeyframes(quat_keys, 0.5f);
   assert(rot && near(quatLength(*rot), 1.0f));
 }
 
 void testInterpolationModes() {
-  const std::vector<karma::animation::Vec3Keyframe> keys{
+  const std::vector<karma::world::Vec3Keyframe> keys{
       {.time_seconds = 0.0f,
        .value = {0.0f, 0.0f, 0.0f},
        .out_tangent = {0.0f, 0.0f, 0.0f}},
@@ -485,22 +485,22 @@ void testInterpolationModes() {
        .in_tangent = {0.0f, 0.0f, 0.0f}},
   };
 
-  const auto step = karma::animation::sampleVec3Keyframes(
-      keys, 0.5f, karma::animation::InterpolationMode::Step);
+  const auto step = karma::world::sampleVec3Keyframes(
+      keys, 0.5f, karma::world::InterpolationMode::Step);
   assert(step && near(step->x, 0.0f));
 
-  const auto linear = karma::animation::sampleVec3Keyframes(
-      keys, 0.5f, karma::animation::InterpolationMode::Linear);
+  const auto linear = karma::world::sampleVec3Keyframes(
+      keys, 0.5f, karma::world::InterpolationMode::Linear);
   assert(linear && near(linear->x, 5.0f));
 
-  const auto cubic = karma::animation::sampleVec3Keyframes(
-      keys, 0.25f, karma::animation::InterpolationMode::CubicSpline);
+  const auto cubic = karma::world::sampleVec3Keyframes(
+      keys, 0.25f, karma::world::InterpolationMode::CubicSpline);
   assert(cubic && near(cubic->x, 1.5625f));
 }
 
 void testHierarchyAndPlayback() {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{{10.0f, 0.0f, 0.0f}});
@@ -511,7 +511,7 @@ void testHierarchyAndPlayback() {
   const auto child_node = scene.createNode(child);
   scene.reparent(child_node, root_node);
 
-  karma::scene::updateWorldTransforms(world, scene);
+  karma::world::updateWorldTransforms(world, scene);
   const auto& initial_child_transform =
       world.get<karma::components::TransformComponent>(child);
   assert(near(initial_child_transform.getPosition().x, 12.0f));
@@ -527,15 +527,15 @@ void testHierarchyAndPlayback() {
                       .loop = true,
                       .playing = true});
 
-  karma::animation::AnimationSystem animation_system;
+  karma::world::AnimationSystem animation_system;
   animation_system.update(world, scene, 0.5f);
-  karma::scene::updateWorldTransforms(world, scene);
+  karma::world::updateWorldTransforms(world, scene);
   assert(near(world.get<karma::components::TransformComponent>(child).getPosition().x, 12.0f));
 
   auto& player = world.get<karma::components::AnimatorComponent>(root);
   karma::components::pauseAnimator(player);
   animation_system.update(world, scene, 0.5f);
-  karma::scene::updateWorldTransforms(world, scene);
+  karma::world::updateWorldTransforms(world, scene);
   assert(near(world.get<karma::components::TransformComponent>(child).getPosition().x, 12.0f));
 
   player.clips.push_back(makeMoveClip(8.0f));
@@ -545,8 +545,8 @@ void testHierarchyAndPlayback() {
 }
 
 void testAnimatorStateMachineAndEvents() {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{});
@@ -557,9 +557,9 @@ void testAnimatorStateMachineAndEvents() {
   const auto child_node = scene.createNode(child);
   scene.reparent(child_node, root_node);
 
-  karma::animation::AnimationClip idle = makeMoveClip(0.0f);
+  karma::world::AnimationClip idle = makeMoveClip(0.0f);
   idle.name = "Idle";
-  karma::animation::AnimationClip run = makeMoveClip(10.0f);
+  karma::world::AnimationClip run = makeMoveClip(10.0f);
   run.name = "Run";
   run.events.push_back({.name = "Footstep", .time_seconds = 0.25f});
 
@@ -594,7 +594,7 @@ void testAnimatorStateMachineAndEvents() {
 
   auto& live_animator = world.get<karma::components::AnimatorComponent>(root);
   assert(karma::components::setAnimatorTrigger(live_animator, "go"));
-  karma::animation::AnimationSystem animation_system;
+  karma::world::AnimationSystem animation_system;
   animation_system.update(world, scene, 0.0f);
   assert(live_animator.current_state_index == 1);
   const auto* trigger = karma::components::findAnimatorParameter(live_animator, "go");
@@ -616,18 +616,18 @@ void testAnimatorStateMachineAndEvents() {
 }
 
 void testAnimatorTransitionInterruption() {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{});
   scene.createNode(root);
 
-  karma::animation::AnimationClip idle = makeMoveClip(0.0f);
+  karma::world::AnimationClip idle = makeMoveClip(0.0f);
   idle.name = "Idle";
-  karma::animation::AnimationClip walk = makeMoveClip(1.0f);
+  karma::world::AnimationClip walk = makeMoveClip(1.0f);
   walk.name = "Walk";
-  karma::animation::AnimationClip run = makeMoveClip(2.0f);
+  karma::world::AnimationClip run = makeMoveClip(2.0f);
   run.name = "Run";
 
   karma::components::AnimatorComponent animator{};
@@ -670,7 +670,7 @@ void testAnimatorTransitionInterruption() {
   world.add(root, animator);
 
   auto& live_animator = world.get<karma::components::AnimatorComponent>(root);
-  karma::animation::AnimationSystem animation_system;
+  karma::world::AnimationSystem animation_system;
   assert(karma::components::setAnimatorTrigger(live_animator, "go"));
   animation_system.update(world, scene, 0.0f);
   assert(live_animator.transition.active);
@@ -684,8 +684,8 @@ void testAnimatorTransitionInterruption() {
 }
 
 void testAnimatorBlendTreeAndRootMotion() {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{});
@@ -696,16 +696,16 @@ void testAnimatorBlendTreeAndRootMotion() {
   const auto child_node = scene.createNode(child);
   scene.reparent(child_node, root_node);
 
-  karma::animation::AnimationClip slow = makeMoveClip(2.0f);
+  karma::world::AnimationClip slow = makeMoveClip(2.0f);
   slow.name = "Slow";
-  slow.root_motion = karma::animation::RootMotionTrack{
+  slow.root_motion = karma::world::RootMotionTrack{
       .target_node_index = 0,
       .position_keys = {
           {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f}},
           {.time_seconds = 1.0f, .value = {4.0f, 0.0f, 0.0f}},
       },
   };
-  karma::animation::AnimationClip fast = makeMoveClip(10.0f);
+  karma::world::AnimationClip fast = makeMoveClip(10.0f);
   fast.name = "Fast";
 
   world.add(root, karma::components::RootMotionComponent{
@@ -735,7 +735,7 @@ void testAnimatorBlendTreeAndRootMotion() {
   });
   world.add(root, animator);
 
-  karma::animation::AnimationSystem animation_system;
+  karma::world::AnimationSystem animation_system;
   animation_system.update(world, scene, 0.5f);
 
   auto& live_animator = world.get<karma::components::AnimatorComponent>(root);
@@ -746,7 +746,7 @@ void testAnimatorBlendTreeAndRootMotion() {
   assert(root_motion.has_unconsumed_delta);
   assert(root_motion.delta.position);
   assert(near(root_motion.delta.position->x, 2.0f));
-  const karma::animation::SampledTransform consumed =
+  const karma::world::SampledTransform consumed =
       karma::components::consumeRootMotionDelta(root_motion);
   assert(consumed.position);
   assert(near(consumed.position->x, 2.0f));
@@ -755,7 +755,7 @@ void testAnimatorBlendTreeAndRootMotion() {
 }
 
 void testCpuSkinning() {
-  karma::geometry::MeshData bind_mesh{};
+  karma::world::MeshData bind_mesh{};
   bind_mesh.vertices.push_back({1.0f, 0.0f, 0.0f});
   bind_mesh.normals.push_back({1.0f, 0.0f, 0.0f});
   bind_mesh.indices.push_back(0);
@@ -767,8 +767,8 @@ void testCpuSkinning() {
       glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)),
   };
 
-  const karma::geometry::MeshData skinned =
-      karma::animation::skinMesh(bind_mesh, influences, skin_matrices);
+  const karma::world::MeshData skinned =
+      karma::world::skinMesh(bind_mesh, influences, skin_matrices);
   assert(skinned.vertices.size() == 1);
   assert(near(skinned.vertices[0].x, 3.0f));
   assert(near(skinned.vertices[0].y, 0.0f));
@@ -776,19 +776,19 @@ void testCpuSkinning() {
 }
 
 void testMorphTargets() {
-  karma::geometry::MeshData bind_mesh{};
+  karma::world::MeshData bind_mesh{};
   bind_mesh.vertices.push_back({1.0f, 0.0f, 0.0f});
   bind_mesh.normals.push_back({1.0f, 0.0f, 0.0f});
   bind_mesh.tangents.push_back({1.0f, 0.0f, 0.0f, 1.0f});
   bind_mesh.indices.push_back(0);
-  bind_mesh.morph_targets.push_back(karma::geometry::MeshData::MorphTarget{
+  bind_mesh.morph_targets.push_back(karma::world::MeshData::MorphTarget{
       .position_deltas = {{2.0f, 0.0f, 0.0f}},
       .normal_deltas = {{0.0f, 1.0f, 0.0f}},
       .tangent_deltas = {{0.0f, 1.0f, 0.0f}},
   });
 
-  const karma::geometry::MeshData morphed =
-      karma::animation::morphMesh(bind_mesh, {0.25f});
+  const karma::world::MeshData morphed =
+      karma::world::morphMesh(bind_mesh, {0.25f});
   assert(morphed.vertices.size() == 1);
   assert(near(morphed.vertices[0].x, 1.5f));
   assert(near(glm::length(morphed.normals[0]), 1.0f));
@@ -800,22 +800,22 @@ void testMorphTargets() {
   const std::vector<glm::mat4> skin_matrices{
       glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
   };
-  const karma::geometry::MeshData morphed_then_skinned =
-      karma::animation::skinMesh(morphed, influences, skin_matrices);
+  const karma::world::MeshData morphed_then_skinned =
+      karma::world::skinMesh(morphed, influences, skin_matrices);
   assert(near(morphed_then_skinned.vertices[0].x, 2.5f));
 }
 
 void testAnimationSystemUpdatesMorphWeights() {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
 
   const auto root = world.createEntity();
   world.add(root, karma::components::TransformComponent{});
   scene.createNode(root);
 
-  karma::geometry::MeshData bind_mesh{};
+  karma::world::MeshData bind_mesh{};
   bind_mesh.vertices.push_back({0.0f, 0.0f, 0.0f});
-  bind_mesh.morph_targets.push_back(karma::geometry::MeshData::MorphTarget{
+  bind_mesh.morph_targets.push_back(karma::world::MeshData::MorphTarget{
       .position_deltas = {{1.0f, 0.0f, 0.0f}},
   });
 
@@ -828,12 +828,12 @@ void testAnimationSystemUpdatesMorphWeights() {
                            .morph_weights_dirty = false,
                            .enabled = true});
 
-  karma::animation::AnimationClip clip{};
+  karma::world::AnimationClip clip{};
   clip.name = "Morph";
   clip.duration_seconds = 1.0f;
-  clip.morph_target_tracks.push_back(karma::animation::MorphTargetTrack{
+  clip.morph_target_tracks.push_back(karma::world::MorphTargetTrack{
       .target_node_index = 0,
-      .interpolation = karma::animation::InterpolationMode::Linear,
+      .interpolation = karma::world::InterpolationMode::Linear,
       .weight_keys = {
           {.time_seconds = 0.0f, .values = {0.0f}},
           {.time_seconds = 1.0f, .values = {1.0f}},
@@ -849,7 +849,7 @@ void testAnimationSystemUpdatesMorphWeights() {
                       .loop = true,
                       .playing = true});
 
-  karma::animation::AnimationSystem animation_system;
+  karma::world::AnimationSystem animation_system;
   animation_system.update(world, scene, 0.5f);
 
   auto& morph = world.get<karma::components::DeformableMeshComponent>(primitive);
@@ -857,7 +857,7 @@ void testAnimationSystemUpdatesMorphWeights() {
   assert(near(morph.morph_weights[0], 0.5f));
   assert(morph.morph_weights_dirty);
 
-  karma::animation::AnimationClip base_clip{};
+  karma::world::AnimationClip base_clip{};
   base_clip.name = "Base";
   base_clip.duration_seconds = 1.0f;
   auto& player = world.get<karma::components::AnimatorComponent>(root);
@@ -870,22 +870,22 @@ void testAnimationSystemUpdatesMorphWeights() {
 }
 
 void testPoseCompositionAndPalette() {
-  karma::animation::PoseHierarchy hierarchy{};
+  karma::world::PoseHierarchy hierarchy{};
   hierarchy.parent_indices = {
-      karma::animation::kInvalidAnimationIndex,
+      karma::world::kInvalidAnimationIndex,
       0u,
   };
   hierarchy.rest_local_transforms.resize(2);
   hierarchy.rest_local_transforms[0].position = {1.0f, 0.0f, 0.0f};
   hierarchy.rest_local_transforms[1].position = {2.0f, 0.0f, 0.0f};
 
-  karma::animation::LocalPose pose = karma::animation::makeRestLocalPose(hierarchy);
-  karma::animation::SampledTransform child_sample{};
+  karma::world::LocalPose pose = karma::world::makeRestLocalPose(hierarchy);
+  karma::world::SampledTransform child_sample{};
   child_sample.position = karma::math::Vec3{3.0f, 0.0f, 0.0f};
-  karma::animation::applySampleToLocalPose(pose, 1u, child_sample);
+  karma::world::applySampleToLocalPose(pose, 1u, child_sample);
 
-  const karma::animation::ModelPose model_pose =
-      karma::animation::composeModelPose(hierarchy, pose);
+  const karma::world::ModelPose model_pose =
+      karma::world::composeModelPose(hierarchy, pose);
   assert(model_pose.node_matrices.size() == 2);
   assert(near(model_pose.node_matrices[1][3].x, 4.0f));
 
@@ -893,8 +893,8 @@ void testPoseCompositionAndPalette() {
   const std::vector<glm::mat4> inverse_binds{
       glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.0f, 0.0f)),
   };
-  const karma::animation::SkinningPalette palette =
-      karma::animation::buildSkinningPalette(joint_node_indices,
+  const karma::world::SkinningPalette palette =
+      karma::world::buildSkinningPalette(joint_node_indices,
                                              inverse_binds,
                                              model_pose.node_matrices,
                                              glm::mat4(1.0f));
@@ -904,21 +904,21 @@ void testPoseCompositionAndPalette() {
 }
 
 void testSkeletonRetargeting() {
-  karma::animation::Skeleton source{};
+  karma::world::Skeleton source{};
   source.joints = {
       {.name = "Root", .node_index = 0u},
       {.name = "Hand", .parent_joint_index = 0u, .node_index = 1u},
   };
   source.root_joint_indices = {0u};
 
-  karma::animation::Skeleton target{};
+  karma::world::Skeleton target{};
   target.joints = {
       {.name = "TargetRoot", .node_index = 10u},
       {.name = "TargetHand", .parent_joint_index = 0u, .node_index = 11u},
   };
   target.root_joint_indices = {0u};
 
-  karma::animation::SkeletonMap map{};
+  karma::world::SkeletonMap map{};
   map.source_root_joint_index = 0u;
   map.target_root_joint_index = 0u;
   map.joints = {
@@ -926,26 +926,26 @@ void testSkeletonRetargeting() {
       {.source_joint_index = 1u, .target_joint_index = 1u},
   };
   std::string diagnostic;
-  assert(karma::animation::validateSkeletonMap(source, target, map, &diagnostic));
+  assert(karma::world::validateSkeletonMap(source, target, map, &diagnostic));
   assert(diagnostic.empty());
 
-  karma::animation::AnimationClip clip{};
+  karma::world::AnimationClip clip{};
   clip.name = "Reach";
   clip.duration_seconds = 1.0f;
-  clip.channels.push_back(karma::animation::AnimationChannel{
+  clip.channels.push_back(karma::world::AnimationChannel{
       .target_node_index = 0u,
       .position_keys = {
           {.time_seconds = 0.0f, .value = {1.0f, 0.0f, 0.0f}},
           {.time_seconds = 1.0f, .value = {2.0f, 0.0f, 0.0f}},
       },
   });
-  clip.channels.push_back(karma::animation::AnimationChannel{
+  clip.channels.push_back(karma::world::AnimationChannel{
       .target_node_index = 1u,
       .rotation_keys = {
           {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f, 1.0f}},
       },
   });
-  clip.root_motion = karma::animation::RootMotionTrack{
+  clip.root_motion = karma::world::RootMotionTrack{
       .target_node_index = 0u,
       .position_keys = {
           {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f}},
@@ -953,13 +953,13 @@ void testSkeletonRetargeting() {
       },
   };
 
-  const karma::animation::AnimationClip retargeted = karma::animation::retargetClip(
+  const karma::world::AnimationClip retargeted = karma::world::retargetClip(
       clip,
       source,
       target,
       map,
-      karma::animation::RetargetOptions{
-          .root_scale_policy = karma::animation::RetargetRootScalePolicy::ExplicitScale,
+      karma::world::RetargetOptions{
+          .root_scale_policy = karma::world::RetargetRootScalePolicy::ExplicitScale,
           .root_translation_scale = 2.0f,
       });
 
@@ -973,7 +973,7 @@ void testSkeletonRetargeting() {
   assert(near(retargeted.root_motion->position_keys[1].value.x, 2.0f));
 
   map.joints.back().target_joint_index = 99u;
-  assert(!karma::animation::validateSkeletonMap(source, target, map, &diagnostic));
+  assert(!karma::world::validateSkeletonMap(source, target, map, &diagnostic));
   assert(!diagnostic.empty());
 }
 
@@ -982,7 +982,7 @@ void testSkinnedGlbImport() {
       std::filesystem::temp_directory_path() / "karma_test_skinned_animation.glb";
   assert(writeSkinnedGlb(path));
 
-  const karma::scene::GltfScenePrefab prefab = karma::scene::loadGltfScenePrefab(path);
+  const karma::world::GltfScenePrefab prefab = karma::world::loadGltfScenePrefab(path);
   assert(prefab.valid());
   assert(!prefab.animations.empty());
   assert(!prefab.skins.empty());
@@ -1011,7 +1011,7 @@ void testSplitWeightGlbImport() {
       std::filesystem::temp_directory_path() / "karma_test_split_weight_skin.glb";
   assert(writeSplitWeightGlb(path));
 
-  const karma::scene::GltfScenePrefab prefab = karma::scene::loadGltfScenePrefab(path);
+  const karma::world::GltfScenePrefab prefab = karma::world::loadGltfScenePrefab(path);
   assert(prefab.valid());
   assert(!prefab.skins.empty());
   assert(prefab.skins.front().joint_node_indices.size() == 2);
@@ -1038,49 +1038,49 @@ void testSplitWeightGlbImport() {
 }
 
 void testGltfMeshReplacementImportsAllMeshNodes() {
-  karma::scene::GltfDocument doc{};
+  karma::world::GltfDocument doc{};
   for (int i = 0; i < 3; ++i) {
     appendFloat(doc.bin, static_cast<float>(i));
     appendFloat(doc.bin, 0.0f);
     appendFloat(doc.bin, 0.0f);
   }
-  doc.json = karma::scene::Json{
+  doc.json = karma::world::Json{
       {"asset", {{"version", "2.0"}}},
       {"nodes",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"name", "StaticNode"}, {"mesh", 0u}},
            {{"name", "SkinnedNode"}, {"mesh", 1u}, {"skin", 0u}},
        })},
       {"meshes",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"primitives",
-             karma::scene::Json::array({
+             karma::world::Json::array({
                  {{"attributes", {{"POSITION", 0u}}}, {"material", 1u}},
              })}},
            {{"primitives",
-             karma::scene::Json::array({
+             karma::world::Json::array({
                  {{"attributes", {{"POSITION", 0u}}}, {"material", 2u}},
              })}},
        })},
-      {"skins", karma::scene::Json::array({{{"joints", karma::scene::Json::array()}}})},
+      {"skins", karma::world::Json::array({{{"joints", karma::world::Json::array()}}})},
       {"bufferViews",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"buffer", 0u}, {"byteOffset", 0u}, {"byteLength", doc.bin.size()}},
        })},
       {"accessors",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"bufferView", 0u}, {"componentType", 5126}, {"count", 3u}, {"type", "VEC3"}},
        })},
   };
 
-  karma::scene::GltfScenePrefab prefab{};
+  karma::world::GltfScenePrefab prefab{};
   prefab.nodes.resize(2);
   prefab.nodes[0].name = "StaticNode";
-  prefab.nodes[0].primitives.push_back(karma::scene::GltfScenePrefabPrimitive{});
+  prefab.nodes[0].primitives.push_back(karma::world::GltfScenePrefabPrimitive{});
   prefab.nodes[0].primitives.front().source_material_index = 10;
   prefab.nodes[0].primitives.front().mesh.vertices.push_back({42.0f, 0.0f, 0.0f});
   prefab.nodes[1].name = "SkinnedNode";
-  prefab.nodes[1].primitives.push_back(karma::scene::GltfScenePrefabPrimitive{});
+  prefab.nodes[1].primitives.push_back(karma::world::GltfScenePrefabPrimitive{});
   prefab.nodes[1].primitives.front().source_material_index = 11;
   prefab.nodes[1].primitives.front().mesh.vertices.push_back({42.0f, 0.0f, 0.0f});
 
@@ -1088,7 +1088,7 @@ void testGltfMeshReplacementImportsAllMeshNodes() {
       {"StaticNode", 0u},
       {"SkinnedNode", 1u},
   };
-  karma::scene::populateGltfMeshData(doc, node_indices_by_name, prefab);
+  karma::world::populateGltfMeshData(doc, node_indices_by_name, prefab);
 
   assert(prefab.nodes[0].primitives.front().mesh.vertices.size() == 3);
   assert(prefab.nodes[0].primitives.front().source_material_index == 10u);
@@ -1099,7 +1099,7 @@ void testGltfMeshReplacementImportsAllMeshNodes() {
 }
 
 void testGltfMorphTargetImport() {
-  karma::scene::GltfDocument doc{};
+  karma::world::GltfDocument doc{};
   const std::uint32_t position_offset = static_cast<std::uint32_t>(doc.bin.size());
   appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f);
   appendFloat(doc.bin, 1.0f); appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 0.0f);
@@ -1116,42 +1116,42 @@ void testGltfMorphTargetImport() {
   const std::uint32_t weight_offset = static_cast<std::uint32_t>(doc.bin.size());
   appendFloat(doc.bin, 0.0f); appendFloat(doc.bin, 1.0f);
 
-  doc.json = karma::scene::Json{
+  doc.json = karma::world::Json{
       {"asset", {{"version", "2.0"}}},
-      {"nodes", karma::scene::Json::array({
+      {"nodes", karma::world::Json::array({
                     {{"name", "MorphNode"}, {"mesh", 0u}},
                 })},
       {"meshes",
-       karma::scene::Json::array({
-           {{"weights", karma::scene::Json::array({0.25f})},
+       karma::world::Json::array({
+           {{"weights", karma::world::Json::array({0.25f})},
             {"primitives",
-             karma::scene::Json::array({
+             karma::world::Json::array({
                  {{"attributes", {{"POSITION", 0u}}},
-                  {"targets", karma::scene::Json::array({
+                  {"targets", karma::world::Json::array({
                                   {{"POSITION", 1u}},
                               })}},
              })}},
        })},
       {"animations",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"samplers",
-             karma::scene::Json::array({
+             karma::world::Json::array({
                  {{"input", 2u}, {"output", 3u}},
              })},
             {"channels",
-             karma::scene::Json::array({
+             karma::world::Json::array({
                  {{"sampler", 0u}, {"target", {{"node", 0u}, {"path", "weights"}}}},
              })}},
        })},
       {"bufferViews",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"buffer", 0u}, {"byteOffset", position_offset}, {"byteLength", 36u}},
            {{"buffer", 0u}, {"byteOffset", morph_offset}, {"byteLength", 36u}},
            {{"buffer", 0u}, {"byteOffset", time_offset}, {"byteLength", 8u}},
            {{"buffer", 0u}, {"byteOffset", weight_offset}, {"byteLength", 8u}},
        })},
       {"accessors",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"bufferView", 0u}, {"componentType", 5126}, {"count", 3u}, {"type", "VEC3"}},
            {{"bufferView", 1u}, {"componentType", 5126}, {"count", 3u}, {"type", "VEC3"}},
            {{"bufferView", 2u}, {"componentType", 5126}, {"count", 2u}, {"type", "SCALAR"}},
@@ -1159,13 +1159,13 @@ void testGltfMorphTargetImport() {
        })},
   };
 
-  karma::scene::GltfScenePrefab prefab{};
+  karma::world::GltfScenePrefab prefab{};
   prefab.nodes.resize(1);
   prefab.nodes[0].name = "MorphNode";
-  prefab.nodes[0].primitives.push_back(karma::scene::GltfScenePrefabPrimitive{});
+  prefab.nodes[0].primitives.push_back(karma::world::GltfScenePrefabPrimitive{});
 
   const std::unordered_map<std::string, uint32_t> node_indices_by_name{{"MorphNode", 0u}};
-  karma::scene::populateGltfMeshData(doc, node_indices_by_name, prefab);
+  karma::world::populateGltfMeshData(doc, node_indices_by_name, prefab);
   const auto& primitive = prefab.nodes[0].primitives.front();
   assert(primitive.morphable());
   assert(primitive.mesh.morph_targets.size() == 1);
@@ -1174,19 +1174,19 @@ void testGltfMorphTargetImport() {
   assert(primitive.morph_weights.size() == 1);
   assert(near(primitive.morph_weights[0], 0.25f));
 
-  const std::vector<karma::animation::AnimationClip> clips =
-      karma::scene::loadGltfAnimationClips(doc, node_indices_by_name, prefab);
+  const std::vector<karma::world::AnimationClip> clips =
+      karma::world::loadGltfAnimationClips(doc, node_indices_by_name, prefab);
   assert(clips.size() == 1);
   assert(clips.front().morph_target_tracks.size() == 1);
   assert(clips.front().morph_target_tracks.front().target_node_index == 0u);
   assert(clips.front().morph_target_tracks.front().target_mesh_index == 0u);
 
   bool sampled_morph = false;
-  karma::animation::sampleAnimationClip(
+  karma::world::sampleAnimationClip(
       clips.front(),
       0.5f,
       true,
-      [&](uint32_t, const karma::animation::SampledTransform&) {},
+      [&](uint32_t, const karma::world::SampledTransform&) {},
       [&](uint32_t target_node_index, const std::vector<float>& weights) {
         sampled_morph = true;
         assert(target_node_index == 0u);
@@ -1214,15 +1214,15 @@ void testGltfDocumentExternalAndDataBuffers() {
   }
 
   auto make_json = [&](const std::string& uri) {
-    return karma::scene::Json{
+    return karma::world::Json{
         {"asset", {{"version", "2.0"}}},
-        {"buffers", karma::scene::Json::array({
+        {"buffers", karma::world::Json::array({
                         {{"uri", uri}, {"byteLength", bin.size()}},
                     })},
-        {"bufferViews", karma::scene::Json::array({
+        {"bufferViews", karma::world::Json::array({
                             {{"buffer", 0u}, {"byteOffset", 0u}, {"byteLength", bin.size()}},
                         })},
-        {"accessors", karma::scene::Json::array({
+        {"accessors", karma::world::Json::array({
                           {{"bufferView", 0u},
                            {"componentType", 5126},
                            {"count", 2u},
@@ -1237,10 +1237,10 @@ void testGltfDocumentExternalAndDataBuffers() {
     assert(out);
     out << make_json("positions.bin").dump();
   }
-  karma::scene::GltfDocument external_doc = karma::scene::loadGltfDocument(external_gltf);
+  karma::world::GltfDocument external_doc = karma::world::loadGltfDocument(external_gltf);
   std::vector<float> values;
   size_t count = 0;
-  assert(karma::scene::readFloatAccessor(external_doc, 0u, 3u, values, &count));
+  assert(karma::world::readFloatAccessor(external_doc, 0u, 3u, values, &count));
   assert(count == 2u);
   assert(near(values[3], 1.0f));
   assert(near(values[4], 2.0f));
@@ -1252,10 +1252,10 @@ void testGltfDocumentExternalAndDataBuffers() {
     assert(out);
     out << make_json(dataUriForBytes(bin)).dump();
   }
-  karma::scene::GltfDocument data_uri_doc = karma::scene::loadGltfDocument(data_uri_gltf);
+  karma::world::GltfDocument data_uri_doc = karma::world::loadGltfDocument(data_uri_gltf);
   values.clear();
   count = 0;
-  assert(karma::scene::readFloatAccessor(data_uri_doc, 0u, 3u, values, &count));
+  assert(karma::world::readFloatAccessor(data_uri_doc, 0u, 3u, values, &count));
   assert(count == 2u);
   assert(near(values[3], 1.0f));
   assert(near(values[4], 2.0f));
@@ -1263,7 +1263,7 @@ void testGltfDocumentExternalAndDataBuffers() {
 }
 
 void testGltfSparseAccessors() {
-  karma::scene::GltfDocument doc{};
+  karma::world::GltfDocument doc{};
 
   const std::uint32_t position_sparse_indices_offset =
       static_cast<std::uint32_t>(doc.bin.size());
@@ -1283,17 +1283,17 @@ void testGltfSparseAccessors() {
       static_cast<std::uint32_t>(doc.bin.size());
   appendU16(doc.bin, 7u);
 
-  doc.json = karma::scene::Json{
+  doc.json = karma::world::Json{
       {"asset", {{"version", "2.0"}}},
       {"bufferViews",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"buffer", 0u}, {"byteOffset", position_sparse_indices_offset}, {"byteLength", 4u}},
            {{"buffer", 0u}, {"byteOffset", position_sparse_values_offset}, {"byteLength", 24u}},
            {{"buffer", 0u}, {"byteOffset", index_sparse_indices_offset}, {"byteLength", 2u}},
            {{"buffer", 0u}, {"byteOffset", index_sparse_values_offset}, {"byteLength", 2u}},
        })},
       {"accessors",
-       karma::scene::Json::array({
+       karma::world::Json::array({
            {{"componentType", 5126},
             {"count", 3u},
             {"type", "VEC3"},
@@ -1313,7 +1313,7 @@ void testGltfSparseAccessors() {
 
   std::vector<float> positions;
   size_t position_count = 0;
-  assert(karma::scene::readFloatAccessor(doc, 0u, 3u, positions, &position_count));
+  assert(karma::world::readFloatAccessor(doc, 0u, 3u, positions, &position_count));
   assert(position_count == 3u);
   assert(near(positions[0], 0.0f));
   assert(near(positions[3], 1.0f));
@@ -1324,7 +1324,7 @@ void testGltfSparseAccessors() {
   assert(near(positions[8], 6.0f));
 
   std::vector<uint32_t> indices;
-  assert(karma::scene::readIndexAccessor(doc, 1u, indices));
+  assert(karma::world::readIndexAccessor(doc, 1u, indices));
   assert(indices.size() == 3u);
   assert(indices[0] == 0u);
   assert(indices[1] == 0u);
@@ -1336,8 +1336,8 @@ void testWalkingGlbImportSmoke() {
       findRepoRoot() / "examples/assets/animation_model/source/walking.glb";
   assert(std::filesystem::exists(path));
 
-  const karma::scene::GltfScenePrefab prefab = karma::scene::loadGltfScenePrefab(path);
-  const karma::scene::GltfDocument gltf = karma::scene::loadGltfDocument(path);
+  const karma::world::GltfScenePrefab prefab = karma::world::loadGltfScenePrefab(path);
+  const karma::world::GltfDocument gltf = karma::world::loadGltfDocument(path);
   assert(prefab.valid());
   assert(gltf.valid());
   assert(gltf.json.contains("materials") && gltf.json["materials"].size() == 7);
@@ -1356,7 +1356,7 @@ void testWalkingGlbImportSmoke() {
   assert(suit_node_it != prefab_nodes_by_name.end());
   assert(suit_node_it->second < prefab.nodes.size());
   assert(!prefab.nodes[suit_node_it->second].primitives.empty());
-  const karma::geometry::MeshData& suit_mesh =
+  const karma::world::MeshData& suit_mesh =
       prefab.nodes[suit_node_it->second].primitives.front().mesh;
   assert(!suit_mesh.uvs.empty());
   assert(near(suit_mesh.uvs.front().x, 0.5138f, 0.0001f));
@@ -1364,16 +1364,16 @@ void testWalkingGlbImportSmoke() {
   assert(suit_mesh.tangents.size() == suit_mesh.vertices.size());
   auto gltf_node_by_name = [&](const char* name) -> uint32_t {
     for (uint32_t node_index = 0; node_index < gltf.json["nodes"].size(); ++node_index) {
-      if (karma::scene::gltfNodeName(gltf, node_index) == name) {
+      if (karma::world::gltfNodeName(gltf, node_index) == name) {
         return node_index;
       }
     }
-    return karma::scene::kInvalidGltfSceneNode;
+    return karma::world::kInvalidGltfSceneNode;
   };
   auto assert_imported_world_matches_gltf = [&](const char* name) {
     const uint32_t gltf_node = gltf_node_by_name(name);
     const auto prefab_it = prefab_nodes_by_name.find(name);
-    assert(gltf_node != karma::scene::kInvalidGltfSceneNode);
+    assert(gltf_node != karma::world::kInvalidGltfSceneNode);
     assert(prefab_it != prefab_nodes_by_name.end());
     assert(gltf_node < gltf_world_matrices.size());
     assert(prefab_it->second < prefab.nodes.size());
@@ -1397,8 +1397,8 @@ void testWalkingGlbImportSmoke() {
                                                          node.world_rotation,
                                                          node.world_scale);
   }
-  const karma::animation::SkinningPalette rest_palette =
-      karma::animation::buildSkinningPalette(prefab.skins.front().joint_node_indices,
+  const karma::world::SkinningPalette rest_palette =
+      karma::world::buildSkinningPalette(prefab.skins.front().joint_node_indices,
                                              prefab.skins.front().inverse_bind_matrices,
                                              prefab_world_matrices,
                                              glm::mat4(1.0f),
@@ -1408,20 +1408,20 @@ void testWalkingGlbImportSmoke() {
     assert(maxMatrixDiff(joint_matrix, glm::mat4(1.0f)) < 0.001f);
   }
 
-  const karma::animation::PoseHierarchy hierarchy = buildPrefabPoseHierarchy(prefab);
-  karma::animation::LocalPose sampled_pose =
-      karma::animation::makeRestLocalPose(hierarchy);
-  karma::animation::sampleAnimationClip(
+  const karma::world::PoseHierarchy hierarchy = buildPrefabPoseHierarchy(prefab);
+  karma::world::LocalPose sampled_pose =
+      karma::world::makeRestLocalPose(hierarchy);
+  karma::world::sampleAnimationClip(
       prefab.animations.front(),
       0.5f,
       true,
-      [&](uint32_t target_node_index, const karma::animation::SampledTransform& sampled) {
-        karma::animation::applySampleToLocalPose(sampled_pose, target_node_index, sampled);
+      [&](uint32_t target_node_index, const karma::world::SampledTransform& sampled) {
+        karma::world::applySampleToLocalPose(sampled_pose, target_node_index, sampled);
       });
-  const karma::animation::ModelPose sampled_model_pose =
-      karma::animation::composeModelPose(hierarchy, sampled_pose);
-  const karma::animation::SkinningPalette sampled_palette =
-      karma::animation::buildSkinningPalette(prefab.skins.front().joint_node_indices,
+  const karma::world::ModelPose sampled_model_pose =
+      karma::world::composeModelPose(hierarchy, sampled_pose);
+  const karma::world::SkinningPalette sampled_palette =
+      karma::world::buildSkinningPalette(prefab.skins.front().joint_node_indices,
                                              prefab.skins.front().inverse_bind_matrices,
                                              sampled_model_pose.node_matrices,
                                              glm::mat4(1.0f),
@@ -1433,8 +1433,8 @@ void testWalkingGlbImportSmoke() {
       if (!primitive.skinned()) {
         continue;
       }
-      const karma::geometry::MeshData skinned_mesh =
-          karma::animation::skinMesh(primitive.mesh,
+      const karma::world::MeshData skinned_mesh =
+          karma::world::skinMesh(primitive.mesh,
                                      primitive.vertex_influences,
                                      sampled_palette.joint_matrices);
       for (const glm::vec3& vertex : skinned_mesh.vertices) {
@@ -1446,21 +1446,21 @@ void testWalkingGlbImportSmoke() {
   assert(nearVec3(sampled_bounds.min, glm::vec3(-0.2676f, -0.0088f, -0.2146f), 0.002f));
   assert(nearVec3(sampled_bounds.max, glm::vec3(0.3042f, 1.2849f, 0.2677f), 0.002f));
 
-  karma::ecs::World runtime_world;
-  karma::scene::Scene runtime_scene;
-  std::vector<karma::ecs::Entity> runtime_nodes(prefab.nodes.size());
-  std::function<karma::scene::NodeId(uint32_t, karma::scene::NodeId)> instantiate_node =
-      [&](uint32_t prefab_node_index, karma::scene::NodeId parent_node) {
+  karma::world::World runtime_world;
+  karma::world::Scene runtime_scene;
+  std::vector<karma::world::Entity> runtime_nodes(prefab.nodes.size());
+  std::function<karma::world::NodeId(uint32_t, karma::world::NodeId)> instantiate_node =
+      [&](uint32_t prefab_node_index, karma::world::NodeId parent_node) {
         const auto& prefab_node = prefab.nodes[prefab_node_index];
-        const karma::ecs::Entity entity = runtime_world.createEntity();
+        const karma::world::Entity entity = runtime_world.createEntity();
         runtime_world.setName(entity, prefab_node.name);
         runtime_world.add(entity,
                           karma::components::TransformComponent{
                               prefab_node.local_position,
                               prefab_node.local_rotation,
                               prefab_node.local_scale});
-        const karma::scene::NodeId node_id = runtime_scene.createNode(entity);
-        if (parent_node != karma::scene::Node::kInvalidId) {
+        const karma::world::NodeId node_id = runtime_scene.createNode(entity);
+        if (parent_node != karma::world::Node::kInvalidId) {
           runtime_scene.reparent(node_id, parent_node);
         }
         runtime_nodes[prefab_node_index] = entity;
@@ -1469,9 +1469,9 @@ void testWalkingGlbImportSmoke() {
         }
         return node_id;
       };
-  const karma::scene::NodeId runtime_root_node =
-      instantiate_node(prefab.root_node, karma::scene::Node::kInvalidId);
-  const karma::ecs::Entity runtime_root = runtime_scene.get(runtime_root_node).entity;
+  const karma::world::NodeId runtime_root_node =
+      instantiate_node(prefab.root_node, karma::world::Node::kInvalidId);
+  const karma::world::Entity runtime_root = runtime_scene.get(runtime_root_node).entity;
   runtime_world.add(runtime_root,
                     karma::components::AnimatorComponent{
                         .clips = prefab.animations,
@@ -1485,7 +1485,7 @@ void testWalkingGlbImportSmoke() {
                         .playing = true});
 
   struct RuntimePrimitive {
-    const karma::scene::GltfScenePrefabPrimitive* primitive = nullptr;
+    const karma::world::GltfScenePrefabPrimitive* primitive = nullptr;
     karma::components::DeformableMeshComponent deformation;
   };
   std::vector<RuntimePrimitive> runtime_primitives;
@@ -1494,12 +1494,12 @@ void testWalkingGlbImportSmoke() {
       if (!primitive.skinned()) {
         continue;
       }
-      std::vector<karma::ecs::Entity> joint_entities;
+      std::vector<karma::world::Entity> joint_entities;
       joint_entities.reserve(primitive.joint_node_indices.size());
       for (const uint32_t joint_node_index : primitive.joint_node_indices) {
         joint_entities.push_back(joint_node_index < runtime_nodes.size()
                                      ? runtime_nodes[joint_node_index]
-                                     : karma::ecs::Entity{});
+                                     : karma::world::Entity{});
       }
       runtime_primitives.push_back(RuntimePrimitive{
           .primitive = &primitive,
@@ -1518,21 +1518,21 @@ void testWalkingGlbImportSmoke() {
     }
   }
 
-  karma::animation::AnimationSystem animation_system;
+  karma::world::AnimationSystem animation_system;
   animation_system.update(runtime_world, runtime_scene, 0.5f);
-  karma::scene::updateWorldTransforms(runtime_world, runtime_scene);
+  karma::world::updateWorldTransforms(runtime_world, runtime_scene);
   const glm::mat4 runtime_render_world =
       toMatrix(runtime_world.get<karma::components::TransformComponent>(runtime_root));
   Bounds runtime_bounds{};
   for (const RuntimePrimitive& runtime_primitive : runtime_primitives) {
-    const karma::animation::SkinningPalette palette =
-        karma::animation::buildSkinningPaletteFromScene(runtime_primitive.deformation,
+    const karma::world::SkinningPalette palette =
+        karma::world::buildSkinningPaletteFromScene(runtime_primitive.deformation,
                                                         runtime_world,
                                                         runtime_scene,
                                                         glm::mat4(1.0f));
     assert(palette.valid);
-    const karma::geometry::MeshData skinned_mesh =
-        karma::animation::skinMesh(runtime_primitive.primitive->mesh,
+    const karma::world::MeshData skinned_mesh =
+        karma::world::skinMesh(runtime_primitive.primitive->mesh,
                                    runtime_primitive.primitive->vertex_influences,
                                    palette.joint_matrices);
     for (const glm::vec3& vertex : skinned_mesh.vertices) {
@@ -1546,7 +1546,7 @@ void testWalkingGlbImportSmoke() {
   auto has_joint = [&](const char* name) {
     return std::any_of(prefab.skeletons.front().joints.begin(),
                        prefab.skeletons.front().joints.end(),
-                       [&](const karma::animation::Joint& joint) {
+                       [&](const karma::world::Joint& joint) {
                          return joint.name == name;
                        });
   };

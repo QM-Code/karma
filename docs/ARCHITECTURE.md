@@ -55,7 +55,7 @@ Rules:
 - Visual feature modules belong in `features/visual`, not renderer internals.
 - UI provider adapters belong in `features/ui/<provider>`. The shared engine
   contract is `runtime/app/UiLayer`; provider-specific setup belongs behind a
-  factory such as `karma::imgui::createUiLayer(...)`.
+  factory such as `karma::ui::imgui::createUiLayer(...)`.
 
 ## Public API Rules
 
@@ -64,8 +64,4 @@ Rules:
   unrelated contracts.
 - Keep concrete backend internals private unless an example or integration needs
   a small public access surface.
-- Keep math operations centralized under `karma/core/math`. Use
-  `karma/core/math/glm.h` for conversions between engine math types and GLM at
-  renderer, physics, content, and example boundaries. Do not add subsystem-local
-  `Vec3`/`Quat` conversion, clamp, interpolation, or scale helpers when the
-  shared math API covers the operation.
+- Keep math operations exposed through `karma/math.h`.

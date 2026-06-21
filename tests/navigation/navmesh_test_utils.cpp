@@ -17,8 +17,8 @@ std::filesystem::path resolveRepoPath(const std::filesystem::path& relative) {
   return relative;
 }
 
-karma::geometry::MeshData makePlaneMesh(float half_extent) {
-  karma::geometry::MeshData mesh;
+karma::world::MeshData makePlaneMesh(float half_extent) {
+  karma::world::MeshData mesh;
   mesh.vertices = {
       {-half_extent, 0.0f, -half_extent},
       {half_extent, 0.0f, -half_extent},
@@ -29,9 +29,9 @@ karma::geometry::MeshData makePlaneMesh(float half_extent) {
   return mesh;
 }
 
-karma::geometry::MeshData combineMeshes(const std::vector<karma::geometry::MeshData>& meshes) {
-  karma::geometry::MeshData combined;
-  for (const karma::geometry::MeshData& mesh : meshes) {
+karma::world::MeshData combineMeshes(const std::vector<karma::world::MeshData>& meshes) {
+  karma::world::MeshData combined;
+  for (const karma::world::MeshData& mesh : meshes) {
     const uint32_t base = static_cast<uint32_t>(combined.vertices.size());
     combined.vertices.insert(combined.vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
     combined.indices.reserve(combined.indices.size() + mesh.indices.size());
@@ -48,7 +48,7 @@ karma::navigation::NavMeshInputGeometry makePlaneGeometry(float half_extent) {
   return geometry;
 }
 
-void appendQuad(karma::geometry::MeshData& mesh,
+void appendQuad(karma::world::MeshData& mesh,
                 const karma::math::Vec3& a,
                 const karma::math::Vec3& b,
                 const karma::math::Vec3& c,
@@ -62,7 +62,7 @@ void appendQuad(karma::geometry::MeshData& mesh,
 }
 
 karma::navigation::NavMeshInputGeometry makeRingGeometry() {
-  karma::geometry::MeshData mesh;
+  karma::world::MeshData mesh;
   appendQuad(mesh, {-5.0f, 0.0f, -5.0f}, {-1.0f, 0.0f, -5.0f},
              {-1.0f, 0.0f, 5.0f}, {-5.0f, 0.0f, 5.0f});
   appendQuad(mesh, {1.0f, 0.0f, -5.0f}, {5.0f, 0.0f, -5.0f},
@@ -78,7 +78,7 @@ karma::navigation::NavMeshInputGeometry makeRingGeometry() {
 }
 
 karma::navigation::NavMeshInputGeometry makeCorridorGeometry() {
-  karma::geometry::MeshData mesh;
+  karma::world::MeshData mesh;
   appendQuad(mesh,
              {-5.0f, 0.0f, -1.0f},
              {5.0f, 0.0f, -1.0f},

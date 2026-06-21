@@ -2,17 +2,17 @@
 
 #include <algorithm>
 
-#include "karma/world/components/nav_crowd.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/character_controller.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace karma::navigation::detail {
 
-void rebuildCrowds(ecs::World& world) {
+void rebuildCrowds(world::World& world) {
   world.forEach<components::NavMeshComponent, components::NavCrowdComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
         auto& crowd = world.get<components::NavCrowdComponent>(entity);
         if (!crowd.enabled) {
@@ -43,13 +43,13 @@ void rebuildCrowds(ecs::World& world) {
       });
 }
 
-void syncCrowdAgents(ecs::World& world) {
+void syncCrowdAgents(world::World& world) {
   world.forEach<components::NavCrowdAgentComponent, components::TransformComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& agent = world.get<components::NavCrowdAgentComponent>(entity);
         const auto& transform = world.get<components::TransformComponent>(entity);
 
-        auto remove_from_crowd = [&](ecs::Entity preferred) {
+        auto remove_from_crowd = [&](world::Entity preferred) {
           const CrowdSelection old_crowd = findCrowd(world, preferred);
           if (old_crowd.crowd != nullptr && agent.agent_id >= 0) {
             old_crowd.crowd->crowd.removeAgent(agent.agent_id);
@@ -58,7 +58,7 @@ void syncCrowdAgents(ecs::World& world) {
           agent.cached_crowd_entity = {};
         };
 
-        const ecs::Entity current_crowd = agent.cached_crowd_entity.isValid()
+        const world::Entity current_crowd = agent.cached_crowd_entity.isValid()
             ? agent.cached_crowd_entity
             : agent.crowd_entity;
         if (!agent.enabled || agent.remove_requested) {
@@ -120,9 +120,9 @@ void syncCrowdAgents(ecs::World& world) {
       });
 }
 
-void updateCrowds(ecs::World& world, float dt) {
+void updateCrowds(world::World& world, float dt) {
   world.forEach<components::NavMeshComponent, components::NavCrowdComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
         auto& crowd = world.get<components::NavCrowdComponent>(entity);
         if (!crowdUsable(nav_mesh, crowd)) {
@@ -143,7 +143,7 @@ void updateCrowds(ecs::World& world, float dt) {
             ? crowd.crowd.debugSnapshot(crowd.debug_request)
             : NavCrowdDebugSnapshot{};
         world.forEach<components::NavCrowdAgentComponent, components::TransformComponent>(
-            [&](ecs::Entity agent_entity) {
+            [&](world::Entity agent_entity) {
               auto& agent = world.get<components::NavCrowdAgentComponent>(agent_entity);
               if (agent.cached_crowd_entity != entity || agent.agent_id < 0) {
                 return;
@@ -181,7 +181,7 @@ void updateCrowds(ecs::World& world, float dt) {
       });
 }
 
-void syncCrowds(ecs::World& world, float dt) {
+void syncCrowds(world::World& world, float dt) {
   rebuildCrowds(world);
   syncCrowdAgents(world);
   updateCrowds(world, dt);

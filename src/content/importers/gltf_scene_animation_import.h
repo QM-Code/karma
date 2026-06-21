@@ -10,15 +10,15 @@
 
 struct aiScene;
 
-namespace karma::scene {
+namespace karma::world {
 
-std::vector<animation::AnimationClip> loadGltfAnimationClips(
+std::vector<world::AnimationClip> loadGltfAnimationClips(
     const GltfDocument& doc,
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
     const GltfScenePrefab& prefab);
 
-std::vector<animation::AnimationClip> loadAnimationClips(
+std::vector<world::AnimationClip> loadAnimationClips(
     const aiScene& scene,
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name);
 
-}  // namespace karma::scene
+}  // namespace karma::world

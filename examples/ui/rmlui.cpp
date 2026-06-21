@@ -6,7 +6,7 @@
 #include <utility>
 
 #include "demo_asset_paths.h"
-#include "karma/features/ui/rmlui/rmlui_layer.h"
+#include "karma/ui.h"
 #include "karma/karma.h"
 
 #include <RmlUi/Core.h>
@@ -117,9 +117,9 @@ int main() {
   karma::demo::DemoGame game;
 
   auto content = std::make_shared<karma::demo::DemoRmlContent>();
-  karma::rmlui::RmlUiLayerConfig ui_config;
+  karma::ui::rmlui::RmlUiLayerConfig ui_config;
   ui_config.asset_roots.push_back(karma::demo::resolveAssetPath("examples/assets"));
-  app.setUi(karma::rmlui::createUiLayer(
+  app.setUi(karma::ui::rmlui::createUiLayer(
       [content](Rml::Context& context) { content->onContextReady(context); },
       std::move(ui_config)));
 

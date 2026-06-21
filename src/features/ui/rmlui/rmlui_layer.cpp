@@ -1,4 +1,4 @@
-#include "karma/features/ui/rmlui/rmlui_layer.h"
+#include "karma/ui.h"
 
 #include <cstdio>
 #include <cstdint>
@@ -9,7 +9,7 @@
 
 #include <spdlog/spdlog.h>
 
-namespace karma::rmlui {
+namespace karma::ui::rmlui {
 
 namespace {
 
@@ -168,7 +168,7 @@ class RmlUiLayer final : public app::UiLayer,
 
   void onFrame(app::UIContext& ctx) override {
     ctx_ = &ctx;
-    renderer::UIDrawData& out = ctx.drawData();
+    rendering::UIDrawData& out = ctx.drawData();
     out.clear();
     out.premultiplied_alpha = false;
 
@@ -258,7 +258,7 @@ class RmlUiLayer final : public app::UiLayer,
       return;
     }
 
-    renderer::UIDrawData& out = ctx_->drawData();
+    rendering::UIDrawData& out = ctx_->drawData();
     const size_t base_vertex = out.vertices.size();
     const size_t base_index = out.indices.size();
 
@@ -276,7 +276,7 @@ class RmlUiLayer final : public app::UiLayer,
         pos.y = ty;
       }
 
-      renderer::UIVertex out_v{};
+      rendering::UIVertex out_v{};
       out_v.x = pos.x;
       out_v.y = pos.y;
       out_v.u = v.tex_coord.x;
@@ -289,7 +289,7 @@ class RmlUiLayer final : public app::UiLayer,
       out.indices.push_back(static_cast<uint32_t>(idx) + static_cast<uint32_t>(base_vertex));
     }
 
-    renderer::UIDrawCmd cmd{};
+    rendering::UIDrawCmd cmd{};
     cmd.index_offset = static_cast<uint32_t>(base_index);
     cmd.index_count = static_cast<uint32_t>(it->second.indices.size());
     cmd.scissor_enabled = scissor_enabled_;
@@ -555,4 +555,4 @@ std::unique_ptr<app::UiLayer> createUiLayer(RmlUiLayerCallbacks callbacks,
   return std::make_unique<RmlUiLayer>(std::move(callbacks), std::move(config));
 }
 
-}  // namespace karma::rmlui
+}  // namespace karma::ui::rmlui

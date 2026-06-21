@@ -2,9 +2,9 @@
 
 #include <spdlog/spdlog.h>
 
-#include "karma/world/components/network.h"
-#include "karma/world/components/tag.h"
-#include "karma/world/components/transform.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::examples::network_demo {
 
@@ -20,19 +20,19 @@ std::string payloadText(std::span<const std::byte> payload) {
 }
 
 std::vector<std::byte> encodeInput(PlayerInput input) {
-  net::BinaryWriter writer;
+  network::BinaryWriter writer;
   writer.writeFloat32(input.dx);
   writer.writeFloat32(input.dz);
   return writer.takeBytes();
 }
 
 bool decodeInput(std::span<const std::byte> bytes, PlayerInput& input) {
-  net::BinaryReader reader(bytes);
+  network::BinaryReader reader(bytes);
   return reader.readFloat32(input.dx) && reader.readFloat32(input.dz);
 }
 
-ecs::Entity spawnReplicatedPlayer(ecs::World& world,
-                                  net::PeerId peer,
+world::Entity spawnReplicatedPlayer(world::World& world,
+                                  network::PeerId peer,
                                   const std::string& name,
                                   float offset) {
   auto entity = world.createEntity();
@@ -59,8 +59,8 @@ ecs::Entity spawnReplicatedPlayer(ecs::World& world,
   return entity;
 }
 
-void logReplicatedWorld(const ecs::World& world) {
-  for (const ecs::Entity entity : world.entities()) {
+void logReplicatedWorld(const world::World& world) {
+  for (const world::Entity entity : world.entities()) {
     if (!world.has<components::NetworkIdentityComponent>(entity) ||
         !world.has<components::TransformComponent>(entity)) {
       continue;

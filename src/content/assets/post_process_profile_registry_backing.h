@@ -6,9 +6,9 @@
 #include <unordered_map>
 #include <utility>
 
-#include "karma/rendering/renderer/post_process.h"
+#include "karma/rendering.h"
 
-namespace karma::renderer {
+namespace karma::rendering {
 
 /// \ingroup karma_rendering
 /// Conventional key for the engine default post-process profile.
@@ -22,7 +22,7 @@ inline constexpr std::string_view kDefaultPostProcessProfileKey = "default";
 /// not disable rendering.
 ///
 /// `AssetRegistry` owns this backing store. Register profiles through
-/// `content::AssetRegistry` during startup, or update them at runtime when
+/// `assets::AssetRegistry` during startup, or update them at runtime when
 /// camera looks need to change.
 class PostProcessProfileLibrary {
  public:
@@ -102,4 +102,4 @@ class PostProcessProfileLibrary {
   uint64_t version_ = 0;
 };
 
-}  // namespace karma::renderer
+}  // namespace karma::rendering

@@ -1,6 +1,6 @@
 #include "navmesh_test_utils.h"
 
-#include "karma/content/assets/asset_registry.h"
+#include "karma/assets.h"
 
 namespace karma::tests::navigation {
 
@@ -100,15 +100,15 @@ void testNearestPolyFlagsAndSnapshotRefresh() {
 }
 
 void testGlbPrefabCollectionAppliesWorldTransform() {
-  karma::ecs::World world;
-  const karma::ecs::Entity surface = world.createEntity();
+  karma::world::World world;
+  const karma::world::Entity surface = world.createEntity();
   karma::components::TransformComponent transform{};
   transform.setPosition({10.0f, 2.0f, -3.0f});
   transform.setScale({2.0f, 1.0f, 2.0f});
   world.add(surface, transform);
   world.add(surface, karma::components::NavMeshSurfaceComponent{
                          .mesh_data =
-                             std::make_shared<karma::geometry::MeshData>(makePlaneMesh(1.0f)),
+                             std::make_shared<karma::world::MeshData>(makePlaneMesh(1.0f)),
                      });
 
   const karma::navigation::NavMeshInputGeometry geometry =
@@ -121,12 +121,12 @@ void testGlbPrefabCollectionAppliesWorldTransform() {
 }
 
 void testWorldSurfaceCollectionUsesNavMeshSurfaceArea() {
-  karma::ecs::World world;
+  karma::world::World world;
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{
                          .area = 2,
-                         .mesh_data = std::make_shared<karma::geometry::MeshData>(makePlaneMesh()),
+                         .mesh_data = std::make_shared<karma::world::MeshData>(makePlaneMesh()),
                      });
 
   const karma::navigation::NavMeshInputGeometry geometry =
@@ -138,10 +138,10 @@ void testWorldSurfaceCollectionUsesNavMeshSurfaceArea() {
 }
 
 void testWorldSurfaceCollectionResolvesMeshAssetKey() {
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   assets.registerMeshAsset("runtime/nav/plane", makePlaneMesh());
 
-  karma::ecs::World world;
+  karma::world::World world;
   const auto surface = world.createEntity();
   world.add(surface, karma::components::TransformComponent{});
   world.add(surface, karma::components::NavMeshSurfaceComponent{

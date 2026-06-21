@@ -1,9 +1,9 @@
-#include "karma/runtime/app/ui_context.h"
+#include "karma/app.h"
 
 #include <algorithm>
 
-#include "karma/runtime/input/input_system.h"
-#include "karma/rendering/renderer/device.h"
+#include "karma/app.h"
+#include "karma/rendering.h"
 
 #include "../../../third_party/stb_image.h"
 
@@ -17,7 +17,7 @@ UITextureHandle UIContext::createTextureRGBA8(int w, int h, const void* pixels) 
   if (!device_ || w <= 0 || h <= 0) {
     return 0;
   }
-  const karma::renderer::TextureId id = device_->createTextureRGBA8(w, h, pixels);
+  const karma::rendering::TextureId id = device_->createTextureRGBA8(w, h, pixels);
   return static_cast<UITextureHandle>(id);
 }
 
@@ -51,7 +51,7 @@ void UIContext::updateTextureRGBA8(UITextureHandle tex, int w, int h, const void
   if (!device_ || tex == 0 || w <= 0 || h <= 0) {
     return;
   }
-  device_->updateTextureRGBA8(static_cast<karma::renderer::TextureId>(tex), w, h, pixels);
+  device_->updateTextureRGBA8(static_cast<karma::rendering::TextureId>(tex), w, h, pixels);
 }
 
 void UIContext::destroyTexture(UITextureHandle tex) {
@@ -63,14 +63,14 @@ void UIContext::destroyTexture(UITextureHandle tex) {
   if (!device_) {
     return;
   }
-  device_->destroyTexture(static_cast<karma::renderer::TextureId>(tex));
+  device_->destroyTexture(static_cast<karma::rendering::TextureId>(tex));
 }
 
 void UIContext::destroyOwnedTextures() {
   if (device_) {
     for (const UITextureHandle tex : owned_textures_) {
       if (tex != 0) {
-        device_->destroyTexture(static_cast<karma::renderer::TextureId>(tex));
+        device_->destroyTexture(static_cast<karma::rendering::TextureId>(tex));
       }
     }
   }
@@ -85,7 +85,7 @@ void UIContext::reset() {
   device_ = nullptr;
 }
 
-karma::input::InputSystem& UIContext::input() {
+karma::app::InputSystem& UIContext::input() {
   return *input_;
 }
 

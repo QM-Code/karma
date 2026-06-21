@@ -14,7 +14,7 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace karma::demo {
 
@@ -84,7 +84,7 @@ struct ExplosionStressItem {
 };
 
 struct ActiveExplosionInstance {
-  ecs::Entity root{};
+  world::Entity root{};
   float destroy_time = 0.0f;
 };
 
@@ -327,7 +327,7 @@ class ExplosionStressExample final : public app::GameInterface {
     const std::size_t active_explosion_visuals = active_explosions_.size();
     std::size_t active_explosion_lights = 0u;
     if (world != nullptr) {
-      for (ecs::Entity entity :
+      for (world::Entity entity :
            world->view<components::LightPulseComponent, components::LightComponent>()) {
         const auto& pulse = world->get<components::LightPulseComponent>(entity);
         if (pulse.active) {
@@ -343,8 +343,8 @@ class ExplosionStressExample final : public app::GameInterface {
         world != nullptr ? world->view<components::ParticleEmitterComponent>().size() : 0u;
     const std::size_t total_lights =
         world != nullptr ? world->view<components::LightComponent>().size() : 0u;
-    renderer::ForwardPlusStats stats{};
-    renderer::ParticlePassStats particle_stats{};
+    rendering::ForwardPlusStats stats{};
+    rendering::ParticlePassStats particle_stats{};
     if (graphics != nullptr) {
       graphics->getFramebufferSize(fb_width, fb_height);
       stats = graphics->getForwardPlusStats();
@@ -458,17 +458,17 @@ class ExplosionStressExample final : public app::GameInterface {
     cleanupExpiredExplosions();
   }
 
-  void disableExplosionEmitter(ecs::Entity entity) {
+  void disableExplosionEmitter(world::Entity entity) {
     if (!entity.isValid()) {
       return;
     }
-    particles::setEffectPlayback(*world, entity, false, false);
+    visual::particles::setEffectPlayback(*world, entity, false, false);
     if (world->has<components::VisibilityComponent>(entity)) {
       world->get<components::VisibilityComponent>(entity).visible = false;
     }
   }
 
-  void disableExplosionLight(ecs::Entity light_entity) {
+  void disableExplosionLight(world::Entity light_entity) {
     if (world->isAlive(light_entity) &&
         world->has<components::LightComponent>(light_entity)) {
       auto& light = world->get<components::LightComponent>(light_entity);
@@ -525,7 +525,7 @@ class ExplosionStressExample final : public app::GameInterface {
   }
 
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
@@ -533,7 +533,7 @@ class ExplosionStressExample final : public app::GameInterface {
                                  .visible = true,
                              });
 
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                  .environment_map_asset_key = environment_map_,
@@ -543,7 +543,7 @@ class ExplosionStressExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 48.0f, 0.0f});
@@ -649,7 +649,7 @@ class ExplosionStressExample final : public app::GameInterface {
 
   std::string world_mesh_;
   std::string environment_map_;
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   std::vector<ExplosionStressItem> explosions_{};
   std::vector<ActiveExplosionInstance> active_explosions_{};
   int explosion_count_ = kDefaultExplosionCount;

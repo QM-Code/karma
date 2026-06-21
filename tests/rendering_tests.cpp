@@ -12,17 +12,17 @@
 #include <utility>
 #include <vector>
 
-#include "karma/content/assets/asset_package.h"
-#include "karma/content/assets/asset_registry.h"
-#include "karma/content/materials/material_loader.h"
+#include "karma/assets.h"
+#include "karma/assets.h"
+#include "karma/assets.h"
 #include <glm/mat4x4.hpp>
 
-#include "karma/content/importers/gltf_scene_import.h"
-#include "karma/platform/window/window.h"
-#include "karma/rendering/renderer/device.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/ecs/world.h"
-#include "karma/world/scene/scene.h"
+#include "karma/assets.h"
+#include "karma/platform.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
 namespace {
 
@@ -56,13 +56,13 @@ class DummyWindow final : public karma::platform::Window {
 
 void testTerrainHeadlessNoopApi() {
   DummyWindow window;
-  karma::renderer::GraphicsDevice device(window);
+  karma::rendering::GraphicsDevice device(window);
 
-  karma::renderer::TerrainDesc desc{};
-  const karma::renderer::TerrainId terrain = device.createTerrain(desc);
-  assert(terrain == karma::renderer::kInvalidTerrain);
+  karma::rendering::TerrainDesc desc{};
+  const karma::rendering::TerrainId terrain = device.createTerrain(desc);
+  assert(terrain == karma::rendering::kInvalidTerrain);
 
-  karma::renderer::TerrainTileData tile{};
+  karma::rendering::TerrainTileData tile{};
   tile.coord = {.x = 1, .z = -2};
   tile.resolution = 2u;
   tile.heights = {0.0f, 1.0f, 0.5f, 0.25f};
@@ -71,7 +71,7 @@ void testTerrainHeadlessNoopApi() {
   tile.color_rgba8 = {255u, 255u, 255u, 255u};
   assert(tile.valid());
   device.uploadTerrainTile(terrain, tile);
-  device.submitTerrain(karma::renderer::TerrainDrawItem{
+  device.submitTerrain(karma::rendering::TerrainDrawItem{
       .instance = 7u,
       .terrain = terrain,
       .coord = tile.coord,
@@ -90,7 +90,7 @@ void testTerrainHeadlessNoopApi() {
   assert(stats.submitted_tiles == 0u);
   assert(stats.drawn_tiles == 0u);
 
-  device.beginFrame(karma::renderer::FrameInfo{.width = 128, .height = 64, .delta_time = 0.016f});
+  device.beginFrame(karma::rendering::FrameInfo{.width = 128, .height = 64, .delta_time = 0.016f});
   device.endFrame();
   const auto reset_stats = device.getTerrainStats();
   assert(reset_stats.submitted_tiles == 0u);
@@ -100,8 +100,8 @@ bool nearly(float a, float b) {
   return std::abs(a - b) < 0.0001f;
 }
 
-karma::geometry::MeshData makeTriangleMesh() {
-  karma::geometry::MeshData mesh;
+karma::world::MeshData makeTriangleMesh() {
+  karma::world::MeshData mesh;
   mesh.vertices = {{0.0f, 0.0f, 0.0f},
                    {1.0f, 0.0f, 0.0f},
                    {0.0f, 0.0f, 1.0f}};
@@ -110,7 +110,7 @@ karma::geometry::MeshData makeTriangleMesh() {
 }
 
 void testAssetRegistryRegisterResolveUnregister() {
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
 
   const uint64_t start_version = assets.version();
   assets.registerMeshAsset("mesh/tri", makeTriangleMesh());
@@ -118,17 +118,17 @@ void testAssetRegistryRegisterResolveUnregister() {
   assert(assets.findMeshAsset("mesh/tri") != nullptr);
   assert(assets.findMeshAsset("missing") == nullptr);
 
-  karma::content::TextureAsset texture{};
+  karma::assets::TextureAsset texture{};
   texture.desc.width = 1;
   texture.desc.height = 1;
   texture.bytes = {255u, 255u, 255u, 255u};
   assets.registerTextureAsset("texture/white", std::move(texture));
   assert(assets.findTextureAsset("texture/white") != nullptr);
 
-  karma::renderer::MaterialDesc material{};
+  karma::rendering::MaterialDesc material{};
   material.base_color = {0.1f, 0.2f, 0.3f, 1.0f};
   assets.registerMaterialAsset("material/base", material);
-  karma::renderer::MaterialVariantDesc variant{};
+  karma::rendering::MaterialVariantDesc variant{};
   variant.base_material_key = "material/base";
   variant.params["roughness"] = 0.4f;
   assets.registerMaterialVariant("material/variant", variant);
@@ -137,20 +137,20 @@ void testAssetRegistryRegisterResolveUnregister() {
   assert(nearly(resolved_material->surface.base_color.b, 0.3f));
   assert(resolved_material->params.contains("roughness"));
 
-  karma::renderer::PostProcessSettings profile{};
+  karma::rendering::PostProcessSettings profile{};
   profile.bloom_enabled = true;
   assets.registerPostProcessProfile("post/cinematic", profile);
   assert(assets.findPostProcessProfile("post/cinematic") != nullptr);
   assert(assets.resolvePostProcessProfile("post/cinematic").bloom_enabled);
 
-  karma::particles::ParticleEffectAsset effect{};
-  effect.emitters.push_back(karma::particles::ParticleEmitterDesc{});
+  karma::visual::particles::ParticleEffectAsset effect{};
+  effect.emitters.push_back(karma::visual::particles::ParticleEmitterDesc{});
   effect.emitters.front().texture_key = "texture/white";
   assets.registerParticleEffect("particle/spark", std::move(effect));
   assert(assets.findParticleEffect("particle/spark") != nullptr);
   assert(assets.findParticleEffect("particle/spark")->primaryEmitter() != nullptr);
   const uint64_t before_texture_version = assets.textureVersion();
-  karma::content::TextureAsset particle_texture{};
+  karma::assets::TextureAsset particle_texture{};
   particle_texture.desc.width = 1;
   particle_texture.desc.height = 1;
   particle_texture.bytes = {255u, 255u, 255u, 255u};
@@ -160,33 +160,33 @@ void testAssetRegistryRegisterResolveUnregister() {
   assert(assets.unregisterTextureAsset("particle/texture_asset"));
   assert(assets.findTextureAsset("particle/texture_asset") == nullptr);
 
-  assets.registerAudioClip("audio/wind", karma::content::AudioClipAsset{.path = "wind.ogg"});
+  assets.registerAudioClip("audio/wind", karma::assets::AudioClipAsset{.path = "wind.ogg"});
   assert(assets.findAudioClip("audio/wind") != nullptr);
 
   assets.registerEnvironmentMap("env/studio",
-                                karma::content::EnvironmentMapAsset{.path = "studio.hdr"});
+                                karma::assets::EnvironmentMapAsset{.path = "studio.hdr"});
   assert(assets.findEnvironmentMap("env/studio") != nullptr);
 
-  karma::animation::AnimationClip clip{};
+  karma::world::AnimationClip clip{};
   clip.name = "idle";
   clip.duration_seconds = 1.25f;
   assets.registerAnimationClip("clip/idle", clip);
   assert(assets.findAnimationClip("clip/idle") != nullptr);
   assert(nearly(assets.findAnimationClip("clip/idle")->duration_seconds, 1.25f));
 
-  karma::animation::Skeleton skeleton{};
+  karma::world::Skeleton skeleton{};
   skeleton.name = "humanoid";
-  skeleton.joints.push_back(karma::animation::Joint{.name = "root"});
+  skeleton.joints.push_back(karma::world::Joint{.name = "root"});
   assets.registerSkeleton("skeleton/humanoid", skeleton);
   assert(assets.findSkeleton("skeleton/humanoid") != nullptr);
 
-  karma::animation::Skin skin{};
+  karma::world::Skin skin{};
   skin.name = "skin";
   skin.joint_node_indices = {0u};
   assets.registerSkin("skin/body", skin);
   assert(assets.findSkin("skin/body") != nullptr);
 
-  karma::content::GltfSceneAsset scene{};
+  karma::assets::GltfSceneAsset scene{};
   scene.scene_key = "scene/root";
   scene.mesh_asset_keys.push_back("mesh/tri");
   assets.registerGltfSceneAsset("scene/import", scene);
@@ -314,15 +314,15 @@ std::filesystem::path findRepoRoot() {
 }
 
 void testAssetRegistryMaterialInheritance() {
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
 
-  karma::renderer::MaterialDesc base{};
+  karma::rendering::MaterialDesc base{};
   base.base_color = {0.25f, 0.5f, 0.75f, 1.0f};
   base.roughness = 0.8f;
   base.metallic = 0.1f;
   assets.registerMaterialAsset("paint", base);
 
-  karma::renderer::MaterialVariantDesc variant{};
+  karma::rendering::MaterialVariantDesc variant{};
   variant.base_material_key = "paint";
   variant.params["roughness"] = 0.25f;
   assets.registerMaterialVariant("paint/local", variant);
@@ -362,7 +362,7 @@ void testMaterialFileLoading() {
               "textures": { "base_color": "textures/albedo" }
             })");
   std::string diagnostic;
-  auto standard_desc = karma::content::loadMaterialAssetDesc(standard, &diagnostic);
+  auto standard_desc = karma::assets::loadMaterialAssetDesc(standard, &diagnostic);
   assert(standard_desc.has_value());
   assert(standard_desc->pipeline.name == "standard");
   assert(nearly(standard_desc->surface.base_color.g, 0.2f));
@@ -383,7 +383,7 @@ void testMaterialFileLoading() {
               },
               "params": { "wave_tint_strength": 0.75 }
             })");
-  auto custom_desc = karma::content::loadMaterialAssetDesc(custom, &diagnostic);
+  auto custom_desc = karma::assets::loadMaterialAssetDesc(custom, &diagnostic);
   assert(custom_desc.has_value());
   assert(custom_desc->pipeline.name == "custom");
   assert(custom_desc->pipeline.vertex_shader_path ==
@@ -400,7 +400,7 @@ void testMaterialFileLoading() {
               "surface": { "roughness": 0.15 },
               "render_state": { "transparent": true }
             })");
-  auto variant_desc = karma::content::loadMaterialVariantDesc(variant, &diagnostic);
+  auto variant_desc = karma::assets::loadMaterialVariantDesc(variant, &diagnostic);
   assert(variant_desc.has_value());
   assert(variant_desc->base_material_key == "paint");
   assert(variant_desc->params.contains("roughness"));
@@ -408,7 +408,7 @@ void testMaterialFileLoading() {
 
   const std::filesystem::path invalid = dir / "materials" / "invalid.mat";
   writeText(invalid, R"({"version": 2, "pipeline": { "name": "custom" }})");
-  auto invalid_desc = karma::content::loadMaterialAssetDesc(invalid, &diagnostic);
+  auto invalid_desc = karma::assets::loadMaterialAssetDesc(invalid, &diagnostic);
   assert(!invalid_desc.has_value());
   assert(!diagnostic.empty());
 
@@ -416,14 +416,14 @@ void testMaterialFileLoading() {
 }
 
 void testAssetKeyValidationAndPackages() {
-  assert(karma::content::AssetRegistry::isValidAssetKey("examples/mesh/world"));
-  assert(karma::content::AssetRegistry::isValidAssetKey("default"));
-  assert(!karma::content::AssetRegistry::isValidAssetKey(""));
-  assert(!karma::content::AssetRegistry::isValidAssetKey("/tmp/world"));
-  assert(!karma::content::AssetRegistry::isValidAssetKey("../world"));
-  assert(!karma::content::AssetRegistry::isValidAssetKey("textures\\world"));
-  assert(!karma::content::AssetRegistry::isValidAssetKey("examples/assets/world.glb"));
-  assert(!karma::content::AssetRegistry::assetKeyValidationError("examples/assets/world.glb").empty());
+  assert(karma::assets::AssetRegistry::isValidAssetKey("examples/mesh/world"));
+  assert(karma::assets::AssetRegistry::isValidAssetKey("default"));
+  assert(!karma::assets::AssetRegistry::isValidAssetKey(""));
+  assert(!karma::assets::AssetRegistry::isValidAssetKey("/tmp/world"));
+  assert(!karma::assets::AssetRegistry::isValidAssetKey("../world"));
+  assert(!karma::assets::AssetRegistry::isValidAssetKey("textures\\world"));
+  assert(!karma::assets::AssetRegistry::isValidAssetKey("examples/assets/world.glb"));
+  assert(!karma::assets::AssetRegistry::assetKeyValidationError("examples/assets/world.glb").empty());
 
   const std::filesystem::path repo_root = findRepoRoot();
   assert(!repo_root.empty());
@@ -460,9 +460,9 @@ void testAssetKeyValidationAndPackages() {
               ]
             })");
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   std::string diagnostic;
-  auto package = karma::content::importAssetPackage(assets, dir, &diagnostic);
+  auto package = karma::assets::importAssetPackage(assets, dir, &diagnostic);
   assert(package.has_value());
   assert(diagnostic.empty());
   const auto* texture = assets.findTextureAsset("package/spark_atlas");
@@ -473,18 +473,18 @@ void testAssetKeyValidationAndPackages() {
   assert(!texture->bytes.empty());
 #if defined(KARMA_ENABLE_KTX2)
   assert(texture->payload_format ==
-         karma::content::TextureAsset::PayloadFormat::KTX2_BASIS_UASTC);
+         karma::assets::TextureAsset::PayloadFormat::KTX2_BASIS_UASTC);
   assert(!texture->fallback_rgba8.empty());
   assert(texture->fallback_rgba8.size() == 256u * 64u * 4u);
   assert(texture->subresources.empty());
 #else
-  assert(texture->payload_format == karma::content::TextureAsset::PayloadFormat::RGBA8);
+  assert(texture->payload_format == karma::assets::TextureAsset::PayloadFormat::RGBA8);
   assert(texture->fallback_rgba8.empty());
   assert(texture->subresources.size() == 1u);
 #endif
   assert(assets.findParticleEffect("package/flash") != nullptr);
   assert(assets.findEnvironmentMap("package/env") != nullptr);
-  assert(karma::content::unloadAssetPackage(assets, *package));
+  assert(karma::assets::unloadAssetPackage(assets, *package));
   assert(assets.findTextureAsset("package/spark_atlas") == nullptr);
   assert(assets.findParticleEffect("package/flash") == nullptr);
   assert(assets.findEnvironmentMap("package/env") == nullptr);
@@ -499,7 +499,7 @@ void testAssetKeyValidationAndPackages() {
             })");
   diagnostic.clear();
   auto rollback_package =
-      karma::content::importAssetPackage(assets, dir / "rollback.package.json", &diagnostic);
+      karma::assets::importAssetPackage(assets, dir / "rollback.package.json", &diagnostic);
   assert(!rollback_package.has_value());
   assert(!diagnostic.empty());
   assert(assets.findEnvironmentMap("package/rollback_env") == nullptr);
@@ -507,7 +507,7 @@ void testAssetKeyValidationAndPackages() {
 
   assert(assets.registerEnvironmentMap(
       "package/dupe_env",
-      karma::content::EnvironmentMapAsset{.path = dir / "environment.hdr"}));
+      karma::assets::EnvironmentMapAsset{.path = dir / "environment.hdr"}));
   writeText(dir / "duplicate.package.json",
             R"({
               "version": 1,
@@ -517,7 +517,7 @@ void testAssetKeyValidationAndPackages() {
             })");
   diagnostic.clear();
   auto duplicate_package =
-      karma::content::importAssetPackage(assets, dir / "duplicate.package.json", &diagnostic);
+      karma::assets::importAssetPackage(assets, dir / "duplicate.package.json", &diagnostic);
   assert(!duplicate_package.has_value());
   assert(!diagnostic.empty());
   assert(assets.findEnvironmentMap("package/dupe_env") != nullptr);
@@ -534,20 +534,20 @@ void testAssetCacheV2AndPackageWarmRestore() {
   setEnvVar("KARMA_ASSET_CACHE_DIR", cache_dir.string().c_str());
   setEnvVar("KARMA_ASSET_CACHE_FLUSH", "1");
   unsetEnvVar("KARMA_ASSET_CACHE");
-  karma::content::AssetCacheConfig env_config =
-      karma::content::AssetCacheConfig::fromEnvironment();
+  karma::assets::AssetCacheConfig env_config =
+      karma::assets::AssetCacheConfig::fromEnvironment();
   assert(env_config.root == cache_dir);
   assert(env_config.enabled);
   assert(env_config.flush);
-  karma::content::AssetCache env_cache(env_config);
+  karma::assets::AssetCache env_cache(env_config);
   assert(std::filesystem::exists(cache_dir / "index.json"));
 
-  karma::content::TextureAsset cached_texture{};
+  karma::assets::TextureAsset cached_texture{};
   cached_texture.desc.width = 1;
   cached_texture.desc.height = 1;
-  cached_texture.desc.format = karma::renderer::TextureFormat::RGBA8;
+  cached_texture.desc.format = karma::rendering::TextureFormat::RGBA8;
   cached_texture.bytes = {1u, 2u, 3u, 4u};
-  cached_texture.subresources.push_back(karma::renderer::TextureUploadSubresource{
+  cached_texture.subresources.push_back(karma::rendering::TextureUploadSubresource{
       .mip_level = 0u,
       .array_layer = 0u,
       .width = 1,
@@ -561,7 +561,7 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(read_texture.has_value());
   assert(read_texture->bytes == cached_texture.bytes);
 
-  karma::geometry::MeshData cached_mesh{};
+  karma::world::MeshData cached_mesh{};
   cached_mesh.vertices = {glm::vec3{1.0f, 2.0f, 3.0f}, glm::vec3{4.0f, 5.0f, 6.0f}};
   cached_mesh.normals = {glm::vec3{0.0f, 1.0f, 0.0f}, glm::vec3{0.0f, 0.0f, 1.0f}};
   cached_mesh.uvs = {glm::vec2{0.25f, 0.5f}, glm::vec2{0.75f, 1.0f}};
@@ -572,17 +572,17 @@ void testAssetCacheV2AndPackageWarmRestore() {
   cached_mesh.joint_weights = {glm::vec4{0.1f, 0.2f, 0.3f, 0.4f},
                                glm::vec4{0.4f, 0.3f, 0.2f, 0.1f}};
   cached_mesh.indices = {0u, 1u, 0u};
-  cached_mesh.morph_targets.push_back(karma::geometry::MeshData::MorphTarget{
+  cached_mesh.morph_targets.push_back(karma::world::MeshData::MorphTarget{
       .position_deltas = {glm::vec3{0.1f, 0.0f, 0.0f}},
       .normal_deltas = {glm::vec3{0.0f, 0.1f, 0.0f}},
       .tangent_deltas = {glm::vec3{0.0f, 0.0f, 0.1f}},
   });
-  cached_mesh.submeshes.push_back(karma::geometry::MeshSubmesh{
+  cached_mesh.submeshes.push_back(karma::world::MeshSubmesh{
       .index_offset = 0u,
       .index_count = 3u,
       .material_slot = 1u,
   });
-  cached_mesh.material_slots.push_back(karma::geometry::MeshMaterialSlot{
+  cached_mesh.material_slots.push_back(karma::world::MeshMaterialSlot{
       .name = "slot_a",
       .default_material_key = "material/a",
   });
@@ -598,14 +598,14 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(read_mesh->submeshes[0].material_slot == 1u);
   assert(read_mesh->material_slots[0].default_material_key == "material/a");
 
-  auto imported_material = std::make_shared<karma::renderer::ImportedMaterialData>();
+  auto imported_material = std::make_shared<karma::rendering::ImportedMaterialData>();
   imported_material->texcoord_row0[0] = glm::vec4(1.0f, 0.0f, 0.25f, 0.0f);
   imported_material->texcoord_row1[0] = glm::vec4(0.0f, -1.0f, 0.75f, 0.0f);
-  karma::renderer::ImportedMaterialTexture import_only_texture{};
+  karma::rendering::ImportedMaterialTexture import_only_texture{};
   import_only_texture.source_key = "embedded/0";
   import_only_texture.source_bytes = {1u, 2u, 3u, 4u};
   imported_material->textures.push_back(std::move(import_only_texture));
-  karma::renderer::MaterialAssetDesc cached_material{};
+  karma::rendering::MaterialAssetDesc cached_material{};
   cached_material.material_key = "material/cached";
   cached_material.textures["base_color"] = "texture/cached";
   cached_material.material_asset_path = "models/source.glb";
@@ -631,8 +631,8 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(!env_cache.readTexture("legacy").has_value());
 
   setEnvVar("KARMA_ASSET_CACHE", "0");
-  karma::content::AssetCacheConfig disabled =
-      karma::content::AssetCacheConfig::fromEnvironment();
+  karma::assets::AssetCacheConfig disabled =
+      karma::assets::AssetCacheConfig::fromEnvironment();
   assert(!disabled.enabled);
   unsetEnvVar("KARMA_ASSET_CACHE");
   unsetEnvVar("KARMA_ASSET_CACHE_FLUSH");
@@ -668,51 +668,51 @@ void testAssetCacheV2AndPackageWarmRestore() {
               ]
             })");
 
-  karma::content::AssetPackageOptions options{};
+  karma::assets::AssetPackageOptions options{};
   options.cache.root = cache_dir;
   options.cache.enabled = true;
   options.cache.flush = false;
 
-  karma::content::AssetRegistry cold_assets;
+  karma::assets::AssetRegistry cold_assets;
   std::string diagnostic;
   auto cold_package =
-      karma::content::importAssetPackage(cold_assets, dir, options, &diagnostic);
+      karma::assets::importAssetPackage(cold_assets, dir, options, &diagnostic);
   assert(cold_package.has_value());
   assert(diagnostic.empty());
   assert(cold_assets.findTextureAsset("cache/package/spark_atlas") != nullptr);
   assert(cold_assets.findParticleEffect("cache/package/flash") != nullptr);
   assert(cold_assets.findEnvironmentMap("cache/package/env") != nullptr);
-  const karma::content::TextureAsset* cold_texture =
+  const karma::assets::TextureAsset* cold_texture =
       cold_assets.findTextureAsset("cache/package/spark_atlas");
   assert(cold_texture != nullptr);
-  auto rgba_upload = karma::content::prepareTextureUpload(*cold_texture, {});
+  auto rgba_upload = karma::assets::prepareTextureUpload(*cold_texture, {});
   assert(rgba_upload.has_value());
-  assert(rgba_upload->desc.format == karma::renderer::TextureFormat::RGBA8);
+  assert(rgba_upload->desc.format == karma::rendering::TextureFormat::RGBA8);
   assert(!rgba_upload->upload.bytes.empty());
 #if defined(KARMA_ENABLE_KTX2)
-  auto default_compressed_upload = karma::content::prepareTextureUpload(
+  auto default_compressed_upload = karma::assets::prepareTextureUpload(
       *cold_texture,
-      karma::content::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
+      karma::assets::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
   assert(default_compressed_upload.has_value());
-  assert(default_compressed_upload->desc.format == karma::renderer::TextureFormat::RGBA8);
+  assert(default_compressed_upload->desc.format == karma::rendering::TextureFormat::RGBA8);
   assert(default_compressed_upload->upload.bytes == cold_texture->fallback_rgba8);
 
   setEnvVar("KARMA_TEXTURE_BC7", "1");
-  auto bc7_upload = karma::content::prepareTextureUpload(
+  auto bc7_upload = karma::assets::prepareTextureUpload(
       *cold_texture,
-      karma::content::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
+      karma::assets::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
   assert(bc7_upload.has_value());
-  assert(bc7_upload->desc.format == karma::renderer::TextureFormat::BC7_RGBA_UNORM);
+  assert(bc7_upload->desc.format == karma::rendering::TextureFormat::BC7_RGBA_UNORM);
   assert(!bc7_upload->upload.subresources.empty());
   assert(bc7_upload->upload.subresources.front().row_stride > 0u);
   unsetEnvVar("KARMA_TEXTURE_BC7");
 
   setEnvVar("KARMA_TEXTURE_BC7", "0");
-  auto bc7_disabled_upload = karma::content::prepareTextureUpload(
+  auto bc7_disabled_upload = karma::assets::prepareTextureUpload(
       *cold_texture,
-      karma::content::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
+      karma::assets::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
   assert(bc7_disabled_upload.has_value());
-  assert(bc7_disabled_upload->desc.format == karma::renderer::TextureFormat::RGBA8);
+  assert(bc7_disabled_upload->desc.format == karma::rendering::TextureFormat::RGBA8);
   assert(bc7_disabled_upload->upload.bytes == cold_texture->fallback_rgba8);
   unsetEnvVar("KARMA_TEXTURE_BC7");
 #endif
@@ -729,10 +729,10 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(!texture_blob_key.empty());
   assert(std::filesystem::exists(cache_dir / "blobs" / (texture_blob_key + ".kasset")));
 
-  karma::content::AssetRegistry warm_assets;
+  karma::assets::AssetRegistry warm_assets;
   diagnostic.clear();
   auto warm_package =
-      karma::content::importAssetPackage(warm_assets, dir, options, &diagnostic);
+      karma::assets::importAssetPackage(warm_assets, dir, options, &diagnostic);
   assert(warm_package.has_value());
   assert(diagnostic.empty());
   assert(warm_assets.findTextureAsset("cache/package/spark_atlas") != nullptr);
@@ -740,21 +740,21 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(warm_assets.findEnvironmentMap("cache/package/env") != nullptr);
 
   std::filesystem::remove(cache_dir / "blobs" / (texture_blob_key + ".kasset"));
-  karma::content::AssetRegistry rebuild_assets;
+  karma::assets::AssetRegistry rebuild_assets;
   diagnostic.clear();
   auto rebuilt_package =
-      karma::content::importAssetPackage(rebuild_assets, dir, options, &diagnostic);
+      karma::assets::importAssetPackage(rebuild_assets, dir, options, &diagnostic);
   assert(rebuilt_package.has_value());
   assert(diagnostic.empty());
   assert(rebuild_assets.findTextureAsset("cache/package/spark_atlas") != nullptr);
   assert(std::filesystem::exists(cache_dir / "blobs" / (texture_blob_key + ".kasset")));
 
-  karma::content::AssetPackageOptions disabled_options = options;
+  karma::assets::AssetPackageOptions disabled_options = options;
   disabled_options.cache.enabled = false;
-  karma::content::AssetRegistry disabled_assets;
+  karma::assets::AssetRegistry disabled_assets;
   diagnostic.clear();
   auto disabled_package =
-      karma::content::importAssetPackage(disabled_assets, dir, disabled_options, &diagnostic);
+      karma::assets::importAssetPackage(disabled_assets, dir, disabled_options, &diagnostic);
   assert(disabled_package.has_value());
   assert(diagnostic.empty());
   assert(disabled_assets.findTextureAsset("cache/package/spark_atlas") != nullptr);
@@ -787,20 +787,20 @@ void testTexturePreparedUploadPreservesRowOrder() {
               ]
             })");
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   std::string diagnostic;
-  auto package = karma::content::importAssetPackage(assets, dir, &diagnostic);
+  auto package = karma::assets::importAssetPackage(assets, dir, &diagnostic);
   assert(package.has_value());
   assert(diagnostic.empty());
-  const karma::content::TextureAsset* texture =
+  const karma::assets::TextureAsset* texture =
       assets.findTextureAsset("tests/textures/rows");
   assert(texture != nullptr);
   assert(texture->desc.width == 4);
   assert(texture->desc.height == 8);
 
-  auto prepared = karma::content::prepareTextureUpload(*texture, {});
+  auto prepared = karma::assets::prepareTextureUpload(*texture, {});
   assert(prepared.has_value());
-  assert(prepared->desc.format == karma::renderer::TextureFormat::RGBA8);
+  assert(prepared->desc.format == karma::rendering::TextureFormat::RGBA8);
   assert(prepared->upload.subresources.size() == 1u);
   assert(rgbaNear(prepared->upload.bytes, prepared->desc.width, 0, 0,
                   255u, 0u, 0u));
@@ -818,10 +818,10 @@ void testImportedMaterialTextureMatchesRendererOrigin() {
   const std::filesystem::path source = dir / "textures" / "rows.tga";
   writeSolidRowsTga(source);
 
-  auto imported_material = std::make_shared<karma::renderer::ImportedMaterialData>();
-  karma::renderer::ImportedMaterialTexture imported_texture{};
+  auto imported_material = std::make_shared<karma::rendering::ImportedMaterialData>();
+  karma::rendering::ImportedMaterialTexture imported_texture{};
   imported_texture.semantic =
-      karma::renderer::ImportedMaterialTextureSemantic::BaseColor;
+      karma::rendering::ImportedMaterialTextureSemantic::BaseColor;
   imported_texture.source_key = source.string();
   imported_texture.raw_name = source.filename().string();
   imported_texture.resolved_path = source;
@@ -831,21 +831,21 @@ void testImportedMaterialTextureMatchesRendererOrigin() {
   imported_texture.srgb = true;
   imported_material->textures.push_back(std::move(imported_texture));
 
-  karma::renderer::MaterialAssetDesc material{};
+  karma::rendering::MaterialAssetDesc material{};
   material.imported_material = imported_material;
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   const std::vector<std::string> texture_keys =
       assets.registerImportedMaterialTextures("tests/material/rows", material);
   assert(texture_keys.size() == 1u);
   assert(material.textures.at("base_color") == texture_keys.front());
 
-  const karma::content::TextureAsset* texture =
+  const karma::assets::TextureAsset* texture =
       assets.findTextureAsset(texture_keys.front());
   assert(texture != nullptr);
-  auto prepared = karma::content::prepareTextureUpload(*texture, {});
+  auto prepared = karma::assets::prepareTextureUpload(*texture, {});
   assert(prepared.has_value());
-  assert(prepared->desc.format == karma::renderer::TextureFormat::RGBA8);
+  assert(prepared->desc.format == karma::rendering::TextureFormat::RGBA8);
   assert(prepared->desc.width == 4);
   assert(prepared->desc.height == 8);
   assert(rgbaNear(prepared->upload.bytes, prepared->desc.width, 0, 0,
@@ -866,28 +866,28 @@ void testAssetPackageAsyncCommitAndStore() {
               ]
             })");
 
-  karma::content::AssetRegistry assets;
-  karma::content::AssetPackageJob job = karma::content::loadAssetPackageAsync(dir);
+  karma::assets::AssetRegistry assets;
+  karma::assets::AssetPackageJob job = karma::assets::loadAssetPackageAsync(dir);
   assert(assets.findEnvironmentMap("package/async_env") == nullptr);
   job.wait();
   assert(job.success());
   assert(job.handle() != nullptr);
-  karma::content::AssetPackageHandle committed{};
-  assert(karma::content::commitAssetPackageJob(assets, job, &committed));
+  karma::assets::AssetPackageHandle committed{};
+  assert(karma::assets::commitAssetPackageJob(assets, job, &committed));
   assert(committed.valid());
   assert(assets.findEnvironmentMap("package/async_env") != nullptr);
-  assert(karma::content::unloadAssetPackage(assets, committed));
+  assert(karma::assets::unloadAssetPackage(assets, committed));
   assert(assets.findEnvironmentMap("package/async_env") == nullptr);
 
   writeText(dir / "invalid.package.json", R"({"version": 1, "assets": "bad"})");
-  karma::content::AssetPackageJob failed =
-      karma::content::loadAssetPackageAsync(dir / "invalid.package.json");
+  karma::assets::AssetPackageJob failed =
+      karma::assets::loadAssetPackageAsync(dir / "invalid.package.json");
   failed.wait();
   assert(!failed.success());
-  assert(!karma::content::commitAssetPackageJob(assets, failed));
+  assert(!karma::assets::commitAssetPackageJob(assets, failed));
   assert(assets.findEnvironmentMap("package/async_env") == nullptr);
 
-  karma::content::AssetPackageStore store(assets);
+  karma::assets::AssetPackageStore store(assets);
   std::string diagnostic;
   auto first = store.acquirePackage(dir, &diagnostic);
   assert(first.has_value());
@@ -925,38 +925,38 @@ void testGltfSceneInstantiationRegistersLogicalMeshKeys() {
               ]
             })");
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   std::string diagnostic;
-  auto package = karma::content::importAssetPackage(assets, package_dir, &diagnostic);
+  auto package = karma::assets::importAssetPackage(assets, package_dir, &diagnostic);
   assert(package.has_value());
   assert(diagnostic.empty());
-  const karma::content::GltfSceneAsset* scene_asset =
+  const karma::assets::GltfSceneAsset* scene_asset =
       assets.findGltfSceneAsset("tests/gltf/world");
   assert(scene_asset != nullptr);
   assert(scene_asset->valid());
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::scene::GltfSceneImportResult imported =
-      karma::scene::instantiateGltfSceneAsset(
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::GltfSceneImportResult imported =
+      karma::world::instantiateGltfSceneAsset(
           world,
           scene,
           assets,
           *scene_asset,
-          karma::scene::GltfSceneInstantiateOptions{
+          karma::world::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = false,
           });
   assert(imported.valid());
 
   bool saw_mesh = false;
-  for (const karma::ecs::Entity entity : imported.entities) {
+  for (const karma::world::Entity entity : imported.entities) {
     if (!world.isAlive(entity) || !world.has<karma::components::MeshComponent>(entity)) {
       continue;
     }
     saw_mesh = true;
     const auto& mesh = world.get<karma::components::MeshComponent>(entity);
-    assert(karma::content::AssetRegistry::isValidAssetKey(mesh.mesh_asset_key));
+    assert(karma::assets::AssetRegistry::isValidAssetKey(mesh.mesh_asset_key));
     assert(mesh.mesh_asset_key.rfind("tests/gltf/world/meshes/", 0) == 0);
     assert(mesh.mesh_asset_key.find(".glb") == std::string::npos);
     assert(mesh.mesh_asset_key.find("#node=") == std::string::npos);
@@ -964,22 +964,22 @@ void testGltfSceneInstantiationRegistersLogicalMeshKeys() {
     assert(mesh_asset != nullptr);
     for (const auto& slot : mesh_asset->material_slots) {
       if (!slot.default_material_key.empty()) {
-        assert(karma::content::AssetRegistry::isValidAssetKey(slot.default_material_key));
+        assert(karma::assets::AssetRegistry::isValidAssetKey(slot.default_material_key));
         assert(assets.findMaterialAsset(slot.default_material_key) != nullptr);
       }
     }
   }
   assert(saw_mesh);
 
-  karma::content::AssetRegistry cached_assets;
+  karma::assets::AssetRegistry cached_assets;
   auto cached_package =
-      karma::content::importAssetPackage(cached_assets, package_dir, &diagnostic);
+      karma::assets::importAssetPackage(cached_assets, package_dir, &diagnostic);
   assert(cached_package.has_value());
   assert(diagnostic.empty());
-  const karma::content::GltfSceneAsset* cached_scene_ptr =
+  const karma::assets::GltfSceneAsset* cached_scene_ptr =
       cached_assets.findGltfSceneAsset("tests/gltf/world");
   assert(cached_scene_ptr != nullptr);
-  const karma::content::GltfSceneAsset& cached_scene = *cached_scene_ptr;
+  const karma::assets::GltfSceneAsset& cached_scene = *cached_scene_ptr;
   assert(cached_scene.valid());
   assert(cached_scene.nodes.size() == scene_asset->nodes.size());
   assert(!cached_scene.mesh_asset_keys.empty());
@@ -999,11 +999,11 @@ void testGltfSceneInstantiationRegistersLogicalMeshKeys() {
   assert(saw_cached_default_material);
 
   const std::filesystem::path cache_dir = makeTempDir("karma_gltf_scene_cache_tests");
-  karma::content::AssetCacheConfig cache_config{};
+  karma::assets::AssetCacheConfig cache_config{};
   cache_config.root = cache_dir;
   cache_config.enabled = true;
   cache_config.flush = true;
-  karma::content::AssetCache cache(cache_config);
+  karma::assets::AssetCache cache(cache_config);
   assert(cache.writeGltfScene("cached_scene_blob", cached_scene));
   auto restored_scene = cache.readGltfScene("cached_scene_blob");
   assert(restored_scene.has_value());
@@ -1012,22 +1012,22 @@ void testGltfSceneInstantiationRegistersLogicalMeshKeys() {
   assert(restored_scene->mesh_asset_keys == cached_scene.mesh_asset_keys);
   std::filesystem::remove_all(cache_dir);
 
-  karma::ecs::World cached_world;
-  karma::scene::Scene cached_scene_graph;
-  const karma::scene::GltfSceneImportResult cached_imported =
-      karma::scene::instantiateGltfSceneAsset(
+  karma::world::World cached_world;
+  karma::world::Scene cached_scene_graph;
+  const karma::world::GltfSceneImportResult cached_imported =
+      karma::world::instantiateGltfSceneAsset(
           cached_world,
           cached_scene_graph,
           cached_assets,
           *restored_scene,
-          karma::scene::GltfSceneInstantiateOptions{
+          karma::world::GltfSceneInstantiateOptions{
               .create_synthetic_root = true,
               .autoplay_animations = false,
           });
   assert(cached_imported.valid());
 
   bool saw_cached_mesh = false;
-  for (const karma::ecs::Entity entity : cached_imported.entities) {
+  for (const karma::world::Entity entity : cached_imported.entities) {
     if (!cached_world.isAlive(entity) ||
         !cached_world.has<karma::components::MeshComponent>(entity)) {
       continue;
@@ -1043,16 +1043,16 @@ void testGltfSceneInstantiationRegistersLogicalMeshKeys() {
 
 void testDeformationHeadlessNoopApi() {
   DummyWindow window;
-  karma::renderer::GraphicsDevice device(window);
+  karma::rendering::GraphicsDevice device(window);
 
-  karma::renderer::DeformationDesc desc{};
+  karma::rendering::DeformationDesc desc{};
   desc.skinning_enabled = true;
   desc.morphing_enabled = true;
   desc.joint_palette = {glm::mat4(1.0f), glm::mat4(2.0f)};
   desc.morph_weights = {0.25f, 0.75f};
 
-  const karma::renderer::DeformationId deformation = device.createDeformation(desc);
-  assert(deformation == karma::renderer::kInvalidDeformation);
+  const karma::rendering::DeformationId deformation = device.createDeformation(desc);
+  assert(deformation == karma::rendering::kInvalidDeformation);
   device.updateDeformation(deformation, desc);
   device.destroyDeformation(deformation);
 
@@ -1075,13 +1075,13 @@ int main() {
   testGltfSceneInstantiationRegistersLogicalMeshKeys();
   testAssetRegistryRegisterResolveUnregister();
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
 
   constexpr const char* kDefaultPostProfile = "default";
   assert(!assets.resolvePostProcessProfile(kDefaultPostProfile).bloom_enabled);
   assert(!assets.resolvePostProcessProfile("missing").bloom_enabled);
 
-  karma::renderer::PostProcessSettings default_profile{};
+  karma::rendering::PostProcessSettings default_profile{};
   default_profile.bloom_enabled = true;
   default_profile.bloom_intensity = 0.6f;
   assets.registerPostProcessProfile(kDefaultPostProfile, default_profile);
@@ -1089,7 +1089,7 @@ int main() {
   assert(assets.resolvePostProcessProfile("missing").bloom_enabled);
   assert(assets.resolvePostProcessProfile("missing").bloom_intensity == 0.6f);
 
-  karma::renderer::PostProcessSettings named_profile{};
+  karma::rendering::PostProcessSettings named_profile{};
   named_profile.tone_mapping_enabled = true;
   named_profile.tone_exposure = 1.25f;
   assets.registerPostProcessProfile("cinematic", named_profile);
@@ -1097,13 +1097,13 @@ int main() {
   assert(assets.resolvePostProcessProfile("cinematic").tone_exposure == 1.25f);
   assert(!assets.resolvePostProcessProfile("cinematic").bloom_enabled);
 
-  karma::renderer::PostProcessSettings replacement_default{};
+  karma::rendering::PostProcessSettings replacement_default{};
   replacement_default.depth_of_field_enabled = true;
   assets.registerPostProcessProfile(kDefaultPostProfile, replacement_default);
   assert(assets.resolvePostProcessProfile(kDefaultPostProfile).depth_of_field_enabled);
   assert(assets.resolvePostProcessProfile("missing").depth_of_field_enabled);
 
-  karma::renderer::PostProcessSettings empty_key_default{};
+  karma::rendering::PostProcessSettings empty_key_default{};
   empty_key_default.temporal_antialiasing_enabled = true;
   empty_key_default.taa_feedback = 0.82f;
   assert(assets.registerPostProcessProfile("", empty_key_default));

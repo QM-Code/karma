@@ -2,14 +2,14 @@
 
 The rendering API is split between gameplay-facing ECS data and lower-level
 renderer services. Most game code should author components and shared resource
-registries, then let karma::renderer::RenderSystem submit the frame.
+registries, then let karma::rendering::RenderSystem submit the frame.
 
 ## Camera-Resolved Post Processing
 
 Post processing is selected by camera, not by global backend state.
 
-- karma::renderer::PostProcessSettings stores the tunable effect values.
-- karma::content::AssetRegistry stores named settings profiles.
+- karma::rendering::PostProcessSettings stores the tunable effect values.
+- karma::assets::AssetRegistry stores named settings profiles.
 - karma::components::CameraComponent::post_process_profile_key selects a
   profile for one camera pass.
 - An empty or missing profile key resolves to the default profile.
@@ -25,7 +25,7 @@ Use karma::app::GameInterface::assets or
 karma::app::RuntimeModuleContext::assets to register profiles:
 
 ```cpp
-karma::renderer::PostProcessSettings cinematic{};
+karma::rendering::PostProcessSettings cinematic{};
 cinematic.bloom_enabled = true;
 cinematic.bloom_threshold = 0.7f;
 cinematic.bloom_intensity = 0.35f;
@@ -42,9 +42,9 @@ world->add(camera, karma::components::CameraComponent{
 
 ## Render Submission Boundary
 
-karma::renderer::GraphicsDevice::renderLayer requires resolved
-karma::renderer::PostProcessSettings. Normal applications do not call this
-directly; karma::renderer::RenderSystem resolves camera profiles, submits
+karma::rendering::GraphicsDevice::renderLayer requires resolved
+karma::rendering::PostProcessSettings. Normal applications do not call this
+directly; karma::rendering::RenderSystem resolves camera profiles, submits
 offscreen camera passes, then submits the primary camera pass.
 
 There is no global `setPostProcessSettings` API. To change post-processing,
@@ -82,14 +82,4 @@ tank/world movement scene, plus local point lights.
 
 Renderer source is intentionally split by responsibility:
 
-- public renderer API: `include/karma/rendering/renderer/`
-- renderer extraction helpers:
-  `src/rendering/renderer/render_system/`
-- Diligent backend passes:
-  `src/rendering/renderer/backends/diligent/passes/`
-- Diligent post-process pass pieces:
-  `src/rendering/renderer/backends/diligent/passes/post_process/`
-
-Backend implementation files are private. Keep new gameplay-facing renderer
-contracts under the public `karma/rendering/...` include hierarchy, and keep
-backend pass details inside the owning backend directory.
+- public renderer API: `include/karma/rendering.h

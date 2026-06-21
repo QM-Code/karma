@@ -1,4 +1,4 @@
-#include "karma/platform/window/window.h"
+#include "karma/platform.h"
 
 #include <GLFW/glfw3.h>
 #include <spdlog/spdlog.h>

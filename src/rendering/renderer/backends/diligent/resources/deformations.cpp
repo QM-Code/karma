@@ -14,7 +14,7 @@
 #include <limits>
 #include <vector>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 
@@ -103,18 +103,18 @@ bool createFallbackStructuredBuffer(Diligent::IRenderDevice* device,
 
 }  // namespace
 
-renderer::DeformationId DiligentBackend::createDeformation(
-    const renderer::DeformationDesc& desc) {
-  const renderer::DeformationId id = nextDeformationId_++;
+rendering::DeformationId DiligentBackend::createDeformation(
+    const rendering::DeformationDesc& desc) {
+  const rendering::DeformationId id = nextDeformationId_++;
   DeformationRecord record{};
   deformations_.emplace(id, std::move(record));
   updateDeformation(id, desc);
   return id;
 }
 
-void DiligentBackend::updateDeformation(renderer::DeformationId deformation,
-                                        const renderer::DeformationDesc& desc) {
-  if (deformation == renderer::kInvalidDeformation) {
+void DiligentBackend::updateDeformation(rendering::DeformationId deformation,
+                                        const rendering::DeformationDesc& desc) {
+  if (deformation == rendering::kInvalidDeformation) {
     return;
   }
   auto it = deformations_.find(deformation);
@@ -147,18 +147,18 @@ void DiligentBackend::updateDeformation(renderer::DeformationId deformation,
                          record.morph_weight_capacity);
 }
 
-void DiligentBackend::destroyDeformation(renderer::DeformationId deformation) {
+void DiligentBackend::destroyDeformation(rendering::DeformationId deformation) {
   deformations_.erase(deformation);
   for (auto& [id, instance] : instances_) {
     (void)id;
     if (instance.deformation == deformation) {
-      instance.deformation = renderer::kInvalidDeformation;
+      instance.deformation = rendering::kInvalidDeformation;
     }
   }
 }
 
-renderer::DeformationStats DiligentBackend::getDeformationStats() const {
-  renderer::DeformationStats stats{};
+rendering::DeformationStats DiligentBackend::getDeformationStats() const {
+  rendering::DeformationStats stats{};
   stats.resource_count = static_cast<uint32_t>(
       std::min<size_t>(deformations_.size(), std::numeric_limits<uint32_t>::max()));
   for (const auto& [id, record] : deformations_) {
@@ -202,13 +202,13 @@ bool DiligentBackend::ensureFallbackDeformationResources() {
 
 bool DiligentBackend::bindDeformationResources(Diligent::IShaderResourceBinding* srb,
                                                const MeshRecord& mesh,
-                                               renderer::DeformationId deformation) {
+                                               rendering::DeformationId deformation) {
   if (srb == nullptr || !ensureFallbackDeformationResources()) {
     return false;
   }
 
   const DeformationRecord* record = nullptr;
-  if (deformation != renderer::kInvalidDeformation) {
+  if (deformation != rendering::kInvalidDeformation) {
     const auto it = deformations_.find(deformation);
     if (it != deformations_.end()) {
       record = &it->second;
@@ -250,14 +250,14 @@ bool DiligentBackend::bindDeformationResources(Diligent::IShaderResourceBinding*
 }
 
 bool DiligentBackend::updateDeformationConstants(const MeshRecord& mesh,
-                                                 renderer::DeformationId deformation) {
+                                                 rendering::DeformationId deformation) {
   if (context_ == nullptr || deformation_constants_ == nullptr) {
     return false;
   }
 
   DeformationConstants constants{};
   const DeformationRecord* record = nullptr;
-  if (deformation != renderer::kInvalidDeformation) {
+  if (deformation != rendering::kInvalidDeformation) {
     const auto it = deformations_.find(deformation);
     if (it != deformations_.end()) {
       record = &it->second;
@@ -291,4 +291,4 @@ bool DiligentBackend::updateDeformationConstants(const MeshRecord& mesh,
   return true;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

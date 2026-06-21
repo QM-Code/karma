@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 template <typename T, bool KeepStrongReferences = false>
@@ -23,7 +23,7 @@ T* getMappedData(Diligent::MapHelper<T, KeepStrongReferences>& map) {
 }
 }  // namespace
 
-bool DiligentBackend::ensureCameraOverridePipeline(const renderer::CameraData& camera) {
+bool DiligentBackend::ensureCameraOverridePipeline(const rendering::CameraData& camera) {
   if (!device_ || !swap_chain_ || !constants_) {
     return false;
   }
@@ -170,13 +170,13 @@ bool DiligentBackend::ensureCameraOverridePipeline(const renderer::CameraData& c
   return true;
 }
 
-void DiligentBackend::updateCameraOverrideUserConstants(const renderer::CameraData& camera) {
+void DiligentBackend::updateCameraOverrideUserConstants(const rendering::CameraData& camera) {
   if (!context_ || !camera_override_user_constants_) {
     return;
   }
   CameraOverrideUserConstants constants{};
   const uint32_t count =
-      std::min(camera.shader_user_param_count, renderer::kCameraShaderUserParamCapacity);
+      std::min(camera.shader_user_param_count, rendering::kCameraShaderUserParamCapacity);
   for (uint32_t i = 0; i < count; ++i) {
     const auto& p = camera.shader_user_params[i];
     constants.user_key_hashes[i][0] = p.key_hash;
@@ -203,4 +203,4 @@ void DiligentBackend::updateCameraOverrideUserConstants(const renderer::CameraDa
   *mapped_constants = constants;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

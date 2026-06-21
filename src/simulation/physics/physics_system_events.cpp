@@ -1,4 +1,4 @@
-#include "karma/simulation/physics/physics_system.h"
+#include "karma/physics.h"
 #include "physics_system_internal.h"
 
 #include <vector>
@@ -7,8 +7,8 @@ namespace karma::physics {
 
 using namespace system_internal;
 
-void PhysicsSystem::syncContactEvents(ecs::World& world) {
-  auto handle_for_entity = [&](ecs::Entity entity) -> std::uintptr_t {
+void PhysicsSystem::syncContactEvents(world::World& world) {
+  auto handle_for_entity = [&](world::Entity entity) -> std::uintptr_t {
     const uint64_t key = entityKey(entity);
     auto character_it = character_controllers_.find(key);
     if (character_it != character_controllers_.end()) {
@@ -41,7 +41,7 @@ void PhysicsSystem::syncContactEvents(ecs::World& world) {
     state.controller.collectContacts(contacts);
   }
 
-  for (const ecs::Entity entity : world.view<components::ContactListenerComponent>()) {
+  for (const world::Entity entity : world.view<components::ContactListenerComponent>()) {
     auto& listener = world.get<components::ContactListenerComponent>(entity);
     if (!world.has<components::ContactEventsComponent>(entity)) {
       world.add(entity, components::ContactEventsComponent{});
@@ -78,7 +78,7 @@ void PhysicsSystem::syncContactEvents(ecs::World& world) {
         continue;
       }
 
-      const ecs::Entity other = other_it->second;
+      const world::Entity other = other_it->second;
       if (!world.isAlive(other) || other == entity) {
         continue;
       }
@@ -124,14 +124,14 @@ void PhysicsSystem::syncContactEvents(ecs::World& world) {
     }
   }
 }
-void PhysicsSystem::syncGroundContacts(ecs::World& world) {
+void PhysicsSystem::syncGroundContacts(world::World& world) {
   constexpr float kGroundNormalThreshold = 0.7f;
   constexpr float kGroundProbeInset = 0.02f;
   constexpr float kGroundProbeDistance = 0.2f;
 
-  auto apply_ground_state = [&](ecs::Entity entity,
+  auto apply_ground_state = [&](world::Entity entity,
                                 const PhysicsGroundContact* hit,
-                                ecs::Entity support_entity) {
+                                world::Entity support_entity) {
     auto& contact = world.get<components::GroundContactComponent>(entity);
     const bool was_grounded = contact.grounded;
     contact.clearTransient();
@@ -144,7 +144,7 @@ void PhysicsSystem::syncGroundContacts(ecs::World& world) {
     contact.normal = hit != nullptr ? math::fromGlm(hit->normal) : math::Vec3{0.0f, 1.0f, 0.0f};
   };
 
-  world.forEach<components::GroundContactComponent>([&](const ecs::Entity entity) {
+  world.forEach<components::GroundContactComponent>([&](const world::Entity entity) {
     if (!collisionEnabled(world, entity)) {
       apply_ground_state(entity, nullptr, {});
       return;
@@ -155,7 +155,7 @@ void PhysicsSystem::syncGroundContacts(ecs::World& world) {
       auto controller_it = character_controllers_.find(entityKey(entity));
       const bool grounded = controller_it != character_controllers_.end() &&
                             controller_it->second.controller.getGroundContact(hit);
-      ecs::Entity support_entity{};
+      world::Entity support_entity{};
       if (grounded) {
         auto support_it = physics_entities_by_handle_.find(hit.support_handle);
         if (support_it != physics_entities_by_handle_.end()) {
@@ -211,7 +211,7 @@ void PhysicsSystem::syncGroundContacts(ecs::World& world) {
                          hit.normal.y > kGroundNormalThreshold;
     }
 
-    ecs::Entity support_entity{};
+    world::Entity support_entity{};
     if (resolved_support) {
       auto support_it = physics_entities_by_handle_.find(hit.support_handle);
       if (support_it != physics_entities_by_handle_.end() && support_it->second != entity) {

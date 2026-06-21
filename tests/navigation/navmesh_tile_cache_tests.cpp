@@ -115,9 +115,9 @@ void testTileCacheSnapshotAndContentRoundTrip() {
         (compression == karma::navigation::NavTileCacheCompression::None
              ? "karma_nav_none.kntc"
              : "karma_nav_fastlz.kntc");
-    assert(karma::content::saveNavTileCacheSnapshot(path, snapshot));
+    assert(karma::assets::saveNavTileCacheSnapshot(path, snapshot));
     const karma::navigation::NavTileCacheSnapshot loaded_snapshot =
-        karma::content::loadNavTileCacheSnapshot(path);
+        karma::assets::loadNavTileCacheSnapshot(path);
     assert(loaded_snapshot.valid());
     std::filesystem::remove(path);
 

@@ -1,8 +1,8 @@
-#include "karma/content/navigation/nav_tile_cache.h"
+#include "karma/assets.h"
 
 #include <fstream>
 
-namespace karma::content {
+namespace karma::assets {
 
 navigation::NavTileCacheSnapshot loadNavTileCacheSnapshot(const std::filesystem::path& path) {
   navigation::NavTileCacheSnapshot snapshot;
@@ -37,4 +37,4 @@ bool saveNavTileCacheSnapshot(const std::filesystem::path& path,
   return static_cast<bool>(stream);
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

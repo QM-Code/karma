@@ -38,7 +38,7 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
 
  private:
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
@@ -46,7 +46,7 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
                                  .visible = true,
                              });
 
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                  .environment_map_asset_key = environment_map_,
@@ -56,7 +56,7 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 48.0f, 0.0f});
@@ -70,7 +70,7 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
   }
 
   void spawnCamera() {
-    const ecs::Entity camera = world->createEntity();
+    const world::Entity camera = world->createEntity();
     world->setName(camera, "Camera");
     components::TransformComponent camera_transform{};
     camera_transform.setPosition({0.0f, 2.55f, 6.7f});
@@ -106,7 +106,7 @@ class VolumetricSpherePrefabExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeRuntimeModule>());
+  engine.addRuntimeModule(std::make_unique<karma::visual::volumes::VolumeRuntimeModule>());
   karma::demo::VolumetricSpherePrefabExample game;
 
   karma::app::EngineConfig config;

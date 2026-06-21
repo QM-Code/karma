@@ -6,18 +6,18 @@
 
 #include <glm/gtc/quaternion.hpp>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/rendering/renderer/device.h"
-#include "karma/world/components/audio_listener.h"
-#include "karma/world/components/environment.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/assets.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace karma::demo::helpers {
 namespace {
 
-void appendVertex(geometry::MeshData& mesh,
+void appendVertex(world::MeshData& mesh,
                   const glm::vec3& position,
                   const glm::vec3& normal,
                   const glm::vec2& uv = {}) {
@@ -27,7 +27,7 @@ void appendVertex(geometry::MeshData& mesh,
   mesh.tangents.push_back({1.0f, 0.0f, 0.0f, 1.0f});
 }
 
-void appendQuad(geometry::MeshData& mesh,
+void appendQuad(world::MeshData& mesh,
                 const glm::vec3& a,
                 const glm::vec3& b,
                 const glm::vec3& c,
@@ -62,10 +62,10 @@ void expandBounds(GltfSceneAssetBounds& bounds, const glm::vec3& point) {
 
 }  // namespace
 
-geometry::MeshData makeBoxMesh(const glm::vec3& half_extents) {
+world::MeshData makeBoxMesh(const glm::vec3& half_extents) {
   const glm::vec3 min = -half_extents;
   const glm::vec3 max = half_extents;
-  geometry::MeshData mesh;
+  world::MeshData mesh;
 
   appendQuad(mesh, {min.x, max.y, min.z}, {max.x, max.y, min.z},
              {max.x, max.y, max.z}, {min.x, max.y, max.z}, {0.0f, 1.0f, 0.0f});
@@ -83,19 +83,19 @@ geometry::MeshData makeBoxMesh(const glm::vec3& half_extents) {
   return mesh;
 }
 
-GltfSceneAssetBounds computeGltfSceneAssetBounds(const content::AssetRegistry& assets,
-                                                 const content::GltfSceneAsset& scene) {
+GltfSceneAssetBounds computeGltfSceneAssetBounds(const assets::AssetRegistry& assets,
+                                                 const assets::GltfSceneAsset& scene) {
   GltfSceneAssetBounds geometry_bounds{};
   GltfSceneAssetBounds fallback_bounds{};
 
-  for (const content::GltfSceneAssetNode& node : scene.nodes) {
+  for (const assets::GltfSceneAssetNode& node : scene.nodes) {
     const glm::vec3 world_pos = toGlm(node.world_position);
     expandBounds(fallback_bounds, world_pos);
 
     const glm::vec3 world_scale = toGlm(node.world_scale);
     const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
-    for (const content::GltfSceneAssetPrimitive& primitive : node.primitives) {
-      const geometry::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
+    for (const assets::GltfSceneAssetPrimitive& primitive : node.primitives) {
+      const world::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
       if (mesh == nullptr) {
         continue;
       }
@@ -108,14 +108,14 @@ GltfSceneAssetBounds computeGltfSceneAssetBounds(const content::AssetRegistry& a
   return geometry_bounds.valid ? geometry_bounds : fallback_bounds;
 }
 
-GltfSceneAssetStats summarizeGltfSceneAsset(const content::AssetRegistry& assets,
-                                            const content::GltfSceneAsset& scene) {
+GltfSceneAssetStats summarizeGltfSceneAsset(const assets::AssetRegistry& assets,
+                                            const assets::GltfSceneAsset& scene) {
   GltfSceneAssetStats stats{};
   stats.node_count = scene.nodes.size();
-  for (const content::GltfSceneAssetNode& node : scene.nodes) {
+  for (const assets::GltfSceneAssetNode& node : scene.nodes) {
     stats.primitive_count += node.primitives.size();
-    for (const content::GltfSceneAssetPrimitive& primitive : node.primitives) {
-      const geometry::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
+    for (const assets::GltfSceneAssetPrimitive& primitive : node.primitives) {
+      const world::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
       if (mesh == nullptr) {
         continue;
       }
@@ -126,13 +126,13 @@ GltfSceneAssetStats summarizeGltfSceneAsset(const content::AssetRegistry& assets
   return stats;
 }
 
-ecs::Entity spawnMesh(ecs::World& world,
+world::Entity spawnMesh(world::World& world,
                       std::string name,
                       std::string mesh_key,
                       std::string material_key,
                       const math::Vec3& position,
                       bool visible) {
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   components::TransformComponent transform;
   transform.setPosition(position);
@@ -152,11 +152,11 @@ ecs::Entity spawnMesh(ecs::World& world,
   return entity;
 }
 
-ecs::Entity spawnMeshAsset(ecs::World& world,
+world::Entity spawnMeshAsset(world::World& world,
                            std::string name,
                            std::string mesh_key,
                            const math::Vec3& position) {
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   components::TransformComponent transform;
   transform.setPosition(position);
@@ -167,22 +167,22 @@ ecs::Entity spawnMeshAsset(ecs::World& world,
   return entity;
 }
 
-ecs::Entity createDebugBoxMarker(ecs::World& world,
-                                 renderer::GraphicsDevice* graphics,
-                                 content::AssetRegistry* assets,
+world::Entity createDebugBoxMarker(world::World& world,
+                                 rendering::GraphicsDevice* graphics,
+                                 assets::AssetRegistry* assets,
                                  std::string name,
                                  const math::Color& color,
                                  const math::Vec3& position,
                                  const glm::vec3& half_extents,
                                  bool visible) {
-  const geometry::MeshData marker_mesh = makeBoxMesh(half_extents);
+  const world::MeshData marker_mesh = makeBoxMesh(half_extents);
   const std::string mesh_key = "runtime/debug_box/" + name + "/mesh";
   const std::string material_key = "runtime/debug_box/" + name + "/material";
   if (graphics != nullptr && assets != nullptr) {
     assets->registerMeshAsset(mesh_key, marker_mesh);
   }
   if (assets != nullptr) {
-    renderer::MaterialDesc material;
+    rendering::MaterialDesc material;
     material.base_color = color;
     material.emissive_color = color;
     material.unlit = true;
@@ -192,13 +192,13 @@ ecs::Entity createDebugBoxMarker(ecs::World& world,
   return spawnMesh(world, std::move(name), mesh_key, material_key, position, visible);
 }
 
-ecs::Entity spawnCamera(ecs::World& world,
+world::Entity spawnCamera(world::World& world,
                         std::string name,
                         const math::Vec3& position,
                         const math::Quat& rotation,
                         const components::CameraComponent& camera,
                         bool add_audio_listener) {
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   components::TransformComponent transform;
   transform.setPosition(position);
@@ -211,12 +211,12 @@ ecs::Entity spawnCamera(ecs::World& world,
   return entity;
 }
 
-ecs::Entity spawnDirectionalLight(ecs::World& world,
+world::Entity spawnDirectionalLight(world::World& world,
                                   std::string name,
                                   const math::Vec3& position,
                                   const math::Quat& rotation,
                                   const components::LightComponent& light) {
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   components::TransformComponent transform;
   transform.setPosition(position);
@@ -226,11 +226,11 @@ ecs::Entity spawnDirectionalLight(ecs::World& world,
   return entity;
 }
 
-ecs::Entity spawnPointLight(ecs::World& world,
+world::Entity spawnPointLight(world::World& world,
                             std::string name,
                             const math::Vec3& position,
                             const components::LightComponent& light) {
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   components::TransformComponent transform;
   transform.setPosition(position);
@@ -239,14 +239,14 @@ ecs::Entity spawnPointLight(ecs::World& world,
   return entity;
 }
 
-ecs::Entity spawnEnvironment(ecs::World& world,
-                             content::AssetRegistry* assets,
+world::Entity spawnEnvironment(world::World& world,
+                             assets::AssetRegistry* assets,
                              std::string name,
                              std::string environment_map,
                              float intensity,
                              bool draw_skybox) {
   (void)assets;
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   world.add(entity, components::EnvironmentComponent{
                         .environment_map_asset_key = std::move(environment_map),

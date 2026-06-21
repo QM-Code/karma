@@ -100,7 +100,7 @@ class PrefabParticleIsolationExample final : public app::GameInterface {
 
  private:
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
@@ -110,7 +110,7 @@ class PrefabParticleIsolationExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 42.0f, 0.0f});
@@ -163,7 +163,7 @@ class PrefabParticleIsolationExample final : public app::GameInterface {
     }
   }
 
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;

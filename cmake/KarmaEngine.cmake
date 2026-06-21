@@ -2,7 +2,7 @@ set(KARMA_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
 configure_file(
   ${PROJECT_SOURCE_DIR}/cmake/version.h.in
-  ${KARMA_GENERATED_INCLUDE_DIR}/karma/core/version.h
+  ${KARMA_GENERATED_INCLUDE_DIR}/karma/version.h
   @ONLY
 )
 
@@ -12,6 +12,8 @@ function(karma_configure_target target)
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
       $<BUILD_INTERFACE:${KARMA_GENERATED_INCLUDE_DIR}>
       $<INSTALL_INTERFACE:include>
+    PRIVATE
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
   )
   target_compile_features(${target} PUBLIC cxx_std_20)
   foreach (karma_include_dir IN LISTS KARMA_EXTRA_INCLUDE_DIRS)

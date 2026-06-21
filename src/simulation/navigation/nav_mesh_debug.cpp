@@ -9,8 +9,8 @@
 #include <DebugDraw.h>
 #include <RecastDebugDraw.h>
 
-#include "karma/rendering/renderer/device.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/rendering.h"
+#include "karma/navigation.h"
 #include "detail/detour_utils.h"
 
 namespace karma::navigation::detail {
@@ -292,7 +292,7 @@ void NavMesh::refreshDetourDebugDraw() {
   captureDetourDebugLines(*nav_mesh_, debug_draw_lines_);
 }
 
-void NavMesh::debugDraw(renderer::GraphicsDevice& graphics,
+void NavMesh::debugDraw(rendering::GraphicsDevice& graphics,
                         const math::Color& color,
                         bool depth_test) const {
   if (nav_mesh_ == nullptr) {
@@ -304,7 +304,7 @@ void NavMesh::debugDraw(renderer::GraphicsDevice& graphics,
   }
 }
 
-void NavMesh::debugDraw(renderer::GraphicsDevice& graphics,
+void NavMesh::debugDraw(rendering::GraphicsDevice& graphics,
                         NavMeshDebugDrawMode mode,
                         bool depth_test,
                         const math::Color& fallback_color) const {
@@ -322,7 +322,7 @@ void NavMesh::debugDraw(renderer::GraphicsDevice& graphics,
   }
 }
 
-void NavMesh::debugDrawPolygons(renderer::GraphicsDevice& graphics,
+void NavMesh::debugDrawPolygons(rendering::GraphicsDevice& graphics,
                                 const std::vector<uint64_t>& poly_refs,
                                 const math::Color& color,
                                 bool depth_test) const {

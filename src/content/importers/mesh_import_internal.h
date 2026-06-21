@@ -3,10 +3,10 @@
 #include <filesystem>
 #include <vector>
 
-#include "karma/world/geometry/mesh_data.h"
+#include "karma/world.h"
 
-namespace karma::content {
+namespace karma::assets {
 
-std::vector<geometry::MeshData> importMeshes(const std::filesystem::path& path);
+std::vector<world::MeshData> importMeshes(const std::filesystem::path& path);
 
-}  // namespace karma::content
+}  // namespace karma::assets

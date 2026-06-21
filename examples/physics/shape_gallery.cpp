@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "physics_example_common.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 
 #include <imgui.h>
 
@@ -150,7 +150,7 @@ class ShapeGalleryGame final : public app::GameInterface {
     applyAuthoringState();
   }
 
-  ecs::Entity createDynamicBase(const char* name, const math::Vec3& position) {
+  world::Entity createDynamicBase(const char* name, const math::Vec3& position) {
     auto entity = world->createEntity();
     world->setName(entity, name);
     setTransform(*world, entity, position, axisAngle({0.0f, 1.0f, 0.0f}, position.x * 0.08f));
@@ -174,7 +174,7 @@ class ShapeGalleryGame final : public app::GameInterface {
     return entity;
   }
 
-  void addDynamicBody(ecs::Entity entity, const math::Vec3& position) {
+  void addDynamicBody(world::Entity entity, const math::Vec3& position) {
     components::RigidbodyComponent body{};
     body.mass = state_->mass;
     body.motion_quality = components::RigidbodyMotionQuality::LinearCast;
@@ -315,7 +315,7 @@ class ShapeGalleryGame final : public app::GameInterface {
     state_->selected =
         std::clamp(state_->selected, 0, static_cast<int>(dynamic_entities_.size() - 1u));
     for (size_t i = 0; i < dynamic_entities_.size(); ++i) {
-      const ecs::Entity entity = dynamic_entities_[i];
+      const world::Entity entity = dynamic_entities_[i];
       if (!world->isAlive(entity)) {
         continue;
       }
@@ -368,7 +368,7 @@ class ShapeGalleryGame final : public app::GameInterface {
     }
     const int selected = std::clamp(state_->selected, 0, static_cast<int>(dynamic_entities_.size() - 1u));
     for (size_t i = 0; i < dynamic_entities_.size(); ++i) {
-      const ecs::Entity entity = dynamic_entities_[i];
+      const world::Entity entity = dynamic_entities_[i];
       if (!world->isAlive(entity)) {
         continue;
       }
@@ -412,7 +412,7 @@ class ShapeGalleryGame final : public app::GameInterface {
     }
     state_->selected =
         std::clamp(state_->selected, 0, static_cast<int>(dynamic_entities_.size() - 1u));
-    const ecs::Entity entity = dynamic_entities_[state_->selected];
+    const world::Entity entity = dynamic_entities_[state_->selected];
     if (!world->isAlive(entity)) {
       return;
     }
@@ -436,7 +436,7 @@ class ShapeGalleryGame final : public app::GameInterface {
             ? -1
             : std::clamp(state_->selected, 0, static_cast<int>(dynamic_entities_.size() - 1u));
 
-    for (ecs::Entity entity : entities_) {
+    for (world::Entity entity : entities_) {
       if (!world->isAlive(entity)) {
         continue;
       }
@@ -457,7 +457,7 @@ class ShapeGalleryGame final : public app::GameInterface {
     }
 
     if (selected >= 0) {
-      const ecs::Entity entity = dynamic_entities_[selected];
+      const world::Entity entity = dynamic_entities_[selected];
       if (world->isAlive(entity) && world->has<components::ContactEventsComponent>(entity)) {
         const auto& events = world->get<components::ContactEventsComponent>(entity);
         for (const components::ContactEvent& event : events.active) {
@@ -477,8 +477,8 @@ class ShapeGalleryGame final : public app::GameInterface {
 
   std::shared_ptr<GalleryState> state_;
   CameraRig camera_{};
-  std::vector<ecs::Entity> entities_;
-  std::vector<ecs::Entity> dynamic_entities_;
+  std::vector<world::Entity> entities_;
+  std::vector<world::Entity> dynamic_entities_;
   std::vector<std::string> dynamic_names_;
 };
 
@@ -491,7 +491,7 @@ int main() {
   auto state = std::make_shared<karma::demo::physics_examples::GalleryState>();
   karma::demo::physics_examples::ShapeGalleryGame game(state);
   auto ui = std::make_shared<karma::demo::physics_examples::GalleryUi>(state);
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [ui](karma::app::UIContext& ctx) { ui->draw(ctx); }));
 
   karma::app::EngineConfig config;

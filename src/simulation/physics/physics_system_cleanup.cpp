@@ -1,13 +1,13 @@
-#include "karma/simulation/physics/physics_system.h"
+#include "karma/physics.h"
 #include "physics_system_internal.h"
 
 namespace karma::physics {
 
 using namespace system_internal;
 
-void PhysicsSystem::cleanupStale(ecs::World& world) {
+void PhysicsSystem::cleanupStale(world::World& world) {
   for (auto it = vehicles_.begin(); it != vehicles_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     const bool remove = !world.isAlive(entity) ||
                         !world.has<components::PhysicsVehicleComponent>(entity) ||
                         !world.has<components::RigidbodyComponent>(entity) ||
@@ -22,7 +22,7 @@ void PhysicsSystem::cleanupStale(ecs::World& world) {
   }
 
   for (auto it = constraints_.begin(); it != constraints_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     bool remove = !world.isAlive(entity) ||
                   !world.has<components::PhysicsConstraintComponent>(entity);
     if (!remove) {
@@ -41,7 +41,7 @@ void PhysicsSystem::cleanupStale(ecs::World& world) {
   }
 
   for (auto it = soft_bodies_.begin(); it != soft_bodies_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     if (!world.isAlive(entity) || !world.has<components::PhysicsSoftBodyComponent>(entity)) {
       physics_entities_by_handle_.erase(it->second.nativeHandle());
       it->second.destroy();
@@ -53,7 +53,7 @@ void PhysicsSystem::cleanupStale(ecs::World& world) {
   }
 
   for (auto it = rigid_bodies_.begin(); it != rigid_bodies_.end();) {
-    ecs::Entity entity = entityFromKey(it->first);
+    world::Entity entity = entityFromKey(it->first);
     if (!world.isAlive(entity) ||
         !world.has<components::RigidbodyComponent>(entity) ||
         !hasPhysicsCollider(world, entity)) {
@@ -67,7 +67,7 @@ void PhysicsSystem::cleanupStale(ecs::World& world) {
   }
 
   for (auto it = static_bodies_.begin(); it != static_bodies_.end();) {
-    ecs::Entity entity = entityFromKey(it->first);
+    world::Entity entity = entityFromKey(it->first);
     if (!world.isAlive(entity) ||
         world.has<components::RigidbodyComponent>(entity) ||
         world.has<components::CharacterControllerComponent>(entity) ||
@@ -82,7 +82,7 @@ void PhysicsSystem::cleanupStale(ecs::World& world) {
   }
 
   for (auto it = character_controllers_.begin(); it != character_controllers_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     const bool remove = !world.isAlive(entity) ||
                         !world.has<components::CharacterControllerComponent>(entity) ||
                         !world.has<components::TransformComponent>(entity) ||
@@ -100,7 +100,7 @@ void PhysicsSystem::cleanupStale(ecs::World& world) {
   }
 
   for (auto it = previous_contacts_.begin(); it != previous_contacts_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     if (!world.isAlive(entity) || !world.has<components::ContactListenerComponent>(entity)) {
       it = previous_contacts_.erase(it);
     } else {

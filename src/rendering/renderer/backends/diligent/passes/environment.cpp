@@ -22,7 +22,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 struct alignas(16) EnvConstants {
@@ -1174,4 +1174,4 @@ void DiligentBackend::renderSkybox(const glm::mat4& projection, const glm::mat4&
   context_->Draw(draw);
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

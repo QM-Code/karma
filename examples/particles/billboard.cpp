@@ -1,6 +1,6 @@
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
-#include "karma/content/assets/asset_package.h"
+#include "karma/assets.h"
 
 #include <algorithm>
 #include <array>
@@ -19,7 +19,7 @@ namespace karma::demo {
 namespace {
 
 struct ScheduledEffectRestart {
-  ecs::Entity entity{};
+  world::Entity entity{};
   float trigger_time = 0.0f;
 };
 
@@ -124,13 +124,13 @@ components::TransformComponent makeTransform(const math::Vec3& position, const m
   return transform;
 }
 
-ecs::Entity createParticleEffectEntity(ecs::World& world,
+world::Entity createParticleEffectEntity(world::World& world,
                                        std::string_view name,
                                        std::string_view effect_key,
                                        const components::TransformComponent& transform,
                                        bool playing) {
-  return particles::createEffectEntity(world,
-                                       particles::ParticleEffectEntityDesc{
+  return visual::particles::createEffectEntity(world,
+                                       visual::particles::ParticleEffectEntityDesc{
                                            .name = name,
                                            .effect_key = effect_key,
                                            .transform = transform,
@@ -139,7 +139,7 @@ ecs::Entity createParticleEffectEntity(ecs::World& world,
                                        });
 }
 
-void setEntityPositionIfAlive(ecs::World& world, ecs::Entity entity, const math::Vec3& position) {
+void setEntityPositionIfAlive(world::World& world, world::Entity entity, const math::Vec3& position) {
   if (!world.isAlive(entity) || !world.has<components::TransformComponent>(entity)) {
     return;
   }
@@ -548,7 +548,7 @@ std::vector<std::uint8_t> buildDebrisAtlas(int frame_size, int frame_count) {
   return pixels;
 }
 
-bool registerTextureAsset(content::AssetRegistry& assets,
+bool registerTextureAsset(assets::AssetRegistry& assets,
                           std::string_view key,
                           int width,
                           int height,
@@ -556,21 +556,21 @@ bool registerTextureAsset(content::AssetRegistry& assets,
   if (pixels.empty()) {
     return false;
   }
-  content::TextureAsset texture{};
+  assets::TextureAsset texture{};
   texture.desc.width = width;
   texture.desc.height = height;
-  texture.desc.format = renderer::TextureFormat::RGBA8;
+  texture.desc.format = rendering::TextureFormat::RGBA8;
   texture.bytes = pixels;
   return assets.registerTextureAsset(std::string(key), std::move(texture));
 }
 
-void registerParticleEffects(content::AssetRegistry& assets,
+void registerParticleEffects(assets::AssetRegistry& assets,
                              bool has_explosion_flipbook_texture,
                              bool has_explosion_smoke_flipbook_texture,
                              bool use_fast_flipbook_effects) {
   auto import_package = [&](std::string_view path) {
     std::string diagnostic;
-    if (!content::importAssetPackage(assets, resolveExampleAssetPath(path), &diagnostic)) {
+    if (!assets::importAssetPackage(assets, resolveExampleAssetPath(path), &diagnostic)) {
       spdlog::error("Failed to import particle package '{}': {}",
                     path,
                     diagnostic);
@@ -591,8 +591,8 @@ void registerParticleEffects(content::AssetRegistry& assets,
 class ParticleExample final : public app::GameInterface {
  public:
   void onStart() override {
-    input->bindKey("toggle_particles", platform::Key::Space, input::Trigger::Pressed);
-    input->bindKey("trigger_explosion", platform::Key::E, input::Trigger::Pressed);
+    input->bindKey("toggle_particles", platform::Key::Space, app::Trigger::Pressed);
+    input->bindKey("trigger_explosion", platform::Key::E, app::Trigger::Pressed);
 
     const std::string world_mesh = importExampleMeshAsset(assets, "world.glb");
     const std::string environment_map =
@@ -812,9 +812,9 @@ class ParticleExample final : public app::GameInterface {
 
     if (input->actionPressed("toggle_particles")) {
       particles_enabled_ = !particles_enabled_;
-      particles::setEffectPlaying(*world, fountain_entity_, particles_enabled_);
-      particles::setEffectPlaying(*world, glow_entity_, particles_enabled_);
-      particles::setEffectPlaying(*world, smoke_entity_, particles_enabled_);
+      visual::particles::setEffectPlaying(*world, fountain_entity_, particles_enabled_);
+      visual::particles::setEffectPlaying(*world, glow_entity_, particles_enabled_);
+      visual::particles::setEffectPlaying(*world, smoke_entity_, particles_enabled_);
       if (!particles_enabled_) {
         scheduled_restarts_.clear();
         explosion_light_active_ = false;
@@ -965,7 +965,7 @@ class ParticleExample final : public app::GameInterface {
          ground_position.z});
   }
 
-  void queueEffectRestart(ecs::Entity entity, float delay_seconds) {
+  void queueEffectRestart(world::Entity entity, float delay_seconds) {
     scheduled_restarts_.push_back(ScheduledEffectRestart{
         .entity = entity,
         .trigger_time = time_ + std::max(delay_seconds, 0.0f),
@@ -983,8 +983,8 @@ class ParticleExample final : public app::GameInterface {
     }
   }
 
-  void restartEffectEntity(ecs::Entity entity) {
-    particles::restartEffect(*world, entity);
+  void restartEffectEntity(world::Entity entity) {
+    visual::particles::restartEffect(*world, entity);
   }
 
   void updateExplosionLight() {
@@ -1048,21 +1048,21 @@ class ParticleExample final : public app::GameInterface {
     queueEffectRestart(explosion_scorch_entity_, 0.12f);
   }
 
-  ecs::Entity fountain_entity_{};
-  ecs::Entity glow_entity_{};
-  ecs::Entity smoke_entity_{};
-  ecs::Entity explosion_flash_entity_{};
-  ecs::Entity explosion_fireball_entity_{};
-  ecs::Entity explosion_heat_entity_{};
-  ecs::Entity explosion_core_flipbook_entity_{};
-  ecs::Entity explosion_smoke_flipbook_entity_{};
-  ecs::Entity explosion_embers_entity_{};
-  ecs::Entity explosion_shock_ring_entity_{};
-  ecs::Entity explosion_debris_entity_{};
-  ecs::Entity explosion_dust_ring_entity_{};
-  ecs::Entity explosion_smoke_entity_{};
-  ecs::Entity explosion_scorch_entity_{};
-  ecs::Entity explosion_light_entity_{};
+  world::Entity fountain_entity_{};
+  world::Entity glow_entity_{};
+  world::Entity smoke_entity_{};
+  world::Entity explosion_flash_entity_{};
+  world::Entity explosion_fireball_entity_{};
+  world::Entity explosion_heat_entity_{};
+  world::Entity explosion_core_flipbook_entity_{};
+  world::Entity explosion_smoke_flipbook_entity_{};
+  world::Entity explosion_embers_entity_{};
+  world::Entity explosion_shock_ring_entity_{};
+  world::Entity explosion_debris_entity_{};
+  world::Entity explosion_dust_ring_entity_{};
+  world::Entity explosion_smoke_entity_{};
+  world::Entity explosion_scorch_entity_{};
+  world::Entity explosion_light_entity_{};
   std::vector<ScheduledEffectRestart> scheduled_restarts_;
   bool particles_enabled_ = true;
   bool explosion_light_active_ = false;

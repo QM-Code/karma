@@ -1,10 +1,10 @@
-#include "karma/world/components/transform.h"
+#include "karma/components.h"
 
 #include <cmath>
 
-#include "karma/core/math/quat.h"
-#include "karma/core/math/scalar.h"
-#include "karma/core/math/vec3.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/math.h"
 
 namespace karma::components {
 

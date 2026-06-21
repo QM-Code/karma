@@ -1,12 +1,12 @@
-#include "karma/simulation/physics/physics_system.h"
+#include "karma/physics.h"
 #include "physics_system_internal.h"
 
 namespace karma::physics {
 
 using namespace system_internal;
 
-void PhysicsSystem::syncSoftBodies(ecs::World& world) {
-  world.forEach<components::PhysicsSoftBodyComponent>([&](const ecs::Entity entity) {
+void PhysicsSystem::syncSoftBodies(world::World& world) {
+  world.forEach<components::PhysicsSoftBodyComponent>([&](const world::Entity entity) {
     auto& component = world.get<components::PhysicsSoftBodyComponent>(entity);
     const uint64_t key = entityKey(entity);
     auto* transform = world.has<components::TransformComponent>(entity)

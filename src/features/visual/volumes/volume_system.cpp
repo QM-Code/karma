@@ -1,4 +1,4 @@
-#include "karma/features/visual/volumes/volume_system.h"
+#include "karma/visual.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,14 +11,14 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "karma/world/components/camera.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/volumetric.h"
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
-#include "karma/rendering/renderer/device.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/rendering.h"
 
-namespace karma::volumes {
+namespace karma::visual::volumes {
 
 namespace {
 
@@ -54,8 +54,8 @@ struct ResolvedVolume {
   float bounds_radius = 1.0f;
 };
 
-geometry::MeshData buildOverlayQuadMesh() {
-  geometry::MeshData mesh{};
+world::MeshData buildOverlayQuadMesh() {
+  world::MeshData mesh{};
   mesh.vertices = {
       {-1.0f, -1.0f, 0.0f},
       {1.0f, -1.0f, 0.0f},
@@ -109,34 +109,34 @@ glm::vec3 safeNormalize(const glm::vec3& value, const glm::vec3& fallback) {
   return value * glm::inversesqrt(len_sq);
 }
 
-glm::vec3 toGlm(const math::Vec3& v) {
+glm::vec3 toVolumeGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
 }
 
-glm::quat toGlm(const math::Quat& q) {
+glm::quat toVolumeGlm(const math::Quat& q) {
   return {q.w, q.x, q.y, q.z};
 }
 
 glm::mat4 toGlmMat4(const components::TransformComponent& transform) {
   glm::mat4 matrix(1.0f);
-  matrix = glm::translate(matrix, toGlm(transform.getPosition()));
-  matrix *= glm::mat4_cast(toGlm(transform.getRotation()));
-  matrix = glm::scale(matrix, toGlm(transform.getScale()));
+  matrix = glm::translate(matrix, toVolumeGlm(transform.getPosition()));
+  matrix *= glm::mat4_cast(toVolumeGlm(transform.getRotation()));
+  matrix = glm::scale(matrix, toVolumeGlm(transform.getScale()));
   return matrix;
 }
 
 ResolvedVolume resolveVolume(const components::VolumetricComponent& volume,
                              const components::TransformComponent& transform) {
   ResolvedVolume resolved{};
-  resolved.center = toGlm(transform.getPosition());
+  resolved.center = toVolumeGlm(transform.getPosition());
   resolved.axis_x =
-      safeNormalize(toGlm(math::rotateVec(transform.getRotation(), {1.0f, 0.0f, 0.0f})),
+      safeNormalize(toVolumeGlm(math::rotateVec(transform.getRotation(), {1.0f, 0.0f, 0.0f})),
                     {1.0f, 0.0f, 0.0f});
   resolved.axis_y =
-      safeNormalize(toGlm(math::rotateVec(transform.getRotation(), {0.0f, 1.0f, 0.0f})),
+      safeNormalize(toVolumeGlm(math::rotateVec(transform.getRotation(), {0.0f, 1.0f, 0.0f})),
                     {0.0f, 1.0f, 0.0f});
   resolved.axis_z =
-      safeNormalize(toGlm(math::rotateVec(transform.getRotation(), {0.0f, 0.0f, 1.0f})),
+      safeNormalize(toVolumeGlm(math::rotateVec(transform.getRotation(), {0.0f, 0.0f, 1.0f})),
                     {0.0f, 0.0f, 1.0f});
 
   const math::Vec3 scale = transform.getScale();
@@ -195,15 +195,15 @@ CameraFrame makeCameraFrame(const components::TransformComponent& camera_transfo
                             float aspect) {
   const math::Quat camera_rotation = camera_transform.getRotation();
   CameraFrame frame{};
-  frame.position = toGlm(camera_transform.getPosition());
+  frame.position = toVolumeGlm(camera_transform.getPosition());
   frame.forward =
-      safeNormalize(toGlm(math::rotateVec(camera_rotation, {0.0f, 0.0f, -1.0f})),
+      safeNormalize(toVolumeGlm(math::rotateVec(camera_rotation, {0.0f, 0.0f, -1.0f})),
                     {0.0f, 0.0f, -1.0f});
   frame.right =
-      safeNormalize(toGlm(math::rotateVec(camera_rotation, {1.0f, 0.0f, 0.0f})),
+      safeNormalize(toVolumeGlm(math::rotateVec(camera_rotation, {1.0f, 0.0f, 0.0f})),
                     {1.0f, 0.0f, 0.0f});
   frame.up =
-      safeNormalize(toGlm(math::rotateVec(camera_rotation, {0.0f, 1.0f, 0.0f})),
+      safeNormalize(toVolumeGlm(math::rotateVec(camera_rotation, {0.0f, 1.0f, 0.0f})),
                     {0.0f, 1.0f, 0.0f});
   frame.tan_half_y = std::tan(glm::radians(camera.fov_y_degrees) * 0.5f);
   frame.tan_half_x = frame.tan_half_y * std::max(aspect, 1.0e-4f);
@@ -342,9 +342,9 @@ uint32_t volumeShapeId(components::VolumetricShape shape) {
   return 0u;
 }
 
-renderer::ResolvedMaterialDesc buildMaterialDesc(const components::VolumetricComponent& volume,
+rendering::ResolvedMaterialDesc buildMaterialDesc(const components::VolumetricComponent& volume,
                                                  const ResolvedVolume& resolved) {
-  renderer::ResolvedMaterialDesc desc{};
+  rendering::ResolvedMaterialDesc desc{};
   desc.pipeline.name = "volumetric_solid";
   desc.surface.base_color = volume.color;
   desc.surface.emissive_color = volume.emissive_color;
@@ -352,7 +352,7 @@ renderer::ResolvedMaterialDesc buildMaterialDesc(const components::VolumetricCom
   desc.surface.roughness = 1.0f;
   desc.surface.unlit = true;
   desc.surface.transparent = true;
-  desc.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  desc.surface.blend_mode = rendering::MaterialDesc::BlendMode::Alpha;
   desc.surface.double_sided = true;
   desc.surface.depth_test = false;
   desc.surface.depth_write = false;
@@ -374,14 +374,14 @@ renderer::ResolvedMaterialDesc buildMaterialDesc(const components::VolumetricCom
 
 }  // namespace
 
-VolumeSystem::VolumeSystem(renderer::GraphicsDevice* device) : device_(device) {}
+VolumeSystem::VolumeSystem(rendering::GraphicsDevice* device) : device_(device) {}
 
 VolumeSystem::~VolumeSystem() {
   destroySharedResources();
 }
 
 void VolumeSystem::ensureSharedResources() {
-  if (device_ == nullptr || overlay_mesh_ != renderer::kInvalidMesh) {
+  if (device_ == nullptr || overlay_mesh_ != rendering::kInvalidMesh) {
     return;
   }
   overlay_mesh_ = device_->createMesh(buildOverlayQuadMesh());
@@ -396,20 +396,20 @@ void VolumeSystem::destroySharedResources() {
     destroyRuntimeState(state);
   }
   runtime_.clear();
-  if (overlay_mesh_ != renderer::kInvalidMesh) {
+  if (overlay_mesh_ != rendering::kInvalidMesh) {
     device_->destroyMesh(overlay_mesh_);
-    overlay_mesh_ = renderer::kInvalidMesh;
+    overlay_mesh_ = rendering::kInvalidMesh;
   }
 }
 
 void VolumeSystem::destroyRuntimeState(RuntimeState& state) {
-  if (device_ != nullptr && state.material != renderer::kInvalidMaterial) {
+  if (device_ != nullptr && state.material != rendering::kInvalidMaterial) {
     device_->destroyMaterial(state.material);
-    state.material = renderer::kInvalidMaterial;
+    state.material = rendering::kInvalidMaterial;
   }
 }
 
-VolumeSystem::RuntimeState& VolumeSystem::ensureRuntimeState(ecs::Entity source) {
+VolumeSystem::RuntimeState& VolumeSystem::ensureRuntimeState(world::Entity source) {
   const uint64_t key = entityKey(source);
   auto it = runtime_.find(key);
   if (it != runtime_.end()) {
@@ -421,16 +421,16 @@ VolumeSystem::RuntimeState& VolumeSystem::ensureRuntimeState(ecs::Entity source)
   return it->second;
 }
 
-void VolumeSystem::update(ecs::World& world, float dt, float interpolation_alpha) {
+void VolumeSystem::update(world::World& world, float dt, float interpolation_alpha) {
   (void)dt;
 
   ensureSharedResources();
 
-  ecs::Entity primary_camera{};
+  world::Entity primary_camera{};
   const components::CameraComponent* camera_component = nullptr;
   const components::TransformComponent* camera_transform = nullptr;
   world.forEach<components::CameraComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
         const auto& camera = world.get<components::CameraComponent>(entity);
         if (!primary_camera.isValid() && camera.is_primary) {
           primary_camera = entity;
@@ -461,9 +461,9 @@ void VolumeSystem::update(ecs::World& world, float dt, float interpolation_alpha
       makeCameraFrame(interpolated_camera_transform, *camera_component, aspect);
 
   std::unordered_set<uint64_t> active_keys;
-  const std::vector<ecs::Entity> entities =
+  const std::vector<world::Entity> entities =
       world.view<components::VolumetricComponent, components::TransformComponent>();
-  for (const ecs::Entity entity : entities) {
+  for (const world::Entity entity : entities) {
     auto& volume = world.get<components::VolumetricComponent>(entity);
     auto& source_transform = world.get<components::TransformComponent>(entity);
     const uint64_t key = entityKey(entity);
@@ -489,13 +489,13 @@ void VolumeSystem::update(ecs::World& world, float dt, float interpolation_alpha
                                    volume.overlay_depth,
                                    overlay_rect);
     if (device_ != nullptr) {
-      if (state.material != renderer::kInvalidMaterial) {
+      if (state.material != rendering::kInvalidMaterial) {
         device_->destroyMaterial(state.material);
       }
       state.material = device_->createMaterial(buildMaterialDesc(volume, resolved));
     }
-    if (device_ != nullptr && state.material != renderer::kInvalidMaterial) {
-      renderer::DrawItem item{};
+    if (device_ != nullptr && state.material != rendering::kInvalidMaterial) {
+      rendering::DrawItem item{};
       item.instance = key;
       item.mesh = overlay_mesh_;
       item.material = state.material;
@@ -516,4 +516,4 @@ void VolumeSystem::update(ecs::World& world, float dt, float interpolation_alpha
   }
 }
 
-}  // namespace karma::volumes
+}  // namespace karma::visual::volumes

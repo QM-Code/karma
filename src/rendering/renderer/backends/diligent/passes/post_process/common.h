@@ -2,7 +2,7 @@
 
 #include "../../backend.hpp"
 
-namespace karma::renderer_backend::post_process {
+namespace karma::rendering::backend::post_process {
 
 struct alignas(16) PostProcessConstants {
   float screen_params[4] = {};
@@ -16,15 +16,15 @@ struct alignas(16) PostProcessConstants {
   float mode_params[4] = {};
 };
 
-bool hasActiveEffect(const renderer::PostProcessSettings& settings);
+bool hasActiveEffect(const rendering::PostProcessSettings& settings);
 void releasePass(PostProcessPassResources& pass);
 bool passReady(const PostProcessPassResources& pass);
-PostProcessConstants makeConstants(const renderer::PostProcessSettings& settings,
-                                   const renderer::CameraData& camera,
+PostProcessConstants makeConstants(const rendering::PostProcessSettings& settings,
+                                   const rendering::CameraData& camera,
                                    int width,
                                    int height,
                                    bool history_valid,
                                    bool bloom_available,
                                    double accumulated_time_seconds);
 
-}  // namespace karma::renderer_backend::post_process
+}  // namespace karma::rendering::backend::post_process

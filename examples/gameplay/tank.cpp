@@ -1,6 +1,6 @@
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
-#include "karma/world/components/environment.h"
+#include "karma/components.h"
 
 #include <imgui.h>
 
@@ -75,7 +75,7 @@ class RadarUiLayer final : public app::UiLayer {
       return;
     }
 
-    renderer::UIDrawData& out = ctx.drawData();
+    rendering::UIDrawData& out = ctx.drawData();
     out.clear();
     out.vertices.reserve(static_cast<size_t>(draw_data->TotalVtxCount));
     out.indices.reserve(static_cast<size_t>(draw_data->TotalIdxCount));
@@ -87,7 +87,7 @@ class RadarUiLayer final : public app::UiLayer {
       const ImDrawList* cmd_list = draw_data->CmdLists[n];
       for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
         const ImDrawVert& v = cmd_list->VtxBuffer[i];
-        renderer::UIVertex out_v{};
+        rendering::UIVertex out_v{};
         out_v.x = v.pos.x;
         out_v.y = v.pos.y;
         out_v.u = v.uv.x;
@@ -115,7 +115,7 @@ class RadarUiLayer final : public app::UiLayer {
           continue;
         }
 
-        renderer::UIDrawCmd out_cmd{};
+        rendering::UIDrawCmd out_cmd{};
         out_cmd.index_offset = global_idx_offset;
         out_cmd.index_count = cmd.ElemCount;
         out_cmd.scissor_enabled = true;
@@ -160,7 +160,7 @@ class DemoGame : public app::GameInterface {
     input->bindKey("player_turn_left", platform::Key::Left);
     input->bindKey("player_turn_right", platform::Key::D);
     input->bindKey("player_turn_right", platform::Key::Right);
-    input->bindKey("player_reset", platform::Key::R, input::Trigger::Down);
+    input->bindKey("player_reset", platform::Key::R, app::Trigger::Down);
 
     auto world_entity = world->createEntity();
     world->setName(world_entity, "World");
@@ -193,13 +193,13 @@ class DemoGame : public app::GameInterface {
     camera_entity_ = camera;
 
     if (graphics) {
-      renderer::RenderTargetDesc radar_target_desc{};
+      rendering::RenderTargetDesc radar_target_desc{};
       radar_target_desc.width = radar_target_size_;
       radar_target_desc.height = radar_target_size_;
       radar_target_desc.depth = true;
       radar_target_desc.stencil = false;
       radar_target_ = graphics->createRenderTarget(radar_target_desc);
-      if (radar_state_ && radar_target_ != renderer::kDefaultRenderTarget) {
+      if (radar_state_ && radar_target_ != rendering::kDefaultRenderTarget) {
         radar_state_->radar_texture =
             static_cast<app::UITextureHandle>(graphics->getRenderTargetTextureId(radar_target_));
         radar_state_->radar_width = radar_target_size_;
@@ -371,9 +371,9 @@ class DemoGame : public app::GameInterface {
   }
 
   void onShutdown() override {
-    if (graphics && radar_target_ != renderer::kDefaultRenderTarget) {
+    if (graphics && radar_target_ != rendering::kDefaultRenderTarget) {
       graphics->destroyRenderTarget(radar_target_);
-      radar_target_ = renderer::kDefaultRenderTarget;
+      radar_target_ = rendering::kDefaultRenderTarget;
     }
     if (radar_state_) {
       radar_state_->radar_texture = 0;
@@ -384,10 +384,10 @@ class DemoGame : public app::GameInterface {
 
  private:
   RadarOverlayState* radar_state_ = nullptr;
-  ecs::Entity camera_entity_{};
-  ecs::Entity radar_camera_entity_{};
-  ecs::Entity player_entity_{};
-  renderer::RenderTargetId radar_target_ = renderer::kDefaultRenderTarget;
+  world::Entity camera_entity_{};
+  world::Entity radar_camera_entity_{};
+  world::Entity player_entity_{};
+  rendering::RenderTargetId radar_target_ = rendering::kDefaultRenderTarget;
   int radar_target_size_ = 512;
   math::Vec3 camera_follow_offset_{0.0f, 10.0f, 18.0f};
   float camera_pitch_ = -0.5f;

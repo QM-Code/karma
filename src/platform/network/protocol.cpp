@@ -1,10 +1,10 @@
-#include "karma/platform/network/protocol.h"
+#include "karma/network.h"
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
 
-namespace karma::net {
+namespace karma::network {
 namespace {
 
 void appendLittle(std::vector<std::byte>& out, uint64_t value, std::size_t size) {
@@ -221,4 +221,4 @@ DecodeResult decodePacket(std::span<const std::byte> bytes,
   };
 }
 
-}  // namespace karma::net
+}  // namespace karma::network

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "karma/rendering/renderer/device.h"
-#include "karma/world/components/transform.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
 
-namespace karma::renderer::render_system {
+namespace karma::rendering::render_system {
 
 void drawBoxWire(GraphicsDevice& device,
                  const components::TransformComponent& transform,
@@ -25,4 +25,4 @@ void drawCapsuleWire(GraphicsDevice& device,
                      const math::Color& color,
                      float interpolation_alpha);
 
-}  // namespace karma::renderer::render_system
+}  // namespace karma::rendering::render_system

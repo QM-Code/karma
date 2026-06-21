@@ -14,16 +14,16 @@
 #include <utility>
 #include <vector>
 
-#include "karma/features/network/component_replication.h"
-#include "karma/features/network/role.h"
-#include "karma/platform/network/protocol.h"
-#include "karma/platform/network/session.h"
-#include "karma/platform/network/transport.h"
-#include "karma/platform/network/transport_factory.h"
-#include "karma/world/components/network.h"
-#include "karma/world/components/tag.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/network.h"
+#include "karma/network.h"
+#include "karma/network.h"
+#include "karma/network.h"
+#include "karma/network.h"
+#include "karma/network.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace {
 
@@ -40,45 +40,45 @@ std::span<const std::byte> bytesOf(const std::string& value) {
 }
 
 struct FakeLink {
-  karma::net::PeerId server_peer{1};
-  karma::net::PeerId client_peer{7};
-  karma::net::Endpoint endpoint{.ip = "127.0.0.1", .port = 27015};
+  karma::network::PeerId server_peer{1};
+  karma::network::PeerId client_peer{7};
+  karma::network::Endpoint endpoint{.ip = "127.0.0.1", .port = 27015};
   bool connected = false;
-  std::vector<karma::net::TransportEvent> server_events;
-  std::vector<karma::net::TransportEvent> client_events;
+  std::vector<karma::network::TransportEvent> server_events;
+  std::vector<karma::network::TransportEvent> client_events;
 };
 
-class FakeClientTransport final : public karma::net::IClientTransport {
+class FakeClientTransport final : public karma::network::IClientTransport {
  public:
   explicit FakeClientTransport(FakeLink& link) : link_(link) {}
 
-  karma::net::ConnectResult connect(const std::string& host,
+  karma::network::ConnectResult connect(const std::string& host,
                                     uint16_t port,
                                     int timeout_ms) override {
     (void)host;
     (void)port;
     (void)timeout_ms;
     link_.connected = true;
-    link_.server_events.push_back(karma::net::TransportEvent{
-        .type = karma::net::TransportEvent::Type::Connect,
+    link_.server_events.push_back(karma::network::TransportEvent{
+        .type = karma::network::TransportEvent::Type::Connect,
         .peer = link_.client_peer,
         .endpoint = link_.endpoint,
     });
     return {
-        .status = karma::net::ConnectStatus::Connected,
+        .status = karma::network::ConnectStatus::Connected,
         .peer = link_.server_peer,
         .endpoint = link_.endpoint,
     };
   }
 
-  void disconnect(karma::net::DisconnectReason reason =
-                      karma::net::DisconnectReason::Local) override {
+  void disconnect(karma::network::DisconnectReason reason =
+                      karma::network::DisconnectReason::Local) override {
     if (!link_.connected) {
       return;
     }
     link_.connected = false;
-    link_.server_events.push_back(karma::net::TransportEvent{
-        .type = karma::net::TransportEvent::Type::Disconnect,
+    link_.server_events.push_back(karma::network::TransportEvent{
+        .type = karma::network::TransportEvent::Type::Disconnect,
         .peer = link_.client_peer,
         .disconnect_reason = reason,
         .endpoint = link_.endpoint,
@@ -86,38 +86,38 @@ class FakeClientTransport final : public karma::net::IClientTransport {
   }
 
   bool isConnected() const override { return link_.connected; }
-  karma::net::PeerId serverPeer() const override { return link_.server_peer; }
+  karma::network::PeerId serverPeer() const override { return link_.server_peer; }
 
-  void poll(std::vector<karma::net::TransportEvent>& out_events) override {
+  void poll(std::vector<karma::network::TransportEvent>& out_events) override {
     out_events.insert(out_events.end(),
                       std::make_move_iterator(link_.client_events.begin()),
                       std::make_move_iterator(link_.client_events.end()));
     link_.client_events.clear();
   }
 
-  karma::net::SendResult send(karma::net::ChannelId channel,
+  karma::network::SendResult send(karma::network::ChannelId channel,
                               const std::byte* data,
                               std::size_t size,
-                              karma::net::Delivery delivery,
+                              karma::network::Delivery delivery,
                               bool flush) override {
     (void)delivery;
     (void)flush;
     if (!link_.connected) {
-      return {.status = karma::net::SendStatus::NotConnected};
+      return {.status = karma::network::SendStatus::NotConnected};
     }
-    link_.server_events.push_back(karma::net::TransportEvent{
-        .type = karma::net::TransportEvent::Type::Receive,
+    link_.server_events.push_back(karma::network::TransportEvent{
+        .type = karma::network::TransportEvent::Type::Receive,
         .peer = link_.client_peer,
         .channel = channel,
         .payload = std::vector<std::byte>(data, data + size),
         .endpoint = link_.endpoint,
     });
-    return {.status = karma::net::SendStatus::Ok, .bytes_queued = size};
+    return {.status = karma::network::SendStatus::Ok, .bytes_queued = size};
   }
 
   void flush() override {}
 
-  std::optional<karma::net::Endpoint> remoteEndpoint() const override {
+  std::optional<karma::network::Endpoint> remoteEndpoint() const override {
     return link_.endpoint;
   }
 
@@ -125,50 +125,50 @@ class FakeClientTransport final : public karma::net::IClientTransport {
   FakeLink& link_;
 };
 
-class FakeServerTransport final : public karma::net::IServerTransport {
+class FakeServerTransport final : public karma::network::IServerTransport {
  public:
   explicit FakeServerTransport(FakeLink& link) : link_(link) {}
 
-  void poll(std::vector<karma::net::TransportEvent>& out_events) override {
+  void poll(std::vector<karma::network::TransportEvent>& out_events) override {
     out_events.insert(out_events.end(),
                       std::make_move_iterator(link_.server_events.begin()),
                       std::make_move_iterator(link_.server_events.end()));
     link_.server_events.clear();
   }
 
-  karma::net::SendResult send(karma::net::PeerId peer,
-                              karma::net::ChannelId channel,
+  karma::network::SendResult send(karma::network::PeerId peer,
+                              karma::network::ChannelId channel,
                               const std::byte* data,
                               std::size_t size,
-                              karma::net::Delivery delivery,
+                              karma::network::Delivery delivery,
                               bool flush) override {
     (void)delivery;
     (void)flush;
     if (!link_.connected) {
-      return {.status = karma::net::SendStatus::NotConnected};
+      return {.status = karma::network::SendStatus::NotConnected};
     }
     if (peer != link_.client_peer) {
-      return {.status = karma::net::SendStatus::UnknownPeer};
+      return {.status = karma::network::SendStatus::UnknownPeer};
     }
-    link_.client_events.push_back(karma::net::TransportEvent{
-        .type = karma::net::TransportEvent::Type::Receive,
+    link_.client_events.push_back(karma::network::TransportEvent{
+        .type = karma::network::TransportEvent::Type::Receive,
         .peer = link_.server_peer,
         .channel = channel,
         .payload = std::vector<std::byte>(data, data + size),
         .endpoint = link_.endpoint,
     });
-    return {.status = karma::net::SendStatus::Ok, .bytes_queued = size};
+    return {.status = karma::network::SendStatus::Ok, .bytes_queued = size};
   }
 
-  void disconnect(karma::net::PeerId peer,
-                  karma::net::DisconnectReason reason =
-                      karma::net::DisconnectReason::Local) override {
+  void disconnect(karma::network::PeerId peer,
+                  karma::network::DisconnectReason reason =
+                      karma::network::DisconnectReason::Local) override {
     if (peer != link_.client_peer || !link_.connected) {
       return;
     }
     link_.connected = false;
-    link_.client_events.push_back(karma::net::TransportEvent{
-        .type = karma::net::TransportEvent::Type::Disconnect,
+    link_.client_events.push_back(karma::network::TransportEvent{
+        .type = karma::network::TransportEvent::Type::Disconnect,
         .peer = link_.server_peer,
         .disconnect_reason = reason,
         .endpoint = link_.endpoint,
@@ -177,16 +177,16 @@ class FakeServerTransport final : public karma::net::IServerTransport {
 
   void flush() override {}
 
-  std::optional<karma::net::Endpoint> endpoint(karma::net::PeerId peer) const override {
+  std::optional<karma::network::Endpoint> endpoint(karma::network::PeerId peer) const override {
     if (peer != link_.client_peer) {
       return std::nullopt;
     }
     return link_.endpoint;
   }
 
-  std::vector<karma::net::PeerId> peers() const override {
-    return link_.connected ? std::vector<karma::net::PeerId>{link_.client_peer}
-                           : std::vector<karma::net::PeerId>{};
+  std::vector<karma::network::PeerId> peers() const override {
+    return link_.connected ? std::vector<karma::network::PeerId>{link_.client_peer}
+                           : std::vector<karma::network::PeerId>{};
   }
 
  private:
@@ -195,8 +195,8 @@ class FakeServerTransport final : public karma::net::IServerTransport {
 
 struct SessionHarness {
   FakeLink link;
-  karma::net::ServerSession server;
-  karma::net::ClientSession client;
+  karma::network::ServerSession server;
+  karma::network::ClientSession client;
 
   SessionHarness()
       : server(std::make_unique<FakeServerTransport>(link), kAppId),
@@ -204,51 +204,51 @@ struct SessionHarness {
 };
 
 void handshake(SessionHarness& harness,
-               std::vector<karma::net::SessionEvent>& server_events,
-               std::vector<karma::net::SessionEvent>& client_events) {
+               std::vector<karma::network::SessionEvent>& server_events,
+               std::vector<karma::network::SessionEvent>& client_events) {
   const auto connected = harness.client.connect("127.0.0.1", 27015, 1);
   expect(connected.connected(), "fake client should connect");
   harness.server.poll(server_events);
   harness.client.poll(client_events);
   expect(!server_events.empty(), "server should emit handshake event");
   expect(!client_events.empty(), "client should emit handshake accept");
-  expect(server_events.front().type == karma::net::SessionEventType::PeerConnected,
+  expect(server_events.front().type == karma::network::SessionEventType::PeerConnected,
          "server should report peer connected");
-  expect(client_events.front().type == karma::net::SessionEventType::PeerConnected,
+  expect(client_events.front().type == karma::network::SessionEventType::PeerConnected,
          "client should report session connected");
   expect(harness.client.isConnected(), "client session should be connected");
 }
 
 void testProtocolRoundTrip() {
   const std::string payload_text = "payload";
-  karma::net::PacketHeader header;
+  karma::network::PacketHeader header;
   header.app_id = kAppId;
-  header.message_type = karma::net::MessageType::CustomReliable;
-  header.flags = karma::net::PacketFlagReliable;
+  header.message_type = karma::network::MessageType::CustomReliable;
+  header.flags = karma::network::PacketFlagReliable;
   header.tick = 42;
   header.sequence = 99;
 
-  std::vector<std::byte> encoded = karma::net::encodePacket(header, bytesOf(payload_text));
-  const auto decoded = karma::net::decodePacket(encoded, kAppId);
+  std::vector<std::byte> encoded = karma::network::encodePacket(header, bytesOf(payload_text));
+  const auto decoded = karma::network::decodePacket(encoded, kAppId);
   expect(decoded.ok(), "packet should decode");
   expect(decoded.packet.header.tick == 42, "tick should round trip");
   expect(decoded.packet.header.sequence == 99, "sequence should round trip");
   expect(decoded.packet.payload.size() == payload_text.size(), "payload should round trip");
 
   encoded[0] = std::byte{0};
-  expect(karma::net::decodePacket(encoded, kAppId).status == karma::net::DecodeStatus::BadMagic,
+  expect(karma::network::decodePacket(encoded, kAppId).status == karma::network::DecodeStatus::BadMagic,
          "bad magic should be rejected");
 
-  encoded = karma::net::encodePacket(header, bytesOf(payload_text));
+  encoded = karma::network::encodePacket(header, bytesOf(payload_text));
   encoded[4] = std::byte{0xFF};
-  expect(karma::net::decodePacket(encoded, kAppId).status ==
-             karma::net::DecodeStatus::UnsupportedVersion,
+  expect(karma::network::decodePacket(encoded, kAppId).status ==
+             karma::network::DecodeStatus::UnsupportedVersion,
          "version mismatch should be rejected");
 
-  encoded = karma::net::encodePacket(header, bytesOf(payload_text));
+  encoded = karma::network::encodePacket(header, bytesOf(payload_text));
   encoded.pop_back();
-  expect(karma::net::decodePacket(encoded, kAppId).status ==
-             karma::net::DecodeStatus::PayloadLengthMismatch,
+  expect(karma::network::decodePacket(encoded, kAppId).status ==
+             karma::network::DecodeStatus::PayloadLengthMismatch,
          "truncated payload should be rejected");
 }
 
@@ -266,7 +266,7 @@ void testNetworkRoleHelpers() {
 
   const karma::network::NetworkRoleContext listen{
       .role = karma::network::NetworkRole::ListenServer,
-      .local_peer = karma::net::PeerId{42},
+      .local_peer = karma::network::PeerId{42},
   };
   expect(listen.isServer(), "listen server should be a server role");
   expect(listen.isClient(), "listen server should be a client role");
@@ -289,31 +289,31 @@ bool waitUntil(const std::function<bool()>& predicate, int timeout_ms) {
 
 void testEnetLoopbackTransport() {
   constexpr uint16_t port = 32147;
-  auto server = karma::net::createDefaultServerTransport(port, 4, 2);
+  auto server = karma::network::createDefaultServerTransport(port, 4, 2);
   expect(server != nullptr, "ENet server transport should be available");
 
-  auto timeout_client = karma::net::createDefaultClientTransport();
+  auto timeout_client = karma::network::createDefaultClientTransport();
   expect(timeout_client != nullptr, "ENet client transport should be available");
   const auto timeout = timeout_client->connect("127.0.0.1",
                                               static_cast<uint16_t>(port + 1),
                                               25);
   expect(!timeout.connected(), "connect to unused port should fail");
 
-  auto client = karma::net::createDefaultClientTransport();
+  auto client = karma::network::createDefaultClientTransport();
   std::atomic<bool> connect_done{false};
-  karma::net::ConnectResult connect_result{};
+  karma::network::ConnectResult connect_result{};
   std::thread connect_thread([&]() {
     connect_result = client->connect("127.0.0.1", port, 1000);
     connect_done.store(true, std::memory_order_release);
   });
 
-  std::vector<karma::net::TransportEvent> server_events;
-  karma::net::PeerId peer{};
+  std::vector<karma::network::TransportEvent> server_events;
+  karma::network::PeerId peer{};
   const bool saw_connect = waitUntil(
       [&]() {
         server->poll(server_events);
         for (const auto& event : server_events) {
-          if (event.type == karma::net::TransportEvent::Type::Connect) {
+          if (event.type == karma::network::TransportEvent::Type::Connect) {
             peer = event.peer;
           }
         }
@@ -330,14 +330,14 @@ void testEnetLoopbackTransport() {
   expect(client->send(0,
                       reinterpret_cast<const std::byte*>(reliable.data()),
                       reliable.size(),
-                      karma::net::Delivery::Reliable,
+                      karma::network::Delivery::Reliable,
                       true)
              .ok(),
          "reliable client send should succeed");
   expect(client->send(1,
                       reinterpret_cast<const std::byte*>(unreliable.data()),
                       unreliable.size(),
-                      karma::net::Delivery::Unreliable,
+                      karma::network::Delivery::Unreliable,
                       true)
              .ok(),
          "unreliable client send should succeed");
@@ -349,7 +349,7 @@ void testEnetLoopbackTransport() {
              [&]() {
                server->poll(server_events);
                for (const auto& event : server_events) {
-                 if (event.type != karma::net::TransportEvent::Type::Receive) {
+                 if (event.type != karma::network::TransportEvent::Type::Receive) {
                    continue;
                  }
                  saw_reliable = saw_reliable || event.channel == 0;
@@ -365,71 +365,71 @@ void testEnetLoopbackTransport() {
                       0,
                       reinterpret_cast<const std::byte*>(reply.data()),
                       reply.size(),
-                      karma::net::Delivery::Reliable,
+                      karma::network::Delivery::Reliable,
                       true)
              .ok(),
          "server send should succeed");
 
-  std::vector<karma::net::TransportEvent> client_events;
+  std::vector<karma::network::TransportEvent> client_events;
   expect(waitUntil(
              [&]() {
                client->poll(client_events);
                return std::any_of(client_events.begin(),
                                   client_events.end(),
-                                  [](const karma::net::TransportEvent& event) {
+                                  [](const karma::network::TransportEvent& event) {
                                     return event.type ==
-                                           karma::net::TransportEvent::Type::Receive;
+                                           karma::network::TransportEvent::Type::Receive;
                                   });
              },
              1000),
          "client should receive server reply");
 
-  expect(server->send(karma::net::PeerId{999},
+  expect(server->send(karma::network::PeerId{999},
                       0,
                       reinterpret_cast<const std::byte*>(reply.data()),
                       reply.size(),
-                      karma::net::Delivery::Reliable,
+                      karma::network::Delivery::Reliable,
                       true)
-             .status == karma::net::SendStatus::UnknownPeer,
+             .status == karma::network::SendStatus::UnknownPeer,
          "send to missing peer should fail cleanly");
 
   client->disconnect();
   expect(client->send(0,
                       reinterpret_cast<const std::byte*>(reply.data()),
                       reply.size(),
-                      karma::net::Delivery::Reliable,
+                      karma::network::Delivery::Reliable,
                       true)
-             .status == karma::net::SendStatus::NotConnected,
+             .status == karma::network::SendStatus::NotConnected,
          "send after client disconnect should fail cleanly");
 }
 #endif
 
 void testSessionHandshakeCustomAndFilters() {
   SessionHarness harness;
-  std::vector<karma::net::SessionEvent> server_events;
-  std::vector<karma::net::SessionEvent> client_events;
+  std::vector<karma::network::SessionEvent> server_events;
+  std::vector<karma::network::SessionEvent> client_events;
   handshake(harness, server_events, client_events);
 
   server_events.clear();
   const std::string client_message = "hello server";
-  harness.client.sendCustom(bytesOf(client_message), karma::net::Delivery::Reliable, 0, 3);
+  harness.client.sendCustom(bytesOf(client_message), karma::network::Delivery::Reliable, 0, 3);
   harness.server.poll(server_events);
   expect(server_events.size() == 1, "server should receive one custom event");
-  expect(server_events[0].type == karma::net::SessionEventType::CustomMessage,
+  expect(server_events[0].type == karma::network::SessionEventType::CustomMessage,
          "server should classify custom payloads");
   expect(!server_events[0].stale_sequence, "first custom message should not be stale");
 
-  karma::net::PacketHeader duplicate_header;
+  karma::network::PacketHeader duplicate_header;
   duplicate_header.app_id = kAppId;
-  duplicate_header.message_type = karma::net::MessageType::CustomReliable;
-  duplicate_header.flags = karma::net::PacketFlagReliable;
+  duplicate_header.message_type = karma::network::MessageType::CustomReliable;
+  duplicate_header.flags = karma::network::PacketFlagReliable;
   duplicate_header.tick = 3;
   duplicate_header.sequence = server_events[0].sequence;
-  harness.link.server_events.push_back(karma::net::TransportEvent{
-      .type = karma::net::TransportEvent::Type::Receive,
+  harness.link.server_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Receive,
       .peer = harness.link.client_peer,
       .channel = 0,
-      .payload = karma::net::encodePacket(duplicate_header, bytesOf(client_message)),
+      .payload = karma::network::encodePacket(duplicate_header, bytesOf(client_message)),
       .endpoint = harness.link.endpoint,
   });
   server_events.clear();
@@ -440,22 +440,22 @@ void testSessionHandshakeCustomAndFilters() {
   harness.server.addPeerToGroup(harness.link.client_peer, "alpha");
   const std::string targeted = "targeted";
   const auto result = harness.server.sendCustomWhere(
-      [](const karma::net::SessionPeer& peer) {
+      [](const karma::network::SessionPeer& peer) {
         return peer.groups.find("alpha") != peer.groups.end();
       },
       bytesOf(targeted),
-      karma::net::Delivery::Reliable,
+      karma::network::Delivery::Reliable,
       0,
       4);
   expect(result.ok(), "group send should succeed");
   client_events.clear();
   harness.client.poll(client_events);
   expect(client_events.size() == 1, "client should receive targeted group message");
-  expect(client_events[0].type == karma::net::SessionEventType::CustomMessage,
+  expect(client_events[0].type == karma::network::SessionEventType::CustomMessage,
          "targeted message should dispatch as custom");
 }
 
-karma::ecs::Entity makeReplicatedEntity(karma::ecs::World& world) {
+karma::world::Entity makeReplicatedEntity(karma::world::World& world) {
   auto entity = world.createEntity();
   world.add(entity,
             karma::components::TransformComponent{
@@ -482,7 +482,7 @@ karma::ecs::Entity makeReplicatedEntity(karma::ecs::World& world) {
 
 std::vector<std::byte> encodeTransformUpdatePayload(karma::components::NetworkEntityId id,
                                                     const karma::math::Vec3& position) {
-  karma::net::BinaryWriter component;
+  karma::network::BinaryWriter component;
   component.writeFloat32(position.x);
   component.writeFloat32(position.y);
   component.writeFloat32(position.z);
@@ -495,7 +495,7 @@ std::vector<std::byte> encodeTransformUpdatePayload(karma::components::NetworkEn
   component.writeFloat32(1.0f);
   const std::vector<std::byte> component_bytes = component.takeBytes();
 
-  karma::net::BinaryWriter payload;
+  karma::network::BinaryWriter payload;
   payload.writeUInt64(id);
   payload.writeUInt32(karma::network::kTransformComponentWireId);
   payload.writeUInt32(static_cast<uint32_t>(component_bytes.size()));
@@ -504,7 +504,7 @@ std::vector<std::byte> encodeTransformUpdatePayload(karma::components::NetworkEn
 }
 
 std::vector<std::byte> encodeDespawnPayload(karma::components::NetworkEntityId id) {
-  karma::net::BinaryWriter payload;
+  karma::network::BinaryWriter payload;
   payload.writeUInt64(id);
   return payload.takeBytes();
 }
@@ -514,7 +514,7 @@ std::vector<std::byte> encodeSpawnPayload(karma::components::NetworkEntityId id,
                                           karma::components::AuthorityMode mode =
                                               karma::components::AuthorityMode::Server,
                                           uint32_t owner_peer = 0) {
-  karma::net::BinaryWriter component;
+  karma::network::BinaryWriter component;
   component.writeFloat32(position.x);
   component.writeFloat32(position.y);
   component.writeFloat32(position.z);
@@ -527,7 +527,7 @@ std::vector<std::byte> encodeSpawnPayload(karma::components::NetworkEntityId id,
   component.writeFloat32(1.0f);
   const std::vector<std::byte> component_bytes = component.takeBytes();
 
-  karma::net::BinaryWriter payload;
+  karma::network::BinaryWriter payload;
   payload.writeUInt64(id);
   payload.writeUInt8(static_cast<uint8_t>(mode));
   payload.writeUInt32(owner_peer);
@@ -540,14 +540,14 @@ std::vector<std::byte> encodeSpawnPayload(karma::components::NetworkEntityId id,
   return payload.takeBytes();
 }
 
-karma::net::SessionEvent makeReplicationEvent(
-    karma::net::MessageType message_type,
+karma::network::SessionEvent makeReplicationEvent(
+    karma::network::MessageType message_type,
     std::vector<std::byte> payload,
     uint32_t tick,
     uint32_t sequence,
-    karma::net::PeerId peer = {}) {
-  return karma::net::SessionEvent{
-      .type = karma::net::SessionEventType::ReplicationMessage,
+    karma::network::PeerId peer = {}) {
+  return karma::network::SessionEvent{
+      .type = karma::network::SessionEventType::ReplicationMessage,
       .peer = peer,
       .message_type = message_type,
       .tick = tick,
@@ -556,11 +556,11 @@ karma::net::SessionEvent makeReplicationEvent(
   };
 }
 
-void pumpClientReplication(karma::net::ClientSession& client,
+void pumpClientReplication(karma::network::ClientSession& client,
                            karma::network::ClientReplicationState& replication,
-                           karma::ecs::World& client_world,
+                           karma::world::World& client_world,
                            const karma::network::ComponentReplicationRegistry& registry) {
-  std::vector<karma::net::SessionEvent> events;
+  std::vector<karma::network::SessionEvent> events;
   client.poll(events);
   for (const auto& event : events) {
     replication.applyEvent(client_world, registry, event);
@@ -569,16 +569,16 @@ void pumpClientReplication(karma::net::ClientSession& client,
 
 void testReplicationSpawnUpdateDespawn() {
   SessionHarness harness;
-  std::vector<karma::net::SessionEvent> server_events;
-  std::vector<karma::net::SessionEvent> client_events;
+  std::vector<karma::network::SessionEvent> server_events;
+  std::vector<karma::network::SessionEvent> client_events;
   handshake(harness, server_events, client_events);
 
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
   karma::network::ServerReplicationState server_replication;
   karma::network::ClientReplicationState client_replication;
-  karma::ecs::World server_world;
-  karma::ecs::World client_world;
+  karma::world::World server_world;
+  karma::world::World client_world;
   const auto server_entity = makeReplicatedEntity(server_world);
 
   auto sent = server_replication.replicate(server_world, harness.server, registry, 10);
@@ -608,10 +608,10 @@ void testReplicationSpawnUpdateDespawn() {
   expect(position.x == 4.0f && position.y == 5.0f && position.z == 6.0f,
          "transform snapshot should apply on client");
 
-  karma::net::SessionEvent client_update{
-      .type = karma::net::SessionEventType::ReplicationMessage,
+  karma::network::SessionEvent client_update{
+      .type = karma::network::SessionEventType::ReplicationMessage,
       .peer = harness.link.client_peer,
-      .message_type = karma::net::MessageType::ComponentSnapshot,
+      .message_type = karma::network::MessageType::ComponentSnapshot,
       .payload = encodeTransformUpdatePayload(network_id, {9.0f, 9.0f, 9.0f}),
   };
   expect(!server_replication.applyClientComponentEvent(server_world,
@@ -654,13 +654,13 @@ void testReplicationSpawnUpdateDespawn() {
   pumpClientReplication(harness.client, client_replication, client_world, registry);
   expect(!client_world.isAlive(*maybe_client_entity), "client entity should be destroyed");
 
-  karma::net::BinaryWriter stale_payload;
+  karma::network::BinaryWriter stale_payload;
   stale_payload.writeUInt64(network_id);
   stale_payload.writeUInt32(karma::network::kTransformComponentWireId);
   stale_payload.writeUInt32(0);
-  karma::net::SessionEvent stale_event{
-      .type = karma::net::SessionEventType::ReplicationMessage,
-      .message_type = karma::net::MessageType::ComponentSnapshot,
+  karma::network::SessionEvent stale_event{
+      .type = karma::network::SessionEventType::ReplicationMessage,
+      .message_type = karma::network::MessageType::ComponentSnapshot,
       .payload = stale_payload.takeBytes(),
   };
   expect(!client_replication.applyEvent(client_world, registry, stale_event),
@@ -669,32 +669,32 @@ void testReplicationSpawnUpdateDespawn() {
 
 void testReplicationPeerCleanupAndReconnect() {
   SessionHarness harness;
-  std::vector<karma::net::SessionEvent> server_events;
-  std::vector<karma::net::SessionEvent> client_events;
+  std::vector<karma::network::SessionEvent> server_events;
+  std::vector<karma::network::SessionEvent> client_events;
   handshake(harness, server_events, client_events);
 
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
   karma::network::ServerReplicationState server_replication;
   karma::network::ClientReplicationState client_replication;
-  karma::ecs::World server_world;
-  karma::ecs::World client_world;
+  karma::world::World server_world;
+  karma::world::World client_world;
   makeReplicatedEntity(server_world);
 
   auto sent = server_replication.replicate(server_world, harness.server, registry, 20);
   expect(sent.ok() && sent.sent == 1, "initial peer should receive spawn");
   pumpClientReplication(harness.client, client_replication, client_world, registry);
 
-  harness.link.server_events.push_back(karma::net::TransportEvent{
-      .type = karma::net::TransportEvent::Type::Disconnect,
+  harness.link.server_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Disconnect,
       .peer = harness.link.client_peer,
-      .disconnect_reason = karma::net::DisconnectReason::Remote,
+      .disconnect_reason = karma::network::DisconnectReason::Remote,
       .endpoint = harness.link.endpoint,
   });
   server_events.clear();
   harness.server.poll(server_events);
   expect(!server_events.empty() &&
-             server_events.front().type == karma::net::SessionEventType::PeerDisconnected,
+             server_events.front().type == karma::network::SessionEventType::PeerDisconnected,
          "server should observe peer disconnect");
   server_replication.removePeer(harness.link.client_peer);
   harness.link.connected = false;
@@ -709,22 +709,22 @@ void testReplicationPeerCleanupAndReconnect() {
 
 void testReplicationVisibilityTransitions() {
   SessionHarness harness;
-  std::vector<karma::net::SessionEvent> server_events;
-  std::vector<karma::net::SessionEvent> client_events;
+  std::vector<karma::network::SessionEvent> server_events;
+  std::vector<karma::network::SessionEvent> client_events;
   handshake(harness, server_events, client_events);
 
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
   karma::network::ServerReplicationState server_replication;
   karma::network::ClientReplicationState client_replication;
-  karma::ecs::World server_world;
-  karma::ecs::World client_world;
+  karma::world::World server_world;
+  karma::world::World client_world;
   const auto server_entity = makeReplicatedEntity(server_world);
 
   bool visible = true;
   const karma::network::ReplicationVisibilityPredicate visibility =
-      [&visible](const karma::net::SessionPeer& peer,
-                 karma::ecs::Entity entity,
+      [&visible](const karma::network::SessionPeer& peer,
+                 karma::world::Entity entity,
                  karma::components::NetworkEntityId id) {
         (void)peer;
         (void)entity;
@@ -773,13 +773,13 @@ void testClientStaleReplicationRejection() {
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
   karma::network::ClientReplicationState replication;
-  karma::ecs::World world;
+  karma::world::World world;
   constexpr karma::components::NetworkEntityId network_id = 42;
 
   expect(replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::EntitySpawn,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
                                   encodeSpawnPayload(network_id, {1.0f, 2.0f, 3.0f}),
                                   10,
                                   1)),
@@ -790,7 +790,7 @@ void testClientStaleReplicationRejection() {
   expect(replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::ComponentSnapshot,
+             makeReplicationEvent(karma::network::MessageType::ComponentSnapshot,
                                   encodeTransformUpdatePayload(network_id,
                                                                {5.0f, 6.0f, 7.0f}),
                                   12,
@@ -803,7 +803,7 @@ void testClientStaleReplicationRejection() {
   expect(!replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::ComponentDelta,
+             makeReplicationEvent(karma::network::MessageType::ComponentDelta,
                                   encodeTransformUpdatePayload(network_id,
                                                                {8.0f, 8.0f, 8.0f}),
                                   11,
@@ -816,7 +816,7 @@ void testClientStaleReplicationRejection() {
   expect(!replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::EntityDespawn,
+             makeReplicationEvent(karma::network::MessageType::EntityDespawn,
                                   encodeDespawnPayload(network_id),
                                   9,
                                   10)),
@@ -826,7 +826,7 @@ void testClientStaleReplicationRejection() {
   expect(replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::EntityDespawn,
+             makeReplicationEvent(karma::network::MessageType::EntityDespawn,
                                   encodeDespawnPayload(network_id),
                                   13,
                                   11)),
@@ -836,7 +836,7 @@ void testClientStaleReplicationRejection() {
   expect(!replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::ComponentSnapshot,
+             makeReplicationEvent(karma::network::MessageType::ComponentSnapshot,
                                   encodeTransformUpdatePayload(network_id,
                                                                {9.0f, 9.0f, 9.0f}),
                                   12,
@@ -845,7 +845,7 @@ void testClientStaleReplicationRejection() {
   expect(!replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::EntitySpawn,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
                                   encodeSpawnPayload(network_id, {2.0f, 2.0f, 2.0f}),
                                   12,
                                   13)),
@@ -854,7 +854,7 @@ void testClientStaleReplicationRejection() {
   expect(replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::EntitySpawn,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
                                   encodeSpawnPayload(network_id, {3.0f, 3.0f, 3.0f}),
                                   14,
                                   14)),
@@ -865,7 +865,7 @@ void testClientStaleReplicationRejection() {
   expect(replication.applyEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::EntitySpawn,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
                                   encodeSpawnPayload(network_id, {3.0f, 3.0f, 3.0f}),
                                   14,
                                   14)),
@@ -879,17 +879,17 @@ void testServerAuthorityModes() {
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
   karma::network::ServerReplicationState replication;
-  karma::ecs::World world;
+  karma::world::World world;
   const auto entity = makeReplicatedEntity(world);
   replication.ensureNetworkIds(world);
   const auto network_id = world.get<karma::components::NetworkIdentityComponent>(entity).id;
   auto& authority = world.get<karma::components::NetworkAuthorityComponent>(entity);
 
-  auto apply_position = [&](karma::net::PeerId peer, const karma::math::Vec3& position) {
+  auto apply_position = [&](karma::network::PeerId peer, const karma::math::Vec3& position) {
     return replication.applyClientComponentEvent(
         world,
         registry,
-        makeReplicationEvent(karma::net::MessageType::ComponentSnapshot,
+        makeReplicationEvent(karma::network::MessageType::ComponentSnapshot,
                              encodeTransformUpdatePayload(network_id, position),
                              1,
                              1,
@@ -898,25 +898,25 @@ void testServerAuthorityModes() {
   };
 
   authority.mode = karma::components::AuthorityMode::Server;
-  expect(!apply_position(karma::net::PeerId{7}, {1.0f, 1.0f, 1.0f}),
+  expect(!apply_position(karma::network::PeerId{7}, {1.0f, 1.0f, 1.0f}),
          "server-authority should reject client writes");
 
   authority.mode = karma::components::AuthorityMode::Custom;
-  expect(!apply_position(karma::net::PeerId{7}, {2.0f, 2.0f, 2.0f}),
+  expect(!apply_position(karma::network::PeerId{7}, {2.0f, 2.0f, 2.0f}),
          "custom-authority should reject client writes by default");
 
   authority.mode = karma::components::AuthorityMode::Owner;
   authority.owner_peer = 7;
-  expect(!apply_position(karma::net::PeerId{8}, {3.0f, 3.0f, 3.0f}),
+  expect(!apply_position(karma::network::PeerId{8}, {3.0f, 3.0f, 3.0f}),
          "owner-authority should reject non-owner writes");
-  expect(apply_position(karma::net::PeerId{7}, {4.0f, 4.0f, 4.0f}),
+  expect(apply_position(karma::network::PeerId{7}, {4.0f, 4.0f, 4.0f}),
          "owner-authority should accept owner writes");
   auto position = world.get<karma::components::TransformComponent>(entity).getPosition();
   expect(position.x == 4.0f && position.y == 4.0f && position.z == 4.0f,
          "owner write should mutate state");
 
   authority.mode = karma::components::AuthorityMode::Client;
-  expect(apply_position(karma::net::PeerId{8}, {5.0f, 5.0f, 5.0f}),
+  expect(apply_position(karma::network::PeerId{8}, {5.0f, 5.0f, 5.0f}),
          "client-authority should accept any client write");
   position = world.get<karma::components::TransformComponent>(entity).getPosition();
   expect(position.x == 5.0f && position.y == 5.0f && position.z == 5.0f,
@@ -926,12 +926,12 @@ void testServerAuthorityModes() {
   expect(replication.applyClientComponentEvent(
              world,
              registry,
-             makeReplicationEvent(karma::net::MessageType::ComponentSnapshot,
+             makeReplicationEvent(karma::network::MessageType::ComponentSnapshot,
                                   encodeTransformUpdatePayload(network_id,
                                                                {6.0f, 6.0f, 6.0f}),
                                   1,
                                   1,
-                                  karma::net::PeerId{9}),
+                                  karma::network::PeerId{9}),
              true),
          "server override should bypass authority checks");
   position = world.get<karma::components::TransformComponent>(entity).getPosition();
@@ -944,8 +944,8 @@ void testNetworkRuntimeModuleStats() {
   SessionHarness harness;
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
-  karma::ecs::World server_world;
-  karma::ecs::World client_world;
+  karma::world::World server_world;
+  karma::world::World client_world;
   const auto server_entity = makeReplicatedEntity(server_world);
   int server_callbacks = 0;
   int client_callbacks = 0;
@@ -955,8 +955,8 @@ void testNetworkRuntimeModuleStats() {
       karma::network::ServerNetworkRuntimeConfig{
           .app_id = kAppId,
           .event_handler =
-              [&server_callbacks](const karma::net::SessionEvent& event,
-                                  karma::ecs::World& world) {
+              [&server_callbacks](const karma::network::SessionEvent& event,
+                                  karma::world::World& world) {
                 (void)event;
                 (void)world;
                 ++server_callbacks;
@@ -969,8 +969,8 @@ void testNetworkRuntimeModuleStats() {
       karma::network::ClientNetworkRuntimeConfig{
           .app_id = kAppId,
           .event_handler =
-              [&client_callbacks](const karma::net::SessionEvent& event,
-                                  karma::ecs::World& world) {
+              [&client_callbacks](const karma::network::SessionEvent& event,
+                                  karma::world::World& world) {
                 (void)event;
                 (void)world;
                 ++client_callbacks;
@@ -986,7 +986,7 @@ void testNetworkRuntimeModuleStats() {
   expect(client_module.stats().events_received == 1, "client should count handshake event");
 
   const std::string custom = "runtime-custom";
-  harness.client.sendCustom(bytesOf(custom), karma::net::Delivery::Reliable, 0, 2);
+  harness.client.sendCustom(bytesOf(custom), karma::network::Delivery::Reliable, 0, 2);
   const std::string input = "runtime-input";
   harness.client.sendInputCommand(bytesOf(input), 3);
   server_module.onFrameBegin(server_world, 0.0f);
@@ -1004,16 +1004,16 @@ void testNetworkRuntimeModuleStats() {
 
   const auto network_id =
       server_world.get<karma::components::NetworkIdentityComponent>(server_entity).id;
-  karma::net::PacketHeader stale_header;
+  karma::network::PacketHeader stale_header;
   stale_header.app_id = kAppId;
-  stale_header.message_type = karma::net::MessageType::ComponentSnapshot;
+  stale_header.message_type = karma::network::MessageType::ComponentSnapshot;
   stale_header.tick = 1;
   stale_header.sequence = 1;
-  harness.link.client_events.push_back(karma::net::TransportEvent{
-      .type = karma::net::TransportEvent::Type::Receive,
+  harness.link.client_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Receive,
       .peer = harness.link.server_peer,
       .channel = 1,
-      .payload = karma::net::encodePacket(
+      .payload = karma::network::encodePacket(
           stale_header,
           encodeTransformUpdatePayload(network_id, {99.0f, 99.0f, 99.0f})),
       .endpoint = harness.link.endpoint,
@@ -1022,9 +1022,9 @@ void testNetworkRuntimeModuleStats() {
   expect(client_module.stats().stale_replication_rejects == 1,
          "client stats should count stale replication rejects");
 
-  harness.client.send(karma::net::MessageType::ComponentSnapshot,
+  harness.client.send(karma::network::MessageType::ComponentSnapshot,
                       encodeTransformUpdatePayload(network_id, {7.0f, 7.0f, 7.0f}),
-                      karma::net::Delivery::Reliable,
+                      karma::network::Delivery::Reliable,
                       1,
                       5);
   server_module.onFrameBegin(server_world, 0.0f);
@@ -1033,8 +1033,8 @@ void testNetworkRuntimeModuleStats() {
   expect(server_module.stats().authority_rejects == 1,
          "server stats should count authority rejects");
 
-  harness.link.server_events.push_back(karma::net::TransportEvent{
-      .type = karma::net::TransportEvent::Type::Receive,
+  harness.link.server_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Receive,
       .peer = harness.link.client_peer,
       .channel = 0,
       .payload = {std::byte{0}},

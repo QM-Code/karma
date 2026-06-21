@@ -11,15 +11,15 @@
 
 #include <nlohmann/json.hpp>
 
-#include "karma/content/assets/asset_cache.h"
-#include "karma/content/image/image.h"
-#include "karma/features/visual/particles/effect_asset.h"
+#include "karma/assets.h"
+#include "karma/assets.h"
+#include "karma/visual.h"
 
 #include "asset_texture_internal.h"
 #include "../importers/gltf_scene_import_internal.h"
 #include "../importers/mesh_import_internal.h"
 
-namespace karma::content {
+namespace karma::assets {
 
 namespace {
 
@@ -29,29 +29,29 @@ std::string childKey(const std::string& parent,
   return parent + "/" + std::string(kind) + "/" + std::to_string(index);
 }
 
-void assignSingleMaterialSlot(geometry::MeshData& mesh,
+void assignSingleMaterialSlot(world::MeshData& mesh,
                               std::string slot_name,
                               std::string material_key) {
-  mesh.material_slots = {geometry::MeshMaterialSlot{
+  mesh.material_slots = {world::MeshMaterialSlot{
       .name = std::move(slot_name),
       .default_material_key = std::move(material_key),
   }};
   if (mesh.submeshes.empty() && !mesh.indices.empty()) {
-    mesh.submeshes.push_back(geometry::MeshSubmesh{
+    mesh.submeshes.push_back(world::MeshSubmesh{
         .index_offset = 0u,
         .index_count = static_cast<uint32_t>(mesh.indices.size()),
         .material_slot = 0u,
     });
     return;
   }
-  for (geometry::MeshSubmesh& submesh : mesh.submeshes) {
+  for (world::MeshSubmesh& submesh : mesh.submeshes) {
     submesh.material_slot = 0u;
   }
 }
 
-geometry::MeshData combineMeshes(std::vector<geometry::MeshData> meshes) {
-  geometry::MeshData combined{};
-  for (geometry::MeshData& mesh : meshes) {
+world::MeshData combineMeshes(std::vector<world::MeshData> meshes) {
+  world::MeshData combined{};
+  for (world::MeshData& mesh : meshes) {
     if (mesh.vertices.empty() || mesh.indices.empty()) {
       continue;
     }
@@ -80,15 +80,15 @@ geometry::MeshData combineMeshes(std::vector<geometry::MeshData> meshes) {
                                    mesh.material_slots.begin(),
                                    mesh.material_slots.end());
     if (!mesh.submeshes.empty()) {
-      for (const geometry::MeshSubmesh& submesh : mesh.submeshes) {
-        combined.submeshes.push_back(geometry::MeshSubmesh{
+      for (const world::MeshSubmesh& submesh : mesh.submeshes) {
+        combined.submeshes.push_back(world::MeshSubmesh{
             .index_offset = index_base + submesh.index_offset,
             .index_count = submesh.index_count,
             .material_slot = material_slot_base + submesh.material_slot,
         });
       }
     } else {
-      combined.submeshes.push_back(geometry::MeshSubmesh{
+      combined.submeshes.push_back(world::MeshSubmesh{
           .index_offset = index_base,
           .index_count = static_cast<uint32_t>(mesh.indices.size()),
           .material_slot = material_slot_base,
@@ -108,8 +108,8 @@ bool importMeshAsset(AssetRegistry& assets,
   if (!AssetRegistry::isValidAssetKey(key)) {
     return false;
   }
-  std::vector<geometry::MeshData> imported = importMeshes(path);
-  geometry::MeshData combined = combineMeshes(std::move(imported));
+  std::vector<world::MeshData> imported = importMeshes(path);
+  world::MeshData combined = combineMeshes(std::move(imported));
   if (combined.vertices.empty() || combined.indices.empty()) {
     return false;
   }
@@ -168,8 +168,8 @@ bool importParticleEffect(AssetRegistry& assets,
   if (!AssetRegistry::isValidAssetKey(key)) {
     return false;
   }
-  particles::ParticleEffectAsset effect{};
-  if (!particles::loadParticleEffectAsset(path, effect)) {
+  visual::particles::ParticleEffectAsset effect{};
+  if (!visual::particles::loadParticleEffectAsset(path, effect)) {
     return false;
   }
   return assets.registerParticleEffect(key, std::move(effect));
@@ -178,11 +178,11 @@ bool importParticleEffect(AssetRegistry& assets,
 GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
                                     const std::string& key,
                                     const std::filesystem::path& path,
-                                    const scene::GltfSceneLoadOptions& options) {
+                                    const world::GltfSceneLoadOptions& options) {
   if (!AssetRegistry::isValidAssetKey(key)) {
     return {};
   }
-  scene::GltfScenePrefab prefab = scene::loadGltfScenePrefab(path, options);
+  world::GltfScenePrefab prefab = world::loadGltfScenePrefab(path, options);
   if (!prefab.valid()) {
     return {};
   }
@@ -195,7 +195,7 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
 
   std::size_t mesh_index = 0;
   std::size_t material_index = 0;
-  for (const scene::GltfScenePrefabNode& node : prefab.nodes) {
+  for (const world::GltfScenePrefabNode& node : prefab.nodes) {
     GltfSceneAssetNode asset_node{};
     asset_node.name = node.name;
     asset_node.local_position = node.local_position;
@@ -209,10 +209,10 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
     asset_node.children = node.children;
     asset_node.primitives.reserve(node.primitives.size());
 
-    for (const scene::GltfScenePrefabPrimitive& primitive : node.primitives) {
+    for (const world::GltfScenePrefabPrimitive& primitive : node.primitives) {
       const std::string mesh_key = childKey(key, "meshes", mesh_index++);
       const std::string material_key = childKey(key, "materials", material_index++);
-      renderer::MaterialAssetDesc material{};
+      rendering::MaterialAssetDesc material{};
       material.surface = primitive.material;
       material.material_asset_path = prefab.source_path;
       material.material_asset_index = primitive.source_material_index;
@@ -229,7 +229,7 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
                                       texture_keys.end());
       asset.material_keys.push_back(material_key);
 
-      geometry::MeshData mesh = primitive.mesh;
+      world::MeshData mesh = primitive.mesh;
       assignSingleMaterialSlot(mesh,
                                primitive.name.empty() ? std::string("Slot 0") : primitive.name,
                                material_key);
@@ -281,4 +281,4 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
 
 }  // namespace detail
 
-}  // namespace karma::content
+}  // namespace karma::assets

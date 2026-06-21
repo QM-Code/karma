@@ -1,14 +1,17 @@
-#include "karma/rendering/renderer/render_system.h"
+#include "karma/rendering.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -16,19 +19,22 @@
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
-#include "karma/content/assets/asset_package.h"
-#include "karma/core/math/glm.h"
-#include "karma/core/time.h"
+#include "karma/assets.h"
+#include "karma/assets.h"
+#include "karma/math.h"
+#include "karma/core.h"
 #include "render_system/debug_draw.h"
 #include "render_system/extractors.h"
-#include "karma/world/components/camera.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/environment.h"
-#include "karma/world/components/light.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/visibility.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
-namespace karma::renderer {
+namespace karma::rendering {
 
 namespace {
 using render_system::drawBoxWire;
@@ -72,7 +78,7 @@ void logRenderSystemStage(const bool enabled,
   }
 }
 
-renderer::PostProcessSettings resolvePostProcessSettings(const content::AssetRegistry* assets,
+rendering::PostProcessSettings resolvePostProcessSettings(const assets::AssetRegistry* assets,
                                                          const std::string& key) {
   if (assets != nullptr) {
     return assets->resolvePostProcessProfile(key);
@@ -87,8 +93,8 @@ glm::mat4 toInstanceTransform(const components::MeshInstance& instance) {
   return transform;
 }
 
-renderer::InstanceData toRendererInstance(const components::MeshInstance& instance) {
-  renderer::InstanceData out{};
+rendering::InstanceData toRendererInstance(const components::MeshInstance& instance) {
+  rendering::InstanceData out{};
   out.transform = toInstanceTransform(instance);
   out.params = glm::vec4(instance.params[0],
                          instance.params[1],
@@ -97,9 +103,9 @@ renderer::InstanceData toRendererInstance(const components::MeshInstance& instan
   return out;
 }
 
-renderer::PlanarInstanceData toRendererPlanarInstance(
+rendering::PlanarInstanceData toRendererPlanarInstance(
     const components::PlanarMeshInstance& instance) {
-  renderer::PlanarInstanceData out{};
+  rendering::PlanarInstanceData out{};
   out.position_yaw = glm::vec4(instance.position.x,
                                instance.position.y,
                                instance.position.z,
@@ -171,7 +177,7 @@ void rebuildCachedInstances(const components::InstancedMeshComponent& instanced,
   record.cached_instances.clear();
   record.cached_planar_instances.clear();
 
-  if (instanced.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+  if (instanced.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
     record.cached_planar_instances.reserve(instanced.planar_instances.size());
     for (const auto& instance : instanced.planar_instances) {
       record.cached_planar_instances.push_back(toRendererPlanarInstance(instance));
@@ -192,7 +198,7 @@ void rebuildCachedInstances(const components::InstancedMeshComponent& instanced,
 
   record.cached_instances.reserve(instanced.instances.size());
   for (const auto& instance : instanced.instances) {
-    renderer::InstanceData renderer_instance = toRendererInstance(instance);
+    rendering::InstanceData renderer_instance = toRendererInstance(instance);
     if (record.bounds_valid) {
       const glm::vec3 center =
           glm::vec3(renderer_instance.transform * glm::vec4(record.bounds_center, 1.0f));
@@ -209,9 +215,9 @@ void rebuildCachedInstances(const components::InstancedMeshComponent& instanced,
 
 size_t authoredInstanceCount(const components::InstancedMeshComponent& instanced) {
   switch (instanced.gpu_layout) {
-    case renderer::InstanceGpuLayout::Matrix4x4Params:
+    case rendering::InstanceGpuLayout::Matrix4x4Params:
       return instanced.instances.size();
-    case renderer::InstanceGpuLayout::PositionYawScaleParams:
+    case rendering::InstanceGpuLayout::PositionYawScaleParams:
       return instanced.planar_instances.size();
   }
   return 0u;
@@ -227,13 +233,13 @@ void appendColor(std::ostringstream& stream, std::string_view name, const math::
 }
 
 void appendMaterialParameter(std::ostringstream& stream,
-                             const renderer::MaterialParameterValue& value) {
+                             const rendering::MaterialParameterValue& value) {
   std::visit(
       [&](const auto& typed) {
         using Value = std::decay_t<decltype(typed)>;
         if constexpr (std::is_same_v<Value, bool>) {
           stream << (typed ? "true" : "false");
-        } else if constexpr (std::is_same_v<Value, renderer::Color>) {
+        } else if constexpr (std::is_same_v<Value, rendering::Color>) {
           stream << typed.r << ',' << typed.g << ',' << typed.b << ',' << typed.a;
         } else if constexpr (std::is_same_v<Value, glm::vec2>) {
           stream << typed.x << ',' << typed.y;
@@ -248,7 +254,7 @@ void appendMaterialParameter(std::ostringstream& stream,
       value);
 }
 
-std::string materialFingerprint(const renderer::ResolvedMaterialDesc& resolved) {
+std::string materialFingerprint(const rendering::ResolvedMaterialDesc& resolved) {
   std::ostringstream stream;
   stream << "pipeline=" << resolved.pipeline.name << ';'
          << "vs=" << resolved.pipeline.vertex_shader_path.generic_string() << ';'
@@ -261,7 +267,7 @@ std::string materialFingerprint(const renderer::ResolvedMaterialDesc& resolved) 
     stream << "define=" << define << ';';
   }
 
-  const renderer::MaterialDesc& material = resolved.surface;
+  const rendering::MaterialDesc& material = resolved.surface;
   appendColor(stream, "base_color", material.base_color);
   appendColor(stream, "emissive_color", material.emissive_color);
   appendScalar(stream, "metallic", material.metallic);
@@ -322,16 +328,186 @@ std::string materialFingerprint(const renderer::ResolvedMaterialDesc& resolved) 
 
 }
 
-void RenderSystem::releaseRecord(uint64_t key, RenderRecord& record) {
+struct RenderSystem::Impl {
+  Impl(GraphicsDevice& device, const assets::AssetRegistry& assets)
+      : device_(device), assets_(&assets) {}
+
+  struct InstancedLodRecord {
+    float start_distance = 0.0f;
+    std::string mesh_asset_key;
+    std::vector<world::MeshMaterialSlot> material_slots;
+    std::vector<components::MeshMaterialAssignment> component_materials;
+    std::vector<std::string> acquired_material_keys;
+    std::vector<rendering::DrawMaterialBinding> material_bindings;
+    rendering::MeshId mesh = rendering::kInvalidMesh;
+    glm::vec3 bounds_center{0.0f};
+    float bounds_radius = 0.0f;
+    bool bounds_valid = false;
+    rendering::InstanceLodRenderMode render_mode = rendering::InstanceLodRenderMode::Mesh;
+    bool shadow_visible = false;
+  };
+
+  struct RenderRecord {
+    std::string mesh_asset_key;
+    std::vector<world::MeshMaterialSlot> material_slots;
+    std::vector<components::MeshMaterialAssignment> component_materials;
+    std::vector<std::string> acquired_material_keys;
+    std::vector<rendering::DrawMaterialBinding> material_bindings;
+    rendering::MeshId mesh = rendering::kInvalidMesh;
+    glm::vec3 bounds_center{0.0f};
+    float bounds_radius = 0.0f;
+    bool bounds_valid = false;
+    rendering::InstanceGpuLayout cached_instance_layout =
+        rendering::InstanceGpuLayout::Matrix4x4Params;
+    uint64_t cached_instance_revision = UINT64_MAX;
+    size_t cached_instance_count = 0;
+    bool cached_instance_dynamic = false;
+    bool cached_instance_bounds_valid = false;
+    glm::vec3 cached_instance_bounds_center{0.0f};
+    float cached_instance_bounds_radius = 0.0f;
+    std::vector<rendering::InstanceData> cached_instances;
+    std::vector<rendering::PlanarInstanceData> cached_planar_instances;
+    std::vector<InstancedLodRecord> instanced_lods;
+  };
+
+  struct SharedMeshResource {
+    rendering::MeshId mesh = rendering::kInvalidMesh;
+    uint32_t ref_count = 0;
+    glm::vec3 bounds_center{0.0f};
+    float bounds_radius = 0.0f;
+    bool bounds_valid = false;
+    bool owned_by_render_system = false;
+  };
+
+  struct SharedMaterialResource {
+    rendering::MaterialId material = rendering::kInvalidMaterial;
+    uint32_t ref_count = 0;
+    std::vector<std::string> texture_asset_keys;
+  };
+
+  struct SharedMaterialAlias {
+    std::string fingerprint;
+    uint32_t ref_count = 0;
+  };
+
+  struct SharedTextureResource {
+    rendering::TextureId texture = rendering::kInvalidTexture;
+    uint32_t ref_count = 0;
+  };
+
+  struct PrewarmRecord {
+    std::vector<std::string> mesh_asset_keys;
+    std::vector<std::string> material_keys;
+    std::vector<std::string> texture_keys;
+  };
+
+  static uint64_t entityKey(world::Entity entity) {
+    return (static_cast<uint64_t>(entity.index) << 32) |
+           static_cast<uint64_t>(entity.generation);
+  }
+  static uint64_t instancedEntityKey(world::Entity entity) {
+    return entityKey(entity) | (uint64_t{1} << 63);
+  }
+  static world::Entity entityFromKey(uint64_t key) {
+    world::Entity entity{};
+    entity.index = static_cast<uint32_t>(key >> 32);
+    entity.generation = static_cast<uint32_t>(key & 0xFFFFFFFFu);
+    return entity;
+  }
+  static world::Entity entityFromInstancedKey(uint64_t key) {
+    return entityFromKey(key & ~(uint64_t{1} << 63));
+  }
+
+  void update(world::World& world, world::Scene& scene, float dt, float interpolation_alpha);
+  RenderPrewarmHandle prewarmAssets(const std::vector<std::string>& mesh_keys,
+                                    const std::vector<std::string>& material_keys,
+                                    const std::vector<std::string>& texture_keys);
+  RenderPrewarmHandle prewarmPackage(const karma::assets::AssetPackageHandle& package);
+  bool releasePrewarm(RenderPrewarmHandle handle);
+
+  void releaseRecord(uint64_t key, RenderRecord& record);
+  void cleanupStaleRecords(world::World& world);
+  void cleanupStaleInstancedRecords(world::World& world);
+  void releaseMeshBinding(RenderRecord& record);
+  void releaseMaterialBinding(RenderRecord& record);
+  void releaseInstancedLodBindings(RenderRecord& record);
+  bool syncInstancedLodBindings(const components::InstancedMeshComponent& instanced,
+                                RenderRecord& record);
+  void bindMesh(const components::MeshComponent& mesh, RenderRecord& record);
+  void bindMesh(const std::string& mesh_asset_key, RenderRecord& record);
+  void bindMaterial(const components::MeshComponent& mesh, RenderRecord& record);
+  void bindMaterial(const std::vector<components::MeshMaterialAssignment>& materials,
+                    RenderRecord& record);
+  void acquireSharedMesh(const std::string& mesh_asset_key, RenderRecord& record);
+  void releaseSharedMesh(const std::string& mesh_asset_key);
+  rendering::MaterialId acquireSharedMaterial(const std::string& material_key);
+  void releaseSharedMaterial(const std::string& material_key);
+  rendering::TextureId acquireSharedTexture(const std::string& texture_key);
+  void releaseSharedTexture(const std::string& texture_key);
+
+  GraphicsDevice& device_;
+  const assets::AssetRegistry* assets_ = nullptr;
+  std::unordered_map<uint64_t, RenderRecord> records_;
+  std::unordered_map<uint64_t, RenderRecord> instanced_records_;
+  std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
+  std::unordered_map<std::string, SharedMaterialResource> shared_materials_;
+  std::unordered_map<std::string, SharedMaterialAlias> shared_material_aliases_;
+  std::unordered_map<std::string, SharedTextureResource> shared_textures_;
+  std::unordered_map<uint64_t, PrewarmRecord> prewarm_records_;
+  std::unordered_map<std::string, rendering::RenderTargetId> render_targets_by_key_;
+  std::unordered_map<std::string, bool> warned_missing_mesh_asset_keys_;
+  std::unordered_map<std::string, bool> warned_missing_material_keys_;
+  std::unordered_map<std::string, bool> warned_missing_environment_map_keys_;
+  uint64_t last_asset_registry_version_ = 0;
+  std::string last_env_path_;
+  float last_env_intensity_ = -1.0f;
+  bool last_env_draw_skybox_ = false;
+  bool warned_no_camera_ = false;
+  uint64_t next_prewarm_id_ = 1u;
+};
+
+RenderSystem::RenderSystem(GraphicsDevice& device, const assets::AssetRegistry& assets)
+    : impl_(std::make_unique<Impl>(device, assets)) {}
+
+RenderSystem::~RenderSystem() = default;
+
+RenderSystem::RenderSystem(RenderSystem&&) noexcept = default;
+
+RenderSystem& RenderSystem::operator=(RenderSystem&&) noexcept = default;
+
+void RenderSystem::update(world::World& world,
+                          world::Scene& scene,
+                          float dt,
+                          float interpolation_alpha) {
+  impl_->update(world, scene, dt, interpolation_alpha);
+}
+
+RenderPrewarmHandle RenderSystem::prewarmAssets(
+    const std::vector<std::string>& mesh_keys,
+    const std::vector<std::string>& material_keys,
+    const std::vector<std::string>& texture_keys) {
+  return impl_->prewarmAssets(mesh_keys, material_keys, texture_keys);
+}
+
+RenderPrewarmHandle RenderSystem::prewarmPackage(
+    const karma::assets::AssetPackageHandle& package) {
+  return impl_->prewarmPackage(package);
+}
+
+bool RenderSystem::releasePrewarm(RenderPrewarmHandle handle) {
+  return impl_->releasePrewarm(handle);
+}
+
+void RenderSystem::Impl::releaseRecord(uint64_t key, RenderRecord& record) {
   device_.retireInstance(static_cast<InstanceId>(key));
   releaseInstancedLodBindings(record);
   releaseMaterialBinding(record);
   releaseMeshBinding(record);
 }
 
-void RenderSystem::cleanupStaleRecords(ecs::World& world) {
+void RenderSystem::Impl::cleanupStaleRecords(world::World& world) {
   for (auto it = records_.begin(); it != records_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     const bool stale = !world.isAlive(entity) ||
                        !world.has<components::MeshComponent>(entity) ||
                        !world.has<components::TransformComponent>(entity);
@@ -344,9 +520,9 @@ void RenderSystem::cleanupStaleRecords(ecs::World& world) {
   }
 }
 
-void RenderSystem::cleanupStaleInstancedRecords(ecs::World& world) {
+void RenderSystem::Impl::cleanupStaleInstancedRecords(world::World& world) {
   for (auto it = instanced_records_.begin(); it != instanced_records_.end();) {
-    const ecs::Entity entity = entityFromInstancedKey(it->first);
+    const world::Entity entity = entityFromInstancedKey(it->first);
     const bool stale = !world.isAlive(entity) ||
                        !world.has<components::InstancedMeshComponent>(entity);
     if (!stale) {
@@ -358,18 +534,18 @@ void RenderSystem::cleanupStaleInstancedRecords(ecs::World& world) {
   }
 }
 
-void RenderSystem::releaseMeshBinding(RenderRecord& record) {
+void RenderSystem::Impl::releaseMeshBinding(RenderRecord& record) {
   releaseSharedMesh(record.mesh_asset_key);
   record.mesh_asset_key.clear();
   record.material_slots.clear();
 
-  record.mesh = renderer::kInvalidMesh;
+  record.mesh = rendering::kInvalidMesh;
   record.bounds_center = glm::vec3(0.0f);
   record.bounds_radius = 0.0f;
   record.bounds_valid = false;
 }
 
-void RenderSystem::releaseMaterialBinding(RenderRecord& record) {
+void RenderSystem::Impl::releaseMaterialBinding(RenderRecord& record) {
   for (const std::string& material_key : record.acquired_material_keys) {
     releaseSharedMaterial(material_key);
   }
@@ -377,7 +553,7 @@ void RenderSystem::releaseMaterialBinding(RenderRecord& record) {
   record.material_bindings.clear();
 }
 
-void RenderSystem::releaseInstancedLodBindings(RenderRecord& record) {
+void RenderSystem::Impl::releaseInstancedLodBindings(RenderRecord& record) {
   for (auto& lod : record.instanced_lods) {
     for (const std::string& material_key : lod.acquired_material_keys) {
       releaseSharedMaterial(material_key);
@@ -386,7 +562,7 @@ void RenderSystem::releaseInstancedLodBindings(RenderRecord& record) {
     lod.material_bindings.clear();
     releaseSharedMesh(lod.mesh_asset_key);
     lod.mesh_asset_key.clear();
-    lod.mesh = renderer::kInvalidMesh;
+    lod.mesh = rendering::kInvalidMesh;
     lod.bounds_center = glm::vec3(0.0f);
     lod.bounds_radius = 0.0f;
     lod.bounds_valid = false;
@@ -394,7 +570,7 @@ void RenderSystem::releaseInstancedLodBindings(RenderRecord& record) {
   record.instanced_lods.clear();
 }
 
-bool RenderSystem::syncInstancedLodBindings(
+bool RenderSystem::Impl::syncInstancedLodBindings(
     const components::InstancedMeshComponent& instanced,
     RenderRecord& record) {
   std::vector<components::InstancedMeshLodLevel> desired;
@@ -441,7 +617,7 @@ bool RenderSystem::syncInstancedLodBindings(
 
     RenderRecord mesh_record{};
     acquireSharedMesh(wanted.mesh_asset_key, mesh_record);
-    if (mesh_record.mesh == renderer::kInvalidMesh) {
+    if (mesh_record.mesh == rendering::kInvalidMesh) {
       continue;
     }
     lod_record.mesh_asset_key = wanted.mesh_asset_key;
@@ -451,7 +627,7 @@ bool RenderSystem::syncInstancedLodBindings(
     lod_record.bounds_valid = mesh_record.bounds_valid;
     lod_record.material_slots = std::move(mesh_record.material_slots);
 
-    if (lod_record.mesh != renderer::kInvalidMesh) {
+    if (lod_record.mesh != rendering::kInvalidMesh) {
       device_.getMeshMaterialSlots(lod_record.mesh, lod_record.material_slots);
     }
 
@@ -466,24 +642,24 @@ bool RenderSystem::syncInstancedLodBindings(
   return true;
 }
 
-void RenderSystem::bindMesh(const components::MeshComponent& mesh, RenderRecord& record) {
+void RenderSystem::Impl::bindMesh(const components::MeshComponent& mesh, RenderRecord& record) {
   bindMesh(mesh.mesh_asset_key, record);
 }
 
-void RenderSystem::bindMesh(const std::string& mesh_asset_key, RenderRecord& record) {
+void RenderSystem::Impl::bindMesh(const std::string& mesh_asset_key, RenderRecord& record) {
   record.mesh_asset_key = mesh_asset_key;
   acquireSharedMesh(mesh_asset_key, record);
   record.material_slots.clear();
-  if (record.mesh != renderer::kInvalidMesh) {
+  if (record.mesh != rendering::kInvalidMesh) {
     device_.getMeshMaterialSlots(record.mesh, record.material_slots);
   }
 }
 
-void RenderSystem::bindMaterial(const components::MeshComponent& mesh, RenderRecord& record) {
+void RenderSystem::Impl::bindMaterial(const components::MeshComponent& mesh, RenderRecord& record) {
   bindMaterial(mesh.materials, record);
 }
 
-void RenderSystem::bindMaterial(const std::vector<components::MeshMaterialAssignment>& materials,
+void RenderSystem::Impl::bindMaterial(const std::vector<components::MeshMaterialAssignment>& materials,
                                 RenderRecord& record) {
   record.component_materials = materials;
   record.material_bindings.clear();
@@ -511,34 +687,34 @@ void RenderSystem::bindMaterial(const std::vector<components::MeshMaterialAssign
             ? &record.material_slots[slot].default_material_key
             : nullptr;
 
-    renderer::MaterialId material = renderer::kInvalidMaterial;
+    rendering::MaterialId material = rendering::kInvalidMaterial;
     const std::string* acquired_key = nullptr;
     if (material_key != nullptr) {
       material = acquireSharedMaterial(*material_key);
-      if (material != renderer::kInvalidMaterial) {
+      if (material != rendering::kInvalidMaterial) {
         acquired_key = material_key;
       }
     }
-    if (material == renderer::kInvalidMaterial && fallback_key != nullptr &&
+    if (material == rendering::kInvalidMaterial && fallback_key != nullptr &&
         (material_key == nullptr || *fallback_key != *material_key)) {
       material = acquireSharedMaterial(*fallback_key);
-      if (material != renderer::kInvalidMaterial) {
+      if (material != rendering::kInvalidMaterial) {
         acquired_key = fallback_key;
       }
     }
-    if (material == renderer::kInvalidMaterial) {
+    if (material == rendering::kInvalidMaterial) {
       continue;
     }
     record.acquired_material_keys.push_back(*acquired_key);
-    record.material_bindings.push_back(renderer::DrawMaterialBinding{
+    record.material_bindings.push_back(rendering::DrawMaterialBinding{
         .slot = slot,
         .material = material,
     });
   }
 }
 
-void RenderSystem::acquireSharedMesh(const std::string& mesh_asset_key, RenderRecord& record) {
-  record.mesh = renderer::kInvalidMesh;
+void RenderSystem::Impl::acquireSharedMesh(const std::string& mesh_asset_key, RenderRecord& record) {
+  record.mesh = rendering::kInvalidMesh;
   record.bounds_center = glm::vec3(0.0f);
   record.bounds_radius = 0.0f;
   record.bounds_valid = false;
@@ -551,8 +727,8 @@ void RenderSystem::acquireSharedMesh(const std::string& mesh_asset_key, RenderRe
     SharedMeshResource shared{};
     shared.mesh = device_.findRuntimeMesh(mesh_asset_key);
     shared.owned_by_render_system = false;
-    if (shared.mesh == renderer::kInvalidMesh) {
-      const geometry::MeshData* mesh_asset =
+    if (shared.mesh == rendering::kInvalidMesh) {
+      const world::MeshData* mesh_asset =
           assets_ != nullptr ? assets_->findMeshAsset(mesh_asset_key) : nullptr;
       if (mesh_asset == nullptr) {
         if (!warned_missing_mesh_asset_keys_.contains(mesh_asset_key)) {
@@ -562,9 +738,9 @@ void RenderSystem::acquireSharedMesh(const std::string& mesh_asset_key, RenderRe
         return;
       }
       shared.mesh = device_.registerRuntimeMesh(mesh_asset_key, *mesh_asset);
-      shared.owned_by_render_system = shared.mesh != renderer::kInvalidMesh;
+      shared.owned_by_render_system = shared.mesh != rendering::kInvalidMesh;
     }
-    if (shared.mesh != renderer::kInvalidMesh) {
+    if (shared.mesh != rendering::kInvalidMesh) {
       shared.bounds_valid =
           device_.getMeshBounds(shared.mesh, shared.bounds_center, shared.bounds_radius);
     }
@@ -580,7 +756,7 @@ void RenderSystem::acquireSharedMesh(const std::string& mesh_asset_key, RenderRe
   record.bounds_valid = shared_it->second.bounds_valid;
 }
 
-void RenderSystem::releaseSharedMesh(const std::string& mesh_asset_key) {
+void RenderSystem::Impl::releaseSharedMesh(const std::string& mesh_asset_key) {
   if (mesh_asset_key.empty()) {
     return;
   }
@@ -593,16 +769,16 @@ void RenderSystem::releaseSharedMesh(const std::string& mesh_asset_key) {
   }
   if (shared_it->second.ref_count == 0) {
     if (shared_it->second.owned_by_render_system &&
-        shared_it->second.mesh != renderer::kInvalidMesh) {
+        shared_it->second.mesh != rendering::kInvalidMesh) {
       device_.unregisterRuntimeMesh(mesh_asset_key);
     }
     shared_meshes_.erase(shared_it);
   }
 }
 
-renderer::TextureId RenderSystem::acquireSharedTexture(const std::string& texture_key) {
+rendering::TextureId RenderSystem::Impl::acquireSharedTexture(const std::string& texture_key) {
   if (texture_key.empty() || assets_ == nullptr) {
-    return renderer::kInvalidTexture;
+    return rendering::kInvalidTexture;
   }
 
   auto shared_it = shared_textures_.find(texture_key);
@@ -611,38 +787,38 @@ renderer::TextureId RenderSystem::acquireSharedTexture(const std::string& textur
     return shared_it->second.texture;
   }
 
-  const content::TextureAsset* texture_asset = assets_->findTextureAsset(texture_key);
+  const assets::TextureAsset* texture_asset = assets_->findTextureAsset(texture_key);
   if (texture_asset == nullptr ||
       texture_asset->desc.width <= 0 ||
       texture_asset->desc.height <= 0) {
-    return renderer::kInvalidTexture;
+    return rendering::kInvalidTexture;
   }
 
-  const content::TextureRuntimeCapabilities capabilities{
-      .bc7_unorm = device_.supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM),
-      .bc7_srgb = device_.supportsTextureFormat(renderer::TextureFormat::BC7_RGBA_UNORM_SRGB),
+  const assets::TextureRuntimeCapabilities capabilities{
+      .bc7_unorm = device_.supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM),
+      .bc7_srgb = device_.supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM_SRGB),
   };
-  auto prepared = content::prepareTextureUpload(*texture_asset, capabilities);
+  auto prepared = assets::prepareTextureUpload(*texture_asset, capabilities);
   if (!prepared.has_value()) {
-    return renderer::kInvalidTexture;
+    return rendering::kInvalidTexture;
   }
 
   SharedTextureResource shared{};
   shared.texture = device_.createTexture(prepared->desc);
-  if (shared.texture == renderer::kInvalidTexture) {
-    return renderer::kInvalidTexture;
+  if (shared.texture == rendering::kInvalidTexture) {
+    return rendering::kInvalidTexture;
   }
   const bool uploaded = device_.uploadTexture(shared.texture, prepared->upload);
   if (!uploaded) {
     device_.destroyTexture(shared.texture);
-    return renderer::kInvalidTexture;
+    return rendering::kInvalidTexture;
   }
   shared.ref_count = 1u;
   shared_it = shared_textures_.emplace(texture_key, std::move(shared)).first;
   return shared_it->second.texture;
 }
 
-void RenderSystem::releaseSharedTexture(const std::string& texture_key) {
+void RenderSystem::Impl::releaseSharedTexture(const std::string& texture_key) {
   if (texture_key.empty()) {
     return;
   }
@@ -654,16 +830,16 @@ void RenderSystem::releaseSharedTexture(const std::string& texture_key) {
     shared_it->second.ref_count -= 1u;
   }
   if (shared_it->second.ref_count == 0u) {
-    if (shared_it->second.texture != renderer::kInvalidTexture) {
+    if (shared_it->second.texture != rendering::kInvalidTexture) {
       device_.destroyTexture(shared_it->second.texture);
     }
     shared_textures_.erase(shared_it);
   }
 }
 
-renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& material_key) {
+rendering::MaterialId RenderSystem::Impl::acquireSharedMaterial(const std::string& material_key) {
   if (material_key.empty() || assets_ == nullptr) {
-    return renderer::kInvalidMaterial;
+    return rendering::kInvalidMaterial;
   }
 
   const bool diag_enabled = renderSystemDiagEnabled();
@@ -684,7 +860,7 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
     shared_material_aliases_.erase(alias_it);
   }
 
-  std::optional<renderer::ResolvedMaterialDesc> resolved;
+  std::optional<rendering::ResolvedMaterialDesc> resolved;
   if (assets_ != nullptr) {
     resolved = assets_->resolveMaterial(material_key);
   }
@@ -694,7 +870,7 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
                    material_key);
       warned_missing_material_keys_.emplace(material_key, true);
     }
-    return renderer::kInvalidMaterial;
+    return rendering::kInvalidMaterial;
   }
 
   const std::string fingerprint = materialFingerprint(*resolved);
@@ -704,8 +880,8 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
     std::vector<std::string> acquired_texture_keys;
     acquired_texture_keys.reserve(resolved->textures.size());
     for (const auto& [alias, texture_key] : resolved->textures) {
-      const renderer::TextureId texture = acquireSharedTexture(texture_key);
-      if (texture == renderer::kInvalidTexture) {
+      const rendering::TextureId texture = acquireSharedTexture(texture_key);
+      if (texture == rendering::kInvalidTexture) {
         continue;
       }
       resolved->texture_handles[alias] = texture;
@@ -714,7 +890,7 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
 
     SharedMaterialResource shared{};
     shared.material = device_.createMaterial(*resolved);
-    if (shared.material == renderer::kInvalidMaterial) {
+    if (shared.material == rendering::kInvalidMaterial) {
       for (const std::string& texture_key : acquired_texture_keys) {
         releaseSharedTexture(texture_key);
       }
@@ -723,7 +899,7 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
                      material_key,
                      core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
       }
-      return renderer::kInvalidMaterial;
+      return rendering::kInvalidMaterial;
     }
     shared.ref_count = 1;
     shared.texture_asset_keys = std::move(acquired_texture_keys);
@@ -749,7 +925,7 @@ renderer::MaterialId RenderSystem::acquireSharedMaterial(const std::string& mate
   return shared_it->second.material;
 }
 
-void RenderSystem::releaseSharedMaterial(const std::string& material_key) {
+void RenderSystem::Impl::releaseSharedMaterial(const std::string& material_key) {
   if (material_key.empty()) {
     return;
   }
@@ -774,7 +950,7 @@ void RenderSystem::releaseSharedMaterial(const std::string& material_key) {
     shared_it->second.ref_count -= 1;
   }
   if (shared_it->second.ref_count == 0) {
-    if (shared_it->second.material != renderer::kInvalidMaterial) {
+    if (shared_it->second.material != rendering::kInvalidMaterial) {
       device_.destroyMaterial(shared_it->second.material);
     }
     for (const std::string& texture_key : shared_it->second.texture_asset_keys) {
@@ -784,7 +960,7 @@ void RenderSystem::releaseSharedMaterial(const std::string& material_key) {
   }
 }
 
-RenderPrewarmHandle RenderSystem::prewarmAssets(
+RenderPrewarmHandle RenderSystem::Impl::prewarmAssets(
     const std::vector<std::string>& mesh_keys,
     const std::vector<std::string>& material_keys,
     const std::vector<std::string>& texture_keys) {
@@ -796,19 +972,19 @@ RenderPrewarmHandle RenderSystem::prewarmAssets(
   for (const std::string& mesh_key : mesh_keys) {
     RenderRecord mesh_record{};
     acquireSharedMesh(mesh_key, mesh_record);
-    if (mesh_record.mesh != renderer::kInvalidMesh) {
+    if (mesh_record.mesh != rendering::kInvalidMesh) {
       record.mesh_asset_keys.push_back(mesh_key);
     }
   }
 
   for (const std::string& material_key : material_keys) {
-    if (acquireSharedMaterial(material_key) != renderer::kInvalidMaterial) {
+    if (acquireSharedMaterial(material_key) != rendering::kInvalidMaterial) {
       record.material_keys.push_back(material_key);
     }
   }
 
   for (const std::string& texture_key : texture_keys) {
-    if (acquireSharedTexture(texture_key) != renderer::kInvalidTexture) {
+    if (acquireSharedTexture(texture_key) != rendering::kInvalidTexture) {
       record.texture_keys.push_back(texture_key);
     }
   }
@@ -824,8 +1000,8 @@ RenderPrewarmHandle RenderSystem::prewarmAssets(
   return handle;
 }
 
-RenderPrewarmHandle RenderSystem::prewarmPackage(
-    const karma::content::AssetPackageHandle& package) {
+RenderPrewarmHandle RenderSystem::Impl::prewarmPackage(
+    const karma::assets::AssetPackageHandle& package) {
   std::vector<std::string> mesh_keys;
   std::vector<std::string> material_keys;
   std::vector<std::string> texture_keys;
@@ -844,7 +1020,7 @@ RenderPrewarmHandle RenderSystem::prewarmPackage(
   return prewarmAssets(mesh_keys, material_keys, texture_keys);
 }
 
-bool RenderSystem::releasePrewarm(RenderPrewarmHandle handle) {
+bool RenderSystem::Impl::releasePrewarm(RenderPrewarmHandle handle) {
   if (!handle.valid()) {
     return false;
   }
@@ -865,7 +1041,7 @@ bool RenderSystem::releasePrewarm(RenderPrewarmHandle handle) {
   return true;
 }
 
-void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt*/,
+void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, float /*dt*/,
                           float interpolation_alpha) {
   static size_t diag_update_count = 0;
   const bool diag_requested = renderSystemDiagEnabled();
@@ -910,43 +1086,43 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     logged_start = true;
   }
   bool has_camera = false;
-  renderer::CameraData primary_camera{};
-  renderer::PostProcessSettings primary_post_process{};
+  rendering::CameraData primary_camera{};
+  rendering::PostProcessSettings primary_post_process{};
   struct OffscreenPass {
-    renderer::CameraData camera;
-    renderer::RenderTargetId target = renderer::kDefaultRenderTarget;
-    renderer::PostProcessSettings post_process;
+    rendering::CameraData camera;
+    rendering::RenderTargetId target = rendering::kDefaultRenderTarget;
+    rendering::PostProcessSettings post_process;
   };
   std::vector<OffscreenPass> offscreen_passes;
   std::unordered_set<std::string> active_render_target_keys;
   world.forEach<components::CameraComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const auto& camera = world.get<components::CameraComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
-    const renderer::CameraData cam = toCameraData(camera, transform, interpolation_alpha);
-    const renderer::PostProcessSettings post_process =
+    const rendering::CameraData cam = toCameraData(camera, transform, interpolation_alpha);
+    const rendering::PostProcessSettings post_process =
         resolvePostProcessSettings(assets_, camera.post_process_profile_key);
 
     if (camera.render_to_texture) {
-      renderer::RenderTargetId target_id = camera.render_target;
-      if (target_id == renderer::kDefaultRenderTarget && !camera.render_target_key.empty()) {
+      rendering::RenderTargetId target_id = camera.render_target;
+      if (target_id == rendering::kDefaultRenderTarget && !camera.render_target_key.empty()) {
         active_render_target_keys.insert(camera.render_target_key);
         auto target_it = render_targets_by_key_.find(camera.render_target_key);
         if (target_it == render_targets_by_key_.end()) {
-          renderer::RenderTargetDesc target_desc{};
+          rendering::RenderTargetDesc target_desc{};
           target_desc.width = 512;
           target_desc.height = 512;
           target_desc.depth = true;
           target_desc.stencil = false;
           target_id = device_.createRenderTarget(target_desc);
-          if (target_id != renderer::kDefaultRenderTarget) {
+          if (target_id != rendering::kDefaultRenderTarget) {
             render_targets_by_key_[camera.render_target_key] = target_id;
           }
         } else {
           target_id = target_it->second;
         }
       }
-      if (target_id != renderer::kDefaultRenderTarget) {
+      if (target_id != rendering::kDefaultRenderTarget) {
         offscreen_passes.push_back(OffscreenPass{
             .camera = cam,
             .target = target_id,
@@ -972,7 +1148,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
       ++it;
       continue;
     }
-    if (it->second != renderer::kDefaultRenderTarget) {
+    if (it->second != rendering::kDefaultRenderTarget) {
       device_.destroyRenderTarget(it->second);
     }
     it = render_targets_by_key_.erase(it);
@@ -987,7 +1163,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     }
     device_.setCameraActive(false);
     device_.renderLayer(0,
-                        renderer::kDefaultRenderTarget,
+                        rendering::kDefaultRenderTarget,
                         resolvePostProcessSettings(assets_, {}));
     logRenderSystemStage(diag_enabled, "total", update_start, core::SteadyClock::now());
     return;
@@ -996,13 +1172,13 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   device_.setCamera(primary_camera);
   device_.setCameraActive(true);
 
-  renderer::DirectionalLightData light{};
-  std::vector<renderer::LightData> lights;
+  rendering::DirectionalLightData light{};
+  std::vector<rendering::LightData> lights;
   lights.reserve(16);
   bool has_light = false;
   static bool warned_missing_light_transform = false;
   if (!warned_missing_light_transform) {
-    world.forEach<components::LightComponent>([&](const ecs::Entity entity) {
+    world.forEach<components::LightComponent>([&](const world::Entity entity) {
       if (!world.has<components::TransformComponent>(entity)) {
         warned_missing_light_transform = true;
         return false;
@@ -1011,7 +1187,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     });
   }
   world.forEach<components::LightComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const auto& light_component = world.get<components::LightComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
     if (light_component.type != components::LightComponent::Type::Directional) {
@@ -1042,14 +1218,14 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   section_start = section_end;
 
   bool env_found = false;
-  world.forEach<components::EnvironmentComponent>([&](const ecs::Entity entity) {
+  world.forEach<components::EnvironmentComponent>([&](const world::Entity entity) {
     const auto& env = world.get<components::EnvironmentComponent>(entity);
     if (!env.enabled) {
       return true;
     }
     std::filesystem::path environment_path;
     if (!env.environment_map_asset_key.empty()) {
-      const content::EnvironmentMapAsset* asset =
+      const assets::EnvironmentMapAsset* asset =
           assets_ != nullptr ? assets_->findEnvironmentMap(env.environment_map_asset_key) : nullptr;
       if (asset == nullptr) {
         if (!warned_missing_environment_map_keys_.contains(env.environment_map_asset_key)) {
@@ -1086,7 +1262,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   size_t mesh_entity_count = 0;
   size_t new_render_record_count = 0;
   world.forEach<components::MeshComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     ++mesh_entity_count;
     const auto& mesh = world.get<components::MeshComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
@@ -1168,7 +1344,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     if (deformable_mesh != nullptr &&
         deformable_mesh->enabled &&
         deformable_mesh->path == components::DeformationPath::Gpu &&
-        deformable_mesh->deformation != renderer::kInvalidDeformation) {
+        deformable_mesh->deformation != rendering::kInvalidDeformation) {
       item.deformation = deformable_mesh->deformation;
     }
     device_.submit(item);
@@ -1186,7 +1362,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   size_t instanced_instance_count = 0;
   size_t new_instanced_record_count = 0;
   size_t rebuilt_instanced_payload_count = 0;
-  world.forEach<components::InstancedMeshComponent>([&](const ecs::Entity entity) {
+  world.forEach<components::InstancedMeshComponent>([&](const world::Entity entity) {
     ++instanced_entity_count;
     const auto& instanced = world.get<components::InstancedMeshComponent>(entity);
 
@@ -1265,7 +1441,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
     item.materials = it->second.material_bindings;
     item.lods.reserve(it->second.instanced_lods.size());
     for (const auto& lod : it->second.instanced_lods) {
-      item.lods.push_back(renderer::InstancedLodDrawDesc{
+      item.lods.push_back(rendering::InstancedLodDrawDesc{
           .start_distance = lod.start_distance,
           .mesh = lod.mesh,
           .materials = lod.material_bindings,
@@ -1313,7 +1489,7 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
 
   const math::Color debug_color{0.1f, 1.0f, 0.1f, 1.0f};
   world.forEach<components::TransformComponent, components::ColliderComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const auto& collider = world.get<components::ColliderComponent>(entity);
     if (!collider.debug_draw) {
       return;
@@ -1359,10 +1535,10 @@ void RenderSystem::update(ecs::World& world, scene::Scene& /*scene*/, float /*dt
   }
   device_.setCamera(primary_camera);
   device_.setCameraActive(true);
-  device_.renderLayer(0, renderer::kDefaultRenderTarget, primary_post_process);
+  device_.renderLayer(0, rendering::kDefaultRenderTarget, primary_post_process);
   section_end = core::SteadyClock::now();
   logRenderSystemStage(diag_enabled, "offscreen passes", section_start, section_end);
   logRenderSystemStage(diag_enabled, "total", update_start, section_end);
 }
 
-}  // namespace karma::renderer
+}  // namespace karma::rendering

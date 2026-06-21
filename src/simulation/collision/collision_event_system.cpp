@@ -1,13 +1,13 @@
-#include "karma/simulation/collision/collision_event_system.h"
+#include "karma/physics.h"
 
-#include "karma/world/components/collider.h"
-#include "karma/world/ecs/collider_queries.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
-namespace karma::collision {
+namespace karma::physics {
 
 namespace {
 
-bool hasQuerySourceCollider(const ecs::World& world, ecs::Entity entity) {
+bool hasQuerySourceCollider(const world::World& world, world::Entity entity) {
   if (!world.has<components::ColliderComponent>(entity)) {
     return false;
   }
@@ -18,7 +18,7 @@ bool hasQuerySourceCollider(const ecs::World& world, ecs::Entity entity) {
          type == components::ColliderShapeType::Capsule;
 }
 
-bool colliderIsTrigger(const ecs::World& world, ecs::Entity entity) {
+bool colliderIsTrigger(const world::World& world, world::Entity entity) {
   return world.has<components::ColliderComponent>(entity) &&
          world.get<components::ColliderComponent>(entity).is_trigger;
 }
@@ -46,10 +46,10 @@ components::CollisionContact toCollisionContact(
 
 }  // namespace
 
-void CollisionEventSystem::update(ecs::World& world, float /*dt*/) {
+void CollisionEventSystem::update(world::World& world, float /*dt*/) {
   cleanupStale(world);
 
-  for (const ecs::Entity entity : world.view<components::CollisionListenerComponent>()) {
+  for (const world::Entity entity : world.view<components::CollisionListenerComponent>()) {
     auto& listener = world.get<components::CollisionListenerComponent>(entity);
     if (!world.has<components::CollisionEventsComponent>(entity)) {
       world.add(entity, components::CollisionEventsComponent{});
@@ -63,10 +63,10 @@ void CollisionEventSystem::update(ecs::World& world, float /*dt*/) {
       continue;
     }
 
-    const auto overlaps = ecs::queries::findOverlappingColliders(
+    const auto overlaps = world::queries::findOverlappingColliders(
         world,
         entity,
-        ecs::queries::OverlapFilter{
+        world::queries::OverlapFilter{
             .only_triggers = false,
             .collision_layer_mask = listener.collision_layer_mask,
             .skip_self = true,
@@ -116,9 +116,9 @@ void CollisionEventSystem::update(ecs::World& world, float /*dt*/) {
   }
 }
 
-void CollisionEventSystem::cleanupStale(ecs::World& world) {
+void CollisionEventSystem::cleanupStale(world::World& world) {
   for (auto it = previous_contacts_.begin(); it != previous_contacts_.end();) {
-    const ecs::Entity listener = {
+    const world::Entity listener = {
         static_cast<uint32_t>(it->first >> 32),
         static_cast<uint32_t>(it->first & 0xFFFFFFFFu),
     };
@@ -130,4 +130,4 @@ void CollisionEventSystem::cleanupStale(ecs::World& world) {
   }
 }
 
-}  // namespace karma::collision
+}  // namespace karma::physics

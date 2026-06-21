@@ -1,12 +1,12 @@
-#include "karma/simulation/physics/backend.hpp"
+#include "private/physics/backend.hpp"
 
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
 #elif defined(KARMA_PHYSICS_BACKEND_BULLET)
-#include "karma/simulation/physics/backends/bullet/physics_world_bullet.hpp"
+#include "private/physics/backends/bullet/physics_world_bullet.hpp"
 #endif
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 std::unique_ptr<PhysicsWorldBackend> CreatePhysicsWorldBackend() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
@@ -18,4 +18,4 @@ std::unique_ptr<PhysicsWorldBackend> CreatePhysicsWorldBackend() {
 #endif
 }
 
-} // namespace karma::physics_backend
+} // namespace karma::physics::backend

@@ -15,7 +15,7 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace karma::demo {
 
@@ -71,7 +71,7 @@ struct ExplosionGalleryItem {
 };
 
 struct ActiveExplosionInstance {
-  ecs::Entity root{};
+  world::Entity root{};
   float destroy_time = 0.0f;
 };
 
@@ -107,14 +107,14 @@ math::Color withAlpha(math::Color color, float alpha) {
   return color;
 }
 
-void applyOrbAccent(ecs::World& world,
-                    content::AssetRegistry* assets,
+void applyOrbAccent(world::World& world,
+                    assets::AssetRegistry* assets,
                     const prefabs::PrefabInstance& instance,
                     const math::Color& color,
                     std::string_view shell_material_key) {
   auto setStartAndEndColor =
       [&](std::string_view name, math::Color start_color, math::Color end_color) {
-        const ecs::Entity entity = instance.find(name);
+        const world::Entity entity = instance.find(name);
         if (world.isAlive(entity) &&
             world.has<components::ParticleEffectOverrideComponent>(entity)) {
           auto& effect_override =
@@ -134,14 +134,14 @@ void applyOrbAccent(ecs::World& world,
                       scaleColor(color, 0.45f, 0.72f, 0.45f, 0.14f),
                       scaleColor(color, 0.25f, 0.40f, 0.25f, 0.0f));
 
-  const ecs::Entity shell_entity = instance.find("shell");
+  const world::Entity shell_entity = instance.find("shell");
   if (!shell_material_key.empty() && assets != nullptr && world.isAlive(shell_entity) &&
       world.has<components::MeshComponent>(shell_entity)) {
     auto& shell_mesh = world.get<components::MeshComponent>(shell_entity);
     const std::string material_key(shell_material_key);
     const math::Color shell_tint =
         withAlpha(mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.18f), 1.0f);
-    renderer::MaterialDesc shell_material{};
+    rendering::MaterialDesc shell_material{};
     shell_material.base_color = shell_tint;
     shell_material.emissive_color = scaleColor(color, 0.25f, 0.25f, 0.25f, 1.0f);
     shell_material.emissive_strength = 0.75f;
@@ -154,7 +154,7 @@ void applyOrbAccent(ecs::World& world,
     }};
   }
 
-  const ecs::Entity light_entity = instance.find("glow");
+  const world::Entity light_entity = instance.find("glow");
   if (world.isAlive(light_entity) && world.has<components::LightComponent>(light_entity)) {
     world.get<components::LightComponent>(light_entity).color =
         mixColor(color, {1.0f, 1.0f, 1.0f, 1.0f}, 0.22f);
@@ -334,7 +334,7 @@ class PrefabGalleryExample final : public app::GameInterface {
     const std::size_t active_explosion_visuals = active_explosions_.size();
     std::size_t active_explosion_lights = 0u;
     if (world != nullptr) {
-      for (ecs::Entity entity :
+      for (world::Entity entity :
            world->view<components::LightPulseComponent, components::LightComponent>()) {
         const auto& pulse = world->get<components::LightPulseComponent>(entity);
         if (pulse.active) {
@@ -345,7 +345,7 @@ class PrefabGalleryExample final : public app::GameInterface {
 
     int fb_width = 0;
     int fb_height = 0;
-    renderer::ForwardPlusStats stats{};
+    rendering::ForwardPlusStats stats{};
     if (graphics != nullptr) {
       graphics->getFramebufferSize(fb_width, fb_height);
       stats = graphics->getForwardPlusStats();
@@ -376,7 +376,7 @@ class PrefabGalleryExample final : public app::GameInterface {
   }
 
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
@@ -386,7 +386,7 @@ class PrefabGalleryExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 48.0f, 0.0f});
@@ -516,7 +516,7 @@ class PrefabGalleryExample final : public app::GameInterface {
   }
 
   std::string world_mesh_;
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   std::vector<ExplosionGalleryItem> explosions_{};
   std::vector<ActiveExplosionInstance> active_explosions_{};
   bool log_perf_stats_ = false;
@@ -538,7 +538,7 @@ class PrefabGalleryExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeRuntimeModule>());
+  engine.addRuntimeModule(std::make_unique<karma::visual::volumes::VolumeRuntimeModule>());
   karma::demo::PrefabGalleryExample game;
 
   karma::app::EngineConfig config;

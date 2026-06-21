@@ -31,8 +31,8 @@ endif()
 # standalone ImGui demo target is disabled.
 if (KARMA_BUILD_GRAPHICAL_PROFILE)
   find_package(imgui CONFIG QUIET)
-  if (TARGET imgui::imgui)
-    set(KARMA_IMGUI_TARGET imgui::imgui)
+  if (TARGET ui::imgui::imgui)
+    set(KARMA_IMGUI_TARGET ui::imgui::imgui)
   elseif (KARMA_FETCH_DEPS)
     FetchContent_Declare(
       imgui

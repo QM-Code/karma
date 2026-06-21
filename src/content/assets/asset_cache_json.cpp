@@ -15,9 +15,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include "karma/content/assets/asset_cache.h"
+#include "karma/assets.h"
 
-namespace karma::content::detail {
+namespace karma::assets::detail {
 
 namespace {
 
@@ -349,7 +349,7 @@ bool readFloatVectorJson(const Json& value, std::vector<float>& out) {
   return true;
 }
 
-Json materialDescJson(const renderer::MaterialDesc& material) {
+Json materialDescJson(const rendering::MaterialDesc& material) {
   return Json{
       {"base_color", colorJson(material.base_color)},
       {"emissive_color", colorJson(material.emissive_color)},
@@ -384,8 +384,8 @@ Json materialDescJson(const renderer::MaterialDesc& material) {
   };
 }
 
-bool readMaterialDescJson(const Json& json, renderer::MaterialDesc& material) {
-  renderer::MaterialDesc parsed{};
+bool readMaterialDescJson(const Json& json, rendering::MaterialDesc& material) {
+  rendering::MaterialDesc parsed{};
   auto read_float_field = [&](const char* key, float& out) {
     const auto it = json.find(key);
     return it == json.end() || readFloatJson(*it, out);
@@ -416,7 +416,7 @@ bool readMaterialDescJson(const Json& json, renderer::MaterialDesc& material) {
   }
   parsed.analytic_sphere_normals = json.value("analytic_sphere_normals", parsed.analytic_sphere_normals);
   parsed.unlit = json.value("unlit", parsed.unlit);
-  parsed.alpha_mode = static_cast<renderer::MaterialDesc::AlphaMode>(
+  parsed.alpha_mode = static_cast<rendering::MaterialDesc::AlphaMode>(
       json.value("alpha_mode", static_cast<uint32_t>(parsed.alpha_mode)));
   if (!read_float_field("alpha_cutoff", parsed.alpha_cutoff) ||
       !read_float_field("alpha_softness", parsed.alpha_softness)) {
@@ -426,10 +426,10 @@ bool readMaterialDescJson(const Json& json, renderer::MaterialDesc& material) {
   parsed.alpha_to_coverage = json.value("alpha_to_coverage", parsed.alpha_to_coverage);
   parsed.transparent = json.value("transparent", parsed.transparent);
   if (parsed.transparent &&
-      parsed.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
-    parsed.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+      parsed.alpha_mode == rendering::MaterialDesc::AlphaMode::Opaque) {
+    parsed.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
   }
-  parsed.blend_mode = static_cast<renderer::MaterialDesc::BlendMode>(
+  parsed.blend_mode = static_cast<rendering::MaterialDesc::BlendMode>(
       json.value("blend_mode", static_cast<uint32_t>(parsed.blend_mode)));
   parsed.depth_test = json.value("depth_test", parsed.depth_test);
   parsed.depth_write = json.value("depth_write", parsed.depth_write);
@@ -439,7 +439,7 @@ bool readMaterialDescJson(const Json& json, renderer::MaterialDesc& material) {
   return true;
 }
 
-Json pipelineJson(const renderer::MaterialPipelineDesc& pipeline) {
+Json pipelineJson(const rendering::MaterialPipelineDesc& pipeline) {
   return Json{
       {"name", pipeline.name},
       {"vertex_shader_path", pipeline.vertex_shader_path.generic_string()},
@@ -450,11 +450,11 @@ Json pipelineJson(const renderer::MaterialPipelineDesc& pipeline) {
   };
 }
 
-bool readPipelineJson(const Json& json, renderer::MaterialPipelineDesc& pipeline) {
+bool readPipelineJson(const Json& json, rendering::MaterialPipelineDesc& pipeline) {
   if (!json.is_object()) {
     return false;
   }
-  renderer::MaterialPipelineDesc parsed{};
+  rendering::MaterialPipelineDesc parsed{};
   parsed.name = json.value("name", parsed.name);
   parsed.vertex_shader_path = json.value("vertex_shader_path", std::string{});
   parsed.fragment_shader_path = json.value("fragment_shader_path", std::string{});
@@ -468,7 +468,7 @@ bool readPipelineJson(const Json& json, renderer::MaterialPipelineDesc& pipeline
   return true;
 }
 
-Json materialParameterJson(const renderer::MaterialParameterValue& value) {
+Json materialParameterJson(const rendering::MaterialParameterValue& value) {
   Json out;
   std::visit(
       [&](const auto& typed) {
@@ -481,7 +481,7 @@ Json materialParameterJson(const renderer::MaterialParameterValue& value) {
           out = Json{{"type", "uint32"}, {"value", typed}};
         } else if constexpr (std::is_same_v<Value, float>) {
           out = Json{{"type", "float"}, {"value", floatJson(typed)}};
-        } else if constexpr (std::is_same_v<Value, renderer::Color>) {
+        } else if constexpr (std::is_same_v<Value, rendering::Color>) {
           out = Json{{"type", "color"}, {"value", colorJson(typed)}};
         } else if constexpr (std::is_same_v<Value, glm::vec2>) {
           out = Json{{"type", "vec2"}, {"value", vec2Json(typed)}};
@@ -497,7 +497,7 @@ Json materialParameterJson(const renderer::MaterialParameterValue& value) {
   return out;
 }
 
-bool readMaterialParameterJson(const Json& json, renderer::MaterialParameterValue& out) {
+bool readMaterialParameterJson(const Json& json, rendering::MaterialParameterValue& out) {
   if (!json.is_object() || !json.contains("type") || !json["type"].is_string() ||
       !json.contains("value")) {
     return false;
@@ -525,7 +525,7 @@ bool readMaterialParameterJson(const Json& json, renderer::MaterialParameterValu
     return true;
   }
   if (type == "color") {
-    renderer::Color parsed{};
+    rendering::Color parsed{};
     if (!readColorJson(value, parsed)) {
       return false;
     }
@@ -563,7 +563,7 @@ bool readMaterialParameterJson(const Json& json, renderer::MaterialParameterValu
   return false;
 }
 
-Json materialParamsJson(const std::unordered_map<std::string, renderer::MaterialParameterValue>& params) {
+Json materialParamsJson(const std::unordered_map<std::string, rendering::MaterialParameterValue>& params) {
   Json out = Json::object();
   for (const auto& [key, value] : params) {
     out[key] = materialParameterJson(value);
@@ -572,13 +572,13 @@ Json materialParamsJson(const std::unordered_map<std::string, renderer::Material
 }
 
 bool readMaterialParamsJson(const Json& json,
-                            std::unordered_map<std::string, renderer::MaterialParameterValue>& out) {
+                            std::unordered_map<std::string, rendering::MaterialParameterValue>& out) {
   if (!json.is_object()) {
     return false;
   }
-  std::unordered_map<std::string, renderer::MaterialParameterValue> parsed;
+  std::unordered_map<std::string, rendering::MaterialParameterValue> parsed;
   for (const auto& [key, value] : json.items()) {
-    renderer::MaterialParameterValue parameter{};
+    rendering::MaterialParameterValue parameter{};
     if (!readMaterialParameterJson(value, parameter)) {
       return false;
     }
@@ -612,7 +612,7 @@ bool readStringMapJson(const Json& json, std::unordered_map<std::string, std::st
 }
 
 Json importedTexcoordRowsJson(
-    const std::array<glm::vec4, renderer::kImportedMaterialTextureCoordSlotCount>& rows) {
+    const std::array<glm::vec4, rendering::kImportedMaterialTextureCoordSlotCount>& rows) {
   Json out = Json::array();
   for (const glm::vec4& row : rows) {
     out.push_back(vec4Json(row));
@@ -622,12 +622,12 @@ Json importedTexcoordRowsJson(
 
 bool readImportedTexcoordRowsJson(
     const Json& json,
-    std::array<glm::vec4, renderer::kImportedMaterialTextureCoordSlotCount>& rows) {
+    std::array<glm::vec4, rendering::kImportedMaterialTextureCoordSlotCount>& rows) {
   if (!json.is_array() ||
-      json.size() != renderer::kImportedMaterialTextureCoordSlotCount) {
+      json.size() != rendering::kImportedMaterialTextureCoordSlotCount) {
     return false;
   }
-  std::array<glm::vec4, renderer::kImportedMaterialTextureCoordSlotCount> parsed{};
+  std::array<glm::vec4, rendering::kImportedMaterialTextureCoordSlotCount> parsed{};
   for (std::size_t i = 0u; i < parsed.size(); ++i) {
     if (!readVec4Json(json[i], parsed[i])) {
       return false;
@@ -637,7 +637,7 @@ bool readImportedTexcoordRowsJson(
   return true;
 }
 
-Json importedMaterialMetadataJson(const renderer::ImportedMaterialData& imported) {
+Json importedMaterialMetadataJson(const rendering::ImportedMaterialData& imported) {
   return Json{
       {"material", materialDescJson(imported.material)},
       {"texcoord_row0", importedTexcoordRowsJson(imported.texcoord_row0)},
@@ -646,11 +646,11 @@ Json importedMaterialMetadataJson(const renderer::ImportedMaterialData& imported
 }
 
 bool readImportedMaterialMetadataJson(const Json& json,
-                                      renderer::ImportedMaterialData& imported) {
+                                      rendering::ImportedMaterialData& imported) {
   if (!json.is_object()) {
     return false;
   }
-  renderer::ImportedMaterialData parsed{};
+  rendering::ImportedMaterialData parsed{};
   if (!readMaterialDescJson(json.value("material", Json::object()), parsed.material) ||
       !readImportedTexcoordRowsJson(json.value("texcoord_row0", Json::array()),
                                     parsed.texcoord_row0) ||
@@ -663,7 +663,7 @@ bool readImportedMaterialMetadataJson(const Json& json,
   return true;
 }
 
-Json materialAssetJson(const renderer::MaterialAssetDesc& material) {
+Json materialAssetJson(const rendering::MaterialAssetDesc& material) {
   Json json{
       {"material_key", material.material_key},
       {"pipeline", pipelineJson(material.pipeline)},
@@ -680,11 +680,11 @@ Json materialAssetJson(const renderer::MaterialAssetDesc& material) {
   return json;
 }
 
-bool readMaterialAssetJson(const Json& json, renderer::MaterialAssetDesc& material) {
+bool readMaterialAssetJson(const Json& json, rendering::MaterialAssetDesc& material) {
   if (!json.is_object()) {
     return false;
   }
-  renderer::MaterialAssetDesc parsed{};
+  rendering::MaterialAssetDesc parsed{};
   parsed.material_key = json.value("material_key", std::string{});
   if (!readPipelineJson(json.value("pipeline", Json::object()), parsed.pipeline) ||
       !readMaterialDescJson(json.value("surface", Json::object()), parsed.surface) ||
@@ -696,18 +696,18 @@ bool readMaterialAssetJson(const Json& json, renderer::MaterialAssetDesc& materi
   parsed.material_asset_index =
       json.value("material_asset_index", parsed.material_asset_index);
   if (const auto it = json.find("imported_material"); it != json.end()) {
-    renderer::ImportedMaterialData imported{};
+    rendering::ImportedMaterialData imported{};
     if (!readImportedMaterialMetadataJson(*it, imported)) {
       return false;
     }
     parsed.imported_material =
-        std::make_shared<renderer::ImportedMaterialData>(std::move(imported));
+        std::make_shared<rendering::ImportedMaterialData>(std::move(imported));
   }
   material = std::move(parsed);
   return true;
 }
 
-Json materialVariantJson(const renderer::MaterialVariantDesc& material) {
+Json materialVariantJson(const rendering::MaterialVariantDesc& material) {
   return Json{
       {"material_key", material.material_key},
       {"base_material_key", material.base_material_key},
@@ -716,11 +716,11 @@ Json materialVariantJson(const renderer::MaterialVariantDesc& material) {
   };
 }
 
-bool readMaterialVariantJson(const Json& json, renderer::MaterialVariantDesc& material) {
+bool readMaterialVariantJson(const Json& json, rendering::MaterialVariantDesc& material) {
   if (!json.is_object()) {
     return false;
   }
-  renderer::MaterialVariantDesc parsed{};
+  rendering::MaterialVariantDesc parsed{};
   parsed.material_key = json.value("material_key", std::string{});
   parsed.base_material_key = json.value("base_material_key", std::string{});
   if (!readMaterialParamsJson(json.value("params", Json::object()), parsed.params) ||
@@ -921,7 +921,7 @@ bool readEmitterJson(const Json& json, components::ParticleEmitterComponent& emi
   return true;
 }
 
-Json particleEffectJson(const particles::ParticleEffectAsset& effect) {
+Json particleEffectJson(const visual::particles::ParticleEffectAsset& effect) {
   Json emitters = Json::array();
   for (const auto& emitter : effect.emitters) {
     emitters.push_back(Json{
@@ -932,17 +932,17 @@ Json particleEffectJson(const particles::ParticleEffectAsset& effect) {
   return Json{{"emitters", std::move(emitters)}};
 }
 
-bool readParticleEffectJson(const Json& json, particles::ParticleEffectAsset& effect) {
+bool readParticleEffectJson(const Json& json, visual::particles::ParticleEffectAsset& effect) {
   if (!json.is_object() || !json.contains("emitters") || !json["emitters"].is_array()) {
     return false;
   }
-  particles::ParticleEffectAsset parsed{};
+  visual::particles::ParticleEffectAsset parsed{};
   parsed.emitters.reserve(json["emitters"].size());
   for (const Json& emitter_json : json["emitters"]) {
     if (!emitter_json.is_object()) {
       return false;
     }
-    particles::ParticleEmitterDesc emitter{};
+    visual::particles::ParticleEmitterDesc emitter{};
     emitter.texture_key = emitter_json.value("texture_key", std::string{});
     if (!readEmitterJson(emitter_json.value("emitter", Json::object()), emitter.emitter)) {
       return false;
@@ -1105,14 +1105,14 @@ bool readGltfSceneJson(const Json& json, GltfSceneAsset& scene) {
   return true;
 }
 
-Json vec3KeyJson(const animation::Vec3Keyframe& key) {
+Json vec3KeyJson(const world::Vec3Keyframe& key) {
   return Json{{"time", floatJson(key.time_seconds)},
               {"value", mathVec3Json(key.value)},
               {"in_tangent", mathVec3Json(key.in_tangent)},
               {"out_tangent", mathVec3Json(key.out_tangent)}};
 }
 
-bool readVec3KeyJson(const Json& json, animation::Vec3Keyframe& key) {
+bool readVec3KeyJson(const Json& json, world::Vec3Keyframe& key) {
   return json.is_object() &&
          readFloatJson(json.value("time", Json(0.0f)), key.time_seconds) &&
          readMathVec3Json(json.value("value", Json::array({0.0f, 0.0f, 0.0f})), key.value) &&
@@ -1120,14 +1120,14 @@ bool readVec3KeyJson(const Json& json, animation::Vec3Keyframe& key) {
          readMathVec3Json(json.value("out_tangent", Json::array({0.0f, 0.0f, 0.0f})), key.out_tangent);
 }
 
-Json quatKeyJson(const animation::QuatKeyframe& key) {
+Json quatKeyJson(const world::QuatKeyframe& key) {
   return Json{{"time", floatJson(key.time_seconds)},
               {"value", quatJson(key.value)},
               {"in_tangent", quatJson(key.in_tangent)},
               {"out_tangent", quatJson(key.out_tangent)}};
 }
 
-bool readQuatKeyJson(const Json& json, animation::QuatKeyframe& key) {
+bool readQuatKeyJson(const Json& json, world::QuatKeyframe& key) {
   return json.is_object() &&
          readFloatJson(json.value("time", Json(0.0f)), key.time_seconds) &&
          readQuatJson(json.value("value", Json::array({0.0f, 0.0f, 0.0f, 1.0f})), key.value) &&
@@ -1135,14 +1135,14 @@ bool readQuatKeyJson(const Json& json, animation::QuatKeyframe& key) {
          readQuatJson(json.value("out_tangent", Json::array({0.0f, 0.0f, 0.0f, 1.0f})), key.out_tangent);
 }
 
-Json morphKeyJson(const animation::MorphWeightKeyframe& key) {
+Json morphKeyJson(const world::MorphWeightKeyframe& key) {
   return Json{{"time", floatJson(key.time_seconds)},
               {"values", floatVectorJson(key.values)},
               {"in_tangents", floatVectorJson(key.in_tangents)},
               {"out_tangents", floatVectorJson(key.out_tangents)}};
 }
 
-bool readMorphKeyJson(const Json& json, animation::MorphWeightKeyframe& key) {
+bool readMorphKeyJson(const Json& json, world::MorphWeightKeyframe& key) {
   return json.is_object() &&
          readFloatJson(json.value("time", Json(0.0f)), key.time_seconds) &&
          readFloatVectorJson(json.value("values", Json::array()), key.values) &&
@@ -1150,7 +1150,7 @@ bool readMorphKeyJson(const Json& json, animation::MorphWeightKeyframe& key) {
          readFloatVectorJson(json.value("out_tangents", Json::array()), key.out_tangents);
 }
 
-Json animationChannelJson(const animation::AnimationChannel& channel) {
+Json animationChannelJson(const world::AnimationChannel& channel) {
   return Json{
       {"target_node_index", channel.target_node_index},
       {"target_skin_index", channel.target_skin_index},
@@ -1164,20 +1164,20 @@ Json animationChannelJson(const animation::AnimationChannel& channel) {
   };
 }
 
-bool readAnimationChannelJson(const Json& json, animation::AnimationChannel& channel) {
+bool readAnimationChannelJson(const Json& json, world::AnimationChannel& channel) {
   if (!json.is_object()) {
     return false;
   }
-  animation::AnimationChannel parsed{};
+  world::AnimationChannel parsed{};
   parsed.target_node_index = json.value("target_node_index", parsed.target_node_index);
   parsed.target_skin_index = json.value("target_skin_index", parsed.target_skin_index);
   parsed.target_joint_index = json.value("target_joint_index", parsed.target_joint_index);
   parsed.position_interpolation =
-      static_cast<animation::InterpolationMode>(json.value("position_interpolation", 1u));
+      static_cast<world::InterpolationMode>(json.value("position_interpolation", 1u));
   parsed.rotation_interpolation =
-      static_cast<animation::InterpolationMode>(json.value("rotation_interpolation", 1u));
+      static_cast<world::InterpolationMode>(json.value("rotation_interpolation", 1u));
   parsed.scale_interpolation =
-      static_cast<animation::InterpolationMode>(json.value("scale_interpolation", 1u));
+      static_cast<world::InterpolationMode>(json.value("scale_interpolation", 1u));
   if (!readVectorJson(json.value("position_keys", Json::array()), parsed.position_keys, readVec3KeyJson) ||
       !readVectorJson(json.value("rotation_keys", Json::array()), parsed.rotation_keys, readQuatKeyJson) ||
       !readVectorJson(json.value("scale_keys", Json::array()), parsed.scale_keys, readVec3KeyJson)) {
@@ -1187,7 +1187,7 @@ bool readAnimationChannelJson(const Json& json, animation::AnimationChannel& cha
   return true;
 }
 
-Json morphTrackJson(const animation::MorphTargetTrack& track) {
+Json morphTrackJson(const world::MorphTargetTrack& track) {
   return Json{
       {"target_node_index", track.target_node_index},
       {"target_mesh_index", track.target_mesh_index},
@@ -1196,14 +1196,14 @@ Json morphTrackJson(const animation::MorphTargetTrack& track) {
   };
 }
 
-bool readMorphTrackJson(const Json& json, animation::MorphTargetTrack& track) {
+bool readMorphTrackJson(const Json& json, world::MorphTargetTrack& track) {
   if (!json.is_object()) {
     return false;
   }
-  animation::MorphTargetTrack parsed{};
+  world::MorphTargetTrack parsed{};
   parsed.target_node_index = json.value("target_node_index", parsed.target_node_index);
   parsed.target_mesh_index = json.value("target_mesh_index", parsed.target_mesh_index);
-  parsed.interpolation = static_cast<animation::InterpolationMode>(json.value("interpolation", 1u));
+  parsed.interpolation = static_cast<world::InterpolationMode>(json.value("interpolation", 1u));
   if (!readVectorJson(json.value("weight_keys", Json::array()), parsed.weight_keys, readMorphKeyJson)) {
     return false;
   }
@@ -1211,7 +1211,7 @@ bool readMorphTrackJson(const Json& json, animation::MorphTargetTrack& track) {
   return true;
 }
 
-Json rootMotionJson(const animation::RootMotionTrack& track) {
+Json rootMotionJson(const world::RootMotionTrack& track) {
   return Json{
       {"target_node_index", track.target_node_index},
       {"position_interpolation", static_cast<uint32_t>(track.position_interpolation)},
@@ -1221,16 +1221,16 @@ Json rootMotionJson(const animation::RootMotionTrack& track) {
   };
 }
 
-bool readRootMotionJson(const Json& json, animation::RootMotionTrack& track) {
+bool readRootMotionJson(const Json& json, world::RootMotionTrack& track) {
   if (!json.is_object()) {
     return false;
   }
-  animation::RootMotionTrack parsed{};
+  world::RootMotionTrack parsed{};
   parsed.target_node_index = json.value("target_node_index", parsed.target_node_index);
   parsed.position_interpolation =
-      static_cast<animation::InterpolationMode>(json.value("position_interpolation", 1u));
+      static_cast<world::InterpolationMode>(json.value("position_interpolation", 1u));
   parsed.rotation_interpolation =
-      static_cast<animation::InterpolationMode>(json.value("rotation_interpolation", 1u));
+      static_cast<world::InterpolationMode>(json.value("rotation_interpolation", 1u));
   if (!readVectorJson(json.value("position_keys", Json::array()), parsed.position_keys, readVec3KeyJson) ||
       !readVectorJson(json.value("rotation_keys", Json::array()), parsed.rotation_keys, readQuatKeyJson)) {
     return false;
@@ -1239,7 +1239,7 @@ bool readRootMotionJson(const Json& json, animation::RootMotionTrack& track) {
   return true;
 }
 
-Json animationClipJson(const animation::AnimationClip& clip) {
+Json animationClipJson(const world::AnimationClip& clip) {
   Json events = Json::array();
   for (const auto& event : clip.events) {
     events.push_back(Json{{"name", event.name},
@@ -1259,11 +1259,11 @@ Json animationClipJson(const animation::AnimationClip& clip) {
   return root;
 }
 
-bool readAnimationClipJson(const Json& json, animation::AnimationClip& clip) {
+bool readAnimationClipJson(const Json& json, world::AnimationClip& clip) {
   if (!json.is_object()) {
     return false;
   }
-  animation::AnimationClip parsed{};
+  world::AnimationClip parsed{};
   parsed.name = json.value("name", std::string{});
   parsed.source_index = json.value("source_index", parsed.source_index);
   if (!readFloatJson(json.value("duration_seconds", Json(0.0f)), parsed.duration_seconds) ||
@@ -1283,7 +1283,7 @@ bool readAnimationClipJson(const Json& json, animation::AnimationClip& clip) {
       if (!event_json.is_object()) {
         return false;
       }
-      animation::AnimationEvent event{};
+      world::AnimationEvent event{};
       event.name = event_json.value("name", std::string{});
       event.payload = event_json.value("payload", std::string{});
       if (!readFloatJson(event_json.value("time", Json(0.0f)), event.time_seconds)) {
@@ -1293,7 +1293,7 @@ bool readAnimationClipJson(const Json& json, animation::AnimationClip& clip) {
     }
   }
   if (const auto it = json.find("root_motion"); it != json.end()) {
-    animation::RootMotionTrack root_motion{};
+    world::RootMotionTrack root_motion{};
     if (!readRootMotionJson(*it, root_motion)) {
       return false;
     }
@@ -1303,7 +1303,7 @@ bool readAnimationClipJson(const Json& json, animation::AnimationClip& clip) {
   return true;
 }
 
-Json skeletonJson(const animation::Skeleton& skeleton) {
+Json skeletonJson(const world::Skeleton& skeleton) {
   Json joints = Json::array();
   for (const auto& joint : skeleton.joints) {
     joints.push_back(Json{
@@ -1318,11 +1318,11 @@ Json skeletonJson(const animation::Skeleton& skeleton) {
               {"root_joint_indices", u32VectorJson(skeleton.root_joint_indices)}};
 }
 
-bool readSkeletonJson(const Json& json, animation::Skeleton& skeleton) {
+bool readSkeletonJson(const Json& json, world::Skeleton& skeleton) {
   if (!json.is_object()) {
     return false;
   }
-  animation::Skeleton parsed{};
+  world::Skeleton parsed{};
   parsed.name = json.value("name", std::string{});
   if (!readU32VectorJson(json.value("root_joint_indices", Json::array()), parsed.root_joint_indices)) {
     return false;
@@ -1336,11 +1336,11 @@ bool readSkeletonJson(const Json& json, animation::Skeleton& skeleton) {
     if (!joint_json.is_object()) {
       return false;
     }
-    animation::Joint joint{};
+    world::Joint joint{};
     joint.name = joint_json.value("name", std::string{});
     joint.parent_joint_index =
-        joint_json.value("parent_joint_index", animation::kInvalidAnimationIndex);
-    joint.node_index = joint_json.value("node_index", animation::kInvalidAnimationIndex);
+        joint_json.value("parent_joint_index", world::kInvalidAnimationIndex);
+    joint.node_index = joint_json.value("node_index", world::kInvalidAnimationIndex);
     if (!readMat4Json(joint_json.value("inverse_bind_matrix", mat4Json(glm::mat4(1.0f))),
                       joint.inverse_bind_matrix)) {
       return false;
@@ -1351,18 +1351,18 @@ bool readSkeletonJson(const Json& json, animation::Skeleton& skeleton) {
   return true;
 }
 
-Json skinJson(const animation::Skin& skin) {
+Json skinJson(const world::Skin& skin) {
   return Json{{"name", skin.name},
               {"skeleton_index", skin.skeleton_index},
               {"joint_node_indices", u32VectorJson(skin.joint_node_indices)},
               {"inverse_bind_matrices", vectorJson(skin.inverse_bind_matrices, mat4Json)}};
 }
 
-bool readSkinJson(const Json& json, animation::Skin& skin) {
+bool readSkinJson(const Json& json, world::Skin& skin) {
   if (!json.is_object()) {
     return false;
   }
-  animation::Skin parsed{};
+  world::Skin parsed{};
   parsed.name = json.value("name", std::string{});
   parsed.skeleton_index = json.value("skeleton_index", parsed.skeleton_index);
   if (!readU32VectorJson(json.value("joint_node_indices", Json::array()), parsed.joint_node_indices) ||
@@ -1466,40 +1466,40 @@ std::optional<T> deserializeJsonAsset(const std::vector<uint8_t>& bytes,
 
 }  // namespace
 
-std::vector<uint8_t> serializeMaterialAsset(const renderer::MaterialAssetDesc& material) {
+std::vector<uint8_t> serializeMaterialAsset(const rendering::MaterialAssetDesc& material) {
   return serializeJsonAsset(kKindMaterialAsset, materialAssetJson(material));
 }
 
-std::optional<renderer::MaterialAssetDesc> deserializeMaterialAsset(
+std::optional<rendering::MaterialAssetDesc> deserializeMaterialAsset(
     const std::vector<uint8_t>& bytes,
     std::string* diagnostic) {
-  return deserializeJsonAsset<renderer::MaterialAssetDesc>(bytes,
+  return deserializeJsonAsset<rendering::MaterialAssetDesc>(bytes,
                                                            kKindMaterialAsset,
                                                            readMaterialAssetJson,
                                                            diagnostic);
 }
 
-std::vector<uint8_t> serializeMaterialVariant(const renderer::MaterialVariantDesc& material) {
+std::vector<uint8_t> serializeMaterialVariant(const rendering::MaterialVariantDesc& material) {
   return serializeJsonAsset(kKindMaterialVariant, materialVariantJson(material));
 }
 
-std::optional<renderer::MaterialVariantDesc> deserializeMaterialVariant(
+std::optional<rendering::MaterialVariantDesc> deserializeMaterialVariant(
     const std::vector<uint8_t>& bytes,
     std::string* diagnostic) {
-  return deserializeJsonAsset<renderer::MaterialVariantDesc>(bytes,
+  return deserializeJsonAsset<rendering::MaterialVariantDesc>(bytes,
                                                              kKindMaterialVariant,
                                                              readMaterialVariantJson,
                                                              diagnostic);
 }
 
-std::vector<uint8_t> serializeParticleEffect(const particles::ParticleEffectAsset& effect) {
+std::vector<uint8_t> serializeParticleEffect(const visual::particles::ParticleEffectAsset& effect) {
   return serializeJsonAsset(kKindParticleEffect, particleEffectJson(effect));
 }
 
-std::optional<particles::ParticleEffectAsset> deserializeParticleEffect(
+std::optional<visual::particles::ParticleEffectAsset> deserializeParticleEffect(
     const std::vector<uint8_t>& bytes,
     std::string* diagnostic) {
-  return deserializeJsonAsset<particles::ParticleEffectAsset>(bytes,
+  return deserializeJsonAsset<visual::particles::ParticleEffectAsset>(bytes,
                                                               kKindParticleEffect,
                                                               readParticleEffectJson,
                                                               diagnostic);
@@ -1517,41 +1517,41 @@ std::optional<GltfSceneAsset> deserializeGltfScene(const std::vector<uint8_t>& b
                                               diagnostic);
 }
 
-std::vector<uint8_t> serializeAnimationClip(const animation::AnimationClip& clip) {
+std::vector<uint8_t> serializeAnimationClip(const world::AnimationClip& clip) {
   return serializeJsonAsset(kKindAnimationClip, animationClipJson(clip));
 }
 
-std::optional<animation::AnimationClip> deserializeAnimationClip(
+std::optional<world::AnimationClip> deserializeAnimationClip(
     const std::vector<uint8_t>& bytes,
     std::string* diagnostic) {
-  return deserializeJsonAsset<animation::AnimationClip>(bytes,
+  return deserializeJsonAsset<world::AnimationClip>(bytes,
                                                         kKindAnimationClip,
                                                         readAnimationClipJson,
                                                         diagnostic);
 }
 
-std::vector<uint8_t> serializeSkeleton(const animation::Skeleton& skeleton) {
+std::vector<uint8_t> serializeSkeleton(const world::Skeleton& skeleton) {
   return serializeJsonAsset(kKindSkeleton, skeletonJson(skeleton));
 }
 
-std::optional<animation::Skeleton> deserializeSkeleton(const std::vector<uint8_t>& bytes,
+std::optional<world::Skeleton> deserializeSkeleton(const std::vector<uint8_t>& bytes,
                                                        std::string* diagnostic) {
-  return deserializeJsonAsset<animation::Skeleton>(bytes,
+  return deserializeJsonAsset<world::Skeleton>(bytes,
                                                    kKindSkeleton,
                                                    readSkeletonJson,
                                                    diagnostic);
 }
 
-std::vector<uint8_t> serializeSkin(const animation::Skin& skin) {
+std::vector<uint8_t> serializeSkin(const world::Skin& skin) {
   return serializeJsonAsset(kKindSkin, skinJson(skin));
 }
 
-std::optional<animation::Skin> deserializeSkin(const std::vector<uint8_t>& bytes,
+std::optional<world::Skin> deserializeSkin(const std::vector<uint8_t>& bytes,
                                                std::string* diagnostic) {
-  return deserializeJsonAsset<animation::Skin>(bytes,
+  return deserializeJsonAsset<world::Skin>(bytes,
                                                kKindSkin,
                                                readSkinJson,
                                                diagnostic);
 }
 
-}  // namespace karma::content::detail
+}  // namespace karma::assets::detail

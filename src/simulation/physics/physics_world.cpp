@@ -1,54 +1,57 @@
-#include "karma/simulation/physics/physics_world.hpp"
-#include "karma/simulation/physics/backend.hpp"
-#include "karma/simulation/physics/character_controller.hpp"
+#include "karma/physics.h"
+#include "karma/physics.h"
+#include "private/physics/objects.hpp"
 
 namespace karma::physics {
 
 World::World()
-    : backend_(karma::physics_backend::CreatePhysicsWorldBackend()) {}
+    : impl_(std::make_unique<Impl>()) {
+    impl_->backend = karma::physics::backend::CreatePhysicsWorldBackend();
+}
 
 World::~World() = default;
 
 void World::update(float deltaTime) {
-    if (backend_) {
-        backend_->update(deltaTime);
+    if (impl_ && impl_->backend) {
+        impl_->backend->update(deltaTime);
     }
 }
 
 void World::setGravity(float gravity) {
-    if (backend_) {
-        backend_->setGravity(gravity);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setGravity(gravity);
     }
 }
 
 RigidBody World::createBody(const PhysicsBodyDesc& desc) {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return RigidBody();
     }
-    return RigidBody(backend_->createBody(desc));
+    return RigidBody(std::make_unique<RigidBody::Impl>(impl_->backend->createBody(desc)));
 }
 
 Constraint World::createConstraint(const PhysicsConstraintDesc& desc,
                                    std::uintptr_t bodyA,
                                    std::uintptr_t bodyB) {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return Constraint();
     }
-    return Constraint(backend_->createConstraint(desc, bodyA, bodyB));
+    return Constraint(std::make_unique<Constraint::Impl>(
+        impl_->backend->createConstraint(desc, bodyA, bodyB)));
 }
 
 Vehicle World::createVehicle(const PhysicsVehicleDesc& desc, std::uintptr_t body) {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return Vehicle();
     }
-    return Vehicle(backend_->createVehicle(desc, body));
+    return Vehicle(std::make_unique<Vehicle::Impl>(impl_->backend->createVehicle(desc, body)));
 }
 
 SoftBody World::createSoftBody(const PhysicsSoftBodyDesc& desc) {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return SoftBody();
     }
-    return SoftBody(backend_->createSoftBody(desc));
+    return SoftBody(std::make_unique<SoftBody::Impl>(impl_->backend->createSoftBody(desc)));
 }
 
 RigidBody World::createBoxBody(const glm::vec3& halfExtents,
@@ -65,67 +68,68 @@ RigidBody World::createBoxBody(const glm::vec3& halfExtents,
 }
 
 CharacterController World::createCharacterController(const glm::vec3& size) {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return CharacterController();
     }
-    return CharacterController(backend_->createCharacterController(size));
+    return CharacterController(
+        std::make_unique<CharacterController::Impl>(impl_->backend->createCharacterController(size)));
 }
 
 bool World::raycast(const glm::vec3& from,
                     const glm::vec3& to,
                     glm::vec3& hitPoint,
                     glm::vec3& hitNormal) const {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return false;
     }
-    return backend_->raycast(from, to, hitPoint, hitNormal);
+    return impl_->backend->raycast(from, to, hitPoint, hitNormal);
 }
 
 bool World::raycastDetailed(const glm::vec3& from,
                             const glm::vec3& to,
                             PhysicsGroundContact& outHit) const {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return false;
     }
-    return backend_->raycastDetailed(from, to, outHit);
+    return impl_->backend->raycastDetailed(from, to, outHit);
 }
 
 bool World::castRay(const PhysicsRaycastDesc& desc, PhysicsQueryHit& outHit) const {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return false;
     }
-    return backend_->castRay(desc, outHit);
+    return impl_->backend->castRay(desc, outHit);
 }
 
 void World::castRayAll(const PhysicsRaycastDesc& desc, std::vector<PhysicsQueryHit>& outHits) const {
-    if (backend_) {
-        backend_->castRayAll(desc, outHits);
+    if (impl_ && impl_->backend) {
+        impl_->backend->castRayAll(desc, outHits);
     }
 }
 
 void World::collidePoint(const glm::vec3& point,
                          const PhysicsQueryFilter& filter,
                          std::vector<PhysicsQueryHit>& outHits) const {
-    if (backend_) {
-        backend_->collidePoint(point, filter, outHits);
+    if (impl_ && impl_->backend) {
+        impl_->backend->collidePoint(point, filter, outHits);
     }
 }
 
 void World::collideShape(const PhysicsShapeQueryDesc& desc, std::vector<PhysicsQueryHit>& outHits) const {
-    if (backend_) {
-        backend_->collideShape(desc, outHits);
+    if (impl_ && impl_->backend) {
+        impl_->backend->collideShape(desc, outHits);
     }
 }
 
 void World::castShape(const PhysicsShapeCastDesc& desc, std::vector<PhysicsQueryHit>& outHits) const {
-    if (backend_) {
-        backend_->castShape(desc, outHits);
+    if (impl_ && impl_->backend) {
+        impl_->backend->castShape(desc, outHits);
     }
 }
 
 void World::collectContacts(std::vector<PhysicsContact>& outContacts) const {
-    if (backend_) {
-        backend_->collectContacts(outContacts);
+    if (impl_ && impl_->backend) {
+        impl_->backend->collectContacts(outContacts);
     }
 }
 

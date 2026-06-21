@@ -1,11 +1,11 @@
-#include "karma/features/network/component_replication.h"
+#include "karma/network.h"
 
 #include <algorithm>
 #include <cstring>
 #include <utility>
 
-#include "karma/world/components/tag.h"
-#include "karma/world/components/transform.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::network {
 namespace {
@@ -15,35 +15,35 @@ bool bytesDirty(std::span<const std::byte> previous, std::span<const std::byte> 
          std::memcmp(previous.data(), current.data(), current.size()) != 0;
 }
 
-void writeVec3(net::BinaryWriter& writer, const math::Vec3& value) {
+void writeVec3(network::BinaryWriter& writer, const math::Vec3& value) {
   writer.writeFloat32(value.x);
   writer.writeFloat32(value.y);
   writer.writeFloat32(value.z);
 }
 
-bool readVec3(net::BinaryReader& reader, math::Vec3& value) {
+bool readVec3(network::BinaryReader& reader, math::Vec3& value) {
   return reader.readFloat32(value.x) &&
          reader.readFloat32(value.y) &&
          reader.readFloat32(value.z);
 }
 
-void writeQuat(net::BinaryWriter& writer, const math::Quat& value) {
+void writeQuat(network::BinaryWriter& writer, const math::Quat& value) {
   writer.writeFloat32(value.x);
   writer.writeFloat32(value.y);
   writer.writeFloat32(value.z);
   writer.writeFloat32(value.w);
 }
 
-bool readQuat(net::BinaryReader& reader, math::Quat& value) {
+bool readQuat(network::BinaryReader& reader, math::Quat& value) {
   return reader.readFloat32(value.x) &&
          reader.readFloat32(value.y) &&
          reader.readFloat32(value.z) &&
          reader.readFloat32(value.w);
 }
 
-bool encodeTransform(const ecs::World& world,
-                     ecs::Entity entity,
-                     net::BinaryWriter& writer) {
+bool encodeTransform(const world::World& world,
+                     world::Entity entity,
+                     network::BinaryWriter& writer) {
   if (!world.has<components::TransformComponent>(entity)) {
     return false;
   }
@@ -54,9 +54,9 @@ bool encodeTransform(const ecs::World& world,
   return true;
 }
 
-bool applyTransform(ecs::World& world,
-                    ecs::Entity entity,
-                    net::BinaryReader& reader,
+bool applyTransform(world::World& world,
+                    world::Entity entity,
+                    network::BinaryReader& reader,
                     bool server_override) {
   (void)server_override;
   math::Vec3 position{};
@@ -75,9 +75,9 @@ bool applyTransform(ecs::World& world,
   return true;
 }
 
-bool encodeTag(const ecs::World& world,
-               ecs::Entity entity,
-               net::BinaryWriter& writer) {
+bool encodeTag(const world::World& world,
+               world::Entity entity,
+               network::BinaryWriter& writer) {
   if (!world.has<components::TagComponent>(entity)) {
     return false;
   }
@@ -85,9 +85,9 @@ bool encodeTag(const ecs::World& world,
   return true;
 }
 
-bool applyTag(ecs::World& world,
-              ecs::Entity entity,
-              net::BinaryReader& reader,
+bool applyTag(world::World& world,
+              world::Entity entity,
+              network::BinaryReader& reader,
               bool server_override) {
   (void)server_override;
   std::string name;
@@ -114,7 +114,7 @@ struct EncodedComponent {
 };
 
 std::vector<std::byte> encodeDespawnPayload(components::NetworkEntityId id) {
-  net::BinaryWriter writer;
+  network::BinaryWriter writer;
   writer.writeUInt64(id);
   return writer.takeBytes();
 }
@@ -122,7 +122,7 @@ std::vector<std::byte> encodeDespawnPayload(components::NetworkEntityId id) {
 std::vector<std::byte> encodeComponentPayload(components::NetworkEntityId id,
                                               uint32_t component_type,
                                               std::span<const std::byte> bytes) {
-  net::BinaryWriter writer;
+  network::BinaryWriter writer;
   writer.writeUInt64(id);
   writer.writeUInt32(component_type);
   writer.writeUInt32(static_cast<uint32_t>(bytes.size()));
@@ -130,7 +130,7 @@ std::vector<std::byte> encodeComponentPayload(components::NetworkEntityId id,
   return writer.takeBytes();
 }
 
-bool readAuthority(net::BinaryReader& reader,
+bool readAuthority(network::BinaryReader& reader,
                    components::NetworkAuthorityComponent& authority) {
   uint8_t mode = 0;
   uint32_t owner = 0;
@@ -146,7 +146,7 @@ bool readAuthority(net::BinaryReader& reader,
   return true;
 }
 
-void writeAuthority(net::BinaryWriter& writer,
+void writeAuthority(network::BinaryWriter& writer,
                     const components::NetworkAuthorityComponent& authority) {
   writer.writeUInt8(static_cast<uint8_t>(authority.mode));
   writer.writeUInt32(authority.owner_peer);
@@ -184,19 +184,19 @@ bool stampOlder(EventStamp candidate, EventStamp latest) {
   return candidate.sequence < latest.sequence;
 }
 
-void accumulateEventStats(NetworkRuntimeStats& stats, const net::SessionEvent& event) {
+void accumulateEventStats(NetworkRuntimeStats& stats, const network::SessionEvent& event) {
   stats.events_received += 1;
   switch (event.type) {
-    case net::SessionEventType::ProtocolError:
+    case network::SessionEventType::ProtocolError:
       stats.protocol_errors += 1;
       break;
-    case net::SessionEventType::CustomMessage:
+    case network::SessionEventType::CustomMessage:
       stats.custom_messages += 1;
       break;
-    case net::SessionEventType::InputCommand:
+    case network::SessionEventType::InputCommand:
       stats.input_commands += 1;
       break;
-    case net::SessionEventType::ReplicationMessage:
+    case network::SessionEventType::ReplicationMessage:
       stats.replication_messages += 1;
       break;
     default:
@@ -214,10 +214,10 @@ bool ComponentReplicationRegistry::registerReplicator(ComponentReplicator replic
   }
   if (!replicator.encode_delta) {
     replicator.encode_delta =
-        [encode_full = replicator.encode_full](const ecs::World& world,
-                                               ecs::Entity entity,
+        [encode_full = replicator.encode_full](const world::World& world,
+                                               world::Entity entity,
                                                std::span<const std::byte> previous,
-                                               net::BinaryWriter& writer) {
+                                               network::BinaryWriter& writer) {
           (void)previous;
           return encode_full(world, entity, writer);
         };
@@ -263,8 +263,8 @@ void ServerReplicationState::reset() {
   authority_rejects_ = 0;
 }
 
-void ServerReplicationState::ensureNetworkIds(ecs::World& world) {
-  for (const ecs::Entity entity : world.view<components::NetworkIdentityComponent>()) {
+void ServerReplicationState::ensureNetworkIds(world::World& world) {
+  for (const world::Entity entity : world.view<components::NetworkIdentityComponent>()) {
     auto& identity = world.get<components::NetworkIdentityComponent>(entity);
     if (identity.id == components::kInvalidNetworkEntityId) {
       identity.id = next_id_++;
@@ -274,7 +274,7 @@ void ServerReplicationState::ensureNetworkIds(ecs::World& world) {
   }
 }
 
-void ServerReplicationState::removePeer(net::PeerId peer) {
+void ServerReplicationState::removePeer(network::PeerId peer) {
   for (auto spawned_it = spawned_.begin(); spawned_it != spawned_.end();) {
     spawned_it->second.erase(peer.value);
     if (spawned_it->second.empty()) {
@@ -293,16 +293,16 @@ void ServerReplicationState::removePeer(net::PeerId peer) {
   }
 }
 
-net::MultiSendResult ServerReplicationState::replicate(
-    ecs::World& world,
-    net::ServerSession& session,
+network::MultiSendResult ServerReplicationState::replicate(
+    world::World& world,
+    network::ServerSession& session,
     const ComponentReplicationRegistry& registry,
     uint32_t tick,
     const ReplicationVisibilityPredicate& visibility) {
   ensureNetworkIds(world);
-  net::MultiSendResult result{};
+  network::MultiSendResult result{};
 
-  for (const ecs::Entity entity :
+  for (const world::Entity entity :
        world.view<components::NetworkIdentityComponent,
                   components::NetworkReplicatedComponent>()) {
     const auto& identity = world.get<components::NetworkIdentityComponent>(entity);
@@ -311,8 +311,8 @@ net::MultiSendResult ServerReplicationState::replicate(
       continue;
     }
 
-    for (const net::PeerId peer_id : session.peers()) {
-      const net::SessionPeer* peer = session.peer(peer_id);
+    for (const network::PeerId peer_id : session.peers()) {
+      const network::SessionPeer* peer = session.peer(peer_id);
       if (!peer) {
         continue;
       }
@@ -327,8 +327,8 @@ net::MultiSendResult ServerReplicationState::replicate(
           result.attempted += 1;
           if (sendDespawn(session, identity.id, peer_id, tick)) {
             result.sent += 1;
-          } else if (result.first_error == net::SendStatus::Ok) {
-            result.first_error = net::SendStatus::BackendError;
+          } else if (result.first_error == network::SendStatus::Ok) {
+            result.first_error = network::SendStatus::BackendError;
           }
         }
         continue;
@@ -337,16 +337,16 @@ net::MultiSendResult ServerReplicationState::replicate(
       if (!hasSpawnedFor(identity.id, peer_id)) {
         std::vector<std::byte> payload = encodeSpawn(world, entity, registry, peer_id);
         result.attempted += 1;
-        const net::SendResult sent = session.sendTo(peer_id,
-                                                    net::MessageType::EntitySpawn,
+        const network::SendResult sent = session.sendTo(peer_id,
+                                                    network::MessageType::EntitySpawn,
                                                     payload,
-                                                    net::Delivery::Reliable,
+                                                    network::Delivery::Reliable,
                                                     0,
                                                     tick);
         if (sent.ok()) {
           result.sent += 1;
           markSpawnedFor(identity.id, peer_id);
-        } else if (result.first_error == net::SendStatus::Ok) {
+        } else if (result.first_error == network::SendStatus::Ok) {
           result.first_error = sent.status;
         }
         continue;
@@ -363,7 +363,7 @@ net::MultiSendResult ServerReplicationState::replicate(
             previous_it == last_sent_.end()
                 ? std::span<const std::byte>{}
                 : std::span<const std::byte>(previous_it->second);
-        net::BinaryWriter full_writer;
+        network::BinaryWriter full_writer;
         if (!replicator->encode_full(world, entity, full_writer)) {
           continue;
         }
@@ -381,20 +381,20 @@ net::MultiSendResult ServerReplicationState::replicate(
         }
         std::vector<std::byte> payload =
             encodeComponentPayload(identity.id, entry.component_type, *encoded);
-        const net::MessageType message_type =
-            use_delta ? net::MessageType::ComponentDelta
-                      : net::MessageType::ComponentSnapshot;
+        const network::MessageType message_type =
+            use_delta ? network::MessageType::ComponentDelta
+                      : network::MessageType::ComponentSnapshot;
         result.attempted += 1;
-        const net::SendResult sent = session.sendTo(peer_id,
+        const network::SendResult sent = session.sendTo(peer_id,
                                                     message_type,
                                                     payload,
-                                                    net::Delivery::Unreliable,
+                                                    network::Delivery::Unreliable,
                                                     1,
                                                     tick);
         if (sent.ok()) {
           result.sent += 1;
           rememberComponent(peer_id, identity.id, entry.component_type, full);
-        } else if (result.first_error == net::SendStatus::Ok) {
+        } else if (result.first_error == network::SendStatus::Ok) {
           result.first_error = sent.status;
         }
       }
@@ -404,15 +404,15 @@ net::MultiSendResult ServerReplicationState::replicate(
   return result;
 }
 
-bool ServerReplicationState::sendDespawn(net::ServerSession& session,
+bool ServerReplicationState::sendDespawn(network::ServerSession& session,
                                          components::NetworkEntityId network_id,
-                                         net::PeerId peer,
+                                         network::PeerId peer,
                                          uint32_t tick) {
   std::vector<std::byte> payload = encodeDespawnPayload(network_id);
-  const net::SendResult sent = session.sendTo(peer,
-                                             net::MessageType::EntityDespawn,
+  const network::SendResult sent = session.sendTo(peer,
+                                             network::MessageType::EntityDespawn,
                                              payload,
-                                             net::Delivery::Reliable,
+                                             network::Delivery::Reliable,
                                              0,
                                              tick);
   if (!sent.ok()) {
@@ -430,17 +430,17 @@ bool ServerReplicationState::sendDespawn(net::ServerSession& session,
 }
 
 bool ServerReplicationState::applyClientComponentEvent(
-    ecs::World& world,
+    world::World& world,
     const ComponentReplicationRegistry& registry,
-    const net::SessionEvent& event,
+    const network::SessionEvent& event,
     bool server_override) {
-  if (event.type != net::SessionEventType::ReplicationMessage ||
-      (event.message_type != net::MessageType::ComponentSnapshot &&
-       event.message_type != net::MessageType::ComponentDelta)) {
+  if (event.type != network::SessionEventType::ReplicationMessage ||
+      (event.message_type != network::MessageType::ComponentSnapshot &&
+       event.message_type != network::MessageType::ComponentDelta)) {
     return false;
   }
 
-  net::BinaryReader reader(event.payload);
+  network::BinaryReader reader(event.payload);
   uint64_t network_id = 0;
   uint32_t component_type = 0;
   uint32_t component_size = 0;
@@ -452,9 +452,9 @@ bool ServerReplicationState::applyClientComponentEvent(
     return false;
   }
 
-  ecs::Entity entity{};
+  world::Entity entity{};
   bool found = false;
-  for (const ecs::Entity candidate : world.view<components::NetworkIdentityComponent>()) {
+  for (const world::Entity candidate : world.view<components::NetworkIdentityComponent>()) {
     if (world.get<components::NetworkIdentityComponent>(candidate).id == network_id) {
       entity = candidate;
       found = true;
@@ -478,7 +478,7 @@ bool ServerReplicationState::applyClientComponentEvent(
   if (!replicator) {
     return false;
   }
-  net::BinaryReader component_reader(component_bytes);
+  network::BinaryReader component_reader(component_bytes);
   return replicator->decode_apply(world, entity, component_reader, server_override);
 }
 
@@ -491,18 +491,18 @@ std::size_t ServerReplicationState::SentComponentKeyHash::operator()(
 }
 
 bool ServerReplicationState::hasSpawnedFor(components::NetworkEntityId id,
-                                           net::PeerId peer) const {
+                                           network::PeerId peer) const {
   auto it = spawned_.find(id);
   return it != spawned_.end() && it->second.find(peer.value) != it->second.end();
 }
 
 void ServerReplicationState::markSpawnedFor(components::NetworkEntityId id,
-                                            net::PeerId peer) {
+                                            network::PeerId peer) {
   spawned_[id].insert(peer.value);
 }
 
 void ServerReplicationState::clearSpawnedFor(components::NetworkEntityId id,
-                                             net::PeerId peer) {
+                                             network::PeerId peer) {
   auto it = spawned_.find(id);
   if (it == spawned_.end()) {
     return;
@@ -514,10 +514,10 @@ void ServerReplicationState::clearSpawnedFor(components::NetworkEntityId id,
 }
 
 std::vector<std::byte> ServerReplicationState::encodeSpawn(
-    ecs::World& world,
-    ecs::Entity entity,
+    world::World& world,
+    world::Entity entity,
     const ComponentReplicationRegistry& registry,
-    net::PeerId peer) {
+    network::PeerId peer) {
   const auto& identity = world.get<components::NetworkIdentityComponent>(entity);
   const auto& replicated = world.get<components::NetworkReplicatedComponent>(entity);
   components::NetworkAuthorityComponent authority{};
@@ -531,7 +531,7 @@ std::vector<std::byte> ServerReplicationState::encodeSpawn(
     if (!replicator) {
       continue;
     }
-    net::BinaryWriter component_writer;
+    network::BinaryWriter component_writer;
     if (!replicator->encode_full(world, entity, component_writer)) {
       continue;
     }
@@ -543,7 +543,7 @@ std::vector<std::byte> ServerReplicationState::encodeSpawn(
     encoded_components.push_back(std::move(encoded));
   }
 
-  net::BinaryWriter writer;
+  network::BinaryWriter writer;
   writer.writeUInt64(identity.id);
   writeAuthority(writer, authority);
   writer.writeUInt16(static_cast<uint16_t>(encoded_components.size()));
@@ -557,12 +557,12 @@ std::vector<std::byte> ServerReplicationState::encodeSpawn(
 }
 
 std::optional<std::vector<std::byte>> ServerReplicationState::encodeComponent(
-    ecs::World& world,
-    ecs::Entity entity,
+    world::World& world,
+    world::Entity entity,
     const ComponentReplicator& replicator,
     std::span<const std::byte> previous,
     bool delta) {
-  net::BinaryWriter writer;
+  network::BinaryWriter writer;
   const bool ok = delta ? replicator.encode_delta(world, entity, previous, writer)
                         : replicator.encode_full(world, entity, writer);
   if (!ok) {
@@ -571,7 +571,7 @@ std::optional<std::vector<std::byte>> ServerReplicationState::encodeComponent(
   return writer.takeBytes();
 }
 
-void ServerReplicationState::rememberComponent(net::PeerId peer,
+void ServerReplicationState::rememberComponent(network::PeerId peer,
                                                components::NetworkEntityId id,
                                                uint32_t component_type,
                                                std::span<const std::byte> bytes) {
@@ -586,10 +586,10 @@ void ClientReplicationState::reset() {
   stale_rejects_ = 0;
 }
 
-bool ClientReplicationState::applyEvent(ecs::World& world,
+bool ClientReplicationState::applyEvent(world::World& world,
                                         const ComponentReplicationRegistry& registry,
-                                        const net::SessionEvent& event) {
-  if (event.type != net::SessionEventType::ReplicationMessage) {
+                                        const network::SessionEvent& event) {
+  if (event.type != network::SessionEventType::ReplicationMessage) {
     return false;
   }
   if (event.stale_sequence) {
@@ -598,21 +598,21 @@ bool ClientReplicationState::applyEvent(ecs::World& world,
   }
   const ReplicationStamp stamp{.tick = event.tick, .sequence = event.sequence};
   switch (event.message_type) {
-    case net::MessageType::EntitySpawn:
+    case network::MessageType::EntitySpawn:
       return applySpawn(world, registry, event.payload, stamp);
-    case net::MessageType::EntityDespawn:
+    case network::MessageType::EntityDespawn:
       return applyDespawn(world, event.payload, stamp);
-    case net::MessageType::ComponentSnapshot:
-    case net::MessageType::ComponentDelta:
+    case network::MessageType::ComponentSnapshot:
+    case network::MessageType::ComponentDelta:
       return applyComponentUpdate(world, registry, event.payload, stamp);
-    case net::MessageType::AuthorityTransfer:
+    case network::MessageType::AuthorityTransfer:
       return applyAuthorityTransfer(world, event.payload, stamp);
     default:
       return false;
   }
 }
 
-std::optional<ecs::Entity> ClientReplicationState::entityFor(
+std::optional<world::Entity> ClientReplicationState::entityFor(
     components::NetworkEntityId id) const {
   auto it = entities_.find(id);
   if (it == entities_.end()) {
@@ -621,11 +621,11 @@ std::optional<ecs::Entity> ClientReplicationState::entityFor(
   return it->second;
 }
 
-bool ClientReplicationState::applySpawn(ecs::World& world,
+bool ClientReplicationState::applySpawn(world::World& world,
                                         const ComponentReplicationRegistry& registry,
                                         std::span<const std::byte> payload,
                                         ReplicationStamp stamp) {
-  net::BinaryReader reader(payload);
+  network::BinaryReader reader(payload);
   uint64_t network_id = 0;
   components::NetworkAuthorityComponent authority{};
   uint16_t component_count = 0;
@@ -642,7 +642,7 @@ bool ClientReplicationState::applySpawn(ecs::World& world,
     return false;
   }
 
-  ecs::Entity entity{};
+  world::Entity entity{};
   auto it = entities_.find(network_id);
   if (it == entities_.end() || !world.isAlive(it->second)) {
     entity = world.createEntity();
@@ -677,7 +677,7 @@ bool ClientReplicationState::applySpawn(ecs::World& world,
     if (!replicator) {
       continue;
     }
-    net::BinaryReader component_reader(component_bytes);
+    network::BinaryReader component_reader(component_bytes);
     if (!replicator->decode_apply(world, entity, component_reader, true)) {
       return false;
     }
@@ -691,10 +691,10 @@ bool ClientReplicationState::applySpawn(ecs::World& world,
   return true;
 }
 
-bool ClientReplicationState::applyDespawn(ecs::World& world,
+bool ClientReplicationState::applyDespawn(world::World& world,
                                           std::span<const std::byte> payload,
                                           ReplicationStamp stamp) {
-  net::BinaryReader reader(payload);
+  network::BinaryReader reader(payload);
   uint64_t network_id = 0;
   if (!reader.readUInt64(network_id)) {
     return false;
@@ -717,11 +717,11 @@ bool ClientReplicationState::applyDespawn(ecs::World& world,
 }
 
 bool ClientReplicationState::applyComponentUpdate(
-    ecs::World& world,
+    world::World& world,
     const ComponentReplicationRegistry& registry,
     std::span<const std::byte> payload,
     ReplicationStamp stamp) {
-  net::BinaryReader reader(payload);
+  network::BinaryReader reader(payload);
   uint64_t network_id = 0;
   uint32_t component_type = 0;
   uint32_t component_size = 0;
@@ -745,7 +745,7 @@ bool ClientReplicationState::applyComponentUpdate(
   if (!replicator) {
     return false;
   }
-  net::BinaryReader component_reader(component_bytes);
+  network::BinaryReader component_reader(component_bytes);
   if (!replicator->decode_apply(world, it->second, component_reader, true)) {
     return false;
   }
@@ -764,10 +764,10 @@ bool ClientReplicationState::applyComponentUpdate(
   return true;
 }
 
-bool ClientReplicationState::applyAuthorityTransfer(ecs::World& world,
+bool ClientReplicationState::applyAuthorityTransfer(world::World& world,
                                                     std::span<const std::byte> payload,
                                                     ReplicationStamp stamp) {
-  net::BinaryReader reader(payload);
+  network::BinaryReader reader(payload);
   uint64_t network_id = 0;
   components::NetworkAuthorityComponent authority{};
   if (!reader.readUInt64(network_id) || !readAuthority(reader, authority)) {
@@ -846,14 +846,14 @@ void ClientReplicationState::forgetComponentStamps(components::NetworkEntityId i
 }
 
 ServerNetworkRuntimeModule::ServerNetworkRuntimeModule(
-    net::ServerSession& session,
+    network::ServerSession& session,
     ComponentReplicationRegistry& registry)
     : ServerNetworkRuntimeModule(session,
                                  registry,
                                  ServerNetworkRuntimeConfig{.app_id = session.appId()}) {}
 
 ServerNetworkRuntimeModule::ServerNetworkRuntimeModule(
-    net::ServerSession& session,
+    network::ServerSession& session,
     ComponentReplicationRegistry& registry,
     ServerNetworkRuntimeConfig config)
     : session_(&session),
@@ -863,10 +863,10 @@ ServerNetworkRuntimeModule::ServerNetworkRuntimeModule(
       replication_enabled_(config.replication_enabled) {}
 
 ServerNetworkRuntimeModule::ServerNetworkRuntimeModule(
-    std::unique_ptr<net::IServerTransport> transport,
+    std::unique_ptr<network::IServerTransport> transport,
     ComponentReplicationRegistry& registry,
     ServerNetworkRuntimeConfig config)
-    : owned_session_(std::make_unique<net::ServerSession>(std::move(transport),
+    : owned_session_(std::make_unique<network::ServerSession>(std::move(transport),
                                                           config.app_id)),
       session_(owned_session_.get()),
       registry_(registry),
@@ -878,18 +878,18 @@ void ServerNetworkRuntimeModule::onAttach(const app::RuntimeModuleContext& conte
   (void)context;
 }
 
-void ServerNetworkRuntimeModule::onFrameBegin(ecs::World& world, float dt) {
+void ServerNetworkRuntimeModule::onFrameBegin(world::World& world, float dt) {
   (void)dt;
   events_.clear();
   session_->poll(events_);
-  for (const net::SessionEvent& event : events_) {
+  for (const network::SessionEvent& event : events_) {
     accumulateEventStats(stats_, event);
-    if (event.type == net::SessionEventType::PeerDisconnected) {
+    if (event.type == network::SessionEventType::PeerDisconnected) {
       replication_.removePeer(event.peer);
     } else if (replication_enabled_ &&
-               event.type == net::SessionEventType::ReplicationMessage &&
-               (event.message_type == net::MessageType::ComponentSnapshot ||
-                event.message_type == net::MessageType::ComponentDelta)) {
+               event.type == network::SessionEventType::ReplicationMessage &&
+               (event.message_type == network::MessageType::ComponentSnapshot ||
+                event.message_type == network::MessageType::ComponentDelta)) {
       const std::size_t before = replication_.authorityRejects();
       replication_.applyClientComponentEvent(world, registry_, event);
       stats_.authority_rejects += replication_.authorityRejects() - before;
@@ -900,14 +900,14 @@ void ServerNetworkRuntimeModule::onFrameBegin(ecs::World& world, float dt) {
   }
 }
 
-void ServerNetworkRuntimeModule::onAfterFixedUpdate(ecs::World& world,
+void ServerNetworkRuntimeModule::onAfterFixedUpdate(world::World& world,
                                                     float fixed_dt,
                                                     uint64_t fixed_tick) {
   (void)fixed_dt;
   if (!replication_enabled_) {
     return;
   }
-  const net::MultiSendResult result =
+  const network::MultiSendResult result =
       replication_.replicate(world,
                              *session_,
                              registry_,
@@ -917,12 +917,12 @@ void ServerNetworkRuntimeModule::onAfterFixedUpdate(ecs::World& world,
   stats_.replication_sends_succeeded += result.sent;
 }
 
-void ServerNetworkRuntimeModule::onFrameEnd(ecs::World& world) {
+void ServerNetworkRuntimeModule::onFrameEnd(world::World& world) {
   (void)world;
   session_->flush();
 }
 
-void ServerNetworkRuntimeModule::onUpdate(ecs::World& world,
+void ServerNetworkRuntimeModule::onUpdate(world::World& world,
                                           float dt,
                                           float interpolation_alpha) {
   (void)world;
@@ -931,14 +931,14 @@ void ServerNetworkRuntimeModule::onUpdate(ecs::World& world,
 }
 
 ClientNetworkRuntimeModule::ClientNetworkRuntimeModule(
-    net::ClientSession& session,
+    network::ClientSession& session,
     ComponentReplicationRegistry& registry)
     : ClientNetworkRuntimeModule(session,
                                  registry,
                                  ClientNetworkRuntimeConfig{.app_id = session.appId()}) {}
 
 ClientNetworkRuntimeModule::ClientNetworkRuntimeModule(
-    net::ClientSession& session,
+    network::ClientSession& session,
     ComponentReplicationRegistry& registry,
     ClientNetworkRuntimeConfig config)
     : session_(&session),
@@ -947,10 +947,10 @@ ClientNetworkRuntimeModule::ClientNetworkRuntimeModule(
       replication_enabled_(config.replication_enabled) {}
 
 ClientNetworkRuntimeModule::ClientNetworkRuntimeModule(
-    std::unique_ptr<net::IClientTransport> transport,
+    std::unique_ptr<network::IClientTransport> transport,
     ComponentReplicationRegistry& registry,
     ClientNetworkRuntimeConfig config)
-    : owned_session_(std::make_unique<net::ClientSession>(std::move(transport),
+    : owned_session_(std::make_unique<network::ClientSession>(std::move(transport),
                                                           config.app_id)),
       session_(owned_session_.get()),
       registry_(registry),
@@ -961,13 +961,13 @@ void ClientNetworkRuntimeModule::onAttach(const app::RuntimeModuleContext& conte
   (void)context;
 }
 
-void ClientNetworkRuntimeModule::onFrameBegin(ecs::World& world, float dt) {
+void ClientNetworkRuntimeModule::onFrameBegin(world::World& world, float dt) {
   (void)dt;
   events_.clear();
   session_->poll(events_);
-  for (const net::SessionEvent& event : events_) {
+  for (const network::SessionEvent& event : events_) {
     accumulateEventStats(stats_, event);
-    if (replication_enabled_ && event.type == net::SessionEventType::ReplicationMessage) {
+    if (replication_enabled_ && event.type == network::SessionEventType::ReplicationMessage) {
       const std::size_t before = replication_.staleRejects();
       replication_.applyEvent(world, registry_, event);
       stats_.stale_replication_rejects += replication_.staleRejects() - before;
@@ -978,12 +978,12 @@ void ClientNetworkRuntimeModule::onFrameBegin(ecs::World& world, float dt) {
   }
 }
 
-void ClientNetworkRuntimeModule::onFrameEnd(ecs::World& world) {
+void ClientNetworkRuntimeModule::onFrameEnd(world::World& world) {
   (void)world;
   session_->flush();
 }
 
-void ClientNetworkRuntimeModule::onUpdate(ecs::World& world,
+void ClientNetworkRuntimeModule::onUpdate(world::World& world,
                                           float dt,
                                           float interpolation_alpha) {
   (void)world;

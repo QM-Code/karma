@@ -6,8 +6,8 @@
 
 #include <Recast.h>
 
-#include "karma/core/math/types.h"
-#include "karma/simulation/navigation/nav_types.h"
+#include "karma/math.h"
+#include "karma/navigation.h"
 
 class dtNavMesh;
 

@@ -8,9 +8,9 @@
 #include <variant>
 
 #include "demo_asset_paths.h"
-#include "karma/core/math/glm.h"
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/math.h"
 
 namespace karma::demo::physics_examples {
 
@@ -22,7 +22,7 @@ math::Vec3 transformPoint(const math::Vec3& center,
   return vadd(center, rotated(rotation, local));
 }
 
-void line(renderer::GraphicsDevice& graphics,
+void line(rendering::GraphicsDevice& graphics,
           const math::Vec3& a,
           const math::Vec3& b,
           const math::Color& color,
@@ -31,7 +31,7 @@ void line(renderer::GraphicsDevice& graphics,
   graphics.drawLine(a, b, color, depth_test, thickness);
 }
 
-void drawCircle(renderer::GraphicsDevice& graphics,
+void drawCircle(rendering::GraphicsDevice& graphics,
                 const math::Vec3& center,
                 const math::Quat& rotation,
                 float radius,
@@ -96,7 +96,7 @@ std::vector<uint32_t> wedgeIndices() {
   };
 }
 
-void drawPointSet(renderer::GraphicsDevice& graphics,
+void drawPointSet(rendering::GraphicsDevice& graphics,
                   const std::vector<glm::vec3>& points,
                   const math::Vec3& center,
                   const math::Quat& rotation,
@@ -126,7 +126,7 @@ void drawPointSet(renderer::GraphicsDevice& graphics,
   }
 }
 
-void drawTriangle(renderer::GraphicsDevice& graphics,
+void drawTriangle(rendering::GraphicsDevice& graphics,
                   const std::array<glm::vec3, 3>& triangle,
                   const math::Vec3& center,
                   const math::Quat& rotation,
@@ -170,7 +170,7 @@ math::Quat axisAngle(const math::Vec3& axis, float radians) {
   return {n.x * s, n.y * s, n.z * s, std::cos(half)};
 }
 
-void bindFlyCameraControls(input::InputSystem& input) {
+void bindFlyCameraControls(app::InputSystem& input) {
   input.bindKey("cam_forward", platform::Key::W);
   input.bindKey("cam_backward", platform::Key::S);
   input.bindKey("cam_left", platform::Key::A);
@@ -180,7 +180,7 @@ void bindFlyCameraControls(input::InputSystem& input) {
   input.bindMouse("cam_look", platform::MouseButton::Right);
 }
 
-void addDefaultLighting(ecs::World& world, content::AssetRegistry* assets) {
+void addDefaultLighting(world::World& world, assets::AssetRegistry* assets) {
   auto light = world.createEntity();
   components::TransformComponent light_xform{};
   light_xform.setPosition({0.0f, 35.0f, 0.0f});
@@ -201,7 +201,7 @@ void addDefaultLighting(ecs::World& world, content::AssetRegistry* assets) {
   world.add(environment, env);
 }
 
-void createFlyCamera(ecs::World& world,
+void createFlyCamera(world::World& world,
                      CameraRig& rig,
                      const math::Vec3& position,
                      float yaw,
@@ -226,7 +226,7 @@ void createFlyCamera(ecs::World& world,
   rig.target_pitch = pitch;
 }
 
-void updateFlyCamera(ecs::World& world, input::InputSystem& input, CameraRig& rig, float dt) {
+void updateFlyCamera(world::World& world, app::InputSystem& input, CameraRig& rig, float dt) {
   if (!world.isAlive(rig.entity)) {
     return;
   }
@@ -269,8 +269,8 @@ void updateFlyCamera(ecs::World& world, input::InputSystem& input, CameraRig& ri
   transform.setRotation(rotation);
 }
 
-void destroyEntities(ecs::World& world, std::vector<ecs::Entity>& entities) {
-  for (ecs::Entity entity : entities) {
+void destroyEntities(world::World& world, std::vector<world::Entity>& entities) {
+  for (world::Entity entity : entities) {
     if (world.isAlive(entity)) {
       world.destroyEntity(entity);
     }
@@ -278,8 +278,8 @@ void destroyEntities(ecs::World& world, std::vector<ecs::Entity>& entities) {
   entities.clear();
 }
 
-void setTransform(ecs::World& world,
-                  ecs::Entity entity,
+void setTransform(world::World& world,
+                  world::Entity entity,
                   const math::Vec3& position,
                   const math::Quat& rotation,
                   const math::Vec3& scale) {
@@ -290,7 +290,7 @@ void setTransform(ecs::World& world,
   world.add(entity, transform);
 }
 
-ecs::Entity addStaticBox(ecs::World& world,
+world::Entity addStaticBox(world::World& world,
                          const math::Vec3& position,
                          const math::Vec3& half_extents,
                          uint32_t layers,
@@ -423,7 +423,7 @@ physics::PhysicsShapeDesc makeCompoundShape() {
   return compound;
 }
 
-void drawReference(renderer::GraphicsDevice& graphics, float radius) {
+void drawReference(rendering::GraphicsDevice& graphics, float radius) {
   const math::Color grid{0.23f, 0.26f, 0.29f, 0.58f};
   for (int i = -static_cast<int>(radius); i <= static_cast<int>(radius); ++i) {
     const float p = static_cast<float>(i);
@@ -438,7 +438,7 @@ void drawReference(renderer::GraphicsDevice& graphics, float radius) {
        {0.2f, 0.45f, 1.0f, 1.0f}, false, 2.0f);
 }
 
-void drawWireBox(renderer::GraphicsDevice& graphics,
+void drawWireBox(rendering::GraphicsDevice& graphics,
                  const math::Vec3& center,
                  const math::Quat& rotation,
                  const math::Vec3& half_extents,
@@ -465,7 +465,7 @@ void drawWireBox(renderer::GraphicsDevice& graphics,
   }
 }
 
-void drawWireSphere(renderer::GraphicsDevice& graphics,
+void drawWireSphere(rendering::GraphicsDevice& graphics,
                     const math::Vec3& center,
                     const math::Quat& rotation,
                     float radius,
@@ -477,7 +477,7 @@ void drawWireSphere(renderer::GraphicsDevice& graphics,
   drawCircle(graphics, center, rotation, radius, 2, color, depth_test, thickness);
 }
 
-void drawWireCapsule(renderer::GraphicsDevice& graphics,
+void drawWireCapsule(rendering::GraphicsDevice& graphics,
                      const math::Vec3& center,
                      const math::Quat& rotation,
                      float radius,
@@ -504,7 +504,7 @@ void drawWireCapsule(renderer::GraphicsDevice& graphics,
                  depth_test, thickness * 0.75f);
 }
 
-void drawWireCylinder(renderer::GraphicsDevice& graphics,
+void drawWireCylinder(rendering::GraphicsDevice& graphics,
                       const math::Vec3& center,
                       const math::Quat& rotation,
                       float radius,
@@ -527,7 +527,7 @@ void drawWireCylinder(renderer::GraphicsDevice& graphics,
   }
 }
 
-void drawWireTaperedCapsule(renderer::GraphicsDevice& graphics,
+void drawWireTaperedCapsule(rendering::GraphicsDevice& graphics,
                             const math::Vec3& center,
                             const math::Quat& rotation,
                             float top_radius,
@@ -558,7 +558,7 @@ void drawWireTaperedCapsule(renderer::GraphicsDevice& graphics,
                  depth_test, thickness * 0.75f);
 }
 
-void drawShapeDesc(renderer::GraphicsDevice& graphics,
+void drawShapeDesc(rendering::GraphicsDevice& graphics,
                    const physics::PhysicsShapeDesc& shape,
                    const math::Vec3& position,
                    const math::Quat& rotation,
@@ -634,9 +634,9 @@ void drawShapeDesc(renderer::GraphicsDevice& graphics,
   }
 }
 
-void drawEntityColliders(renderer::GraphicsDevice& graphics,
-                         const ecs::World& world,
-                         ecs::Entity entity,
+void drawEntityColliders(rendering::GraphicsDevice& graphics,
+                         const world::World& world,
+                         world::Entity entity,
                          const math::Color& color,
                          bool depth_test,
                          float thickness) {

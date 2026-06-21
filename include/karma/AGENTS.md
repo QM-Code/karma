@@ -1,11 +1,11 @@
 # Public Header Rules
 
-New public headers must live under the layered layout and be included using the
-same public path, for example:
+New public headers must live at the root `karma/*.h` surface and be included
+using that same public path, for example:
 
-- `karma/world/components/transform.h`
-- `karma/simulation/physics/physics_system.h`
-- `karma/features/visual/particles/particle_system.h`
+- `karma/components.h`
+- `karma/physics.h`
+- `karma/visual.h`
 
 Do not add forwarding headers for old include paths.
 
@@ -13,6 +13,6 @@ Public headers should expose data contracts and narrow subsystem APIs. Keep
 backend internals and large implementation records in `src/` unless users
 actually need them.
 
-UI provider adapters use `include/karma/features/ui/<provider>`. Their public
-API should be a small provider-specific factory around the generic
-`runtime/app/UiLayer` contract.
+UI provider adapters live under `src/features/ui/<provider>`. Their public API
+should be a small provider-specific factory in `karma/ui.h` around the generic
+`karma/app.h` UI layer contract.

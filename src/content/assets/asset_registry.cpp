@@ -1,4 +1,4 @@
-#include "karma/content/assets/asset_registry.h"
+#include "karma/assets.h"
 
 #include <algorithm>
 #include <array>
@@ -12,13 +12,13 @@
 #include <utility>
 #include <vector>
 
-#include "karma/content/assets/asset_cache.h"
+#include "karma/assets.h"
 
 #include "asset_texture_internal.h"
 #include "material_registry_backing.h"
 #include "post_process_profile_registry_backing.h"
 
-namespace karma::content {
+namespace karma::assets {
 
 namespace {
 
@@ -82,7 +82,7 @@ void appendVectorRaw(std::vector<uint8_t>& out, const std::vector<T>& values) {
   }
 }
 
-std::string meshContentHash(const geometry::MeshData& mesh) {
+std::string meshContentHash(const world::MeshData& mesh) {
   std::vector<uint8_t> bytes;
   appendVectorRaw(bytes, mesh.vertices);
   appendVectorRaw(bytes, mesh.normals);
@@ -99,20 +99,20 @@ std::string meshContentHash(const geometry::MeshData& mesh) {
 }  // namespace
 
 struct AssetRegistry::Impl {
-  std::unordered_map<std::string, std::shared_ptr<geometry::MeshData>> meshes;
+  std::unordered_map<std::string, std::shared_ptr<world::MeshData>> meshes;
   std::unordered_map<std::string, std::shared_ptr<TextureAsset>> textures;
-  std::unordered_map<std::string, std::weak_ptr<geometry::MeshData>> mesh_payloads_by_hash;
+  std::unordered_map<std::string, std::weak_ptr<world::MeshData>> mesh_payloads_by_hash;
   std::unordered_map<std::string, std::weak_ptr<TextureAsset>> texture_payloads_by_hash;
   std::unordered_map<std::string, std::string> imported_texture_keys_by_source_hash;
-  std::unordered_map<std::string, particles::ParticleEffectAsset> particle_effects;
+  std::unordered_map<std::string, visual::particles::ParticleEffectAsset> particle_effects;
   std::unordered_map<std::string, AudioClipAsset> audio_clips;
   std::unordered_map<std::string, EnvironmentMapAsset> environment_maps;
-  std::unordered_map<std::string, animation::AnimationClip> animation_clips;
-  std::unordered_map<std::string, animation::Skeleton> skeletons;
-  std::unordered_map<std::string, animation::Skin> skins;
+  std::unordered_map<std::string, world::AnimationClip> animation_clips;
+  std::unordered_map<std::string, world::Skeleton> skeletons;
+  std::unordered_map<std::string, world::Skin> skins;
   std::unordered_map<std::string, GltfSceneAsset> gltf_scenes;
-  renderer::MaterialLibrary materials;
-  renderer::PostProcessProfileLibrary post_process_profiles;
+  rendering::MaterialLibrary materials;
+  rendering::PostProcessProfileLibrary post_process_profiles;
   uint64_t version = 0;
   uint64_t mesh_version = 0;
   uint64_t texture_version = 0;
@@ -192,21 +192,21 @@ void AssetRegistry::clear() {
   impl_->skins.clear();
   impl_->gltf_scenes.clear();
   impl_->materials.clear();
-  impl_->post_process_profiles = renderer::PostProcessProfileLibrary{};
+  impl_->post_process_profiles = rendering::PostProcessProfileLibrary{};
   bumpMeshVersion();
   bumpTextureVersion();
 }
 
-bool AssetRegistry::registerMeshAsset(const std::string& key, geometry::MeshData mesh) {
+bool AssetRegistry::registerMeshAsset(const std::string& key, world::MeshData mesh) {
   if (!isValidAssetKey(key)) {
     return false;
   }
   const std::string hash = meshContentHash(mesh);
-  std::shared_ptr<geometry::MeshData> payload;
+  std::shared_ptr<world::MeshData> payload;
   if (auto existing = impl_->mesh_payloads_by_hash[hash].lock()) {
     payload = std::move(existing);
   } else {
-    payload = std::make_shared<geometry::MeshData>(std::move(mesh));
+    payload = std::make_shared<world::MeshData>(std::move(mesh));
     impl_->mesh_payloads_by_hash[hash] = payload;
   }
   impl_->meshes[key] = std::move(payload);
@@ -222,7 +222,7 @@ bool AssetRegistry::unregisterMeshAsset(const std::string& key) {
   return true;
 }
 
-const geometry::MeshData* AssetRegistry::findMeshAsset(std::string_view key) const {
+const world::MeshData* AssetRegistry::findMeshAsset(std::string_view key) const {
   const auto it = impl_->meshes.find(std::string(key));
   return it != impl_->meshes.end() && it->second ? it->second.get() : nullptr;
 }
@@ -259,7 +259,7 @@ const TextureAsset* AssetRegistry::findTextureAsset(std::string_view key) const 
 
 std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(
     const std::string& material_key,
-    renderer::MaterialAssetDesc& material) {
+    rendering::MaterialAssetDesc& material) {
   (void)material_key;
   std::vector<std::string> keys;
   if (material.imported_material == nullptr ||
@@ -268,7 +268,7 @@ std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(
   }
 
   keys.reserve(material.imported_material->textures.size());
-  for (const renderer::ImportedMaterialTexture& imported :
+  for (const rendering::ImportedMaterialTexture& imported :
        material.imported_material->textures) {
     if (imported.source_key.empty()) {
       continue;
@@ -311,7 +311,7 @@ std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(
 }
 
 bool AssetRegistry::registerMaterialAsset(const std::string& key,
-                                          renderer::MaterialAssetDesc material) {
+                                          rendering::MaterialAssetDesc material) {
   if (!isValidAssetKey(key)) {
     return false;
   }
@@ -321,14 +321,14 @@ bool AssetRegistry::registerMaterialAsset(const std::string& key,
 }
 
 bool AssetRegistry::registerMaterialAsset(const std::string& key,
-                                          renderer::MaterialDesc surface) {
-  renderer::MaterialAssetDesc material{};
+                                          rendering::MaterialDesc surface) {
+  rendering::MaterialAssetDesc material{};
   material.surface = std::move(surface);
   return registerMaterialAsset(key, std::move(material));
 }
 
 bool AssetRegistry::registerMaterialVariant(const std::string& key,
-                                            renderer::MaterialVariantDesc material) {
+                                            rendering::MaterialVariantDesc material) {
   if (!isValidAssetKey(key) || !isValidAssetKey(material.base_material_key)) {
     return false;
   }
@@ -340,9 +340,9 @@ bool AssetRegistry::registerMaterialVariant(const std::string& key,
 bool AssetRegistry::registerMaterialVariant(
     const std::string& key,
     const std::string& base_material_key,
-    std::unordered_map<std::string, renderer::MaterialParameterValue> params,
+    std::unordered_map<std::string, rendering::MaterialParameterValue> params,
     std::unordered_map<std::string, std::string> textures) {
-  renderer::MaterialVariantDesc material{};
+  rendering::MaterialVariantDesc material{};
   material.base_material_key = base_material_key;
   material.params = std::move(params);
   material.textures = std::move(textures);
@@ -357,25 +357,25 @@ bool AssetRegistry::unregisterMaterial(const std::string& key) {
   return removed;
 }
 
-const renderer::MaterialAssetDesc* AssetRegistry::findMaterialAsset(
+const rendering::MaterialAssetDesc* AssetRegistry::findMaterialAsset(
     std::string_view key) const {
   return impl_->materials.findAsset(std::string(key));
 }
 
-const renderer::MaterialVariantDesc* AssetRegistry::findMaterialVariant(
+const rendering::MaterialVariantDesc* AssetRegistry::findMaterialVariant(
     std::string_view key) const {
   return impl_->materials.findVariant(std::string(key));
 }
 
-std::optional<renderer::ResolvedMaterialDesc> AssetRegistry::resolveMaterial(
+std::optional<rendering::ResolvedMaterialDesc> AssetRegistry::resolveMaterial(
     std::string_view key) const {
   return impl_->materials.resolve(std::string(key));
 }
 
 bool AssetRegistry::registerPostProcessProfile(const std::string& key,
-                                               renderer::PostProcessSettings profile) {
+                                               rendering::PostProcessSettings profile) {
   const bool default_profile_key =
-      key.empty() || key == renderer::kDefaultPostProcessProfileKey;
+      key.empty() || key == rendering::kDefaultPostProcessProfileKey;
   if (!default_profile_key && !isValidAssetKey(key)) {
     return false;
   }
@@ -392,18 +392,18 @@ bool AssetRegistry::unregisterPostProcessProfile(const std::string& key) {
   return removed;
 }
 
-const renderer::PostProcessSettings* AssetRegistry::findPostProcessProfile(
+const rendering::PostProcessSettings* AssetRegistry::findPostProcessProfile(
     std::string_view key) const {
   return impl_->post_process_profiles.find(key);
 }
 
-const renderer::PostProcessSettings& AssetRegistry::resolvePostProcessProfile(
+const rendering::PostProcessSettings& AssetRegistry::resolvePostProcessProfile(
     std::string_view key) const {
   return impl_->post_process_profiles.resolve(key);
 }
 
 bool AssetRegistry::registerParticleEffect(const std::string& key,
-                                           particles::ParticleEffectAsset effect) {
+                                           visual::particles::ParticleEffectAsset effect) {
   if (!isValidAssetKey(key)) {
     return false;
   }
@@ -420,7 +420,7 @@ bool AssetRegistry::unregisterParticleEffect(const std::string& key) {
   return true;
 }
 
-const particles::ParticleEffectAsset* AssetRegistry::findParticleEffect(
+const visual::particles::ParticleEffectAsset* AssetRegistry::findParticleEffect(
     std::string_view key) const {
   return findInMap(impl_->particle_effects, key);
 }
@@ -469,7 +469,7 @@ const EnvironmentMapAsset* AssetRegistry::findEnvironmentMap(std::string_view ke
 }
 
 bool AssetRegistry::registerAnimationClip(const std::string& key,
-                                          animation::AnimationClip clip) {
+                                          world::AnimationClip clip) {
   if (!isValidAssetKey(key)) {
     return false;
   }
@@ -486,11 +486,11 @@ bool AssetRegistry::unregisterAnimationClip(const std::string& key) {
   return true;
 }
 
-const animation::AnimationClip* AssetRegistry::findAnimationClip(std::string_view key) const {
+const world::AnimationClip* AssetRegistry::findAnimationClip(std::string_view key) const {
   return findInMap(impl_->animation_clips, key);
 }
 
-bool AssetRegistry::registerSkeleton(const std::string& key, animation::Skeleton skeleton) {
+bool AssetRegistry::registerSkeleton(const std::string& key, world::Skeleton skeleton) {
   if (!isValidAssetKey(key)) {
     return false;
   }
@@ -507,11 +507,11 @@ bool AssetRegistry::unregisterSkeleton(const std::string& key) {
   return true;
 }
 
-const animation::Skeleton* AssetRegistry::findSkeleton(std::string_view key) const {
+const world::Skeleton* AssetRegistry::findSkeleton(std::string_view key) const {
   return findInMap(impl_->skeletons, key);
 }
 
-bool AssetRegistry::registerSkin(const std::string& key, animation::Skin skin) {
+bool AssetRegistry::registerSkin(const std::string& key, world::Skin skin) {
   if (!isValidAssetKey(key)) {
     return false;
   }
@@ -528,7 +528,7 @@ bool AssetRegistry::unregisterSkin(const std::string& key) {
   return true;
 }
 
-const animation::Skin* AssetRegistry::findSkin(std::string_view key) const {
+const world::Skin* AssetRegistry::findSkin(std::string_view key) const {
   return findInMap(impl_->skins, key);
 }
 
@@ -553,4 +553,4 @@ const GltfSceneAsset* AssetRegistry::findGltfSceneAsset(std::string_view key) co
   return findInMap(impl_->gltf_scenes, key);
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

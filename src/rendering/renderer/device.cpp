@@ -1,6 +1,7 @@
-#include "karma/rendering/renderer/device.h"
+#include "karma/rendering.h"
 
-#include "karma/core/time.h"
+#include "karma/core.h"
+#include "private/rendering/backend.hpp"
 
 #include <condition_variable>
 #include <cstddef>
@@ -16,7 +17,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace karma::renderer {
+namespace karma::rendering {
 namespace {
 
 bool envFlagEnabled(const char* value) {
@@ -80,7 +81,7 @@ struct OwnedInstancedDrawItem {
         visible(item.visible),
         shadow_visible(item.shadow_visible) {}
 
-  void submit(renderer_backend::Backend& backend) const {
+  void submit(rendering::backend::Backend& backend) const {
     InstancedDrawItem item{};
     item.instance = instance;
     item.mesh = mesh;
@@ -108,7 +109,7 @@ struct OwnedInstancedDrawItem {
 
 class GraphicsDevice::RenderScheduler {
  public:
-  using Backend = renderer_backend::Backend;
+  using Backend = rendering::backend::Backend;
   using RenderCommand = std::function<void(Backend&)>;
 
   RenderScheduler(karma::platform::Window& window, const GraphicsDeviceCreateInfo& create_info)
@@ -116,7 +117,7 @@ class GraphicsDevice::RenderScheduler {
     if (threaded_) {
       startRenderThread(window, create_info);
     } else {
-      backend_ = renderer_backend::CreateGraphicsBackend(window, create_info);
+      backend_ = rendering::backend::CreateGraphicsBackend(window, create_info);
       refreshCachedStats(0.0f, 0.0f, 0.0f);
     }
   }
@@ -330,7 +331,7 @@ class GraphicsDevice::RenderScheduler {
     worker_ = std::thread([this, &window, create_info, init_promise]() mutable {
       render_thread_id_ = std::this_thread::get_id();
       try {
-        backend_ = renderer_backend::CreateGraphicsBackend(window, create_info);
+        backend_ = rendering::backend::CreateGraphicsBackend(window, create_info);
         {
           std::lock_guard<std::mutex> lock(stats_mutex_);
           backend_available_ = backend_ != nullptr;
@@ -581,14 +582,14 @@ void GraphicsDevice::getFramebufferSize(int& width, int& height) const {
   height = framebuffer_height_;
 }
 
-MeshId GraphicsDevice::createMesh(const geometry::MeshData& mesh) {
+MeshId GraphicsDevice::createMesh(const world::MeshData& mesh) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   return scheduler_ ? scheduler_->invoke([&](RenderScheduler::Backend* backend) {
     return backend != nullptr ? backend->createMesh(mesh) : kInvalidMesh;
   }) : kInvalidMesh;
 }
 
-void GraphicsDevice::updateMesh(MeshId mesh, const geometry::MeshData& data) {
+void GraphicsDevice::updateMesh(MeshId mesh, const world::MeshData& data) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
     scheduler_->invokeVoid([&](RenderScheduler::Backend* backend) {
@@ -619,7 +620,7 @@ bool GraphicsDevice::getMeshBounds(MeshId mesh, glm::vec3& center, float& radius
 
 bool GraphicsDevice::getMeshMaterialSlots(
     MeshId mesh,
-    std::vector<geometry::MeshMaterialSlot>& out_slots) const {
+    std::vector<world::MeshMaterialSlot>& out_slots) const {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (!scheduler_) {
     out_slots.clear();
@@ -635,7 +636,7 @@ bool GraphicsDevice::getMeshMaterialSlots(
 }
 
 MeshId GraphicsDevice::registerRuntimeMesh(const std::string& key,
-                                           const geometry::MeshData& mesh) {
+                                           const world::MeshData& mesh) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (key.empty() || scheduler_ == nullptr || !scheduler_->hasBackend()) {
     return kInvalidMesh;
@@ -1213,10 +1214,10 @@ void GraphicsDevice::setExposure(float exposure) {
 
 TextureId GraphicsDevice::createTextureRGBA8(int width, int height, const void* pixels) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
-  renderer::TextureDesc desc{};
+  rendering::TextureDesc desc{};
   desc.width = width;
   desc.height = height;
-  desc.format = renderer::TextureFormat::RGBA8;
+  desc.format = rendering::TextureFormat::RGBA8;
   desc.srgb = false;
   desc.generate_mips = false;
   const TextureId id = createTexture(desc);
@@ -1249,7 +1250,7 @@ void GraphicsDevice::updateTextureRGBA8(TextureId texture, int width, int height
   }
 }
 
-void GraphicsDevice::renderUi(const karma::renderer::UIDrawData& draw_data) {
+void GraphicsDevice::renderUi(const karma::rendering::UIDrawData& draw_data) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
     scheduler_->recordFrameCommand([draw_data](RenderScheduler::Backend& backend) {
@@ -1258,14 +1259,4 @@ void GraphicsDevice::renderUi(const karma::renderer::UIDrawData& draw_data) {
   }
 }
 
-renderer_backend::Backend* GraphicsDevice::backend() {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
-  return scheduler_ ? scheduler_->backendIfSynchronous() : nullptr;
-}
-
-const renderer_backend::Backend* GraphicsDevice::backend() const {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
-  return scheduler_ ? scheduler_->backendIfSynchronous() : nullptr;
-}
-
-}  // namespace karma::renderer
+}  // namespace karma::rendering

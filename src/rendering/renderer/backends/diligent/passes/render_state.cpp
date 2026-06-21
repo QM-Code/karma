@@ -11,9 +11,9 @@
 
 #include <spdlog/spdlog.h>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
-void DiligentBackend::setCamera(const renderer::CameraData& camera) {
+void DiligentBackend::setCamera(const rendering::CameraData& camera) {
   camera_ = camera;
 }
 
@@ -21,7 +21,7 @@ void DiligentBackend::setCameraActive(bool active) {
   camera_active_ = active;
 }
 
-void DiligentBackend::setDirectionalLight(const renderer::DirectionalLightData& light) {
+void DiligentBackend::setDirectionalLight(const rendering::DirectionalLightData& light) {
   directional_light_ = light;
   if (glm::length(directional_light_.direction) < 1e-4f) {
     directional_light_.direction = glm::vec3(0.3f, -1.0f, 0.2f);
@@ -34,7 +34,7 @@ void DiligentBackend::setDirectionalLight(const renderer::DirectionalLightData& 
   }
 }
 
-void DiligentBackend::setLights(const std::vector<renderer::LightData>& lights) {
+void DiligentBackend::setLights(const std::vector<rendering::LightData>& lights) {
   lights_ = lights;
   for (auto& light : lights_) {
     if (light.intensity < 0.0f) {
@@ -144,7 +144,7 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
 
 void DiligentBackend::setVsync(bool enabled) {
   vsync_enabled_ = enabled;
-  present_mode_ = renderer::PresentMode::Auto;
+  present_mode_ = rendering::PresentMode::Auto;
   if (vsync_enabled_) {
     spdlog::info(
         "Diligent Vulkan present policy: vsync FIFO/FIFO_RELAXED pacing enabled");
@@ -301,7 +301,7 @@ void DiligentBackend::setForwardPlusSettings(int tile_size,
       static_cast<uint32_t>(forward_plus_max_local_lights_);
 }
 
-renderer::ForwardPlusStats DiligentBackend::getForwardPlusStats() const {
+rendering::ForwardPlusStats DiligentBackend::getForwardPlusStats() const {
   return forward_plus_stats_;
 }
 
@@ -315,16 +315,16 @@ void DiligentBackend::setInstancingCpuTimings(float render_system_extraction_ms,
   }
 }
 
-renderer::InstancingStats DiligentBackend::getInstancingStats() const {
+rendering::InstancingStats DiligentBackend::getInstancingStats() const {
   return instancing_stats_;
 }
 
-renderer::ParticlePassStats DiligentBackend::getParticlePassStats() const {
+rendering::ParticlePassStats DiligentBackend::getParticlePassStats() const {
   return particle_pass_stats_;
 }
 
-renderer::RendererCommandStats DiligentBackend::getRendererCommandStats() const {
-  renderer::RendererCommandStats out{};
+rendering::RendererCommandStats DiligentBackend::getRendererCommandStats() const {
+  rendering::RendererCommandStats out{};
   if (!context_) {
     return out;
   }
@@ -367,11 +367,11 @@ renderer::RendererCommandStats DiligentBackend::getRendererCommandStats() const 
   return out;
 }
 
-renderer::RendererFrameTimingStats DiligentBackend::getRendererFrameTimingStats() const {
+rendering::RendererFrameTimingStats DiligentBackend::getRendererFrameTimingStats() const {
   return last_frame_timing_stats_;
 }
 
-void DiligentBackend::setParticleSystemStats(const renderer::ParticlePassStats& stats) {
+void DiligentBackend::setParticleSystemStats(const rendering::ParticlePassStats& stats) {
   particle_pass_stats_.effect_binding_updates = stats.effect_binding_updates;
   particle_pass_stats_.simulated_emitters = stats.simulated_emitters;
   particle_pass_stats_.visible_emitters = stats.visible_emitters;
@@ -488,8 +488,8 @@ void DiligentBackend::setExposure(float exposure) {
 }
 
 void DiligentBackend::applyPostProcessSettingsForPass(
-    const renderer::PostProcessSettings& settings) {
-  renderer::PostProcessSettings clamped = settings;
+    const rendering::PostProcessSettings& settings) {
+  rendering::PostProcessSettings clamped = settings;
   clamped.bloom_threshold = std::clamp(clamped.bloom_threshold, 0.0f, 16.0f);
   clamped.bloom_intensity = std::clamp(clamped.bloom_intensity, 0.0f, 8.0f);
   clamped.bloom_radius = std::clamp(clamped.bloom_radius, 0.25f, 8.0f);
@@ -514,4 +514,4 @@ void DiligentBackend::applyPostProcessSettingsForPass(
   post_process_settings_ = clamped;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

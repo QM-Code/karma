@@ -1,14 +1,14 @@
-#include "karma/media/audio/backend.hpp"
+#include "private/audio/backend.hpp"
 
 #if defined(KARMA_AUDIO_BACKEND_MINIAUDIO)
-#include "karma/media/audio/backends/miniaudio/backend.hpp"
+#include "private/audio/backends/miniaudio/backend.hpp"
 #endif
 
 #if defined(KARMA_AUDIO_BACKEND_SDL)
-#include "karma/media/audio/backends/sdl/backend.hpp"
+#include "private/audio/backends/sdl/backend.hpp"
 #endif
 
-namespace karma::audio_backend {
+namespace karma::audio::backend {
 
 std::unique_ptr<Backend> CreateAudioBackend() {
 #if defined(KARMA_AUDIO_BACKEND_MINIAUDIO)
@@ -20,4 +20,4 @@ std::unique_ptr<Backend> CreateAudioBackend() {
 #endif
 }
 
-}  // namespace karma::audio_backend
+}  // namespace karma::audio::backend

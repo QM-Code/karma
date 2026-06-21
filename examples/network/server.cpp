@@ -7,9 +7,9 @@
 
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/vec3.h"
+#include "karma/math.h"
 #include "karma/server.h"
-#include "karma/world/components/transform.h"
+#include "karma/components.h"
 
 #include "shared.h"
 
@@ -18,7 +18,7 @@ namespace demo = karma::examples::network_demo;
 namespace {
 
 void runServer(uint16_t port) {
-  auto transport = karma::net::createDefaultServerTransport(port, 16, 2);
+  auto transport = karma::network::createDefaultServerTransport(port, 16, 2);
   if (!transport) {
     spdlog::error("Server: failed to create transport");
     return;
@@ -26,9 +26,9 @@ void runServer(uint16_t port) {
 
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
-  karma::ecs::World world;
+  karma::world::World world;
 
-  std::unordered_map<uint32_t, karma::ecs::Entity> players;
+  std::unordered_map<uint32_t, karma::world::Entity> players;
   std::unordered_map<uint32_t, demo::PlayerInput> inputs;
   uint32_t tick = 0;
   bool targeted_message_sent = false;
@@ -42,9 +42,9 @@ void runServer(uint16_t port) {
       });
 
   network_module.setEventHandler(
-      [&](const karma::net::SessionEvent& event, karma::ecs::World& world) {
+      [&](const karma::network::SessionEvent& event, karma::world::World& world) {
         switch (event.type) {
-          case karma::net::SessionEventType::PeerConnected: {
+          case karma::network::SessionEventType::PeerConnected: {
             const float offset = static_cast<float>(players.size()) * 2.0f;
             const std::string player_name = "player_" + std::to_string(event.peer.value);
             players[event.peer.value] =
@@ -59,11 +59,11 @@ void runServer(uint16_t port) {
             const std::string group_notice =
                 "players group now includes peer " + std::to_string(event.peer.value);
             network_module.session().sendCustomWhere(
-                [](const karma::net::SessionPeer& peer) {
+                [](const karma::network::SessionPeer& peer) {
                   return peer.groups.find("players") != peer.groups.end();
                 },
                 demo::asBytes(group_notice),
-                karma::net::Delivery::Reliable,
+                karma::network::Delivery::Reliable,
                 0,
                 tick);
 
@@ -72,7 +72,7 @@ void runServer(uint16_t port) {
                   "targeted-only hello for peer " + std::to_string(event.peer.value);
               network_module.session().sendCustomTo(event.peer,
                                                     demo::asBytes(targeted),
-                                                    karma::net::Delivery::Reliable,
+                                                    karma::network::Delivery::Reliable,
                                                     0,
                                                     tick);
               targeted_message_sent = true;
@@ -81,14 +81,14 @@ void runServer(uint16_t port) {
             }
             break;
           }
-          case karma::net::SessionEventType::PeerDisconnected: {
+          case karma::network::SessionEventType::PeerDisconnected: {
             auto it = players.find(event.peer.value);
             if (it != players.end()) {
               if (world.isAlive(it->second) &&
                   world.has<karma::components::NetworkIdentityComponent>(it->second)) {
                 const auto id =
                     world.get<karma::components::NetworkIdentityComponent>(it->second).id;
-                for (const karma::net::PeerId peer : network_module.session().peers()) {
+                for (const karma::network::PeerId peer : network_module.session().peers()) {
                   network_module.replicationState().sendDespawn(network_module.session(),
                                                                 id,
                                                                 peer,
@@ -104,14 +104,14 @@ void runServer(uint16_t port) {
             spdlog::info("Server: peer {} left", event.peer.value);
             break;
           }
-          case karma::net::SessionEventType::InputCommand: {
+          case karma::network::SessionEventType::InputCommand: {
             demo::PlayerInput input{};
             if (demo::decodeInput(event.payload, input)) {
               inputs[event.peer.value] = input;
             }
             break;
           }
-          case karma::net::SessionEventType::ProtocolError:
+          case karma::network::SessionEventType::ProtocolError:
             spdlog::warn("Server: protocol error from peer {}", event.peer.value);
             break;
           default:

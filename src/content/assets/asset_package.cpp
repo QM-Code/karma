@@ -1,4 +1,4 @@
-#include "karma/content/assets/asset_package.h"
+#include "karma/assets.h"
 
 #include <atomic>
 #include <chrono>
@@ -13,12 +13,12 @@
 #include <assimp/version.h>
 #include <nlohmann/json.hpp>
 
-#include "karma/content/materials/material_loader.h"
+#include "karma/assets.h"
 
 #include "asset_source_import.h"
 #include "../importers/gltf_scene_import_internal.h"
 
-namespace karma::content {
+namespace karma::assets {
 
 namespace {
 
@@ -144,20 +144,20 @@ bool copyAssetTo(AssetRegistry& target,
     return true;
   }
   if (asset.type == "mesh") {
-    const geometry::MeshData* mesh = source.findMeshAsset(asset.key);
+    const world::MeshData* mesh = source.findMeshAsset(asset.key);
     if (mesh == nullptr || !target.registerMeshAsset(asset.key, *mesh)) {
       return fail(diagnostic, "failed to commit mesh asset: " + asset.key);
     }
     return true;
   }
   if (asset.type == "material") {
-    if (const renderer::MaterialAssetDesc* material = source.findMaterialAsset(asset.key)) {
+    if (const rendering::MaterialAssetDesc* material = source.findMaterialAsset(asset.key)) {
       if (!target.registerMaterialAsset(asset.key, *material)) {
         return fail(diagnostic, "failed to commit material asset: " + asset.key);
       }
       return true;
     }
-    if (const renderer::MaterialVariantDesc* variant = source.findMaterialVariant(asset.key)) {
+    if (const rendering::MaterialVariantDesc* variant = source.findMaterialVariant(asset.key)) {
       if (!target.registerMaterialVariant(asset.key, *variant)) {
         return fail(diagnostic, "failed to commit material variant: " + asset.key);
       }
@@ -166,7 +166,7 @@ bool copyAssetTo(AssetRegistry& target,
     return fail(diagnostic, "missing staged material asset: " + asset.key);
   }
   if (asset.type == "particle_effect") {
-    const particles::ParticleEffectAsset* effect = source.findParticleEffect(asset.key);
+    const visual::particles::ParticleEffectAsset* effect = source.findParticleEffect(asset.key);
     if (effect == nullptr || !target.registerParticleEffect(asset.key, *effect)) {
       return fail(diagnostic, "failed to commit particle effect: " + asset.key);
     }
@@ -187,21 +187,21 @@ bool copyAssetTo(AssetRegistry& target,
     return true;
   }
   if (asset.type == "animation_clip") {
-    const animation::AnimationClip* clip = source.findAnimationClip(asset.key);
+    const world::AnimationClip* clip = source.findAnimationClip(asset.key);
     if (clip == nullptr || !target.registerAnimationClip(asset.key, *clip)) {
       return fail(diagnostic, "failed to commit animation clip: " + asset.key);
     }
     return true;
   }
   if (asset.type == "skeleton") {
-    const animation::Skeleton* skeleton = source.findSkeleton(asset.key);
+    const world::Skeleton* skeleton = source.findSkeleton(asset.key);
     if (skeleton == nullptr || !target.registerSkeleton(asset.key, *skeleton)) {
       return fail(diagnostic, "failed to commit skeleton: " + asset.key);
     }
     return true;
   }
   if (asset.type == "skin") {
-    const animation::Skin* skin = source.findSkin(asset.key);
+    const world::Skin* skin = source.findSkin(asset.key);
     if (skin == nullptr || !target.registerSkin(asset.key, *skin)) {
       return fail(diagnostic, "failed to commit skin: " + asset.key);
     }
@@ -343,7 +343,7 @@ bool importEntry(AssetRegistry& assets,
     if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
       return false;
     }
-    scene::GltfSceneLoadOptions load_options{};
+    world::GltfSceneLoadOptions load_options{};
     load_options.import_meshes = entry.value("import_meshes", true);
     load_options.import_lights = entry.value("import_lights", true);
     GltfSceneAsset scene = detail::importGltfSceneAsset(assets, key, source_path, load_options);
@@ -510,19 +510,19 @@ bool writePackageAssetBlob(AssetCache& cache,
            cache.writeTexture(asset.cache_blob_key, *texture, diagnostic);
   }
   if (asset.type == "mesh") {
-    const geometry::MeshData* mesh = assets.findMeshAsset(asset.key);
+    const world::MeshData* mesh = assets.findMeshAsset(asset.key);
     return mesh != nullptr && cache.writeMesh(asset.cache_blob_key, *mesh, diagnostic);
   }
   if (asset.type == "material") {
-    if (const renderer::MaterialVariantDesc* variant = assets.findMaterialVariant(asset.key)) {
+    if (const rendering::MaterialVariantDesc* variant = assets.findMaterialVariant(asset.key)) {
       return cache.writeMaterialVariant(asset.cache_blob_key, *variant, diagnostic);
     }
-    const renderer::MaterialAssetDesc* material = assets.findMaterialAsset(asset.key);
+    const rendering::MaterialAssetDesc* material = assets.findMaterialAsset(asset.key);
     return material != nullptr &&
            cache.writeMaterialAsset(asset.cache_blob_key, *material, diagnostic);
   }
   if (asset.type == "particle_effect") {
-    const particles::ParticleEffectAsset* effect = assets.findParticleEffect(asset.key);
+    const visual::particles::ParticleEffectAsset* effect = assets.findParticleEffect(asset.key);
     return effect != nullptr &&
            cache.writeParticleEffect(asset.cache_blob_key, *effect, diagnostic);
   }
@@ -531,16 +531,16 @@ bool writePackageAssetBlob(AssetCache& cache,
     return scene != nullptr && cache.writeGltfScene(asset.cache_blob_key, *scene, diagnostic);
   }
   if (asset.type == "animation_clip") {
-    const animation::AnimationClip* clip = assets.findAnimationClip(asset.key);
+    const world::AnimationClip* clip = assets.findAnimationClip(asset.key);
     return clip != nullptr && cache.writeAnimationClip(asset.cache_blob_key, *clip, diagnostic);
   }
   if (asset.type == "skeleton") {
-    const animation::Skeleton* skeleton = assets.findSkeleton(asset.key);
+    const world::Skeleton* skeleton = assets.findSkeleton(asset.key);
     return skeleton != nullptr &&
            cache.writeSkeleton(asset.cache_blob_key, *skeleton, diagnostic);
   }
   if (asset.type == "skin") {
-    const animation::Skin* skin = assets.findSkin(asset.key);
+    const world::Skin* skin = assets.findSkin(asset.key);
     return skin != nullptr && cache.writeSkin(asset.cache_blob_key, *skin, diagnostic);
   }
   return fail(diagnostic, "unsupported cache asset type: " + asset.type);
@@ -1037,4 +1037,4 @@ void AssetPackageStore::clear() {
   keys_by_instance_id_.clear();
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

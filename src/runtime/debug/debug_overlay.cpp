@@ -1,4 +1,4 @@
-#include "karma/runtime/debug/debug_overlay.h"
+#include "karma/app.h"
 
 #include <algorithm>
 #include <array>
@@ -12,30 +12,30 @@
 
 #include <imgui.h>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/world/ecs/world.h"
-#include "karma/world/components/tag.h"
-#include "karma/world/components/audio_listener.h"
-#include "karma/world/components/audio_source.h"
-#include "karma/world/components/animator.h"
-#include "karma/world/components/camera.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/environment.h"
-#include "karma/world/components/layers.h"
-#include "karma/world/components/light.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/character_controller.h"
-#include "karma/world/components/rigidbody.h"
-#include "karma/world/components/script.h"
-#include "karma/world/components/deformable_mesh.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/visibility.h"
-#include "karma/world/scene/scene.h"
-#include "karma/world/scene/node.h"
-#include "karma/world/systems/system_graph.h"
-#include "karma/rendering/renderer/device.h"
+#include "karma/assets.h"
+#include "karma/world.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/rendering.h"
 
-namespace karma::debug {
+namespace karma::app {
 
 namespace {
 class ScopedImGuiContext {
@@ -179,7 +179,7 @@ const char* deformationPathName(components::DeformationPath path) {
   return "Unknown";
 }
 
-std::string debugMaterialVariantKey(ecs::Entity entity,
+std::string debugMaterialVariantKey(world::Entity entity,
                                     uint32_t slot,
                                     std::string_view base_key) {
   std::string key(base_key.empty() ? "material" : base_key);
@@ -287,7 +287,7 @@ bool inputTextString(const char* label, std::string& value) {
   return ImGui::IsItemDeactivatedAfterEdit();
 }
 
-std::string nodeDisplayName(const scene::Node& node, ecs::World* world) {
+std::string nodeDisplayName(const world::Node& node, world::World* world) {
   if (world && node.entity.isValid() && world->has<components::TagComponent>(node.entity)) {
     const auto& tag = world->get<components::TagComponent>(node.entity);
     if (!tag.name.empty()) {
@@ -305,7 +305,7 @@ std::string lowerCopy(std::string_view value) {
   return lowered;
 }
 
-std::string nodeSearchText(const scene::Node& node, ecs::World* world) {
+std::string nodeSearchText(const world::Node& node, world::World* world) {
   std::string text = nodeDisplayName(node, world);
   text += " node ";
   text += std::to_string(node.id);
@@ -318,8 +318,8 @@ std::string nodeSearchText(const scene::Node& node, ecs::World* world) {
   return text;
 }
 
-bool nodeMatchesFilter(const scene::Node& node,
-                       ecs::World* world,
+bool nodeMatchesFilter(const world::Node& node,
+                       world::World* world,
                        std::string_view filter_lower) {
   if (filter_lower.empty()) {
     return true;
@@ -328,9 +328,9 @@ bool nodeMatchesFilter(const scene::Node& node,
   return search_text.find(filter_lower) != std::string::npos;
 }
 
-bool nodeHasFilterMatch(const scene::Scene& scene,
-                        ecs::World* world,
-                        scene::NodeId id,
+bool nodeHasFilterMatch(const world::Scene& scene,
+                        world::World* world,
+                        world::NodeId id,
                         std::string_view filter_lower) {
   if (!scene.isAlive(id)) {
     return false;
@@ -339,7 +339,7 @@ bool nodeHasFilterMatch(const scene::Scene& scene,
   if (nodeMatchesFilter(node, world, filter_lower)) {
     return true;
   }
-  for (scene::NodeId child : node.children) {
+  for (world::NodeId child : node.children) {
     if (nodeHasFilterMatch(scene, world, child, filter_lower)) {
       return true;
     }
@@ -347,10 +347,10 @@ bool nodeHasFilterMatch(const scene::Scene& scene,
   return false;
 }
 
-bool drawNode(const scene::Scene& scene,
-              ecs::World* world,
-              scene::NodeId id,
-              scene::NodeId& selected,
+bool drawNode(const world::Scene& scene,
+              world::World* world,
+              world::NodeId id,
+              world::NodeId& selected,
               std::string_view filter_lower) {
   if (!scene.isAlive(id)) {
     return false;
@@ -362,7 +362,7 @@ bool drawNode(const scene::Scene& scene,
   }
 
   bool has_visible_children = false;
-  for (scene::NodeId child : node.children) {
+  for (world::NodeId child : node.children) {
     if (!filter_active || nodeHasFilterMatch(scene, world, child, filter_lower)) {
       has_visible_children = true;
       break;
@@ -384,7 +384,7 @@ bool drawNode(const scene::Scene& scene,
     selected = id;
   }
   if (open) {
-    for (scene::NodeId child : node.children) {
+    for (world::NodeId child : node.children) {
       drawNode(scene, world, child, selected, filter_lower);
     }
     ImGui::TreePop();
@@ -393,11 +393,11 @@ bool drawNode(const scene::Scene& scene,
 }
 }  // namespace
 
-DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
-                                     scene::Scene* scene,
-                                     systems::SystemGraph* systems,
-                                     renderer::GraphicsDevice* graphics,
-                                     content::AssetRegistry* assets,
+DebugOverlayLayer::DebugOverlayLayer(world::World* world,
+                                     world::Scene* scene,
+                                     world::SystemGraph* systems,
+                                     rendering::GraphicsDevice* graphics,
+                                     assets::AssetRegistry* assets,
                                      int shadow_map_size,
                                      float shadow_bias,
                                      int shadow_pcf_radius,
@@ -444,7 +444,7 @@ DebugOverlayLayer::DebugOverlayLayer(ecs::World* world,
   io.BackendPlatformName = "karma";
   io.BackendRendererName = "karma_ui_draw";
   if (graphics_) {
-    const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
+    const rendering::ForwardPlusStats stats = graphics_->getForwardPlusStats();
     forward_plus_tile_size_ = std::max(4, static_cast<int>(stats.tile_size));
     forward_plus_max_lights_per_tile_ =
         std::max(8, static_cast<int>(stats.max_lights_per_tile));
@@ -535,7 +535,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
     return;
   }
 
-  renderer::UIDrawData& out = ctx.drawData();
+  rendering::UIDrawData& out = ctx.drawData();
   out.clear();
   out.vertices.reserve(static_cast<size_t>(draw_data->TotalVtxCount));
   out.indices.reserve(static_cast<size_t>(draw_data->TotalIdxCount));
@@ -547,7 +547,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
     const ImDrawList* cmd_list = draw_data->CmdLists[n];
     for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
       const ImDrawVert& v = cmd_list->VtxBuffer[i];
-      renderer::UIVertex out_v{};
+      rendering::UIVertex out_v{};
       out_v.x = v.pos.x;
       out_v.y = v.pos.y;
       out_v.u = v.uv.x;
@@ -575,7 +575,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
         continue;
       }
 
-      renderer::UIDrawCmd out_cmd{};
+      rendering::UIDrawCmd out_cmd{};
       out_cmd.index_offset = global_idx_offset;
       out_cmd.index_count = cmd.ElemCount;
       out_cmd.scissor_enabled = true;
@@ -662,18 +662,18 @@ void DebugOverlayLayer::drawSceneHierarchyPane() {
 
   ImGui::Separator();
 
-  if (selected_node_ != scene::Node::kInvalidId && !scene_->isAlive(selected_node_)) {
-    selected_node_ = scene::Node::kInvalidId;
+  if (selected_node_ != world::Node::kInvalidId && !scene_->isAlive(selected_node_)) {
+    selected_node_ = world::Node::kInvalidId;
   }
 
   const std::string filter_lower = lowerCopy(hierarchy_filter_);
   bool drew_any_node = false;
   const auto& nodes = scene_->nodes();
-  for (scene::NodeId id = 0; id < nodes.size(); ++id) {
+  for (world::NodeId id = 0; id < nodes.size(); ++id) {
     if (!scene_->isAlive(id)) {
       continue;
     }
-    if (nodes[id].parent != scene::Node::kInvalidId) {
+    if (nodes[id].parent != world::Node::kInvalidId) {
       continue;
     }
     drew_any_node |= drawNode(*scene_, world_, id, selected_node_, filter_lower);
@@ -691,7 +691,7 @@ void DebugOverlayLayer::drawSelectedInspectorPane() {
     ImGui::TextDisabled("No scene.");
     return;
   }
-  if (selected_node_ == scene::Node::kInvalidId || !scene_->isAlive(selected_node_)) {
+  if (selected_node_ == world::Node::kInvalidId || !scene_->isAlive(selected_node_)) {
     ImGui::TextDisabled("No node selected.");
     return;
   }
@@ -715,7 +715,7 @@ void DebugOverlayLayer::drawSelectedInspectorPane() {
   drawComponentInspector(node);
 }
 
-void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
+void DebugOverlayLayer::drawSelectedSummary(const world::Node& node) {
   const std::string name = nodeDisplayName(node, world_);
   ImGui::Text("Selected: %s", name.c_str());
   ImGui::Text("Node: %u", static_cast<unsigned int>(node.id));
@@ -726,7 +726,7 @@ void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
   } else {
     ImGui::TextUnformatted("Entity: (none)");
   }
-  if (node.parent != scene::Node::kInvalidId) {
+  if (node.parent != world::Node::kInvalidId) {
     ImGui::Text("Parent: %u", static_cast<unsigned int>(node.parent));
   } else {
     ImGui::TextUnformatted("Parent: (root)");
@@ -766,7 +766,7 @@ void DebugOverlayLayer::drawSelectedSummary(const scene::Node& node) {
   ImGui::TextWrapped("Component Summary: %s", components.c_str());
 }
 
-void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
+void DebugOverlayLayer::drawComponentInspector(const world::Node& node) {
   if (!world_ || !node.entity.isValid()) {
     return;
   }
@@ -833,7 +833,7 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
               assets_->findMaterialAsset(base_key) == nullptr) {
             return false;
           }
-          renderer::MaterialVariantDesc variant{};
+          rendering::MaterialVariantDesc variant{};
           variant.base_material_key = base_key;
           const std::string variant_key =
               debugMaterialVariantKey(node.entity, binding.slot, base_key);
@@ -927,11 +927,11 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
       }
       ImGui::Text("Root Motion Mode: %s", rootMotionModeName(c.root_motion_mode));
       int root_node = static_cast<int>(
-          c.root_motion_node_index == animation::kInvalidAnimationIndex ? -1
+          c.root_motion_node_index == world::kInvalidAnimationIndex ? -1
                                                                         : c.root_motion_node_index);
       if (editInt("Root Motion Node", root_node)) {
         c.root_motion_node_index =
-            root_node < 0 ? animation::kInvalidAnimationIndex : static_cast<uint32_t>(root_node);
+            root_node < 0 ? world::kInvalidAnimationIndex : static_cast<uint32_t>(root_node);
       }
       if (c.root_motion_delta.position) {
         const auto delta = *c.root_motion_delta.position;
@@ -1026,7 +1026,7 @@ void DebugOverlayLayer::drawComponentInspector(const scene::Node& node) {
       }
       const bool gpu_draw_ready =
           c.enabled && c.path == components::DeformationPath::Gpu &&
-          c.deformation != renderer::kInvalidDeformation;
+          c.deformation != rendering::kInvalidDeformation;
       ImGui::Text("Runtime: %s path, palette %s, GPU draw %s",
                   deformationPathName(c.path),
                   c.palette_valid ? "valid" : "invalid",
@@ -1217,7 +1217,7 @@ void DebugOverlayLayer::drawRendererTab() {
   }
 
   if (ImGui::CollapsingHeader("Frame Timings", ImGuiTreeNodeFlags_DefaultOpen)) {
-    const renderer::RendererFrameTimingStats timing =
+    const rendering::RendererFrameTimingStats timing =
         graphics_->getRendererFrameTimingStats();
     ImGui::Text("Frames: submitted %llu, completed %llu, dropped %llu, queue %u",
                 static_cast<unsigned long long>(timing.submitted_frames),
@@ -1273,7 +1273,7 @@ void DebugOverlayLayer::drawRendererTab() {
   }
 
   if (ImGui::CollapsingHeader("Instancing", ImGuiTreeNodeFlags_DefaultOpen)) {
-    const renderer::InstancingStats stats = graphics_->getInstancingStats();
+    const rendering::InstancingStats stats = graphics_->getInstancingStats();
     ImGui::Text("Submitted/Drawn: %u / %u",
                 static_cast<unsigned int>(stats.submitted_instances),
                 static_cast<unsigned int>(stats.drawn_instances));
@@ -1377,7 +1377,7 @@ void DebugOverlayLayer::drawRendererTab() {
       lighting_exposure_ = std::max(0.01f, lighting_exposure_);
       graphics_->setExposure(lighting_exposure_);
     }
-    const renderer::ForwardPlusStats stats = graphics_->getForwardPlusStats();
+    const rendering::ForwardPlusStats stats = graphics_->getForwardPlusStats();
     ImGui::Text("Active: %s", stats.active ? "yes" : "no");
     ImGui::Text("CPU Fallback: %s", stats.cpu_fallback ? "yes" : "no");
     ImGui::Text("Local Lights: %u", static_cast<unsigned int>(stats.local_light_count));
@@ -1400,7 +1400,7 @@ void DebugOverlayLayer::drawParticlesTab() {
     return;
   }
 
-  const renderer::ParticlePassStats stats = graphics_->getParticlePassStats();
+  const rendering::ParticlePassStats stats = graphics_->getParticlePassStats();
 
   if (ImGui::CollapsingHeader("System", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::Text("Effect Binding Updates: %u",
@@ -1551,7 +1551,7 @@ void DebugOverlayLayer::drawPerformanceTab(float frame_ms, float framerate) {
       average_ms /= static_cast<float>(frame_time_history_count_);
     }
 
-    renderer::RendererFrameTimingStats renderer_timing{};
+    rendering::RendererFrameTimingStats renderer_timing{};
     if (graphics_) {
       renderer_timing = graphics_->getRendererFrameTimingStats();
       const auto now = std::chrono::steady_clock::now();
@@ -1633,4 +1633,4 @@ void DebugOverlayLayer::onShutdown() {
   imgui_context_ = nullptr;
 }
 
-}  // namespace karma::debug
+}  // namespace karma::app

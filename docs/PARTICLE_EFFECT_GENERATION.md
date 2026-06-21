@@ -29,62 +29,7 @@ The format is simple and strict:
 
 Primary files:
 
-- [particle_emitter.h](../include/karma/world/components/particle_emitter.h)
-- [effect_library.cpp](../src/features/visual/particles/effect_library.cpp)
-- [PARTICLE_SYSTEM.md](PARTICLE_SYSTEM.md)
-- [examples/assets/particles](../examples/assets/particles)
-
-## What Is Already Generator-Friendly
-
-The engine already has several pieces that make generation practical:
-
-- `.kpeffect` files are structured JSON with stable grouped blocks.
-- The parser is deterministic and strict.
-- Existing examples cover useful archetypes: sparks, smoke, flash, heat
-  distortion, shock rings, debris, scorch marks, flipbook fire/smoke, orb core,
-  orb arcs, orb halo, and orb distortion.
-- Texture aliases decouple emitter files from runtime texture IDs.
-- `ParticleEffectOverrideComponent` supports safe variation without duplicating
-  shared emitter files.
-- `prefab.json` composition is separate from emitter behavior, which is the
-  right model for layered effects.
-
-The best current generation target is a v3 `.kpeffect` JSON file with one or
-more emitter layers. The next best target is a prefab directory containing
-generated `.kpeffect` assets, a `prefab.json` composition file with only effect
-bindings/playback defaults, and an `assets.package.json` package for
-texture/effect registration.
-
-## Current Blockers
-
-The current system is not yet robust enough for unattended image-to-effect
-generation:
-
-- There is no standalone schema file outside the parser/tests.
-- There is no standalone validator or formatter for `.kpeffect`.
-- Field ranges and safe defaults live in code and examples, not in a generator
-  contract.
-- There are no semantic presets such as `spark_burst`, `smoke_plume`,
-  `fireball`, `heat_haze`, `shock_ring`, or `orb_halo`.
-- Texture/atlas creation and texture alias registration are package-specific.
-- Complex effects require multiple files plus registration and sometimes C++
-  package setup.
-- There is no automated preview/capture loop to compare generated output against
-  the source image.
-- Performance constraints are implicit; a generated file can easily choose a
-  particle count, blend mode, or distortion setup that looks plausible but is
-  too expensive.
-
-## Recommended Generation Architecture
-
-Use a structured intermediate description instead of generating `.kpeffect`
-directly from image analysis.
-
-Example intermediate form:
-
-```json
-{
-  "style": "smoke_plume",
+- [particle_emitter.h](../include/karma/components.h"style": "smoke_plume",
   "palette": ["#5a5650", "#161412"],
   "motion": "rising",
   "density": 0.55,

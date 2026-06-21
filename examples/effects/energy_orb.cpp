@@ -19,15 +19,15 @@ components::TransformComponent makeTransform(const math::Vec3& position) {
   return transform;
 }
 
-void setPrefabInstancePlayback(ecs::World& world,
+void setPrefabInstancePlayback(world::World& world,
                                const prefabs::PrefabInstance& instance,
                                bool enabled) {
-  for (const ecs::Entity entity : instance.entities) {
+  for (const world::Entity entity : instance.entities) {
     if (!world.isAlive(entity)) {
       continue;
     }
     if (world.has<components::ParticleEmitterComponent>(entity)) {
-      particles::setEffectPlayback(world, entity, enabled, enabled);
+      visual::particles::setEffectPlayback(world, entity, enabled, enabled);
     }
     if (world.has<components::MeshComponent>(entity)) {
       world.get<components::MeshComponent>(entity).visible = enabled;
@@ -38,10 +38,10 @@ void setPrefabInstancePlayback(ecs::World& world,
   }
 }
 
-void restartInstanceParticleEffects(ecs::World& world, const prefabs::PrefabInstance& instance) {
-  for (const ecs::Entity entity : instance.entities) {
+void restartInstanceParticleEffects(world::World& world, const prefabs::PrefabInstance& instance) {
+  for (const world::Entity entity : instance.entities) {
     if (world.isAlive(entity)) {
-      particles::restartEffect(world, entity);
+      visual::particles::restartEffect(world, entity);
     }
   }
 }
@@ -56,8 +56,8 @@ class EnergyOrbExample final : public app::GameInterface {
     input->bindKey("cam_left", platform::Key::A);
     input->bindKey("cam_right", platform::Key::D);
     input->bindMouse("cam_look", platform::MouseButton::Right);
-    input->bindKey("toggle_orb", platform::Key::Space, input::Trigger::Pressed);
-    input->bindKey("restart_orb", platform::Key::R, input::Trigger::Pressed);
+    input->bindKey("toggle_orb", platform::Key::Space, app::Trigger::Pressed);
+    input->bindKey("restart_orb", platform::Key::R, app::Trigger::Pressed);
 
     world_mesh_ = importExampleMeshAsset(assets, "world.glb");
     environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
@@ -155,12 +155,12 @@ class EnergyOrbExample final : public app::GameInterface {
 
  private:
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{.mesh_asset_key = world_mesh_});
 
-    const ecs::Entity environment_entity = world->createEntity();
+    const world::Entity environment_entity = world->createEntity();
     world->setName(environment_entity, "Environment");
     world->add(environment_entity,
                components::EnvironmentComponent{
@@ -171,7 +171,7 @@ class EnergyOrbExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun_entity = world->createEntity();
+    const world::Entity sun_entity = world->createEntity();
     world->setName(sun_entity, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 40.0f, 0.0f});
@@ -208,8 +208,8 @@ class EnergyOrbExample final : public app::GameInterface {
   std::string world_mesh_;
   std::string environment_map_;
   prefabs::PrefabInstance orb_instance_{};
-  ecs::Entity orb_root_entity_{};
-  ecs::Entity camera_entity_{};
+  world::Entity orb_root_entity_{};
+  world::Entity camera_entity_{};
   bool orb_enabled_ = true;
   float time_ = 0.0f;
   float camera_yaw_ = 0.0f;

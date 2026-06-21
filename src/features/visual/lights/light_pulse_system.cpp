@@ -1,11 +1,11 @@
-#include "karma/features/visual/lights/light_pulse_system.h"
+#include "karma/visual.h"
 
 #include <algorithm>
 #include <cmath>
 
-#include "karma/world/components/light.h"
-#include "karma/world/components/light_pulse.h"
-#include "karma/world/components/visibility.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::visual {
 
@@ -16,7 +16,7 @@ float smoothStep01(float value) {
   return t * t * (3.0f - 2.0f * t);
 }
 
-void setVisibility(ecs::World& world, ecs::Entity entity, bool visible) {
+void setVisibility(world::World& world, world::Entity entity, bool visible) {
   if (world.has<components::VisibilityComponent>(entity)) {
     world.get<components::VisibilityComponent>(entity).visible = visible;
   }
@@ -24,10 +24,10 @@ void setVisibility(ecs::World& world, ecs::Entity entity, bool visible) {
 
 }  // namespace
 
-void LightPulseSystem::update(ecs::World& world, float dt) {
+void LightPulseSystem::update(world::World& world, float dt) {
   const float clamped_dt = std::max(dt, 0.0f);
   world.forEach<components::LightPulseComponent, components::LightComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& pulse = world.get<components::LightPulseComponent>(entity);
         auto& light = world.get<components::LightComponent>(entity);
         if (!pulse.enabled) {

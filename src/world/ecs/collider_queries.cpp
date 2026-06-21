@@ -1,17 +1,17 @@
-#include "karma/world/ecs/collider_queries.h"
+#include "karma/components.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
 
-#include "karma/world/components/collider.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/visibility.h"
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/math.h"
+#include "karma/math.h"
 
-namespace karma::ecs::queries {
+namespace karma::world::queries {
 
 namespace {
 
@@ -60,8 +60,8 @@ math::Vec3 worldPointFromLocal(const components::TransformComponent& transform,
                                    scaledLocalPoint(local_point, transform.getScale())));
 }
 
-bool matchesCollisionLayerMask(const ecs::World& world,
-                               ecs::Entity entity,
+bool matchesCollisionLayerMask(const world::World& world,
+                               world::Entity entity,
                                uint32_t collision_layer_mask) {
   if (!world.has<components::VisibilityComponent>(entity)) {
     return true;
@@ -70,16 +70,16 @@ bool matchesCollisionLayerMask(const ecs::World& world,
   return (visibility.collision_layer_mask & collision_layer_mask) != 0u;
 }
 
-const components::ColliderComponent* colliderForEntity(const ecs::World& world,
-                                                       ecs::Entity entity) {
+const components::ColliderComponent* colliderForEntity(const world::World& world,
+                                                       world::Entity entity) {
   if (!world.has<components::ColliderComponent>(entity)) {
     return nullptr;
   }
   return &world.get<components::ColliderComponent>(entity);
 }
 
-std::optional<components::ColliderShapeType> colliderShapeForEntity(const ecs::World& world,
-                                                                    ecs::Entity entity) {
+std::optional<components::ColliderShapeType> colliderShapeForEntity(const world::World& world,
+                                                                    world::Entity entity) {
   const auto* collider = colliderForEntity(world, entity);
   if (collider == nullptr) {
     return std::nullopt;
@@ -87,7 +87,7 @@ std::optional<components::ColliderShapeType> colliderShapeForEntity(const ecs::W
   return components::colliderShapeType(collider->shape);
 }
 
-bool colliderIsTrigger(const ecs::World& world, ecs::Entity entity) {
+bool colliderIsTrigger(const world::World& world, world::Entity entity) {
   const auto* collider = colliderForEntity(world, entity);
   return collider != nullptr && collider->is_trigger;
 }
@@ -430,7 +430,7 @@ bool containsPointCollider(const components::TransformComponent& transform,
   return false;
 }
 
-bool overlapsColliderPair(const ecs::World& world, ecs::Entity a_entity, ecs::Entity b_entity) {
+bool overlapsColliderPair(const world::World& world, world::Entity a_entity, world::Entity b_entity) {
   if (!world.isAlive(a_entity) || !world.isAlive(b_entity) || a_entity == b_entity ||
       !world.has<components::TransformComponent>(a_entity) ||
       !world.has<components::TransformComponent>(b_entity)) {
@@ -560,7 +560,7 @@ bool overlapsColliderPair(const ecs::World& world, ecs::Entity a_entity, ecs::En
 
 }  // namespace
 
-bool containsPoint(const ecs::World& world, ecs::Entity entity, const math::Vec3& world_point) {
+bool containsPoint(const world::World& world, world::Entity entity, const math::Vec3& world_point) {
   if (!world.isAlive(entity) || !world.has<components::TransformComponent>(entity) ||
       !world.has<components::ColliderComponent>(entity)) {
     return false;
@@ -572,13 +572,13 @@ bool containsPoint(const ecs::World& world, ecs::Entity entity, const math::Vec3
 }
 
 std::optional<PointContainmentHit> findContainingCollider(
-    const ecs::World& world,
+    const world::World& world,
     const math::Vec3& world_point,
     const PointContainmentFilter& filter) {
   std::optional<PointContainmentHit> hit;
 
   world.forEach<components::ColliderComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
       return true;
     }
@@ -598,13 +598,13 @@ std::optional<PointContainmentHit> findContainingCollider(
 }
 
 std::vector<PointContainmentHit> findContainingColliders(
-    const ecs::World& world,
+    const world::World& world,
     const math::Vec3& world_point,
     const PointContainmentFilter& filter) {
   std::vector<PointContainmentHit> hits;
 
   world.forEach<components::ColliderComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (!matchesCollisionLayerMask(world, entity, filter.collision_layer_mask)) {
       return;
     }
@@ -624,19 +624,19 @@ std::vector<PointContainmentHit> findContainingColliders(
   return hits;
 }
 
-bool overlaps(const ecs::World& world, ecs::Entity a, ecs::Entity b) {
+bool overlaps(const world::World& world, world::Entity a, world::Entity b) {
   return overlapsColliderPair(world, a, b);
 }
 
 std::optional<OverlapHit> findOverlappingCollider(
-    const ecs::World& world,
-    ecs::Entity query_entity,
+    const world::World& world,
+    world::Entity query_entity,
     const OverlapFilter& filter) {
   if (!world.isAlive(query_entity) || !colliderShapeForEntity(world, query_entity)) {
     return std::nullopt;
   }
 
-  for (const ecs::Entity entity : world.entities()) {
+  for (const world::Entity entity : world.entities()) {
     if (!world.isAlive(entity)) {
       continue;
     }
@@ -661,15 +661,15 @@ std::optional<OverlapHit> findOverlappingCollider(
 }
 
 std::vector<OverlapHit> findOverlappingColliders(
-    const ecs::World& world,
-    ecs::Entity query_entity,
+    const world::World& world,
+    world::Entity query_entity,
     const OverlapFilter& filter) {
   std::vector<OverlapHit> hits;
   if (!world.isAlive(query_entity) || !colliderShapeForEntity(world, query_entity)) {
     return hits;
   }
 
-  for (const ecs::Entity entity : world.entities()) {
+  for (const world::Entity entity : world.entities()) {
     if (!world.isAlive(entity)) {
       continue;
     }
@@ -694,4 +694,4 @@ std::vector<OverlapHit> findOverlappingColliders(
   return hits;
 }
 
-}  // namespace karma::ecs::queries
+}  // namespace karma::world::queries

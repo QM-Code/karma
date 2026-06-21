@@ -7,7 +7,7 @@
 
 #include <assimp/scene.h>
 
-namespace karma::scene {
+namespace karma::world {
 
 namespace {
 
@@ -91,7 +91,7 @@ std::vector<int> buildGltfParentMap(const GltfDocument& doc) {
 
 bool populatePrimitiveInfluencesFromGltf(const GltfDocument& doc,
                                          const Json& source_primitive,
-                                         const animation::Skin& skin,
+                                         const world::Skin& skin,
                                          GltfScenePrefabPrimitive& primitive) {
   if (!source_primitive.contains("attributes") ||
       !source_primitive["attributes"].is_object()) {
@@ -144,7 +144,7 @@ void populateGltfSkins(const GltfDocument& doc,
   const auto gltf_node_to_prefab = buildGltfNodeToPrefabIndex(doc, node_indices_by_name);
   const std::vector<int> parents = buildGltfParentMap(doc);
   std::vector<uint32_t> gltf_skin_to_prefab_skin(doc.json["skins"].size(),
-                                                 animation::kInvalidAnimationIndex);
+                                                 world::kInvalidAnimationIndex);
 
   for (size_t skin_index = 0; skin_index < doc.json["skins"].size(); ++skin_index) {
     const Json& source_skin = doc.json["skins"][skin_index];
@@ -152,9 +152,9 @@ void populateGltfSkins(const GltfDocument& doc,
       continue;
     }
 
-    animation::Skin skin{};
+    world::Skin skin{};
     skin.name = source_skin.value("name", "Skin " + std::to_string(skin_index));
-    animation::Skeleton skeleton{};
+    world::Skeleton skeleton{};
     skeleton.name = skin.name.empty() ? "Skeleton " + std::to_string(skin_index)
                                       : skin.name + " Skeleton";
 
@@ -175,7 +175,7 @@ void populateGltfSkins(const GltfDocument& doc,
       gltf_joint_to_local.emplace(gltf_joint, local_joint);
       skin.joint_node_indices.push_back(prefab_node_it->second);
 
-      animation::Joint joint{};
+      world::Joint joint{};
       joint.name = gltfNodeName(doc, gltf_joint);
       joint.node_index = prefab_node_it->second;
       skeleton.joints.push_back(std::move(joint));
@@ -209,7 +209,7 @@ void populateGltfSkins(const GltfDocument& doc,
 
     for (size_t i = 0; i < gltf_joint_indices.size(); ++i) {
       const uint32_t gltf_joint = gltf_joint_indices[i];
-      uint32_t parent_joint = animation::kInvalidAnimationIndex;
+      uint32_t parent_joint = world::kInvalidAnimationIndex;
       if (gltf_joint < parents.size() && parents[gltf_joint] >= 0) {
         const auto parent_it = gltf_joint_to_local.find(static_cast<uint32_t>(parents[gltf_joint]));
         if (parent_it != gltf_joint_to_local.end()) {
@@ -217,7 +217,7 @@ void populateGltfSkins(const GltfDocument& doc,
         }
       }
       skeleton.joints[i].parent_joint_index = parent_joint;
-      if (parent_joint == animation::kInvalidAnimationIndex) {
+      if (parent_joint == world::kInvalidAnimationIndex) {
         skeleton.root_joint_indices.push_back(static_cast<uint32_t>(i));
       }
     }
@@ -239,7 +239,7 @@ void populateGltfSkins(const GltfDocument& doc,
     }
     const uint32_t gltf_skin_index = node["skin"].get<uint32_t>();
     if (gltf_skin_index >= gltf_skin_to_prefab_skin.size() ||
-        gltf_skin_to_prefab_skin[gltf_skin_index] == animation::kInvalidAnimationIndex) {
+        gltf_skin_to_prefab_skin[gltf_skin_index] == world::kInvalidAnimationIndex) {
       continue;
     }
     const uint32_t skin_index = gltf_skin_to_prefab_skin[gltf_skin_index];
@@ -248,7 +248,7 @@ void populateGltfSkins(const GltfDocument& doc,
         prefab_node_it->second >= prefab.nodes.size()) {
       continue;
     }
-    const animation::Skin& skin = prefab.skins[skin_index];
+    const world::Skin& skin = prefab.skins[skin_index];
     const Json* source_primitives = nullptr;
     if (node.contains("mesh") && node["mesh"].is_number_unsigned()) {
       const uint32_t mesh_index = node["mesh"].get<uint32_t>();
@@ -304,7 +304,7 @@ void populatePrimitiveSkinning(
       primitive.joint_node_indices.clear();
       primitive.inverse_bind_matrices.clear();
 
-      const animation::Skin* explicit_skin = nullptr;
+      const world::Skin* explicit_skin = nullptr;
       if (primitive.skin_index < prefab.skins.size()) {
         explicit_skin = &prefab.skins[primitive.skin_index];
         primitive.joint_node_indices = explicit_skin->joint_node_indices;
@@ -324,7 +324,7 @@ void populatePrimitiveSkinning(
           continue;
         }
 
-        uint32_t joint_index = animation::kInvalidAnimationIndex;
+        uint32_t joint_index = world::kInvalidAnimationIndex;
         if (explicit_skin != nullptr) {
           const auto joint_it = std::find(explicit_skin->joint_node_indices.begin(),
                                           explicit_skin->joint_node_indices.end(),
@@ -365,4 +365,4 @@ void populatePrimitiveSkinning(
   }
 }
 
-}  // namespace karma::scene
+}  // namespace karma::world

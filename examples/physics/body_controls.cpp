@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "physics_example_common.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 
 #include <imgui.h>
 
@@ -555,7 +555,7 @@ int main() {
   auto state = std::make_shared<karma::demo::physics_examples::BodyState>();
   karma::demo::physics_examples::BodyControlsGame game(state);
   auto ui = std::make_shared<karma::demo::physics_examples::BodyUi>(state);
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [ui](karma::app::UIContext& ctx) { ui->draw(ctx); }));
 
   karma::app::EngineConfig config;

@@ -11,14 +11,14 @@
 
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
-#include "karma/simulation/navigation/nav_geometry.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/nav_crowd.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/components/transform.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/navigation.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::demo {
 namespace {
@@ -34,15 +34,15 @@ enum class PanelKind {
 struct Panel {
   PanelKind kind = PanelKind::Solo;
   std::string name;
-  ecs::Entity mesh_entity{};
-  ecs::Entity nav_entity{};
+  world::Entity mesh_entity{};
+  world::Entity nav_entity{};
   math::Vec3 mesh_offset{};
   uint32_t source_mask = 0;
   std::vector<QueryCase> path_queries;
   std::vector<QueryCase> ray_queries;
   std::vector<navigation::NavPath> debug_paths;
-  std::vector<ecs::Entity> obstacles;
-  std::vector<ecs::Entity> crowd_agents;
+  std::vector<world::Entity> obstacles;
+  std::vector<world::Entity> crowd_agents;
   math::Vec3 crowd_target_a{};
   math::Vec3 crowd_target_b{};
   float timer = 0.0f;
@@ -89,10 +89,10 @@ math::Vec3 panelPoint(const Panel& panel, float x, float y, float z) {
   return localToWorld(panel, {x, y, z});
 }
 
-void registerPanelMaterial(content::AssetRegistry& assets,
+void registerPanelMaterial(assets::AssetRegistry& assets,
                            const std::string& key,
                            const math::Color& tint) {
-  renderer::MaterialDesc material{};
+  rendering::MaterialDesc material{};
   material.base_color = tint;
   material.roughness = 0.72f;
   material.metallic = 0.0f;
@@ -187,7 +187,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
                components::NavMeshSurfaceComponent{
                    .layer_mask = panel.source_mask,
                    .area = navigation::kNavAreaDefault,
-                   .mesh_data = std::make_shared<geometry::MeshData>(combineMeshes(asset.meshes)),
+                   .mesh_data = std::make_shared<world::MeshData>(combineMeshes(asset.meshes)),
                    .mesh_asset_key = mesh_key,
                });
 
@@ -376,14 +376,14 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
     }
 
     const QueryCase& query = nav_tests_.queries.front();
-    const ecs::Entity end = helpers::createDebugBoxMarker(*world,
+    const world::Entity end = helpers::createDebugBoxMarker(*world,
                                                           graphics,
                                                           assets,
                                                           panel.name + " OffMesh End",
                                                           {0.95f, 0.90f, 0.20f, 1.0f},
                                                           localToWorld(panel, query.end),
                                                           {0.45f, 0.45f, 0.45f});
-    const ecs::Entity start = helpers::createDebugBoxMarker(*world,
+    const world::Entity start = helpers::createDebugBoxMarker(*world,
                                                             graphics,
                                                             assets,
                                                             panel.name + " OffMesh Start",
@@ -402,7 +402,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
                });
 
     const math::Vec3 mid = midpoint(query.start, query.end);
-    const ecs::Entity volume = world->createEntity();
+    const world::Entity volume = world->createEntity();
     world->setName(volume, panel.name + " Convex Volume");
     components::TransformComponent transform;
     transform.setPosition(panel.mesh_offset);
@@ -440,13 +440,13 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
                                              0.65f));
   }
 
-  ecs::Entity createObstacle(const Panel& panel,
+  world::Entity createObstacle(const Panel& panel,
                              std::string_view label,
                              const math::Vec3& position,
                              navigation::NavTileCacheObstacleShape shape,
                              const math::Vec3& half_extents,
                              float yaw = 0.0f) {
-    const ecs::Entity entity = helpers::createDebugBoxMarker(*world,
+    const world::Entity entity = helpers::createDebugBoxMarker(*world,
                                                              graphics,
                                                              assets,
                                                              panel.name + " " + std::string(label),
@@ -485,7 +485,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
           panel.crowd_target_a.y,
           panel.crowd_target_a.z + offset.z,
       };
-      const ecs::Entity entity = helpers::createDebugBoxMarker(*world,
+      const world::Entity entity = helpers::createDebugBoxMarker(*world,
                                                                graphics,
                                                                assets,
                                                                panel.name + " Agent",
@@ -682,7 +682,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
     }
     panel.timer = 0.0f;
     panel.temp_obstacle_enabled = !panel.temp_obstacle_enabled;
-    const ecs::Entity obstacle_entity = panel.obstacles.front();
+    const world::Entity obstacle_entity = panel.obstacles.front();
     if (!world->isAlive(obstacle_entity) ||
         !world->has<components::NavTileCacheObstacleComponent>(obstacle_entity) ||
         !world->has<components::MeshComponent>(obstacle_entity)) {
@@ -706,7 +706,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
     panel.crowd_target_b_active = !panel.crowd_target_b_active;
     const math::Vec3 target =
         panel.crowd_target_b_active ? panel.crowd_target_b : panel.crowd_target_a;
-    for (const ecs::Entity agent : panel.crowd_agents) {
+    for (const world::Entity agent : panel.crowd_agents) {
       navigation::NavigationSystem::requestCrowdMoveTo(*world, agent, target);
     }
   }
@@ -736,7 +736,7 @@ class RecastNavigationGraphicalExample final : public app::GameInterface {
   TestCaseFile nav_tests_;
   TestCaseFile ray_tests_;
   std::vector<Panel> panels_;
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   int next_source_bit_ = 0;
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = -0.55f;

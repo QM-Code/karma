@@ -7,7 +7,7 @@
 #include <iterator>
 #include <string>
 
-namespace karma::scene {
+namespace karma::world {
 
 namespace {
 
@@ -877,4 +877,4 @@ std::unordered_map<uint32_t, uint32_t> buildGltfNodeToPrefabIndex(
   return out;
 }
 
-}  // namespace karma::scene
+}  // namespace karma::world

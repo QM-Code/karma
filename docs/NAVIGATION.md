@@ -21,39 +21,12 @@ the main thread because they mutate live Detour state and entity transforms.
 
 Public headers are split by API role:
 
-- `karma/simulation/navigation/nav_types.h`: shared status, flags, area config,
-  query filters, build config, and debug draw mode contracts.
-- `karma/simulation/navigation/nav_geometry_types.h`: authored triangle input,
-  off-mesh links, and convex area volumes.
-- `karma/simulation/navigation/nav_mesh.h`: baked Detour navmesh ownership,
-  snapshots, mutable polygon/tile state, and debug draw access.
-- `karma/simulation/navigation/nav_query.h`: path, raycast, spatial query, and
-  sliced query result types plus `NavQuery`.
-- `karma/simulation/navigation/nav_tile_cache.h` and `nav_crowd.h`: dynamic
-  obstacle tile-cache and crowd steering APIs.
+- `karma/navigation.h"game/level");
 
-## Build Flow
-
-1. Collect world-space triangles into `navigation::NavMeshInputGeometry`.
-2. Build a `navigation::NavMesh` with `NavMeshBuildConfig`.
-3. Create `navigation::NavQuery` from the mesh.
-4. Call `findPath`, `findNearestPoint`, `raycast`, sliced path queries, or the
-   local spatial helpers.
-
-glTF scene navigation geometry is collected from instantiated ECS data. Import
-the scene through a package, instantiate the registered `GltfSceneAsset`, then
-collect geometry with the asset registry available:
-
-```cpp
-content::AssetRegistry assets;
-std::string diagnostic;
-auto package = content::importAssetPackage(assets, package_path, &diagnostic);
-const content::GltfSceneAsset* level = assets.findGltfSceneAsset("game/level");
-
-ecs::World world;
-scene::Scene scene;
+world::World world;
+world::Scene scene;
 auto imported =
-    scene::instantiateGltfSceneAsset(world, scene, assets, *level);
+    world::instantiateGltfSceneAsset(world, scene, assets, *level);
 
 const auto geometry = navigation::collectNavMeshGeometry(world, &assets);
 
@@ -70,7 +43,7 @@ ECS collection now prefers explicit navigation surfaces:
 - `NavMeshComponent`: attach to an empty owner entity to hold bake config,
   build state, debug flags, and the runtime `navigation::NavMesh`.
 - `NavMeshSurfaceComponent`: attach to render/source entities that should feed
-  the bake. It supports CPU `geometry::MeshData`, a mesh key, area IDs, and
+  the bake. It supports CPU `world::MeshData`, a mesh key, area IDs, and
   walkable/non-walkable marking.
 - `NavOffMeshLinkComponent`: attach to an entity to add a point-to-point
   Detour off-mesh connection during bake.
@@ -203,12 +176,12 @@ Tile caches can be persisted as opaque `.kntc` assets:
 
 ```cpp
 navigation::NavTileCacheSnapshot snapshot = tile_cache.snapshot(nav_mesh);
-content::saveNavTileCacheSnapshot("level.kntc", snapshot);
+assets::saveNavTileCacheSnapshot("level.kntc", snapshot);
 
 navigation::NavMesh loaded_mesh;
 navigation::NavTileCache loaded_cache;
 loaded_cache.loadSnapshot(loaded_mesh,
-                          content::loadNavTileCacheSnapshot("level.kntc"));
+                          assets::loadNavTileCacheSnapshot("level.kntc"));
 ```
 
 `NavTileCacheBuildConfig::compression` accepts `NavTileCacheCompression::FastLz`
@@ -254,7 +227,7 @@ character controller per ECS `CharacterControllerComponent`.
 
 `NavMesh::debugDraw()` and `NavQuery::debugDrawPath()` draw the baked mesh,
 captured Recast debug layers, and paths through
-`renderer::GraphicsDevice::drawLine`.
+`rendering::GraphicsDevice::drawLine`.
 
 ## Example
 

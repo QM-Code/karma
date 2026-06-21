@@ -75,24 +75,24 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
  public:
   void onStart() override {
     input->bindMouse("orbit", platform::MouseButton::Right);
-    input->bindKey("reset", platform::Key::R, input::Trigger::Pressed);
+    input->bindKey("reset", platform::Key::R, app::Trigger::Pressed);
 
     SceneBounds bounds{};
     bool spawned_model = false;
 
-    if (const content::GltfSceneAsset* cached_scene =
+    if (const assets::GltfSceneAsset* cached_scene =
             assets->findGltfSceneAsset(kPostProcessSceneKey)) {
       const helpers::GltfSceneAssetBounds asset_bounds =
           helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
       bounds = SceneBounds{.min = asset_bounds.min,
                            .max = asset_bounds.max,
                            .valid = asset_bounds.valid};
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+      const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
           *cached_scene,
-          scene::GltfSceneInstantiateOptions{
+          world::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = true,
           });
@@ -225,7 +225,7 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
   }
 
   void configurePostProcess(float radius) {
-    renderer::PostProcessSettings settings{};
+    rendering::PostProcessSettings settings{};
     settings.bloom_enabled = true;
     settings.bloom_threshold = 0.72f;
     settings.bloom_intensity = 0.18f;
@@ -254,7 +254,7 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
     }
   }
 
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   math::Vec3 orbit_center_{};
   math::Vec3 default_center_{};
   float yaw_ = 0.0f;

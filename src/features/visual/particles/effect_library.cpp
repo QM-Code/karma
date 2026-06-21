@@ -1,4 +1,4 @@
-#include "karma/features/visual/particles/effect_asset.h"
+#include "karma/visual.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -14,7 +14,7 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
-namespace karma::particles {
+namespace karma::visual::particles {
 
 namespace {
 
@@ -711,4 +711,4 @@ bool loadParticleEffectAsset(const std::filesystem::path& path,
   return true;
 }
 
-}  // namespace karma::particles
+}  // namespace karma::visual::particles

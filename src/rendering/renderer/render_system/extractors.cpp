@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace karma::renderer::render_system {
+namespace karma::rendering::render_system {
 
 glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
@@ -19,18 +19,18 @@ glm::quat toGlm(const math::Quat& q) {
 glm::vec3 transformPoint(const components::TransformComponent& transform,
                          const math::Vec3& local,
                          float interpolation_alpha) {
-  const glm::vec3 pos = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 pos = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  const glm::quat rot = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::vec3 scale = ::karma::rendering::render_system::toGlm(transform.getScale());
   const glm::vec3 scaled{local.x * scale.x, local.y * scale.y, local.z * scale.z};
   return pos + glm::mat3_cast(rot) * scaled;
 }
 
 glm::mat4 toTransform(const components::TransformComponent& transform,
                       float interpolation_alpha) {
-  const glm::vec3 pos = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 pos = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  const glm::quat rot = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::vec3 scale = ::karma::rendering::render_system::toGlm(transform.getScale());
   glm::mat4 matrix(1.0f);
   matrix = glm::translate(matrix, pos);
   matrix *= glm::mat4_cast(rot);
@@ -42,8 +42,8 @@ CameraData toCameraData(const components::CameraComponent& camera,
                         const components::TransformComponent& transform,
                         float interpolation_alpha) {
   CameraData out{};
-  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  out.rotation = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  out.position = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  out.rotation = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   out.perspective = camera.perspective;
   out.render_shadows = camera.render_shadows;
   out.fov_y_degrees = camera.fov_y_degrees;
@@ -74,10 +74,10 @@ DirectionalLightData toDirectionalLight(const components::LightComponent& light,
   DirectionalLightData out{};
   out.color = light.color;
   out.intensity = light.intensity;
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::quat rot = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   out.direction = basis * glm::vec3(0.0f, 0.0f, -1.0f);
-  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  out.position = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.shadow_extent = light.shadow_extent;
   out.casts_shadows = light.casts_shadows;
   return out;
@@ -87,7 +87,7 @@ LightData toLightData(const components::LightComponent& light,
                       const components::TransformComponent& transform,
                       float interpolation_alpha) {
   LightData out{};
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::quat rot = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   glm::vec3 dir = basis * glm::vec3(0.0f, 0.0f, -1.0f);
   if (glm::length(dir) < 1e-5f) {
@@ -95,7 +95,7 @@ LightData toLightData(const components::LightComponent& light,
   } else {
     dir = glm::normalize(dir);
   }
-  out.position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  out.position = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.direction = dir;
   out.color = light.color;
   out.intensity = light.intensity;
@@ -127,4 +127,4 @@ LightData toLightData(const components::LightComponent& light,
   return out;
 }
 
-}  // namespace karma::renderer::render_system
+}  // namespace karma::rendering::render_system

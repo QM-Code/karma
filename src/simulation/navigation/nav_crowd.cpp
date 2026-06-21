@@ -1,5 +1,5 @@
-#include "karma/simulation/navigation/nav_crowd.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,8 +12,8 @@
 #include <DetourObstacleAvoidance.h>
 #include <DetourStatus.h>
 
-#include "karma/core/math/vec3.h"
-#include "karma/rendering/renderer/device.h"
+#include "karma/math.h"
+#include "karma/rendering.h"
 #include "detail/detour_utils.h"
 #include "detail/nav_mesh_access.h"
 
@@ -28,7 +28,7 @@ using detail::mapStraightPathFlags;
 using detail::ptr;
 using detail::toVec3;
 
-void drawCircle(renderer::GraphicsDevice& graphics,
+void drawCircle(rendering::GraphicsDevice& graphics,
                 const math::Vec3& center,
                 float radius,
                 const math::Color& color,
@@ -47,7 +47,7 @@ void drawCircle(renderer::GraphicsDevice& graphics,
   }
 }
 
-void drawCross(renderer::GraphicsDevice& graphics,
+void drawCross(rendering::GraphicsDevice& graphics,
                const math::Vec3& center,
                float size,
                const math::Color& color,
@@ -513,7 +513,7 @@ const NavCrowdBuildResult& NavCrowd::lastBuildResult() const {
   return impl_ != nullptr ? impl_->last_result : empty;
 }
 
-void NavCrowd::debugDraw(renderer::GraphicsDevice& graphics,
+void NavCrowd::debugDraw(rendering::GraphicsDevice& graphics,
                          const math::Color& agent_color,
                          const math::Color& velocity_color,
                          bool depth_test) const {

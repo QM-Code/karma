@@ -89,24 +89,24 @@ class DiligentGltfViewerExample final : public app::GameInterface {
     input->bindKey("viewer_pan_up", platform::Key::E);
     input->bindKey("viewer_zoom_in", platform::Key::Z);
     input->bindKey("viewer_zoom_out", platform::Key::X);
-    input->bindKey("viewer_reset", platform::Key::R, input::Trigger::Pressed);
+    input->bindKey("viewer_reset", platform::Key::R, app::Trigger::Pressed);
 
     SceneBounds bounds{};
     bool spawned_scene = false;
     if (!scene_asset_key_.empty()) {
-      if (const content::GltfSceneAsset* cached_scene =
+      if (const assets::GltfSceneAsset* cached_scene =
               assets->findGltfSceneAsset(scene_asset_key_)) {
         const helpers::GltfSceneAssetBounds asset_bounds =
             helpers::computeGltfSceneAssetBounds(*assets, *cached_scene);
         bounds = SceneBounds{.min = asset_bounds.min,
                              .max = asset_bounds.max,
                              .valid = asset_bounds.valid};
-        const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+        const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
             *world,
             *scene,
             *assets,
             *cached_scene,
-            scene::GltfSceneInstantiateOptions{
+            world::GltfSceneInstantiateOptions{
                 .create_synthetic_root = false,
                 .autoplay_animations = true,
             });
@@ -230,7 +230,7 @@ class DiligentGltfViewerExample final : public app::GameInterface {
   void onShutdown() override {}
 
  private:
-  void logSceneSummary(const content::GltfSceneAsset& scene_asset,
+  void logSceneSummary(const assets::GltfSceneAsset& scene_asset,
                        const SceneBounds& bounds) const {
     const helpers::GltfSceneAssetStats stats =
         helpers::summarizeGltfSceneAsset(*assets, scene_asset);
@@ -363,7 +363,7 @@ class DiligentGltfViewerExample final : public app::GameInterface {
 
   std::filesystem::path source_hint_;
   std::string scene_asset_key_;
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   math::Vec3 orbit_center_{};
   math::Vec3 target_orbit_center_{};
   math::Vec3 default_orbit_center_{};

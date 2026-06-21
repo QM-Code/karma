@@ -18,7 +18,7 @@
 
 #include <spdlog/spdlog.h>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 constexpr double kWrappedShaderTimeSeconds = 4096.0;
@@ -63,22 +63,22 @@ void copyParticleBatchMetadata(RecordT& record, const BatchT& batch) {
 }
 
 template <typename BatchT>
-void accumulateParticlePassStats(renderer::ParticlePassStats& stats, const BatchT& batch) {
+void accumulateParticlePassStats(rendering::ParticlePassStats& stats, const BatchT& batch) {
   const uint32_t particle_count = static_cast<uint32_t>(std::min<std::size_t>(
       batch.particles.size(),
       static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())));
   stats.submitted_batches += 1u;
   stats.submitted_particles += particle_count;
   switch (batch.blend_mode) {
-    case renderer::ParticleBlendMode::Additive:
+    case rendering::ParticleBlendMode::Additive:
       stats.additive_batches += 1u;
       stats.additive_particles += particle_count;
       break;
-    case renderer::ParticleBlendMode::Alpha:
+    case rendering::ParticleBlendMode::Alpha:
       stats.alpha_batches += 1u;
       stats.alpha_particles += particle_count;
       break;
-    case renderer::ParticleBlendMode::Distortion:
+    case rendering::ParticleBlendMode::Distortion:
       stats.distortion_batches += 1u;
       stats.distortion_particles += particle_count;
       stats.distortion_present = true;
@@ -86,8 +86,8 @@ void accumulateParticlePassStats(renderer::ParticlePassStats& stats, const Batch
   }
 }
 
-renderer::ParticlePackedInstance packParticleInstance(const renderer::ParticleInstance& particle) {
-  renderer::ParticlePackedInstance packed{};
+rendering::ParticlePackedInstance packParticleInstance(const rendering::ParticleInstance& particle) {
+  rendering::ParticlePackedInstance packed{};
   packed.position_age[0] = particle.position.x;
   packed.position_age[1] = particle.position.y;
   packed.position_age[2] = particle.position.z;
@@ -143,7 +143,7 @@ Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_fo
 }
 }  // namespace
 
-void DiligentBackend::beginFrame(const renderer::FrameInfo& frame) {
+void DiligentBackend::beginFrame(const rendering::FrameInfo& frame) {
   current_frame_timing_stats_ = {};
   frame_active_ = true;
   present_frame_ = frame.present;
@@ -250,17 +250,17 @@ void DiligentBackend::prewarmRendererResources(bool include_ui) {
 
   ensureDefaultSceneResources(width, height);
   ensureForwardPipeline(ForwardPipelineVariant::Opaque,
-                        renderer::InstanceGpuLayout::Matrix4x4Params);
+                        rendering::InstanceGpuLayout::Matrix4x4Params);
   ensureForwardPipeline(ForwardPipelineVariant::Opaque,
-                        renderer::InstanceGpuLayout::PositionYawScaleParams);
+                        rendering::InstanceGpuLayout::PositionYawScaleParams);
   ensureForwardPipeline(ForwardPipelineVariant::OpaqueDoubleSided,
-                        renderer::InstanceGpuLayout::Matrix4x4Params);
+                        rendering::InstanceGpuLayout::Matrix4x4Params);
   ensureForwardPipeline(ForwardPipelineVariant::OpaqueDoubleSided,
-                        renderer::InstanceGpuLayout::PositionYawScaleParams);
+                        rendering::InstanceGpuLayout::PositionYawScaleParams);
   ensureForwardPipeline(ForwardPipelineVariant::DepthPrepass,
-                        renderer::InstanceGpuLayout::Matrix4x4Params);
+                        rendering::InstanceGpuLayout::Matrix4x4Params);
   ensureForwardPipeline(ForwardPipelineVariant::DepthPrepass,
-                        renderer::InstanceGpuLayout::PositionYawScaleParams);
+                        rendering::InstanceGpuLayout::PositionYawScaleParams);
   ensureInstancedGpuCullingResources();
   ensureInstancedGpuLodCullingResources();
   if (!shadow_pipeline_state_) {
@@ -507,8 +507,8 @@ void DiligentBackend::ensureParticleFallbackDepthResource() {
       particle_fallback_depth_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
 }
 
-void DiligentBackend::submit(const renderer::DrawItem& item) {
-  if (item.instance == renderer::kInvalidInstance) {
+void DiligentBackend::submit(const rendering::DrawItem& item) {
+  if (item.instance == rendering::kInvalidInstance) {
     return;
   }
 
@@ -536,9 +536,9 @@ void DiligentBackend::submit(const renderer::DrawItem& item) {
   record.shadow_visible = item.shadow_visible;
 }
 
-void DiligentBackend::submitInstanced(const renderer::InstancedDrawItem& item) {
+void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) {
   const size_t item_instance_count = item.instanceCount();
-  if (item.instance == renderer::kInvalidInstance || item_instance_count == 0u) {
+  if (item.instance == rendering::kInvalidInstance || item_instance_count == 0u) {
     return;
   }
 
@@ -569,7 +569,7 @@ void DiligentBackend::submitInstanced(const renderer::InstancedDrawItem& item) {
     if (lod_index >= record.lods.size()) {
       record.lods.emplace_back();
     }
-    const renderer::InstancedLodDrawDesc& item_lod = item.lods[lod_index];
+    const rendering::InstancedLodDrawDesc& item_lod = item.lods[lod_index];
     InstancedRecord::LodRecord& lod = record.lods[lod_index];
     lod.start_distance = item_lod.start_distance;
     lod.mesh = item_lod.mesh;
@@ -592,7 +592,7 @@ void DiligentBackend::submitInstanced(const renderer::InstancedDrawItem& item) {
   if (payload_changed) {
     record.instances.clear();
     record.planar_instances.clear();
-    if (item.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+    if (item.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
       record.planar_instances.assign(item.planar_instances.begin(), item.planar_instances.end());
     } else {
       record.instances.assign(item.instances.begin(), item.instances.end());
@@ -615,13 +615,13 @@ bool DiligentBackend::ensureInstancedRecordBuffer(InstancedRecord& record) {
 
   const void* payload_data = nullptr;
   size_t payload_bytes = 0u;
-  const size_t payload_stride = renderer::instanceGpuLayoutStride(record.gpu_layout);
-  if (record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+  const size_t payload_stride = rendering::instanceGpuLayoutStride(record.gpu_layout);
+  if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
     payload_data = record.planar_instances.data();
-    payload_bytes = record.planar_instances.size() * sizeof(renderer::PlanarInstanceData);
+    payload_bytes = record.planar_instances.size() * sizeof(rendering::PlanarInstanceData);
   } else {
     payload_data = record.instances.data();
-    payload_bytes = record.instances.size() * sizeof(renderer::InstanceData);
+    payload_bytes = record.instances.size() * sizeof(rendering::InstanceData);
   }
   if (!payload_data || payload_bytes == 0u ||
       payload_bytes > static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max())) {
@@ -634,7 +634,7 @@ bool DiligentBackend::ensureInstancedRecordBuffer(InstancedRecord& record) {
                  record.instance_buffer_capacity_bytes > 0u
                      ? record.instance_buffer_capacity_bytes * 2u
                      : static_cast<size_t>(128u) *
-                           renderer::instanceGpuLayoutStride(record.gpu_layout));
+                           rendering::instanceGpuLayoutStride(record.gpu_layout));
     Diligent::BufferDesc desc{};
     desc.Name = "Karma Persistent Instance Buffer";
     desc.Usage = Diligent::USAGE_DEFAULT;
@@ -678,18 +678,18 @@ bool DiligentBackend::ensureInstancedRecordBuffer(InstancedRecord& record) {
     record.instance_buffer_dirty = false;
   }
   if (!record.dynamic &&
-      record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams &&
+      record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams &&
       instancedGpuCullingEnabled()) {
     ensureInstancedGpuCullingRecordBuffers(record);
   }
   return record.instance_buffer != nullptr && record.instance_srv != nullptr;
 }
 
-void DiligentBackend::submitParticles(renderer::ParticleBatch batch) {
+void DiligentBackend::submitParticles(rendering::ParticleBatch batch) {
   if (batch.particles.empty()) {
     return;
   }
-  renderer::PackedParticleBatch packed_batch{};
+  rendering::PackedParticleBatch packed_batch{};
   packed_batch.layer = batch.layer;
   packed_batch.depth_test = batch.depth_test;
   packed_batch.texture = batch.texture;
@@ -724,7 +724,7 @@ void DiligentBackend::submitParticles(renderer::ParticleBatch batch) {
   submitPackedParticles(std::move(packed_batch));
 }
 
-void DiligentBackend::submitPackedParticles(renderer::PackedParticleBatch batch) {
+void DiligentBackend::submitPackedParticles(rendering::PackedParticleBatch batch) {
   if (batch.particles.empty()) {
     return;
   }
@@ -739,7 +739,7 @@ void DiligentBackend::submitPackedParticles(renderer::PackedParticleBatch batch)
   particle_batches_.push_back(std::move(record));
 }
 
-void DiligentBackend::submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) {
+void DiligentBackend::submitParticleEmitter(const rendering::ParticleEmitterGpuDesc& emitter) {
   if (emitter.instance_id == 0u) {
     return;
   }
@@ -769,8 +769,8 @@ void DiligentBackend::submitParticleEmitter(const renderer::ParticleEmitterGpuDe
   });
 }
 
-void DiligentBackend::retireInstance(renderer::InstanceId instance) {
-  if (instance == renderer::kInvalidInstance) {
+void DiligentBackend::retireInstance(rendering::InstanceId instance) {
+  if (instance == rendering::kInvalidInstance) {
     return;
   }
   instances_.erase(instance);
@@ -822,8 +822,8 @@ void DiligentBackend::drawLine(const math::Vec3& start, const math::Vec3& end,
   bucket.push_back(b);
 }
 
-unsigned int DiligentBackend::getRenderTargetTextureId(renderer::RenderTargetId target) const {
-  if (target == renderer::kDefaultRenderTarget) {
+unsigned int DiligentBackend::getRenderTargetTextureId(rendering::RenderTargetId target) const {
+  if (target == rendering::kDefaultRenderTarget) {
     return 0u;
   }
   auto it = targets_.find(target);
@@ -854,4 +854,4 @@ void DiligentBackend::clearFrame(const float* color, bool clear_depth) {
   }
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

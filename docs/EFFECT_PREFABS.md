@@ -1,7 +1,7 @@
 # Karma Prefabs
 
 Karma prefabs are JSON-backed ECS subtrees. A prefab stores a root entity, its
-`scene::Scene` children, and a map of component payloads for each saved entity.
+`world::Scene` children, and a map of component payloads for each saved entity.
 
 Component map keys use the real component struct names, for example:
 
@@ -57,7 +57,7 @@ the renderer or particle systems resolve them.
 ## API
 
 ```cpp
-#include "karma/content/prefabs/prefab.h"
+#include "karma/prefabs.h"
 
 prefabs::PrefabInstantiateDesc desc{};
 desc.root_transform.setPosition({0.0f, 2.0f, 0.0f});

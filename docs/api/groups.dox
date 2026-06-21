@@ -20,7 +20,7 @@ higher-level systems.
 \ingroup karma_world
 Sparse-set entity/component storage and entity lifetime management.
 
-Use karma::ecs::World for normal gameplay code. Lower-level storage types are
+Use karma::world::World for normal gameplay code. Lower-level storage types are
 public so tests, tools, and specialized systems can inspect dense component
 layouts when needed.
 */

@@ -1,8 +1,8 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
 
-#include "karma/media/audio/backends/miniaudio/backend.hpp"
-#include "karma/media/audio/backends/miniaudio/clip.hpp"
+#include "private/audio/backends/miniaudio/backend.hpp"
+#include "private/audio/backends/miniaudio/clip.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -13,7 +13,7 @@
 
 #include <spdlog/spdlog.h>
 
-namespace karma::audio_backend {
+namespace karma::audio::backend {
 
 MiniaudioBackend::MiniaudioBackend() {
   engine_ = new ma_engine();
@@ -86,4 +86,4 @@ void MiniaudioBackend::setListenerRotation(const glm::quat& rotation) {
   ma_engine_listener_set_direction(engine_, 0, forward.x, forward.y, forward.z);
 }
 
-}  // namespace karma::audio_backend
+}  // namespace karma::audio::backend

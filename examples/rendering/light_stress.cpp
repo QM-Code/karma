@@ -58,10 +58,10 @@ bool envFlagEnabled(const char* name) {
   return false;
 }
 
-void registerTintMaterial(content::AssetRegistry& assets,
+void registerTintMaterial(assets::AssetRegistry& assets,
                           const std::string& key,
                           const math::Color& color) {
-  renderer::MaterialDesc material{};
+  rendering::MaterialDesc material{};
   material.base_color = color;
   material.roughness = 0.62f;
   material.metallic = 0.0f;
@@ -160,7 +160,7 @@ class LocalLightProbeExample final : public app::GameInterface {
       int fb_width = 0;
       int fb_height = 0;
       graphics->getFramebufferSize(fb_width, fb_height);
-      const renderer::ForwardPlusStats stats = graphics->getForwardPlusStats();
+      const rendering::ForwardPlusStats stats = graphics->getForwardPlusStats();
       spdlog::info(
           "Renderer stats: framebuffer={}x{}, active={}, cpu_fallback={}, overflow_risk={}, tile_size={}, max_lights_per_tile={}, max_local_lights={}, tiles={}x{}, local_light_count={}",
           fb_width,
@@ -225,14 +225,14 @@ class LocalLightProbeExample final : public app::GameInterface {
   void spawnBackdrop() {
     bool spawned_world = false;
 
-    if (const content::GltfSceneAsset* cached_world =
+    if (const assets::GltfSceneAsset* cached_world =
             assets->findGltfSceneAsset(kLightStressWorldSceneKey)) {
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+      const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
           *cached_world,
-          scene::GltfSceneInstantiateOptions{
+          world::GltfSceneInstantiateOptions{
               .create_synthetic_root = true,
               .autoplay_animations = false,
           });
@@ -247,7 +247,7 @@ class LocalLightProbeExample final : public app::GameInterface {
 
     if (!spawned_world) {
       spdlog::error("Light stress world scene was not available from the asset package");
-      const ecs::Entity world_entity = world->createEntity();
+      const world::Entity world_entity = world->createEntity();
       world->setName(world_entity, "World");
       world->add(world_entity, components::TransformComponent{});
       world->add(world_entity, components::MeshComponent{
@@ -257,7 +257,7 @@ class LocalLightProbeExample final : public app::GameInterface {
                             });
     }
 
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                  .environment_map_asset_key = environment_map_,
@@ -266,7 +266,7 @@ class LocalLightProbeExample final : public app::GameInterface {
                              });
 
     if (!unsafe_stress_mode_) {
-      const ecs::Entity sun = world->createEntity();
+      const world::Entity sun = world->createEntity();
       world->setName(sun, "Sun");
       components::TransformComponent sun_xform{};
       sun_xform.setPosition({0.0f, 50.0f, 0.0f});
@@ -301,7 +301,7 @@ class LocalLightProbeExample final : public app::GameInterface {
         const std::string marker_material_key = "light_marker_" + std::to_string(index);
         registerTintMaterial(*assets, marker_material_key, color);
 
-        const ecs::Entity light = world->createEntity();
+        const world::Entity light = world->createEntity();
         world->setName(light, "Probe Light " + std::to_string(index));
         components::TransformComponent light_xform{};
         light_xform.setPosition(position);
@@ -314,7 +314,7 @@ class LocalLightProbeExample final : public app::GameInterface {
                               .casts_shadows = true,
                           });
 
-        const ecs::Entity marker = world->createEntity();
+        const world::Entity marker = world->createEntity();
         world->setName(marker, "Probe Light Marker " + std::to_string(index));
         components::TransformComponent marker_xform{};
         marker_xform.setPosition(position);
@@ -365,7 +365,7 @@ class LocalLightProbeExample final : public app::GameInterface {
             1.0f + 0.25f * std::sin(static_cast<float>(x) * 0.55f) *
                          std::cos(static_cast<float>(z) * 0.45f);
 
-        const ecs::Entity light = world->createEntity();
+        const world::Entity light = world->createEntity();
         world->setName(light, "Stress Light " + std::to_string(light_index++));
         components::TransformComponent light_xform{};
         light_xform.setPosition(position);
@@ -378,7 +378,7 @@ class LocalLightProbeExample final : public app::GameInterface {
                               .casts_shadows = false,
                           });
 
-        const ecs::Entity marker = world->createEntity();
+        const world::Entity marker = world->createEntity();
         world->setName(marker, "Stress Marker " + std::to_string(light_index));
         components::TransformComponent marker_xform{};
         marker_xform.setPosition(position);
@@ -414,7 +414,7 @@ class LocalLightProbeExample final : public app::GameInterface {
             receiver_position.z + offset_z,
         };
 
-        const ecs::Entity receiver = world->createEntity();
+        const world::Entity receiver = world->createEntity();
         world->setName(receiver, "Probe Receiver " + std::to_string(index));
         components::TransformComponent receiver_xform{};
         receiver_xform.setPosition(receiver_position);
@@ -430,7 +430,7 @@ class LocalLightProbeExample final : public app::GameInterface {
                                   .shadow_visible = false,
                               });
 
-        const ecs::Entity caster = world->createEntity();
+        const world::Entity caster = world->createEntity();
         world->setName(caster, "Probe Caster " + std::to_string(index));
         components::TransformComponent caster_xform{};
         caster_xform.setPosition(caster_position);
@@ -465,7 +465,7 @@ class LocalLightProbeExample final : public app::GameInterface {
             (static_cast<float>(z) - half_depth) * kUnsafeLightSpacing + kUnsafeLightSpacing * 0.5f,
         };
 
-        const ecs::Entity receiver = world->createEntity();
+        const world::Entity receiver = world->createEntity();
         world->setName(receiver, "Receiver " + std::to_string(receiver_index++));
         components::TransformComponent receiver_xform{};
         receiver_xform.setPosition(position);
@@ -508,7 +508,7 @@ class LocalLightProbeExample final : public app::GameInterface {
     camera_pitch_ = std::asin(std::clamp(direction.y, -1.0f, 1.0f));
     target_camera_pitch_ = camera_pitch_;
 
-    const ecs::Entity camera = world->createEntity();
+    const world::Entity camera = world->createEntity();
     world->setName(camera, "Camera");
     camera_entity_ = camera;
     components::TransformComponent camera_xform{};
@@ -527,8 +527,8 @@ class LocalLightProbeExample final : public app::GameInterface {
   std::string marker_mesh_;
   std::string environment_map_;
   struct AnimatedLight {
-    ecs::Entity entity{};
-    ecs::Entity marker_entity{};
+    world::Entity entity{};
+    world::Entity marker_entity{};
     math::Vec3 anchor_position{};
     float phase_offset = 0.0f;
     float orbit_radius = 1.0f;
@@ -536,7 +536,7 @@ class LocalLightProbeExample final : public app::GameInterface {
     float orbit_speed = 0.8f;
   };
   std::vector<AnimatedLight> animated_lights_;
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   bool unsafe_stress_mode_ = false;
   int safe_light_count_ = 1;
   bool log_renderer_stats_ = false;

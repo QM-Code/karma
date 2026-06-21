@@ -98,7 +98,7 @@ void testAdvancedQueryHelpers() {
 }
 
 void testOffMeshConnectionBridgesGap() {
-  karma::geometry::MeshData mesh;
+  karma::world::MeshData mesh;
   appendQuad(mesh, {-5.0f, 0.0f, -2.0f}, {-1.0f, 0.0f, -2.0f},
              {-1.0f, 0.0f, 2.0f}, {-5.0f, 0.0f, 2.0f});
   appendQuad(mesh, {1.0f, 0.0f, -2.0f}, {5.0f, 0.0f, -2.0f},

@@ -1,8 +1,8 @@
-#include "karma/features/visual/terrain/terrain_runtime_module.h"
+#include "karma/visual.h"
 
-#include "karma/features/visual/terrain/terrain_system.h"
+#include "karma/visual.h"
 
-namespace karma::terrain {
+namespace karma::visual::terrain {
 
 TerrainRuntimeModule::TerrainRuntimeModule() = default;
 
@@ -17,13 +17,13 @@ void TerrainRuntimeModule::onDetach() {
   system_.reset();
 }
 
-void TerrainRuntimeModule::onFrameBegin(ecs::World& world, float) {
+void TerrainRuntimeModule::onFrameBegin(world::World& world, float) {
   if (system_) {
     system_->syncTerrainColliders(world);
   }
 }
 
-void TerrainRuntimeModule::onUpdate(ecs::World& world,
+void TerrainRuntimeModule::onUpdate(world::World& world,
                                     float dt,
                                     float interpolation_alpha) {
   if (system_) {
@@ -31,4 +31,4 @@ void TerrainRuntimeModule::onUpdate(ecs::World& world,
   }
 }
 
-}  // namespace karma::terrain
+}  // namespace karma::visual::terrain

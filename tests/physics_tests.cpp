@@ -11,20 +11,20 @@
 #include <variant>
 #include <vector>
 
-#include "karma/features/visual/terrain/terrain_system.h"
-#include "karma/simulation/physics/physics_system.h"
-#include "karma/simulation/physics/physics_world.hpp"
-#include "karma/world/components/character_controller.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/contact_events.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/physics_collision_filter.h"
-#include "karma/world/components/rigidbody.h"
-#include "karma/world/components/terrain.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
-#include "karma/world/scene/scene.h"
-#include "karma/world/scene/transform_hierarchy.h"
+#include "karma/visual.h"
+#include "karma/physics.h"
+#include "karma/physics.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
 namespace {
 
@@ -43,43 +43,43 @@ bool throwsRuntimeError(Fn&& fn) {
 }
 
 void componentRequirementsAreStrict() {
-  karma::ecs::World world;
+  karma::world::World world;
 
   assert(throwsRuntimeError([&] {
-    world.add(karma::ecs::Entity{}, karma::components::TransformComponent{});
+    world.add(karma::world::Entity{}, karma::components::TransformComponent{});
   }));
 
-  const karma::ecs::Entity dead = world.createEntity();
+  const karma::world::Entity dead = world.createEntity();
   world.destroyEntity(dead);
   assert(throwsRuntimeError([&] {
     world.add(dead, karma::components::TransformComponent{});
   }));
 
-  const karma::ecs::Entity collider_without_transform = world.createEntity();
+  const karma::world::Entity collider_without_transform = world.createEntity();
   assert(throwsRuntimeError([&] {
     world.add(collider_without_transform, karma::components::ColliderComponent::box());
   }));
 
-  const karma::ecs::Entity rigidbody_without_collider = world.createEntity();
+  const karma::world::Entity rigidbody_without_collider = world.createEntity();
   world.add(rigidbody_without_collider, karma::components::TransformComponent{});
   assert(throwsRuntimeError([&] {
     world.add(rigidbody_without_collider, karma::components::RigidbodyComponent{});
   }));
 
-  const karma::ecs::Entity controller_without_collider = world.createEntity();
+  const karma::world::Entity controller_without_collider = world.createEntity();
   world.add(controller_without_collider, karma::components::TransformComponent{});
   assert(throwsRuntimeError([&] {
     world.add(controller_without_collider, karma::components::CharacterControllerComponent{});
   }));
 
-  const karma::ecs::Entity controller_with_mesh = world.createEntity();
+  const karma::world::Entity controller_with_mesh = world.createEntity();
   world.add(controller_with_mesh, karma::components::TransformComponent{});
   world.add(controller_with_mesh, karma::components::ColliderComponent::mesh());
   assert(throwsRuntimeError([&] {
     world.add(controller_with_mesh, karma::components::CharacterControllerComponent{});
   }));
 
-  const karma::ecs::Entity controller_with_mismatched_shape = world.createEntity();
+  const karma::world::Entity controller_with_mismatched_shape = world.createEntity();
   world.add(controller_with_mismatched_shape, karma::components::TransformComponent{});
   auto mismatched = karma::components::ColliderComponent::box();
   mismatched.type = karma::components::ColliderShapeType::Sphere;
@@ -89,13 +89,13 @@ void componentRequirementsAreStrict() {
               karma::components::CharacterControllerComponent{});
   }));
 
-  const karma::ecs::Entity valid_controller = world.createEntity();
+  const karma::world::Entity valid_controller = world.createEntity();
   world.add(valid_controller, karma::components::TransformComponent{});
   world.add(valid_controller, karma::components::ColliderComponent::box());
   world.add(valid_controller, karma::components::CharacterControllerComponent{});
   assert(world.has<karma::components::CharacterControllerComponent>(valid_controller));
 
-  const karma::ecs::Entity valid_rigidbody = world.createEntity();
+  const karma::world::Entity valid_rigidbody = world.createEntity();
   world.add(valid_rigidbody, karma::components::TransformComponent{});
   world.add(valid_rigidbody, karma::components::ColliderComponent::box());
   world.add(valid_rigidbody, karma::components::RigidbodyComponent{});
@@ -104,12 +104,12 @@ void componentRequirementsAreStrict() {
 
 std::size_t overlappingContactCount(bool allow_contact) {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
-  karma::ecs::World world;
+  karma::world::World world;
   karma::physics::World physics_world;
   physics_world.setGravity(0.0f);
   karma::physics::PhysicsSystem physics_system(physics_world);
 
-  const karma::ecs::Entity dynamic_body = world.createEntity();
+  const karma::world::Entity dynamic_body = world.createEntity();
   world.add(dynamic_body, karma::components::TransformComponent{});
   world.add(dynamic_body,
             karma::components::ColliderComponent::box(
@@ -127,7 +127,7 @@ std::size_t overlappingContactCount(bool allow_contact) {
                           });
   world.add(dynamic_body, karma::components::ContactListenerComponent{.emit_stay = true});
 
-  const karma::ecs::Entity static_body = world.createEntity();
+  const karma::world::Entity static_body = world.createEntity();
   world.add(static_body, karma::components::TransformComponent{{0.25f, 0.0f, 0.0f}});
   world.add(static_body,
             karma::components::ColliderComponent::box(
@@ -214,7 +214,7 @@ void queryApiFindsFilteredBodies() {
 
 void meshColliderGeometryProviderBuildsExternalMeshCollider() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
-  karma::ecs::World world;
+  karma::world::World world;
   karma::physics::World physics_world;
   physics_world.setGravity(0.0f);
   karma::physics::PhysicsSystem physics_system(physics_world);
@@ -235,7 +235,7 @@ void meshColliderGeometryProviderBuildsExternalMeshCollider() {
         };
       });
 
-  const karma::ecs::Entity terrain = world.createEntity();
+  const karma::world::Entity terrain = world.createEntity();
   world.add(terrain, karma::components::TransformComponent{});
   world.add(terrain, karma::components::MeshComponent{.mesh_asset_key = "runtime/quad"});
   world.add(terrain, karma::components::ColliderComponent::mesh());
@@ -256,7 +256,7 @@ void meshColliderGeometryProviderBuildsExternalMeshCollider() {
 
 void characterControllerStaysStableOnMeshColliderGround() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
-  karma::ecs::World world;
+  karma::world::World world;
   karma::physics::World physics_world;
   physics_world.setGravity(-9.8f);
   karma::physics::PhysicsSystem physics_system(physics_world);
@@ -275,12 +275,12 @@ void characterControllerStaysStableOnMeshColliderGround() {
         };
       });
 
-  const karma::ecs::Entity ground = world.createEntity();
+  const karma::world::Entity ground = world.createEntity();
   world.add(ground, karma::components::TransformComponent{});
   world.add(ground, karma::components::MeshComponent{.mesh_asset_key = "runtime/ground"});
   world.add(ground, karma::components::ColliderComponent::mesh());
 
-  const karma::ecs::Entity player = world.createEntity();
+  const karma::world::Entity player = world.createEntity();
   world.add(player, karma::components::TransformComponent{});
   world.add(player,
             karma::components::ColliderComponent::box(
@@ -304,14 +304,14 @@ void characterControllerStaysStableOnMeshColliderGround() {
 
 void multipleCharacterControllersMoveIndependently() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
-  karma::ecs::World world;
+  karma::world::World world;
   karma::physics::World physics_world;
   physics_world.setGravity(0.0f);
   karma::physics::PhysicsSystem physics_system(physics_world);
 
   auto make_controller = [&](const karma::math::Vec3& start,
                              const karma::math::Vec3& velocity) {
-    const karma::ecs::Entity entity = world.createEntity();
+    const karma::world::Entity entity = world.createEntity();
     world.add(entity, karma::components::TransformComponent{start});
     world.add(entity,
               karma::components::ColliderComponent::box(
@@ -325,8 +325,8 @@ void multipleCharacterControllersMoveIndependently() {
     return entity;
   };
 
-  const karma::ecs::Entity a = make_controller({0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
-  const karma::ecs::Entity b = make_controller({0.0f, 0.0f, 4.0f}, {0.0f, 0.0f, -1.0f});
+  const karma::world::Entity a = make_controller({0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
+  const karma::world::Entity b = make_controller({0.0f, 0.0f, 4.0f}, {0.0f, 0.0f, -1.0f});
 
   for (int i = 0; i < 30; ++i) {
     physics_system.update(world, 1.0f / 60.0f);
@@ -345,13 +345,13 @@ void multipleCharacterControllersMoveIndependently() {
 
 void sceneHierarchyPreservesPhysicsInterpolationSpan() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
   karma::physics::World physics_world;
   physics_world.setGravity(0.0f);
   karma::physics::PhysicsSystem physics_system(physics_world);
 
-  const karma::ecs::Entity body = world.createEntity();
+  const karma::world::Entity body = world.createEntity();
   world.add(body, karma::components::TransformComponent{});
   scene.createNode(body);
   world.add(body,
@@ -375,7 +375,7 @@ void sceneHierarchyPreservesPhysicsInterpolationSpan() {
   assert(previous_x < mid_x);
   assert(mid_x < current_x);
 
-  karma::scene::updateWorldTransforms(world, scene);
+  karma::world::updateWorldTransforms(world, scene);
 
   const auto& after_hierarchy = world.get<karma::components::TransformComponent>(body);
   assert(std::abs(after_hierarchy.getInterpolatedPosition(0.0f).x - previous_x) < 0.0001f);
@@ -527,13 +527,13 @@ void softBodyCreatesAndReportsState() {
 
 void terrainColliderMarkerCreatesPhysicsHeightfield() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
-  karma::ecs::World world;
+  karma::world::World world;
   karma::physics::World physics_world;
   physics_world.setGravity(0.0f);
   karma::physics::PhysicsSystem physics_system(physics_world);
-  karma::terrain::TerrainSystem terrain_system(nullptr);
+  karma::visual::terrain::TerrainSystem terrain_system(nullptr);
 
-  const karma::ecs::Entity terrain = world.createEntity();
+  const karma::world::Entity terrain = world.createEntity();
   world.add(terrain, karma::components::TransformComponent{});
   world.add(terrain, karma::components::ColliderComponent{});
   world.add(terrain, karma::components::TerrainComponent{

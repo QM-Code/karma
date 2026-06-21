@@ -26,7 +26,7 @@
 #include <variant>
 #include <vector>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 enum TextureCoordSlot : size_t {
@@ -44,8 +44,8 @@ enum TextureCoordSlot : size_t {
   kTexCoordThickness = 11,
 };
 
-renderer::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
-  renderer::MaterialDesc desc{};
+rendering::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
+  rendering::MaterialDesc desc{};
   desc.base_color = {1.0f, 1.0f, 1.0f, 1.0f};
 
   aiColor4D base_factor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -70,7 +70,7 @@ renderer::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
 
   desc.transparent = desc.base_color.a < 0.999f;
   if (desc.transparent) {
-    desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+    desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
   }
   return desc;
 }
@@ -115,7 +115,7 @@ LoadedImage decodeEmbeddedAssimpTexture(const aiTexture& texture) {
   return image;
 }
 
-LoadedImage decodeImportedTextureBytes(const renderer::ImportedMaterialTexture& texture) {
+LoadedImage decodeImportedTextureBytes(const rendering::ImportedMaterialTexture& texture) {
   LoadedImage image{};
   if (texture.source_bytes.empty()) {
     return image;
@@ -246,7 +246,7 @@ MaterialPipelineKind pipelineKind(std::string_view name) {
 }
 
 const float* parameterFloat(
-    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    const std::unordered_map<std::string, rendering::MaterialParameterValue>& params,
     std::string_view name) {
   const auto it = params.find(std::string(name));
   if (it == params.end()) {
@@ -256,7 +256,7 @@ const float* parameterFloat(
 }
 
 const bool* parameterBool(
-    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    const std::unordered_map<std::string, rendering::MaterialParameterValue>& params,
     std::string_view name) {
   const auto it = params.find(std::string(name));
   if (it == params.end()) {
@@ -266,7 +266,7 @@ const bool* parameterBool(
 }
 
 const glm::vec3* parameterVec3(
-    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    const std::unordered_map<std::string, rendering::MaterialParameterValue>& params,
     std::string_view name) {
   const auto it = params.find(std::string(name));
   if (it == params.end()) {
@@ -276,7 +276,7 @@ const glm::vec3* parameterVec3(
 }
 
 uint32_t parameterUint(
-    const std::unordered_map<std::string, renderer::MaterialParameterValue>& params,
+    const std::unordered_map<std::string, rendering::MaterialParameterValue>& params,
     std::string_view name,
     uint32_t fallback) {
   const auto it = params.find(std::string(name));
@@ -511,7 +511,7 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   mark_stage("default texture assignment");
 
   const bool double_sided = record.desc.double_sided;
-  const bool additive = record.blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+  const bool additive = record.blend_mode == rendering::MaterialDesc::BlendMode::Additive;
   ensureForwardPipeline(ForwardPipelineVariant::Opaque);
   mark_stage("required pipeline ensure");
 
@@ -570,7 +570,7 @@ Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
     MaterialRecord& material,
     ForwardPipelineVariant variant,
     bool custom_pipeline,
-    renderer::InstanceGpuLayout layout) {
+    rendering::InstanceGpuLayout layout) {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>* target = nullptr;
   Diligent::IPipelineState* pso = nullptr;
   const size_t layout_slot = forwardPipelineVariantIndex(variant) * kInstanceGpuLayoutCount +
@@ -578,7 +578,7 @@ Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
 
   if (custom_pipeline) {
     pso = ensureCustomForwardPipeline(material, variant, layout);
-    if (layout != renderer::InstanceGpuLayout::Matrix4x4Params ||
+    if (layout != rendering::InstanceGpuLayout::Matrix4x4Params ||
         variant == ForwardPipelineVariant::OpaqueDoubleSided) {
       target = std::addressof(material.layout_custom_srbs[layout_slot]);
     } else {
@@ -607,7 +607,7 @@ Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
     }
   } else {
     pso = ensureForwardPipeline(variant, layout);
-    if (layout != renderer::InstanceGpuLayout::Matrix4x4Params ||
+    if (layout != rendering::InstanceGpuLayout::Matrix4x4Params ||
         variant == ForwardPipelineVariant::OpaqueDoubleSided) {
       target = std::addressof(material.layout_srbs[layout_slot]);
     } else {
@@ -840,7 +840,7 @@ void DiligentBackend::preloadAssimpTextures(const aiScene& scene,
       continue;
     }
 
-    const renderer::TextureId id = nextTextureId_++;
+    const rendering::TextureId id = nextTextureId_++;
     TextureRecord record{};
     record.srv = createTextureSRV(image.pixels.data(),
                                   image.width,
@@ -873,7 +873,7 @@ void DiligentBackend::preloadAssimpTextures(const aiScene& scene,
 }
 
 Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadImportedMaterialTexture(
-    const renderer::ImportedMaterialTexture& texture) {
+    const rendering::ImportedMaterialTexture& texture) {
   const auto total_start = core::SteadyClock::now();
   if (texture.source_key.empty()) {
     return {};
@@ -916,7 +916,7 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadImportedMat
   }
 
   stage_start = core::SteadyClock::now();
-  const renderer::TextureId id = nextTextureId_++;
+  const rendering::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.srv = createTextureSRV(image.pixels.data(),
                                 image.width,
@@ -947,11 +947,11 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadImportedMat
 }
 
 void DiligentBackend::preloadImportedMaterialTextures(
-    const renderer::ImportedMaterialData& material) {
+    const rendering::ImportedMaterialData& material) {
   const auto total_start = core::SteadyClock::now();
   auto stage_start = total_start;
 
-  std::vector<const renderer::ImportedMaterialTexture*> refs;
+  std::vector<const rendering::ImportedMaterialTexture*> refs;
   std::unordered_set<std::string> seen_keys;
   refs.reserve(material.textures.size());
   seen_keys.reserve(material.textures.size());
@@ -983,7 +983,7 @@ void DiligentBackend::preloadImportedMaterialTextures(
 
   stage_start = core::SteadyClock::now();
   for (size_t ref_index = 0; ref_index < refs.size(); ++ref_index) {
-    const renderer::ImportedMaterialTexture* texture = refs[ref_index];
+    const rendering::ImportedMaterialTexture* texture = refs[ref_index];
     if (texture == nullptr || !texture->embedded || texture->source_bytes.empty() ||
         is_cached(texture->source_key)) {
       continue;
@@ -1036,7 +1036,7 @@ void DiligentBackend::preloadImportedMaterialTextures(
       continue;
     }
 
-    const renderer::TextureId id = nextTextureId_++;
+    const rendering::TextureId id = nextTextureId_++;
     TextureRecord record{};
     record.srv = createTextureSRV(image.pixels.data(),
                                   image.width,
@@ -1071,7 +1071,7 @@ void DiligentBackend::preloadImportedMaterialTextures(
 }
 
 DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
-    const renderer::ImportedMaterialData& material) {
+    const rendering::ImportedMaterialData& material) {
   const auto total_start = core::SteadyClock::now();
   MaterialRecord record{};
   initializeTextureCoordTransforms(record);
@@ -1108,7 +1108,7 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
 
   const size_t texcoord_count =
       std::min<size_t>(MaterialRecord::kTextureCoordSlotCount,
-                       renderer::kImportedMaterialTextureCoordSlotCount);
+                       rendering::kImportedMaterialTextureCoordSlotCount);
   for (size_t i = 0; i < texcoord_count; ++i) {
     record.texcoord_row0[i] = material.texcoord_row0[i];
     record.texcoord_row1[i] = material.texcoord_row1[i];
@@ -1120,40 +1120,40 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
       continue;
     }
     switch (texture.semantic) {
-      case renderer::ImportedMaterialTextureSemantic::BaseColor:
+      case rendering::ImportedMaterialTextureSemantic::BaseColor:
         record.base_color_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::Normal:
+      case rendering::ImportedMaterialTextureSemantic::Normal:
         record.normal_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::MetallicRoughness:
+      case rendering::ImportedMaterialTextureSemantic::MetallicRoughness:
         record.metallic_roughness_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::Occlusion:
+      case rendering::ImportedMaterialTextureSemantic::Occlusion:
         record.occlusion_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::Emissive:
+      case rendering::ImportedMaterialTextureSemantic::Emissive:
         record.emissive_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::Clearcoat:
+      case rendering::ImportedMaterialTextureSemantic::Clearcoat:
         record.clearcoat_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::ClearcoatRoughness:
+      case rendering::ImportedMaterialTextureSemantic::ClearcoatRoughness:
         record.clearcoat_roughness_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::ClearcoatNormal:
+      case rendering::ImportedMaterialTextureSemantic::ClearcoatNormal:
         record.clearcoat_normal_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::SheenColor:
+      case rendering::ImportedMaterialTextureSemantic::SheenColor:
         record.sheen_color_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::SheenRoughness:
+      case rendering::ImportedMaterialTextureSemantic::SheenRoughness:
         record.sheen_roughness_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::Transmission:
+      case rendering::ImportedMaterialTextureSemantic::Transmission:
         record.transmission_srv = srv;
         break;
-      case renderer::ImportedMaterialTextureSemantic::Thickness:
+      case rendering::ImportedMaterialTextureSemantic::Thickness:
         record.thickness_srv = srv;
         break;
     }
@@ -1245,7 +1245,7 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
     record.desc.transmission = transmission;
     if (transmission > 0.001f) {
       record.desc.transparent = true;
-      record.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+      record.desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
     }
   }
   float ior = 1.5f;
@@ -1467,7 +1467,7 @@ const DiligentBackend::ImportedMaterialTemplateCacheEntry* DiligentBackend::getI
     } else {
       MaterialRecord fallback{};
       initializeTextureCoordTransforms(fallback);
-      fallback.desc = renderer::MaterialDesc{};
+      fallback.desc = rendering::MaterialDesc{};
       initializeMaterialBindings(fallback);
       entry.materials.push_back(std::move(fallback));
     }
@@ -1482,13 +1482,13 @@ const DiligentBackend::ImportedMaterialTemplateCacheEntry* DiligentBackend::getI
 
 void DiligentBackend::applyResolvedMaterial(
     MaterialRecord& record,
-    const renderer::ResolvedMaterialDesc& resolved) {
-  const renderer::MaterialDesc& material = resolved.surface;
+    const rendering::ResolvedMaterialDesc& resolved) {
+  const rendering::MaterialDesc& material = resolved.surface;
   record.pipeline = resolved.pipeline;
   record.desc = material;
   if (record.desc.transparent &&
-      record.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
-    record.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+      record.desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Opaque) {
+    record.desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
   }
   record.base_color_factor = glm::vec4(material.base_color.r,
                                        material.base_color.g,
@@ -1607,7 +1607,7 @@ void DiligentBackend::applyResolvedMaterial(
     record.volume_noise_strength = *value;
   }
   auto assign_custom_material_param =
-      [&](size_t index, const renderer::MaterialParameterValue& value) {
+      [&](size_t index, const rendering::MaterialParameterValue& value) {
     glm::vec4 parsed{0.0f};
     if (const auto* f = std::get_if<float>(&value)) {
       parsed.x = *f;
@@ -1617,7 +1617,7 @@ void DiligentBackend::applyResolvedMaterial(
       parsed.x = static_cast<float>(*u);
     } else if (const auto* b = std::get_if<bool>(&value)) {
       parsed.x = *b ? 1.0f : 0.0f;
-    } else if (const auto* color = std::get_if<renderer::Color>(&value)) {
+    } else if (const auto* color = std::get_if<rendering::Color>(&value)) {
       parsed = glm::vec4(color->r, color->g, color->b, color->a);
     } else if (const auto* v = std::get_if<glm::vec2>(&value)) {
       parsed = glm::vec4(*v, 0.0f, 0.0f);
@@ -1675,14 +1675,14 @@ void DiligentBackend::applyResolvedMaterial(
   initializeMaterialBindings(record);
 }
 
-renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMaterialDesc& resolved) {
+rendering::MaterialId DiligentBackend::createMaterial(const rendering::ResolvedMaterialDesc& resolved) {
   if (resolved.imported_material &&
       resolved.material_asset_index != std::numeric_limits<uint32_t>::max()) {
-    const renderer::MaterialId imported =
+    const rendering::MaterialId imported =
         createMaterialFromImportedPayload(resolved.material_asset_path,
                                           resolved.material_asset_index,
                                           *resolved.imported_material);
-    if (imported != renderer::kInvalidMaterial) {
+    if (imported != rendering::kInvalidMaterial) {
       if (auto it = materials_.find(imported); it != materials_.end()) {
         applyResolvedMaterial(it->second, resolved);
       }
@@ -1691,9 +1691,9 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
   }
   if (!resolved.material_asset_path.empty() &&
       resolved.material_asset_index != std::numeric_limits<uint32_t>::max()) {
-    const renderer::MaterialId imported =
+    const rendering::MaterialId imported =
         createMaterialFromAsset(resolved.material_asset_path, resolved.material_asset_index);
-    if (imported != renderer::kInvalidMaterial) {
+    if (imported != rendering::kInvalidMaterial) {
       if (auto it = materials_.find(imported); it != materials_.end()) {
         applyResolvedMaterial(it->second, resolved);
       }
@@ -1701,16 +1701,16 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
     }
   }
 
-  renderer::MaterialDesc material = resolved.surface;
+  rendering::MaterialDesc material = resolved.surface;
 
-  const renderer::MaterialId id = nextMaterialId_++;
+  const rendering::MaterialId id = nextMaterialId_++;
   MaterialRecord record{};
   initializeTextureCoordTransforms(record);
   record.pipeline = resolved.pipeline;
   record.desc = material;
   if (record.desc.transparent &&
-      record.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
-    record.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+      record.desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Opaque) {
+    record.desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
   }
   record.base_color_factor = glm::vec4(material.base_color.r,
                                        material.base_color.g,
@@ -1829,7 +1829,7 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
     record.volume_noise_strength = *value;
   }
   auto assign_custom_material_param =
-      [&](size_t index, const renderer::MaterialParameterValue& value) {
+      [&](size_t index, const rendering::MaterialParameterValue& value) {
     glm::vec4 parsed{0.0f};
     if (const auto* f = std::get_if<float>(&value)) {
       parsed.x = *f;
@@ -1839,7 +1839,7 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
       parsed.x = static_cast<float>(*u);
     } else if (const auto* b = std::get_if<bool>(&value)) {
       parsed.x = *b ? 1.0f : 0.0f;
-    } else if (const auto* color = std::get_if<renderer::Color>(&value)) {
+    } else if (const auto* color = std::get_if<rendering::Color>(&value)) {
       parsed = glm::vec4(color->r, color->g, color->b, color->a);
     } else if (const auto* v = std::get_if<glm::vec2>(&value)) {
       parsed = glm::vec4(*v, 0.0f, 0.0f);
@@ -1900,7 +1900,7 @@ renderer::MaterialId DiligentBackend::createMaterial(const renderer::ResolvedMat
   return id;
 }
 
-renderer::MaterialId DiligentBackend::createMaterialFromAsset(const std::filesystem::path& path,
+rendering::MaterialId DiligentBackend::createMaterialFromAsset(const std::filesystem::path& path,
                                                               uint32_t material_index) {
   const auto total_start = core::SteadyClock::now();
   auto stage_start = total_start;
@@ -1909,11 +1909,11 @@ renderer::MaterialId DiligentBackend::createMaterialFromAsset(const std::filesys
   logRenderResourceDiag("material_from_asset", "template lookup", stage_start, stage_end);
   if (!templates || material_index >= templates->materials.size()) {
     logRenderResourceDiag("material_from_asset", "total", total_start, core::SteadyClock::now());
-    return renderer::kInvalidMaterial;
+    return rendering::kInvalidMaterial;
   }
 
   stage_start = stage_end;
-  const renderer::MaterialId id = nextMaterialId_++;
+  const rendering::MaterialId id = nextMaterialId_++;
   MaterialRecord record = templates->materials[material_index];
   if (!record.srb) {
     initializeMaterialBindings(record);
@@ -1925,10 +1925,10 @@ renderer::MaterialId DiligentBackend::createMaterialFromAsset(const std::filesys
   return id;
 }
 
-renderer::MaterialId DiligentBackend::createMaterialFromImportedPayload(
+rendering::MaterialId DiligentBackend::createMaterialFromImportedPayload(
     const std::filesystem::path& path,
     uint32_t material_index,
-    const renderer::ImportedMaterialData& imported) {
+    const rendering::ImportedMaterialData& imported) {
   const auto total_start = core::SteadyClock::now();
   auto stage_start = total_start;
   std::string cache_key = path.string();
@@ -1970,11 +1970,11 @@ renderer::MaterialId DiligentBackend::createMaterialFromImportedPayload(
                           "total",
                           total_start,
                           core::SteadyClock::now());
-    return renderer::kInvalidMaterial;
+    return rendering::kInvalidMaterial;
   }
 
   stage_start = core::SteadyClock::now();
-  const renderer::MaterialId id = nextMaterialId_++;
+  const rendering::MaterialId id = nextMaterialId_++;
   MaterialRecord record = template_it->second;
   if (!record.srb) {
     initializeMaterialBindings(record);
@@ -1989,8 +1989,8 @@ renderer::MaterialId DiligentBackend::createMaterialFromImportedPayload(
   return id;
 }
 
-void DiligentBackend::updateMaterial(renderer::MaterialId material,
-                                     const renderer::MaterialDesc& desc) {
+void DiligentBackend::updateMaterial(rendering::MaterialId material,
+                                     const rendering::MaterialDesc& desc) {
   auto it = materials_.find(material);
   if (it == materials_.end()) {
     return;
@@ -1998,8 +1998,8 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material,
 
   it->second.desc = desc;
   if (it->second.desc.transparent &&
-      it->second.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
-    it->second.desc.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+      it->second.desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Opaque) {
+    it->second.desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
   }
   it->second.base_color_factor = glm::vec4(desc.base_color.r,
                                            desc.base_color.g,
@@ -2033,11 +2033,11 @@ void DiligentBackend::updateMaterial(renderer::MaterialId material,
   initializeMaterialBindings(it->second);
 }
 
-void DiligentBackend::destroyMaterial(renderer::MaterialId material) {
+void DiligentBackend::destroyMaterial(rendering::MaterialId material) {
   materials_.erase(material);
 }
 
-void DiligentBackend::setMaterialFloat(renderer::MaterialId material,
+void DiligentBackend::setMaterialFloat(rendering::MaterialId material,
                                        std::string_view /*name*/,
                                        float /*value*/) {
   if (materials_.find(material) == materials_.end()) {
@@ -2045,4 +2045,4 @@ void DiligentBackend::setMaterialFloat(renderer::MaterialId material,
   }
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

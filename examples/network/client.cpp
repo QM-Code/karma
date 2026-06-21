@@ -20,7 +20,7 @@ namespace {
 void runClient(const std::string& host,
                uint16_t port,
                const std::string& name) {
-  auto transport = karma::net::createDefaultClientTransport();
+  auto transport = karma::network::createDefaultClientTransport();
   if (!transport) {
     spdlog::error("Client: failed to create transport");
     return;
@@ -28,8 +28,8 @@ void runClient(const std::string& host,
 
   karma::network::ComponentReplicationRegistry registry;
   karma::network::registerBuiltinReplicators(registry);
-  karma::ecs::World world;
-  karma::net::ClientSession session(std::move(transport), demo::kDemoAppId, name);
+  karma::world::World world;
+  karma::network::ClientSession session(std::move(transport), demo::kDemoAppId, name);
 
   bool running = true;
   uint32_t tick = 0;
@@ -40,14 +40,14 @@ void runClient(const std::string& host,
       karma::network::ClientNetworkRuntimeConfig{
           .app_id = demo::kDemoAppId,
           .event_handler =
-              [&](const karma::net::SessionEvent& event, karma::ecs::World& world) {
+              [&](const karma::network::SessionEvent& event, karma::world::World& world) {
                 (void)world;
-                if (event.type == karma::net::SessionEventType::PeerConnected) {
+                if (event.type == karma::network::SessionEventType::PeerConnected) {
                   spdlog::info("Client: session accepted as peer {}", event.peer.value);
-                } else if (event.type == karma::net::SessionEventType::PeerDisconnected) {
+                } else if (event.type == karma::network::SessionEventType::PeerDisconnected) {
                   spdlog::info("Client: disconnected");
                   running = false;
-                } else if (event.type == karma::net::SessionEventType::CustomMessage) {
+                } else if (event.type == karma::network::SessionEventType::CustomMessage) {
                   spdlog::info("Client: custom message '{}'",
                                demo::payloadText(event.payload));
                 }

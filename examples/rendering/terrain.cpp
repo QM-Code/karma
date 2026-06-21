@@ -123,9 +123,9 @@ class TerrainExample final : public app::GameInterface {
   }
 
   void onShutdown() override {
-    if (graphics && offscreen_target_ != renderer::kDefaultRenderTarget) {
+    if (graphics && offscreen_target_ != rendering::kDefaultRenderTarget) {
       graphics->destroyRenderTarget(offscreen_target_);
-      offscreen_target_ = renderer::kDefaultRenderTarget;
+      offscreen_target_ = rendering::kDefaultRenderTarget;
     }
   }
 
@@ -135,7 +135,7 @@ class TerrainExample final : public app::GameInterface {
       return;
     }
 
-    renderer::MaterialDesc ground{};
+    rendering::MaterialDesc ground{};
     ground.base_color = math::Color{0.32f, 0.45f, 0.28f, 1.0f};
     ground.roughness = 0.92f;
     ground.metallic = 0.0f;
@@ -143,7 +143,7 @@ class TerrainExample final : public app::GameInterface {
   }
 
   void spawnTerrain() {
-    const ecs::Entity terrain = world->createEntity();
+    const world::Entity terrain = world->createEntity();
     world->setName(terrain, "Heightmap Terrain");
     components::TransformComponent terrain_transform{};
     terrain_transform.setPosition({-kTerrainSize * 0.5f, 0.0f, -kTerrainSize * 0.5f});
@@ -194,7 +194,7 @@ class TerrainExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 900.0f, 0.0f});
@@ -207,7 +207,7 @@ class TerrainExample final : public app::GameInterface {
                         .casts_shadows = false,
                     });
 
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                 .intensity = 0.09f,
@@ -232,7 +232,7 @@ class TerrainExample final : public app::GameInterface {
 
   void spawnOffscreenCamera() {
     if (graphics) {
-      renderer::RenderTargetDesc desc{};
+      rendering::RenderTargetDesc desc{};
       desc.width = 512;
       desc.height = 512;
       desc.depth = true;
@@ -240,7 +240,7 @@ class TerrainExample final : public app::GameInterface {
       offscreen_target_ = graphics->createRenderTarget(desc);
     }
 
-    const ecs::Entity camera = world->createEntity();
+    const world::Entity camera = world->createEntity();
     world->setName(camera, "Terrain Offscreen Camera");
     components::TransformComponent camera_transform{};
     camera_transform.setPosition({0.0f, 1900.0f, 0.0f});
@@ -282,9 +282,9 @@ class TerrainExample final : public app::GameInterface {
     player_input.grounded = false;
   }
 
-  ecs::Entity player_entity_{};
-  ecs::Entity camera_entity_{};
-  renderer::RenderTargetId offscreen_target_ = renderer::kDefaultRenderTarget;
+  world::Entity player_entity_{};
+  world::Entity camera_entity_{};
+  rendering::RenderTargetId offscreen_target_ = rendering::kDefaultRenderTarget;
   float yaw_ = 0.0f;
   float pitch_ = 0.0f;
   bool jump_down_prev_ = false;
@@ -295,7 +295,7 @@ class TerrainExample final : public app::GameInterface {
 
 int main() {
   karma::app::EngineApp engine;
-  engine.addRuntimeModule(std::make_unique<karma::terrain::TerrainRuntimeModule>());
+  engine.addRuntimeModule(std::make_unique<karma::visual::terrain::TerrainRuntimeModule>());
   karma::demo::TerrainExample game;
 
   karma::app::EngineConfig config;

@@ -12,7 +12,7 @@
 
 #include <array>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSRV(
     const unsigned char* data,
@@ -225,7 +225,7 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   }
 
   stage_start = core::SteadyClock::now();
-  const renderer::TextureId id = nextTextureId_++;
+  const rendering::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.srv = createTextureSRV(image.pixels.data(),
                                 image.width,
@@ -263,7 +263,7 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
     return {};
   }
 
-  const renderer::TextureId id = nextTextureId_++;
+  const rendering::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.srv = createTextureSRV(image.pixels.data(),
                                 image.width,
@@ -277,4 +277,4 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   return record.srv;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

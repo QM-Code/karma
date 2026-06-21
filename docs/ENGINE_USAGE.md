@@ -158,11 +158,11 @@ available.
 Karma's foundational math and timing helpers live under `karma/core`.
 
 ```cpp
-#include "karma/core/math/glm.h"
-#include "karma/core/math/quat.h"
-#include "karma/core/math/scalar.h"
-#include "karma/core/math/vec3.h"
-#include "karma/core/time.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/core.h"
 
 const karma::math::Vec3 a{1.0f, 0.0f, 0.0f};
 const karma::math::Vec3 b{0.0f, 2.0f, 0.0f};
@@ -193,27 +193,7 @@ const double elapsed_ms = karma::core::elapsedMillisecondsSince(start);
 Use these helpers instead of adding local `Vec3` arithmetic, quaternion
 conversion, clamp/interpolation, scale, or elapsed-time wrappers in systems,
 runtime code, and examples. GLM conversions for engine math types should go
-through `karma/core/math/glm.h`; backend-specific conversions such as Bullet,
-Jolt, or Assimp native types can stay local to those backend/importer files.
-
-## ECS Component Validation
-
-`ecs::World::add` throws when adding a component to a dead or invalid entity.
-Components that declare composition requirements validate before insertion, so
-invalid gameplay objects fail at authoring/deserialization time instead of
-being repaired later by runtime systems.
-
-Current physics-facing requirements include:
-
-- `ColliderComponent` requires `TransformComponent`.
-- `RigidbodyComponent` requires `TransformComponent` and `ColliderComponent`.
-- `CharacterControllerComponent` requires `TransformComponent`, a
-  `ColliderComponent`, and that collider must be a box.
-
-Add components in dependency order in gameplay code and prefabs:
-
-```cpp
-auto entity = world->createEntity();
+through `karma/math.h>createEntity();
 world->add(entity, karma::components::TransformComponent{});
 world->add(entity, karma::components::ColliderComponent::box(
     karma::components::BoxColliderShape{.half_extents = {0.5f, 1.0f, 0.5f}}));
@@ -423,7 +403,7 @@ register named profiles during `onStart()` or update them at runtime through
 ```cpp
 constexpr const char* kCinematicProfile = "camera/cinematic";
 
-renderer::PostProcessSettings cinematic{};
+rendering::PostProcessSettings cinematic{};
 cinematic.bloom_enabled = true;
 cinematic.bloom_threshold = 0.7f;
 cinematic.bloom_intensity = 0.35f;
@@ -566,7 +546,7 @@ For ImGui, Karma provides the adapter layer and you provide only the ImGui
 content:
 
 ```cpp
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 #include <imgui.h>
 
 struct ToolsUi {
@@ -580,7 +560,7 @@ struct ToolsUi {
     ImGui::Begin("Tools");
     ImGui::TextUnformatted("Hello from ImGui");
     if (logo) {
-      ImGui::Image(karma::imgui::toTextureId(logo.handle),
+      ImGui::Image(karma::ui::imgui::toTextureId(logo.handle),
                    ImVec2(static_cast<float>(logo.width),
                           static_cast<float>(logo.height)));
     }
@@ -589,23 +569,24 @@ struct ToolsUi {
 };
 
 auto tools = std::make_shared<ToolsUi>();
-engine.setUi(karma::imgui::createUiLayer([tools](karma::app::UIContext& ctx) {
+engine.setUi(karma::ui::imgui::createUiLayer([tools](karma::app::UIContext& ctx) {
   tools->draw(ctx);
 }));
 ```
 
-Provider adapters live under `karma/features/ui/<provider>`. Keep code that
-talks to ImGui, RmlUi, or another UI library in that adapter; keep engine
-composition on the generic `UiLayer` contract.
+Provider adapters live under `src/features/ui/<provider>` and expose their
+small public factories through `karma/ui.h`. Keep code that talks to ImGui,
+RmlUi, or another UI library in that adapter; keep engine composition on the
+generic `UiLayer` contract.
 
 RmlUi follows the same pattern. Karma owns the RmlUi render/system/file bridge,
 and app code only initializes documents when the RmlUi context is ready:
 
 ```cpp
-#include "karma/features/ui/rmlui/rmlui_layer.h"
+#include "karma/ui.h"
 #include <RmlUi/Core.h>
 
-engine.setUi(karma::rmlui::createUiLayer([](Rml::Context& context) {
+engine.setUi(karma::ui::rmlui::createUiLayer([](Rml::Context& context) {
   Rml::ElementDocument* document =
       context.LoadDocumentFromMemory("<rml><body><div>Hello</div></body></rml>");
   if (document) {
@@ -616,7 +597,7 @@ engine.setUi(karma::rmlui::createUiLayer([](Rml::Context& context) {
 
 ## Particle Effects
 
-Particle effects are ECS-driven through `content::AssetRegistry`,
+Particle effects are ECS-driven through `assets::AssetRegistry`,
 `ParticleEffectComponent`, `ParticleEffectOverrideComponent`, and
 `ParticleSystem`.
 
@@ -626,7 +607,7 @@ For the intended registration/binding/restart workflow, see
 ## Prefabs
 
 Layered gameplay objects that need multiple ECS entities can be authored as
-JSON prefabs. A prefab stores one root entity, its `scene::Scene` children, and
+JSON prefabs. A prefab stores one root entity, its `world::Scene` children, and
 component payloads keyed by real component type names such as
 `TransformComponent`, `MeshComponent`, and `ParticleEffectComponent`.
 
@@ -686,7 +667,7 @@ class MyGame : public karma::app::GameInterface {
   }
 
  private:
-  karma::ecs::Entity sensor_{};
+  karma::world::Entity sensor_{};
 };
 ```
 
@@ -738,7 +719,7 @@ class MyGame : public karma::app::GameInterface {
   }
 
  private:
-  karma::ecs::Entity actor_{};
+  karma::world::Entity actor_{};
 };
 ```
 
@@ -807,7 +788,7 @@ class MyGame : public karma::app::GameInterface {
   }
 
  private:
-  karma::ecs::Entity player_{};
+  karma::world::Entity player_{};
   float move_speed_ = 6.0f;
   float turn_speed_ = 0.0f;
   float jump_speed_ = 7.0f;
@@ -864,7 +845,7 @@ class MyGame : public karma::app::GameInterface {
   }
 
  private:
-  karma::ecs::Entity player_{};
+  karma::world::Entity player_{};
 };
 ```
 
@@ -876,27 +857,27 @@ Current support:
 For box rigid bodies, the engine now also runs a short downward support probe after physics so `support_entity`, `point`, and `normal` can be resolved for common "what am I standing on?" gameplay logic.
 
 ## ECS Point Containment Queries
-Karma exposes ECS-facing point containment helpers in `karma/world/ecs/collider_queries.h`:
+Karma exposes ECS-facing point containment helpers in `karma/components.h`:
 
 ```cpp
-#include "karma/world/ecs/collider_queries.h"
+#include "karma/components.h"
 
-using karma::ecs::queries::PointContainmentFilter;
+using karma::world::queries::PointContainmentFilter;
 
 const karma::math::Vec3 point{0.0f, 1.0f, 0.0f};
 
-if (karma::ecs::queries::containsPoint(*world, trigger_entity, point)) {
+if (karma::world::queries::containsPoint(*world, trigger_entity, point)) {
   // This point is inside at least one supported collider on trigger_entity.
 }
 
-auto hit = karma::ecs::queries::findContainingCollider(
+auto hit = karma::world::queries::findContainingCollider(
     *world,
     point,
     PointContainmentFilter{
         .only_triggers = true,
         .collision_layer_mask = 0xFFFFFFFFu});
 
-auto hits = karma::ecs::queries::findContainingColliders(
+auto hits = karma::world::queries::findContainingColliders(
     *world,
     point,
     PointContainmentFilter{.only_triggers = true});
@@ -911,18 +892,18 @@ Current support:
 Overlap queries:
 
 ```cpp
-auto hit = karma::ecs::queries::findOverlappingCollider(
+auto hit = karma::world::queries::findOverlappingCollider(
     *world,
     sensor_entity,
-    karma::ecs::queries::OverlapFilter{
+    karma::world::queries::OverlapFilter{
         .only_triggers = false,
         .collision_layer_mask = 0xFFFFFFFFu,
         .skip_self = true});
 
-auto hits = karma::ecs::queries::findOverlappingColliders(
+auto hits = karma::world::queries::findOverlappingColliders(
     *world,
     sensor_entity,
-    karma::ecs::queries::OverlapFilter{
+    karma::world::queries::OverlapFilter{
         .only_triggers = false,
         .collision_layer_mask = 0xFFFFFFFFu,
         .skip_self = true});
@@ -969,12 +950,12 @@ class MyGame : public karma::app::GameInterface {
   void onStart() override {
     const std::string tank_mesh = "examples/mesh/tank_final";
     std::string diagnostic;
-    (void)karma::content::importAssetPackage(
+    (void)karma::assets::importAssetPackage(
         *assets,
         "examples/assets/common_meshes/tank_final",
         &diagnostic);
 
-    karma::renderer::MaterialDesc blue{};
+    karma::rendering::MaterialDesc blue{};
     blue.base_color = karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f};
     blue.roughness = 0.65f;
     blue.metallic = 0.0f;
@@ -1030,7 +1011,7 @@ logical pipeline name, and texture bindings reference texture asset keys:
 Load and register a `.mat` file:
 
 ```cpp
-const auto loaded = karma::content::loadMaterialFile(
+const auto loaded = karma::assets::loadMaterialFile(
     *assets,
     "tank_blue",
     "assets/materials/tank_blue.mat");
@@ -1099,20 +1080,20 @@ Declare the source in `assets.package.json`:
 Load the package and instantiate the registered scene asset:
 
 ```cpp
-karma::content::AssetRegistry assets;
+karma::assets::AssetRegistry assets;
 std::string diagnostic;
-auto package = karma::content::importAssetPackage(assets, "assets/level", &diagnostic);
+auto package = karma::assets::importAssetPackage(assets, "assets/level", &diagnostic);
 if (!package.has_value()) {
   return;
 }
 
-const karma::content::GltfSceneAsset* level =
+const karma::assets::GltfSceneAsset* level =
     assets.findGltfSceneAsset("game/level");
 if (level == nullptr) {
   return;
 }
 
-auto imported = karma::scene::instantiateGltfSceneAsset(
+auto imported = karma::world::instantiateGltfSceneAsset(
     *world,
     *scene,
     assets,
@@ -1127,7 +1108,7 @@ if (imported.valid()) {
 Current behavior:
 
 - one structural ECS entity is created for each imported glTF node
-- imported local transforms are preserved and `scene::updateWorldTransforms(...)`
+- imported local transforms are preserved and `world::updateWorldTransforms(...)`
   composes final world transforms
 - imported lights become `LightComponent`s on those node entities
 - imported point and spot lights are created with `casts_shadows = true`
@@ -1142,13 +1123,13 @@ Current behavior:
   reference deformation remains available for diagnostics
 - morph target deltas and default weights import from glTF mesh primitives and
   morph-weight animation updates runtime deformation components
-- the full node tree is recreated in `scene::Scene`
+- the full node tree is recreated in `world::Scene`
 
 Animation asset boundary:
 
 - a source `.glb` or `.gltf` is only an import container
 - `gltf_scene` package entries register clips as
-  `karma::animation::AnimationClip` assets and store their keys on
+  `karma::world::AnimationClip` assets and store their keys on
   `GltfSceneAsset`
 - `instantiateGltfSceneAsset(...)` resolves those clip keys and copies the
   clips into `AnimatorComponent::clips`
@@ -1165,7 +1146,7 @@ Animation runtime flow:
   entities
 - morph-weight channels write `DeformableMeshComponent::morph_weights` on the
   matching renderable primitive entities
-- `scene::updateWorldTransforms(...)` composes final world transforms after
+- `world::updateWorldTransforms(...)` composes final world transforms after
   animation sampling
 - `DeformationSystem` is the mesh deformation upload stage: it builds joint
   palettes, updates renderer-owned deformation resources, and uploads

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "karma/core/time.h"
-#include "karma/rendering/renderer/camera.h"
-#include "karma/world/geometry/mesh_data.h"
+#include "karma/core.h"
+#include "karma/rendering.h"
+#include "karma/world.h"
 
 #include <filesystem>
 #include <vector>
@@ -16,7 +16,7 @@ struct aiScene;
 
 struct GLFWwindow;
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 struct LoadedImage {
   int width = 0;
@@ -106,8 +106,8 @@ struct InstancedIndexedIndirectArgs {
 };
 
 struct alignas(16) CameraOverrideUserConstants {
-  uint32_t user_key_hashes[renderer::kCameraShaderUserParamCapacity][4];
-  float user_values[renderer::kCameraShaderUserParamCapacity][4];
+  uint32_t user_key_hashes[rendering::kCameraShaderUserParamCapacity][4];
+  float user_values[rendering::kCameraShaderUserParamCapacity][4];
   float user_meta[4];
 };
 
@@ -141,10 +141,10 @@ LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path);
 Diligent::NativeWindow toNativeWindow(GLFWwindow* window);
 #endif
 
-geometry::MeshData combineMeshes(const aiScene& scene,
+world::MeshData combineMeshes(const aiScene& scene,
                                  glm::vec4& out_color,
                                  std::vector<SubmeshInfo>& out_submeshes);
 void copyMat4(float out[16], const glm::mat4& m);
-std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh);
+std::vector<float> buildInterleavedVertices(const world::MeshData& mesh);
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

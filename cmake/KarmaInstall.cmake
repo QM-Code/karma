@@ -10,13 +10,31 @@ install(TARGETS ${KARMA_INSTALL_TARGETS}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  PATTERN "AGENTS.md" EXCLUDE
+install(FILES
+  ${PROJECT_SOURCE_DIR}/include/karma/app.h
+  ${PROJECT_SOURCE_DIR}/include/karma/assets.h
+  ${PROJECT_SOURCE_DIR}/include/karma/audio.h
+  ${PROJECT_SOURCE_DIR}/include/karma/components.h
+  ${PROJECT_SOURCE_DIR}/include/karma/core.h
+  ${PROJECT_SOURCE_DIR}/include/karma/headless.h
+  ${PROJECT_SOURCE_DIR}/include/karma/karma.h
+  ${PROJECT_SOURCE_DIR}/include/karma/math.h
+  ${PROJECT_SOURCE_DIR}/include/karma/navigation.h
+  ${PROJECT_SOURCE_DIR}/include/karma/network.h
+  ${PROJECT_SOURCE_DIR}/include/karma/physics.h
+  ${PROJECT_SOURCE_DIR}/include/karma/platform.h
+  ${PROJECT_SOURCE_DIR}/include/karma/prefabs.h
+  ${PROJECT_SOURCE_DIR}/include/karma/rendering.h
+  ${PROJECT_SOURCE_DIR}/include/karma/server.h
+  ${PROJECT_SOURCE_DIR}/include/karma/ui.h
+  ${PROJECT_SOURCE_DIR}/include/karma/visual.h
+  ${PROJECT_SOURCE_DIR}/include/karma/world.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/karma
 )
 
-install(DIRECTORY ${KARMA_GENERATED_INCLUDE_DIR}/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+install(FILES
+  ${KARMA_GENERATED_INCLUDE_DIR}/karma/version.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/karma
 )
 
 if (EXISTS "${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders")

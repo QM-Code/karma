@@ -5,14 +5,14 @@
 
 #include <glm/glm.hpp>
 
-#include "karma/core/math/types.h"
-#include "karma/rendering/renderer/material.h"
-#include "karma/world/geometry/mesh_data.h"
-#include "karma/world/components/camera.h"
-#include "karma/world/components/light.h"
-#include "karma/world/ecs/entity.h"
+#include "karma/math.h"
+#include "karma/rendering.h"
+#include "karma/world.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
-namespace karma::content {
+namespace karma::assets {
 class AssetRegistry;
 struct GltfSceneAsset;
 }
@@ -21,11 +21,11 @@ namespace karma::components {
 class TransformComponent;
 }
 
-namespace karma::ecs {
+namespace karma::world {
 class World;
 }
 
-namespace karma::renderer {
+namespace karma::rendering {
 class GraphicsDevice;
 }
 
@@ -44,55 +44,55 @@ struct GltfSceneAssetStats {
   std::size_t triangle_count = 0u;
 };
 
-geometry::MeshData makeBoxMesh(const glm::vec3& half_extents);
+world::MeshData makeBoxMesh(const glm::vec3& half_extents);
 
-GltfSceneAssetBounds computeGltfSceneAssetBounds(const content::AssetRegistry& assets,
-                                                 const content::GltfSceneAsset& scene);
+GltfSceneAssetBounds computeGltfSceneAssetBounds(const assets::AssetRegistry& assets,
+                                                 const assets::GltfSceneAsset& scene);
 
-GltfSceneAssetStats summarizeGltfSceneAsset(const content::AssetRegistry& assets,
-                                            const content::GltfSceneAsset& scene);
+GltfSceneAssetStats summarizeGltfSceneAsset(const assets::AssetRegistry& assets,
+                                            const assets::GltfSceneAsset& scene);
 
-ecs::Entity spawnMesh(ecs::World& world,
+world::Entity spawnMesh(world::World& world,
                       std::string name,
                       std::string mesh_key,
                       std::string material_key,
                       const math::Vec3& position,
                       bool visible = true);
 
-ecs::Entity spawnMeshAsset(ecs::World& world,
+world::Entity spawnMeshAsset(world::World& world,
                            std::string name,
                            std::string mesh_key,
                            const math::Vec3& position);
 
-ecs::Entity createDebugBoxMarker(ecs::World& world,
-                                 renderer::GraphicsDevice* graphics,
-                                 content::AssetRegistry* assets,
+world::Entity createDebugBoxMarker(world::World& world,
+                                 rendering::GraphicsDevice* graphics,
+                                 assets::AssetRegistry* assets,
                                  std::string name,
                                  const math::Color& color,
                                  const math::Vec3& position,
                                  const glm::vec3& half_extents,
                                  bool visible = true);
 
-ecs::Entity spawnCamera(ecs::World& world,
+world::Entity spawnCamera(world::World& world,
                         std::string name,
                         const math::Vec3& position,
                         const math::Quat& rotation,
                         const components::CameraComponent& camera,
                         bool add_audio_listener = true);
 
-ecs::Entity spawnDirectionalLight(ecs::World& world,
+world::Entity spawnDirectionalLight(world::World& world,
                                   std::string name,
                                   const math::Vec3& position,
                                   const math::Quat& rotation,
                                   const components::LightComponent& light);
 
-ecs::Entity spawnPointLight(ecs::World& world,
+world::Entity spawnPointLight(world::World& world,
                             std::string name,
                             const math::Vec3& position,
                             const components::LightComponent& light);
 
-ecs::Entity spawnEnvironment(ecs::World& world,
-                             content::AssetRegistry* assets,
+world::Entity spawnEnvironment(world::World& world,
+                             assets::AssetRegistry* assets,
                              std::string name,
                              std::string environment_map,
                              float intensity,

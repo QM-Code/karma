@@ -12,7 +12,7 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace karma::demo {
 
@@ -149,7 +149,7 @@ class LaserExample final : public app::GameInterface {
 
  private:
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
@@ -157,7 +157,7 @@ class LaserExample final : public app::GameInterface {
                               .visible = true,
                           });
 
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                  .environment_map_asset_key = environment_map_,
@@ -167,7 +167,7 @@ class LaserExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 48.0f, 0.0f});
@@ -189,7 +189,7 @@ class LaserExample final : public app::GameInterface {
     const glm::vec3 eye = center + glm::normalize(glm::vec3(0.28f, 0.32f, 1.0f)) * radius * 2.25f;
     const LookAngles look = lookAnglesToTarget(eye, center);
 
-    const ecs::Entity camera = world->createEntity();
+    const world::Entity camera = world->createEntity();
     world->setName(camera, "Camera");
     camera_entity_ = camera;
     camera_yaw_ = look.yaw;
@@ -233,8 +233,8 @@ class LaserExample final : public app::GameInterface {
 
   std::string world_mesh_;
   std::string environment_map_;
-  ecs::Entity camera_entity_{};
-  ecs::Entity beam_entity_{};
+  world::Entity camera_entity_{};
+  world::Entity beam_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;
@@ -262,7 +262,7 @@ int main() {
   config.local_light_directional_shadow_lift_strength = 0.0f;
   config.lighting_exposure = 0.95f;
 
-  engine.addRuntimeModule(std::make_unique<karma::volumes::VolumeRuntimeModule>());
+  engine.addRuntimeModule(std::make_unique<karma::visual::volumes::VolumeRuntimeModule>());
 
   engine.start(game, config);
   while (engine.isRunning()) {

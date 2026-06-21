@@ -1,102 +1,107 @@
-#include "karma/simulation/physics/character_controller.hpp"
-#include "karma/simulation/physics/backend.hpp"
+#include "karma/physics.h"
+#include "private/physics/objects.hpp"
 
 namespace karma::physics {
 
-CharacterController::CharacterController(std::unique_ptr<karma::physics_backend::PhysicsCharacterControllerBackend> backend)
-    : backend_(std::move(backend)) {}
+CharacterController::CharacterController() = default;
+
+CharacterController::CharacterController(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl)) {}
+
+CharacterController::CharacterController(CharacterController&& other) noexcept = default;
+CharacterController& CharacterController::operator=(CharacterController&& other) noexcept = default;
 
 CharacterController::~CharacterController() {
     destroy();
 }
 
 glm::vec3 CharacterController::getPosition() const {
-    return backend_ ? backend_->getPosition() : glm::vec3(0.0f);
+    return impl_ && impl_->backend ? impl_->backend->getPosition() : glm::vec3(0.0f);
 }
 
 glm::quat CharacterController::getRotation() const {
-    return backend_ ? backend_->getRotation() : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    return impl_ && impl_->backend ? impl_->backend->getRotation() : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
 glm::vec3 CharacterController::getVelocity() const {
-    return backend_ ? backend_->getVelocity() : glm::vec3(0.0f);
+    return impl_ && impl_->backend ? impl_->backend->getVelocity() : glm::vec3(0.0f);
 }
 
 glm::vec3 CharacterController::getAngularVelocity() const {
-    return backend_ ? backend_->getAngularVelocity() : glm::vec3(0.0f);
+    return impl_ && impl_->backend ? impl_->backend->getAngularVelocity() : glm::vec3(0.0f);
 }
 
 glm::vec3 CharacterController::getForwardVector() const {
-    return backend_ ? backend_->getForwardVector() : glm::vec3(0.0f, 0.0f, -1.0f);
+    return impl_ && impl_->backend ? impl_->backend->getForwardVector() : glm::vec3(0.0f, 0.0f, -1.0f);
 }
 
 void CharacterController::setHalfExtents(const glm::vec3& extents) {
-    if (backend_) {
-        backend_->setHalfExtents(extents);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setHalfExtents(extents);
     }
 }
 
 void CharacterController::setCenter(const glm::vec3& center) {
     center_ = center;
-    if (backend_) {
-        backend_->setCenter(center);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setCenter(center);
     }
 }
 
 void CharacterController::update(float dt) {
-    if (backend_) {
-        backend_->update(dt);
+    if (impl_ && impl_->backend) {
+        impl_->backend->update(dt);
     }
 }
 
 void CharacterController::setPosition(const glm::vec3& position) {
-    if (backend_) {
-        backend_->setPosition(position);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setPosition(position);
     }
 }
 
 void CharacterController::setRotation(const glm::quat& rotation) {
-    if (backend_) {
-        backend_->setRotation(rotation);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setRotation(rotation);
     }
 }
 
 void CharacterController::setVelocity(const glm::vec3& velocity) {
-    if (backend_) {
-        backend_->setVelocity(velocity);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setVelocity(velocity);
     }
 }
 
 void CharacterController::setAngularVelocity(const glm::vec3& angularVelocity) {
-    if (backend_) {
-        backend_->setAngularVelocity(angularVelocity);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setAngularVelocity(angularVelocity);
     }
 }
 
 bool CharacterController::isGrounded() const {
-    return backend_ ? backend_->isGrounded() : false;
+    return impl_ && impl_->backend ? impl_->backend->isGrounded() : false;
 }
 
 bool CharacterController::getGroundContact(PhysicsGroundContact& outContact) const {
-    return backend_ ? backend_->getGroundContact(outContact) : false;
+    return impl_ && impl_->backend ? impl_->backend->getGroundContact(outContact) : false;
 }
 
 void CharacterController::collectContacts(std::vector<PhysicsContact>& outContacts) const {
-    if (backend_) {
-        backend_->collectContacts(outContacts);
+    if (impl_ && impl_->backend) {
+        impl_->backend->collectContacts(outContacts);
     }
 }
 
 std::uintptr_t CharacterController::nativeHandle() const {
-    return backend_ ? backend_->nativeHandle() : 0;
+    return impl_ && impl_->backend ? impl_->backend->nativeHandle() : 0;
 }
 
 void CharacterController::destroy() {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return;
     }
-    backend_->destroy();
-    backend_.reset();
+    impl_->backend->destroy();
+    impl_.reset();
 }
 
 } // namespace karma::physics

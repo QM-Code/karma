@@ -1,12 +1,12 @@
-#include "karma/simulation/physics/physics_system.h"
+#include "karma/physics.h"
 #include "physics_system_internal.h"
 
 namespace karma::physics {
 
 using namespace system_internal;
 
-void PhysicsSystem::syncConstraints(ecs::World& world) {
-  auto handle_for_entity = [&](ecs::Entity entity) -> std::uintptr_t {
+void PhysicsSystem::syncConstraints(world::World& world) {
+  auto handle_for_entity = [&](world::Entity entity) -> std::uintptr_t {
     const uint64_t key = entityKey(entity);
     auto body_it = rigid_bodies_.find(key);
     if (body_it != rigid_bodies_.end() && body_it->second.isValid()) {
@@ -20,7 +20,7 @@ void PhysicsSystem::syncConstraints(ecs::World& world) {
   };
 
   world.forEach<components::PhysicsConstraintComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const auto& component = world.get<components::PhysicsConstraintComponent>(entity);
     if (!world.isAlive(component.body_a) || !world.isAlive(component.body_b)) {
       return;

@@ -1,8 +1,8 @@
-#include "karma/rendering/renderer/backends/diligent_access.hpp"
+#include "private/rendering/backends/diligent/access.hpp"
 
 #include "backend.hpp"
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 Diligent::IRenderDevice* diligentRenderDevice(Backend* backend) {
   auto* diligent = dynamic_cast<DiligentBackend*>(backend);
@@ -19,4 +19,4 @@ Diligent::ISwapChain* diligentSwapChain(Backend* backend) {
   return diligent != nullptr ? diligent->getSwapChain() : nullptr;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

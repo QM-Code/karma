@@ -1,6 +1,6 @@
 #include "backend.hpp"
 
-#include "karma/platform/window/window.h"
+#include "karma/platform.h"
 
 #include "backend_internal.h"
 
@@ -38,7 +38,7 @@
   #include <GLFW/glfw3native.h>
 #endif
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 bool envFlagEnabled(const char* name) {
@@ -764,11 +764,11 @@ size_t DiligentBackend::forwardPipelineVariantIndex(ForwardPipelineVariant varia
   return 0u;
 }
 
-size_t DiligentBackend::instanceGpuLayoutIndex(renderer::InstanceGpuLayout layout) {
+size_t DiligentBackend::instanceGpuLayoutIndex(rendering::InstanceGpuLayout layout) {
   switch (layout) {
-    case renderer::InstanceGpuLayout::Matrix4x4Params:
+    case rendering::InstanceGpuLayout::Matrix4x4Params:
       return 0u;
-    case renderer::InstanceGpuLayout::PositionYawScaleParams:
+    case rendering::InstanceGpuLayout::PositionYawScaleParams:
       return 1u;
   }
   return 0u;
@@ -776,10 +776,10 @@ size_t DiligentBackend::instanceGpuLayoutIndex(renderer::InstanceGpuLayout layou
 
 Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
     ForwardPipelineVariant variant,
-    renderer::InstanceGpuLayout layout) {
+    rendering::InstanceGpuLayout layout) {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState>* out_pso = nullptr;
   const char* name = "Karma Pipeline";
-  const bool compact_layout = layout == renderer::InstanceGpuLayout::PositionYawScaleParams;
+  const bool compact_layout = layout == rendering::InstanceGpuLayout::PositionYawScaleParams;
   if (compact_layout) {
     out_pso = std::addressof(compact_forward_pipeline_states_[forwardPipelineVariantIndex(variant)]);
   } else {
@@ -901,19 +901,19 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   }
 
   const Diligent::Uint32 kInstanceStride =
-      static_cast<Diligent::Uint32>(renderer::instanceGpuLayoutStride(layout));
+      static_cast<Diligent::Uint32>(rendering::instanceGpuLayoutStride(layout));
   const Diligent::Uint32 model_col1_offset =
       static_cast<Diligent::Uint32>(sizeof(float) * 4);
   const Diligent::Uint32 model_col2_offset =
-      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+      layout == rendering::InstanceGpuLayout::PositionYawScaleParams
           ? 0u
           : static_cast<Diligent::Uint32>(sizeof(float) * 8);
   const Diligent::Uint32 model_col3_offset =
-      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+      layout == rendering::InstanceGpuLayout::PositionYawScaleParams
           ? static_cast<Diligent::Uint32>(sizeof(float) * 4)
           : static_cast<Diligent::Uint32>(sizeof(float) * 12);
   const Diligent::Uint32 params_offset =
-      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+      layout == rendering::InstanceGpuLayout::PositionYawScaleParams
           ? static_cast<Diligent::Uint32>(sizeof(float) * 8)
           : static_cast<Diligent::Uint32>(sizeof(float) * 16);
   Diligent::LayoutElement layout_elems[] = {
@@ -1074,7 +1074,7 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
 Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
     const MaterialRecord& material,
     ForwardPipelineVariant variant,
-    renderer::InstanceGpuLayout layout) {
+    rendering::InstanceGpuLayout layout) {
   if (variant == ForwardPipelineVariant::DepthPrepass ||
       !materialUsesCustomForwardPipeline(material)) {
     return nullptr;
@@ -1142,7 +1142,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
   std::vector<ParsedDefine> parsed_defines;
   parsed_defines.reserve(material.pipeline.defines.size() + 2u);
   parsed_defines.push_back(ParsedDefine{.name = "KARMA_CUSTOM_MATERIAL", .value = "1"});
-  if (layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+  if (layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
     parsed_defines.push_back(ParsedDefine{
         .name = "KARMA_INSTANCE_LAYOUT_POSITION_YAW_SCALE",
         .value = "1",
@@ -1234,7 +1234,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
   graphics.DepthStencilDesc.DepthWriteEnable = transparent ? false : material.desc.depth_write;
   graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
   if (!transparent &&
-      material.desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Masked &&
+      material.desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Masked &&
       material.desc.alpha_to_coverage) {
     graphics.BlendDesc.AlphaToCoverageEnable = true;
   }
@@ -1252,19 +1252,19 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
   }
 
   const Diligent::Uint32 kInstanceStride =
-      static_cast<Diligent::Uint32>(renderer::instanceGpuLayoutStride(layout));
+      static_cast<Diligent::Uint32>(rendering::instanceGpuLayoutStride(layout));
   const Diligent::Uint32 model_col1_offset =
       static_cast<Diligent::Uint32>(sizeof(float) * 4);
   const Diligent::Uint32 model_col2_offset =
-      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+      layout == rendering::InstanceGpuLayout::PositionYawScaleParams
           ? 0u
           : static_cast<Diligent::Uint32>(sizeof(float) * 8);
   const Diligent::Uint32 model_col3_offset =
-      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+      layout == rendering::InstanceGpuLayout::PositionYawScaleParams
           ? static_cast<Diligent::Uint32>(sizeof(float) * 4)
           : static_cast<Diligent::Uint32>(sizeof(float) * 12);
   const Diligent::Uint32 params_offset =
-      layout == renderer::InstanceGpuLayout::PositionYawScaleParams
+      layout == rendering::InstanceGpuLayout::PositionYawScaleParams
           ? static_cast<Diligent::Uint32>(sizeof(float) * 8)
           : static_cast<Diligent::Uint32>(sizeof(float) * 16);
   Diligent::LayoutElement layout_elems[] = {
@@ -3959,4 +3959,4 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   logStartupDiag("diligent_device", "total", init_start, core::SteadyClock::now());
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

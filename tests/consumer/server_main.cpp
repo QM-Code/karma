@@ -7,7 +7,7 @@ int main() {
 
   karma::network::NetworkRoleContext context{
       .role = karma::network::NetworkRole::Server,
-      .local_peer = karma::net::PeerId{1},
+      .local_peer = karma::network::PeerId{1},
   };
   if (!context.isServer() || !context.isAuthority() || context.local_peer.value != 1) {
     return 1;

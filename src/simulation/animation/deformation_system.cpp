@@ -1,4 +1,4 @@
-#include "karma/simulation/animation/deformation_system.h"
+#include "karma/world.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -8,13 +8,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/core/math/glm.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/scene/scene.h"
+#include "karma/assets.h"
+#include "karma/math.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
-namespace karma::animation {
+namespace karma::world {
 
 namespace {
 
@@ -36,16 +36,16 @@ glm::mat4 toLocalMatrix(const components::TransformComponent& transform) {
 
 class SceneMatrixResolver {
  public:
-  SceneMatrixResolver(const ecs::World& world, const scene::Scene& scene)
+  SceneMatrixResolver(const world::World& world, const world::Scene& scene)
       : world_(world), scene_(scene), cache_(scene.nodes().size(), glm::mat4(1.0f)),
         computed_(scene.nodes().size(), 0u) {}
 
-  glm::mat4 entityWorld(ecs::Entity entity, const glm::mat4& fallback) {
+  glm::mat4 entityWorld(world::Entity entity, const glm::mat4& fallback) {
     if (!entity.isValid() || !world_.isAlive(entity)) {
       return fallback;
     }
 
-    const scene::NodeId node_id = scene_.findNode(entity);
+    const world::NodeId node_id = scene_.findNode(entity);
     if (scene_.isAlive(node_id)) {
       return nodeWorld(node_id);
     }
@@ -57,7 +57,7 @@ class SceneMatrixResolver {
   }
 
  private:
-  glm::mat4 nodeWorld(scene::NodeId node_id) {
+  glm::mat4 nodeWorld(world::NodeId node_id) {
     if (!scene_.isAlive(node_id)) {
       return glm::mat4(1.0f);
     }
@@ -69,7 +69,7 @@ class SceneMatrixResolver {
       return cache_[node_id];
     }
 
-    const scene::Node& node = scene_.get(node_id);
+    const world::Node& node = scene_.get(node_id);
     glm::mat4 world = scene_.isAlive(node.parent) ? nodeWorld(node.parent) : glm::mat4(1.0f);
     if (node.entity.isValid() && world_.isAlive(node.entity)) {
       if (world_.has<components::TransformComponent>(node.entity)) {
@@ -87,8 +87,8 @@ class SceneMatrixResolver {
     return world;
   }
 
-  const ecs::World& world_;
-  const scene::Scene& scene_;
+  const world::World& world_;
+  const world::Scene& scene_;
   std::vector<glm::mat4> cache_;
   std::vector<uint8_t> computed_;
 };
@@ -117,7 +117,7 @@ bool hasActiveMorphWeights(const std::vector<float>& weights) {
 }
 
 bool prepareMorphMesh(components::DeformableMeshComponent& deformation,
-                      geometry::MeshData& out_mesh) {
+                      world::MeshData& out_mesh) {
   out_mesh = deformation.bind_mesh;
   if (!deformation.enabled ||
       deformation.bind_mesh.vertices.empty() ||
@@ -144,15 +144,15 @@ bool prepareMorphMesh(components::DeformableMeshComponent& deformation,
 
 }  // namespace
 
-void DeformationSystem::update(ecs::World& world,
-                               const scene::Scene& scene,
-                               renderer::GraphicsDevice& device,
-                               const content::AssetRegistry* assets) {
-  const std::vector<ecs::Entity> entities =
+void DeformationSystem::update(world::World& world,
+                               const world::Scene& scene,
+                               rendering::GraphicsDevice& device,
+                               const assets::AssetRegistry* assets) {
+  const std::vector<world::Entity> entities =
       world.view<components::DeformableMeshComponent, components::MeshComponent,
                  components::TransformComponent>();
 
-  for (const ecs::Entity entity : entities) {
+  for (const world::Entity entity : entities) {
     auto& deformation = world.get<components::DeformableMeshComponent>(entity);
     auto& mesh = world.get<components::MeshComponent>(entity);
     if (deformation.path == components::DeformationPath::Gpu) {
@@ -163,8 +163,8 @@ void DeformationSystem::update(ecs::World& world,
       continue;
     }
 
-    geometry::MeshData deformed_bind_mesh{};
-    geometry::MeshData* mesh_for_deformation = &deformation.bind_mesh;
+    world::MeshData deformed_bind_mesh{};
+    world::MeshData* mesh_for_deformation = &deformation.bind_mesh;
     const bool morph_was_dirty = deformation.morph_weights_dirty;
     const bool morph_active = prepareMorphMesh(deformation, deformed_bind_mesh);
     if (morph_active) {
@@ -188,13 +188,13 @@ void DeformationSystem::update(ecs::World& world,
       deformation.palette_valid = false;
     }
 
-    renderer::MeshId renderer_mesh = device.findRuntimeMesh(mesh.mesh_asset_key);
-    if (renderer_mesh == renderer::kInvalidMesh && assets != nullptr) {
-      if (const geometry::MeshData* mesh_asset = assets->findMeshAsset(mesh.mesh_asset_key)) {
+    rendering::MeshId renderer_mesh = device.findRuntimeMesh(mesh.mesh_asset_key);
+    if (renderer_mesh == rendering::kInvalidMesh && assets != nullptr) {
+      if (const world::MeshData* mesh_asset = assets->findMeshAsset(mesh.mesh_asset_key)) {
         renderer_mesh = device.registerRuntimeMesh(mesh.mesh_asset_key, *mesh_asset);
       }
     }
-    if (renderer_mesh == renderer::kInvalidMesh) {
+    if (renderer_mesh == rendering::kInvalidMesh) {
       deformation.palette_valid = false;
       deformation.diagnostic = "Deformable mesh asset key is not registered";
       continue;
@@ -206,7 +206,7 @@ void DeformationSystem::update(ecs::World& world,
         deformation.renderer_mesh_is_cpu_deformed = false;
       }
 
-      renderer::DeformationDesc desc{};
+      rendering::DeformationDesc desc{};
       desc.skinning_enabled = has_skin && deformation.palette_valid &&
                               !deformation.joint_palette.empty();
       desc.joint_palette = desc.skinning_enabled ? deformation.joint_palette
@@ -215,22 +215,22 @@ void DeformationSystem::update(ecs::World& world,
       desc.morph_weights = desc.morphing_enabled ? effectiveMorphWeights(deformation)
                                                  : std::vector<float>{};
       if (desc.skinning_enabled || desc.morphing_enabled) {
-        if (deformation.deformation == renderer::kInvalidDeformation) {
+        if (deformation.deformation == rendering::kInvalidDeformation) {
           deformation.deformation = device.createDeformation(desc);
         } else {
           device.updateDeformation(deformation.deformation, desc);
         }
-      } else if (deformation.deformation != renderer::kInvalidDeformation) {
+      } else if (deformation.deformation != rendering::kInvalidDeformation) {
         device.destroyDeformation(deformation.deformation);
-        deformation.deformation = renderer::kInvalidDeformation;
+        deformation.deformation = rendering::kInvalidDeformation;
       }
       deformation.diagnostic.clear();
       continue;
     }
 
-    if (deformation.deformation != renderer::kInvalidDeformation) {
+    if (deformation.deformation != rendering::kInvalidDeformation) {
       device.destroyDeformation(deformation.deformation);
-      deformation.deformation = renderer::kInvalidDeformation;
+      deformation.deformation = rendering::kInvalidDeformation;
     }
 
     if (has_skin && deformation.palette_valid) {
@@ -263,7 +263,7 @@ void DeformationSystem::update(ecs::World& world,
 
 SkinningPalette buildSkinningPaletteFromWorld(
     const components::DeformableMeshComponent& deformation,
-    const ecs::World& world,
+    const world::World& world,
     const glm::mat4& mesh_world) {
   glm::mat4 output_space_world = mesh_world;
   if (deformation.override_render_transform) {
@@ -278,7 +278,7 @@ SkinningPalette buildSkinningPaletteFromWorld(
 
   std::vector<glm::mat4> joint_world_matrices;
   joint_world_matrices.reserve(deformation.joint_entities.size());
-  for (const ecs::Entity joint : deformation.joint_entities) {
+  for (const world::Entity joint : deformation.joint_entities) {
     glm::mat4 joint_world(1.0f);
     if (world.isAlive(joint) && world.has<components::TransformComponent>(joint)) {
       joint_world = toMatrix(world.get<components::TransformComponent>(joint));
@@ -300,8 +300,8 @@ SkinningPalette buildSkinningPaletteFromWorld(
 
 SkinningPalette buildSkinningPaletteFromScene(
     const components::DeformableMeshComponent& deformation,
-    const ecs::World& world,
-    const scene::Scene& scene,
+    const world::World& world,
+    const world::Scene& scene,
     const glm::mat4& mesh_world) {
   SceneMatrixResolver resolver(world, scene);
 
@@ -313,7 +313,7 @@ SkinningPalette buildSkinningPaletteFromScene(
 
   std::vector<glm::mat4> joint_world_matrices;
   joint_world_matrices.reserve(deformation.joint_entities.size());
-  for (const ecs::Entity joint : deformation.joint_entities) {
+  for (const world::Entity joint : deformation.joint_entities) {
     joint_world_matrices.push_back(resolver.entityWorld(joint, glm::mat4(1.0f)));
   }
 
@@ -329,10 +329,10 @@ SkinningPalette buildSkinningPaletteFromScene(
                               deformation.skin_index);
 }
 
-geometry::MeshData skinMesh(const geometry::MeshData& bind_mesh,
+world::MeshData skinMesh(const world::MeshData& bind_mesh,
                             const std::vector<components::VertexSkinInfluence>& influences,
                             const std::vector<glm::mat4>& skin_matrices) {
-  geometry::MeshData skinned_mesh = bind_mesh;
+  world::MeshData skinned_mesh = bind_mesh;
   if (bind_mesh.vertices.empty() || influences.size() != bind_mesh.vertices.size()) {
     return skinned_mesh;
   }
@@ -371,9 +371,9 @@ geometry::MeshData skinMesh(const geometry::MeshData& bind_mesh,
   return skinned_mesh;
 }
 
-geometry::MeshData morphMesh(const geometry::MeshData& bind_mesh,
+world::MeshData morphMesh(const world::MeshData& bind_mesh,
                              const std::vector<float>& weights) {
-  geometry::MeshData morphed_mesh = bind_mesh;
+  world::MeshData morphed_mesh = bind_mesh;
   if (bind_mesh.vertices.empty() || bind_mesh.morph_targets.empty() || weights.empty()) {
     return morphed_mesh;
   }
@@ -387,7 +387,7 @@ geometry::MeshData morphMesh(const geometry::MeshData& bind_mesh,
       continue;
     }
 
-    const geometry::MeshData::MorphTarget& target = bind_mesh.morph_targets[target_index];
+    const world::MeshData::MorphTarget& target = bind_mesh.morph_targets[target_index];
     if (target.position_deltas.size() == bind_mesh.vertices.size()) {
       for (size_t vertex_index = 0; vertex_index < bind_mesh.vertices.size(); ++vertex_index) {
         morphed_mesh.vertices[vertex_index] += target.position_deltas[vertex_index] * weight;
@@ -431,4 +431,4 @@ geometry::MeshData morphMesh(const geometry::MeshData& bind_mesh,
   return morphed_mesh;
 }
 
-}  // namespace karma::animation
+}  // namespace karma::world

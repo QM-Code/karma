@@ -1,4 +1,4 @@
-#include "karma/runtime/app/engine_app.h"
+#include "karma/app.h"
 
 #include <algorithm>
 #include <atomic>
@@ -18,20 +18,22 @@
 
 #include <spdlog/spdlog.h>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/content/prefabs/prefab.h"
-#include "karma/core/math/glm.h"
-#include "karma/core/math/quat.h"
-#include "karma/core/time.h"
-#include "karma/runtime/debug/debug_overlay.h"
-#include "karma/simulation/collision/collision_event_system.h"
+#include "karma/assets.h"
+#include "karma/prefabs.h"
+#include "karma/math.h"
+#include "karma/math.h"
+#include "karma/core.h"
+#include "karma/app.h"
+#include "karma/physics.h"
 #if defined(KARMA_ENABLE_NAVIGATION)
-#include "karma/simulation/navigation/navigation_system.h"
+#include "karma/navigation.h"
 #endif
-#include "karma/world/components/camera.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/geometry/mesh_data.h"
-#include "karma/world/scene/transform_hierarchy.h"
+#include "karma/visual.h"
+#include "karma/visual.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
 #include "../../../third_party/stb_image.h"
 
@@ -111,13 +113,13 @@ std::filesystem::path resolveStartupPath(const std::filesystem::path& path) {
 }
 
 std::optional<physics::MeshColliderGeometry> loadMeshColliderGeometry(
-    const content::AssetRegistry& assets,
+    const assets::AssetRegistry& assets,
     std::string_view mesh_asset_key) {
   if (mesh_asset_key.empty()) {
     return std::nullopt;
   }
 
-  const geometry::MeshData* mesh = assets.findMeshAsset(mesh_asset_key);
+  const world::MeshData* mesh = assets.findMeshAsset(mesh_asset_key);
   if (mesh == nullptr) {
     return std::nullopt;
   }
@@ -166,7 +168,7 @@ math::Color scaledColor(math::Color color, float scale, float alpha) {
   return color;
 }
 
-void addUiQuad(renderer::UIDrawData& out,
+void addUiQuad(rendering::UIDrawData& out,
                float x,
                float y,
                float w,
@@ -177,10 +179,10 @@ void addUiQuad(renderer::UIDrawData& out,
   }
   const uint32_t rgba = packUiColor(color);
   const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y, .rgba = rgba});
-  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y, .rgba = rgba});
-  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y + h, .rgba = rgba});
-  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y + h, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x, .y = y, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x + w, .y = y, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x + w, .y = y + h, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x, .y = y + h, .rgba = rgba});
   out.indices.push_back(base);
   out.indices.push_back(base + 1u);
   out.indices.push_back(base + 2u);
@@ -189,7 +191,7 @@ void addUiQuad(renderer::UIDrawData& out,
   out.indices.push_back(base + 3u);
 }
 
-void addUiTexturedQuad(renderer::UIDrawData& out,
+void addUiTexturedQuad(rendering::UIDrawData& out,
                        float x,
                        float y,
                        float w,
@@ -201,10 +203,10 @@ void addUiTexturedQuad(renderer::UIDrawData& out,
   }
   const uint32_t rgba = packUiColor(color);
   const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y, .u = 0.0f, .v = 0.0f, .rgba = rgba});
-  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y, .u = 1.0f, .v = 0.0f, .rgba = rgba});
-  out.vertices.push_back(renderer::UIVertex{.x = x + w, .y = y + h, .u = 1.0f, .v = 1.0f, .rgba = rgba});
-  out.vertices.push_back(renderer::UIVertex{.x = x, .y = y + h, .u = 0.0f, .v = 1.0f, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x, .y = y, .u = 0.0f, .v = 0.0f, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x + w, .y = y, .u = 1.0f, .v = 0.0f, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x + w, .y = y + h, .u = 1.0f, .v = 1.0f, .rgba = rgba});
+  out.vertices.push_back(rendering::UIVertex{.x = x, .y = y + h, .u = 0.0f, .v = 1.0f, .rgba = rgba});
   out.indices.push_back(base);
   out.indices.push_back(base + 1u);
   out.indices.push_back(base + 2u);
@@ -215,14 +217,15 @@ void addUiTexturedQuad(renderer::UIDrawData& out,
 
 }  // namespace
 
-EngineApp::EngineApp() = default;
+EngineApp::EngineApp()
+    : light_pulse_system_(std::make_unique<visual::LightPulseSystem>()) {}
 
 #if defined(KARMA_DEBUG_UI)
 std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
   if (!debug_ui_enabled_) {
     return nullptr;
   }
-  return std::make_unique<debug::DebugOverlayLayer>(&world_,
+  return std::make_unique<app::DebugOverlayLayer>(&world_,
                                                     &scene_,
                                                     &systems_,
                                                     graphics_.get(),
@@ -303,17 +306,17 @@ void EngineApp::initSubsystems() {
   log_init_stage("input bind window", core::SteadyClock::now());
 
   if (window_) {
-    renderer::GraphicsDeviceCreateInfo graphics_create_info{};
+    rendering::GraphicsDeviceCreateInfo graphics_create_info{};
     graphics_create_info.vsync = config_.vsync;
     graphics_create_info.present_mode = config_.present_mode;
     graphics_create_info.execution_mode = config_.renderer_execution_mode;
-    graphics_ = std::make_unique<renderer::GraphicsDevice>(*window_, graphics_create_info);
+    graphics_ = std::make_unique<rendering::GraphicsDevice>(*window_, graphics_create_info);
     log_init_stage("graphics device create", core::SteadyClock::now());
 
-    render_system_ = std::make_unique<renderer::RenderSystem>(*graphics_, assets_);
+    render_system_ = std::make_unique<rendering::RenderSystem>(*graphics_, assets_);
     log_init_stage("render system create", core::SteadyClock::now());
 
-    particle_system_ = std::make_unique<particles::ParticleSystem>(graphics_.get(), &assets_);
+    particle_system_ = std::make_unique<visual::particles::ParticleSystem>(graphics_.get(), &assets_);
     log_init_stage("particle system create", core::SteadyClock::now());
   }
 
@@ -326,7 +329,7 @@ void EngineApp::initSubsystems() {
   log_init_stage("physics system create", core::SteadyClock::now());
 
   const auto collision_system_id =
-      systems_.addSystem(std::make_unique<collision::CollisionEventSystem>());
+      systems_.addSystem(std::make_unique<physics::CollisionEventSystem>());
   systems_.addDependency(collision_system_id, physics_system_id);
   log_init_stage("collision system create", core::SteadyClock::now());
 #if defined(KARMA_ENABLE_NAVIGATION)
@@ -378,7 +381,7 @@ void EngineApp::warmUpRenderer() {
     return;
   }
 
-  renderer::FrameInfo frame{};
+  rendering::FrameInfo frame{};
   frame.width = fb_width;
   frame.height = fb_height;
   frame.delta_time = 0.0f;
@@ -419,7 +422,7 @@ void EngineApp::warmUpRenderer() {
     log_pass_stage(pass, "animation", section_start, section_end);
 
     section_start = section_end;
-    scene::updateWorldTransforms(world_, scene_);
+    world::updateWorldTransforms(world_, scene_);
     section_end = core::SteadyClock::now();
     log_pass_stage(pass, "scene transforms", section_start, section_end);
 
@@ -430,7 +433,7 @@ void EngineApp::warmUpRenderer() {
 
     if (particle_system_) {
       section_start = section_end;
-      light_pulse_system_.update(world_, 0.0f);
+      light_pulse_system_->update(world_, 0.0f);
       section_end = core::SteadyClock::now();
       log_pass_stage(pass, "light pulse", section_start, section_end);
 
@@ -463,7 +466,7 @@ void EngineApp::warmUpRenderer() {
   };
 
   struct CameraWarmupRestore {
-    ecs::Entity entity{};
+    world::Entity entity{};
     math::Quat local_rotation{};
   };
 
@@ -474,7 +477,7 @@ void EngineApp::warmUpRenderer() {
 
     std::vector<CameraWarmupRestore> cameras;
     world_.forEach<components::CameraComponent, components::TransformComponent>(
-        [&](const ecs::Entity entity) {
+        [&](const world::Entity entity) {
           const auto& camera = world_.get<components::CameraComponent>(entity);
           if (!camera.is_primary) {
             return true;
@@ -517,16 +520,16 @@ void EngineApp::warmUpRenderer() {
       auto& transform = world_.get<components::TransformComponent>(camera.entity);
       transform.setRotation(camera.local_rotation);
     }
-    scene::updateWorldTransforms(world_, scene_);
+    world::updateWorldTransforms(world_, scene_);
   };
 
   run_warmup_frame("pass1", true);
   run_warmup_frame("pass2", false);
   run_camera_sweep(config_.renderer_warmup_camera_sweep_steps);
   run_warmup_frame("validation", false);
-  const renderer::RendererFrameTimingStats warmup_validation_timing =
+  const rendering::RendererFrameTimingStats warmup_validation_timing =
       graphics_->getRendererFrameTimingStats();
-  const renderer::InstancingStats warmup_validation_instancing =
+  const rendering::InstancingStats warmup_validation_instancing =
       graphics_->getInstancingStats();
   constexpr uint64_t kWarmupValidationInstanceUploadWarningBytes = 1024u;
   if (warmup_validation_timing.resource_creation_count > 0u ||
@@ -574,7 +577,7 @@ void EngineApp::shutdownSubsystems() {
   for (auto it = startup_asset_package_handles_.rbegin();
        it != startup_asset_package_handles_.rend();
        ++it) {
-    content::unloadAssetPackage(assets_, *it);
+    assets::unloadAssetPackage(assets_, *it);
   }
   startup_asset_package_handles_.clear();
   render_system_.reset();
@@ -607,7 +610,7 @@ void EngineApp::setCursorVisible(bool visible) {
 }
 
 bool EngineApp::ensureLoadingSplashTexture() {
-  if (loading_splash_texture_ != renderer::kInvalidTexture) {
+  if (loading_splash_texture_ != rendering::kInvalidTexture) {
     return true;
   }
   if (!graphics_ || config_.loading_splash.image_path.empty()) {
@@ -637,14 +640,14 @@ bool EngineApp::ensureLoadingSplashTexture() {
   }
 
   stage_start = stage_end;
-  const renderer::TextureId texture = graphics_->createTextureRGBA8(width, height, pixels);
+  const rendering::TextureId texture = graphics_->createTextureRGBA8(width, height, pixels);
   stage_end = core::SteadyClock::now();
   if (startup_diag) {
     spdlog::info("Engine startup diag: area=loading_splash stage=texture upload ms={:.2f}",
                  core::elapsedMilliseconds(stage_start, stage_end));
   }
   stbi_image_free(pixels);
-  if (texture == renderer::kInvalidTexture) {
+  if (texture == rendering::kInvalidTexture) {
     spdlog::warn("Loading splash image '{}' could not be uploaded",
                  config_.loading_splash.image_path.string());
     return false;
@@ -662,10 +665,10 @@ bool EngineApp::ensureLoadingSplashTexture() {
 
 void EngineApp::releaseLoadingSplashTexture() {
   std::lock_guard<std::mutex> lock(loading_splash_graphics_mutex_);
-  if (graphics_ && loading_splash_texture_ != renderer::kInvalidTexture) {
+  if (graphics_ && loading_splash_texture_ != rendering::kInvalidTexture) {
     graphics_->destroyTexture(loading_splash_texture_);
   }
-  loading_splash_texture_ = renderer::kInvalidTexture;
+  loading_splash_texture_ = rendering::kInvalidTexture;
   loading_splash_texture_width_ = 0;
   loading_splash_texture_height_ = 0;
   loading_splash_presented_ = false;
@@ -745,7 +748,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
   const float bar_x = center_x - bar_w * 0.5f;
   const float bar_y = std::min(height - unit * 10.0f, image_y + image_h + unit * 5.5f);
 
-  renderer::UIDrawData draw_data;
+  rendering::UIDrawData draw_data;
   uint32_t command_index_offset = 0;
   auto append_command = [&](UITextureHandle texture) {
     const uint32_t index_count =
@@ -753,7 +756,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
     if (index_count == 0u) {
       return;
     }
-    renderer::UIDrawCmd cmd{};
+    rendering::UIDrawCmd cmd{};
     cmd.index_offset = command_index_offset;
     cmd.index_count = index_count;
     cmd.texture = texture;
@@ -790,7 +793,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
                  core::elapsedMilliseconds(stage_start, stage_end));
   }
 
-  renderer::FrameInfo frame{};
+  rendering::FrameInfo frame{};
   frame.width = fb_width;
   frame.height = fb_height;
   frame.delta_time = 0.0f;
@@ -871,11 +874,11 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   if (!config_.environment_map_source_path.empty()) {
     assets_.registerEnvironmentMap(
         std::string(kStartupEnvironmentMapAssetKey),
-        content::EnvironmentMapAsset{.path = config_.environment_map_source_path});
+        assets::EnvironmentMapAsset{.path = config_.environment_map_source_path});
   }
   if (const char* vsync_env = std::getenv("KARMA_ENGINE_VSYNC")) {
     config_.vsync = envFlagEnabled(vsync_env);
-    config_.present_mode = renderer::PresentMode::Auto;
+    config_.present_mode = rendering::PresentMode::Auto;
     spdlog::info("KARMA_ENGINE_VSYNC override: {}", config_.vsync ? "on" : "off");
   }
   if (const char* frame_pacing_env = std::getenv("KARMA_ENGINE_FRAME_PACING_FPS")) {
@@ -997,7 +1000,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   for (const std::filesystem::path& package_path : config_.startup_asset_packages) {
     const std::filesystem::path resolved_package_path = resolveStartupPath(package_path);
     std::string diagnostic;
-    auto package = content::importAssetPackage(assets_, resolved_package_path, &diagnostic);
+    auto package = assets::importAssetPackage(assets_, resolved_package_path, &diagnostic);
     if (!package.has_value()) {
       spdlog::error("Failed to import startup asset package '{}': {}",
                     resolved_package_path.string(),
@@ -1173,7 +1176,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
 
   if (graphics_) {
     std::filesystem::path startup_environment_path;
-    if (const content::EnvironmentMapAsset* environment =
+    if (const assets::EnvironmentMapAsset* environment =
             assets_.findEnvironmentMap(kStartupEnvironmentMapAssetKey)) {
       startup_environment_path = environment->path;
     }
@@ -1236,13 +1239,13 @@ void EngineApp::syncSceneEntities() {
     return;
   }
 
-  for (const ecs::Entity entity : world_.entities()) {
-    if (scene_.findNode(entity) == scene::Node::kInvalidId) {
+  for (const world::Entity entity : world_.entities()) {
+    if (scene_.findNode(entity) == world::Node::kInvalidId) {
       scene_.createNode(entity);
     }
   }
 
-  std::vector<scene::NodeId> stale_nodes;
+  std::vector<world::NodeId> stale_nodes;
   for (const auto& node : scene_.nodes()) {
     if (!scene_.isAlive(node.id) || !node.entity.isValid()) {
       continue;
@@ -1251,7 +1254,7 @@ void EngineApp::syncSceneEntities() {
       stale_nodes.push_back(node.id);
     }
   }
-  for (const scene::NodeId id : stale_nodes) {
+  for (const world::NodeId id : stale_nodes) {
     scene_.destroyNode(id);
   }
   last_synced_entity_version_ = entity_version;
@@ -1455,7 +1458,7 @@ void EngineApp::tick() {
   const double game_update_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
-  light_pulse_system_.update(world_, frame_dt);
+  light_pulse_system_->update(world_, frame_dt);
   section_end = core::SteadyClock::now();
   const double light_pulse_ms = core::elapsedMilliseconds(section_start, section_end);
 
@@ -1470,7 +1473,7 @@ void EngineApp::tick() {
   const double animation_ms = core::elapsedMilliseconds(section_start, section_end);
 
   section_start = section_end;
-  scene::updateWorldTransforms(world_, scene_);
+  world::updateWorldTransforms(world_, scene_);
   section_end = core::SteadyClock::now();
   const double scene_transforms_ms = core::elapsedMilliseconds(section_start, section_end);
 
@@ -1532,7 +1535,7 @@ void EngineApp::tick() {
     section_end = core::SteadyClock::now();
     ui_frame_ms = core::elapsedMilliseconds(section_start, section_end);
 
-    renderer::FrameInfo frame{};
+    rendering::FrameInfo frame{};
     frame.width = fb_width;
     frame.height = fb_height;
     frame.delta_time = frame_dt;
@@ -1600,7 +1603,7 @@ void EngineApp::tick() {
   const auto tick_end = core::SteadyClock::now();
   const double tick_total_ms = core::elapsedMilliseconds(tick_start, tick_end);
   const double raw_frame_ms = static_cast<double>(raw_frame_dt) * 1000.0;
-  renderer::RendererFrameTimingStats frame_timing_stats{};
+  rendering::RendererFrameTimingStats frame_timing_stats{};
   if (frame_diag_enabled_ && graphics_) {
     frame_timing_stats = graphics_->getRendererFrameTimingStats();
   }
@@ -1610,9 +1613,9 @@ void EngineApp::tick() {
        frame_timing_stats.render_thread_frame_ms >= frame_diag_threshold_ms_ ||
        frame_timing_stats.swapchain_present_ms >= frame_diag_threshold_ms_ ||
        skip_present_this_frame)) {
-    renderer::InstancingStats instancing_stats{};
-    renderer::RendererCommandStats command_stats{};
-    renderer::ForwardPlusStats forward_plus_stats{};
+    rendering::InstancingStats instancing_stats{};
+    rendering::RendererCommandStats command_stats{};
+    rendering::ForwardPlusStats forward_plus_stats{};
     if (graphics_) {
       instancing_stats = graphics_->getInstancingStats();
       command_stats = graphics_->getRendererCommandStats();

@@ -2,7 +2,7 @@
 
 #include "backend_internal.h"
 #include "passes/pass_shared.h"
-#include "karma/rendering/renderer/particle_stats_report.h"
+#include "karma/rendering.h"
 
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/SwapChain.h>
@@ -30,7 +30,7 @@
 
 #include <spdlog/spdlog.h>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 struct alignas(16) ForwardPlusGpuLight {
@@ -135,7 +135,7 @@ bool projectSphereToScreenRect(const glm::mat4& view,
   return out_rect.z >= out_rect.x && out_rect.w >= out_rect.y;
 }
 
-ForwardPlusGpuLight packForwardPlusLight(const renderer::LightData& light,
+ForwardPlusGpuLight packForwardPlusLight(const rendering::LightData& light,
                                          const glm::vec4& screen_rect) {
   ForwardPlusGpuLight gpu{};
   gpu.position_range[0] = light.position.x;
@@ -195,9 +195,9 @@ struct RenderLayerStageTiming {
 
 }  // namespace
 
-void DiligentBackend::renderLayer(renderer::LayerId layer,
-                                  renderer::RenderTargetId target,
-                                  const renderer::PostProcessSettings& post_process) {
+void DiligentBackend::renderLayer(rendering::LayerId layer,
+                                  rendering::RenderTargetId target,
+                                  const rendering::PostProcessSettings& post_process) {
   const bool frame_layer_diag = renderLayerFrameDiagEnabled();
   const float frame_layer_diag_threshold_ms =
       std::max(0.0f,
@@ -243,7 +243,7 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     return;
   }
 
-  const bool rendering_to_default_target = target == renderer::kDefaultRenderTarget;
+  const bool rendering_to_default_target = target == rendering::kDefaultRenderTarget;
   Diligent::ITextureView* active_rtv = swap_chain_->GetCurrentBackBufferRTV();
   Diligent::ITextureView* active_dsv = swap_chain_->GetDepthBufferDSV();
   Diligent::ITextureView* particle_dsv = active_dsv;
@@ -555,8 +555,8 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
       forward_plus_tiles_x != forward_plus_tiles_x_unclamped ||
       forward_plus_tiles_y != forward_plus_tiles_y_unclamped;
 
-  auto is_local_light = [](const renderer::LightData& light) {
-    return light.type != renderer::LightType::Directional &&
+  auto is_local_light = [](const rendering::LightData& light) {
+    return light.type != rendering::LightType::Directional &&
            light.intensity > 0.0f &&
            light.range > 0.0f;
   };
@@ -1198,11 +1198,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
       continue;
     }
     has_particle_work = true;
-    if (batch.blend_mode == renderer::ParticleBlendMode::Distortion) {
+    if (batch.blend_mode == rendering::ParticleBlendMode::Distortion) {
       allow_distortion_particles = true;
       require_scene_color_copy = true;
     }
-    if (batch.shading_mode == renderer::ParticleShadingMode::Shell) {
+    if (batch.shading_mode == rendering::ParticleShadingMode::Shell) {
       require_scene_color_copy = true;
     }
   }
@@ -1215,11 +1215,11 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
     if (!emitter.visible || !emitter.enabled) {
       continue;
     }
-    if (emitter.blend_mode == renderer::ParticleBlendMode::Distortion) {
+    if (emitter.blend_mode == rendering::ParticleBlendMode::Distortion) {
       allow_distortion_particles = true;
       require_scene_color_copy = true;
     }
-    if (emitter.shading_mode == renderer::ParticleShadingMode::Shell) {
+    if (emitter.shading_mode == rendering::ParticleShadingMode::Shell) {
       require_scene_color_copy = true;
     }
   }
@@ -1447,9 +1447,9 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
                                          : 1.0 / 60.0;
     particle_stats_log_elapsed_seconds_ += frame_seconds;
     particle_stats_log_frame_count_ += 1u;
-    renderer::accumulateParticleStats(particle_stats_log_totals_, particle_pass_stats_);
+    rendering::accumulateParticleStats(particle_stats_log_totals_, particle_pass_stats_);
     if (particle_stats_log_elapsed_seconds_ >= 1.0) {
-      spdlog::info("{}", renderer::formatParticleStatsReport(renderer::ParticleStatsReport{
+      spdlog::info("{}", rendering::formatParticleStatsReport(rendering::ParticleStatsReport{
                             .totals = particle_stats_log_totals_,
                             .frame_count = particle_stats_log_frame_count_,
                             .elapsed_seconds = particle_stats_log_elapsed_seconds_,
@@ -1465,4 +1465,4 @@ void DiligentBackend::renderLayer(renderer::LayerId layer,
   }
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

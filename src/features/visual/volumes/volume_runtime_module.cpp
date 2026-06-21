@@ -1,8 +1,8 @@
-#include "karma/features/visual/volumes/volume_runtime_module.h"
+#include "karma/visual.h"
 
-#include "karma/features/visual/volumes/volume_system.h"
+#include "karma/visual.h"
 
-namespace karma::volumes {
+namespace karma::visual::volumes {
 
 VolumeRuntimeModule::VolumeRuntimeModule() = default;
 
@@ -19,7 +19,7 @@ void VolumeRuntimeModule::onDetach() {
   system_.reset();
 }
 
-void VolumeRuntimeModule::onUpdate(ecs::World& world,
+void VolumeRuntimeModule::onUpdate(world::World& world,
                                    float dt,
                                    float interpolation_alpha) {
   if (system_) {
@@ -27,4 +27,4 @@ void VolumeRuntimeModule::onUpdate(ecs::World& world,
   }
 }
 
-}  // namespace karma::volumes
+}  // namespace karma::visual::volumes

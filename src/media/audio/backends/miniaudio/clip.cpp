@@ -1,8 +1,8 @@
-#include "karma/media/audio/backends/miniaudio/clip.hpp"
+#include "private/audio/backends/miniaudio/clip.hpp"
 
 #include <spdlog/spdlog.h>
 
-namespace karma::audio_backend {
+namespace karma::audio::backend {
 
 MiniaudioClip::MiniaudioClip(ma_sound* stem, std::vector<ma_sound*> instances)
     : stem_(stem), instances_(std::move(instances)) {}
@@ -74,4 +74,4 @@ void MiniaudioClip::setDistanceRange(float min_distance, float max_distance) {
   max_distance_ = max_distance;
 }
 
-}  // namespace karma::audio_backend
+}  // namespace karma::audio::backend

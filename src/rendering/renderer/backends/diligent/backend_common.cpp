@@ -1,10 +1,10 @@
 #include "backend.hpp"
 
-#include "karma/platform/window/window.h"
+#include "karma/platform.h"
 
 #include "backend_internal.h"
 
-#include "karma/core/time.h"
+#include "karma/core.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
@@ -54,7 +54,7 @@
   #include <GLFW/glfw3native.h>
 #endif
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 struct FileInfo {
@@ -97,31 +97,31 @@ void setProcessEnvironment(const char* name, const char* value, bool overwrite) 
 #endif
 }
 
-const char* presentModeEnvironmentValue(renderer::PresentMode mode) {
+const char* presentModeEnvironmentValue(rendering::PresentMode mode) {
   switch (mode) {
-    case renderer::PresentMode::Auto:
+    case rendering::PresentMode::Auto:
       return "auto";
-    case renderer::PresentMode::Immediate:
+    case rendering::PresentMode::Immediate:
       return "immediate";
-    case renderer::PresentMode::Mailbox:
+    case rendering::PresentMode::Mailbox:
       return "mailbox";
-    case renderer::PresentMode::Fifo:
+    case rendering::PresentMode::Fifo:
       return "fifo";
-    case renderer::PresentMode::FifoRelaxed:
+    case rendering::PresentMode::FifoRelaxed:
       return "fifo_relaxed";
   }
   return nullptr;
 }
 
-bool presentModeUsesVsync(renderer::PresentMode mode, bool fallback_vsync) {
+bool presentModeUsesVsync(rendering::PresentMode mode, bool fallback_vsync) {
   switch (mode) {
-    case renderer::PresentMode::Auto:
+    case rendering::PresentMode::Auto:
       return fallback_vsync;
-    case renderer::PresentMode::Immediate:
-    case renderer::PresentMode::Mailbox:
+    case rendering::PresentMode::Immediate:
+    case rendering::PresentMode::Mailbox:
       return false;
-    case renderer::PresentMode::Fifo:
-    case renderer::PresentMode::FifoRelaxed:
+    case rendering::PresentMode::Fifo:
+    case rendering::PresentMode::FifoRelaxed:
       return true;
   }
   return fallback_vsync;
@@ -390,10 +390,10 @@ Diligent::NativeWindow toNativeWindow(GLFWwindow* window) {
 }
 #endif
 
-geometry::MeshData combineMeshes(const aiScene& scene,
+world::MeshData combineMeshes(const aiScene& scene,
                                  glm::vec4& out_color,
                                  std::vector<SubmeshInfo>& out_submeshes) {
-  geometry::MeshData combined;
+  world::MeshData combined;
   out_color = glm::vec4(1.0f);
   bool has_color = false;
   out_submeshes.clear();
@@ -492,7 +492,7 @@ void copyMat4(float out[16], const glm::mat4& m) {
   }
 }
 
-std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh) {
+std::vector<float> buildInterleavedVertices(const world::MeshData& mesh) {
   const bool has_normals = mesh.normals.size() == mesh.vertices.size();
   const bool has_uvs = mesh.uvs.size() == mesh.vertices.size();
   const bool has_uvs1 = mesh.uvs1.size() == mesh.vertices.size();
@@ -537,7 +537,7 @@ std::vector<float> buildInterleavedVertices(const geometry::MeshData& mesh) {
 }
 
 DiligentBackend::DiligentBackend(karma::platform::Window& window,
-                                 const renderer::GraphicsDeviceCreateInfo& create_info)
+                                 const rendering::GraphicsDeviceCreateInfo& create_info)
     : window_(&window) {
   const auto constructor_start = core::SteadyClock::now();
   auto stage_start = constructor_start;
@@ -665,4 +665,4 @@ DiligentBackend::~DiligentBackend() {
   saveRenderStateCache("destructor shader cache save");
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

@@ -13,16 +13,16 @@
 #include <variant>
 #include <vector>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/features/visual/terrain/terrain_system.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/assets.h"
+#include "karma/visual.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace {
 
-using karma::renderer::TerrainTileCoord;
-using karma::terrain::TileCoordHash;
+using karma::rendering::TerrainTileCoord;
+using karma::visual::terrain::TileCoordHash;
 
 bool nearly(float a, float b) {
   return std::abs(a - b) < 0.0001f;
@@ -94,15 +94,15 @@ void writeR32Le(const std::filesystem::path& path,
 }
 
 void testChunkCountMath() {
-  const auto coords = karma::terrain::terrainChunkCoordsAround(
+  const auto coords = karma::visual::terrain::terrainChunkCoordsAround(
       TerrainTileCoord{.x = 0, .z = 0}, 4000.0f, 1000.0f);
   assert(coords.size() == 81u);
 }
 
 void testChunkRecenterDelta() {
-  const auto a = karma::terrain::terrainChunkCoordsAround(
+  const auto a = karma::visual::terrain::terrainChunkCoordsAround(
       TerrainTileCoord{.x = 0, .z = 0}, 1000.0f, 1000.0f);
-  const auto b = karma::terrain::terrainChunkCoordsAround(
+  const auto b = karma::visual::terrain::terrainChunkCoordsAround(
       TerrainTileCoord{.x = 1, .z = 0}, 1000.0f, 1000.0f);
   std::unordered_set<TerrainTileCoord, TileCoordHash> set_a(a.begin(), a.end());
   std::unordered_set<TerrainTileCoord, TileCoordHash> set_b(b.begin(), b.end());
@@ -132,13 +132,13 @@ void testProceduralDeterminismAndBorders() {
   terrain.origin_tile_x = -2;
   terrain.origin_tile_z = 5;
 
-  const auto a = karma::terrain::generateProceduralTerrainTile(
+  const auto a = karma::visual::terrain::generateProceduralTerrainTile(
       terrain, TerrainTileCoord{.x = 0, .z = 0});
-  const auto a_repeat = karma::terrain::generateProceduralTerrainTile(
+  const auto a_repeat = karma::visual::terrain::generateProceduralTerrainTile(
       terrain, TerrainTileCoord{.x = 0, .z = 0});
-  const auto b = karma::terrain::generateProceduralTerrainTile(
+  const auto b = karma::visual::terrain::generateProceduralTerrainTile(
       terrain, TerrainTileCoord{.x = 1, .z = 0});
-  const auto c = karma::terrain::generateProceduralTerrainTile(
+  const auto c = karma::visual::terrain::generateProceduralTerrainTile(
       terrain, TerrainTileCoord{.x = 0, .z = 1});
 
   assert(a.valid());
@@ -162,7 +162,7 @@ void testProceduralDeterminismAndBorders() {
 }
 
 void testImageHeightConversion() {
-  karma::content::Rgba8Image image{};
+  karma::assets::Rgba8Image image{};
   image.width = 2;
   image.height = 2;
   image.pixels = {
@@ -171,7 +171,7 @@ void testImageHeightConversion() {
       128, 0, 0, 255,
       64, 0, 0, 255,
   };
-  const auto heights = karma::terrain::convertHeightImageToNormalizedHeights(image, 2u);
+  const auto heights = karma::visual::terrain::convertHeightImageToNormalizedHeights(image, 2u);
   assert(heights.size() == 4u);
   assert(nearly(heights[0], 0.0f));
   assert(nearly(heights[1], 1.0f));
@@ -184,11 +184,11 @@ void testRaw16ScalarHeightLoading() {
   const std::filesystem::path path = dir / "height.raw";
   writeRaw16Le(path, {0u, 65535u, 32768u, 16384u});
 
-  karma::content::ScalarImageLoadOptions options{};
-  options.format = karma::content::ScalarImageFormat::Raw16Unsigned;
+  karma::assets::ScalarImageLoadOptions options{};
+  options.format = karma::assets::ScalarImageFormat::Raw16Unsigned;
   options.raw_width = 2u;
   options.raw_height = 2u;
-  const auto image = karma::content::loadScalarImage(path, options);
+  const auto image = karma::assets::loadScalarImage(path, options);
   assert(image.has_value());
   assert(image->valid());
   assert(nearly(image->values[0], 0.0f));
@@ -204,11 +204,11 @@ void testR32ScalarHeightLoading() {
   const std::filesystem::path path = dir / "height.r32";
   writeR32Le(path, {0.0f, 1.0f, 0.5f, 0.25f});
 
-  karma::content::ScalarImageLoadOptions options{};
-  options.format = karma::content::ScalarImageFormat::R32Float;
+  karma::assets::ScalarImageLoadOptions options{};
+  options.format = karma::assets::ScalarImageFormat::R32Float;
   options.raw_width = 2u;
   options.raw_height = 2u;
-  const auto image = karma::content::loadScalarImage(path, options);
+  const auto image = karma::assets::loadScalarImage(path, options);
   assert(image.has_value());
   assert(image->valid());
   assert(nearly(image->values[0], 0.0f));
@@ -226,7 +226,7 @@ void testTerrainDescClamping() {
   terrain.base_patch_size = 0u;
   terrain.tessellation_factor = 100.0f;
   terrain.target_tessellated_edge_size = 0.0f;
-  const auto desc = karma::terrain::terrainDescFromComponent(terrain);
+  const auto desc = karma::visual::terrain::terrainDescFromComponent(terrain);
   assert(nearly(desc.tile_size, 0.001f));
   assert(desc.tile_resolution == 2u);
   assert(desc.base_patch_size == 1u);
@@ -239,7 +239,7 @@ void testSingleImageTerrainDescUsesTerrainSize() {
   terrain.source = karma::components::TerrainSourceType::SingleImage;
   terrain.tile_size = 1000.0f;
   terrain.terrain_size = 250.0f;
-  const auto desc = karma::terrain::terrainDescFromComponent(terrain);
+  const auto desc = karma::visual::terrain::terrainDescFromComponent(terrain);
   assert(nearly(desc.tile_size, 250.0f));
 }
 
@@ -270,7 +270,7 @@ void testSingleImageTerrainTileLoadsHeatmapAndColor() {
   terrain.origin_tile_x = 4;
   terrain.origin_tile_z = -2;
 
-  const auto tile = karma::terrain::loadSingleImageTerrainTile(terrain);
+  const auto tile = karma::visual::terrain::loadSingleImageTerrainTile(terrain);
   assert(tile.has_value());
   assert(tile->valid());
   assert(tile->coord.x == 4);
@@ -283,7 +283,7 @@ void testSingleImageTerrainTileLoadsHeatmapAndColor() {
   assert(tile->color_rgba8 == color_rgba);
 
   terrain.color_image.clear();
-  const auto fallback_tile = karma::terrain::loadSingleImageTerrainTile(terrain);
+  const auto fallback_tile = karma::visual::terrain::loadSingleImageTerrainTile(terrain);
   assert(fallback_tile.has_value());
   assert(fallback_tile->valid());
   assert(fallback_tile->color_rgba8 == heatmap_rgba);
@@ -341,7 +341,7 @@ void testImageTileLoadsControlAndDataMaps() {
   });
 
   const auto tile =
-      karma::terrain::loadImageTerrainTile(terrain, TerrainTileCoord{.x = 2, .z = 5});
+      karma::visual::terrain::loadImageTerrainTile(terrain, TerrainTileCoord{.x = 2, .z = 5});
   assert(tile.has_value());
   assert(tile->valid());
   assert(tile->control_width == 2u);
@@ -365,7 +365,7 @@ void testTerrainMaterialLayerLoading() {
   };
   writeRgbaTga(dir / "rock_albedo.tga", 2u, 2u, albedo_rgba);
 
-  const auto layer = karma::terrain::loadTerrainMaterialLayer(
+  const auto layer = karma::visual::terrain::loadTerrainMaterialLayer(
       karma::components::TerrainMaterialLayer{
           .name = "rock",
           .albedo_image = dir / "rock_albedo.tga",
@@ -385,14 +385,14 @@ void testTerrainMaterialLayerLoading() {
 }
 
 void testTerrainMaterialLayerResolvesMaterialKey() {
-  karma::content::AssetRegistry assets;
-  karma::renderer::MaterialDesc ground{};
+  karma::assets::AssetRegistry assets;
+  karma::rendering::MaterialDesc ground{};
   ground.base_color = karma::math::Color{0.25f, 0.5f, 0.75f, 1.0f};
   ground.roughness = 0.6f;
   ground.metallic = 0.0f;
   assets.registerMaterialAsset("terrain/ground", ground);
 
-  const auto layer = karma::terrain::loadTerrainMaterialLayer(
+  const auto layer = karma::visual::terrain::loadTerrainMaterialLayer(
       karma::components::TerrainMaterialLayer{
           .material_key = "terrain/ground",
           .uv_scale = 18.0f,
@@ -413,14 +413,14 @@ void testTerrainMaterialLayerResolvesMaterialKey() {
 }
 
 void testTerrainMaterialLayerResolvesAssetRegistryMaterialKey() {
-  karma::content::AssetRegistry assets;
-  karma::renderer::MaterialDesc ground{};
+  karma::assets::AssetRegistry assets;
+  karma::rendering::MaterialDesc ground{};
   ground.base_color = karma::math::Color{0.5f, 0.25f, 0.125f, 1.0f};
   ground.roughness = 0.25f;
   ground.metallic = 0.0f;
   assets.registerMaterialAsset("terrain/asset_ground", ground);
 
-  const auto layer = karma::terrain::loadTerrainMaterialLayer(
+  const auto layer = karma::visual::terrain::loadTerrainMaterialLayer(
       karma::components::TerrainMaterialLayer{
           .material_key = "terrain/asset_ground",
           .uv_scale = 9.0f,
@@ -451,8 +451,8 @@ void testTerrainColliderSyncCreatesHeightField() {
   };
   writeRgbaTga(heatmap_path, 2u, 2u, heatmap_rgba);
 
-  karma::ecs::World world;
-  const karma::ecs::Entity entity = world.createEntity();
+  karma::world::World world;
+  const karma::world::Entity entity = world.createEntity();
   world.add(entity, karma::components::TransformComponent{});
   world.add(entity, karma::components::ColliderComponent{
                         .is_trigger = true,
@@ -467,7 +467,7 @@ void testTerrainColliderSyncCreatesHeightField() {
                         .height_offset = -2.0f,
                     });
 
-  karma::terrain::TerrainSystem system(nullptr);
+  karma::visual::terrain::TerrainSystem system(nullptr);
   system.syncTerrainColliders(world);
 
   assert(world.has<karma::components::ColliderComponent>(entity));
@@ -499,11 +499,11 @@ void testTerrainColliderSyncCreatesHeightField() {
 }
 
 void testTerrainTilePatternFormatting() {
-  const std::string path = karma::terrain::formatTerrainTilePattern(
+  const std::string path = karma::visual::terrain::formatTerrainTilePattern(
       "height_{x}_{z}_{x}.png", TerrainTileCoord{.x = -3, .z = 12});
   assert(path == "height_-3_12_-3.png");
 
-  const std::string gaea_path = karma::terrain::formatTerrainTilePattern(
+  const std::string gaea_path = karma::visual::terrain::formatTerrainTilePattern(
       "tile_{tile_x}_{tile_y}_{X}_{Y}.png",
       TerrainTileCoord{.x = 0, .z = 4},
       1);

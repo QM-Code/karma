@@ -12,7 +12,7 @@
 
 #include <cstddef>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 static constexpr const char* kLineVS = R"(
@@ -180,4 +180,4 @@ void DiligentBackend::ensureLineResources() {
   }
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

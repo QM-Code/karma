@@ -4,11 +4,11 @@
 
 #include "navigation_examples.h"
 
-#include "karma/core/math/types.h"
-#include "karma/simulation/navigation/nav_geometry_types.h"
-#include "karma/simulation/navigation/nav_mesh.h"
-#include "karma/world/ecs/entity.h"
-#include "karma/world/geometry/mesh_data.h"
+#include "karma/math.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
 namespace karma::demo::navigation_examples {
 
@@ -25,13 +25,13 @@ struct Bounds {
 };
 
 struct SurfaceBuild {
-  geometry::MeshData mesh;
+  world::MeshData mesh;
   navigation::NavMeshInputGeometry geometry;
 };
 
 struct AgentVisual {
   int id = -1;
-  ecs::Entity marker{};
+  world::Entity marker{};
 };
 
 SurfaceBuild makeOpenSurface(float half_extent = 8.0f);

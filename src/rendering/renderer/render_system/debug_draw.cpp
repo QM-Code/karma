@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace karma::renderer::render_system {
+namespace karma::rendering::render_system {
 namespace {
 
 void drawCircle(GraphicsDevice& device,
@@ -74,7 +74,7 @@ void drawSphereWire(GraphicsDevice& device,
                     const math::Color& color,
                     float interpolation_alpha) {
   const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 scale = ::karma::rendering::render_system::toGlm(transform.getScale());
   const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
   const float r = radius * max_scale;
   drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, r, color);
@@ -89,10 +89,10 @@ void drawCapsuleWire(GraphicsDevice& device,
                      float height,
                      const math::Color& color,
                      float interpolation_alpha) {
-  const glm::vec3 scale = toGlm(transform.getScale());
+  const glm::vec3 scale = ::karma::rendering::render_system::toGlm(transform.getScale());
   const float r = radius * std::max(scale.x, scale.z);
   const float half_height = (height * 0.5f) * scale.y;
-  const glm::quat rot = toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  const glm::quat rot = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
   const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
@@ -112,4 +112,4 @@ void drawCapsuleWire(GraphicsDevice& device,
   }
 }
 
-}  // namespace karma::renderer::render_system
+}  // namespace karma::rendering::render_system

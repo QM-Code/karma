@@ -7,7 +7,7 @@
 
 #include <algorithm>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 namespace {
 
 template <typename T, bool KeepStrongReferences = false>
@@ -267,4 +267,4 @@ void DiligentBackend::applyPostProcessChain(Diligent::ITexture* scene_texture,
   }
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

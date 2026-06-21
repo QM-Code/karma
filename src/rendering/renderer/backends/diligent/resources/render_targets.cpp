@@ -3,7 +3,7 @@
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
 #include <Graphics/GraphicsEngine/interface/Texture.h>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_format) {
@@ -20,19 +20,19 @@ Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_fo
 }
 }  // namespace
 
-renderer::RenderTargetId DiligentBackend::createRenderTarget(const renderer::RenderTargetDesc& desc) {
+rendering::RenderTargetId DiligentBackend::createRenderTarget(const rendering::RenderTargetDesc& desc) {
   RenderTargetRecord record{};
   record.desc = desc;
   const int target_width = desc.width > 0 ? desc.width : current_width_;
   const int target_height = desc.height > 0 ? desc.height : current_height_;
   recreateRenderTargetResources(record, target_width, target_height);
 
-  const renderer::RenderTargetId id = nextTargetId_++;
+  const rendering::RenderTargetId id = nextTargetId_++;
   targets_[id] = std::move(record);
   return id;
 }
 
-void DiligentBackend::destroyRenderTarget(renderer::RenderTargetId target) {
+void DiligentBackend::destroyRenderTarget(rendering::RenderTargetId target) {
   targets_.erase(target);
 }
 
@@ -108,4 +108,4 @@ void DiligentBackend::recreateRenderTargetResources(RenderTargetRecord& record,
   record.height = height;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

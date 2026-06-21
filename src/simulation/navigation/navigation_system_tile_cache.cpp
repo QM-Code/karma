@@ -3,20 +3,20 @@
 #include <algorithm>
 #include <cmath>
 
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace karma::navigation::detail {
 
-void syncTileCacheObstacles(ecs::World& world) {
+void syncTileCacheObstacles(world::World& world) {
   world.forEach<components::NavTileCacheObstacleComponent, components::TransformComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& obstacle = world.get<components::NavTileCacheObstacleComponent>(entity);
         const auto& transform = world.get<components::TransformComponent>(entity);
 
-        auto remove_from_cache = [&](ecs::Entity preferred) {
+        auto remove_from_cache = [&](world::Entity preferred) {
           const TileCacheSelection old_cache = findTileCache(world, preferred);
           if (old_cache.tile_cache == nullptr || obstacle.obstacle_ref == 0) {
             obstacle.obstacle_ref = 0;
@@ -29,7 +29,7 @@ void syncTileCacheObstacles(ecs::World& world) {
           obstacle.cached_nav_mesh_entity = {};
         };
 
-        const ecs::Entity current_cache = obstacle.cached_nav_mesh_entity.isValid()
+        const world::Entity current_cache = obstacle.cached_nav_mesh_entity.isValid()
             ? obstacle.cached_nav_mesh_entity
             : obstacle.nav_mesh_entity;
 
@@ -103,9 +103,9 @@ void syncTileCacheObstacles(ecs::World& world) {
       });
 }
 
-void updateTileCaches(ecs::World& world, float dt) {
+void updateTileCaches(world::World& world, float dt) {
   world.forEach<components::NavMeshComponent, components::NavTileCacheComponent>(
-      [&](ecs::Entity entity) {
+      [&](world::Entity entity) {
         auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
         auto& tile_cache = world.get<components::NavTileCacheComponent>(entity);
         if (!tileCacheUsable(nav_mesh, tile_cache)) {
@@ -129,7 +129,7 @@ void updateTileCaches(ecs::World& world, float dt) {
       });
 }
 
-void syncTileCaches(ecs::World& world, float dt) {
+void syncTileCaches(world::World& world, float dt) {
   syncTileCacheObstacles(world);
   updateTileCaches(world, dt);
 }

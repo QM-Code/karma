@@ -2,37 +2,14 @@
 
 This engine now has a reusable particle workflow built around five pieces:
 
-- `content::AssetRegistry`: stores named effect templates and CPU texture assets.
+- `assets::AssetRegistry`: stores named effect templates and CPU texture assets.
 - `components::ParticleEffectComponent`: binds an entity to a named effect key.
 - `components::ParticleEffectOverrideComponent`: applies per-entity overrides on top of a named effect.
 - `components::ParticleEmitterComponent`: lightweight playback metadata and the in-memory template shape used by code-authored emitters.
-- `particles::ParticleSystem`: resolves effects/overrides and submits emitter descriptors to the renderer.
+- `visual::particles::ParticleSystem`: resolves effects/overrides and submits emitter descriptors to the renderer.
 
 Most game code should work through `AssetRegistry` plus the ECS helpers in
-`karma/features/visual/particles/effect_api.h` rather than manually constructing particle
-components.
-
-For the roadmap toward agent-generated `.kpeffect` files from images or visual
-references, see [PARTICLE_EFFECT_GENERATION.md](PARTICLE_EFFECT_GENERATION.md).
-
-## Typical Flow
-
-1. Register or import texture assets in `AssetRegistry`.
-2. Register one or more `.kpeffect` files under stable effect keys.
-3. Create ECS entities bound to those effect keys.
-4. Attach `ParticleEffectOverrideComponent` only when a specific instance needs to diverge from the shared template.
-5. Restart or toggle those entities at runtime through the helper API.
-
-Register or re-import effect files explicitly when their source changes.
-
-## Registering Assets
-
-```cpp
-content::TextureAsset smoke_texture{};
-smoke_texture.desc.width = smoke_width;
-smoke_texture.desc.height = smoke_height;
-smoke_texture.bytes = smoke_rgba8;
-assets->registerTextureAsset("smoke_atlas", std::move(smoke_texture));
+`karma/visual.h>registerTextureAsset("smoke_atlas", std::move(smoke_texture));
 
 assets->importTextureAsset("prefabs/explosion/spark_atlas",
                            "examples/assets/prefabs/explosion/textures/spark_atlas.png");
@@ -50,14 +27,14 @@ emitter `"texture"` string. The particle system owns renderer uploads privately.
 ## Binding Effects To ECS Entities
 
 ```cpp
-#include "karma/features/visual/particles/effect_api.h"
+#include "karma/visual.h"
 
 components::TransformComponent transform{};
 transform.setPosition({0.0f, 1.0f, 0.0f});
 
-ecs::Entity smoke = particles::createEffectEntity(
+world::Entity smoke = visual::particles::createEffectEntity(
     *world,
-    particles::ParticleEffectEntityDesc{
+    visual::particles::ParticleEffectEntityDesc{
         .name = "Smoke Plume",
         .effect_key = "smoke_plume",
         .transform = transform,
@@ -68,10 +45,10 @@ ecs::Entity smoke = particles::createEffectEntity(
 For an existing entity:
 
 ```cpp
-particles::bindEffect(
+visual::particles::bindEffect(
     *world,
     entity,
-    particles::ParticleEffectBindingDesc{
+    visual::particles::ParticleEffectBindingDesc{
         .effect_key = "prefabs/explosion/embers",
         .playing = false,
     });
@@ -89,9 +66,9 @@ effect_override.radius_scale = 1.35f;
 effect_override.start_color = math::Color{1.0f, 1.0f, 1.0f, 0.95f};
 effect_override.end_color = math::Color{0.18f, 1.0f, 0.28f, 0.0f};
 
-ecs::Entity orb_core = particles::createEffectEntity(
+world::Entity orb_core = visual::particles::createEffectEntity(
     *world,
-    particles::ParticleEffectEntityDesc{
+    visual::particles::ParticleEffectEntityDesc{
         .name = "Orb Core",
         .effect_key = "energy_orb_core",
         .transform = transform,
@@ -102,8 +79,8 @@ ecs::Entity orb_core = particles::createEffectEntity(
 You can also attach or remove overrides on an existing entity:
 
 ```cpp
-particles::setEffectOverrides(*world, entity, effect_override);
-particles::clearEffectOverrides(*world, entity);
+visual::particles::setEffectOverrides(*world, entity, effect_override);
+visual::particles::clearEffectOverrides(*world, entity);
 ```
 
 Supported override fields are intentionally general-purpose:
@@ -133,10 +110,10 @@ That covers common ECS authoring cases such as:
 These helpers are intentionally small and ECS-oriented:
 
 ```cpp
-particles::restartEffect(*world, explosion_entity);
-particles::setEffectPlaying(*world, smoke_entity, false);
-particles::setEffectEnabled(*world, smoke_entity, true);
-particles::setEffectPlayback(*world, smoke_entity, true, true);
+visual::particles::restartEffect(*world, explosion_entity);
+visual::particles::setEffectPlaying(*world, smoke_entity, false);
+visual::particles::setEffectEnabled(*world, smoke_entity, true);
+visual::particles::setEffectPlayback(*world, smoke_entity, true, true);
 ```
 
 `restartEffect(...)` increments `ParticleEffectComponent::restart_count` and
@@ -166,7 +143,7 @@ That means:
 - Use direct `ParticleEmitterComponent` authoring only for code-driven effects
   that intentionally bypass the library.
 - Use `auto_apply = false` if you want to attach a `ParticleEffectComponent` without having the library overwrite the emitter.
-- Treat `renderer::submitParticles(...)` and `submitPackedParticles(...)` as
+- Treat `rendering::submitParticles(...)` and `submitPackedParticles(...)` as
   compatibility APIs for legacy baked producers. They are reported as
   `cpu_fallback_particles` in diagnostics and are not the normal `.kpeffect`
   path.
@@ -224,11 +201,11 @@ Minimal v3 shape:
 For most gameplay code:
 
 - register shared effect templates once during startup;
-- create entities with `particles::createEffectEntity(...)`;
+- create entities with `visual::particles::createEffectEntity(...)`;
 - attach overrides only when a specific instance needs a local style/timing change;
 - keep entity ids around;
 - move those entities by updating their `TransformComponent`;
-- retrigger them with `particles::restartEffect(...)`.
+- retrigger them with `visual::particles::restartEffect(...)`.
 
 The particle examples in [../examples/particles/billboard.cpp](../examples/particles/billboard.cpp)
 and [../examples/effects/energy_orb.cpp](../examples/effects/energy_orb.cpp)

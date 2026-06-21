@@ -1,4 +1,4 @@
-#include "karma/simulation/physics/physics_system.h"
+#include "karma/physics.h"
 #include "physics_system_internal.h"
 
 namespace karma::physics {
@@ -9,7 +9,7 @@ namespace {
 
 template <typename State>
 void removeCharacterHandle(State& state,
-                           std::unordered_map<std::uintptr_t, ecs::Entity>& entities_by_handle) {
+                           std::unordered_map<std::uintptr_t, world::Entity>& entities_by_handle) {
   if (state.native_handle != 0) {
     entities_by_handle.erase(state.native_handle);
     state.native_handle = 0;
@@ -25,9 +25,9 @@ void publishInvalidController(components::CharacterControllerComponent& componen
 
 }  // namespace
 
-void PhysicsSystem::syncCharacterControllerObject(ecs::World& world) {
+void PhysicsSystem::syncCharacterControllerObject(world::World& world) {
   world.forEach<components::CharacterControllerComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     auto& component = world.get<components::CharacterControllerComponent>(entity);
     const uint64_t key = entityKey(entity);
 
@@ -115,13 +115,13 @@ void PhysicsSystem::syncCharacterControllerObject(ecs::World& world) {
   });
 }
 
-void PhysicsSystem::applyCharacterControllerInput(ecs::World& world, float dt) {
+void PhysicsSystem::applyCharacterControllerInput(world::World& world, float dt) {
   if (dt <= 0.0f) {
     return;
   }
 
   for (auto& [key, state] : character_controllers_) {
-    const ecs::Entity entity = entityFromKey(key);
+    const world::Entity entity = entityFromKey(key);
     if (!world.isAlive(entity) ||
         !world.has<components::CharacterControllerComponent>(entity)) {
       continue;
@@ -142,9 +142,9 @@ void PhysicsSystem::applyCharacterControllerInput(ecs::World& world, float dt) {
   }
 }
 
-void PhysicsSystem::syncCharacterControllerTransform(ecs::World& world) {
+void PhysicsSystem::syncCharacterControllerTransform(world::World& world) {
   for (auto& [key, state] : character_controllers_) {
-    const ecs::Entity entity = entityFromKey(key);
+    const world::Entity entity = entityFromKey(key);
     if (!world.isAlive(entity) ||
         !world.has<components::CharacterControllerComponent>(entity) ||
         !world.has<components::TransformComponent>(entity)) {

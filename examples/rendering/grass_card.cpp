@@ -24,7 +24,7 @@ constexpr float kCameraMoveSpeed = 5.0f;
 constexpr float kCameraBoostMultiplier = 3.0f;
 constexpr float kCameraSmoothing = 20.0f;
 
-void appendVertex(geometry::MeshData& mesh,
+void appendVertex(world::MeshData& mesh,
                   const glm::vec3& position,
                   const glm::vec3& normal,
                   const glm::vec2& uv,
@@ -35,10 +35,10 @@ void appendVertex(geometry::MeshData& mesh,
   mesh.tangents.push_back(tangent);
 }
 
-geometry::MeshData makeGroundPlane(float width, float depth, std::string material_key) {
+world::MeshData makeGroundPlane(float width, float depth, std::string material_key) {
   const float half_width = width * 0.5f;
   const float half_depth = depth * 0.5f;
-  geometry::MeshData mesh{};
+  world::MeshData mesh{};
   appendVertex(mesh,
                {-half_width, 0.0f, -half_depth},
                {0.0f, 1.0f, 0.0f},
@@ -60,21 +60,21 @@ geometry::MeshData makeGroundPlane(float width, float depth, std::string materia
                {0.0f, 1.0f},
                {1.0f, 0.0f, 0.0f, 1.0f});
   mesh.indices = {0u, 2u, 1u, 0u, 3u, 2u};
-  mesh.submeshes.push_back(geometry::MeshSubmesh{
+  mesh.submeshes.push_back(world::MeshSubmesh{
       .index_offset = 0u,
       .index_count = static_cast<uint32_t>(mesh.indices.size()),
       .material_slot = 0u,
   });
-  mesh.material_slots.push_back(geometry::MeshMaterialSlot{
+  mesh.material_slots.push_back(world::MeshMaterialSlot{
       .name = "Ground",
       .default_material_key = std::move(material_key),
   });
   return mesh;
 }
 
-geometry::MeshData makeUprightPlane(float width, float height, std::string material_key) {
+world::MeshData makeUprightPlane(float width, float height, std::string material_key) {
   const float half_width = width * 0.5f;
-  geometry::MeshData mesh{};
+  world::MeshData mesh{};
   appendVertex(mesh,
                {-half_width, 0.0f, 0.0f},
                {0.0f, 0.0f, 1.0f},
@@ -96,24 +96,24 @@ geometry::MeshData makeUprightPlane(float width, float height, std::string mater
                {0.0f, 0.0f},
                {1.0f, 0.0f, 0.0f, 1.0f});
   mesh.indices = {0u, 1u, 2u, 0u, 2u, 3u};
-  mesh.submeshes.push_back(geometry::MeshSubmesh{
+  mesh.submeshes.push_back(world::MeshSubmesh{
       .index_offset = 0u,
       .index_count = static_cast<uint32_t>(mesh.indices.size()),
       .material_slot = 0u,
   });
-  mesh.material_slots.push_back(geometry::MeshMaterialSlot{
+  mesh.material_slots.push_back(world::MeshMaterialSlot{
       .name = "Grass",
       .default_material_key = std::move(material_key),
   });
   return mesh;
 }
 
-ecs::Entity spawnMeshEntity(ecs::World& world,
+world::Entity spawnMeshEntity(world::World& world,
                             std::string name,
                             std::string mesh_key,
                             const math::Vec3& position,
                             bool shadow_visible) {
-  const ecs::Entity entity = world.createEntity();
+  const world::Entity entity = world.createEntity();
   world.setName(entity, std::move(name));
   components::TransformComponent transform{};
   transform.setPosition(position);
@@ -167,7 +167,7 @@ class GrassCardExample final : public app::GameInterface {
   void registerAssets() {
     environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
 
-    renderer::MaterialDesc ground_material{};
+    rendering::MaterialDesc ground_material{};
     ground_material.base_color = {0.42f, 0.48f, 0.39f, 1.0f};
     ground_material.metallic = 0.0f;
     ground_material.roughness = 0.82f;
@@ -178,13 +178,13 @@ class GrassCardExample final : public app::GameInterface {
                     kGrassTextureKey);
     }
 
-    renderer::MaterialAssetDesc grass_material{};
+    rendering::MaterialAssetDesc grass_material{};
     grass_material.pipeline.name = "foliage";
     grass_material.surface.base_color = {0.78f, 0.90f, 0.56f, 1.0f};
     grass_material.surface.metallic = 0.0f;
     grass_material.surface.roughness = 0.82f;
     grass_material.surface.unlit = false;
-    grass_material.surface.alpha_mode = renderer::MaterialDesc::AlphaMode::Masked;
+    grass_material.surface.alpha_mode = rendering::MaterialDesc::AlphaMode::Masked;
     grass_material.surface.alpha_cutoff = 0.28f;
     grass_material.surface.alpha_softness = 0.16f;
     grass_material.surface.alpha_dither = true;
@@ -205,7 +205,7 @@ class GrassCardExample final : public app::GameInterface {
   }
 
   void spawnEnvironment() {
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                .environment_map_asset_key = environment_map_,
@@ -215,7 +215,7 @@ class GrassCardExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 8.0f, 0.0f});
@@ -229,7 +229,7 @@ class GrassCardExample final : public app::GameInterface {
         .shadow_extent = 16.0f,
     });
 
-    const ecs::Entity fill = world->createEntity();
+    const world::Entity fill = world->createEntity();
     world->setName(fill, "Soft Fill");
     components::TransformComponent fill_transform{};
     fill_transform.setPosition({-3.0f, 2.0f, 4.0f});
@@ -310,7 +310,7 @@ class GrassCardExample final : public app::GameInterface {
     camera_transform.setRotation(camera_rotation);
   }
 
-  ecs::Entity camera_entity_{};
+  world::Entity camera_entity_{};
   std::string environment_map_;
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;

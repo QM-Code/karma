@@ -1,5 +1,5 @@
-#include "karma/simulation/physics/backends/bullet/rigid_body_bullet.hpp"
-#include "karma/simulation/physics/backends/bullet/physics_world_bullet.hpp"
+#include "private/physics/backends/bullet/rigid_body_bullet.hpp"
+#include "private/physics/backends/bullet/physics_world_bullet.hpp"
 #include <btBulletDynamicsCommon.h>
 
 namespace {
@@ -7,7 +7,7 @@ inline glm::vec3 toGlm(const btVector3& v) { return glm::vec3(v.x(), v.y(), v.z(
 inline btVector3 toBt(const glm::vec3& v) { return btVector3(v.x, v.y, v.z); }
 }
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 PhysicsRigidBodyBullet::PhysicsRigidBodyBullet(PhysicsWorldBullet* world,
                                                std::unique_ptr<btRigidBody> body,
@@ -307,4 +307,4 @@ std::uintptr_t PhysicsRigidBodyBullet::nativeHandle() const {
     return reinterpret_cast<std::uintptr_t>(body_.get());
 }
 
-} // namespace karma::physics_backend
+} // namespace karma::physics::backend

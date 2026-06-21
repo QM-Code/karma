@@ -22,16 +22,16 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 #include "karma/karma.h"
-#include "karma/rendering/renderer/camera_picking.h"
-#include "karma/simulation/navigation/nav_geometry.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/nav_crowd.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_mesh_agent.h"
-#include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/components/transform.h"
+#include "karma/rendering.h"
+#include "karma/navigation.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::demo {
 namespace {
@@ -78,12 +78,12 @@ struct AgentTrail {
 };
 
 struct OffMeshLinkRecord {
-  ecs::Entity start{};
-  ecs::Entity end{};
+  world::Entity start{};
+  world::Entity end{};
 };
 
 struct ConvexVolumeRecord {
-  ecs::Entity entity{};
+  world::Entity entity{};
   std::vector<math::Vec3> vertices;
   float min_y = 0.0f;
   float max_y = 0.0f;
@@ -327,7 +327,7 @@ std::vector<math::Vec3> offsetPolyFromCentroid(const std::vector<math::Vec3>& ve
   return out;
 }
 
-void drawCircle(renderer::GraphicsDevice& graphics,
+void drawCircle(rendering::GraphicsDevice& graphics,
                 const math::Vec3& center,
                 float radius,
                 const math::Color& color,
@@ -343,7 +343,7 @@ void drawCircle(renderer::GraphicsDevice& graphics,
   }
 }
 
-void drawCross(renderer::GraphicsDevice& graphics,
+void drawCross(rendering::GraphicsDevice& graphics,
                const math::Vec3& center,
                float size,
                const math::Color& color,
@@ -420,7 +420,7 @@ math::Vec3 yOffset(const math::Vec3& point, float y) {
   return {point.x, point.y + y, point.z};
 }
 
-uint64_t entityKey(ecs::Entity entity) {
+uint64_t entityKey(world::Entity entity) {
   return (static_cast<uint64_t>(entity.index) << 32u) |
          static_cast<uint64_t>(entity.generation);
 }
@@ -495,10 +495,10 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     input->bindKey("up", platform::Key::E);
     input->bindKey("down", platform::Key::Q);
     input->bindKey("fast", platform::Key::LeftShift);
-    input->bindKey("crowd_toggle", platform::Key::Space, input::Trigger::Pressed);
-    input->bindKey("crowd_step", platform::Key::Num1, input::Trigger::Pressed);
+    input->bindKey("crowd_toggle", platform::Key::Space, app::Trigger::Pressed);
+    input->bindKey("crowd_step", platform::Key::Num1, app::Trigger::Pressed);
     input->bindMouse("look", platform::MouseButton::Right);
-    input->bindMouse("sample_click", platform::MouseButton::Left, input::Trigger::Pressed);
+    input->bindMouse("sample_click", platform::MouseButton::Left, app::Trigger::Pressed);
   }
 
   void loadAssets() {
@@ -550,7 +550,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     const std::string mesh_key = asset_.path.string();
     const std::string material_key =
         std::string("recast/") + recastNavigationSampleName(kind_) + "/mesh_tint";
-    renderer::MaterialDesc material{};
+    rendering::MaterialDesc material{};
     material.base_color = tintForSample(kind_);
     material.roughness = 0.72f;
     material.metallic = 0.0f;
@@ -566,7 +566,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
                components::NavMeshSurfaceComponent{
                    .layer_mask = source_mask_,
                    .area = navigation::kNavAreaDefault,
-                   .mesh_data = std::make_shared<geometry::MeshData>(combineMeshes(asset_.meshes)),
+                   .mesh_data = std::make_shared<world::MeshData>(combineMeshes(asset_.meshes)),
                    .mesh_asset_key = mesh_key,
                });
 
@@ -652,7 +652,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     transform.setRotation(rotation);
   }
 
-  bool mouseScreenRay(renderer::ScreenRay& out_ray) const {
+  bool mouseScreenRay(rendering::ScreenRay& out_ray) const {
     if (graphics == nullptr || !world->isAlive(camera_entity_)) {
       return false;
     }
@@ -666,7 +666,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     graphics->getFramebufferSize(width, height);
     const auto& camera_transform = world->get<components::TransformComponent>(camera_entity_);
     const auto& camera = world->get<components::CameraComponent>(camera_entity_);
-    return renderer::screenPointToWorldRay(mouse_x,
+    return rendering::screenPointToWorldRay(mouse_x,
                                            mouse_y,
                                            width,
                                            height,
@@ -677,7 +677,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   }
 
   bool screenToGround(math::Vec3& out_point) const {
-    renderer::ScreenRay ray;
+    rendering::ScreenRay ray;
     if (!mouseScreenRay(ray) || std::abs(ray.direction.y) < 0.0001f) {
       return false;
     }
@@ -690,7 +690,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   }
 
   std::optional<ScreenSegment> clickSegment(float length = 1000.0f) const {
-    renderer::ScreenRay ray;
+    rendering::ScreenRay ray;
     if (!mouseScreenRay(ray)) {
       return std::nullopt;
     }
@@ -1047,9 +1047,9 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   }
 
   void removeTempObstacleHit(const ScreenSegment& segment) {
-    ecs::Entity best{};
+    world::Entity best{};
     float best_t = std::numeric_limits<float>::max();
-    for (const ecs::Entity entity : obstacles_) {
+    for (const world::Entity entity : obstacles_) {
       if (!world->isAlive(entity) ||
           !world->has<components::TransformComponent>(entity) ||
           !world->has<components::NavTileCacheObstacleComponent>(entity)) {
@@ -1098,7 +1098,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
       off_mesh_has_start_ = true;
       return;
     }
-    const ecs::Entity end =
+    const world::Entity end =
         marker(point, "OffMesh End", {0.95f, 0.90f, 0.20f, 1.0f});
     if (world->isAlive(off_mesh_start_entity_)) {
       world->add(off_mesh_start_entity_,
@@ -1186,7 +1186,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     min_y -= convex_volume_descent_;
     const float max_y = min_y + convex_volume_height_;
 
-    const ecs::Entity volume = world->createEntity();
+    const world::Entity volume = world->createEntity();
     world->setName(volume, "Recast Convex Volume");
     world->add(volume, components::TransformComponent{});
     world->add(volume,
@@ -1218,7 +1218,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   }
 
   void clearConvexDraft() {
-    for (const ecs::Entity entity : convex_draft_markers_) {
+    for (const world::Entity entity : convex_draft_markers_) {
       if (world->isAlive(entity)) {
         world->destroyEntity(entity);
       }
@@ -1248,7 +1248,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
         setCrowdMoveTarget(point, input->actionDown("fast"));
         break;
       case CrowdToolMode::SelectAgent:
-        selected_crowd_agent_ = segment ? hitTestCrowdAgent(*segment) : ecs::Entity{};
+        selected_crowd_agent_ = segment ? hitTestCrowdAgent(*segment) : world::Entity{};
         break;
       case CrowdToolMode::TogglePolys:
         toggleCrowdPoly(point);
@@ -1293,7 +1293,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   void createCrowdAgent(const math::Vec3& point) {
     const navigation::NavCrowdAgentParams params = currentCrowdAgentParams();
     const glm::vec3 half_extents{params.radius, params.height * 0.5f, params.radius};
-    const ecs::Entity entity = marker(point,
+    const world::Entity entity = marker(point,
                                       "Crowd Agent",
                                       {0.2f, 0.65f, 1.0f, 1.0f},
                                       half_extents);
@@ -1314,7 +1314,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   }
 
   void removeCrowdAgentHit(const ScreenSegment& segment) {
-    const ecs::Entity hit = hitTestCrowdAgent(segment);
+    const world::Entity hit = hitTestCrowdAgent(segment);
     if (!hit.isValid() || !world->isAlive(hit)) {
       return;
     }
@@ -1336,10 +1336,10 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     }
   }
 
-  ecs::Entity hitTestCrowdAgent(const ScreenSegment& segment) const {
-    ecs::Entity best{};
+  world::Entity hitTestCrowdAgent(const ScreenSegment& segment) const {
+    world::Entity best{};
     float best_t = std::numeric_limits<float>::max();
-    for (const ecs::Entity entity : crowd_agents_) {
+    for (const world::Entity entity : crowd_agents_) {
       if (!world->isAlive(entity) ||
           !world->has<components::TransformComponent>(entity) ||
           !world->has<components::NavCrowdAgentComponent>(entity)) {
@@ -1374,14 +1374,14 @@ class RecastNavigationSampleApp final : public app::GameInterface {
            velocity_mode ? math::Color{0.45f, 1.0f, 0.2f, 1.0f}
                          : math::Color{0.95f, 0.95f, 0.15f, 1.0f});
 
-    std::vector<ecs::Entity> targets;
+    std::vector<world::Entity> targets;
     if (selected_crowd_agent_.isValid() && world->isAlive(selected_crowd_agent_)) {
       targets.push_back(selected_crowd_agent_);
     } else {
       targets = crowd_agents_;
     }
 
-    for (const ecs::Entity agent_entity : targets) {
+    for (const world::Entity agent_entity : targets) {
       if (!world->isAlive(agent_entity) ||
           !world->has<components::TransformComponent>(agent_entity) ||
           !world->has<components::NavCrowdAgentComponent>(agent_entity)) {
@@ -1426,7 +1426,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
 
   void updateCrowdAgentParams() {
     const navigation::NavCrowdAgentParams params = currentCrowdAgentParams();
-    for (const ecs::Entity entity : crowd_agents_) {
+    for (const world::Entity entity : crowd_agents_) {
       if (!world->isAlive(entity) || !world->has<components::NavCrowdAgentComponent>(entity)) {
         continue;
       }
@@ -1457,7 +1457,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     if (!world->isAlive(nav_entity_) || !world->has<components::NavCrowdComponent>(nav_entity_)) {
       return;
     }
-    for (const ecs::Entity entity : crowd_agents_) {
+    for (const world::Entity entity : crowd_agents_) {
       if (!world->isAlive(entity) ||
           !world->has<components::TransformComponent>(entity) ||
           !world->has<components::NavCrowdAgentComponent>(entity)) {
@@ -1499,11 +1499,11 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     world->add(nav_entity_, std::move(crowd));
   }
 
-  ecs::Entity marker(const math::Vec3& point,
+  world::Entity marker(const math::Vec3& point,
                      std::string_view name,
                      const math::Color& color,
                      const glm::vec3& half_extents = {0.32f, 0.32f, 0.32f}) {
-    const ecs::Entity entity =
+    const world::Entity entity =
         helpers::createDebugBoxMarker(*world,
                                       graphics,
                                       assets,
@@ -1516,7 +1516,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
     return entity;
   }
 
-  ecs::Entity createObstacle(const math::Vec3& point,
+  world::Entity createObstacle(const math::Vec3& point,
                              navigation::NavTileCacheObstacleShape shape,
                              const math::Vec3& half_extents,
                              float radius,
@@ -1529,7 +1529,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
         ? math::Vec3{point.x, point.y - 0.5f, point.z}
         : yOffset(point, visual_half.y);
     const math::Vec3 visual_position = yOffset(point, visual_half.y);
-    const ecs::Entity entity =
+    const world::Entity entity =
         helpers::createDebugBoxMarker(*world,
                                       graphics,
                                       assets,
@@ -1614,7 +1614,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   }
 
   void clearRuntimeMarkers() {
-    auto is_runtime_entity = [&](ecs::Entity entity) {
+    auto is_runtime_entity = [&](world::Entity entity) {
       if (std::find(obstacles_.begin(), obstacles_.end(), entity) != obstacles_.end() ||
           std::find(crowd_agents_.begin(), crowd_agents_.end(), entity) != crowd_agents_.end() ||
           std::find(convex_draft_markers_.begin(), convex_draft_markers_.end(), entity) !=
@@ -1628,8 +1628,8 @@ class RecastNavigationSampleApp final : public app::GameInterface {
       }
       return false;
     };
-    std::vector<ecs::Entity> kept;
-    for (const ecs::Entity entity : helper_entities_) {
+    std::vector<world::Entity> kept;
+    for (const world::Entity entity : helper_entities_) {
       if (is_runtime_entity(entity)) {
         kept.push_back(entity);
       } else if (world->isAlive(entity)) {
@@ -1648,7 +1648,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   }
 
   void clearObstacles() {
-    for (const ecs::Entity entity : obstacles_) {
+    for (const world::Entity entity : obstacles_) {
       if (world->isAlive(entity) && world->has<components::NavTileCacheObstacleComponent>(entity)) {
         world->get<components::NavTileCacheObstacleComponent>(entity).remove_requested = true;
       }
@@ -1667,7 +1667,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
       return;
     }
     std::ofstream out(snapshotFileForSample(kind_));
-    for (const ecs::Entity entity : obstacles_) {
+    for (const world::Entity entity : obstacles_) {
       if (!world->isAlive(entity) || !world->has<components::TransformComponent>(entity) ||
           !world->has<components::NavTileCacheObstacleComponent>(entity)) {
         continue;
@@ -2314,15 +2314,15 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   math::Vec3 mesh_offset_{};
   uint32_t source_mask_ = 1u;
 
-  ecs::Entity mesh_entity_{};
-  ecs::Entity nav_entity_{};
-  ecs::Entity camera_entity_{};
-  std::vector<ecs::Entity> helper_entities_;
-  std::vector<ecs::Entity> obstacles_;
-  std::vector<ecs::Entity> crowd_agents_;
+  world::Entity mesh_entity_{};
+  world::Entity nav_entity_{};
+  world::Entity camera_entity_{};
+  std::vector<world::Entity> helper_entities_;
+  std::vector<world::Entity> obstacles_;
+  std::vector<world::Entity> crowd_agents_;
   std::vector<OffMeshLinkRecord> off_mesh_links_;
   std::vector<ConvexVolumeRecord> convex_volumes_;
-  std::vector<ecs::Entity> convex_draft_markers_;
+  std::vector<world::Entity> convex_draft_markers_;
   std::vector<navigation::NavPath> debug_paths_;
   std::unordered_map<uint64_t, AgentTrail> agent_trails_;
 
@@ -2378,7 +2378,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
 
   bool off_mesh_has_start_ = false;
   math::Vec3 off_mesh_start_{};
-  ecs::Entity off_mesh_start_entity_{};
+  world::Entity off_mesh_start_entity_{};
   float off_mesh_radius_ = 0.8f;
   bool off_mesh_bidirectional_ = true;
   uint32_t off_mesh_user_id_ = 1000;
@@ -2396,7 +2396,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
   float obstacle_height_ = 2.0f;
   float obstacle_yaw_ = 0.0f;
   CrowdToolMode crowd_mode_ = CrowdToolMode::CreateAgents;
-  ecs::Entity selected_crowd_agent_{};
+  world::Entity selected_crowd_agent_{};
   math::Vec3 crowd_target_{};
   bool crowd_target_set_ = false;
   float crowd_agent_radius_ = 0.6f;
@@ -2431,7 +2431,7 @@ class RecastNavigationSampleApp final : public app::GameInterface {
 int runRecastNavigationSample(RecastNavigationSampleKind kind) {
   app::EngineApp engine;
   RecastNavigationSampleApp game(kind);
-  engine.setUi(imgui::createUiLayer([&game](app::UIContext& ctx) { game.drawUi(ctx); }));
+  engine.setUi(ui::imgui::createUiLayer([&game](app::UIContext& ctx) { game.drawUi(ctx); }));
 
   app::EngineConfig config;
   config.window.title = std::string("Karma Recast ") + recastNavigationSampleName(kind);

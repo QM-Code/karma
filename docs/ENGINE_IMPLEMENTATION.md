@@ -12,7 +12,7 @@ Karma is a C++20 client/server 3D game engine with a layered architecture and a 
 ## Rendering
 - **Renderer entry**: `src/rendering/renderer/render_system.cpp` +
   `src/rendering/renderer/render_system/*` + `src/rendering/renderer/device.cpp`.
-- **Backend abstraction**: `include/karma/rendering/renderer/backend.hpp`.
+- **Backend abstraction**: `src/private/rendering/backend.hpp`.
 - **Diligent backend**: `src/rendering/renderer/backends/diligent/*`.
   - Handles swapchain creation, pipelines, texture uploads, shadow maps, etc.
 - **Diligent post-process passes**:
@@ -35,12 +35,9 @@ selects a named profile, and `RenderSystem` passes resolved settings into each
 - Point-light shadows are budgeted through `point_shadow_max_lights`.
 
 ## UI / Draw Data Integration
-- Core types: `include/karma/runtime/app/ui_draw_data.h` + `include/karma/runtime/app/ui_context.h`.
-- Engine owns a `UIContext` and calls a user-provided `UiLayer` each frame.
-- The renderer consumes `renderer::UIDrawData` and composites it over the 3D frame.
-- UI provider adapters live under `include/karma/features/ui/<provider>` and
+- Core types: `include/karma/app.h<provider>` and
   `src/features/ui/<provider>`. They translate provider draw lists into
-  `renderer::UIDrawData` behind factories returning `app::UiLayer`.
+  `rendering::UIDrawData` behind factories returning `app::UiLayer`.
 
 ## Optional Dependencies
 Optional dependencies are controlled via CMake (window/audio/physics/network backends). When `KARMA_FETCH_DEPS=ON`,
@@ -66,9 +63,8 @@ remain controlled by their individual CMake switches.
 - **Networking**: ENet
 
 ## Physics
-- Public physics authoring lives in `include/karma/world/components`; runtime
-  wrappers and backend-neutral descriptors live under
-  `include/karma/simulation/physics`.
+- Public physics authoring lives in `include/karma/components.h`; runtime
+  wrappers and backend-neutral descriptors live in `include/karma/physics.h`.
 - `src/simulation/physics/physics_system.cpp` owns the high-level fixed-step
   phases. Neighboring `physics_system_*` files implement body, character,
   constraint, vehicle, soft-body, event, conversion, and cleanup details.

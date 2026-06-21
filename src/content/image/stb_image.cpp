@@ -1,4 +1,4 @@
-#include "karma/content/image/image.h"
+#include "karma/assets.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "../../../third_party/stb_image.h"
@@ -13,7 +13,7 @@
 
 #include <spdlog/spdlog.h>
 
-namespace karma::content {
+namespace karma::assets {
 
 namespace {
 
@@ -375,4 +375,4 @@ std::optional<ScalarImage> loadScalarImage(const std::filesystem::path& path,
   return std::nullopt;
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

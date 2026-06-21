@@ -10,10 +10,10 @@
 #include <limits>
 #include <glm/geometric.hpp>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
-void computeBounds(const geometry::MeshData& mesh, glm::vec3& out_center, float& out_radius) {
+void computeBounds(const world::MeshData& mesh, glm::vec3& out_center, float& out_radius) {
   if (mesh.vertices.empty()) {
     out_center = glm::vec3(0.0f);
     out_radius = 0.0f;
@@ -32,7 +32,7 @@ void computeBounds(const geometry::MeshData& mesh, glm::vec3& out_center, float&
   out_radius = 0.5f * glm::length(extents);
 }
 
-std::vector<ParticleGpuMeshSample> buildParticleMeshSamples(const geometry::MeshData& mesh) {
+std::vector<ParticleGpuMeshSample> buildParticleMeshSamples(const world::MeshData& mesh) {
   std::vector<ParticleGpuMeshSample> samples;
   float cumulative_area = 0.0f;
 
@@ -105,7 +105,7 @@ void DiligentBackend::refreshSubmeshesFromMeshData(MeshRecord& record) {
   }
 }
 
-void DiligentBackend::uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record) {
+void DiligentBackend::uploadMeshBuffers(const world::MeshData& mesh, MeshRecord& record) {
   record.vertex_buffer.Release();
   record.index_buffer.Release();
   record.vertex_count = 0;
@@ -140,7 +140,7 @@ void DiligentBackend::uploadMeshBuffers(const geometry::MeshData& mesh, MeshReco
   uploadMeshMorphBuffers(mesh, record);
 }
 
-void DiligentBackend::uploadMeshMorphBuffers(const geometry::MeshData& mesh,
+void DiligentBackend::uploadMeshMorphBuffers(const world::MeshData& mesh,
                                              MeshRecord& record) {
   record.morph_delta_buffer.Release();
   record.morph_delta_srv.Release();
@@ -151,7 +151,7 @@ void DiligentBackend::uploadMeshMorphBuffers(const geometry::MeshData& mesh,
 
   std::vector<MorphTargetDeltaGpu> deltas;
   deltas.reserve(mesh.vertices.size() * mesh.morph_targets.size());
-  for (const geometry::MeshData::MorphTarget& target : mesh.morph_targets) {
+  for (const world::MeshData::MorphTarget& target : mesh.morph_targets) {
     for (size_t vertex_index = 0; vertex_index < mesh.vertices.size(); ++vertex_index) {
       MorphTargetDeltaGpu delta{};
       if (vertex_index < target.position_deltas.size()) {
@@ -200,8 +200,8 @@ void DiligentBackend::uploadMeshMorphBuffers(const geometry::MeshData& mesh,
   }
 }
 
-renderer::MeshId DiligentBackend::createMesh(const geometry::MeshData& mesh) {
-  const renderer::MeshId id = nextMeshId_++;
+rendering::MeshId DiligentBackend::createMesh(const world::MeshData& mesh) {
+  const rendering::MeshId id = nextMeshId_++;
   MeshRecord record{};
   record.data = mesh;
   computeBounds(mesh, record.bounds_center, record.bounds_radius);
@@ -214,15 +214,15 @@ renderer::MeshId DiligentBackend::createMesh(const geometry::MeshData& mesh) {
   return id;
 }
 
-void DiligentBackend::updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) {
+void DiligentBackend::updateMesh(rendering::MeshId mesh, const world::MeshData& data) {
   auto it = meshes_.find(mesh);
   if (it == meshes_.end()) {
     return;
   }
 
   MeshRecord& record = it->second;
-  const std::vector<geometry::MeshSubmesh> previous_submeshes = record.data.submeshes;
-  const std::vector<geometry::MeshMaterialSlot> previous_material_slots = record.data.material_slots;
+  const std::vector<world::MeshSubmesh> previous_submeshes = record.data.submeshes;
+  const std::vector<world::MeshMaterialSlot> previous_material_slots = record.data.material_slots;
   record.data = data;
   if (record.data.submeshes.empty()) {
     record.data.submeshes = previous_submeshes;
@@ -236,13 +236,13 @@ void DiligentBackend::updateMesh(renderer::MeshId mesh, const geometry::MeshData
   refreshSubmeshesFromMeshData(record);
 }
 
-void DiligentBackend::destroyMesh(renderer::MeshId mesh) {
+void DiligentBackend::destroyMesh(rendering::MeshId mesh) {
   auto mesh_it = meshes_.find(mesh);
   if (mesh_it == meshes_.end()) {
     return;
   }
 
-  for (const renderer::MaterialId material : mesh_it->second.owned_materials) {
+  for (const rendering::MaterialId material : mesh_it->second.owned_materials) {
     materials_.erase(material);
   }
 
@@ -257,7 +257,7 @@ void DiligentBackend::destroyMesh(renderer::MeshId mesh) {
   meshes_.erase(mesh_it);
 }
 
-bool DiligentBackend::getMeshBounds(renderer::MeshId mesh,
+bool DiligentBackend::getMeshBounds(rendering::MeshId mesh,
                                     glm::vec3& center,
                                     float& radius) const {
   auto mesh_it = meshes_.find(mesh);
@@ -276,8 +276,8 @@ bool DiligentBackend::getMeshBounds(renderer::MeshId mesh,
 }
 
 bool DiligentBackend::getMeshMaterialSlots(
-    renderer::MeshId mesh,
-    std::vector<geometry::MeshMaterialSlot>& out_slots) const {
+    rendering::MeshId mesh,
+    std::vector<world::MeshMaterialSlot>& out_slots) const {
   auto mesh_it = meshes_.find(mesh);
   if (mesh_it == meshes_.end()) {
     out_slots.clear();
@@ -287,4 +287,4 @@ bool DiligentBackend::getMeshMaterialSlots(
   return true;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

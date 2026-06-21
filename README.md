@@ -127,11 +127,9 @@ Current consumer import status:
   - `karma::graphical`: full graphical runtime profile.
   - `karma::karma`: compatibility alias for `karma::graphical` when the
     graphical profile is built.
-- Public includes are under `include/karma/...`; consumers should include
-  profile headers such as `<karma/server.h>`, `<karma/headless.h>`, or
-  `<karma/karma.h>`, or layered
-	  headers such as
-	  `<karma/content/importers/mesh_import.h>`.
+- Public includes are root headers under `include/karma`; consumers should
+  include profile headers such as `<karma/server.h>`, `<karma/headless.h>`, or
+  `<karma/karma.h>`, or focused domain headers such as `<karma/assets.h>`.
 - The engine is currently built as a static C++20 library. It is still moving
   quickly, so source-vendoring is the most flexible integration path during
   active development.
@@ -313,7 +311,7 @@ artifacts, and publishes them to the matching GitHub release.
 ## Versioning
 
 The root [VERSION](VERSION) file is the source of truth for the CMake project
-version, generated package version files, and `<karma/core/version.h>`. Karma
+version, generated package version files, and `<karma/version.h>`. Karma
 uses SemVer `0.x`: breaking changes are allowed before `1.0.0`, but version
 updates should still be intentional. The README badge reads the pushed `main`
 branch's `VERSION` file through Shields, so local unpushed version edits are

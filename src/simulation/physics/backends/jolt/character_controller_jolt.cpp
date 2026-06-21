@@ -1,5 +1,5 @@
-#include "karma/simulation/physics/backends/jolt/character_controller_jolt.hpp"
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/character_controller_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -23,7 +23,7 @@ RefConst<Shape> makeBoxFromHalfExtents(const glm::vec3& halfExtents) {
 
 } // namespace
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 class PhysicsCharacterControllerJolt::ContactListener final : public JPH::CharacterContactListener {
 public:
@@ -232,4 +232,4 @@ void PhysicsCharacterControllerJolt::destroy() {
     world_ = nullptr;
 }
 
-} // namespace karma::physics_backend
+} // namespace karma::physics::backend

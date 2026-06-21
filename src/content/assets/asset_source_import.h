@@ -3,13 +3,13 @@
 #include <filesystem>
 #include <string>
 
-#include "karma/content/assets/asset_registry.h"
+#include "karma/assets.h"
 
-namespace karma::scene {
+namespace karma::world {
 struct GltfSceneLoadOptions;
 }
 
-namespace karma::content::detail {
+namespace karma::assets::detail {
 
 bool importMeshAsset(AssetRegistry& assets,
                      const std::string& key,
@@ -24,6 +24,6 @@ bool importParticleEffect(AssetRegistry& assets,
 GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
                                     const std::string& key,
                                     const std::filesystem::path& path,
-                                    const scene::GltfSceneLoadOptions& options);
+                                    const world::GltfSceneLoadOptions& options);
 
-}  // namespace karma::content::detail
+}  // namespace karma::assets::detail

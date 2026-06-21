@@ -1,11 +1,11 @@
-#include "karma/media/audio/audio_system.h"
+#include "karma/audio.h"
 
 #include <exception>
 
 #include <glm/gtc/quaternion.hpp>
 #include <spdlog/spdlog.h>
 
-#include "karma/content/assets/asset_registry.h"
+#include "karma/assets.h"
 
 namespace karma::audio {
 
@@ -21,13 +21,13 @@ AudioClip& AudioSystem::getClip(const std::string& key, int max_instances) {
   return inserted->second;
 }
 
-void AudioSystem::update(ecs::World& world, float /*dt*/) {
-  ecs::Entity listener_entity{};
+void AudioSystem::update(world::World& world, float /*dt*/) {
+  world::Entity listener_entity{};
   bool has_listener = false;
   bool multiple_listeners = false;
 
   world.forEach<components::AudioListenerComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (!has_listener) {
       listener_entity = entity;
       has_listener = true;
@@ -57,7 +57,7 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
 
   bool played_without_listener = false;
   world.forEach<components::AudioSourceComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const uint64_t key = entityKey(entity);
     auto& source = world.get<components::AudioSourceComponent>(entity);
     const bool should_play_on_start = source.play_on_start && !played_on_start_[key];
@@ -68,7 +68,7 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
 
     const auto& transform = world.get<components::TransformComponent>(entity);
     try {
-      const content::AudioClipAsset* clip_asset =
+      const assets::AudioClipAsset* clip_asset =
           assets_ != nullptr ? assets_->findAudioClip(source.clip_key) : nullptr;
       if (clip_asset == nullptr) {
         spdlog::error("Karma: audio clip asset key '{}' was not registered", source.clip_key);
@@ -107,7 +107,7 @@ void AudioSystem::update(ecs::World& world, float /*dt*/) {
 
   if (!played_on_start_.empty()) {
     for (auto it = played_on_start_.begin(); it != played_on_start_.end();) {
-      const ecs::Entity entity{static_cast<uint32_t>(it->first >> 32),
+      const world::Entity entity{static_cast<uint32_t>(it->first >> 32),
                                static_cast<uint32_t>(it->first & 0xFFFFFFFFu)};
       if (!world.isAlive(entity)) {
         it = played_on_start_.erase(it);

@@ -1,11 +1,11 @@
-#include "karma/simulation/physics/backends/bullet/physics_world_bullet.hpp"
-#include "karma/simulation/physics/backends/bullet/character_controller_bullet.hpp"
-#include "karma/simulation/physics/backends/bullet/rigid_body_bullet.hpp"
+#include "private/physics/backends/bullet/physics_world_bullet.hpp"
+#include "private/physics/backends/bullet/character_controller_bullet.hpp"
+#include "private/physics/backends/bullet/rigid_body_bullet.hpp"
 #include <btBulletDynamicsCommon.h>
 #include <BulletCollision/CollisionDispatch/btGhostObject.h>
 #include <cmath>
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 namespace {
 
@@ -293,4 +293,4 @@ void PhysicsWorldBullet::collectContacts(std::vector<karma::physics::PhysicsCont
     }
 }
 
-} // namespace karma::physics_backend
+} // namespace karma::physics::backend

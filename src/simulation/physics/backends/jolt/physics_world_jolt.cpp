@@ -1,7 +1,7 @@
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
-#include "karma/simulation/physics/backends/jolt/character_controller_jolt.hpp"
-#include "karma/simulation/physics/backends/jolt/constraint_jolt.hpp"
-#include "karma/simulation/physics/backends/jolt/rigid_body_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/character_controller_jolt.hpp"
+#include "private/physics/backends/jolt/constraint_jolt.hpp"
+#include "private/physics/backends/jolt/rigid_body_jolt.hpp"
 #include "shape_factory.h"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
@@ -197,7 +197,7 @@ void initJoltOnce() {
 }
 } // namespace
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 class PhysicsWorldJoltContactListener final : public JPH::ContactListener {
 public:
@@ -264,7 +264,7 @@ PhysicsWorldJolt::PhysicsWorldJolt() {
     static ObjectVsBroadPhaseLayerFilterImpl objectVsBroadphaseFilter;
     static ObjectLayerPairFilterImpl objectPairFilter;
 
-    physicsSystem_ = std::make_unique<PhysicsSystem>();
+    physicsSystem_ = std::make_unique<JPH::PhysicsSystem>();
     physicsSystem_->Init(MAX_BODIES,
                          NUM_BODY_MUTEXES,
                          MAX_BODY_PAIRS,
@@ -645,4 +645,4 @@ void PhysicsWorldJolt::removeConstraint(JPH::Constraint* constraint) const {
     physicsSystem_->RemoveConstraint(constraint);
 }
 
-} // namespace karma::physics_backend
+} // namespace karma::physics::backend

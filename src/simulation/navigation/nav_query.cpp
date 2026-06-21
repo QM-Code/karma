@@ -1,5 +1,5 @@
-#include "karma/simulation/navigation/nav_query.h"
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/navigation.h"
+#include "karma/navigation.h"
 
 #include <algorithm>
 #include <utility>
@@ -8,7 +8,7 @@
 #include <DetourNavMesh.h>
 #include <DetourNavMeshQuery.h>
 
-#include "karma/rendering/renderer/device.h"
+#include "karma/rendering.h"
 #include "detail/detour_utils.h"
 #include "detail/nav_mesh_access.h"
 
@@ -132,7 +132,7 @@ bool NavQuery::findNearestPoly(const math::Vec3& point,
   return true;
 }
 
-void NavQuery::debugDrawPath(renderer::GraphicsDevice& graphics,
+void NavQuery::debugDrawPath(rendering::GraphicsDevice& graphics,
                              const NavPath& path,
                              const math::Color& color,
                              bool depth_test) {

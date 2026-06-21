@@ -7,7 +7,7 @@
 
 #include "demo_asset_paths.h"
 #include "karma/karma.h"
-#include "karma/world/components/environment.h"
+#include "karma/components.h"
 
 #include <imgui.h>
 
@@ -283,7 +283,7 @@ class CollisionUiLayer final : public app::UiLayer {
       return;
     }
 
-    renderer::UIDrawData& out = ctx.drawData();
+    rendering::UIDrawData& out = ctx.drawData();
     out.clear();
     out.vertices.reserve(static_cast<size_t>(draw_data->TotalVtxCount));
     out.indices.reserve(static_cast<size_t>(draw_data->TotalIdxCount));
@@ -295,7 +295,7 @@ class CollisionUiLayer final : public app::UiLayer {
       const ImDrawList* cmd_list = draw_data->CmdLists[n];
       for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
         const ImDrawVert& v = cmd_list->VtxBuffer[i];
-        renderer::UIVertex out_v{};
+        rendering::UIVertex out_v{};
         out_v.x = v.pos.x;
         out_v.y = v.pos.y;
         out_v.u = v.uv.x;
@@ -324,7 +324,7 @@ class CollisionUiLayer final : public app::UiLayer {
           continue;
         }
 
-        renderer::UIDrawCmd out_cmd{};
+        rendering::UIDrawCmd out_cmd{};
         out_cmd.index_offset = global_idx_offset;
         out_cmd.index_count = cmd.ElemCount;
         out_cmd.scissor_enabled = true;
@@ -585,7 +585,7 @@ class CollisionEventsGame final : public app::GameInterface {
     world->add(entity, transform);
 
     if (assets != nullptr) {
-      renderer::MaterialDesc material{};
+      rendering::MaterialDesc material{};
       material.base_color = color;
       material.emissive_color = {color.r * 1.8f, color.g * 1.8f, color.b * 1.8f, 1.0f};
       material.unlit = true;
@@ -628,7 +628,7 @@ class CollisionEventsGame final : public app::GameInterface {
     player_xform.setRotation({});
   }
 
-  std::string entityLabel(ecs::Entity entity) const {
+  std::string entityLabel(world::Entity entity) const {
     if (!world->isAlive(entity)) {
       return "Destroyed Entity";
     }
@@ -664,8 +664,8 @@ class CollisionEventsGame final : public app::GameInterface {
   }
 
   CollisionUiState& ui_state_;
-  ecs::Entity player_entity_{};
-  ecs::Entity camera_entity_{};
+  world::Entity player_entity_{};
+  world::Entity camera_entity_{};
   math::Vec3 camera_follow_offset_{0.0f, 8.0f, 12.0f};
   float camera_pitch_ = -0.55f;
   float move_speed_ = 12.0f;

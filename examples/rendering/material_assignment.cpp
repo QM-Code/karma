@@ -34,10 +34,10 @@ math::Color materialColor(std::string_view key) {
   return {1.0f, 1.0f, 1.0f, 1.0f};
 }
 
-void registerTintMaterial(content::AssetRegistry& assets,
+void registerTintMaterial(assets::AssetRegistry& assets,
                           const std::string& key,
                           const math::Color& color) {
-  renderer::MaterialDesc material{};
+  rendering::MaterialDesc material{};
   material.base_color = color;
   material.roughness = 0.58f;
   material.metallic = 0.0f;
@@ -105,7 +105,7 @@ class MaterialAssignmentExample final : public app::GameInterface {
         .intensity = 18.0f,
         .range = 24.0f});
 
-    const content::GltfSceneAsset* tank_asset =
+    const assets::GltfSceneAsset* tank_asset =
         assets->findGltfSceneAsset(kMaterialAssignmentTankSceneKey);
     if (tank_asset == nullptr) {
       spdlog::error("Material assignment tank scene was not available from the asset package");
@@ -121,7 +121,7 @@ class MaterialAssignmentExample final : public app::GameInterface {
 
     for (size_t i = 0; i < spawns.size(); ++i) {
       const auto& spawn = spawns[i];
-      const ecs::Entity entity = spawnTank(spawn, i, tank_asset);
+      const world::Entity entity = spawnTank(spawn, i, tank_asset);
       tanks_[i] = TankEntry{
           .entity = entity,
           .base_position = spawn.position,
@@ -161,7 +161,7 @@ class MaterialAssignmentExample final : public app::GameInterface {
   };
 
   struct TankEntry {
-    ecs::Entity entity{};
+    world::Entity entity{};
     math::Vec3 base_position{};
     float base_yaw = 0.0f;
   };
@@ -169,14 +169,14 @@ class MaterialAssignmentExample final : public app::GameInterface {
   void spawnWorld() {
     bool spawned_world = false;
 
-    if (const content::GltfSceneAsset* cached_world =
+    if (const assets::GltfSceneAsset* cached_world =
             assets->findGltfSceneAsset(kMaterialAssignmentWorldSceneKey)) {
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+      const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
           *cached_world,
-          scene::GltfSceneInstantiateOptions{
+          world::GltfSceneInstantiateOptions{
               .create_synthetic_root = true,
               .autoplay_animations = false,
           });
@@ -191,7 +191,7 @@ class MaterialAssignmentExample final : public app::GameInterface {
 
     if (!spawned_world) {
       spdlog::error("Material assignment world scene was not available from the asset package");
-      const ecs::Entity world_entity = world->createEntity();
+      const world::Entity world_entity = world->createEntity();
       world->setName(world_entity, "World");
       world->add(world_entity, components::TransformComponent{});
       world->add(world_entity, components::MeshComponent{
@@ -202,18 +202,18 @@ class MaterialAssignmentExample final : public app::GameInterface {
     }
   }
 
-  ecs::Entity spawnTank(const SpawnDesc& spawn,
+  world::Entity spawnTank(const SpawnDesc& spawn,
                         size_t spawn_index,
-                        const content::GltfSceneAsset* tank_asset) {
+                        const assets::GltfSceneAsset* tank_asset) {
     const std::string asset_key_prefix =
         "examples/material_assignment/tanks/" + std::to_string(spawn_index);
     if (tank_asset != nullptr) {
-      const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+      const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
           *world,
           *scene,
           *assets,
           *tank_asset,
-          scene::GltfSceneInstantiateOptions{
+          world::GltfSceneInstantiateOptions{
               .create_synthetic_root = true,
               .autoplay_animations = false,
           });
@@ -236,7 +236,7 @@ class MaterialAssignmentExample final : public app::GameInterface {
     return spawnFallbackTank(spawn);
   }
 
-  ecs::Entity spawnFallbackTank(const SpawnDesc& spawn) {
+  world::Entity spawnFallbackTank(const SpawnDesc& spawn) {
     if (tank_mesh_.empty()) {
       tank_mesh_ = importExampleMeshAsset(assets, "tank_final.glb");
     }
@@ -259,18 +259,18 @@ class MaterialAssignmentExample final : public app::GameInterface {
     return entity;
   }
 
-  void assignTintedMaterialVariants(const scene::GltfSceneImportResult& imported,
+  void assignTintedMaterialVariants(const world::GltfSceneImportResult& imported,
                                     const std::string& asset_key_prefix,
                                     std::string_view material_key_prefix,
                                     const math::Color& color) {
     uint32_t variant_index = 0;
-    for (const ecs::Entity entity : imported.entities) {
+    for (const world::Entity entity : imported.entities) {
       if (!world->isAlive(entity) || !world->has<components::MeshComponent>(entity)) {
         continue;
       }
 
       auto& mesh = world->get<components::MeshComponent>(entity);
-      const geometry::MeshData* mesh_asset = assets->findMeshAsset(mesh.mesh_asset_key);
+      const world::MeshData* mesh_asset = assets->findMeshAsset(mesh.mesh_asset_key);
       uint32_t slot_count = 1;
       if (mesh_asset != nullptr && !mesh_asset->material_slots.empty()) {
         slot_count = static_cast<uint32_t>(mesh_asset->material_slots.size());

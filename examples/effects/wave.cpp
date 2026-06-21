@@ -11,7 +11,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace karma::demo {
 
@@ -80,8 +80,8 @@ components::TransformComponent makeScreenOverlayTransform(
   return transform;
 }
 
-geometry::MeshData buildAuraQuadMesh() {
-  geometry::MeshData mesh{};
+world::MeshData buildAuraQuadMesh() {
+  world::MeshData mesh{};
   mesh.vertices = {
       {-1.0f, -1.0f, 0.0f},
       {1.0f, -1.0f, 0.0f},
@@ -290,8 +290,8 @@ LookAngles lookAnglesToTarget(const glm::vec3& eye, const glm::vec3& target) {
   };
 }
 
-renderer::MaterialAssetDesc buildWaveOutsideMaterialDesc() {
-  renderer::MaterialAssetDesc asset{};
+rendering::MaterialAssetDesc buildWaveOutsideMaterialDesc() {
+  rendering::MaterialAssetDesc asset{};
   asset.surface.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 0.55f};
   asset.surface.emissive_color = {0.0f, 0.0f, 0.0f, 1.0f};
   asset.surface.metallic = 0.0f;
@@ -300,19 +300,19 @@ renderer::MaterialAssetDesc buildWaveOutsideMaterialDesc() {
   asset.surface.double_sided = true;
   asset.surface.depth_test = true;
   asset.surface.depth_write = false;
-  asset.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  asset.surface.blend_mode = rendering::MaterialDesc::BlendMode::Alpha;
   return asset;
 }
 
-renderer::MaterialAssetDesc buildWaveVolumeMaterialDesc() {
-  renderer::MaterialAssetDesc asset{};
+rendering::MaterialAssetDesc buildWaveVolumeMaterialDesc() {
+  rendering::MaterialAssetDesc asset{};
   asset.pipeline.name = "wave_volume";
   asset.surface.base_color = {kWaveColor.r, kWaveColor.g, kWaveColor.b, 1.0f};
   asset.surface.emissive_color = {0.18f, 0.44f, 0.52f, 1.0f};
   asset.surface.metallic = 0.0f;
   asset.surface.roughness = 0.0f;
   asset.surface.transparent = true;
-  asset.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  asset.surface.blend_mode = rendering::MaterialDesc::BlendMode::Alpha;
   asset.surface.double_sided = true;
   asset.surface.depth_test = false;
   asset.surface.depth_write = false;
@@ -326,13 +326,13 @@ renderer::MaterialAssetDesc buildWaveVolumeMaterialDesc() {
   return asset;
 }
 
-renderer::MaterialAssetDesc buildWaveOverlayMaterialDesc() {
-  renderer::MaterialAssetDesc asset{};
+rendering::MaterialAssetDesc buildWaveOverlayMaterialDesc() {
+  rendering::MaterialAssetDesc asset{};
   asset.pipeline.name = "screen_wave";
   asset.surface.metallic = 0.0f;
   asset.surface.roughness = 1.0f;
   asset.surface.transparent = true;
-  asset.surface.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+  asset.surface.blend_mode = rendering::MaterialDesc::BlendMode::Alpha;
   asset.surface.double_sided = true;
   asset.surface.depth_test = false;
   asset.surface.depth_write = false;
@@ -440,14 +440,14 @@ class WaveExample final : public app::GameInterface {
 
  private:
   void spawnWorld() {
-    const ecs::Entity world_entity = world->createEntity();
+    const world::Entity world_entity = world->createEntity();
     world->setName(world_entity, "World");
     world->add(world_entity, components::TransformComponent{});
     world->add(world_entity, components::MeshComponent{
                                  .mesh_asset_key = world_mesh_,
                              });
 
-    const ecs::Entity environment = world->createEntity();
+    const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
                                  .environment_map_asset_key = environment_map_,
@@ -457,7 +457,7 @@ class WaveExample final : public app::GameInterface {
   }
 
   void spawnLighting() {
-    const ecs::Entity sun = world->createEntity();
+    const world::Entity sun = world->createEntity();
     world->setName(sun, "Sun");
     components::TransformComponent sun_transform{};
     sun_transform.setPosition({0.0f, 48.0f, 0.0f});
@@ -524,24 +524,24 @@ class WaveExample final : public app::GameInterface {
     const std::string glow_texture_key = "runtime/wave/glow_texture";
     const std::string distortion_texture_key = "runtime/wave/distortion_texture";
     if (assets != nullptr) {
-      content::TextureAsset glow_texture{};
+      assets::TextureAsset glow_texture{};
       glow_texture.desc.width = kWaveGlowTextureSize;
       glow_texture.desc.height = kWaveGlowTextureSize;
-      glow_texture.desc.format = renderer::TextureFormat::RGBA8;
+      glow_texture.desc.format = rendering::TextureFormat::RGBA8;
       glow_texture.bytes = glow_pixels;
       assets->registerTextureAsset(glow_texture_key, std::move(glow_texture));
 
-      content::TextureAsset distortion_texture{};
+      assets::TextureAsset distortion_texture{};
       distortion_texture.desc.width = kWaveDistortionTextureSize;
       distortion_texture.desc.height = kWaveDistortionTextureSize;
-      distortion_texture.desc.format = renderer::TextureFormat::RGBA8;
+      distortion_texture.desc.format = rendering::TextureFormat::RGBA8;
       distortion_texture.bytes = distortion_pixels;
       assets->registerTextureAsset(distortion_texture_key, std::move(distortion_texture));
     }
 
     auto spawn_emitter = [&](std::string_view name,
-                             const components::ParticleEmitterComponent& emitter) -> ecs::Entity {
-      const ecs::Entity entity = world->createEntity();
+                             const components::ParticleEmitterComponent& emitter) -> world::Entity {
+      const world::Entity entity = world->createEntity();
       world->setName(entity, std::string(name));
       world->add(entity, makeWaveShellTransform(kWaveCenter));
       world->add(entity, emitter);
@@ -594,13 +594,13 @@ class WaveExample final : public app::GameInterface {
                                  camera_position.z - wave_position.z);
     const bool camera_inside_wave =
         glm::dot(camera_delta, camera_delta) <= (kWaveRadius * kWaveRadius);
-    auto set_mesh_visibility = [&](ecs::Entity entity, bool visible) {
+    auto set_mesh_visibility = [&](world::Entity entity, bool visible) {
       if (!world->isAlive(entity) || !world->has<components::MeshComponent>(entity)) {
         return;
       }
       world->get<components::MeshComponent>(entity).visible = visible;
     };
-    auto set_particle_visibility = [&](ecs::Entity entity, bool visible) {
+    auto set_particle_visibility = [&](world::Entity entity, bool visible) {
       if (!world->isAlive(entity)) {
         return;
       }
@@ -616,7 +616,7 @@ class WaveExample final : public app::GameInterface {
     set_particle_visibility(wave_outer_glow_entity_, !camera_inside_wave);
     set_particle_visibility(wave_distortion_entity_, !camera_inside_wave);
 
-    auto sync_overlay_transform = [&](ecs::Entity entity) {
+    auto sync_overlay_transform = [&](world::Entity entity) {
       if (!world->isAlive(entity) || !world->has<components::TransformComponent>(entity)) {
         return;
       }
@@ -627,14 +627,14 @@ class WaveExample final : public app::GameInterface {
                                      kWaveOverlayDepth);
     };
 
-    auto sync_wave_shell_transform = [&](ecs::Entity entity) {
+    auto sync_wave_shell_transform = [&](world::Entity entity) {
       if (!world->isAlive(entity) || !world->has<components::TransformComponent>(entity)) {
         return;
       }
       world->get<components::TransformComponent>(entity) = makeWaveShellTransform(wave_position);
     };
 
-    auto sync_wave_volume_transform = [&](ecs::Entity entity) {
+    auto sync_wave_volume_transform = [&](world::Entity entity) {
       if (!world->isAlive(entity) || !world->has<components::TransformComponent>(entity)) {
         return;
       }
@@ -659,7 +659,7 @@ class WaveExample final : public app::GameInterface {
     const glm::vec3 eye = target + glm::vec3(0.0f, 0.45f, 6.4f);
     const LookAngles look = lookAnglesToTarget(eye, target);
 
-    const ecs::Entity camera = world->createEntity();
+    const world::Entity camera = world->createEntity();
     world->setName(camera, "Camera");
     camera_entity_ = camera;
     camera_yaw_ = look.yaw;
@@ -688,14 +688,14 @@ class WaveExample final : public app::GameInterface {
   std::string wave_material_key_;
   std::string wave_volume_material_key_;
   std::string wave_overlay_material_key_;
-  ecs::Entity wave_entity_{};
-  ecs::Entity wave_volume_entity_{};
-  ecs::Entity wave_core_glow_entity_{};
-  ecs::Entity wave_outer_glow_entity_{};
-  ecs::Entity wave_distortion_entity_{};
-  ecs::Entity wave_overlay_entity_{};
-  ecs::Entity wave_light_entity_{};
-  ecs::Entity camera_entity_{};
+  world::Entity wave_entity_{};
+  world::Entity wave_volume_entity_{};
+  world::Entity wave_core_glow_entity_{};
+  world::Entity wave_outer_glow_entity_{};
+  world::Entity wave_distortion_entity_{};
+  world::Entity wave_overlay_entity_{};
+  world::Entity wave_light_entity_{};
+  world::Entity camera_entity_{};
   float camera_yaw_ = 0.0f;
   float camera_pitch_ = 0.0f;
   float target_camera_yaw_ = 0.0f;

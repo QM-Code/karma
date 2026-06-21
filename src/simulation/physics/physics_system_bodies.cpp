@@ -1,4 +1,4 @@
-#include "karma/simulation/physics/physics_system.h"
+#include "karma/physics.h"
 #include "physics_system_internal.h"
 
 #include <cmath>
@@ -7,14 +7,14 @@ namespace karma::physics {
 
 using namespace system_internal;
 
-void PhysicsSystem::syncRigidBodies(ecs::World& world) {
+void PhysicsSystem::syncRigidBodies(world::World& world) {
   const MeshColliderGeometryResolver resolve_mesh_geometry =
       [this](std::string_view mesh_key) -> const MeshColliderGeometry* {
         return resolveMeshColliderGeometry(mesh_key);
       };
 
   world.forEach<components::RigidbodyComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (!hasPhysicsCollider(world, entity)) {
       return;
     }
@@ -95,7 +95,7 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
   });
 
   world.forEach<components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (world.has<components::RigidbodyComponent>(entity)) {
       return;
     }
@@ -149,7 +149,7 @@ void PhysicsSystem::syncRigidBodies(ecs::World& world) {
     }
   });
 }
-void PhysicsSystem::applyBodyForces(ecs::World& world) {
+void PhysicsSystem::applyBodyForces(world::World& world) {
   auto non_zero = [](const math::Vec3& value) {
     return std::abs(value.x) > 0.000001f ||
            std::abs(value.y) > 0.000001f ||
@@ -157,7 +157,7 @@ void PhysicsSystem::applyBodyForces(ecs::World& world) {
   };
 
   world.forEach<components::PhysicsBodyForcesComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const uint64_t key = entityKey(entity);
     auto body_it = rigid_bodies_.find(key);
     if (body_it == rigid_bodies_.end() || !body_it->second.isValid()) {
@@ -193,9 +193,9 @@ void PhysicsSystem::applyBodyForces(ecs::World& world) {
     }
   });
 }
-void PhysicsSystem::syncDynamicBodies(ecs::World& world) {
+void PhysicsSystem::syncDynamicBodies(world::World& world) {
   world.forEach<components::RigidbodyComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (!collisionEnabled(world, entity)) {
       return;
     }

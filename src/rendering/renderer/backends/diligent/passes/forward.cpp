@@ -30,7 +30,7 @@
 
 #include <spdlog/spdlog.h>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 
@@ -82,7 +82,7 @@ glm::vec4 transformBoundingSphere(const glm::mat4& world,
   return glm::vec4(center, radius);
 }
 
-glm::mat4 planarInstanceTransform(const renderer::PlanarInstanceData& instance) {
+glm::mat4 planarInstanceTransform(const rendering::PlanarInstanceData& instance) {
   const glm::vec3 position(instance.position_yaw);
   const float yaw = instance.position_yaw.w;
   const glm::vec3 scale(instance.scale_pad);
@@ -671,7 +671,7 @@ bool DiligentBackend::ensureInstancedGpuCullingOutputBuffers(
     return false;
   }
 
-  const size_t stride = sizeof(renderer::PlanarInstanceData);
+  const size_t stride = sizeof(rendering::PlanarInstanceData);
   const size_t required_bytes = instance_count * stride;
   if (required_bytes == 0u ||
       required_bytes > static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max())) {
@@ -749,7 +749,7 @@ bool DiligentBackend::ensureInstancedGpuCullingOutputBuffers(
 bool DiligentBackend::ensureInstancedGpuCullingRecordBuffers(InstancedRecord& record) {
   if (!instancedGpuCullingEnabled() ||
       record.dynamic ||
-      record.gpu_layout != renderer::InstanceGpuLayout::PositionYawScaleParams ||
+      record.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
       record.instanceCount() == 0u ||
       !device_) {
     return false;
@@ -763,7 +763,7 @@ bool DiligentBackend::ensureInstancedGpuCullingRecordBuffers(InstancedRecord& re
       record.gpu_culling_indirect_args_uav);
 }
 
-void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
+void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
                                                const glm::mat4& view_proj,
                                                const glm::vec3& camera_position,
                                                const glm::vec3& camera_forward,
@@ -802,8 +802,8 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
   opaque_batch_lookup.reserve(instances_.size() + instanced_records_.size());
 
   auto append_opaque_forward_batch = [&](const ForwardBatchKey& key,
-                                         const renderer::InstanceData& instance,
-                                         renderer::DeformationId deformation) {
+                                         const rendering::InstanceData& instance,
+                                         rendering::DeformationId deformation) {
     if (key.deformed) {
       out_state.deformed_opaque_draws.push_back(DeformedForwardDraw{
           .key = key,
@@ -824,7 +824,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
   };
 
   auto append_persistent_instanced_batch = [&](const ForwardBatchKey& key,
-                                              renderer::InstanceId instance,
+                                              rendering::InstanceId instance,
                                               Diligent::Uint32 instance_count,
                                               uint32_t lod_index = UINT32_MAX) {
     ForwardBatch batch{};
@@ -836,24 +836,24 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
   };
 
   auto resolve_bound_material =
-      [&](const std::vector<renderer::DrawMaterialBinding>& materials,
-          renderer::MaterialId material,
+      [&](const std::vector<rendering::DrawMaterialBinding>& materials,
+          rendering::MaterialId material,
           uint32_t material_slot,
-          renderer::MaterialId fallback_material) -> renderer::MaterialId {
+          rendering::MaterialId fallback_material) -> rendering::MaterialId {
     for (const auto& binding : materials) {
       if (binding.slot == material_slot &&
-          binding.material != renderer::kInvalidMaterial) {
+          binding.material != rendering::kInvalidMaterial) {
         return binding.material;
       }
     }
-    if (material != renderer::kInvalidMaterial) {
+    if (material != rendering::kInvalidMaterial) {
       return material;
     }
     return fallback_material;
   };
 
-  auto lookup_material = [&](renderer::MaterialId material_id) -> const MaterialRecord* {
-    if (material_id == renderer::kInvalidMaterial) {
+  auto lookup_material = [&](rendering::MaterialId material_id) -> const MaterialRecord* {
+    if (material_id == rendering::kInvalidMaterial) {
       return nullptr;
     }
     auto mat_it = materials_.find(material_id);
@@ -864,7 +864,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
                                           const MeshRecord& mesh) {
     if (mat) {
       return mat->desc.transparent ||
-             mat->desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Blend ||
+             mat->desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Blend ||
              (mat->shading_model == MaterialPipelineKind::Standard &&
               mat->transmission_factor > 0.001f);
     }
@@ -941,7 +941,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
       }
     }
 
-    const renderer::InstanceData submitted_instance{
+    const rendering::InstanceData submitted_instance{
         .transform = instance.transform,
         .params = instance.params,
     };
@@ -949,7 +949,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
     if (!mesh.submeshes.empty()) {
       for (size_t submesh_index = 0; submesh_index < mesh.submeshes.size(); ++submesh_index) {
         const auto& submesh = mesh.submeshes[submesh_index];
-        const renderer::MaterialId mat_id =
+        const rendering::MaterialId mat_id =
             resolve_bound_material(instance.materials,
                                    instance.material,
                                    submesh.material_slot,
@@ -960,7 +960,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
             .index_offset = submesh.index_offset,
             .index_count = submesh.index_count,
             .indexed = indexed_mesh && submesh.index_count > 0,
-            .deformed = instance.deformation != renderer::kInvalidDeformation,
+            .deformed = instance.deformation != rendering::kInvalidDeformation,
         };
         const MaterialRecord* mat = lookup_material(mat_id);
         const bool transparent = uses_transparent_forward_path(mat, mesh);
@@ -992,18 +992,18 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         }
       }
     } else {
-      const renderer::MaterialId mat_id =
+      const rendering::MaterialId mat_id =
           resolve_bound_material(instance.materials,
                                  instance.material,
                                  0,
-                                 renderer::kInvalidMaterial);
+                                 rendering::kInvalidMaterial);
       const ForwardBatchKey key{
           .mesh = instance.mesh,
           .material = mat_id,
           .index_offset = 0,
           .index_count = mesh.index_count,
           .indexed = indexed_mesh,
-          .deformed = instance.deformation != renderer::kInvalidDeformation,
+          .deformed = instance.deformation != rendering::kInvalidDeformation,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
       const bool transparent = uses_transparent_forward_path(mat, mesh);
@@ -1037,7 +1037,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
   }
 
   for (const auto& entry : instanced_records_) {
-    const renderer::InstanceId record_id = entry.first;
+    const rendering::InstanceId record_id = entry.first;
     const auto& record = entry.second;
     if (record.layer != layer) {
       out_stats.skipped_layer += 1;
@@ -1075,8 +1075,8 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
                                       Diligent::Uint32 index_offset,
                                       Diligent::Uint32 index_count,
                                       bool indexed,
-                                      renderer::MaterialId fallback_material) {
-      const renderer::MaterialId mat_id = resolve_bound_material(
+                                      rendering::MaterialId fallback_material) {
+      const rendering::MaterialId mat_id = resolve_bound_material(
           record.materials, record.material, material_slot, fallback_material);
       const ForwardBatchKey key{
           .mesh = record.mesh,
@@ -1117,16 +1117,16 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
             },
             .transform = transform,
             .params = params,
-            .deformation = renderer::kInvalidDeformation,
+            .deformation = rendering::kInvalidDeformation,
             .depth = resolve_transparent_sort_depth(mat, mesh, transform),
         });
       };
-      if (record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
-        for (const renderer::PlanarInstanceData& instance : record.planar_instances) {
+      if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
+        for (const rendering::PlanarInstanceData& instance : record.planar_instances) {
           append_transparent_instance(planarInstanceTransform(instance), instance.params);
         }
       } else {
-        for (const renderer::InstanceData& instance : record.instances) {
+        for (const rendering::InstanceData& instance : record.instances) {
           append_transparent_instance(instance.transform, instance.params);
         }
       }
@@ -1134,7 +1134,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
 
     if (!mesh.submeshes.empty()) {
       for (const auto& submesh : mesh.submeshes) {
-        const renderer::MaterialId mat_id =
+        const rendering::MaterialId mat_id =
             resolve_bound_material(record.materials,
                                    record.material,
                                    submesh.material_slot,
@@ -1165,11 +1165,11 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
         }
       }
     } else {
-      const renderer::MaterialId mat_id =
+      const rendering::MaterialId mat_id =
           resolve_bound_material(record.materials,
                                  record.material,
                                  0,
-                                 renderer::kInvalidMaterial);
+                                 rendering::kInvalidMaterial);
       const ForwardBatchKey key{
           .mesh = record.mesh,
           .material = mat_id,
@@ -1181,8 +1181,8 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
       if (uses_transparent_forward_path(mat, mesh)) {
-        if (record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
-          for (const renderer::PlanarInstanceData& instance : record.planar_instances) {
+        if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
+          for (const rendering::PlanarInstanceData& instance : record.planar_instances) {
             const glm::mat4 transform = planarInstanceTransform(instance);
             auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                      ? out_state.pre_particle_scene_sample_draws
@@ -1200,12 +1200,12 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
                 },
                 .transform = transform,
                 .params = instance.params,
-                .deformation = renderer::kInvalidDeformation,
+                .deformation = rendering::kInvalidDeformation,
                 .depth = resolve_transparent_sort_depth(mat, mesh, transform),
             });
           }
         } else {
-          for (const renderer::InstanceData& submitted_instance : record.instances) {
+          for (const rendering::InstanceData& submitted_instance : record.instances) {
             auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                      ? out_state.pre_particle_scene_sample_draws
                                      : (uses_post_particle_transparent_pass(mat)
@@ -1222,7 +1222,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
                 },
                 .transform = submitted_instance.transform,
                 .params = submitted_instance.params,
-                .deformation = renderer::kInvalidDeformation,
+                .deformation = rendering::kInvalidDeformation,
                 .depth = resolve_transparent_sort_depth(mat, mesh, submitted_instance.transform),
             });
           }
@@ -1241,7 +1241,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
          lod_index < static_cast<uint32_t>(record.lods.size());
          ++lod_index) {
       const auto& lod = record.lods[lod_index];
-      if (lod.mesh == renderer::kInvalidMesh) {
+      if (lod.mesh == rendering::kInvalidMesh) {
         continue;
       }
       auto lod_mesh_it = meshes_.find(lod.mesh);
@@ -1257,8 +1257,8 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
                                   Diligent::Uint32 index_offset,
                                   Diligent::Uint32 index_count,
                                   bool indexed,
-                                  renderer::MaterialId fallback_material) {
-        const renderer::MaterialId mat_id = resolve_bound_material(
+                                  rendering::MaterialId fallback_material) {
+        const rendering::MaterialId mat_id = resolve_bound_material(
             lod.materials, lod.material, material_slot, fallback_material);
         const MaterialRecord* mat = lookup_material(mat_id);
         if (uses_transparent_forward_path(mat, lod_mesh)) {
@@ -1295,7 +1295,7 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
                          0,
                          lod_mesh.index_count,
                          lod_indexed_mesh,
-                         renderer::kInvalidMaterial);
+                         rendering::kInvalidMaterial);
       }
     }
   }
@@ -1334,9 +1334,9 @@ void DiligentBackend::collectForwardLayerState(renderer::LayerId layer,
     const MaterialRecord* mat_a = lookup_material(a.key.material);
     const MaterialRecord* mat_b = lookup_material(b.key.material);
     const bool additive_a =
-        mat_a && mat_a->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+        mat_a && mat_a->blend_mode == rendering::MaterialDesc::BlendMode::Additive;
     const bool additive_b =
-        mat_b && mat_b->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+        mat_b && mat_b->blend_mode == rendering::MaterialDesc::BlendMode::Additive;
     if (additive_a != additive_b) {
       return !additive_a && additive_b;
     }
@@ -1424,8 +1424,8 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     return first + count <= total;
   };
 
-  auto lookup_material = [&](renderer::MaterialId material_id) -> MaterialRecord* {
-    if (material_id == renderer::kInvalidMaterial) {
+  auto lookup_material = [&](rendering::MaterialId material_id) -> MaterialRecord* {
+    if (material_id == rendering::kInvalidMaterial) {
       return nullptr;
     }
     auto mat_it = materials_.find(material_id);
@@ -1433,10 +1433,10 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   };
 
   thread_local std::vector<InstanceGpuData> packed_instances;
-  auto pack_instances = [&](const std::vector<renderer::InstanceData>& instances) {
+  auto pack_instances = [&](const std::vector<rendering::InstanceData>& instances) {
     packed_instances.clear();
     packed_instances.reserve(instances.size());
-    for (const renderer::InstanceData& instance : instances) {
+    for (const rendering::InstanceData& instance : instances) {
       InstanceGpuData packed{};
       const float* ptr = glm::value_ptr(instance.transform);
       std::memcpy(packed.col0, ptr, sizeof(packed.col0));
@@ -1449,28 +1449,28 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
   };
 
-  auto update_forward_material_constants = [&](renderer::MaterialId material_id,
-                                               renderer::MeshId mesh_id,
+  auto update_forward_material_constants = [&](rendering::MaterialId material_id,
+                                               rendering::MeshId mesh_id,
                                                const MeshRecord& mesh,
                                                const MaterialRecord* mat,
-                                               renderer::InstanceGpuLayout layout,
-                                               renderer::InstanceLodRenderMode render_mode,
-                                               renderer::MaterialId& last_constants_material,
-                                               renderer::MeshId& last_constants_mesh,
-                                               renderer::InstanceGpuLayout& last_constants_layout,
-                                               renderer::InstanceLodRenderMode&
+                                               rendering::InstanceGpuLayout layout,
+                                               rendering::InstanceLodRenderMode render_mode,
+                                               rendering::MaterialId& last_constants_material,
+                                               rendering::MeshId& last_constants_mesh,
+                                               rendering::InstanceGpuLayout& last_constants_layout,
+                                               rendering::InstanceLodRenderMode&
                                                    last_constants_render_mode) -> bool {
     if (material_id == last_constants_material &&
-        (material_id != renderer::kInvalidMaterial || mesh_id == last_constants_mesh) &&
+        (material_id != rendering::kInvalidMaterial || mesh_id == last_constants_mesh) &&
         layout == last_constants_layout &&
         render_mode == last_constants_render_mode) {
       return true;
     }
     DrawConstants constants = base_constants;
     constants.instance_params[0] =
-        layout == renderer::InstanceGpuLayout::PositionYawScaleParams ? 1.0f : 0.0f;
+        layout == rendering::InstanceGpuLayout::PositionYawScaleParams ? 1.0f : 0.0f;
     constants.instance_params[1] =
-        render_mode == renderer::InstanceLodRenderMode::UprightBillboard ? 1.0f : 0.0f;
+        render_mode == rendering::InstanceLodRenderMode::UprightBillboard ? 1.0f : 0.0f;
     constants.instance_params[2] = 0.0f;
     constants.instance_params[3] = 0.0f;
     glm::vec4 base_color = mat ? mat->base_color_factor : mesh.base_color;
@@ -1559,7 +1559,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params2[1] = mat ? mat->shell_body_strength : 1.0f;
       constants.material_params2[2] = (mat && mat->desc.unlit) ? 1.0f : 0.0f;
       constants.material_params2[3] =
-          (mat && mat->desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Masked)
+          (mat && mat->desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Masked)
               ? mat->desc.alpha_cutoff
               : -1.0f;
     }
@@ -1654,7 +1654,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   };
 
   auto resolve_forward_pipeline = [&](MaterialRecord* mat,
-                                      renderer::InstanceGpuLayout layout,
+                                      rendering::InstanceGpuLayout layout,
                                       bool& custom_pipeline) -> Diligent::IPipelineState* {
     custom_pipeline = false;
     if (use_custom_shader_override) {
@@ -1675,7 +1675,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
 
   auto resolve_forward_srb = [&](MaterialRecord* mat,
                                  bool custom_pipeline,
-                                 renderer::InstanceGpuLayout layout) -> Diligent::IShaderResourceBinding* {
+                                 rendering::InstanceGpuLayout layout) -> Diligent::IShaderResourceBinding* {
     if (use_custom_shader_override) {
       return camera_override_srb_;
     }
@@ -1688,7 +1688,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         return srb;
       }
     }
-    if (layout == renderer::InstanceGpuLayout::PositionYawScaleParams) {
+    if (layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
       auto& compact_srb = compact_default_material_srbs_[forwardPipelineVariantIndex(variant)];
       return compact_srb ? compact_srb.RawPtr() : shader_resources_.RawPtr();
     }
@@ -1821,7 +1821,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
           Diligent::IBuffer*& bound_index_buffer) -> bool {
     if (use_custom_shader_override ||
         !key.indexed ||
-        key.gpu_layout != renderer::InstanceGpuLayout::PositionYawScaleParams ||
+        key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
         record.dynamic ||
         !record.instance_srv ||
         !record.instance_buffer ||
@@ -1956,7 +1956,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     std::array<GpuLodBucketDraw, kInstancedGpuLodBucketCapacity> buckets{};
   };
 
-  std::unordered_map<renderer::InstanceId, GpuLodClassification> gpu_lod_classifications;
+  std::unordered_map<rendering::InstanceId, GpuLodClassification> gpu_lod_classifications;
   gpu_lod_classifications.reserve(instanced_records_.size());
 
   auto lod_bucket_index_for_batch =
@@ -1986,7 +1986,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
           Diligent::IBuffer*& bound_index_buffer) -> bool {
     if (use_custom_shader_override ||
         !key.indexed ||
-        key.gpu_layout != renderer::InstanceGpuLayout::PositionYawScaleParams ||
+        key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
         !visible_instance_buffer ||
         !indirect_args_buffer ||
         !graphics_pipeline ||
@@ -2028,7 +2028,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   };
 
   auto classify_gpu_lod_record =
-      [&](renderer::InstanceId record_id,
+      [&](rendering::InstanceId record_id,
           InstancedRecord& record,
           Diligent::Uint32 instance_count) -> GpuLodClassification* {
     auto [classification_it, inserted] =
@@ -2042,7 +2042,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         static_cast<uint32_t>(record.lods.size()) + 1u;
     if (use_custom_shader_override ||
         record.dynamic ||
-        record.gpu_layout != renderer::InstanceGpuLayout::PositionYawScaleParams ||
+        record.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
         record.lods.empty() ||
         classification.bucket_count > kInstancedGpuLodBucketCapacity ||
         instance_count == 0u ||
@@ -2058,7 +2058,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         continue;
       }
       if (!candidate.key.indexed ||
-          candidate.key.gpu_layout != renderer::InstanceGpuLayout::PositionYawScaleParams ||
+          candidate.key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
           candidate.persistent_instance_count != instance_count) {
         return &classification;
       }
@@ -2248,7 +2248,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       if (materialUsesCustomForwardPipeline(*mat)) {
         has_custom_opaque_material = true;
       }
-      if (mat->desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Masked) {
+      if (mat->desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Masked) {
         has_masked_opaque_material = true;
       }
       if (has_custom_opaque_material && has_masked_opaque_material) {
@@ -2314,7 +2314,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         if (depth_prepass_srb_) {
           if (!bindDeformationResources(depth_prepass_srb_,
                                         mesh,
-                                        renderer::kInvalidDeformation)) {
+                                        rendering::kInvalidDeformation)) {
             continue;
           }
           context_->CommitShaderResources(depth_prepass_srb_,
@@ -2383,11 +2383,11 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   Diligent::IBuffer* bound_instance_vb = nullptr;
   Diligent::IBuffer* bound_index_buffer = nullptr;
   Diligent::IShaderResourceBinding* bound_forward_srb = nullptr;
-  renderer::MaterialId last_constants_material = renderer::kInvalidMaterial;
-  renderer::MeshId last_constants_mesh = renderer::kInvalidMesh;
-  renderer::InstanceGpuLayout last_constants_layout = renderer::InstanceGpuLayout::Matrix4x4Params;
-  renderer::InstanceLodRenderMode last_constants_render_mode =
-      renderer::InstanceLodRenderMode::Mesh;
+  rendering::MaterialId last_constants_material = rendering::kInvalidMaterial;
+  rendering::MeshId last_constants_mesh = rendering::kInvalidMesh;
+  rendering::InstanceGpuLayout last_constants_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
+  rendering::InstanceLodRenderMode last_constants_render_mode =
+      rendering::InstanceLodRenderMode::Mesh;
   {
     Diligent::MapHelper<DrawConstants> mapped(
         context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
@@ -2403,7 +2403,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     bound_forward_srb = camera_override_srb_;
   }
   for (const auto& batch : state.opaque_batches) {
-    if (batch.instances.empty() && batch.instanced_record == renderer::kInvalidInstance) {
+    if (batch.instances.empty() && batch.instanced_record == rendering::kInvalidInstance) {
       continue;
     }
     auto mesh_it = meshes_.find(batch.key.mesh);
@@ -2453,7 +2453,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       active_forward_srb =
           resolve_forward_srb(mat, custom_pipeline, batch.key.gpu_layout);
       if (active_forward_srb &&
-          !bindDeformationResources(active_forward_srb, mesh, renderer::kInvalidDeformation)) {
+          !bindDeformationResources(active_forward_srb, mesh, rendering::kInvalidDeformation)) {
         continue;
       }
       if (active_forward_srb) {
@@ -2461,12 +2461,12 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                         Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         bound_forward_srb = active_forward_srb;
       }
-    } else if (!updateDeformationConstants(mesh, renderer::kInvalidDeformation)) {
+    } else if (!updateDeformationConstants(mesh, rendering::kInvalidDeformation)) {
       continue;
     }
 
     Diligent::Uint32 instance_count = 0u;
-    if (batch.instanced_record != renderer::kInvalidInstance) {
+    if (batch.instanced_record != rendering::kInvalidInstance) {
       auto record_it = instanced_records_.find(batch.instanced_record);
       if (record_it == instanced_records_.end() ||
           !ensureInstancedRecordBuffer(record_it->second)) {
@@ -2518,7 +2518,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       Diligent::IBuffer* indirect_args_buffer = nullptr;
       Diligent::IBufferView* indirect_args_uav = nullptr;
       bool gpu_lod_bucket_ready = false;
-      if (record.gpu_layout == renderer::InstanceGpuLayout::PositionYawScaleParams &&
+      if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams &&
           !record.dynamic) {
         if (lod_batch) {
           auto& lod = record.lods[batch.instanced_lod_index];
@@ -2586,7 +2586,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         continue;
       }
       if (!record.lods.empty() &&
-          record.gpu_layout != renderer::InstanceGpuLayout::PositionYawScaleParams) {
+          record.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams) {
         instancing_stats_.lod_fallbacks += 1u;
       }
       if (!bind_forward_instance_buffer(mesh,
@@ -2608,7 +2608,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                            bound_index_buffer,
                            "opaque-forward")) {
       draw_count += 1;
-      if (batch.instanced_record != renderer::kInvalidInstance) {
+      if (batch.instanced_record != rendering::kInvalidInstance) {
         instancing_stats_.drawn_batches += 1u;
         instancing_stats_.drawn_instances += instance_count;
         instancing_stats_.draw_calls += 1u;
@@ -2630,7 +2630,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     bool custom_pipeline = false;
     Diligent::IPipelineState* pipeline =
         resolve_forward_pipeline(mat,
-                                 renderer::InstanceGpuLayout::Matrix4x4Params,
+                                 rendering::InstanceGpuLayout::Matrix4x4Params,
                                  custom_pipeline);
     if (!pipeline) {
       continue;
@@ -2652,8 +2652,8 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                            draw.key.mesh,
                                            mesh,
                                  mat,
-                                 renderer::InstanceGpuLayout::Matrix4x4Params,
-                                 renderer::InstanceLodRenderMode::Mesh,
+                                 rendering::InstanceGpuLayout::Matrix4x4Params,
+                                 rendering::InstanceLodRenderMode::Mesh,
                                  last_constants_material,
                                  last_constants_mesh,
                                  last_constants_layout,
@@ -2665,7 +2665,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       Diligent::IShaderResourceBinding* srb =
           resolve_forward_srb(mat,
                               custom_pipeline,
-                              renderer::InstanceGpuLayout::Matrix4x4Params);
+                              rendering::InstanceGpuLayout::Matrix4x4Params);
       if (srb && !bindDeformationResources(srb, mesh, draw.deformation)) {
         continue;
       }
@@ -2759,26 +2759,26 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     return first + count <= total;
   };
 
-  auto lookup_material = [&](renderer::MaterialId material_id) -> MaterialRecord* {
-    if (material_id == renderer::kInvalidMaterial) {
+  auto lookup_material = [&](rendering::MaterialId material_id) -> MaterialRecord* {
+    if (material_id == rendering::kInvalidMaterial) {
       return nullptr;
     }
     auto mat_it = materials_.find(material_id);
     return mat_it != materials_.end() ? &mat_it->second : nullptr;
   };
 
-  auto update_forward_material_constants = [&](renderer::MaterialId material_id,
-                                               renderer::MeshId mesh_id,
+  auto update_forward_material_constants = [&](rendering::MaterialId material_id,
+                                               rendering::MeshId mesh_id,
                                                const MeshRecord& mesh,
                                                const MaterialRecord* mat,
                                                TransparentForwardDraw::SceneSampleMode scene_sample_mode,
-                                               renderer::MaterialId& last_constants_material,
-                                               renderer::MeshId& last_constants_mesh,
+                                               rendering::MaterialId& last_constants_material,
+                                               rendering::MeshId& last_constants_mesh,
                                                TransparentForwardDraw::SceneSampleMode&
                                                    last_constants_scene_sample_mode) -> bool {
     if (material_id == last_constants_material &&
         scene_sample_mode == last_constants_scene_sample_mode &&
-        (material_id != renderer::kInvalidMaterial || mesh_id == last_constants_mesh)) {
+        (material_id != rendering::kInvalidMaterial || mesh_id == last_constants_mesh)) {
       return true;
     }
     DrawConstants constants = base_constants;
@@ -2872,7 +2872,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params2[1] = mat ? mat->shell_body_strength : 1.0f;
       constants.material_params2[2] = (mat && mat->desc.unlit) ? 1.0f : 0.0f;
       constants.material_params2[3] =
-          (mat && mat->desc.alpha_mode == renderer::MaterialDesc::AlphaMode::Masked)
+          (mat && mat->desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Masked)
               ? mat->desc.alpha_cutoff
               : -1.0f;
     }
@@ -2975,7 +2975,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       variant = ForwardPipelineVariant::Transparent;
       return active_forward_pipeline;
     }
-    const bool additive = mat && mat->blend_mode == renderer::MaterialDesc::BlendMode::Additive;
+    const bool additive = mat && mat->blend_mode == rendering::MaterialDesc::BlendMode::Additive;
     const bool double_sided = mat && mat->desc.double_sided;
     if (additive && double_sided) {
       variant = ForwardPipelineVariant::AdditiveDoubleSided;
@@ -3176,8 +3176,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   Diligent::IBuffer* bound_index_buffer = nullptr;
   Diligent::ITextureView* bound_scene_color = nullptr;
   Diligent::ITextureView* bound_scene_depth = nullptr;
-  renderer::MaterialId last_constants_material = renderer::kInvalidMaterial;
-  renderer::MeshId last_constants_mesh = renderer::kInvalidMesh;
+  rendering::MaterialId last_constants_material = rendering::kInvalidMaterial;
+  rendering::MeshId last_constants_mesh = rendering::kInvalidMesh;
   auto last_constants_scene_sample_mode = TransparentForwardDraw::SceneSampleMode::None;
   Diligent::Uint32 draw_count = 0;
   for (const auto& draw : draws) {
@@ -3246,8 +3246,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
         }
       }
     }
-    const renderer::DeformationId deformation =
-        draw.key.deformed ? draw.deformation : renderer::kInvalidDeformation;
+    const rendering::DeformationId deformation =
+        draw.key.deformed ? draw.deformation : rendering::kInvalidDeformation;
     if (srb && !bindDeformationResources(srb, mesh, deformation)) {
       continue;
     }
@@ -3280,7 +3280,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
 bool DiligentBackend::forwardDrawsRequireSceneColorCopy(
     const std::vector<TransparentForwardDraw>& draws) const {
   for (const auto& draw : draws) {
-    if (draw.key.material == renderer::kInvalidMaterial) {
+    if (draw.key.material == rendering::kInvalidMaterial) {
       continue;
     }
     auto mat_it = materials_.find(draw.key.material);
@@ -3296,4 +3296,4 @@ bool DiligentBackend::forwardDrawsRequireSceneColorCopy(
   return false;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

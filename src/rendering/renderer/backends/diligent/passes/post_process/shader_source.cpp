@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace karma::renderer_backend::post_process {
+namespace karma::rendering::backend::post_process {
 namespace {
 
 static constexpr const char* kFallbackFullscreenVS = R"(
@@ -250,4 +250,4 @@ std::string loadShader(const char* filename, ShaderFallback fallback) {
   return fallbackSource(fallback);
 }
 
-}  // namespace karma::renderer_backend::post_process
+}  // namespace karma::rendering::backend::post_process

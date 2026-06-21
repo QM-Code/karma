@@ -1,6 +1,6 @@
-#include "karma/simulation/physics/backends/jolt/soft_body_jolt.hpp"
+#include "private/physics/backends/jolt/soft_body_jolt.hpp"
 
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -362,7 +362,7 @@ const JPH::SoftBodyMotionProperties* softBodyMotion(const JPH::Body& body) {
 
 }  // namespace
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 PhysicsSoftBodyJolt::PhysicsSoftBodyJolt(PhysicsWorldJolt* world, JPH::BodyID body)
     : world_(world), body_(body) {}
@@ -593,4 +593,4 @@ std::unique_ptr<PhysicsSoftBodyBackend> PhysicsWorldJolt::createSoftBody(
     return std::make_unique<PhysicsSoftBodyJolt>(this, body);
 }
 
-}  // namespace karma::physics_backend
+}  // namespace karma::physics::backend

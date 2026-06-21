@@ -1,14 +1,14 @@
-#include "karma/simulation/animation/retarget.h"
+#include "karma/world.h"
 
 #include <algorithm>
 #include <utility>
 
 #include <glm/gtc/quaternion.hpp>
 
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
+#include "karma/math.h"
+#include "karma/math.h"
 
-namespace karma::animation {
+namespace karma::world {
 
 namespace {
 
@@ -181,4 +181,4 @@ AnimationClip retargetClip(const AnimationClip& source_clip,
   return out;
 }
 
-}  // namespace karma::animation
+}  // namespace karma::world

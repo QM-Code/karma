@@ -1,11 +1,11 @@
-#include "karma/rendering/renderer/camera_picking.h"
+#include "karma/rendering.h"
 
 #include <cmath>
 
-#include "karma/core/math/quat.h"
-#include "karma/core/math/vec3.h"
+#include "karma/math.h"
+#include "karma/math.h"
 
-namespace karma::renderer {
+namespace karma::rendering {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
@@ -40,4 +40,4 @@ bool screenPointToWorldRay(double screen_x,
   return math::lengthSquared(ray_dir) > 0.0f;
 }
 
-}  // namespace karma::renderer
+}  // namespace karma::rendering

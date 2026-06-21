@@ -1,6 +1,6 @@
-#include "karma/media/audio/backends/sdl/backend.hpp"
+#include "private/audio/backends/sdl/backend.hpp"
 
-#include "karma/media/audio/backends/sdl/clip.hpp"
+#include "private/audio/backends/sdl/clip.hpp"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -15,7 +15,7 @@ constexpr int kDefaultFrequency = 48000;
 constexpr int kDefaultChannels = 2;
 }
 
-namespace karma::audio_backend {
+namespace karma::audio::backend {
 
 SdlAudioBackend::SdlAudioBackend() {
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
@@ -123,4 +123,4 @@ void SdlAudioBackend::mixAudio(float* output, int frames) {
   }
 }
 
-}  // namespace karma::audio_backend
+}  // namespace karma::audio::backend

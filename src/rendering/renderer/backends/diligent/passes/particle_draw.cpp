@@ -28,9 +28,9 @@
 
 #include <glm/geometric.hpp>
 
-#include "karma/core/time.h"
+#include "karma/core.h"
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 
@@ -53,11 +53,11 @@ T* getMappedData(Diligent::MapHelper<T, KeepStrongReferences>& map) {
 }
 
 struct ParticleBatchGroupKey {
-  renderer::TextureId texture = renderer::kInvalidTexture;
-  renderer::ParticleAlignment alignment = renderer::ParticleAlignment::Billboard;
-  renderer::ParticleShadingMode shading_mode = renderer::ParticleShadingMode::Standard;
-  renderer::ParticlePresentationMode presentation_mode =
-      renderer::ParticlePresentationMode::Baked;
+  rendering::TextureId texture = rendering::kInvalidTexture;
+  rendering::ParticleAlignment alignment = rendering::ParticleAlignment::Billboard;
+  rendering::ParticleShadingMode shading_mode = rendering::ParticleShadingMode::Standard;
+  rendering::ParticlePresentationMode presentation_mode =
+      rendering::ParticlePresentationMode::Baked;
   bool use_soft_mask = true;
   float soft_particle_distance = 0.0f;
   float distortion_strength = 0.0f;
@@ -158,7 +158,7 @@ struct PreparedParticleStream {
 };
 
 struct SortedParticle {
-  const renderer::ParticlePackedInstance* particle = nullptr;
+  const rendering::ParticlePackedInstance* particle = nullptr;
   std::size_t batch_index = 0u;
   std::size_t draw_state_key = 0u;
   float depth = 0.0f;
@@ -178,9 +178,9 @@ bool sortedParticleLess(const SortedParticle& a, const SortedParticle& b) {
          reinterpret_cast<std::uintptr_t>(b.particle);
 }
 
-bool isTransparentParticleBlend(renderer::ParticleBlendMode blend_mode) {
-  return blend_mode == renderer::ParticleBlendMode::Alpha ||
-         blend_mode == renderer::ParticleBlendMode::Distortion;
+bool isTransparentParticleBlend(rendering::ParticleBlendMode blend_mode) {
+  return blend_mode == rendering::ParticleBlendMode::Alpha ||
+         blend_mode == rendering::ParticleBlendMode::Distortion;
 }
 
 Diligent::Viewport buildViewport(int render_width, int render_height) {
@@ -202,7 +202,7 @@ constexpr auto kHotPathDrawFlags = Diligent::DRAW_FLAG_VERIFY_ALL;
 
 }  // namespace
 
-void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
+void DiligentBackend::renderParticlePasses(rendering::LayerId layer,
                                            const ParticlePassContext& context) {
   auto make_batch_group_key = [](const auto& batch) {
     return ParticleBatchGroupKey{
@@ -233,8 +233,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     };
   };
 
-  auto resolve_particle_texture = [&](renderer::TextureId texture_id) -> Diligent::ITextureView* {
-    if (texture_id != renderer::kInvalidTexture) {
+  auto resolve_particle_texture = [&](rendering::TextureId texture_id) -> Diligent::ITextureView* {
+    if (texture_id != rendering::kInvalidTexture) {
       auto it = textures_.find(texture_id);
       if (it != textures_.end() && it->second.srv) {
         return it->second.srv;
@@ -306,7 +306,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   bool has_alpha_particles = false;
   for (const auto& batch : particle_batches_) {
     if (batch.layer == layer &&
-        batch.blend_mode == renderer::ParticleBlendMode::Alpha &&
+        batch.blend_mode == rendering::ParticleBlendMode::Alpha &&
         !batch.particles.empty()) {
       has_alpha_particles = true;
       break;
@@ -316,7 +316,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     for (const auto& submission : particle_emitter_submissions_) {
       const auto& emitter = submission.desc;
       if (emitter.layer == layer &&
-          emitter.blend_mode == renderer::ParticleBlendMode::Alpha &&
+          emitter.blend_mode == rendering::ParticleBlendMode::Alpha &&
           emitter.visible &&
           emitter.enabled &&
           emitter.max_particles > 0u) {
@@ -379,7 +379,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   };
 
   auto draw_particle_spans =
-      [&](renderer::ParticleBlendMode blend_mode,
+      [&](rendering::ParticleBlendMode blend_mode,
           Diligent::RefCntAutoPtr<Diligent::IPipelineState>& pso,
           Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb,
           Diligent::IShaderResourceVariable* texture_var,
@@ -420,7 +420,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       copyMat4(constants.view_proj, context.view_proj);
       glm::vec3 particle_right = context.camera_right;
       glm::vec3 particle_up = context.camera_up;
-      if (key.alignment == renderer::ParticleAlignment::Ground) {
+      if (key.alignment == rendering::ParticleAlignment::Ground) {
         particle_right = glm::vec3(1.0f, 0.0f, 0.0f);
         particle_up = glm::vec3(0.0f, 0.0f, 1.0f);
       }
@@ -544,13 +544,13 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                  Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
 
       switch (blend_mode) {
-        case renderer::ParticleBlendMode::Additive:
+        case rendering::ParticleBlendMode::Additive:
           particle_pass_stats_.additive_draw_calls += 1u;
           break;
-        case renderer::ParticleBlendMode::Alpha:
+        case rendering::ParticleBlendMode::Alpha:
           particle_pass_stats_.alpha_draw_calls += 1u;
           break;
-        case renderer::ParticleBlendMode::Distortion:
+        case rendering::ParticleBlendMode::Distortion:
           particle_pass_stats_.distortion_draw_calls += 1u;
           break;
       }
@@ -580,7 +580,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   };
 
   auto draw_prepared_particles =
-      [&](renderer::ParticleBlendMode blend_mode,
+      [&](rendering::ParticleBlendMode blend_mode,
           Diligent::RefCntAutoPtr<Diligent::IPipelineState>& pso,
           Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb,
           Diligent::IShaderResourceVariable* texture_var,
@@ -613,7 +613,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
 
   struct PersistentGpuParticleGroup {
     ParticleBatchGroupKey key{};
-    renderer::ParticleBlendMode blend_mode = renderer::ParticleBlendMode::Additive;
+    rendering::ParticleBlendMode blend_mode = rendering::ParticleBlendMode::Additive;
     bool depth_test = true;
     uint32_t group_index = 0u;
     uint32_t instance_base = 0u;
@@ -642,7 +642,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
         .texture = emitter.texture,
         .alignment = emitter.alignment,
         .shading_mode = emitter.shading_mode,
-        .presentation_mode = renderer::ParticlePresentationMode::Simulated,
+        .presentation_mode = rendering::ParticlePresentationMode::Simulated,
         .use_soft_mask = emitter.use_soft_mask,
         .soft_particle_distance = std::max(emitter.soft_particle_distance, 0.0f),
         .distortion_strength = std::max(emitter.distortion_strength, 0.0f),
@@ -733,7 +733,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     return std::min(alive, max_particles);
   };
 
-  auto estimate_emitter_bounds_radius = [](const renderer::ParticleEmitterGpuDesc& emitter) {
+  auto estimate_emitter_bounds_radius = [](const rendering::ParticleEmitterGpuDesc& emitter) {
     const float max_scale =
         std::max({std::abs(emitter.scale.x), std::abs(emitter.scale.y),
                   std::abs(emitter.scale.z), 1.0e-4f});
@@ -774,7 +774,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     return std::max(radius, 0.01f);
   };
 
-  auto is_emitter_visible_to_camera = [&](const renderer::ParticleEmitterGpuDesc& emitter) {
+  auto is_emitter_visible_to_camera = [&](const rendering::ParticleEmitterGpuDesc& emitter) {
     if (!emitter.visible) {
       return false;
     }
@@ -815,7 +815,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
            std::abs(horizontal) <= horizontal_limit;
   };
 
-  auto fill_source_data = [](auto& constants, const renderer::ParticleEmitterGpuDesc& emitter) {
+  auto fill_source_data = [](auto& constants, const rendering::ParticleEmitterGpuDesc& emitter) {
     constants.spawn_box[0] = emitter.source_box_extents.x;
     constants.spawn_box[1] = emitter.source_box_extents.y;
     constants.spawn_box[2] = emitter.source_box_extents.z;
@@ -946,7 +946,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     constants.output[3] = 0.0f;
   };
 
-  auto record_gpu_draw_stats = [&](renderer::ParticleBlendMode blend_mode,
+  auto record_gpu_draw_stats = [&](rendering::ParticleBlendMode blend_mode,
                                    uint32_t alive_count,
                                    uint32_t capacity,
                                    uint32_t spawned_this_frame) {
@@ -961,16 +961,16 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     particle_pass_stats_.gpu_killed_particles += capacity > alive_count ? capacity - alive_count : 0u;
     particle_pass_stats_.gpu_compacted_particles += alive_count;
     switch (blend_mode) {
-      case renderer::ParticleBlendMode::Additive:
+      case rendering::ParticleBlendMode::Additive:
         particle_pass_stats_.additive_batches += 1u;
         particle_pass_stats_.additive_particles += alive_count;
         break;
-      case renderer::ParticleBlendMode::Alpha:
+      case rendering::ParticleBlendMode::Alpha:
         particle_pass_stats_.alpha_batches += 1u;
         particle_pass_stats_.alpha_particles += alive_count;
         particle_pass_stats_.alpha_sorted_particles += alive_count;
         break;
-      case renderer::ParticleBlendMode::Distortion:
+      case rendering::ParticleBlendMode::Distortion:
         particle_pass_stats_.distortion_batches += 1u;
         particle_pass_stats_.distortion_particles += alive_count;
         particle_pass_stats_.distortion_sorted_particles += alive_count;
@@ -989,7 +989,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                   uint32_t,
                                   ParticleBatchGroupKeyHash>
       persistent_gpu_material_lookup;
-  thread_local std::unordered_map<renderer::TextureId, uint32_t>
+  thread_local std::unordered_map<rendering::TextureId, uint32_t>
       persistent_gpu_texture_lookup;
   thread_local std::array<Diligent::IDeviceObject*, kParticleGpuTextureTableSize>
       persistent_gpu_texture_table;
@@ -1000,7 +1000,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   bool persistent_gpu_global_sort_active = false;
 
   auto draw_global_particle_spans =
-      [&](renderer::ParticleBlendMode blend_mode,
+      [&](rendering::ParticleBlendMode blend_mode,
           ParticleGlobalPipeline& pipeline,
           const ParticleDrawTarget& draw_target,
           const std::vector<PreparedParticleSpan>& spans,
@@ -1109,9 +1109,9 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                  Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
                                  Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
 
-      if (blend_mode == renderer::ParticleBlendMode::Alpha) {
+      if (blend_mode == rendering::ParticleBlendMode::Alpha) {
         particle_pass_stats_.alpha_draw_calls += 1u;
-      } else if (blend_mode == renderer::ParticleBlendMode::Distortion) {
+      } else if (blend_mode == rendering::ParticleBlendMode::Distortion) {
         particle_pass_stats_.distortion_draw_calls += 1u;
       }
 
@@ -1500,12 +1500,12 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
         global_pipeline_ready(particle_global_distortion_depth_) &&
         global_pipeline_ready(particle_global_distortion_no_depth_);
 
-    auto add_texture_slot = [&](renderer::TextureId texture_id, uint32_t& out_index) {
+    auto add_texture_slot = [&](rendering::TextureId texture_id, uint32_t& out_index) {
       Diligent::ITextureView* texture_view = resolve_particle_texture(texture_id);
       if (!texture_view) {
         return false;
       }
-      if (texture_id == renderer::kInvalidTexture) {
+      if (texture_id == rendering::kInvalidTexture) {
         out_index = 0u;
         return true;
       }
@@ -1571,7 +1571,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     };
 
     if (global_sort_possible) {
-      persistent_gpu_texture_lookup.emplace(renderer::kInvalidTexture, 0u);
+      persistent_gpu_texture_lookup.emplace(rendering::kInvalidTexture, 0u);
       persistent_gpu_texture_table[0] =
           static_cast<Diligent::IDeviceObject*>(default_base_color_.RawPtr());
       for (const auto& submission : particle_emitter_submissions_) {
@@ -1623,7 +1623,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     }
 
     auto find_or_add_group = [&](const ParticleBatchGroupKey& key,
-                                 renderer::ParticleBlendMode blend_mode,
+                                 rendering::ParticleBlendMode blend_mode,
                                  bool depth_test) {
       const bool global_sort_group =
           persistent_gpu_global_sort_active && isTransparentParticleBlend(blend_mode);
@@ -1640,8 +1640,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       group.blend_mode = blend_mode;
       group.depth_test = depth_test;
       group.group_index = static_cast<uint32_t>(persistent_gpu_groups.size());
-      group.sortable = blend_mode == renderer::ParticleBlendMode::Alpha ||
-                       blend_mode == renderer::ParticleBlendMode::Distortion;
+      group.sortable = blend_mode == rendering::ParticleBlendMode::Alpha ||
+                       blend_mode == rendering::ParticleBlendMode::Distortion;
       if (group.sortable && !persistent_gpu_global_sort_active) {
         particle_pass_stats_.gpu_grouped_sort_fallback = true;
       }
@@ -1651,9 +1651,9 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
 
     auto append_mesh_source_samples =
         [&](ParticleGpuEmitterDesc& gpu_desc,
-            const renderer::ParticleEmitterGpuDesc& emitter) {
-          if (emitter.source_shape != renderer::ParticleSourceShape::MeshSurface ||
-              emitter.source_mesh == renderer::kInvalidMesh) {
+            const rendering::ParticleEmitterGpuDesc& emitter) {
+          if (emitter.source_shape != rendering::ParticleSourceShape::MeshSurface ||
+              emitter.source_mesh == rendering::kInvalidMesh) {
             return true;
           }
           const auto mesh_it = meshes_.find(emitter.source_mesh);
@@ -2192,7 +2192,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   };
 
   auto draw_persistent_gpu_particles =
-      [&](renderer::ParticleBlendMode blend_mode,
+      [&](rendering::ParticleBlendMode blend_mode,
           bool depth_test,
           Diligent::RefCntAutoPtr<Diligent::IPipelineState>& pso,
           Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb,
@@ -2219,13 +2219,13 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       });
       particle_pass_stats_.submitted_batches += 1u;
       switch (blend_mode) {
-        case renderer::ParticleBlendMode::Additive:
+        case rendering::ParticleBlendMode::Additive:
           particle_pass_stats_.additive_batches += 1u;
           break;
-        case renderer::ParticleBlendMode::Alpha:
+        case rendering::ParticleBlendMode::Alpha:
           particle_pass_stats_.alpha_batches += 1u;
           break;
-        case renderer::ParticleBlendMode::Distortion:
+        case rendering::ParticleBlendMode::Distortion:
           particle_pass_stats_.distortion_batches += 1u;
           particle_pass_stats_.distortion_present = true;
           break;
@@ -2237,14 +2237,14 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
 
     ParticleGlobalPipeline* global_pipeline = nullptr;
     if (persistent_gpu_global_sort_active && isTransparentParticleBlend(blend_mode)) {
-      if (blend_mode == renderer::ParticleBlendMode::Alpha) {
+      if (blend_mode == rendering::ParticleBlendMode::Alpha) {
         if (use_half_res_alpha) {
           global_pipeline = &particle_global_alpha_half_res_;
         } else {
           global_pipeline = depth_test ? &particle_global_alpha_depth_
                                        : &particle_global_alpha_no_depth_;
         }
-      } else if (blend_mode == renderer::ParticleBlendMode::Distortion) {
+      } else if (blend_mode == rendering::ParticleBlendMode::Distortion) {
         global_pipeline = depth_test ? &particle_global_distortion_depth_
                                      : &particle_global_distortion_no_depth_;
       }
@@ -2276,7 +2276,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   persistent_gpu_ready = run_persistent_gpu_particles();
 
   auto render_gpu_emitters =
-      [&](renderer::ParticleBlendMode blend_mode,
+      [&](rendering::ParticleBlendMode blend_mode,
           bool depth_test,
           Diligent::RefCntAutoPtr<Diligent::IPipelineState>& pso,
           Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb,
@@ -2333,8 +2333,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       return;
     }
 
-    if (blend_mode == renderer::ParticleBlendMode::Alpha ||
-        blend_mode == renderer::ParticleBlendMode::Distortion) {
+    if (blend_mode == rendering::ParticleBlendMode::Alpha ||
+        blend_mode == rendering::ParticleBlendMode::Distortion) {
       particle_pass_stats_.gpu_sort_passes += 1u;
       std::sort(gpu_draws.begin(), gpu_draws.end(), [](const auto& a, const auto& b) {
         return a.depth > b.depth;
@@ -2430,7 +2430,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
       const auto& batch = particle_batches_[batch_index];
       if (batch.layer != layer ||
           batch.depth_test != depth_test ||
-          batch.blend_mode != renderer::ParticleBlendMode::Additive ||
+          batch.blend_mode != rendering::ParticleBlendMode::Additive ||
           batch.particles.empty()) {
         continue;
       }
@@ -2477,7 +2477,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     float span_ms = 0.0f;
   };
 
-  auto build_sorted_stream = [&](renderer::ParticleBlendMode blend_mode,
+  auto build_sorted_stream = [&](rendering::ParticleBlendMode blend_mode,
                                  bool depth_test,
                                  PreparedParticleStream& stream) {
     SortedStreamBuildMetrics metrics{};
@@ -2504,9 +2504,9 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
             particle.position_age[2]);
         float depth = glm::dot(position - camera_.position, context.camera_forward);
         if (!std::isfinite(depth)) {
-          if (blend_mode == renderer::ParticleBlendMode::Alpha) {
+          if (blend_mode == rendering::ParticleBlendMode::Alpha) {
             particle_pass_stats_.alpha_invalid_depth_particles += 1u;
-          } else if (blend_mode == renderer::ParticleBlendMode::Distortion) {
+          } else if (blend_mode == rendering::ParticleBlendMode::Distortion) {
             particle_pass_stats_.distortion_invalid_depth_particles += 1u;
           }
           depth = -std::numeric_limits<float>::infinity();
@@ -2528,9 +2528,9 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     const uint32_t sorted_particle_count = static_cast<uint32_t>(std::min<std::size_t>(
         sorted_particles.size(),
         static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())));
-    if (blend_mode == renderer::ParticleBlendMode::Alpha) {
+    if (blend_mode == rendering::ParticleBlendMode::Alpha) {
       particle_pass_stats_.alpha_sorted_particles += sorted_particle_count;
-    } else if (blend_mode == renderer::ParticleBlendMode::Distortion) {
+    } else if (blend_mode == rendering::ParticleBlendMode::Distortion) {
       particle_pass_stats_.distortion_sorted_particles += sorted_particle_count;
     }
 
@@ -2564,15 +2564,15 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
     return metrics;
   };
 
-  auto record_sorted_stream_metrics = [&](renderer::ParticleBlendMode blend_mode,
+  auto record_sorted_stream_metrics = [&](rendering::ParticleBlendMode blend_mode,
                                           const SortedStreamBuildMetrics& metrics) {
-    if (blend_mode == renderer::ParticleBlendMode::Alpha) {
+    if (blend_mode == rendering::ParticleBlendMode::Alpha) {
       particle_pass_stats_.alpha_collect_ms += metrics.collect_ms;
       particle_pass_stats_.alpha_sort_only_ms += metrics.sort_only_ms;
       particle_pass_stats_.alpha_span_ms += metrics.span_ms;
       particle_pass_stats_.alpha_sort_ms +=
           metrics.collect_ms + metrics.sort_only_ms + metrics.span_ms;
-    } else if (blend_mode == renderer::ParticleBlendMode::Distortion) {
+    } else if (blend_mode == rendering::ParticleBlendMode::Distortion) {
       particle_pass_stats_.distortion_collect_ms += metrics.collect_ms;
       particle_pass_stats_.distortion_sort_only_ms += metrics.sort_only_ms;
       particle_pass_stats_.distortion_span_ms += metrics.span_ms;
@@ -2613,7 +2613,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   };
 
   if (context.allow_distortion_particles) {
-    if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Distortion,
+    if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Distortion,
                                        true,
                                        particle_pipeline_state_distortion_depth_,
                                        particle_srb_distortion_depth_,
@@ -2621,7 +2621,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                        particle_scene_color_var_distortion_depth_,
                                        particle_scene_depth_var_distortion_depth_,
                                        default_target)) {
-      render_gpu_emitters(renderer::ParticleBlendMode::Distortion,
+      render_gpu_emitters(rendering::ParticleBlendMode::Distortion,
                           true,
                           particle_pipeline_state_distortion_depth_,
                           particle_srb_distortion_depth_,
@@ -2631,8 +2631,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                           default_target);
     }
     const auto distortion_depth_metrics =
-        build_sorted_stream(renderer::ParticleBlendMode::Distortion, true, prepared_stream);
-    draw_prepared_particles(renderer::ParticleBlendMode::Distortion,
+        build_sorted_stream(rendering::ParticleBlendMode::Distortion, true, prepared_stream);
+    draw_prepared_particles(rendering::ParticleBlendMode::Distortion,
                             particle_pipeline_state_distortion_depth_,
                             particle_srb_distortion_depth_,
                             particle_texture_var_distortion_depth_,
@@ -2640,9 +2640,9 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                             particle_scene_depth_var_distortion_depth_,
                             default_target,
                             prepared_stream);
-    record_sorted_stream_metrics(renderer::ParticleBlendMode::Distortion, distortion_depth_metrics);
+    record_sorted_stream_metrics(rendering::ParticleBlendMode::Distortion, distortion_depth_metrics);
 
-    if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Distortion,
+    if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Distortion,
                                        false,
                                        particle_pipeline_state_distortion_no_depth_,
                                        particle_srb_distortion_no_depth_,
@@ -2650,7 +2650,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                        particle_scene_color_var_distortion_no_depth_,
                                        particle_scene_depth_var_distortion_no_depth_,
                                        default_target)) {
-      render_gpu_emitters(renderer::ParticleBlendMode::Distortion,
+      render_gpu_emitters(rendering::ParticleBlendMode::Distortion,
                           false,
                           particle_pipeline_state_distortion_no_depth_,
                           particle_srb_distortion_no_depth_,
@@ -2660,8 +2660,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                           default_target);
     }
     const auto distortion_no_depth_metrics =
-        build_sorted_stream(renderer::ParticleBlendMode::Distortion, false, prepared_stream);
-    draw_prepared_particles(renderer::ParticleBlendMode::Distortion,
+        build_sorted_stream(rendering::ParticleBlendMode::Distortion, false, prepared_stream);
+    draw_prepared_particles(rendering::ParticleBlendMode::Distortion,
                             particle_pipeline_state_distortion_no_depth_,
                             particle_srb_distortion_no_depth_,
                             particle_texture_var_distortion_no_depth_,
@@ -2669,11 +2669,11 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                             particle_scene_depth_var_distortion_no_depth_,
                             default_target,
                             prepared_stream);
-    record_sorted_stream_metrics(renderer::ParticleBlendMode::Distortion,
+    record_sorted_stream_metrics(rendering::ParticleBlendMode::Distortion,
                                  distortion_no_depth_metrics);
   }
 
-  if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Additive,
+  if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Additive,
                                      true,
                                      particle_pipeline_state_additive_depth_,
                                      particle_srb_additive_depth_,
@@ -2681,7 +2681,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                      particle_scene_color_var_additive_depth_,
                                      particle_scene_depth_var_additive_depth_,
                                      default_target)) {
-    render_gpu_emitters(renderer::ParticleBlendMode::Additive,
+    render_gpu_emitters(rendering::ParticleBlendMode::Additive,
                         true,
                         particle_pipeline_state_additive_depth_,
                         particle_srb_additive_depth_,
@@ -2691,7 +2691,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                         default_target);
   }
   build_additive_stream(true, prepared_stream);
-  draw_prepared_particles(renderer::ParticleBlendMode::Additive,
+  draw_prepared_particles(rendering::ParticleBlendMode::Additive,
                           particle_pipeline_state_additive_depth_,
                           particle_srb_additive_depth_,
                           particle_texture_var_additive_depth_,
@@ -2699,7 +2699,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                           particle_scene_depth_var_additive_depth_,
                           default_target,
                           prepared_stream);
-  if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Additive,
+  if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Additive,
                                      false,
                                      particle_pipeline_state_additive_no_depth_,
                                      particle_srb_additive_no_depth_,
@@ -2707,7 +2707,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                      particle_scene_color_var_additive_no_depth_,
                                      particle_scene_depth_var_additive_no_depth_,
                                      default_target)) {
-    render_gpu_emitters(renderer::ParticleBlendMode::Additive,
+    render_gpu_emitters(rendering::ParticleBlendMode::Additive,
                         false,
                         particle_pipeline_state_additive_no_depth_,
                         particle_srb_additive_no_depth_,
@@ -2717,7 +2717,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                         default_target);
   }
   build_additive_stream(false, prepared_stream);
-  draw_prepared_particles(renderer::ParticleBlendMode::Additive,
+  draw_prepared_particles(rendering::ParticleBlendMode::Additive,
                           particle_pipeline_state_additive_no_depth_,
                           particle_srb_additive_no_depth_,
                           particle_texture_var_additive_no_depth_,
@@ -2729,7 +2729,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
   if (use_half_res_alpha) {
     ParticleDrawTarget depth_alpha_target = half_res_alpha_target;
     depth_alpha_target.force_scene_depth_clip = true;
-    if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Alpha,
+    if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Alpha,
                                        true,
                                        particle_pipeline_state_alpha_half_res_,
                                        particle_srb_alpha_half_res_,
@@ -2737,7 +2737,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                        particle_scene_color_var_alpha_half_res_,
                                        particle_scene_depth_var_alpha_half_res_,
                                        depth_alpha_target)) {
-      render_gpu_emitters(renderer::ParticleBlendMode::Alpha,
+      render_gpu_emitters(rendering::ParticleBlendMode::Alpha,
                           true,
                           particle_pipeline_state_alpha_half_res_,
                           particle_srb_alpha_half_res_,
@@ -2747,8 +2747,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                           depth_alpha_target);
     }
     const auto alpha_depth_metrics =
-        build_sorted_stream(renderer::ParticleBlendMode::Alpha, true, prepared_stream);
-    draw_prepared_particles(renderer::ParticleBlendMode::Alpha,
+        build_sorted_stream(rendering::ParticleBlendMode::Alpha, true, prepared_stream);
+    draw_prepared_particles(rendering::ParticleBlendMode::Alpha,
                             particle_pipeline_state_alpha_half_res_,
                             particle_srb_alpha_half_res_,
                             particle_texture_var_alpha_half_res_,
@@ -2756,9 +2756,9 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                             particle_scene_depth_var_alpha_half_res_,
                             depth_alpha_target,
                             prepared_stream);
-    record_sorted_stream_metrics(renderer::ParticleBlendMode::Alpha, alpha_depth_metrics);
+    record_sorted_stream_metrics(rendering::ParticleBlendMode::Alpha, alpha_depth_metrics);
 
-    if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Alpha,
+    if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Alpha,
                                        false,
                                        particle_pipeline_state_alpha_half_res_,
                                        particle_srb_alpha_half_res_,
@@ -2766,7 +2766,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                        particle_scene_color_var_alpha_half_res_,
                                        particle_scene_depth_var_alpha_half_res_,
                                        half_res_alpha_target)) {
-      render_gpu_emitters(renderer::ParticleBlendMode::Alpha,
+      render_gpu_emitters(rendering::ParticleBlendMode::Alpha,
                           false,
                           particle_pipeline_state_alpha_half_res_,
                           particle_srb_alpha_half_res_,
@@ -2776,8 +2776,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                           half_res_alpha_target);
     }
     const auto alpha_no_depth_metrics =
-        build_sorted_stream(renderer::ParticleBlendMode::Alpha, false, prepared_stream);
-    draw_prepared_particles(renderer::ParticleBlendMode::Alpha,
+        build_sorted_stream(rendering::ParticleBlendMode::Alpha, false, prepared_stream);
+    draw_prepared_particles(rendering::ParticleBlendMode::Alpha,
                             particle_pipeline_state_alpha_half_res_,
                             particle_srb_alpha_half_res_,
                             particle_texture_var_alpha_half_res_,
@@ -2785,10 +2785,10 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                             particle_scene_depth_var_alpha_half_res_,
                             half_res_alpha_target,
                             prepared_stream);
-    record_sorted_stream_metrics(renderer::ParticleBlendMode::Alpha, alpha_no_depth_metrics);
+    record_sorted_stream_metrics(rendering::ParticleBlendMode::Alpha, alpha_no_depth_metrics);
     composite_half_res_alpha();
   } else {
-    if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Alpha,
+    if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Alpha,
                                        true,
                                        particle_pipeline_state_alpha_depth_,
                                        particle_srb_alpha_depth_,
@@ -2796,7 +2796,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                        particle_scene_color_var_alpha_depth_,
                                        particle_scene_depth_var_alpha_depth_,
                                        default_target)) {
-      render_gpu_emitters(renderer::ParticleBlendMode::Alpha,
+      render_gpu_emitters(rendering::ParticleBlendMode::Alpha,
                           true,
                           particle_pipeline_state_alpha_depth_,
                           particle_srb_alpha_depth_,
@@ -2806,8 +2806,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                           default_target);
     }
     const auto alpha_depth_metrics =
-        build_sorted_stream(renderer::ParticleBlendMode::Alpha, true, prepared_stream);
-    draw_prepared_particles(renderer::ParticleBlendMode::Alpha,
+        build_sorted_stream(rendering::ParticleBlendMode::Alpha, true, prepared_stream);
+    draw_prepared_particles(rendering::ParticleBlendMode::Alpha,
                             particle_pipeline_state_alpha_depth_,
                             particle_srb_alpha_depth_,
                             particle_texture_var_alpha_depth_,
@@ -2815,9 +2815,9 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                             particle_scene_depth_var_alpha_depth_,
                             default_target,
                             prepared_stream);
-    record_sorted_stream_metrics(renderer::ParticleBlendMode::Alpha, alpha_depth_metrics);
+    record_sorted_stream_metrics(rendering::ParticleBlendMode::Alpha, alpha_depth_metrics);
 
-    if (!draw_persistent_gpu_particles(renderer::ParticleBlendMode::Alpha,
+    if (!draw_persistent_gpu_particles(rendering::ParticleBlendMode::Alpha,
                                        false,
                                        particle_pipeline_state_alpha_no_depth_,
                                        particle_srb_alpha_no_depth_,
@@ -2825,7 +2825,7 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                                        particle_scene_color_var_alpha_no_depth_,
                                        particle_scene_depth_var_alpha_no_depth_,
                                        default_target)) {
-      render_gpu_emitters(renderer::ParticleBlendMode::Alpha,
+      render_gpu_emitters(rendering::ParticleBlendMode::Alpha,
                           false,
                           particle_pipeline_state_alpha_no_depth_,
                           particle_srb_alpha_no_depth_,
@@ -2835,8 +2835,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                           default_target);
     }
     const auto alpha_no_depth_metrics =
-        build_sorted_stream(renderer::ParticleBlendMode::Alpha, false, prepared_stream);
-    draw_prepared_particles(renderer::ParticleBlendMode::Alpha,
+        build_sorted_stream(rendering::ParticleBlendMode::Alpha, false, prepared_stream);
+    draw_prepared_particles(rendering::ParticleBlendMode::Alpha,
                             particle_pipeline_state_alpha_no_depth_,
                             particle_srb_alpha_no_depth_,
                             particle_texture_var_alpha_no_depth_,
@@ -2844,8 +2844,8 @@ void DiligentBackend::renderParticlePasses(renderer::LayerId layer,
                             particle_scene_depth_var_alpha_no_depth_,
                             default_target,
                             prepared_stream);
-    record_sorted_stream_metrics(renderer::ParticleBlendMode::Alpha, alpha_no_depth_metrics);
+    record_sorted_stream_metrics(rendering::ParticleBlendMode::Alpha, alpha_no_depth_metrics);
   }
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

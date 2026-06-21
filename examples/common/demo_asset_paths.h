@@ -4,8 +4,8 @@
 #include <string>
 #include <string_view>
 
-#include "karma/content/assets/asset_package.h"
-#include "karma/content/assets/asset_registry.h"
+#include "karma/assets.h"
+#include "karma/assets.h"
 
 namespace karma::demo {
 
@@ -45,13 +45,13 @@ inline std::string exampleAssetKey(std::string_view category, std::string_view n
   return "examples/" + std::string(category) + "/" + logical.generic_string();
 }
 
-inline std::string importExampleMeshAsset(content::AssetRegistry* assets, std::string_view name) {
+inline std::string importExampleMeshAsset(assets::AssetRegistry* assets, std::string_view name) {
   const std::string key = exampleAssetKey("mesh", name);
   if (assets != nullptr && assets->findMeshAsset(key) == nullptr) {
     std::filesystem::path logical{name};
     logical.replace_extension();
     std::string diagnostic;
-    (void)content::importAssetPackage(
+    (void)assets::importAssetPackage(
         *assets,
         resolveExampleAssetPath(
             (std::filesystem::path("common_meshes") / logical).generic_string()),
@@ -60,12 +60,12 @@ inline std::string importExampleMeshAsset(content::AssetRegistry* assets, std::s
   return key;
 }
 
-inline std::string registerExampleEnvironmentMap(content::AssetRegistry* assets,
+inline std::string registerExampleEnvironmentMap(assets::AssetRegistry* assets,
                                                  std::string_view name) {
   const std::filesystem::path path = resolveExampleAssetPath(name);
   const std::string key = exampleAssetKey("environment", name);
   if (assets != nullptr) {
-    assets->registerEnvironmentMap(key, content::EnvironmentMapAsset{.path = path});
+    assets->registerEnvironmentMap(key, assets::EnvironmentMapAsset{.path = path});
   }
   return key;
 }

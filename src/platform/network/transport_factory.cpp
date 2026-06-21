@@ -1,10 +1,10 @@
-#include "karma/platform/network/transport_factory.h"
+#include "karma/network.h"
 
 #if defined(KARMA_NETWORK_BACKEND_ENET)
-#include "karma/platform/network/enet_transport.h"
+#include "karma/network.h"
 #endif
 
-namespace karma::net {
+namespace karma::network {
 
 std::unique_ptr<IClientTransport> createDefaultClientTransport() {
 #if defined(KARMA_NETWORK_BACKEND_ENET)
@@ -27,4 +27,4 @@ std::unique_ptr<IServerTransport> createDefaultServerTransport(uint16_t port,
 #endif
 }
 
-}  // namespace karma::net
+}  // namespace karma::network

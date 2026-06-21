@@ -6,10 +6,10 @@
 
 #include <utility>
 
-namespace karma::content {
+namespace karma::assets {
 
-std::vector<geometry::MeshData> importMeshes(const std::filesystem::path& path) {
-  std::vector<geometry::MeshData> meshes;
+std::vector<world::MeshData> importMeshes(const std::filesystem::path& path) {
+  std::vector<world::MeshData> meshes;
 
   Assimp::Importer importer;
   const aiScene* scene = importer.ReadFile(path.string(),
@@ -28,7 +28,7 @@ std::vector<geometry::MeshData> importMeshes(const std::filesystem::path& path) 
       continue;
     }
 
-    geometry::MeshData data;
+    world::MeshData data;
     data.vertices.reserve(mesh->mNumVertices);
     data.normals.reserve(mesh->mNumVertices);
     data.uvs.reserve(mesh->mNumVertices);
@@ -83,4 +83,4 @@ std::vector<geometry::MeshData> importMeshes(const std::filesystem::path& path) 
   return meshes;
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

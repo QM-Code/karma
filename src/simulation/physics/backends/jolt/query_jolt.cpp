@@ -1,4 +1,4 @@
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
 
 #include "shape_factory.h"
 
@@ -83,7 +83,7 @@ JPH::RMat44 queryTransform(const glm::vec3& position, const glm::quat& rotation)
 
 }  // namespace
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 class PhysicsWorldJoltQueryBodyFilter final : public JPH::BodyFilter {
 public:
@@ -276,4 +276,4 @@ bool PhysicsWorldJolt::queryAllowsBody(const JPH::Body& body,
     return (body_filter.layers & filter.collision_mask) != 0u;
 }
 
-}  // namespace karma::physics_backend
+}  // namespace karma::physics::backend

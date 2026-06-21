@@ -1,5 +1,5 @@
-#include "karma/simulation/physics/backends/bullet/character_controller_bullet.hpp"
-#include "karma/simulation/physics/backends/bullet/physics_world_bullet.hpp"
+#include "private/physics/backends/bullet/character_controller_bullet.hpp"
+#include "private/physics/backends/bullet/physics_world_bullet.hpp"
 #include <btBulletDynamicsCommon.h>
 #include <BulletCollision/CollisionDispatch/btGhostObject.h>
 #include <BulletDynamics/Character/btKinematicCharacterController.h>
@@ -11,7 +11,7 @@ inline btVector3 toBt(const glm::vec3& v) { return btVector3(v.x, v.y, v.z); }
 inline glm::vec3 toGlm(const btVector3& v) { return glm::vec3(v.x(), v.y(), v.z()); }
 }
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 PhysicsCharacterControllerBullet::PhysicsCharacterControllerBullet(PhysicsWorldBullet* world,
                                                              const glm::vec3& halfExtents,
@@ -185,4 +185,4 @@ void PhysicsCharacterControllerBullet::destroy() {
     world_ = nullptr;
 }
 
-} // namespace karma::physics_backend
+} // namespace karma::physics::backend

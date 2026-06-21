@@ -11,8 +11,8 @@ rendering stays on the current path.
 ## Key Changes
 
 - Add shared instance types:
-  - `renderer::InstanceData { glm::mat4 transform; glm::vec4 params; }`
-  - `renderer::InstancedDrawItem` with batch `InstanceId`, mesh id, material
+  - `rendering::InstanceData { glm::mat4 transform; glm::vec4 params; }`
+  - `rendering::InstancedDrawItem` with batch `InstanceId`, mesh id, material
     slot bindings, instance data, revision, layer, visible, and shadow-visible
     flags.
   - `components::InstancedMeshComponent` with `mesh_asset_key`, slot material
@@ -31,7 +31,7 @@ rendering stays on the current path.
 ## Renderer Implementation
 
 - Add Diligent instanced batch records keyed by batch `InstanceId`.
-- Store submitted `renderer::InstanceData` on the backend record and copy
+- Store submitted `rendering::InstanceData` on the backend record and copy
   visible instances into the existing per-instance vertex buffer path.
 - Reuse the existing forward/shadow instancing draw flow after per-instance CPU
   frustum checks.

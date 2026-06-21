@@ -6,11 +6,11 @@
 #include <string>
 #include <vector>
 
-#include "karma/features/network/component_replication.h"
-#include "karma/platform/network/protocol.h"
-#include "karma/platform/network/transport.h"
-#include "karma/world/ecs/entity.h"
-#include "karma/world/ecs/world.h"
+#include "karma/network.h"
+#include "karma/network.h"
+#include "karma/network.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
 namespace karma::examples::network_demo {
 
@@ -28,11 +28,11 @@ std::string payloadText(std::span<const std::byte> payload);
 std::vector<std::byte> encodeInput(PlayerInput input);
 bool decodeInput(std::span<const std::byte> bytes, PlayerInput& input);
 
-ecs::Entity spawnReplicatedPlayer(ecs::World& world,
-                                  net::PeerId peer,
+world::Entity spawnReplicatedPlayer(world::World& world,
+                                  network::PeerId peer,
                                   const std::string& name,
                                   float offset);
 
-void logReplicatedWorld(const ecs::World& world);
+void logReplicatedWorld(const world::World& world);
 
 }  // namespace karma::examples::network_demo

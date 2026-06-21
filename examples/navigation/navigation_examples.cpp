@@ -16,18 +16,18 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
-#include "karma/content/navigation/nav_tile_cache.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/assets.h"
+#include "karma/ui.h"
 #include "karma/karma.h"
-#include "karma/rendering/renderer/camera_picking.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/nav_crowd.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_mesh_agent.h"
-#include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/components/character_controller.h"
-#include "karma/world/components/transform.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::demo::navigation_examples {
 namespace {
@@ -37,10 +37,10 @@ class NavigationExampleApp final : public app::GameInterface {
   explicit NavigationExampleApp(ExampleKind kind) : kind_(kind) {}
 
   void onStart() override {
-    input->bindMouse("primary", platform::MouseButton::Left, input::Trigger::Pressed);
-    input->bindMouse("secondary", platform::MouseButton::Right, input::Trigger::Pressed);
-    input->bindKey("rebuild", platform::Key::R, input::Trigger::Pressed);
-    input->bindKey("reset", platform::Key::C, input::Trigger::Pressed);
+    input->bindMouse("primary", platform::MouseButton::Left, app::Trigger::Pressed);
+    input->bindMouse("secondary", platform::MouseButton::Right, app::Trigger::Pressed);
+    input->bindKey("rebuild", platform::Key::R, app::Trigger::Pressed);
+    input->bindKey("reset", platform::Key::C, app::Trigger::Pressed);
     build_config_ = defaultBuildConfig(kind_);
     setupScene();
     rebuild();
@@ -106,7 +106,7 @@ class NavigationExampleApp final : public app::GameInterface {
       assets->registerMeshAsset(mesh_key, surface_.mesh);
     }
     if (assets != nullptr) {
-      renderer::MaterialDesc material;
+      rendering::MaterialDesc material;
       material.base_color = {0.42f, 0.44f, 0.40f, 1.0f};
       material.roughness = 0.85f;
       assets->registerMaterialAsset(material_key, material);
@@ -114,7 +114,7 @@ class NavigationExampleApp final : public app::GameInterface {
     surface_entity_ = helpers::spawnMesh(*world, "Navigation Surface", mesh_key, material_key, {}, true);
     world->add(surface_entity_, components::NavMeshSurfaceComponent{
                                     .area = navigation::kNavAreaDefault,
-                                    .mesh_data = std::make_shared<geometry::MeshData>(surface_.mesh),
+                                    .mesh_data = std::make_shared<world::MeshData>(surface_.mesh),
                                 });
 
     spawnCameraAndLights();
@@ -181,8 +181,8 @@ class NavigationExampleApp final : public app::GameInterface {
     graphics->getFramebufferSize(width, height);
     const auto& transform = world->get<components::TransformComponent>(camera_entity_);
     const auto& camera = world->get<components::CameraComponent>(camera_entity_);
-    renderer::ScreenRay ray;
-    if (!renderer::screenPointToWorldRay(x,
+    rendering::ScreenRay ray;
+    if (!rendering::screenPointToWorldRay(x,
                                          y,
                                          width,
                                          height,
@@ -323,7 +323,7 @@ class NavigationExampleApp final : public app::GameInterface {
       if (id < 0) {
         continue;
       }
-      const ecs::Entity marker = helpers::createDebugBoxMarker(*world,
+      const world::Entity marker = helpers::createDebugBoxMarker(*world,
                                                                graphics,
                                                                assets,
                                                                "Crowd Agent",
@@ -529,13 +529,13 @@ class NavigationExampleApp final : public app::GameInterface {
       return;
     }
     const navigation::NavTileCacheSnapshot snapshot = tile_cache_.snapshot(nav_mesh_);
-    if (content::saveNavTileCacheSnapshot(snapshot_path_, snapshot)) {
+    if (assets::saveNavTileCacheSnapshot(snapshot_path_, snapshot)) {
       status_ = "saved " + snapshot_path_.string();
     }
   }
 
   void loadTileCache() {
-    navigation::NavTileCacheSnapshot snapshot = content::loadNavTileCacheSnapshot(snapshot_path_);
+    navigation::NavTileCacheSnapshot snapshot = assets::loadNavTileCacheSnapshot(snapshot_path_);
     navigation::NavTileCacheBuildResult result;
     if (tile_cache_.loadSnapshot(nav_mesh_, snapshot, &result)) {
       status_ = "loaded " + snapshot_path_.string();
@@ -834,12 +834,12 @@ class NavigationExampleApp final : public app::GameInterface {
   math::Vec3 end_{};
   math::Vec3 target_{};
   math::Vec3 query_half_extents_{2.0f, 3.0f, 2.0f};
-  ecs::Entity surface_entity_{};
-  ecs::Entity camera_entity_{};
-  ecs::Entity nav_mesh_entity_{};
-  ecs::Entity actor_entity_{};
-  ecs::Entity start_marker_{};
-  ecs::Entity end_marker_{};
+  world::Entity surface_entity_{};
+  world::Entity camera_entity_{};
+  world::Entity nav_mesh_entity_{};
+  world::Entity actor_entity_{};
+  world::Entity start_marker_{};
+  world::Entity end_marker_{};
   std::string status_ = "not built";
   float point_speed_ = 6.0f;
   float crowd_speed_ = 3.0f;
@@ -887,7 +887,7 @@ const char* exampleName(ExampleKind kind) {
 int runExample(ExampleKind kind) {
   app::EngineApp engine;
   NavigationExampleApp game(kind);
-  engine.setUi(imgui::createUiLayer([&](app::UIContext& ctx) {
+  engine.setUi(ui::imgui::createUiLayer([&](app::UIContext& ctx) {
     game.drawUi(ctx);
   }));
 

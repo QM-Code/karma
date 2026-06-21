@@ -1,13 +1,13 @@
-#include "karma/simulation/animation/pose.h"
+#include "karma/world.h"
 
 #include <algorithm>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
-namespace karma::animation {
+namespace karma::world {
 
 glm::mat4 poseTransformToMatrix(const PoseTransform& transform) {
   glm::mat4 matrix(1.0f);
@@ -149,4 +149,4 @@ SkinningPalette buildSkinningPalette(const std::vector<uint32_t>& joint_node_ind
   return palette;
 }
 
-}  // namespace karma::animation
+}  // namespace karma::world

@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <cmath>
 
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace karma::navigation::detail {
 
 
-uint64_t entityKey(ecs::Entity entity) {
+uint64_t entityKey(world::Entity entity) {
   return (static_cast<uint64_t>(entity.index) << 32u) |
          static_cast<uint64_t>(entity.generation);
 }
@@ -79,7 +79,7 @@ bool crowdUsable(const components::NavMeshComponent& nav_mesh,
          crowd.crowd.isValid();
 }
 
-NavMeshSelection findNavMesh(ecs::World& world, ecs::Entity preferred) {
+NavMeshSelection findNavMesh(world::World& world, world::Entity preferred) {
   if (preferred.isValid() &&
       world.isAlive(preferred) &&
       world.has<components::NavMeshComponent>(preferred)) {
@@ -90,7 +90,7 @@ NavMeshSelection findNavMesh(ecs::World& world, ecs::Entity preferred) {
   }
 
   NavMeshSelection found{};
-  world.forEach<components::NavMeshComponent>([&](ecs::Entity entity) -> bool {
+  world.forEach<components::NavMeshComponent>([&](world::Entity entity) -> bool {
     auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
     if (navMeshUsable(nav_mesh)) {
       found = {entity, &nav_mesh};
@@ -101,7 +101,7 @@ NavMeshSelection findNavMesh(ecs::World& world, ecs::Entity preferred) {
   return found;
 }
 
-CrowdSelection findCrowd(ecs::World& world, ecs::Entity preferred) {
+CrowdSelection findCrowd(world::World& world, world::Entity preferred) {
   if (preferred.isValid() &&
       world.isAlive(preferred) &&
       world.has<components::NavMeshComponent>(preferred) &&
@@ -115,7 +115,7 @@ CrowdSelection findCrowd(ecs::World& world, ecs::Entity preferred) {
 
   CrowdSelection found{};
   world.forEach<components::NavMeshComponent, components::NavCrowdComponent>(
-      [&](ecs::Entity entity) -> bool {
+      [&](world::Entity entity) -> bool {
         auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
         auto& crowd = world.get<components::NavCrowdComponent>(entity);
         if (crowdUsable(nav_mesh, crowd)) {
@@ -127,7 +127,7 @@ CrowdSelection findCrowd(ecs::World& world, ecs::Entity preferred) {
   return found;
 }
 
-TileCacheSelection findTileCache(ecs::World& world, ecs::Entity preferred) {
+TileCacheSelection findTileCache(world::World& world, world::Entity preferred) {
   if (preferred.isValid() &&
       world.isAlive(preferred) &&
       world.has<components::NavMeshComponent>(preferred) &&
@@ -141,7 +141,7 @@ TileCacheSelection findTileCache(ecs::World& world, ecs::Entity preferred) {
 
   TileCacheSelection found{};
   world.forEach<components::NavMeshComponent, components::NavTileCacheComponent>(
-      [&](ecs::Entity entity) -> bool {
+      [&](world::Entity entity) -> bool {
         auto& nav_mesh = world.get<components::NavMeshComponent>(entity);
         auto& tile_cache = world.get<components::NavTileCacheComponent>(entity);
         if (tileCacheUsable(nav_mesh, tile_cache)) {
@@ -169,8 +169,8 @@ float horizontalScale(const math::Vec3& scale) {
   return std::max(std::abs(scale.x), std::abs(scale.z));
 }
 
-void invalidateObstacleRefsForCache(ecs::World& world, ecs::Entity nav_mesh_entity) {
-  world.forEach<components::NavTileCacheObstacleComponent>([&](ecs::Entity obstacle_entity) {
+void invalidateObstacleRefsForCache(world::World& world, world::Entity nav_mesh_entity) {
+  world.forEach<components::NavTileCacheObstacleComponent>([&](world::Entity obstacle_entity) {
     auto& obstacle = world.get<components::NavTileCacheObstacleComponent>(obstacle_entity);
     const bool explicitly_targets_cache = obstacle.nav_mesh_entity == nav_mesh_entity;
     const bool cached_on_cache = obstacle.cached_nav_mesh_entity == nav_mesh_entity;
@@ -184,8 +184,8 @@ void invalidateObstacleRefsForCache(ecs::World& world, ecs::Entity nav_mesh_enti
   });
 }
 
-void invalidateCrowdAgentsForCrowd(ecs::World& world, ecs::Entity crowd_entity) {
-  world.forEach<components::NavCrowdAgentComponent>([&](ecs::Entity agent_entity) {
+void invalidateCrowdAgentsForCrowd(world::World& world, world::Entity crowd_entity) {
+  world.forEach<components::NavCrowdAgentComponent>([&](world::Entity agent_entity) {
     auto& agent = world.get<components::NavCrowdAgentComponent>(agent_entity);
     const bool explicitly_targets_crowd = agent.crowd_entity == crowd_entity;
     const bool cached_on_crowd = agent.cached_crowd_entity == crowd_entity;

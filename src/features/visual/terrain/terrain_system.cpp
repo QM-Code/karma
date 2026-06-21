@@ -1,4 +1,4 @@
-#include "karma/features/visual/terrain/terrain_system.h"
+#include "karma/visual.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,14 +13,14 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/rendering/renderer/device.h"
-#include "karma/world/components/camera.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/visibility.h"
+#include "karma/assets.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
-namespace karma::terrain {
+namespace karma::visual::terrain {
 namespace {
 
 float clamp01(float value) {
@@ -91,7 +91,7 @@ float proceduralHeight(float world_x, float world_z, float tile_size) {
   return clamp01(0.5f + height / std::max(amplitude_sum * 2.0f, 0.001f) + ridge);
 }
 
-glm::vec3 toGlm(const math::Vec3& value) {
+glm::vec3 toTerrainGlm(const math::Vec3& value) {
   return {value.x, value.y, value.z};
 }
 
@@ -107,10 +107,10 @@ uint64_t terrainInstanceKey(uint64_t entity_key, TileCoord coord) {
   h *= 0x100000001B3ull;
   h ^= static_cast<uint32_t>(coord.z);
   h *= 0x100000001B3ull;
-  return h == renderer::kInvalidInstance ? h - 1u : h;
+  return h == rendering::kInvalidInstance ? h - 1u : h;
 }
 
-bool terrainDescEquals(const renderer::TerrainDesc& a, const renderer::TerrainDesc& b) {
+bool terrainDescEquals(const rendering::TerrainDesc& a, const rendering::TerrainDesc& b) {
   return a.tile_size == b.tile_size &&
          a.tile_resolution == b.tile_resolution &&
          a.origin_tile_x == b.origin_tile_x &&
@@ -123,12 +123,12 @@ bool terrainDescEquals(const renderer::TerrainDesc& a, const renderer::TerrainDe
          a.cpu_fallback_enabled == b.cpu_fallback_enabled;
 }
 
-bool terrainColliderRequested(const ecs::World& world, ecs::Entity entity) {
+bool terrainColliderRequested(const world::World& world, world::Entity entity) {
   return world.has<components::ColliderComponent>(entity);
 }
 
-components::ColliderComponent terrainColliderMarker(const ecs::World& world,
-                                                    ecs::Entity entity) {
+components::ColliderComponent terrainColliderMarker(const world::World& world,
+                                                    world::Entity entity) {
   if (world.has<components::ColliderComponent>(entity)) {
     return world.get<components::ColliderComponent>(entity);
   }
@@ -167,7 +167,7 @@ std::size_t terrainColliderSignature(const components::TerrainComponent& terrain
   return seed;
 }
 
-std::optional<renderer::TerrainTileData> loadTerrainColliderTile(
+std::optional<rendering::TerrainTileData> loadTerrainColliderTile(
     const components::TerrainComponent& terrain) {
   const TileCoord origin{.x = terrain.origin_tile_x, .z = terrain.origin_tile_z};
   switch (terrain.source) {
@@ -183,9 +183,9 @@ std::optional<renderer::TerrainTileData> loadTerrainColliderTile(
 
 components::ColliderComponent terrainTileToHeightFieldCollider(
     const components::TerrainComponent& terrain,
-    const renderer::TerrainTileData& tile,
+    const rendering::TerrainTileData& tile,
     const components::ColliderComponent& marker) {
-  const renderer::TerrainDesc desc = terrainDescFromComponent(terrain);
+  const rendering::TerrainDesc desc = terrainDescFromComponent(terrain);
   const float tile_size = std::max(desc.tile_size, 0.001f);
   const float sample_step =
       tile.resolution > 1u ? tile_size / static_cast<float>(tile.resolution - 1u) : tile_size;
@@ -204,7 +204,7 @@ components::ColliderComponent terrainTileToHeightFieldCollider(
       std::move(shape), marker.is_trigger, marker.debug_draw);
 }
 
-uint8_t sampleImageByteBilinear(const content::Rgba8Image& image,
+uint8_t sampleImageByteBilinear(const assets::Rgba8Image& image,
                                 float u,
                                 float v,
                                 uint32_t channel) {
@@ -245,7 +245,7 @@ bool isHeaderlessScalarTerrainPath(const std::filesystem::path& path) {
          extension == ".r32";
 }
 
-float sampleScalarImageBilinear(const content::ScalarImage& image,
+float sampleScalarImageBilinear(const assets::ScalarImage& image,
                                 float u,
                                 float v) {
   if (!image.valid()) {
@@ -274,27 +274,27 @@ float sampleScalarImageBilinear(const content::ScalarImage& image,
   return clamp01(x_top + (x_bottom - x_top) * fy);
 }
 
-content::ScalarImageFormat scalarFormatFromTerrain(
+assets::ScalarImageFormat scalarFormatFromTerrain(
     components::TerrainHeightFormat format) {
   switch (format) {
     case components::TerrainHeightFormat::Auto:
-      return content::ScalarImageFormat::Auto;
+      return assets::ScalarImageFormat::Auto;
     case components::TerrainHeightFormat::ImageFile:
-      return content::ScalarImageFormat::ImageFile;
+      return assets::ScalarImageFormat::ImageFile;
     case components::TerrainHeightFormat::Raw16Unsigned:
-      return content::ScalarImageFormat::Raw16Unsigned;
+      return assets::ScalarImageFormat::Raw16Unsigned;
     case components::TerrainHeightFormat::R32Float:
-      return content::ScalarImageFormat::R32Float;
+      return assets::ScalarImageFormat::R32Float;
   }
-  return content::ScalarImageFormat::Auto;
+  return assets::ScalarImageFormat::Auto;
 }
 
-content::ScalarImageLoadOptions scalarLoadOptions(
+assets::ScalarImageLoadOptions scalarLoadOptions(
     const components::TerrainComponent& terrain,
     components::TerrainHeightFormat format,
     uint32_t raw_width,
     uint32_t raw_height) {
-  return content::ScalarImageLoadOptions{
+  return assets::ScalarImageLoadOptions{
       .format = scalarFormatFromTerrain(format),
       .raw_width = raw_width,
       .raw_height = raw_height,
@@ -305,17 +305,17 @@ content::ScalarImageLoadOptions scalarLoadOptions(
   };
 }
 
-std::optional<content::ScalarImage> loadTerrainScalarImage(
+std::optional<assets::ScalarImage> loadTerrainScalarImage(
     const std::filesystem::path& path,
     const components::TerrainComponent& terrain) {
-  return content::loadScalarImage(path,
+  return assets::loadScalarImage(path,
                                   scalarLoadOptions(terrain,
                                                     terrain.height_format,
                                                     terrain.raw_width,
                                                     terrain.raw_height));
 }
 
-std::optional<content::ScalarImage> loadTerrainDataMapImage(
+std::optional<assets::ScalarImage> loadTerrainDataMapImage(
     const std::filesystem::path& path,
     const components::TerrainComponent& terrain,
     const components::TerrainDataMapBinding& binding) {
@@ -324,9 +324,9 @@ std::optional<content::ScalarImage> loadTerrainDataMapImage(
       binding.channel > 0u &&
       binding.channel < 4u &&
       !isHeaderlessScalarTerrainPath(path)) {
-    std::optional<content::Rgba8Image> rgba = content::loadRgba8Image(path);
+    std::optional<assets::Rgba8Image> rgba = assets::loadRgba8Image(path);
     if (rgba && rgba->valid()) {
-      content::ScalarImage image{};
+      assets::ScalarImage image{};
       image.width = rgba->width;
       image.height = rgba->height;
       image.values.resize(static_cast<std::size_t>(image.width) *
@@ -342,21 +342,21 @@ std::optional<content::ScalarImage> loadTerrainDataMapImage(
               255.0f;
         }
       }
-      return image.valid() ? std::optional<content::ScalarImage>{std::move(image)}
+      return image.valid() ? std::optional<assets::ScalarImage>{std::move(image)}
                            : std::nullopt;
     }
   }
   const uint32_t raw_width = binding.raw_width != 0u ? binding.raw_width : terrain.raw_width;
   const uint32_t raw_height = binding.raw_height != 0u ? binding.raw_height : terrain.raw_height;
-  return content::loadScalarImage(path,
+  return assets::loadScalarImage(path,
                                   scalarLoadOptions(terrain,
                                                     binding.format,
                                                     raw_width,
                                                     raw_height));
 }
 
-renderer::TerrainTextureData textureDataFromImage(content::Rgba8Image image) {
-  renderer::TerrainTextureData texture{};
+rendering::TerrainTextureData textureDataFromImage(assets::Rgba8Image image) {
+  rendering::TerrainTextureData texture{};
   if (!image.valid()) {
     return texture;
   }
@@ -366,30 +366,30 @@ renderer::TerrainTextureData textureDataFromImage(content::Rgba8Image image) {
   return texture;
 }
 
-renderer::TerrainTextureData solidTextureData(uint8_t r,
+rendering::TerrainTextureData solidTextureData(uint8_t r,
                                               uint8_t g,
                                               uint8_t b,
                                               uint8_t a = 255u) {
-  renderer::TerrainTextureData texture{};
+  rendering::TerrainTextureData texture{};
   texture.width = 1u;
   texture.height = 1u;
   texture.rgba8 = {r, g, b, a};
   return texture;
 }
 
-std::optional<renderer::TerrainTextureData> loadTerrainTexture(
+std::optional<rendering::TerrainTextureData> loadTerrainTexture(
     const std::filesystem::path& path) {
   if (path.empty()) {
     return std::nullopt;
   }
-  if (auto image = content::loadRgba8Image(path); image && image->valid()) {
+  if (auto image = assets::loadRgba8Image(path); image && image->valid()) {
     return textureDataFromImage(std::move(*image));
   }
   return std::nullopt;
 }
 
 std::optional<std::filesystem::path> findResolvedTexture(
-    const renderer::ResolvedMaterialDesc& material,
+    const rendering::ResolvedMaterialDesc& material,
     std::initializer_list<std::string_view> aliases) {
   for (std::string_view alias : aliases) {
     const auto it = material.textures.find(std::string(alias));
@@ -400,7 +400,7 @@ std::optional<std::filesystem::path> findResolvedTexture(
   return std::nullopt;
 }
 
-std::vector<uint8_t> scalarImageToGrayscaleRgba8(const content::ScalarImage& image) {
+std::vector<uint8_t> scalarImageToGrayscaleRgba8(const assets::ScalarImage& image) {
   if (!image.valid()) {
     return {255u, 255u, 255u, 255u};
   }
@@ -438,11 +438,11 @@ bool hasMaterialLayers(const components::TerrainComponent& terrain) {
 }
 
 void loadTerrainControlMap(const std::filesystem::path& path,
-                           renderer::TerrainTileData& tile) {
+                           rendering::TerrainTileData& tile) {
   if (path.empty() || !std::filesystem::exists(path)) {
     return;
   }
-  std::optional<content::Rgba8Image> control = content::loadRgba8Image(path);
+  std::optional<assets::Rgba8Image> control = assets::loadRgba8Image(path);
   if (!control || !control->valid()) {
     return;
   }
@@ -453,7 +453,7 @@ void loadTerrainControlMap(const std::filesystem::path& path,
 
 void loadTerrainDataMaps(const components::TerrainComponent& terrain,
                          TileCoord coord,
-                         renderer::TerrainTileData& tile) {
+                         rendering::TerrainTileData& tile) {
   for (const auto& binding : terrain.data_maps) {
     if (!binding.enabled) {
       continue;
@@ -468,12 +468,12 @@ void loadTerrainDataMaps(const components::TerrainComponent& terrain,
     if (path.empty() || !std::filesystem::exists(path)) {
       continue;
     }
-    std::optional<content::ScalarImage> image =
+    std::optional<assets::ScalarImage> image =
         loadTerrainDataMapImage(path, terrain, binding);
     if (!image || !image->valid()) {
       continue;
     }
-    renderer::TerrainDataMapTileData data{};
+    rendering::TerrainDataMapTileData data{};
     data.name = !binding.name.empty() ? binding.name : path.stem().string();
     data.width = static_cast<uint32_t>(image->width);
     data.height = static_cast<uint32_t>(image->height);
@@ -528,8 +528,8 @@ TileCoord terrainTileCoordForWorldPosition(
   };
 }
 
-renderer::TerrainDesc terrainDescFromComponent(const components::TerrainComponent& terrain) {
-  renderer::TerrainDesc desc{};
+rendering::TerrainDesc terrainDescFromComponent(const components::TerrainComponent& terrain) {
+  rendering::TerrainDesc desc{};
   desc.tile_size = std::max(authoredTileSize(terrain), 0.001f);
   desc.tile_resolution = std::max(terrain.tile_resolution, 2u);
   desc.origin_tile_x = terrain.origin_tile_x;
@@ -569,7 +569,7 @@ std::string formatTerrainTilePattern(std::string pattern,
 }
 
 std::vector<float> convertHeightImageToNormalizedHeights(
-    const content::Rgba8Image& image,
+    const assets::Rgba8Image& image,
     uint32_t output_resolution) {
   output_resolution = std::max(output_resolution, 2u);
   std::vector<float> heights(static_cast<std::size_t>(output_resolution) *
@@ -591,7 +591,7 @@ std::vector<float> convertHeightImageToNormalizedHeights(
 }
 
 std::vector<float> convertScalarImageToNormalizedHeights(
-    const content::ScalarImage& image,
+    const assets::ScalarImage& image,
     uint32_t output_resolution) {
   output_resolution = std::max(output_resolution, 2u);
   std::vector<float> heights(static_cast<std::size_t>(output_resolution) *
@@ -612,12 +612,12 @@ std::vector<float> convertScalarImageToNormalizedHeights(
   return heights;
 }
 
-renderer::TerrainTileData generateProceduralTerrainTile(
+rendering::TerrainTileData generateProceduralTerrainTile(
     const components::TerrainComponent& terrain,
     TileCoord coord) {
   const uint32_t resolution = std::max(terrain.tile_resolution, 2u);
   const float tile_size = std::max(terrain.tile_size, 0.001f);
-  renderer::TerrainTileData tile{};
+  rendering::TerrainTileData tile{};
   tile.coord = coord;
   tile.resolution = resolution;
   tile.color_width = resolution;
@@ -660,7 +660,7 @@ renderer::TerrainTileData generateProceduralTerrainTile(
   return tile;
 }
 
-std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
+std::optional<rendering::TerrainMaterialLayerData> loadTerrainMaterialLayer(
     const components::TerrainMaterialLayer& layer,
     uint32_t layer_index) {
   if (!layer.enabled || layer_index >= 4u || layer.albedo_image.empty()) {
@@ -671,7 +671,7 @@ std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
     return std::nullopt;
   }
 
-  renderer::TerrainMaterialLayerData data{};
+  rendering::TerrainMaterialLayerData data{};
   data.layer = layer_index;
   data.name = layer.name;
   data.uv_scale = std::max(layer.uv_scale, 0.001f);
@@ -685,25 +685,25 @@ std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
     data.roughness = std::move(*roughness);
   }
 
-  return data.valid() ? std::optional<renderer::TerrainMaterialLayerData>{std::move(data)}
+  return data.valid() ? std::optional<rendering::TerrainMaterialLayerData>{std::move(data)}
                       : std::nullopt;
 }
 
-std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
+std::optional<rendering::TerrainMaterialLayerData> loadTerrainMaterialLayer(
     const components::TerrainMaterialLayer& layer,
     uint32_t layer_index,
-    const content::AssetRegistry* assets) {
+    const assets::AssetRegistry* assets) {
   if (!layer.enabled || layer_index >= 4u) {
     return std::nullopt;
   }
 
   if (!layer.material_key.empty()) {
-    std::optional<renderer::ResolvedMaterialDesc> material;
+    std::optional<rendering::ResolvedMaterialDesc> material;
     if (assets != nullptr) {
       material = assets->resolveMaterial(layer.material_key);
     }
     if (material.has_value()) {
-      renderer::TerrainMaterialLayerData data{};
+      rendering::TerrainMaterialLayerData data{};
       data.layer = layer_index;
       data.name = !layer.name.empty() ? layer.name : layer.material_key;
       data.uv_scale = std::max(layer.uv_scale, 0.001f);
@@ -716,7 +716,7 @@ std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
         }
       }
       if (!data.albedo.valid()) {
-        const renderer::Color color = material->surface.base_color;
+        const rendering::Color color = material->surface.base_color;
         data.albedo = solidTextureData(
             toByte(color.r), toByte(color.g), toByte(color.b), toByte(color.a));
       }
@@ -738,7 +738,7 @@ std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
       }
 
       if (data.valid()) {
-        return std::optional<renderer::TerrainMaterialLayerData>{std::move(data)};
+        return std::optional<rendering::TerrainMaterialLayerData>{std::move(data)};
       }
     }
   }
@@ -746,7 +746,7 @@ std::optional<renderer::TerrainMaterialLayerData> loadTerrainMaterialLayer(
   return loadTerrainMaterialLayer(layer, layer_index);
 }
 
-std::optional<renderer::TerrainTileData> loadSingleImageTerrainTile(
+std::optional<rendering::TerrainTileData> loadSingleImageTerrainTile(
     const components::TerrainComponent& terrain) {
   const std::filesystem::path height_path =
       !terrain.height_image.empty() ? terrain.height_image : terrain.heatmap_image;
@@ -754,23 +754,23 @@ std::optional<renderer::TerrainTileData> loadSingleImageTerrainTile(
     return std::nullopt;
   }
 
-  std::optional<content::ScalarImage> height = loadTerrainScalarImage(height_path, terrain);
+  std::optional<assets::ScalarImage> height = loadTerrainScalarImage(height_path, terrain);
   if (!height || !height->valid()) {
     return std::nullopt;
   }
 
-  std::optional<content::Rgba8Image> color;
+  std::optional<assets::Rgba8Image> color;
   if (!terrain.color_image.empty()) {
-    color = content::loadRgba8Image(terrain.color_image);
+    color = assets::loadRgba8Image(terrain.color_image);
   } else if (!terrain.heatmap_image.empty() && terrain.heatmap_image != height_path) {
-    color = content::loadRgba8Image(terrain.heatmap_image);
+    color = assets::loadRgba8Image(terrain.heatmap_image);
   }
   if ((!color || !color->valid()) && !hasMaterialLayers(terrain) &&
       !isHeaderlessScalarTerrainPath(height_path)) {
-    color = content::loadRgba8Image(height_path);
+    color = assets::loadRgba8Image(height_path);
   }
 
-  renderer::TerrainTileData tile{};
+  rendering::TerrainTileData tile{};
   tile.coord = TileCoord{.x = terrain.origin_tile_x, .z = terrain.origin_tile_z};
   tile.resolution = std::max(terrain.tile_resolution, 2u);
   tile.heights = convertScalarImageToNormalizedHeights(*height, tile.resolution);
@@ -793,11 +793,11 @@ std::optional<renderer::TerrainTileData> loadSingleImageTerrainTile(
     loadTerrainControlMap(terrain.control_image, tile);
   }
   loadTerrainDataMaps(terrain, tile.coord, tile);
-  return tile.valid() ? std::optional<renderer::TerrainTileData>{std::move(tile)}
+  return tile.valid() ? std::optional<rendering::TerrainTileData>{std::move(tile)}
                       : std::nullopt;
 }
 
-std::optional<renderer::TerrainTileData> loadImageTerrainTile(
+std::optional<rendering::TerrainTileData> loadImageTerrainTile(
     const components::TerrainComponent& terrain,
     TileCoord coord) {
   if (terrain.tile_directory.empty()) {
@@ -809,16 +809,16 @@ std::optional<renderer::TerrainTileData> loadImageTerrainTile(
   const auto color_path =
       terrain.tile_directory /
       formatTerrainTilePattern(terrain.color_pattern, coord, terrain.tile_index_base);
-  std::optional<content::ScalarImage> height = loadTerrainScalarImage(height_path, terrain);
+  std::optional<assets::ScalarImage> height = loadTerrainScalarImage(height_path, terrain);
   if (!height || !height->valid()) {
     return std::nullopt;
   }
-  std::optional<content::Rgba8Image> color;
+  std::optional<assets::Rgba8Image> color;
   if (!terrain.color_pattern.empty() && std::filesystem::exists(color_path)) {
-    color = content::loadRgba8Image(color_path);
+    color = assets::loadRgba8Image(color_path);
   }
 
-  renderer::TerrainTileData tile{};
+  rendering::TerrainTileData tile{};
   tile.coord = coord;
   tile.resolution = std::max(terrain.tile_resolution, 2u);
   tile.heights = convertScalarImageToNormalizedHeights(*height, tile.resolution);
@@ -844,12 +844,12 @@ std::optional<renderer::TerrainTileData> loadImageTerrainTile(
     loadTerrainControlMap(control_path, tile);
   }
   loadTerrainDataMaps(terrain, coord, tile);
-  return tile.valid() ? std::optional<renderer::TerrainTileData>{std::move(tile)}
+  return tile.valid() ? std::optional<rendering::TerrainTileData>{std::move(tile)}
                       : std::nullopt;
 }
 
-TerrainSystem::TerrainSystem(renderer::GraphicsDevice* device,
-                             const content::AssetRegistry* assets)
+TerrainSystem::TerrainSystem(rendering::GraphicsDevice* device,
+                             const assets::AssetRegistry* assets)
     : device_(device), assets_(assets) {
   worker_ = std::thread([this] { workerLoop(); });
 }
@@ -862,10 +862,10 @@ TerrainSystem::~TerrainSystem() {
   }
 }
 
-void TerrainSystem::syncTerrainColliders(ecs::World& world) {
+void TerrainSystem::syncTerrainColliders(world::World& world) {
   std::unordered_set<uint64_t> seen;
   world.forEach<components::TerrainComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     if (!terrainColliderRequested(world, entity)) {
       return true;
     }
@@ -884,7 +884,7 @@ void TerrainSystem::syncTerrainColliders(ecs::World& world) {
       return true;
     }
 
-    std::optional<renderer::TerrainTileData> tile = loadTerrainColliderTile(terrain);
+    std::optional<rendering::TerrainTileData> tile = loadTerrainColliderTile(terrain);
     if (!tile || !tile->valid()) {
       if (signature_it != generated_collider_signatures_.end() &&
           world.has<components::ColliderComponent>(entity) &&
@@ -907,7 +907,7 @@ void TerrainSystem::syncTerrainColliders(ecs::World& world) {
       ++it;
       continue;
     }
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     if (world.isAlive(entity) &&
         world.has<components::ColliderComponent>(entity) &&
         world.get<components::ColliderComponent>(entity).type ==
@@ -922,7 +922,7 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
     uint64_t key,
     const components::TerrainComponent& terrain) {
   TerrainState& state = states_[key];
-  const renderer::TerrainDesc desc = terrainDescFromComponent(terrain);
+  const rendering::TerrainDesc desc = terrainDescFromComponent(terrain);
   const TerrainSourceSettings source_settings{
       .source = terrain.source,
       .tile_directory = terrain.tile_directory,
@@ -945,15 +945,15 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
       .material_layers = terrain.material_layers,
       .data_maps = terrain.data_maps,
   };
-  if (state.terrain == renderer::kInvalidTerrain ||
+  if (state.terrain == rendering::kInvalidTerrain ||
       !terrainDescEquals(state.desc, desc) ||
       !(state.source_settings == source_settings)) {
     destroyState(state);
     state.desc = desc;
     state.source_settings = source_settings;
     state.terrain = device_ != nullptr ? device_->createTerrain(desc)
-                                       : renderer::kInvalidTerrain;
-    if (device_ != nullptr && state.terrain != renderer::kInvalidTerrain) {
+                                       : rendering::kInvalidTerrain;
+    if (device_ != nullptr && state.terrain != rendering::kInvalidTerrain) {
       device_->clearTerrainMaterialLayers(state.terrain);
       const uint32_t max_layers =
           static_cast<uint32_t>(std::min<std::size_t>(terrain.material_layers.size(), 4u));
@@ -974,18 +974,18 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
 }
 
 void TerrainSystem::destroyState(TerrainState& state) {
-  if (device_ != nullptr && state.terrain != renderer::kInvalidTerrain) {
+  if (device_ != nullptr && state.terrain != rendering::kInvalidTerrain) {
     device_->destroyTerrain(state.terrain);
   }
-  state.terrain = renderer::kInvalidTerrain;
+  state.terrain = rendering::kInvalidTerrain;
   state.desired.clear();
   state.loaded.clear();
   state.queued.clear();
 }
 
-void TerrainSystem::cleanupStaleStates(ecs::World& world) {
+void TerrainSystem::cleanupStaleStates(world::World& world) {
   for (auto it = states_.begin(); it != states_.end();) {
-    const ecs::Entity entity = entityFromKey(it->first);
+    const world::Entity entity = entityFromKey(it->first);
     if (!world.isAlive(entity) || !world.has<components::TerrainComponent>(entity)) {
       destroyState(it->second);
       it = states_.erase(it);
@@ -1029,7 +1029,7 @@ void TerrainSystem::drainCompleted() {
     TerrainState& state = state_it->second;
     state.queued.erase(tile.coord);
     if (state.generation != tile.generation ||
-        state.terrain == renderer::kInvalidTerrain ||
+        state.terrain == rendering::kInvalidTerrain ||
         !tile.data.has_value() ||
         !tile.data->valid() ||
         !state.desired.contains(tile.coord)) {
@@ -1042,7 +1042,7 @@ void TerrainSystem::drainCompleted() {
   }
 }
 
-void TerrainSystem::update(ecs::World& world, float, float interpolation_alpha) {
+void TerrainSystem::update(world::World& world, float, float interpolation_alpha) {
   syncTerrainColliders(world);
   if (device_ == nullptr) {
     return;
@@ -1053,18 +1053,18 @@ void TerrainSystem::update(ecs::World& world, float, float interpolation_alpha) 
   bool has_camera = false;
   glm::vec3 camera_position{0.0f};
   world.forEach<components::CameraComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const auto& camera = world.get<components::CameraComponent>(entity);
     if (!camera.is_primary && has_camera) {
       return true;
     }
     const auto& transform = world.get<components::TransformComponent>(entity);
-    camera_position = toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+    camera_position = toTerrainGlm(transform.getInterpolatedPosition(interpolation_alpha));
     has_camera = true;
     return !camera.is_primary;
   });
   world.forEach<components::TerrainComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
     const auto& terrain = world.get<components::TerrainComponent>(entity);
     bool visible = terrain.visible;
     if (world.has<components::VisibilityComponent>(entity)) {
@@ -1072,13 +1072,13 @@ void TerrainSystem::update(ecs::World& world, float, float interpolation_alpha) 
     }
     const uint64_t key = entityKey(entity);
     TerrainState& state = ensureState(key, terrain);
-    if (state.terrain == renderer::kInvalidTerrain) {
+    if (state.terrain == rendering::kInvalidTerrain) {
       return true;
     }
 
     const auto& transform = world.get<components::TransformComponent>(entity);
     const glm::vec3 terrain_origin =
-        toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+        toTerrainGlm(transform.getInterpolatedPosition(interpolation_alpha));
     std::vector<TileCoord> coords;
     if (terrain.source == components::TerrainSourceType::SingleImage) {
       coords.push_back(TileCoord{.x = terrain.origin_tile_x,
@@ -1117,12 +1117,12 @@ void TerrainSystem::update(ecs::World& world, float, float interpolation_alpha) 
       if (!state.loaded.contains(coord)) {
         continue;
       }
-      device_->submitTerrain(renderer::TerrainDrawItem{
+      device_->submitTerrain(rendering::TerrainDrawItem{
           .instance = terrainInstanceKey(key, coord),
           .terrain = state.terrain,
           .coord = coord,
           .transform = model,
-          .layer = static_cast<renderer::LayerId>(terrain.layer),
+          .layer = static_cast<rendering::LayerId>(terrain.layer),
           .visible = visible,
       });
     }
@@ -1145,7 +1145,7 @@ void TerrainSystem::workerLoop() {
       requests_.pop_front();
     }
 
-    std::optional<renderer::TerrainTileData> data;
+    std::optional<rendering::TerrainTileData> data;
     switch (request.terrain.source) {
       case components::TerrainSourceType::Procedural:
         data = generateProceduralTerrainTile(request.terrain, request.coord);
@@ -1186,4 +1186,4 @@ void TerrainSystem::stopWorker() {
   }
 }
 
-}  // namespace karma::terrain
+}  // namespace karma::visual::terrain

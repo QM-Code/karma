@@ -7,41 +7,41 @@
 
 #include <algorithm>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 namespace {
 
-bool isBc7(renderer::TextureFormat format) {
-  return format == renderer::TextureFormat::BC7_RGBA_UNORM ||
-         format == renderer::TextureFormat::BC7_RGBA_UNORM_SRGB;
+bool isBc7(rendering::TextureFormat format) {
+  return format == rendering::TextureFormat::BC7_RGBA_UNORM ||
+         format == rendering::TextureFormat::BC7_RGBA_UNORM_SRGB;
 }
 
-Diligent::TEXTURE_FORMAT toDiligentTextureFormat(const renderer::TextureDesc& desc) {
+Diligent::TEXTURE_FORMAT toDiligentTextureFormat(const rendering::TextureDesc& desc) {
   switch (desc.format) {
-    case renderer::TextureFormat::BC7_RGBA_UNORM:
+    case rendering::TextureFormat::BC7_RGBA_UNORM:
       return Diligent::TEX_FORMAT_BC7_UNORM;
-    case renderer::TextureFormat::BC7_RGBA_UNORM_SRGB:
+    case rendering::TextureFormat::BC7_RGBA_UNORM_SRGB:
       return Diligent::TEX_FORMAT_BC7_UNORM_SRGB;
-    case renderer::TextureFormat::RGB8:
+    case rendering::TextureFormat::RGB8:
       return desc.srgb ? Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB
                        : Diligent::TEX_FORMAT_RGBA8_UNORM;
-    case renderer::TextureFormat::R8:
+    case rendering::TextureFormat::R8:
       return Diligent::TEX_FORMAT_R8_UNORM;
-    case renderer::TextureFormat::RGBA8:
+    case rendering::TextureFormat::RGBA8:
     default:
       return desc.srgb ? Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB
                        : Diligent::TEX_FORMAT_RGBA8_UNORM;
   }
 }
 
-Diligent::TEXTURE_FORMAT toDiligentTextureFormat(renderer::TextureFormat format) {
-  renderer::TextureDesc desc{};
+Diligent::TEXTURE_FORMAT toDiligentTextureFormat(rendering::TextureFormat format) {
+  rendering::TextureDesc desc{};
   desc.format = format;
-  desc.srgb = format == renderer::TextureFormat::BC7_RGBA_UNORM_SRGB;
+  desc.srgb = format == rendering::TextureFormat::BC7_RGBA_UNORM_SRGB;
   return toDiligentTextureFormat(desc);
 }
 
-std::size_t defaultRowStride(renderer::TextureFormat format, int width) {
+std::size_t defaultRowStride(rendering::TextureFormat format, int width) {
   if (isBc7(format)) {
     const std::size_t blocks_x =
         (static_cast<std::size_t>(std::max(width, 1)) + 3u) / 4u;
@@ -52,8 +52,8 @@ std::size_t defaultRowStride(renderer::TextureFormat format, int width) {
 
 }  // namespace
 
-renderer::TextureId DiligentBackend::createTexture(const renderer::TextureDesc& desc) {
-  const renderer::TextureId id = nextTextureId_++;
+rendering::TextureId DiligentBackend::createTexture(const rendering::TextureDesc& desc) {
+  const rendering::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.desc = desc;
   if (device_ && desc.width > 0 && desc.height > 0) {
@@ -84,8 +84,8 @@ renderer::TextureId DiligentBackend::createTexture(const renderer::TextureDesc& 
   return id;
 }
 
-bool DiligentBackend::supportsTextureFormat(renderer::TextureFormat format) const {
-  if (format == renderer::TextureFormat::KTX2_BASIS_UASTC || device_ == nullptr) {
+bool DiligentBackend::supportsTextureFormat(rendering::TextureFormat format) const {
+  if (format == rendering::TextureFormat::KTX2_BASIS_UASTC || device_ == nullptr) {
     return false;
   }
   const Diligent::TEXTURE_FORMAT diligent_format = toDiligentTextureFormat(format);
@@ -94,13 +94,13 @@ bool DiligentBackend::supportsTextureFormat(renderer::TextureFormat format) cons
   return info.Supported;
 }
 
-bool DiligentBackend::uploadTexture(renderer::TextureId texture,
-                                    const renderer::TextureUploadData& upload) {
-  if (!device_ || !context_ || texture == renderer::kInvalidTexture ||
+bool DiligentBackend::uploadTexture(rendering::TextureId texture,
+                                    const rendering::TextureUploadData& upload) {
+  if (!device_ || !context_ || texture == rendering::kInvalidTexture ||
       upload.bytes.empty() || upload.subresources.empty()) {
     return false;
   }
-  if (upload.format != renderer::TextureFormat::RGBA8 && !isBc7(upload.format)) {
+  if (upload.format != rendering::TextureFormat::RGBA8 && !isBc7(upload.format)) {
     return false;
   }
 
@@ -112,7 +112,7 @@ bool DiligentBackend::uploadTexture(renderer::TextureId texture,
     return false;
   }
 
-  for (const renderer::TextureUploadSubresource& subresource : upload.subresources) {
+  for (const rendering::TextureUploadSubresource& subresource : upload.subresources) {
     if (subresource.width <= 0 || subresource.height <= 0 ||
         subresource.offset > upload.bytes.size() ||
         subresource.size > upload.bytes.size() - subresource.offset) {
@@ -150,15 +150,15 @@ bool DiligentBackend::uploadTexture(renderer::TextureId texture,
   return true;
 }
 
-void DiligentBackend::destroyTexture(renderer::TextureId texture) {
+void DiligentBackend::destroyTexture(rendering::TextureId texture) {
   textures_.erase(texture);
 }
 
-void DiligentBackend::updateTextureRGBA8(renderer::TextureId texture,
+void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
                                          int w,
                                          int h,
                                          const void* pixels) {
-  if (!device_ || !context_ || texture == renderer::kInvalidTexture || !pixels || w <= 0 || h <= 0) {
+  if (!device_ || !context_ || texture == rendering::kInvalidTexture || !pixels || w <= 0 || h <= 0) {
     return;
   }
 
@@ -169,11 +169,11 @@ void DiligentBackend::updateTextureRGBA8(renderer::TextureId texture,
 
   auto& record = it->second;
   const bool size_changed = record.desc.width != w || record.desc.height != h;
-  const bool format_changed = record.desc.format != renderer::TextureFormat::RGBA8;
+  const bool format_changed = record.desc.format != rendering::TextureFormat::RGBA8;
   if (!record.texture || size_changed || format_changed) {
     record.desc.width = w;
     record.desc.height = h;
-    record.desc.format = renderer::TextureFormat::RGBA8;
+    record.desc.format = rendering::TextureFormat::RGBA8;
     record.desc.srgb = false;
     record.desc.generate_mips = false;
 
@@ -231,4 +231,4 @@ void DiligentBackend::updateTextureRGBA8(renderer::TextureId texture,
   }
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

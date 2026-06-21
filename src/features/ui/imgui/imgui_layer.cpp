@@ -1,10 +1,10 @@
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 
 #include <cstdint>
 #include <type_traits>
 #include <utility>
 
-namespace karma::imgui {
+namespace karma::ui::imgui {
 
 namespace {
 
@@ -146,7 +146,7 @@ app::UITextureHandle fromTextureIdImpl(TextureId id) {
   }
 }
 
-void submitDrawData(const ImDrawData& draw_data, renderer::UIDrawData& out) {
+void submitDrawData(const ImDrawData& draw_data, rendering::UIDrawData& out) {
   out.clear();
   out.vertices.reserve(static_cast<size_t>(draw_data.TotalVtxCount));
   out.indices.reserve(static_cast<size_t>(draw_data.TotalIdxCount));
@@ -163,7 +163,7 @@ void submitDrawData(const ImDrawData& draw_data, renderer::UIDrawData& out) {
     const ImDrawList* cmd_list = draw_data.CmdLists[n];
     for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
       const ImDrawVert& v = cmd_list->VtxBuffer[i];
-      renderer::UIVertex out_v{};
+      rendering::UIVertex out_v{};
       out_v.x = v.pos.x;
       out_v.y = v.pos.y;
       out_v.u = v.uv.x;
@@ -192,7 +192,7 @@ void submitDrawData(const ImDrawData& draw_data, renderer::UIDrawData& out) {
         continue;
       }
 
-      renderer::UIDrawCmd out_cmd{};
+      rendering::UIDrawCmd out_cmd{};
       out_cmd.index_offset = global_idx_offset;
       out_cmd.index_count = cmd.ElemCount;
       out_cmd.scissor_enabled = true;
@@ -273,7 +273,7 @@ class ImGuiUiLayer final : public app::UiLayer {
   }
 
   void onFrame(app::UIContext& ctx) override {
-    renderer::UIDrawData& out = ctx.drawData();
+    rendering::UIDrawData& out = ctx.drawData();
     out.clear();
     if (!imgui_context_) {
       return;
@@ -366,4 +366,4 @@ std::unique_ptr<app::UiLayer> createUiLayer(ImGuiLayerConfig config) {
   return createUiLayer(ImGuiLayerCallbacks{}, config);
 }
 
-}  // namespace karma::imgui
+}  // namespace karma::ui::imgui

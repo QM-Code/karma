@@ -13,27 +13,27 @@
 
 #include <nlohmann/json.hpp>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/content/prefabs/prefab.h"
-#include "karma/features/visual/lights/light_pulse_system.h"
-#include "karma/features/visual/particles/effect_asset.h"
-#include "karma/features/visual/particles/particle_system.h"
-#include "karma/rendering/renderer/particle_stats_report.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/instanced_mesh.h"
-#include "karma/world/components/light.h"
-#include "karma/world/components/light_pulse.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/particle_effect.h"
-#include "karma/world/components/particle_effect_override.h"
-#include "karma/world/components/particle_emitter.h"
-#include "karma/world/components/tag.h"
-#include "karma/world/components/terrain.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/visibility.h"
-#include "karma/world/components/volumetric.h"
-#include "karma/world/ecs/world.h"
-#include "karma/world/scene/scene.h"
+#include "karma/assets.h"
+#include "karma/prefabs.h"
+#include "karma/visual.h"
+#include "karma/visual.h"
+#include "karma/visual.h"
+#include "karma/rendering.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
 namespace {
 
@@ -310,9 +310,9 @@ std::filesystem::path findRepoRoot() {
 }
 
 void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::ecs::Entity root = world.createEntity();
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
   scene.createNode(root);
   world.setName(root, "Crate");
   world.add(root, karma::components::TransformComponent{
@@ -352,12 +352,12 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("owns_mesh_id"));
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("owns_material_id"));
 
-  karma::ecs::World loaded_world;
-  karma::scene::Scene loaded_scene;
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
   const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(instance->valid());
-  KARMA_REQUIRE(instance->root_scene_node != karma::scene::Node::kInvalidId);
+  KARMA_REQUIRE(instance->root_scene_node != karma::world::Node::kInvalidId);
   KARMA_REQUIRE(loaded_world.has<karma::components::TagComponent>(instance->root));
   KARMA_REQUIRE(loaded_world.get<karma::components::TagComponent>(instance->root).name == "Crate");
 
@@ -382,9 +382,9 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
 }
 
 void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::ecs::Entity root = world.createEntity();
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
   scene.createNode(root);
   world.setName(root, "Grass Chunk");
   world.add(root, karma::components::InstancedMeshComponent{
@@ -400,10 +400,10 @@ void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
                               .slot = 0,
                               .material_key = "grass_far",
                           }},
-                          .render_mode = karma::renderer::InstanceLodRenderMode::UprightBillboard,
+                          .render_mode = karma::rendering::InstanceLodRenderMode::UprightBillboard,
                           .shadow_visible = false,
                       }},
-                      .gpu_layout = karma::renderer::InstanceGpuLayout::PositionYawScaleParams,
+                      .gpu_layout = karma::rendering::InstanceGpuLayout::PositionYawScaleParams,
                       .planar_instances = {karma::components::PlanarMeshInstance{
                           .position = {1.0f, 0.0f, 2.0f},
                           .yaw_radians = 0.5f,
@@ -426,8 +426,8 @@ void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(serialized["lods"][0]["render_mode"] == "upright_billboard");
   KARMA_REQUIRE(serialized["lods"][0]["materials"][0]["material_key"] == "grass_far");
 
-  karma::ecs::World loaded_world;
-  karma::scene::Scene loaded_scene;
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
   const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
   KARMA_REQUIRE(instance.has_value());
   const auto& loaded =
@@ -438,15 +438,15 @@ void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(loaded.lods[0].materials.size() == 1);
   KARMA_REQUIRE(loaded.lods[0].materials[0].material_key == "grass_far");
   KARMA_REQUIRE(loaded.lods[0].render_mode ==
-                karma::renderer::InstanceLodRenderMode::UprightBillboard);
+                karma::rendering::InstanceLodRenderMode::UprightBillboard);
   KARMA_REQUIRE(!loaded.lods[0].shadow_visible);
 
   Json legacy = saved;
   legacy["nodes"][0]["components"]["InstancedMeshComponent"].erase("lods");
   const std::filesystem::path legacy_path = dir / "instanced_lod_legacy.json";
   writeText(legacy_path, legacy.dump(2));
-  karma::ecs::World legacy_world;
-  karma::scene::Scene legacy_scene;
+  karma::world::World legacy_world;
+  karma::world::Scene legacy_scene;
   const auto legacy_instance =
       karma::prefabs::instantiatePrefab(legacy_world, legacy_scene, legacy_path);
   KARMA_REQUIRE(legacy_instance.has_value());
@@ -539,15 +539,15 @@ void testColliderComponentPrefabRoundTrips(const std::filesystem::path& dir) {
                            .indices = {0, 1, 2},
                        })});
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::ecs::Entity root = world.createEntity();
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
   const auto root_node = scene.createNode(root);
   world.setName(root, "ColliderRoot");
   world.add(root, karma::components::TransformComponent{});
 
   for (const ColliderCase& collider_case : cases) {
-    const karma::ecs::Entity entity = world.createEntity();
+    const karma::world::Entity entity = world.createEntity();
     const auto node = scene.createNode(entity);
     scene.reparent(node, root_node);
     world.setName(entity, collider_case.name);
@@ -576,12 +576,12 @@ void testColliderComponentPrefabRoundTrips(const std::filesystem::path& dir) {
   }
   KARMA_REQUIRE(serialized_colliders == cases.size());
 
-  karma::ecs::World loaded_world;
-  karma::scene::Scene loaded_scene;
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
   const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
   KARMA_REQUIRE(instance.has_value());
   for (const ColliderCase& collider_case : cases) {
-    const karma::ecs::Entity entity = instance->find(collider_case.name);
+    const karma::world::Entity entity = instance->find(collider_case.name);
     KARMA_REQUIRE(entity.isValid());
     KARMA_REQUIRE(loaded_world.has<karma::components::ColliderComponent>(entity));
     requireColliderEquals(loaded_world.get<karma::components::ColliderComponent>(entity),
@@ -590,10 +590,10 @@ void testColliderComponentPrefabRoundTrips(const std::filesystem::path& dir) {
 }
 
 void testHierarchyRoundTrip(const std::filesystem::path& dir) {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::ecs::Entity root = world.createEntity();
-  const karma::ecs::Entity child = world.createEntity();
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
+  const karma::world::Entity child = world.createEntity();
   const auto root_node = scene.createNode(root);
   const auto child_node = scene.createNode(child);
   scene.reparent(child_node, root_node);
@@ -611,15 +611,15 @@ void testHierarchyRoundTrip(const std::filesystem::path& dir) {
   const std::filesystem::path path = dir / "hierarchy.json";
   KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
 
-  karma::ecs::World loaded_world;
-  karma::scene::Scene loaded_scene;
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
   karma::prefabs::PrefabInstantiateDesc desc{};
   desc.root_transform.setPosition({10.0f, 0.0f, 0.0f});
   const auto instance =
       karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path, desc);
   KARMA_REQUIRE(instance.has_value());
 
-  const karma::ecs::Entity loaded_child = instance->find("Child");
+  const karma::world::Entity loaded_child = instance->find("Child");
   KARMA_REQUIRE(loaded_child.isValid());
   const auto loaded_root_node = loaded_scene.findNode(instance->root);
   const auto loaded_child_node = loaded_scene.findNode(loaded_child);
@@ -652,8 +652,8 @@ void testUnknownComponentFails(const std::filesystem::path& dir) {
   ]
 })");
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
   const auto instance = karma::prefabs::instantiatePrefab(world, scene, path);
   KARMA_REQUIRE(!instance.has_value());
 }
@@ -661,8 +661,8 @@ void testUnknownComponentFails(const std::filesystem::path& dir) {
 void testMalformedAndInvalidPayloads(const std::filesystem::path& dir) {
   const std::filesystem::path malformed = dir / "malformed.json";
   writeText(malformed, "{ invalid json");
-  karma::ecs::World world_a;
-  karma::scene::Scene scene_a;
+  karma::world::World world_a;
+  karma::world::Scene scene_a;
   KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(world_a, scene_a, malformed).has_value());
   KARMA_REQUIRE(world_a.entities().empty());
 
@@ -682,8 +682,8 @@ void testMalformedAndInvalidPayloads(const std::filesystem::path& dir) {
     }
   ]
 })");
-  karma::ecs::World world_b;
-  karma::scene::Scene scene_b;
+  karma::world::World world_b;
+  karma::world::Scene scene_b;
   KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(world_b, scene_b, invalid).has_value());
   KARMA_REQUIRE(world_b.entities().empty());
 }
@@ -707,9 +707,9 @@ std::string volumetricPrefabJson(const std::string& component_payload) {
 }
 
 void testVolumetricComponentPrefabRoundTrip(const std::filesystem::path& dir) {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::ecs::Entity root = world.createEntity();
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
   scene.createNode(root);
   world.setName(root, "Volume");
   world.add(root, karma::components::TransformComponent{});
@@ -739,8 +739,8 @@ void testVolumetricComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(!components.contains("VolumeSphereComponent"));
   KARMA_REQUIRE(components["VolumetricComponent"]["shape"] == "capsule");
 
-  karma::ecs::World loaded_world;
-  karma::scene::Scene loaded_scene;
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
   const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(loaded_world.has<karma::components::VolumetricComponent>(instance->root));
@@ -766,8 +766,8 @@ void testVolumetricComponentValidation(const std::filesystem::path& dir) {
         })";
   const std::filesystem::path derived_path = dir / "volumetric_derived_density.json";
   writeText(derived_path, volumetricPrefabJson(valid));
-  karma::ecs::World derived_world;
-  karma::scene::Scene derived_scene;
+  karma::world::World derived_world;
+  karma::world::Scene derived_scene;
   const auto derived =
       karma::prefabs::instantiatePrefab(derived_world, derived_scene, derived_path);
   KARMA_REQUIRE(derived.has_value());
@@ -796,8 +796,8 @@ void testVolumetricComponentValidation(const std::filesystem::path& dir) {
   for (const auto& [name, payload] : invalid_cases) {
     const std::filesystem::path path = dir / (name + ".json");
     writeText(path, volumetricPrefabJson(payload));
-    karma::ecs::World invalid_world;
-    karma::scene::Scene invalid_scene;
+    karma::world::World invalid_world;
+    karma::world::Scene invalid_scene;
     KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(invalid_world, invalid_scene, path)
                        .has_value());
     KARMA_REQUIRE(invalid_world.entities().empty());
@@ -805,9 +805,9 @@ void testVolumetricComponentValidation(const std::filesystem::path& dir) {
 }
 
 void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::ecs::Entity root = world.createEntity();
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
   scene.createNode(root);
   world.setName(root, "Terrain");
   world.add(root, karma::components::TransformComponent{});
@@ -864,8 +864,8 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(terrain_json["data_maps"].size() == 1u);
   KARMA_REQUIRE(terrain_json["layer"] == 2u);
 
-  karma::ecs::World loaded_world;
-  karma::scene::Scene loaded_scene;
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
   const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(loaded_world.has<karma::components::TerrainComponent>(instance->root));
@@ -907,9 +907,9 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
 }
 
 void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
-  karma::ecs::World world;
-  karma::scene::Scene scene;
-  const karma::ecs::Entity root = world.createEntity();
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
   scene.createNode(root);
   world.setName(root, "FixedTerrain");
   world.add(root, karma::components::TransformComponent{});
@@ -947,8 +947,8 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   KARMA_REQUIRE(collider_json["is_trigger"] == true);
   KARMA_REQUIRE(collider_json["debug_draw"] == true);
 
-  karma::ecs::World loaded_world;
-  karma::scene::Scene loaded_scene;
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
   const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(loaded_world.has<karma::components::TerrainComponent>(instance->root));
@@ -1025,19 +1025,19 @@ void testDestroyPrefab(const std::filesystem::path& dir) {
   ]
 })");
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
   const auto instance = karma::prefabs::instantiatePrefab(world, scene, path);
   KARMA_REQUIRE(instance.has_value());
-  const karma::ecs::Entity root = instance->root;
-  const karma::ecs::Entity child = instance->find("Child");
+  const karma::world::Entity root = instance->root;
+  const karma::world::Entity child = instance->find("Child");
   KARMA_REQUIRE(world.isAlive(root));
   KARMA_REQUIRE(world.isAlive(child));
   KARMA_REQUIRE(karma::prefabs::destroyPrefab(world, scene, root));
   KARMA_REQUIRE(!world.isAlive(root));
   KARMA_REQUIRE(!world.isAlive(child));
-  KARMA_REQUIRE(scene.findNode(root) == karma::scene::Node::kInvalidId);
-  KARMA_REQUIRE(scene.findNode(child) == karma::scene::Node::kInvalidId);
+  KARMA_REQUIRE(scene.findNode(root) == karma::world::Node::kInvalidId);
+  KARMA_REQUIRE(scene.findNode(child) == karma::world::Node::kInvalidId);
 }
 
 void testMissingAssetPackageKeepsPrefabLoad(const std::filesystem::path& dir) {
@@ -1045,8 +1045,8 @@ void testMissingAssetPackageKeepsPrefabLoad(const std::filesystem::path& dir) {
   std::filesystem::create_directories(prefab_dir);
   writeText(prefab_dir / "prefab.json", simplePrefabJson());
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
   const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(world.isAlive(instance->root));
@@ -1066,10 +1066,10 @@ void testAssetPackageParsingSuccessAndFailure(const std::filesystem::path& dir) 
   ]
 })");
 
-    karma::content::AssetRegistry assets;
+    karma::assets::AssetRegistry assets;
     karma::prefabs::bindPrefabAssetRegistry(&assets);
-    karma::ecs::World world;
-    karma::scene::Scene scene;
+    karma::world::World world;
+    karma::world::Scene scene;
     const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
     KARMA_REQUIRE(instance.has_value());
     KARMA_REQUIRE(assets.findParticleEffect("test/effect") != nullptr);
@@ -1084,8 +1084,8 @@ void testAssetPackageParsingSuccessAndFailure(const std::filesystem::path& dir) 
     writeText(prefab_dir / "assets.package.json",
               R"({ "version": 1, "assets": { "key": "bad" } })");
 
-    karma::ecs::World world;
-    karma::scene::Scene scene;
+    karma::world::World world;
+    karma::world::Scene scene;
     KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(world, scene, prefab_dir).has_value());
     KARMA_REQUIRE(world.entities().empty());
   }
@@ -1105,8 +1105,8 @@ void testAssetPackageMissingRegistryAndResourceFailure(const std::filesystem::pa
 })");
 
     karma::prefabs::clearPrefabAssetPackages();
-    karma::ecs::World world;
-    karma::scene::Scene scene;
+    karma::world::World world;
+    karma::world::Scene scene;
     KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(world, scene, prefab_dir).has_value());
     KARMA_REQUIRE(world.entities().empty());
   }
@@ -1123,10 +1123,10 @@ void testAssetPackageMissingRegistryAndResourceFailure(const std::filesystem::pa
   ]
 })");
 
-    karma::content::AssetRegistry assets;
+    karma::assets::AssetRegistry assets;
     karma::prefabs::bindPrefabAssetRegistry(&assets);
-    karma::ecs::World world;
-    karma::scene::Scene scene;
+    karma::world::World world;
+    karma::world::Scene scene;
     KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(world, scene, prefab_dir).has_value());
     KARMA_REQUIRE(world.entities().empty());
     karma::prefabs::clearPrefabAssetPackages();
@@ -1138,8 +1138,8 @@ void testParticleEffectParserV3() {
   const std::filesystem::path valid = dir / "valid.kpeffect";
   writeText(valid, validParticleEffectJson().dump(2));
 
-  karma::particles::ParticleEffectAsset effect{};
-  KARMA_REQUIRE(karma::particles::loadParticleEffectAsset(valid, effect));
+  karma::visual::particles::ParticleEffectAsset effect{};
+  KARMA_REQUIRE(karma::visual::particles::loadParticleEffectAsset(valid, effect));
   const auto* primary = effect.primaryEmitter();
   KARMA_REQUIRE(primary != nullptr);
   KARMA_REQUIRE(primary->texture_key == "test/texture");
@@ -1151,26 +1151,26 @@ void testParticleEffectParserV3() {
   unknown["emitters"][0]["render"]["unknown"] = 1;
   const std::filesystem::path unknown_path = dir / "unknown.kpeffect";
   writeText(unknown_path, unknown.dump(2));
-  karma::particles::ParticleEffectAsset invalid_effect{};
-  KARMA_REQUIRE(!karma::particles::loadParticleEffectAsset(unknown_path, invalid_effect));
+  karma::visual::particles::ParticleEffectAsset invalid_effect{};
+  KARMA_REQUIRE(!karma::visual::particles::loadParticleEffectAsset(unknown_path, invalid_effect));
 
   Json invalid_enum = validParticleEffectJson();
   invalid_enum["emitters"][0]["render"]["blend_mode"] = "multiply";
   const std::filesystem::path invalid_enum_path = dir / "invalid_enum.kpeffect";
   writeText(invalid_enum_path, invalid_enum.dump(2));
-  KARMA_REQUIRE(!karma::particles::loadParticleEffectAsset(invalid_enum_path, invalid_effect));
+  KARMA_REQUIRE(!karma::visual::particles::loadParticleEffectAsset(invalid_enum_path, invalid_effect));
 
   Json missing_block = validParticleEffectJson();
   missing_block["emitters"][0].erase("motion");
   const std::filesystem::path missing_block_path = dir / "missing_block.kpeffect";
   writeText(missing_block_path, missing_block.dump(2));
-  KARMA_REQUIRE(!karma::particles::loadParticleEffectAsset(missing_block_path, invalid_effect));
+  KARMA_REQUIRE(!karma::visual::particles::loadParticleEffectAsset(missing_block_path, invalid_effect));
 
   Json missing_source = validParticleEffectJson();
   missing_source["emitters"][0].erase("source");
   const std::filesystem::path missing_source_path = dir / "missing_source.kpeffect";
   writeText(missing_source_path, missing_source.dump(2));
-  KARMA_REQUIRE(!karma::particles::loadParticleEffectAsset(missing_source_path, invalid_effect));
+  KARMA_REQUIRE(!karma::visual::particles::loadParticleEffectAsset(missing_source_path, invalid_effect));
 
   std::filesystem::remove_all(dir);
 }
@@ -1214,8 +1214,8 @@ void testParticleEffectParserV3SourceShapesAndMultiEmitter() {
 
     const std::filesystem::path path = dir / (shape + ".kpeffect");
     writeText(path, json.dump(2));
-    karma::particles::ParticleEffectAsset effect{};
-    KARMA_REQUIRE(karma::particles::loadParticleEffectAsset(path, effect));
+    karma::visual::particles::ParticleEffectAsset effect{};
+    KARMA_REQUIRE(karma::visual::particles::loadParticleEffectAsset(path, effect));
     const auto* primary = effect.primaryEmitter();
     KARMA_REQUIRE(primary != nullptr);
     KARMA_REQUIRE(!primary->emitter.source_path_points.empty());
@@ -1233,8 +1233,8 @@ void testParticleEffectParserV3SourceShapesAndMultiEmitter() {
   multi["emitters"].push_back(second);
   const std::filesystem::path multi_path = dir / "multi.kpeffect";
   writeText(multi_path, multi.dump(2));
-  karma::particles::ParticleEffectAsset effect{};
-  KARMA_REQUIRE(karma::particles::loadParticleEffectAsset(multi_path, effect));
+  karma::visual::particles::ParticleEffectAsset effect{};
+  KARMA_REQUIRE(karma::visual::particles::loadParticleEffectAsset(multi_path, effect));
   KARMA_REQUIRE(effect.emitters.size() == 2u);
   KARMA_REQUIRE(effect.emitters[1].texture_key == "test/second_texture");
   KARMA_REQUIRE(effect.emitters[1].emitter.max_particles == 23u);
@@ -1243,8 +1243,8 @@ void testParticleEffectParserV3SourceShapesAndMultiEmitter() {
 }
 
 void testParticleSystemRendererOwnedState() {
-  karma::ecs::World world;
-  const karma::ecs::Entity entity = world.createEntity();
+  karma::world::World world;
+  const karma::world::Entity entity = world.createEntity();
   world.add(entity, karma::components::TransformComponent{});
   karma::components::ParticleEmitterComponent emitter{};
   emitter.enabled = true;
@@ -1258,15 +1258,15 @@ void testParticleSystemRendererOwnedState() {
   emitter.particle_lifetime_max = 1.0f;
   world.add(entity, emitter);
 
-  karma::particles::ParticleSystem system(nullptr, nullptr);
+  karma::visual::particles::ParticleSystem system(nullptr, nullptr);
   system.update(world, 0.05f, 1.0f);
   KARMA_REQUIRE(system.liveParticleCount(entity) == 0u);
 }
 
 void testParticleSystemEffectLifecycleReapply() {
-  karma::content::AssetRegistry assets;
-  karma::particles::ParticleEffectDesc effect{};
-  effect.emitters.push_back(karma::particles::ParticleEmitterDesc{});
+  karma::assets::AssetRegistry assets;
+  karma::visual::particles::ParticleEffectDesc effect{};
+  effect.emitters.push_back(karma::visual::particles::ParticleEmitterDesc{});
   auto& authored = effect.emitters[0];
   authored.emitter.enabled = true;
   authored.emitter.playing = true;
@@ -1279,8 +1279,8 @@ void testParticleSystemEffectLifecycleReapply() {
   authored.emitter.start_color = {1.0f, 0.5f, 0.25f, 0.8f};
   assets.registerParticleEffect("spark", effect);
 
-  karma::ecs::World world;
-  const karma::ecs::Entity entity = world.createEntity();
+  karma::world::World world;
+  const karma::world::Entity entity = world.createEntity();
   world.add(entity, karma::components::TransformComponent{});
   world.add(entity, karma::components::VisibilityComponent{.visible = false});
   world.add(entity, karma::components::ParticleEffectComponent{
@@ -1307,7 +1307,7 @@ void testParticleSystemEffectLifecycleReapply() {
   effect_override.source_jitter_radius = 0.25f;
   world.add(entity, effect_override);
 
-  karma::particles::ParticleSystem system(nullptr, &assets);
+  karma::visual::particles::ParticleSystem system(nullptr, &assets);
   system.update(world, 0.016f, 1.0f);
   const auto& applied = world.get<karma::components::ParticleEmitterComponent>(entity);
   KARMA_REQUIRE(!applied.enabled);
@@ -1349,8 +1349,8 @@ void testParticleSystemEffectLifecycleReapply() {
 }
 
 void testLightPulseSystem() {
-  karma::ecs::World world;
-  const karma::ecs::Entity entity = world.createEntity();
+  karma::world::World world;
+  const karma::world::Entity entity = world.createEntity();
   world.add(entity, karma::components::LightComponent{
                         .type = karma::components::LightComponent::Type::Point,
                         .intensity = 0.0f,
@@ -1391,19 +1391,19 @@ void testExplosionPrefabDirectLoad() {
   KARMA_REQUIRE(!repo_root.empty());
   const std::filesystem::path prefab_dir = repo_root / "examples/assets/prefabs/explosion";
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   karma::prefabs::bindPrefabAssetRegistry(&assets);
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
   const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(instance->find("flash").isValid());
   KARMA_REQUIRE(instance->find("smoke").isValid());
-  const karma::ecs::Entity glow = instance->find("glow");
+  const karma::world::Entity glow = instance->find("glow");
   KARMA_REQUIRE(glow.isValid());
   KARMA_REQUIRE(world.has<karma::components::LightPulseComponent>(glow));
-  const karma::ecs::Entity smoke = instance->find("smoke");
+  const karma::world::Entity smoke = instance->find("smoke");
   KARMA_REQUIRE(world.has<karma::components::ParticleEmitterComponent>(smoke));
   const auto& smoke_emitter = world.get<karma::components::ParticleEmitterComponent>(smoke);
   KARMA_REQUIRE(nearly(smoke_emitter.start_delay, 0.24f));
@@ -1480,11 +1480,11 @@ void testEnergyOrbPrefabDirectLoad() {
   KARMA_REQUIRE(!repo_root.empty());
   const std::filesystem::path prefab_dir = repo_root / "examples/assets/prefabs/energy_orb";
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   karma::prefabs::bindPrefabAssetRegistry(&assets);
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
   const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(instance->find("shell").isValid());
@@ -1492,11 +1492,11 @@ void testEnergyOrbPrefabDirectLoad() {
   KARMA_REQUIRE(instance->find("arcs").isValid());
   KARMA_REQUIRE(instance->find("halo").isValid());
   KARMA_REQUIRE(instance->find("distortion").isValid());
-  const karma::ecs::Entity glow = instance->find("glow");
+  const karma::world::Entity glow = instance->find("glow");
   KARMA_REQUIRE(glow.isValid());
   KARMA_REQUIRE(world.has<karma::components::LightComponent>(glow));
 
-  const karma::ecs::Entity shell = instance->find("shell");
+  const karma::world::Entity shell = instance->find("shell");
   KARMA_REQUIRE(world.has<karma::components::MeshComponent>(shell));
   KARMA_REQUIRE(world.get<karma::components::MeshComponent>(shell).mesh_asset_key ==
          "prefabs/energy_orb/orb_shell");
@@ -1507,7 +1507,7 @@ void testEnergyOrbPrefabDirectLoad() {
   KARMA_REQUIRE(nearly(shell_transform.localScale().y, 0.28875f));
   KARMA_REQUIRE(nearly(shell_transform.localScale().z, 0.28875f));
 
-  const karma::ecs::Entity core = instance->find("core");
+  const karma::world::Entity core = instance->find("core");
   KARMA_REQUIRE(world.has<karma::components::ParticleEffectComponent>(core));
   KARMA_REQUIRE(world.has<karma::components::ParticleEmitterComponent>(core));
   KARMA_REQUIRE(world.get<karma::components::ParticleEffectComponent>(core).effect_key ==
@@ -1546,11 +1546,11 @@ void testPathEnergyBeamPrefabDirectLoad() {
   const std::filesystem::path prefab_dir =
       repo_root / "examples/assets/prefabs/beam_impostor";
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   karma::prefabs::bindPrefabAssetRegistry(&assets);
 
-  karma::ecs::World world;
-  karma::scene::Scene scene;
+  karma::world::World world;
+  karma::world::Scene scene;
   const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
   KARMA_REQUIRE(instance.has_value());
   KARMA_REQUIRE(instance->find("path_warm_glow").isValid());
@@ -1560,7 +1560,7 @@ void testPathEnergyBeamPrefabDirectLoad() {
   KARMA_REQUIRE(instance->find("path_endpoint_glow").isValid());
   KARMA_REQUIRE(instance->find("path_light_0").isValid());
 
-  const karma::ecs::Entity core = instance->find("path_hot_core");
+  const karma::world::Entity core = instance->find("path_hot_core");
   KARMA_REQUIRE(world.has<karma::components::ParticleEffectComponent>(core));
   KARMA_REQUIRE(world.has<karma::components::ParticleEffectOverrideComponent>(core));
   KARMA_REQUIRE(world.get<karma::components::ParticleEffectComponent>(core).effect_key ==
@@ -1609,8 +1609,8 @@ void testPathEnergyBeamPrefabDirectLoad() {
 }
 
 void testParticleStatsReportFormatting() {
-  karma::renderer::ParticlePassStats totals{};
-  karma::renderer::ParticlePassStats frame{};
+  karma::rendering::ParticlePassStats totals{};
+  karma::rendering::ParticlePassStats frame{};
   frame.submitted_emitters = 3u;
   frame.gpu_particle_capacity = 128u;
   frame.gpu_alive_particles = 42u;
@@ -1636,11 +1636,11 @@ void testParticleStatsReportFormatting() {
   frame.scene_color_copy = true;
   frame.gpu_sort_overflow = true;
   frame.gpu_grouped_sort_fallback = true;
-  karma::renderer::accumulateParticleStats(totals, frame);
-  karma::renderer::accumulateParticleStats(totals, frame);
+  karma::rendering::accumulateParticleStats(totals, frame);
+  karma::rendering::accumulateParticleStats(totals, frame);
 
-  const std::string line = karma::renderer::formatParticleStatsReport(
-      karma::renderer::ParticleStatsReport{
+  const std::string line = karma::rendering::formatParticleStatsReport(
+      karma::rendering::ParticleStatsReport{
           .totals = totals,
           .frame_count = 2u,
           .elapsed_seconds = 1.0,

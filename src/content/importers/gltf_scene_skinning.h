@@ -9,7 +9,7 @@
 
 struct aiScene;
 
-namespace karma::scene {
+namespace karma::world {
 
 void populateGltfSkins(const GltfDocument& doc,
                        const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
@@ -20,4 +20,4 @@ void populatePrimitiveSkinning(
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
     GltfScenePrefab& prefab);
 
-}  // namespace karma::scene
+}  // namespace karma::world

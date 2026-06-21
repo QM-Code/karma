@@ -1,90 +1,95 @@
-#include "karma/simulation/physics/soft_body.hpp"
+#include "karma/physics.h"
 
 #include <utility>
 
-#include "karma/simulation/physics/backend.hpp"
+#include "private/physics/objects.hpp"
 
 namespace karma::physics {
 
-SoftBody::SoftBody(std::unique_ptr<karma::physics_backend::PhysicsSoftBodyBackend> backend)
-    : backend_(std::move(backend)) {}
+SoftBody::SoftBody() = default;
+
+SoftBody::SoftBody(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl)) {}
+
+SoftBody::SoftBody(SoftBody&& other) noexcept = default;
+SoftBody& SoftBody::operator=(SoftBody&& other) noexcept = default;
 
 SoftBody::~SoftBody() {
     destroy();
 }
 
 bool SoftBody::isValid() const {
-    return backend_ && backend_->isValid();
+    return impl_ && impl_->backend && impl_->backend->isValid();
 }
 
 glm::vec3 SoftBody::getPosition() const {
-    return backend_ ? backend_->getPosition() : glm::vec3(0.0f);
+    return impl_ && impl_->backend ? impl_->backend->getPosition() : glm::vec3(0.0f);
 }
 
 glm::quat SoftBody::getRotation() const {
-    return backend_ ? backend_->getRotation() : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    return impl_ && impl_->backend ? impl_->backend->getRotation() : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
 bool SoftBody::isActive() const {
-    return backend_ ? backend_->isActive() : false;
+    return impl_ && impl_->backend ? impl_->backend->isActive() : false;
 }
 
 void SoftBody::setPressure(float pressure) {
-    if (backend_) {
-        backend_->setPressure(pressure);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setPressure(pressure);
     }
 }
 
 void SoftBody::setUpdatePosition(bool updatePosition) {
-    if (backend_) {
-        backend_->setUpdatePosition(updatePosition);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setUpdatePosition(updatePosition);
     }
 }
 
 void SoftBody::setEnableSkinConstraints(bool enabled) {
-    if (backend_) {
-        backend_->setEnableSkinConstraints(enabled);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setEnableSkinConstraints(enabled);
     }
 }
 
 void SoftBody::setSkinnedMaxDistanceMultiplier(float multiplier) {
-    if (backend_) {
-        backend_->setSkinnedMaxDistanceMultiplier(multiplier);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setSkinnedMaxDistanceMultiplier(multiplier);
     }
 }
 
 void SoftBody::setVertexPosition(uint32_t vertex, const glm::vec3& position, bool hardSkin) {
-    if (backend_) {
-        backend_->setVertexPosition(vertex, position, hardSkin);
+    if (impl_ && impl_->backend) {
+        impl_->backend->setVertexPosition(vertex, position, hardSkin);
     }
 }
 
 PhysicsSoftBodyState SoftBody::getState() const {
-    return backend_ ? backend_->getState() : PhysicsSoftBodyState{};
+    return impl_ && impl_->backend ? impl_->backend->getState() : PhysicsSoftBodyState{};
 }
 
 void SoftBody::activate() {
-    if (backend_) {
-        backend_->activate();
+    if (impl_ && impl_->backend) {
+        impl_->backend->activate();
     }
 }
 
 void SoftBody::deactivate() {
-    if (backend_) {
-        backend_->deactivate();
+    if (impl_ && impl_->backend) {
+        impl_->backend->deactivate();
     }
 }
 
 void SoftBody::destroy() {
-    if (!backend_) {
+    if (!impl_ || !impl_->backend) {
         return;
     }
-    backend_->destroy();
-    backend_.reset();
+    impl_->backend->destroy();
+    impl_.reset();
 }
 
 std::uintptr_t SoftBody::nativeHandle() const {
-    return backend_ ? backend_->nativeHandle() : 0;
+    return impl_ && impl_->backend ? impl_->backend->nativeHandle() : 0;
 }
 
 }  // namespace karma::physics

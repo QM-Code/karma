@@ -1,4 +1,4 @@
-#include "karma/platform/network/enet_transport.h"
+#include "karma/network.h"
 
 #if __has_include(<enet/enet.h>)
 #include <enet/enet.h>
@@ -13,7 +13,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace karma::net {
+namespace karma::network {
 namespace {
 
 constexpr PeerId kServerPeer{1};
@@ -493,4 +493,4 @@ std::unique_ptr<IServerTransport> createEnetServerTransport(uint16_t port,
   return std::make_unique<EnetServerTransport>(port, max_clients, num_channels);
 }
 
-}  // namespace karma::net
+}  // namespace karma::network

@@ -1,4 +1,4 @@
-#include "karma/simulation/navigation/navigation_diagnostics.h"
+#include "karma/navigation.h"
 
 #include <cstdlib>
 #include <cstring>

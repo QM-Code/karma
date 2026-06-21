@@ -1,4 +1,4 @@
-#include "karma/world/components/animator.h"
+#include "karma/components.h"
 
 #include <algorithm>
 
@@ -38,7 +38,7 @@ bool setAnimatorClip(AnimatorComponent& animator,
                      float blend_duration_seconds) {
   const auto it = std::find_if(animator.clips.begin(),
                                animator.clips.end(),
-                               [&](const animation::AnimationClip& clip) {
+                               [&](const world::AnimationClip& clip) {
                                  return clip.name == clip_name;
                                });
   if (it == animator.clips.end()) {
@@ -64,7 +64,7 @@ void stopAnimator(AnimatorComponent& animator) {
   animator.state_time_seconds = 0.0f;
   animator.transition = AnimatorTransitionRuntime{};
   animator.blend_active = false;
-  animator.root_motion_delta = animation::SampledTransform{};
+  animator.root_motion_delta = world::SampledTransform{};
 }
 
 AnimatorParameter* findAnimatorParameter(AnimatorComponent& animator, std::string_view name) {
@@ -131,9 +131,9 @@ bool resetAnimatorTrigger(AnimatorComponent& animator, std::string_view name) {
   return true;
 }
 
-animation::SampledTransform consumeRootMotionDelta(RootMotionComponent& root_motion) {
-  animation::SampledTransform out = root_motion.delta;
-  root_motion.delta = animation::SampledTransform{};
+world::SampledTransform consumeRootMotionDelta(RootMotionComponent& root_motion) {
+  world::SampledTransform out = root_motion.delta;
+  root_motion.delta = world::SampledTransform{};
   root_motion.has_unconsumed_delta = false;
   return out;
 }

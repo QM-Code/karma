@@ -11,9 +11,9 @@
 #include <string_view>
 #include <vector>
 
-#include "karma/content/assets/asset_package.h"
-#include "karma/content/assets/asset_registry.h"
-#include "karma/simulation/navigation/nav_geometry.h"
+#include "karma/assets.h"
+#include "karma/assets.h"
+#include "karma/navigation.h"
 
 namespace karma::demo {
 
@@ -33,7 +33,7 @@ struct TestCaseFile {
 
 struct MeshGeometry {
   std::filesystem::path path;
-  std::vector<geometry::MeshData> meshes;
+  std::vector<world::MeshData> meshes;
   navigation::NavMeshInputGeometry geometry;
 };
 
@@ -96,25 +96,25 @@ inline MeshGeometry loadMeshGeometry(std::string_view mesh_file) {
   logical.replace_extension();
   const std::string key =
       "examples/navigation/recast/" + logical.generic_string();
-  content::AssetRegistry assets;
+  assets::AssetRegistry assets;
   std::string diagnostic;
-  (void)content::importAssetPackage(
+  (void)assets::importAssetPackage(
       assets,
       recastAssetPath(
           (std::filesystem::path("mesh_packages") / logical).generic_string()),
       &diagnostic);
-  if (const geometry::MeshData* mesh = assets.findMeshAsset(key)) {
+  if (const world::MeshData* mesh = assets.findMeshAsset(key)) {
     out.meshes.push_back(*mesh);
   }
-  for (const geometry::MeshData& mesh : out.meshes) {
+  for (const world::MeshData& mesh : out.meshes) {
     navigation::appendGeometry(out.geometry, mesh);
   }
   return out;
 }
 
-inline geometry::MeshData combineMeshes(const std::vector<geometry::MeshData>& meshes) {
-  geometry::MeshData combined;
-  for (const geometry::MeshData& mesh : meshes) {
+inline world::MeshData combineMeshes(const std::vector<world::MeshData>& meshes) {
+  world::MeshData combined;
+  for (const world::MeshData& mesh : meshes) {
     const uint32_t base = static_cast<uint32_t>(combined.vertices.size());
     combined.vertices.insert(combined.vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
     combined.indices.reserve(combined.indices.size() + mesh.indices.size());

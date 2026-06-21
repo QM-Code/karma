@@ -25,7 +25,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 namespace {
 
 struct alignas(16) TerrainConstants {
@@ -411,7 +411,7 @@ float maxTransformScale(const glm::mat4& transform) {
 }
 
 std::vector<TerrainVertex> buildPatchVertices(
-    const renderer::TerrainDesc& desc,
+    const rendering::TerrainDesc& desc,
     uint32_t resolution) {
   const uint32_t step = std::max(desc.base_patch_size, 1u);
   const float inv = 1.0f / static_cast<float>(std::max(resolution - 1u, 1u));
@@ -446,8 +446,8 @@ std::vector<TerrainVertex> buildPatchVertices(
   return vertices;
 }
 
-void buildCpuMesh(const renderer::TerrainDesc& desc,
-                  const renderer::TerrainTileData& tile,
+void buildCpuMesh(const rendering::TerrainDesc& desc,
+                  const rendering::TerrainTileData& tile,
                   std::vector<TerrainVertex>& vertices,
                   std::vector<uint32_t>& indices,
                   float& out_min_height,
@@ -530,8 +530,8 @@ Diligent::TEXTURE_FORMAT textureViewFormat(Diligent::ITextureView* view,
 
 }  // namespace
 
-renderer::TerrainId DiligentBackend::createTerrain(const renderer::TerrainDesc& desc) {
-  const renderer::TerrainId id = nextTerrainId_++;
+rendering::TerrainId DiligentBackend::createTerrain(const rendering::TerrainDesc& desc) {
+  const rendering::TerrainId id = nextTerrainId_++;
   TerrainRecord record{};
   record.desc = desc;
   record.desc.tile_size = std::max(record.desc.tile_size, 0.001f);
@@ -545,8 +545,8 @@ renderer::TerrainId DiligentBackend::createTerrain(const renderer::TerrainDesc& 
   return id;
 }
 
-void DiligentBackend::destroyTerrain(renderer::TerrainId terrain) {
-  if (terrain == renderer::kInvalidTerrain) {
+void DiligentBackend::destroyTerrain(rendering::TerrainId terrain) {
+  if (terrain == rendering::kInvalidTerrain) {
     return;
   }
   terrains_.erase(terrain);
@@ -559,8 +559,8 @@ void DiligentBackend::destroyTerrain(renderer::TerrainId terrain) {
       terrain_submissions_.end());
 }
 
-void DiligentBackend::uploadTerrainTile(renderer::TerrainId terrain,
-                                        const renderer::TerrainTileData& tile) {
+void DiligentBackend::uploadTerrainTile(rendering::TerrainId terrain,
+                                        const rendering::TerrainTileData& tile) {
   auto terrain_it = terrains_.find(terrain);
   if (terrain_it == terrains_.end() || !tile.valid()) {
     return;
@@ -666,8 +666,8 @@ void DiligentBackend::uploadTerrainTile(renderer::TerrainId terrain,
 }
 
 void DiligentBackend::uploadTerrainMaterialLayer(
-    renderer::TerrainId terrain,
-    const renderer::TerrainMaterialLayerData& layer) {
+    rendering::TerrainId terrain,
+    const rendering::TerrainMaterialLayerData& layer) {
   auto terrain_it = terrains_.find(terrain);
   if (terrain_it == terrains_.end() || !layer.valid()) {
     return;
@@ -719,7 +719,7 @@ void DiligentBackend::uploadTerrainMaterialLayer(
   }
 }
 
-void DiligentBackend::clearTerrainMaterialLayers(renderer::TerrainId terrain) {
+void DiligentBackend::clearTerrainMaterialLayers(rendering::TerrainId terrain) {
   auto terrain_it = terrains_.find(terrain);
   if (terrain_it == terrains_.end()) {
     return;
@@ -734,8 +734,8 @@ void DiligentBackend::clearTerrainMaterialLayers(renderer::TerrainId terrain) {
   }
 }
 
-void DiligentBackend::evictTerrainTile(renderer::TerrainId terrain,
-                                       renderer::TerrainTileCoord coord) {
+void DiligentBackend::evictTerrainTile(rendering::TerrainId terrain,
+                                       rendering::TerrainTileCoord coord) {
   auto terrain_it = terrains_.find(terrain);
   if (terrain_it == terrains_.end()) {
     return;
@@ -744,9 +744,9 @@ void DiligentBackend::evictTerrainTile(renderer::TerrainId terrain,
   terrain_stats_.eviction_count += 1u;
 }
 
-void DiligentBackend::submitTerrain(const renderer::TerrainDrawItem& item) {
-  if (item.terrain == renderer::kInvalidTerrain ||
-      item.instance == renderer::kInvalidInstance ||
+void DiligentBackend::submitTerrain(const rendering::TerrainDrawItem& item) {
+  if (item.terrain == rendering::kInvalidTerrain ||
+      item.instance == rendering::kInvalidInstance ||
       terrains_.find(item.terrain) == terrains_.end()) {
     return;
   }
@@ -754,8 +754,8 @@ void DiligentBackend::submitTerrain(const renderer::TerrainDrawItem& item) {
   terrain_stats_.submitted_tiles += 1u;
 }
 
-renderer::TerrainCapabilities DiligentBackend::getTerrainCapabilities() const {
-  renderer::TerrainCapabilities caps{};
+rendering::TerrainCapabilities DiligentBackend::getTerrainCapabilities() const {
+  rendering::TerrainCapabilities caps{};
   caps.supported = true;
   caps.hardware_tessellation = terrainTessellationEnabled(device_);
   caps.cpu_fallback = true;
@@ -763,8 +763,8 @@ renderer::TerrainCapabilities DiligentBackend::getTerrainCapabilities() const {
   return caps;
 }
 
-renderer::TerrainStats DiligentBackend::getTerrainStats() const {
-  renderer::TerrainStats stats = terrain_stats_;
+rendering::TerrainStats DiligentBackend::getTerrainStats() const {
+  rendering::TerrainStats stats = terrain_stats_;
   stats.terrain_count = static_cast<uint32_t>(std::min<std::size_t>(
       terrains_.size(), std::numeric_limits<uint32_t>::max()));
   uint32_t resident_tiles = 0u;
@@ -1172,7 +1172,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
   return &pipelines;
 }
 
-Diligent::Uint32 DiligentBackend::renderTerrainLayer(renderer::LayerId layer,
+Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
                                                      const DrawConstants& base_constants,
                                                      const glm::mat4& view_proj,
                                                      bool is_gl,
@@ -1358,4 +1358,4 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(renderer::LayerId layer,
   return draw_count;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

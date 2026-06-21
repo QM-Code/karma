@@ -1,28 +1,28 @@
 #include "common/demo_asset_paths.h"
-#include "karma/world/ecs/world.h"
-#include "karma/world/scene/scene.h"
+#include "karma/world.h"
+#include "karma/world.h"
 
-#include "karma/world/components/audio_source.h"
-#include "karma/world/components/camera.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/environment.h"
-#include "karma/world/components/layers.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/rigidbody.h"
-#include "karma/world/components/tag.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/components/visibility.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
 
 namespace karma::demo {
 
 struct GameInitResult {
-  ecs::World world;
-  scene::Scene scene;
-  ecs::Entity player;
-  ecs::Entity camera;
+  world::World world;
+  world::Scene scene;
+  world::Entity player;
+  world::Entity camera;
 };
 
-GameInitResult BuildDemoScene(content::AssetRegistry& assets) {
+GameInitResult BuildDemoScene(assets::AssetRegistry& assets) {
   GameInitResult result{};
 
   // Player entity

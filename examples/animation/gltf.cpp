@@ -1,6 +1,6 @@
 #include "demo_asset_paths.h"
 #include "scene_helpers.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 #include "karma/karma.h"
 
 #include <algorithm>
@@ -17,7 +17,7 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
-#include "karma/core/math/glm.h"
+#include "karma/math.h"
 
 namespace karma::demo {
 
@@ -98,9 +98,9 @@ class GltfAnimationExample final : public app::GameInterface {
         display_name_(std::move(display_name)) {}
 
   void onStart() override {
-    input->bindKey("toggle_deformation_path", platform::Key::G, input::Trigger::Pressed);
+    input->bindKey("toggle_deformation_path", platform::Key::G, app::Trigger::Pressed);
 
-    const content::GltfSceneAsset* scene_asset =
+    const assets::GltfSceneAsset* scene_asset =
         assets->findGltfSceneAsset(scene_asset_key_);
     if (scene_asset == nullptr) {
       spdlog::error("Missing packaged animation scene '{}'", scene_asset_key_);
@@ -119,7 +119,7 @@ class GltfAnimationExample final : public app::GameInterface {
                  scene_asset->skeleton_keys.size(),
                  scene_asset->skin_keys.size());
     for (const std::string& clip_key : scene_asset->animation_clip_keys) {
-      if (const animation::AnimationClip* clip = assets->findAnimationClip(clip_key)) {
+      if (const world::AnimationClip* clip = assets->findAnimationClip(clip_key)) {
         spdlog::info("Animation clip '{}': {:.3f}s, {} transform channels, {} morph tracks",
                      clip->name,
                      clip->duration_seconds,
@@ -128,13 +128,13 @@ class GltfAnimationExample final : public app::GameInterface {
       }
     }
     if (!scene_asset->skin_keys.empty()) {
-      const animation::Skin* skin = assets->findSkin(scene_asset->skin_keys.front());
+      const world::Skin* skin = assets->findSkin(scene_asset->skin_keys.front());
       spdlog::info("Skin '{}': {} joints",
                    skin != nullptr ? skin->name : scene_asset->skin_keys.front(),
                    skin != nullptr ? skin->joint_node_indices.size() : 0u);
     }
     root_motion_node_index_ = defaultRootMotionNodeIndex(*scene_asset);
-    root_motion_node_index_ui_ = root_motion_node_index_ == animation::kInvalidAnimationIndex
+    root_motion_node_index_ui_ = root_motion_node_index_ == world::kInvalidAnimationIndex
                                      ? -1
                                      : static_cast<int>(root_motion_node_index_);
 
@@ -143,12 +143,12 @@ class GltfAnimationExample final : public app::GameInterface {
     bounds_ = SceneBounds{.min = asset_bounds.min,
                           .max = asset_bounds.max,
                           .valid = asset_bounds.valid};
-    const scene::GltfSceneImportResult imported = scene::instantiateGltfSceneAsset(
+    const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
         *world,
         *scene,
         *assets,
         *scene_asset,
-        scene::GltfSceneInstantiateOptions{
+        world::GltfSceneInstantiateOptions{
             .create_synthetic_root = false,
             .autoplay_animations = true,
         });
@@ -175,7 +175,7 @@ class GltfAnimationExample final : public app::GameInterface {
                                   });
         clip_names_.clear();
         clip_names_.reserve(animator.clips.size());
-        for (const animation::AnimationClip& clip : animator.clips) {
+        for (const world::AnimationClip& clip : animator.clips) {
           clip_names_.push_back(clip.name.empty() ? std::string("Animation") : clip.name);
         }
         if (!animator.clips.empty()) {
@@ -235,9 +235,9 @@ class GltfAnimationExample final : public app::GameInterface {
   }
 
  private:
-  uint32_t defaultRootMotionNodeIndex(const content::GltfSceneAsset& scene_asset) const {
+  uint32_t defaultRootMotionNodeIndex(const assets::GltfSceneAsset& scene_asset) const {
     for (const std::string& skeleton_key : scene_asset.skeleton_keys) {
-      const animation::Skeleton* skeleton = assets->findSkeleton(skeleton_key);
+      const world::Skeleton* skeleton = assets->findSkeleton(skeleton_key);
       if (skeleton != nullptr && !skeleton->root_joint_indices.empty()) {
         const uint32_t joint_index = skeleton->root_joint_indices.front();
         if (joint_index < skeleton->joints.size()) {
@@ -246,7 +246,7 @@ class GltfAnimationExample final : public app::GameInterface {
       }
     }
     for (const std::string& skin_key : scene_asset.skin_keys) {
-      const animation::Skin* skin = assets->findSkin(skin_key);
+      const world::Skin* skin = assets->findSkin(skin_key);
       if (skin != nullptr && !skin->joint_node_indices.empty()) {
         return skin->joint_node_indices.front();
       }
@@ -443,7 +443,7 @@ class GltfAnimationExample final : public app::GameInterface {
     }
     if (ImGui::InputInt("Root Node", &root_motion_node_index_ui_)) {
       root_motion_node_index_ = root_motion_node_index_ui_ < 0
-                                    ? animation::kInvalidAnimationIndex
+                                    ? world::kInvalidAnimationIndex
                                     : static_cast<uint32_t>(root_motion_node_index_ui_);
       animator.root_motion_node_index = root_motion_node_index_;
       if (components::RootMotionComponent* root_motion = liveRootMotion()) {
@@ -475,7 +475,7 @@ class GltfAnimationExample final : public app::GameInterface {
       }
     }
     if (graphics != nullptr) {
-      const renderer::DeformationStats stats = graphics->getDeformationStats();
+      const rendering::DeformationStats stats = graphics->getDeformationStats();
       ImGui::Text("Deformations: %u", stats.resource_count);
       ImGui::Text("Joints: %u  Morph Weights: %u",
                   stats.joint_matrix_count,
@@ -498,7 +498,7 @@ class GltfAnimationExample final : public app::GameInterface {
       assets->registerMeshAsset(mesh_key, helpers::makeBoxMesh(half_extents));
     }
     if (assets != nullptr) {
-      renderer::MaterialDesc material;
+      rendering::MaterialDesc material;
       material.base_color = math::Color{0.16f, 0.18f, 0.18f, 1.0f};
       material.roughness = 0.82f;
       material.metallic = 0.0f;
@@ -575,7 +575,7 @@ class GltfAnimationExample final : public app::GameInterface {
   }
 
   void setImportedDeformationPath(components::DeformationPath path) {
-    for (const ecs::Entity entity : imported_entities_) {
+    for (const world::Entity entity : imported_entities_) {
       if (!world->isAlive(entity) || !world->has<components::DeformableMeshComponent>(entity)) {
         continue;
       }
@@ -593,8 +593,8 @@ class GltfAnimationExample final : public app::GameInterface {
 
   std::string scene_asset_key_;
   std::string display_name_;
-  ecs::Entity imported_root_{};
-  std::vector<ecs::Entity> imported_entities_;
+  world::Entity imported_root_{};
+  std::vector<world::Entity> imported_entities_;
   std::vector<std::string> clip_names_;
   SceneBounds bounds_{};
   size_t selected_clip_index_ = 0;
@@ -603,7 +603,7 @@ class GltfAnimationExample final : public app::GameInterface {
   float auto_cycle_interval_seconds_ = 3.0f;
   float auto_cycle_elapsed_seconds_ = 0.0f;
   components::RootMotionMode root_motion_mode_ = components::RootMotionMode::Disabled;
-  uint32_t root_motion_node_index_ = animation::kInvalidAnimationIndex;
+  uint32_t root_motion_node_index_ = world::kInvalidAnimationIndex;
   int root_motion_node_index_ui_ = -1;
   bool use_gpu_deformation_ = true;
   bool loop_ = true;
@@ -631,7 +631,7 @@ int main(int argc, char** argv) {
 
   karma::app::EngineApp engine;
   karma::demo::GltfAnimationExample game(scene_asset_key, display_name);
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [&game](karma::app::UIContext& ctx) { game.drawUi(ctx); }));
 
   karma::app::EngineConfig config;

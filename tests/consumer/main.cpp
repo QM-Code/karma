@@ -13,10 +13,10 @@ int main() {
     return 1;
   }
 
-  karma::content::AssetRegistry assets;
+  karma::assets::AssetRegistry assets;
   std::string diagnostic;
   const auto package =
-      karma::content::importAssetPackage(assets,
+      karma::assets::importAssetPackage(assets,
                                          "karma_consumer_smoke_missing",
                                          &diagnostic);
   return package.has_value() ? 2 : 0;

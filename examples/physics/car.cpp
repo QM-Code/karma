@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "physics_example_common.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 
 #include <imgui.h>
 
@@ -254,8 +254,8 @@ class CarGame final : public app::GameInterface {
     input->bindKey("car_brake", platform::Key::LeftShift);
     input->bindKey("car_brake", platform::Key::RightShift);
     input->bindKey("car_handbrake", platform::Key::Space);
-    input->bindKey("car_reset", platform::Key::R, input::Trigger::Pressed);
-    input->bindKey("car_upright", platform::Key::F, input::Trigger::Pressed);
+    input->bindKey("car_reset", platform::Key::R, app::Trigger::Pressed);
+    input->bindKey("car_upright", platform::Key::F, app::Trigger::Pressed);
   }
 
   physics::PhysicsShapeDesc chassisShape() const {
@@ -674,7 +674,7 @@ int main() {
   auto state = std::make_shared<karma::demo::physics_examples::CarState>();
   karma::demo::physics_examples::CarGame game(state);
   auto ui = std::make_shared<karma::demo::physics_examples::CarUi>(state);
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [ui](karma::app::UIContext& ctx) { ui->draw(ctx); }));
 
   karma::app::EngineConfig config;

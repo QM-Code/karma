@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 void DiligentBackend::ensurePostProcessResources(int width,
                                                  int height,
@@ -178,4 +178,4 @@ void DiligentBackend::ensurePostProcessResources(int width,
   post_process_format_ = format;
 }
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

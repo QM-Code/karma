@@ -2,9 +2,9 @@
 
 #include <algorithm>
 
-namespace karma::renderer_backend::post_process {
+namespace karma::rendering::backend::post_process {
 
-bool hasActiveEffect(const renderer::PostProcessSettings& settings) {
+bool hasActiveEffect(const rendering::PostProcessSettings& settings) {
   return settings.enabled &&
          (settings.bloom_enabled ||
           settings.tone_mapping_enabled ||
@@ -28,8 +28,8 @@ bool passReady(const PostProcessPassResources& pass) {
   return pass.pso && pass.srb;
 }
 
-PostProcessConstants makeConstants(const renderer::PostProcessSettings& settings,
-                                   const renderer::CameraData& camera,
+PostProcessConstants makeConstants(const rendering::PostProcessSettings& settings,
+                                   const rendering::CameraData& camera,
                                    int width,
                                    int height,
                                    bool history_valid,
@@ -76,4 +76,4 @@ PostProcessConstants makeConstants(const renderer::PostProcessSettings& settings
   return constants;
 }
 
-}  // namespace karma::renderer_backend::post_process
+}  // namespace karma::rendering::backend::post_process

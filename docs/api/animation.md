@@ -10,7 +10,7 @@ commands, and retargeting notes, see `docs/ANIMATION_V2.md`.
 
 Package `gltf_scene` entries import glTF nodes, transforms, skins, skeletons,
 animation clips, and mesh primitive data into a registered
-`karma::content::GltfSceneAsset` plus child assets. `instantiateGltfSceneAsset(...)`
+`karma::assets::GltfSceneAsset` plus child assets. `instantiateGltfSceneAsset(...)`
 creates ECS entities for the node tree and separate child entities for renderable
 mesh primitives.
 
@@ -24,7 +24,7 @@ Imported roots receive `karma::components::AnimatorComponent` when clips are
 available. The animator stores the imported clips, node entity map, and
 node-to-morph-primitive map needed for runtime sampling.
 
-Imported animation clips are plain `karma::animation::AnimationClip` values.
+Imported animation clips are plain `karma::world::AnimationClip` values.
 They are resolved from the registry keys stored on `GltfSceneAsset` and copied
 into `AnimatorComponent::clips`; they do not retain file handles, renderer
 handles, or mesh ownership. They remain authored in the imported node/skeleton
@@ -34,14 +34,14 @@ index space until retargeted.
 
 The engine-owned frame order is:
 
-1. `karma::animation::AnimationSystem` samples clips and writes local transforms
+1. `karma::world::AnimationSystem` samples clips and writes local transforms
    plus morph weights.
-2. `karma::scene::updateWorldTransforms(...)` composes local transforms into
+2. `karma::world::updateWorldTransforms(...)` composes local transforms into
    final world `TransformComponent` values.
-3. `karma::animation::DeformationSystem` builds joint palettes, updates
+3. `karma::world::DeformationSystem` builds joint palettes, updates
    renderer-owned deformation resources, and uploads CPU-deformed meshes only
    when the CPU reference path is explicitly selected.
-4. `karma::renderer::RenderSystem` submits visible meshes and deformation
+4. `karma::rendering::RenderSystem` submits visible meshes and deformation
    resource handles to the renderer.
 
 The animation system is renderer-agnostic. It writes ECS data only. Mesh buffer
@@ -50,17 +50,17 @@ updates are isolated to the deformation upload stage.
 ## Deformation
 
 Imported skinned and morphed meshes use GPU deformation by default. The
-renderer consumes the bind mesh plus a `karma::renderer::DeformationId` that
+renderer consumes the bind mesh plus a `karma::rendering::DeformationId` that
 references joint palette and morph-weight resources owned by the backend.
 
-CPU skinning remains available through `karma::animation::skinMesh(...)` and
-CPU morphing through `karma::animation::morphMesh(...)`. Runtime CPU mesh
+CPU skinning remains available through `karma::world::skinMesh(...)` and
+CPU morphing through `karma::world::morphMesh(...)`. Runtime CPU mesh
 uploads are selected with `karma::components::DeformationPath::CpuReference`
 and are intended for tests and diagnostics.
 
 ## Morph Targets
 
-Morph target deltas are stored on `karma::geometry::MeshData`. Runtime weights
+Morph target deltas are stored on `karma::world::MeshData`. Runtime weights
 live on `karma::components::DeformableMeshComponent`.
 
 `AnimationSystem` samples glTF `weights` channels into morph components. If the
@@ -74,7 +74,7 @@ a reference path for validation and diagnostics.
 ## Retargeting
 
 Karma supports explicit skeleton retargeting through
-`karma::animation::SkeletonMap`, `SkeletonMapEntry`, `RetargetOptions`,
+`karma::world::SkeletonMap`, `SkeletonMapEntry`, `RetargetOptions`,
 `validateSkeletonMap(...)`, and `retargetClip(...)`.
 
 Retargeting converts a source clip from the source skeleton's joint/node index

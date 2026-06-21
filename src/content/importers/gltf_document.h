@@ -11,7 +11,7 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
-namespace karma::scene {
+namespace karma::world {
 
 using Json = nlohmann::json;
 
@@ -52,4 +52,4 @@ std::unordered_map<uint32_t, uint32_t> buildGltfNodeToPrefabIndex(
     const GltfDocument& doc,
     const std::unordered_map<std::string, uint32_t>& node_indices_by_name);
 
-}  // namespace karma::scene
+}  // namespace karma::world

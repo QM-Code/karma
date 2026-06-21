@@ -1,5 +1,5 @@
-#include "karma/simulation/physics/backends/jolt/rigid_body_jolt.hpp"
-#include "karma/simulation/physics/backends/jolt/physics_world_jolt.hpp"
+#include "private/physics/backends/jolt/rigid_body_jolt.hpp"
+#include "private/physics/backends/jolt/physics_world_jolt.hpp"
 #include "shape_factory.h"
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -31,7 +31,7 @@ EMotionQuality toJph(karma::physics::PhysicsMotionQuality quality) {
 }
 }
 
-namespace karma::physics_backend {
+namespace karma::physics::backend {
 
 PhysicsRigidBodyJolt::PhysicsRigidBodyJolt(PhysicsWorldJolt* world, const BodyID& bodyId)
     : world_(world), body_(bodyId) {}
@@ -341,4 +341,4 @@ std::uintptr_t PhysicsRigidBodyJolt::nativeHandle() const {
     return body_.has_value() ? static_cast<std::uintptr_t>(body_->GetIndexAndSequenceNumber()) : 0;
 }
 
-} // namespace karma::physics_backend
+} // namespace karma::physics::backend

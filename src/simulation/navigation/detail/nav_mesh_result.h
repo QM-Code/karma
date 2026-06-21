@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 
-#include "karma/simulation/navigation/nav_mesh.h"
+#include "karma/navigation.h"
 
 namespace karma::navigation::detail {
 

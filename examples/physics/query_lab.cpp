@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "physics_example_common.h"
-#include "karma/features/ui/imgui/imgui_layer.h"
+#include "karma/ui.h"
 
 #include <imgui.h>
 
@@ -285,7 +285,7 @@ class QueryLabGame final : public app::GameInterface {
     entities_.push_back(entity);
   }
 
-  void addFilter(ecs::Entity entity, uint32_t layer) {
+  void addFilter(world::Entity entity, uint32_t layer) {
     components::PhysicsCollisionFilterComponent filter{};
     filter.layers = layer;
     filter.collides_with = 0xFFFFFFFFu;
@@ -353,7 +353,7 @@ class QueryLabGame final : public app::GameInterface {
 
   void drawScene() {
     drawReference(*graphics, 22.0f);
-    for (ecs::Entity entity : entities_) {
+    for (world::Entity entity : entities_) {
       if (!world->isAlive(entity)) {
         continue;
       }
@@ -394,7 +394,7 @@ class QueryLabGame final : public app::GameInterface {
 
   std::shared_ptr<QueryState> state_;
   CameraRig camera_{};
-  std::vector<ecs::Entity> entities_;
+  std::vector<world::Entity> entities_;
 };
 
 }  // namespace
@@ -406,7 +406,7 @@ int main() {
   auto state = std::make_shared<karma::demo::physics_examples::QueryState>();
   karma::demo::physics_examples::QueryLabGame game(state);
   auto ui = std::make_shared<karma::demo::physics_examples::QueryUi>(state);
-  engine.setUi(karma::imgui::createUiLayer(
+  engine.setUi(karma::ui::imgui::createUiLayer(
       [ui](karma::app::UIContext& ctx) { ui->draw(ctx); }));
 
   karma::app::EngineConfig config;

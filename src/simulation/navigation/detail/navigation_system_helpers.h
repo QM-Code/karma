@@ -2,25 +2,25 @@
 
 #include <cstdint>
 
-#include "karma/core/math/types.h"
-#include "karma/simulation/navigation/nav_types.h"
-#include "karma/world/components/nav_crowd.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/nav_mesh_agent.h"
-#include "karma/world/components/nav_tile_cache.h"
-#include "karma/world/ecs/entity.h"
+#include "karma/math.h"
+#include "karma/navigation.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
-namespace karma::ecs {
+namespace karma::world {
 class World;
 }
 
-namespace karma::content {
+namespace karma::assets {
 class AssetRegistry;
 }
 
 namespace karma::navigation::detail {
 
-uint64_t entityKey(ecs::Entity entity);
+uint64_t entityKey(world::Entity entity);
 void incrementBuildVersion(components::NavMeshComponent& nav_mesh);
 
 math::Vec3 navSpacePosition(const math::Vec3& world_position,
@@ -33,18 +33,18 @@ bool hasActivePath(const components::NavMeshAgentComponent& agent);
 void failPathRequest(components::NavMeshAgentComponent& agent, NavStatus status);
 
 struct NavMeshSelection {
-  ecs::Entity entity{};
+  world::Entity entity{};
   components::NavMeshComponent* component = nullptr;
 };
 
 struct TileCacheSelection {
-  ecs::Entity entity{};
+  world::Entity entity{};
   components::NavMeshComponent* nav_mesh = nullptr;
   components::NavTileCacheComponent* tile_cache = nullptr;
 };
 
 struct CrowdSelection {
-  ecs::Entity entity{};
+  world::Entity entity{};
   components::NavMeshComponent* nav_mesh = nullptr;
   components::NavCrowdComponent* crowd = nullptr;
 };
@@ -55,16 +55,16 @@ bool tileCacheUsable(const components::NavMeshComponent& nav_mesh,
 bool crowdUsable(const components::NavMeshComponent& nav_mesh,
                  const components::NavCrowdComponent& crowd);
 
-NavMeshSelection findNavMesh(ecs::World& world, ecs::Entity preferred);
-CrowdSelection findCrowd(ecs::World& world, ecs::Entity preferred);
-TileCacheSelection findTileCache(ecs::World& world, ecs::Entity preferred);
+NavMeshSelection findNavMesh(world::World& world, world::Entity preferred);
+CrowdSelection findCrowd(world::World& world, world::Entity preferred);
+TileCacheSelection findTileCache(world::World& world, world::Entity preferred);
 
 math::Vec3 addVec3(const math::Vec3& a, const math::Vec3& b);
 math::Vec3 scaledByAbs(const math::Vec3& value, const math::Vec3& scale);
 float horizontalScale(const math::Vec3& scale);
 
-void invalidateObstacleRefsForCache(ecs::World& world, ecs::Entity nav_mesh_entity);
-void invalidateCrowdAgentsForCrowd(ecs::World& world, ecs::Entity crowd_entity);
+void invalidateObstacleRefsForCache(world::World& world, world::Entity nav_mesh_entity);
+void invalidateCrowdAgentsForCrowd(world::World& world, world::Entity crowd_entity);
 
 math::Vec3 crowdSpacePosition(const math::Vec3& world_position,
                               const components::NavCrowdAgentComponent& agent);
@@ -72,9 +72,9 @@ math::Vec3 crowdWorldPosition(const math::Vec3& crowd_position,
                               const components::NavCrowdAgentComponent& agent);
 float horizontalDistance(const math::Vec3& a, const math::Vec3& b);
 
-void rebuildNavMeshes(ecs::World& world, const content::AssetRegistry* assets);
-void syncTileCaches(ecs::World& world, float dt);
-void syncCrowds(ecs::World& world, float dt);
-void moveAgents(ecs::World& world, float dt);
+void rebuildNavMeshes(world::World& world, const assets::AssetRegistry* assets);
+void syncTileCaches(world::World& world, float dt);
+void syncCrowds(world::World& world, float dt);
+void moveAgents(world::World& world, float dt);
 
 }  // namespace karma::navigation::detail

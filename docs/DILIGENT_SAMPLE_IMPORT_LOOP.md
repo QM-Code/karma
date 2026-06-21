@@ -33,18 +33,10 @@ API, backend support, documentation, and verification.
 
 Route new work by ownership, not by where the Diligent sample placed it:
 
-- Renderer-facing data contracts: `include/karma/rendering/renderer/...`
-- Renderer implementation: `src/rendering/renderer/...`
-- Diligent backend implementation:
-  `src/rendering/renderer/backends/diligent/...`
-- ECS data consumed by rendering: `include/karma/world/components/...`
-- Asset loading and imported asset metadata: `include/karma/content/...` and
-  `src/content/...`
-- Optional visual systems built on rendering/world data:
-  `include/karma/features/visual/...` and `src/features/visual/...`
-- UI provider bridges: `include/karma/features/ui/<provider>` and
-  `src/features/ui/<provider>`
-- Runtime composition only: `include/karma/runtime/...` and `src/runtime/...`
+- Renderer-facing data contracts: `include/karma/rendering.h`
+- UI provider adapters: `src/features/ui/<provider>`, with public factories in
+  `include/karma/ui.h`
+- Runtime composition only: `include/karma/app.h` and `src/runtime/...`
 
 When in doubt, add the smallest public data contract in the lower layer and let
 `runtime` wire systems together.

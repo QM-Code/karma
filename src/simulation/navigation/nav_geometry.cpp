@@ -1,4 +1,4 @@
-#include "karma/simulation/navigation/nav_geometry.h"
+#include "karma/navigation.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -12,13 +12,13 @@
 
 #include <spdlog/spdlog.h>
 
-#include "karma/content/assets/asset_registry.h"
-#include "karma/core/math/glm.h"
-#include "karma/world/components/collider.h"
-#include "karma/world/components/mesh.h"
-#include "karma/world/components/nav_mesh.h"
-#include "karma/world/components/transform.h"
-#include "karma/world/ecs/world.h"
+#include "karma/assets.h"
+#include "karma/math.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/components.h"
+#include "karma/world.h"
 
 namespace karma::navigation {
 namespace {
@@ -69,10 +69,10 @@ void appendMesh(NavMeshInputGeometry& out,
 }
 
 void appendOffMeshLinks(NavMeshInputGeometry& geometry,
-                        const ecs::World& world,
+                        const world::World& world,
                         uint32_t source_mask) {
   world.forEach<components::NavOffMeshLinkComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
         const auto& link = world.get<components::NavOffMeshLinkComponent>(entity);
         if (!link.enabled || (link.layer_mask & source_mask) == 0u) {
           return;
@@ -104,10 +104,10 @@ void appendOffMeshLinks(NavMeshInputGeometry& geometry,
 }
 
 void appendConvexVolumes(NavMeshInputGeometry& geometry,
-                         const ecs::World& world,
+                         const world::World& world,
                          uint32_t source_mask) {
   world.forEach<components::NavConvexVolumeComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
         const auto& volume = world.get<components::NavConvexVolumeComponent>(entity);
         if (!volume.enabled ||
             volume.vertices.size() < 3 ||
@@ -140,7 +140,7 @@ void appendConvexVolumes(NavMeshInputGeometry& geometry,
 }  // namespace
 
 void appendGeometry(NavMeshInputGeometry& out,
-                    const geometry::MeshData& mesh,
+                    const world::MeshData& mesh,
                     const math::Vec3& position,
                     const math::Quat& rotation,
                     const math::Vec3& scale,
@@ -148,17 +148,17 @@ void appendGeometry(NavMeshInputGeometry& out,
   appendMesh(out, mesh, makeTransform(position, rotation, scale), area);
 }
 
-NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world, uint32_t source_mask) {
+NavMeshInputGeometry collectNavMeshGeometry(const world::World& world, uint32_t source_mask) {
   return collectNavMeshGeometry(world, nullptr, source_mask);
 }
 
-NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
-                                            const content::AssetRegistry* assets,
+NavMeshInputGeometry collectNavMeshGeometry(const world::World& world,
+                                            const assets::AssetRegistry* assets,
                                             uint32_t source_mask) {
   NavMeshInputGeometry geometry;
   bool has_explicit_surfaces = false;
   world.forEach<components::NavMeshSurfaceComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
         const auto& surface = world.get<components::NavMeshSurfaceComponent>(entity);
         if (!surface.enabled || (surface.layer_mask & source_mask) == 0u) {
           return;
@@ -176,7 +176,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
         }
 
         if (!surface.mesh_asset_key.empty()) {
-          if (const geometry::MeshData* mesh =
+          if (const world::MeshData* mesh =
                   assets != nullptr ? assets->findMeshAsset(surface.mesh_asset_key) : nullptr) {
             appendMesh(geometry, *mesh, world_transform, area);
           } else {
@@ -193,7 +193,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
   }
 
   world.forEach<components::ColliderComponent, components::MeshComponent, components::TransformComponent>(
-      [&](const ecs::Entity entity) {
+      [&](const world::Entity entity) {
         const auto& collider = world.get<components::ColliderComponent>(entity);
         const auto* mesh_shape = std::get_if<components::MeshColliderShape>(&collider.shape);
         if (mesh_shape == nullptr) {
@@ -214,7 +214,7 @@ NavMeshInputGeometry collectNavMeshGeometry(const ecs::World& world,
             !mesh_shape->mesh_asset_key.empty() ? std::string_view(mesh_shape->mesh_asset_key)
                                                 : std::string_view(mesh_component.mesh_asset_key);
         if (!mesh_asset_key.empty()) {
-          if (const geometry::MeshData* mesh =
+          if (const world::MeshData* mesh =
                   assets != nullptr ? assets->findMeshAsset(mesh_asset_key) : nullptr) {
             appendMesh(geometry, *mesh, world_transform, kNavAreaDefault);
           } else {

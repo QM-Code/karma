@@ -1,7 +1,7 @@
 #pragma once
 
-#include "karma/core/time.h"
-#include "karma/rendering/renderer/backend.hpp"
+#include "karma/core.h"
+#include "private/rendering/backend.hpp"
 
 #include "passes/pass_shared.h"
 
@@ -43,7 +43,7 @@ struct aiScene;
 struct aiString;
 struct aiMaterial;
 
-namespace karma::renderer_backend {
+namespace karma::rendering::backend {
 
 struct DrawConstants;
 
@@ -79,76 +79,76 @@ enum class MaterialPipelineKind : uint32_t {
 class DiligentBackend final : public Backend {
  public:
 	  explicit DiligentBackend(karma::platform::Window& window,
-	                           const renderer::GraphicsDeviceCreateInfo& create_info = {});
+	                           const rendering::GraphicsDeviceCreateInfo& create_info = {});
   ~DiligentBackend() override;
 
-  void beginFrame(const renderer::FrameInfo& frame) override;
+  void beginFrame(const rendering::FrameInfo& frame) override;
   void endFrame() override;
   void resize(int width, int height) override;
   void prewarmRendererResources(bool include_ui) override;
   void flushRenderStateCache() override;
 
-  renderer::MeshId createMesh(const geometry::MeshData& mesh) override;
-  void updateMesh(renderer::MeshId mesh, const geometry::MeshData& data) override;
-  void destroyMesh(renderer::MeshId mesh) override;
-  bool getMeshBounds(renderer::MeshId mesh, glm::vec3& center, float& radius) const override;
-  bool getMeshMaterialSlots(renderer::MeshId mesh,
-                            std::vector<geometry::MeshMaterialSlot>& out_slots) const override;
+  rendering::MeshId createMesh(const world::MeshData& mesh) override;
+  void updateMesh(rendering::MeshId mesh, const world::MeshData& data) override;
+  void destroyMesh(rendering::MeshId mesh) override;
+  bool getMeshBounds(rendering::MeshId mesh, glm::vec3& center, float& radius) const override;
+  bool getMeshMaterialSlots(rendering::MeshId mesh,
+                            std::vector<world::MeshMaterialSlot>& out_slots) const override;
 
-  renderer::MaterialId createMaterial(const renderer::ResolvedMaterialDesc& material) override;
-  renderer::MaterialId createMaterialFromAsset(const std::filesystem::path& path,
+  rendering::MaterialId createMaterial(const rendering::ResolvedMaterialDesc& material) override;
+  rendering::MaterialId createMaterialFromAsset(const std::filesystem::path& path,
                                                uint32_t material_index) override;
-  void updateMaterial(renderer::MaterialId material, const renderer::MaterialDesc& desc) override;
-  void destroyMaterial(renderer::MaterialId material) override;
-  void setMaterialFloat(renderer::MaterialId material, std::string_view name, float value) override;
+  void updateMaterial(rendering::MaterialId material, const rendering::MaterialDesc& desc) override;
+  void destroyMaterial(rendering::MaterialId material) override;
+  void setMaterialFloat(rendering::MaterialId material, std::string_view name, float value) override;
 
-  renderer::TextureId createTexture(const renderer::TextureDesc& desc) override;
-  bool supportsTextureFormat(renderer::TextureFormat format) const override;
-  bool uploadTexture(renderer::TextureId texture,
-                     const renderer::TextureUploadData& upload) override;
-  void destroyTexture(renderer::TextureId texture) override;
+  rendering::TextureId createTexture(const rendering::TextureDesc& desc) override;
+  bool supportsTextureFormat(rendering::TextureFormat format) const override;
+  bool uploadTexture(rendering::TextureId texture,
+                     const rendering::TextureUploadData& upload) override;
+  void destroyTexture(rendering::TextureId texture) override;
 
-  renderer::RenderTargetId createRenderTarget(const renderer::RenderTargetDesc& desc) override;
-  void destroyRenderTarget(renderer::RenderTargetId target) override;
+  rendering::RenderTargetId createRenderTarget(const rendering::RenderTargetDesc& desc) override;
+  void destroyRenderTarget(rendering::RenderTargetId target) override;
 
-  renderer::TerrainId createTerrain(const renderer::TerrainDesc& desc) override;
-  void destroyTerrain(renderer::TerrainId terrain) override;
-  void uploadTerrainTile(renderer::TerrainId terrain,
-                         const renderer::TerrainTileData& tile) override;
-  void uploadTerrainMaterialLayer(renderer::TerrainId terrain,
-                                  const renderer::TerrainMaterialLayerData& layer) override;
-  void clearTerrainMaterialLayers(renderer::TerrainId terrain) override;
-  void evictTerrainTile(renderer::TerrainId terrain,
-                        renderer::TerrainTileCoord coord) override;
-  void submitTerrain(const renderer::TerrainDrawItem& item) override;
-  renderer::TerrainCapabilities getTerrainCapabilities() const override;
-  renderer::TerrainStats getTerrainStats() const override;
+  rendering::TerrainId createTerrain(const rendering::TerrainDesc& desc) override;
+  void destroyTerrain(rendering::TerrainId terrain) override;
+  void uploadTerrainTile(rendering::TerrainId terrain,
+                         const rendering::TerrainTileData& tile) override;
+  void uploadTerrainMaterialLayer(rendering::TerrainId terrain,
+                                  const rendering::TerrainMaterialLayerData& layer) override;
+  void clearTerrainMaterialLayers(rendering::TerrainId terrain) override;
+  void evictTerrainTile(rendering::TerrainId terrain,
+                        rendering::TerrainTileCoord coord) override;
+  void submitTerrain(const rendering::TerrainDrawItem& item) override;
+  rendering::TerrainCapabilities getTerrainCapabilities() const override;
+  rendering::TerrainStats getTerrainStats() const override;
 
-  renderer::DeformationId createDeformation(const renderer::DeformationDesc& desc) override;
-  void updateDeformation(renderer::DeformationId deformation,
-                         const renderer::DeformationDesc& desc) override;
-  void destroyDeformation(renderer::DeformationId deformation) override;
-  renderer::DeformationStats getDeformationStats() const override;
+  rendering::DeformationId createDeformation(const rendering::DeformationDesc& desc) override;
+  void updateDeformation(rendering::DeformationId deformation,
+                         const rendering::DeformationDesc& desc) override;
+  void destroyDeformation(rendering::DeformationId deformation) override;
+  rendering::DeformationStats getDeformationStats() const override;
 
-  void submit(const renderer::DrawItem& item) override;
-  void submitInstanced(const renderer::InstancedDrawItem& item) override;
-  void submitParticles(renderer::ParticleBatch batch) override;
-  void submitPackedParticles(renderer::PackedParticleBatch batch) override;
-  void submitParticleEmitter(const renderer::ParticleEmitterGpuDesc& emitter) override;
-  void setParticleSystemStats(const renderer::ParticlePassStats& stats) override;
-  void retireInstance(renderer::InstanceId instance) override;
-  void renderLayer(renderer::LayerId layer,
-                   renderer::RenderTargetId target,
-                   const renderer::PostProcessSettings& post_process) override;
+  void submit(const rendering::DrawItem& item) override;
+  void submitInstanced(const rendering::InstancedDrawItem& item) override;
+  void submitParticles(rendering::ParticleBatch batch) override;
+  void submitPackedParticles(rendering::PackedParticleBatch batch) override;
+  void submitParticleEmitter(const rendering::ParticleEmitterGpuDesc& emitter) override;
+  void setParticleSystemStats(const rendering::ParticlePassStats& stats) override;
+  void retireInstance(rendering::InstanceId instance) override;
+  void renderLayer(rendering::LayerId layer,
+                   rendering::RenderTargetId target,
+                   const rendering::PostProcessSettings& post_process) override;
   void drawLine(const math::Vec3& start, const math::Vec3& end,
                 const math::Color& color, bool depth_test, float thickness) override;
 
-  unsigned int getRenderTargetTextureId(renderer::RenderTargetId target) const override;
+  unsigned int getRenderTargetTextureId(rendering::RenderTargetId target) const override;
 
-  void setCamera(const renderer::CameraData& camera) override;
+  void setCamera(const rendering::CameraData& camera) override;
   void setCameraActive(bool active) override;
-  void setDirectionalLight(const renderer::DirectionalLightData& light) override;
-  void setLights(const std::vector<renderer::LightData>& lights) override;
+  void setDirectionalLight(const rendering::DirectionalLightData& light) override;
+  void setLights(const std::vector<rendering::LightData>& lights) override;
   void setEnvironmentMap(const std::filesystem::path& path, float intensity,
                          bool draw_skybox) override;
   void setVsync(bool enabled) override;
@@ -157,13 +157,13 @@ class DiligentBackend final : public Backend {
   void setForwardPlusSettings(int tile_size,
                               int max_lights_per_tile,
                               int max_local_lights) override;
-  renderer::ForwardPlusStats getForwardPlusStats() const override;
+  rendering::ForwardPlusStats getForwardPlusStats() const override;
   void setInstancingCpuTimings(float render_system_extraction_ms,
                                float forward_state_collection_ms) override;
-  renderer::InstancingStats getInstancingStats() const override;
-  renderer::ParticlePassStats getParticlePassStats() const override;
-  renderer::RendererCommandStats getRendererCommandStats() const override;
-  renderer::RendererFrameTimingStats getRendererFrameTimingStats() const override;
+  rendering::InstancingStats getInstancingStats() const override;
+  rendering::ParticlePassStats getParticlePassStats() const override;
+  rendering::RendererCommandStats getRendererCommandStats() const override;
+  rendering::RendererFrameTimingStats getRendererFrameTimingStats() const override;
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,
@@ -181,8 +181,8 @@ class DiligentBackend final : public Backend {
                                 bool ao_affects_local_lights,
                                 float directional_shadow_lift_strength) override;
   void setExposure(float exposure) override;
-  void updateTextureRGBA8(renderer::TextureId texture, int w, int h, const void* pixels) override;
-  void renderUi(const karma::renderer::UIDrawData& draw_data) override;
+  void updateTextureRGBA8(rendering::TextureId texture, int w, int h, const void* pixels) override;
+  void renderUi(const karma::rendering::UIDrawData& draw_data) override;
 
   Diligent::IRenderDevice* getDevice() const { return device_; }
   Diligent::IDeviceContext* getContext() const { return context_; }
@@ -190,7 +190,7 @@ class DiligentBackend final : public Backend {
 
  private:
   struct MeshRecord {
-    geometry::MeshData data;
+    world::MeshData data;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> vertex_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> index_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> morph_delta_buffer;
@@ -206,10 +206,10 @@ class DiligentBackend final : public Backend {
       Diligent::Uint32 index_offset = 0;
       Diligent::Uint32 index_count = 0;
       uint32_t material_slot = 0;
-      renderer::MaterialId material = renderer::kInvalidMaterial;
+      rendering::MaterialId material = rendering::kInvalidMaterial;
     };
     std::vector<Submesh> submeshes;
-    std::vector<renderer::MaterialId> owned_materials;
+    std::vector<rendering::MaterialId> owned_materials;
   };
 
   void refreshSubmeshesFromMeshData(MeshRecord& record);
@@ -217,8 +217,8 @@ class DiligentBackend final : public Backend {
   struct MaterialRecord {
     static constexpr size_t kTextureCoordSlotCount = 12;
 
-    renderer::MaterialPipelineDesc pipeline;
-    renderer::MaterialDesc desc;
+    rendering::MaterialPipelineDesc pipeline;
+    rendering::MaterialDesc desc;
     glm::vec4 base_color_factor{1.0f, 1.0f, 1.0f, 1.0f};
     glm::vec3 emissive_factor{0.0f, 0.0f, 0.0f};
     float metallic_factor = 1.0f;
@@ -269,7 +269,7 @@ class DiligentBackend final : public Backend {
     float volume_noise_strength = 1.0f;
     std::array<glm::vec4, 7> custom_material_params{};
     std::array<bool, 7> custom_material_param_enabled{};
-    renderer::MaterialDesc::BlendMode blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+    rendering::MaterialDesc::BlendMode blend_mode = rendering::MaterialDesc::BlendMode::Alpha;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> base_color_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> metallic_roughness_srv;
@@ -306,13 +306,13 @@ class DiligentBackend final : public Backend {
   };
 
   struct TextureRecord {
-    renderer::TextureDesc desc;
+    rendering::TextureDesc desc;
     Diligent::RefCntAutoPtr<Diligent::ITexture> texture;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
   };
 
   struct RenderTargetRecord {
-    renderer::RenderTargetDesc desc;
+    rendering::RenderTargetDesc desc;
     int width = 0;
     int height = 0;
     Diligent::RefCntAutoPtr<Diligent::ITexture> color_texture;
@@ -325,11 +325,11 @@ class DiligentBackend final : public Backend {
   };
 
   struct InstanceRecord {
-    renderer::LayerId layer = 0;
-    renderer::MeshId mesh = renderer::kInvalidMesh;
-    renderer::MaterialId material = renderer::kInvalidMaterial;
-    std::vector<renderer::DrawMaterialBinding> materials;
-    renderer::DeformationId deformation = renderer::kInvalidDeformation;
+    rendering::LayerId layer = 0;
+    rendering::MeshId mesh = rendering::kInvalidMesh;
+    rendering::MaterialId material = rendering::kInvalidMaterial;
+    std::vector<rendering::DrawMaterialBinding> materials;
+    rendering::DeformationId deformation = rendering::kInvalidDeformation;
     glm::mat4 transform{1.0f};
     glm::vec4 params{0.0f};
     bool visible = true;
@@ -340,10 +340,10 @@ class DiligentBackend final : public Backend {
   struct InstancedRecord {
     struct LodRecord {
       float start_distance = 0.0f;
-      renderer::MeshId mesh = renderer::kInvalidMesh;
-      renderer::MaterialId material = renderer::kInvalidMaterial;
-      std::vector<renderer::DrawMaterialBinding> materials;
-      renderer::InstanceLodRenderMode render_mode = renderer::InstanceLodRenderMode::Mesh;
+      rendering::MeshId mesh = rendering::kInvalidMesh;
+      rendering::MaterialId material = rendering::kInvalidMaterial;
+      std::vector<rendering::DrawMaterialBinding> materials;
+      rendering::InstanceLodRenderMode render_mode = rendering::InstanceLodRenderMode::Mesh;
       glm::vec3 bounds_center{0.0f};
       float bounds_radius = 0.0f;
       bool bounds_valid = false;
@@ -355,14 +355,14 @@ class DiligentBackend final : public Backend {
       Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culling_indirect_args_uav;
     };
 
-    renderer::LayerId layer = 0;
-    renderer::MeshId mesh = renderer::kInvalidMesh;
-    renderer::MaterialId material = renderer::kInvalidMaterial;
-    std::vector<renderer::DrawMaterialBinding> materials;
+    rendering::LayerId layer = 0;
+    rendering::MeshId mesh = rendering::kInvalidMesh;
+    rendering::MaterialId material = rendering::kInvalidMaterial;
+    std::vector<rendering::DrawMaterialBinding> materials;
     std::vector<LodRecord> lods;
-    renderer::InstanceGpuLayout gpu_layout = renderer::InstanceGpuLayout::Matrix4x4Params;
-    std::vector<renderer::InstanceData> instances;
-    std::vector<renderer::PlanarInstanceData> planar_instances;
+    rendering::InstanceGpuLayout gpu_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
+    std::vector<rendering::InstanceData> instances;
+    std::vector<rendering::PlanarInstanceData> planar_instances;
     uint64_t revision = 0;
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
@@ -382,9 +382,9 @@ class DiligentBackend final : public Backend {
 
     size_t instanceCount() const {
       switch (gpu_layout) {
-        case renderer::InstanceGpuLayout::Matrix4x4Params:
+        case rendering::InstanceGpuLayout::Matrix4x4Params:
           return instances.size();
-        case renderer::InstanceGpuLayout::PositionYawScaleParams:
+        case rendering::InstanceGpuLayout::PositionYawScaleParams:
           return planar_instances.size();
       }
       return 0u;
@@ -392,7 +392,7 @@ class DiligentBackend final : public Backend {
   };
 
   struct DeformationRecord {
-    renderer::DeformationDesc desc;
+    rendering::DeformationDesc desc;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> joint_palette_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBufferView> joint_palette_srv;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> morph_weight_buffer;
@@ -402,7 +402,7 @@ class DiligentBackend final : public Backend {
   };
 
   struct TerrainTileCoordHash {
-    std::size_t operator()(const renderer::TerrainTileCoord& coord) const noexcept {
+    std::size_t operator()(const rendering::TerrainTileCoord& coord) const noexcept {
       uint64_t h = 0x517CC1B727220A95ull;
       h ^= static_cast<uint32_t>(coord.x) + 0x9E3779B97F4A7C15ull + (h << 6u) + (h >> 2u);
       h ^= static_cast<uint32_t>(coord.z) + 0x9E3779B97F4A7C15ull + (h << 6u) + (h >> 2u);
@@ -411,7 +411,7 @@ class DiligentBackend final : public Backend {
   };
 
   struct TerrainTileRecord {
-    renderer::TerrainTileCoord coord{};
+    rendering::TerrainTileCoord coord{};
     Diligent::RefCntAutoPtr<Diligent::ITexture> height_texture;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> height_srv;
     Diligent::RefCntAutoPtr<Diligent::ITexture> color_texture;
@@ -444,14 +444,14 @@ class DiligentBackend final : public Backend {
   };
 
   struct TerrainRecord {
-    renderer::TerrainDesc desc{};
-    std::unordered_map<renderer::TerrainTileCoord, TerrainTileRecord, TerrainTileCoordHash> tiles;
+    rendering::TerrainDesc desc{};
+    std::unordered_map<rendering::TerrainTileCoord, TerrainTileRecord, TerrainTileCoordHash> tiles;
     std::array<TerrainMaterialLayerRecord, 4> material_layers{};
     uint32_t material_layer_count = 0u;
   };
 
   struct TerrainSubmission {
-    renderer::TerrainDrawItem item{};
+    rendering::TerrainDrawItem item{};
   };
 
   struct TerrainPipelineSet {
@@ -462,14 +462,14 @@ class DiligentBackend final : public Backend {
   };
 
   struct ForwardBatchKey {
-    renderer::MeshId mesh = renderer::kInvalidMesh;
-    renderer::MaterialId material = renderer::kInvalidMaterial;
+    rendering::MeshId mesh = rendering::kInvalidMesh;
+    rendering::MaterialId material = rendering::kInvalidMaterial;
     Diligent::Uint32 index_offset = 0;
     Diligent::Uint32 index_count = 0;
     bool indexed = false;
     bool deformed = false;
-    renderer::InstanceGpuLayout gpu_layout = renderer::InstanceGpuLayout::Matrix4x4Params;
-    renderer::InstanceLodRenderMode render_mode = renderer::InstanceLodRenderMode::Mesh;
+    rendering::InstanceGpuLayout gpu_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
+    rendering::InstanceLodRenderMode render_mode = rendering::InstanceLodRenderMode::Mesh;
 
     bool operator==(const ForwardBatchKey& other) const {
       return mesh == other.mesh &&
@@ -485,8 +485,8 @@ class DiligentBackend final : public Backend {
 
   struct ForwardBatch {
     ForwardBatchKey key{};
-    std::vector<renderer::InstanceData> instances;
-    renderer::InstanceId instanced_record = renderer::kInvalidInstance;
+    std::vector<rendering::InstanceData> instances;
+    rendering::InstanceId instanced_record = rendering::kInvalidInstance;
     Diligent::Uint32 persistent_instance_count = 0;
     uint32_t instanced_lod_index = UINT32_MAX;
   };
@@ -500,7 +500,7 @@ class DiligentBackend final : public Backend {
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
     glm::vec4 params{0.0f};
-    renderer::DeformationId deformation = renderer::kInvalidDeformation;
+    rendering::DeformationId deformation = rendering::kInvalidDeformation;
     float depth = 0.0f;
     SceneSampleMode scene_sample_mode = SceneSampleMode::None;
   };
@@ -509,7 +509,7 @@ class DiligentBackend final : public Backend {
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
     glm::vec4 params{0.0f};
-    renderer::DeformationId deformation = renderer::kInvalidDeformation;
+    rendering::DeformationId deformation = rendering::kInvalidDeformation;
   };
 
   struct ForwardLayerState {
@@ -551,14 +551,14 @@ class DiligentBackend final : public Backend {
   };
 
   struct ParticleBatchRecord {
-    renderer::LayerId layer = 0;
+    rendering::LayerId layer = 0;
     bool depth_test = true;
-    renderer::TextureId texture = renderer::kInvalidTexture;
-    renderer::ParticleBlendMode blend_mode = renderer::ParticleBlendMode::Additive;
-    renderer::ParticleAlignment alignment = renderer::ParticleAlignment::Billboard;
-    renderer::ParticleShadingMode shading_mode = renderer::ParticleShadingMode::Standard;
-    renderer::ParticlePresentationMode presentation_mode =
-        renderer::ParticlePresentationMode::Baked;
+    rendering::TextureId texture = rendering::kInvalidTexture;
+    rendering::ParticleBlendMode blend_mode = rendering::ParticleBlendMode::Additive;
+    rendering::ParticleAlignment alignment = rendering::ParticleAlignment::Billboard;
+    rendering::ParticleShadingMode shading_mode = rendering::ParticleShadingMode::Standard;
+    rendering::ParticlePresentationMode presentation_mode =
+        rendering::ParticlePresentationMode::Baked;
     bool use_soft_mask = true;
     float soft_particle_distance = 0.0f;
     float distortion_strength = 0.0f;
@@ -579,7 +579,7 @@ class DiligentBackend final : public Backend {
     uint32_t atlas_spacing_x = 0u;
     uint32_t atlas_spacing_y = 0u;
     float animation_fps = 0.0f;
-    std::vector<renderer::ParticlePackedInstance> particles;
+    std::vector<rendering::ParticlePackedInstance> particles;
   };
 
   struct ParticleEmitterRuntimeState {
@@ -595,7 +595,7 @@ class DiligentBackend final : public Backend {
   };
 
   struct ParticleEmitterSubmission {
-    renderer::ParticleEmitterGpuDesc desc{};
+    rendering::ParticleEmitterGpuDesc desc{};
     float elapsed_seconds = 0.0f;
     float previous_elapsed_seconds = 0.0f;
   };
@@ -629,7 +629,7 @@ class DiligentBackend final : public Backend {
   static constexpr size_t kForwardSrbSlotCount =
       kForwardPipelineVariantCount * kInstanceGpuLayoutCount;
   static size_t forwardPipelineVariantIndex(ForwardPipelineVariant variant);
-  static size_t instanceGpuLayoutIndex(renderer::InstanceGpuLayout layout);
+  static size_t instanceGpuLayoutIndex(rendering::InstanceGpuLayout layout);
 
   struct CustomForwardPipeline {
     Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
@@ -642,8 +642,8 @@ class DiligentBackend final : public Backend {
   void recreatePointShadowMap();
   void recreateRenderTargetResources(RenderTargetRecord& record, int width, int height);
   void recreateShadowPipeline();
-  bool ensureCameraOverridePipeline(const renderer::CameraData& camera);
-  void updateCameraOverrideUserConstants(const renderer::CameraData& camera);
+  bool ensureCameraOverridePipeline(const rendering::CameraData& camera);
+  void updateCameraOverrideUserConstants(const rendering::CameraData& camera);
   void ensureUiResources();
   void ensureLineResources();
   TerrainPipelineSet* ensureTerrainResources(Diligent::TEXTURE_FORMAT rtv_format,
@@ -660,19 +660,19 @@ class DiligentBackend final : public Backend {
                               core::SteadyClock::time_point end);
   Diligent::IPipelineState* ensureForwardPipeline(
       ForwardPipelineVariant variant,
-      renderer::InstanceGpuLayout layout = renderer::InstanceGpuLayout::Matrix4x4Params);
+      rendering::InstanceGpuLayout layout = rendering::InstanceGpuLayout::Matrix4x4Params);
   Diligent::IPipelineState* ensureCustomForwardPipeline(const MaterialRecord& material,
                                                         ForwardPipelineVariant variant,
-                                                        renderer::InstanceGpuLayout layout =
-                                                            renderer::InstanceGpuLayout::
+                                                        rendering::InstanceGpuLayout layout =
+                                                            rendering::InstanceGpuLayout::
                                                                 Matrix4x4Params);
   void bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const;
   bool materialUsesCustomForwardPipeline(const MaterialRecord& material) const;
   Diligent::IShaderResourceBinding* ensureMaterialForwardSrb(MaterialRecord& material,
                                                              ForwardPipelineVariant variant,
                                                              bool custom_pipeline,
-                                                             renderer::InstanceGpuLayout layout =
-                                                                 renderer::InstanceGpuLayout::
+                                                             rendering::InstanceGpuLayout layout =
+                                                                 rendering::InstanceGpuLayout::
                                                                      Matrix4x4Params);
   bool ensureInstancedRecordBuffer(InstancedRecord& record);
   bool instancedGpuCullingEnabled() const;
@@ -702,7 +702,7 @@ class DiligentBackend final : public Backend {
                                            int height,
                                            Diligent::TEXTURE_FORMAT format);
   void ensureParticleFallbackDepthResource();
-  void applyPostProcessSettingsForPass(const renderer::PostProcessSettings& settings);
+  void applyPostProcessSettingsForPass(const rendering::PostProcessSettings& settings);
   void ensurePostProcessResources(int width,
                                   int height,
                                   Diligent::TEXTURE_FORMAT format);
@@ -726,14 +726,14 @@ class DiligentBackend final : public Backend {
                                         int width,
                                         int height,
                                         Diligent::TEXTURE_FORMAT format);
-  void uploadMeshBuffers(const geometry::MeshData& mesh, MeshRecord& record);
-  void uploadMeshMorphBuffers(const geometry::MeshData& mesh, MeshRecord& record);
+  void uploadMeshBuffers(const world::MeshData& mesh, MeshRecord& record);
+  void uploadMeshMorphBuffers(const world::MeshData& mesh, MeshRecord& record);
   bool ensureFallbackDeformationResources();
   bool bindDeformationResources(Diligent::IShaderResourceBinding* srb,
                                 const MeshRecord& mesh,
-                                renderer::DeformationId deformation);
+                                rendering::DeformationId deformation);
   bool updateDeformationConstants(const MeshRecord& mesh,
-                                  renderer::DeformationId deformation);
+                                  rendering::DeformationId deformation);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> createTextureSRV(const unsigned char* data,
                                                                    int width,
                                                                    int height,
@@ -763,20 +763,20 @@ class DiligentBackend final : public Backend {
                                                                         bool srgb,
                                                                         const char* label);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> loadImportedMaterialTexture(
-      const renderer::ImportedMaterialTexture& texture);
+      const rendering::ImportedMaterialTexture& texture);
   Diligent::RefCntAutoPtr<Diligent::ITextureView> loadTextureFromFile(const std::filesystem::path& path,
                                                                       bool srgb,
                                                                       const char* label);
-  renderer::MaterialId createMaterialFromImportedPayload(
+  rendering::MaterialId createMaterialFromImportedPayload(
       const std::filesystem::path& path,
       uint32_t material_index,
-      const renderer::ImportedMaterialData& imported);
+      const rendering::ImportedMaterialData& imported);
   MaterialRecord buildImportedMaterialRecord(const aiScene& scene,
                                              const aiMaterial& material,
                                              const std::filesystem::path& asset_path);
-  MaterialRecord buildImportedMaterialRecord(const renderer::ImportedMaterialData& material);
+  MaterialRecord buildImportedMaterialRecord(const rendering::ImportedMaterialData& material);
   void applyResolvedMaterial(MaterialRecord& record,
-                             const renderer::ResolvedMaterialDesc& resolved);
+                             const rendering::ResolvedMaterialDesc& resolved);
   void initializeMaterialBindings(MaterialRecord& record);
   void initializeTextureCoordTransforms(MaterialRecord& record) const;
   void setTextureCoordTransform(MaterialRecord& record,
@@ -787,7 +787,7 @@ class DiligentBackend final : public Backend {
                                 size_t slot) const;
   void bindShadowResourcesToSrb(Diligent::IShaderResourceBinding* srb) const;
   void preloadAssimpTextures(const aiScene& scene, const std::filesystem::path& asset_path);
-  void preloadImportedMaterialTextures(const renderer::ImportedMaterialData& material);
+  void preloadImportedMaterialTextures(const rendering::ImportedMaterialData& material);
   const ImportedMaterialTemplateCacheEntry* getImportedMaterialTemplates(
       const std::filesystem::path& path);
   void ensureEnvironmentResources();
@@ -871,13 +871,13 @@ class DiligentBackend final : public Backend {
     std::array<float, kShadowCascadeCount> cascade_world_texel{};
     std::array<float, kShadowCascadeCount> cascade_splits{};
     std::array<glm::mat4, kPointShadowMatrixCount> point_shadow_uv_proj{};
-    std::array<renderer::LightData, kMaxPointShadowLights> point_shadow_lights{};
+    std::array<rendering::LightData, kMaxPointShadowLights> point_shadow_lights{};
     std::array<size_t, kMaxPointShadowLights> point_shadow_light_source_indices{};
     std::array<size_t, kMaxPointShadowLights> point_shadow_local_light_indices{};
     Diligent::Uint32 point_shadow_light_count = 0;
     bool point_shadow_ready = false;
   };
-  void renderShadowLayer(renderer::LayerId layer,
+  void renderShadowLayer(rendering::LayerId layer,
                          float aspect,
                          const glm::mat4& depth_fix,
                          const glm::vec3& camera_position,
@@ -890,7 +890,7 @@ class DiligentBackend final : public Backend {
                          float point_shadow_texel_size,
                          const std::vector<size_t>& local_light_source_indices,
                          ShadowLayerState& out_state);
-  void collectForwardLayerState(renderer::LayerId layer,
+  void collectForwardLayerState(rendering::LayerId layer,
                                 const glm::mat4& view_proj,
                                 const glm::vec3& camera_position,
                                 const glm::vec3& camera_forward,
@@ -920,8 +920,8 @@ class DiligentBackend final : public Backend {
       Diligent::ITextureView* scene_depth_sample_srv);
   bool forwardDrawsRequireSceneColorCopy(
       const std::vector<TransparentForwardDraw>& draws) const;
-  void renderParticlePasses(renderer::LayerId layer, const ParticlePassContext& context);
-  Diligent::Uint32 renderTerrainLayer(renderer::LayerId layer,
+  void renderParticlePasses(rendering::LayerId layer, const ParticlePassContext& context);
+  Diligent::Uint32 renderTerrainLayer(rendering::LayerId layer,
                                       const DrawConstants& base_constants,
                                       const glm::mat4& view_proj,
                                       bool is_gl,
@@ -1199,24 +1199,24 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBuffer> env_cb_;
   bool env_dirty_ = false;
 
-  renderer::MeshId nextMeshId_ = 1;
-  renderer::MaterialId nextMaterialId_ = 1;
-  renderer::TextureId nextTextureId_ = 1;
-  renderer::RenderTargetId nextTargetId_ = 1;
-  renderer::TerrainId nextTerrainId_ = 1;
-  renderer::DeformationId nextDeformationId_ = 1;
+  rendering::MeshId nextMeshId_ = 1;
+  rendering::MaterialId nextMaterialId_ = 1;
+  rendering::TextureId nextTextureId_ = 1;
+  rendering::RenderTargetId nextTargetId_ = 1;
+  rendering::TerrainId nextTerrainId_ = 1;
+  rendering::DeformationId nextDeformationId_ = 1;
 
-  std::unordered_map<renderer::MeshId, MeshRecord> meshes_;
-  std::unordered_map<renderer::MaterialId, MaterialRecord> materials_;
+  std::unordered_map<rendering::MeshId, MeshRecord> meshes_;
+  std::unordered_map<rendering::MaterialId, MaterialRecord> materials_;
   std::unordered_map<std::string, ImportedMaterialTemplateCacheEntry> imported_material_templates_;
   std::unordered_map<std::string, MaterialRecord> imported_payload_material_templates_;
-  std::unordered_map<renderer::TextureId, TextureRecord> textures_;
-  std::unordered_map<std::string, renderer::TextureId> texture_cache_;
-  std::unordered_map<renderer::RenderTargetId, RenderTargetRecord> targets_;
-  std::unordered_map<renderer::TerrainId, TerrainRecord> terrains_;
-  std::unordered_map<renderer::DeformationId, DeformationRecord> deformations_;
-  std::unordered_map<renderer::InstanceId, InstanceRecord> instances_;
-  std::unordered_map<renderer::InstanceId, InstancedRecord> instanced_records_;
+  std::unordered_map<rendering::TextureId, TextureRecord> textures_;
+  std::unordered_map<std::string, rendering::TextureId> texture_cache_;
+  std::unordered_map<rendering::RenderTargetId, RenderTargetRecord> targets_;
+  std::unordered_map<rendering::TerrainId, TerrainRecord> terrains_;
+  std::unordered_map<rendering::DeformationId, DeformationRecord> deformations_;
+  std::unordered_map<rendering::InstanceId, InstanceRecord> instances_;
+  std::unordered_map<rendering::InstanceId, InstancedRecord> instanced_records_;
   std::vector<TerrainSubmission> terrain_submissions_;
   std::vector<ParticleBatchRecord> particle_batches_;
   std::vector<ParticleEmitterSubmission> particle_emitter_submissions_;
@@ -1224,16 +1224,16 @@ class DiligentBackend final : public Backend {
   std::vector<LineVertex> line_vertices_depth_;
   std::vector<LineVertex> line_vertices_no_depth_;
 
-  renderer::CameraData camera_{};
+  rendering::CameraData camera_{};
   bool camera_active_ = true;
   float clear_color_[4] = {0.2f, 0.6f, 1.0f, 1.0f};
-  renderer::DirectionalLightData directional_light_{};
-  std::vector<renderer::LightData> lights_;
+  rendering::DirectionalLightData directional_light_{};
+  std::vector<rendering::LightData> lights_;
   std::filesystem::path environment_map_;
   float environment_intensity_ = 0.0f;
 	  bool draw_skybox_ = true;
 	  bool vsync_enabled_ = true;
-	  renderer::PresentMode present_mode_ = renderer::PresentMode::Auto;
+	  rendering::PresentMode present_mode_ = rendering::PresentMode::Auto;
 	  int env_debug_mode_ = 0;
   bool warned_env_debug_ = false;
   bool warned_env_bind_missing_ = false;
@@ -1257,7 +1257,7 @@ class DiligentBackend final : public Backend {
   bool ao_affects_local_lights_ = false;
   float local_light_directional_shadow_lift_ = 0.0f;
   float lighting_exposure_ = 1.0f;
-  renderer::PostProcessSettings post_process_settings_{};
+  rendering::PostProcessSettings post_process_settings_{};
   int point_shadow_map_size_ = 1024;
   int point_shadow_max_lights_ = 2;
   size_t ui_vb_size_ = 0;
@@ -1300,13 +1300,13 @@ class DiligentBackend final : public Backend {
   Diligent::TEXTURE_FORMAT particle_half_res_alpha_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   int forward_plus_tile_size_ = 16;
   int forward_plus_max_lights_per_tile_ = 128;
-  renderer::ForwardPlusStats forward_plus_stats_{};
-  renderer::InstancingStats instancing_stats_{};
-  renderer::ParticlePassStats particle_pass_stats_{};
-  renderer::TerrainStats terrain_stats_{};
-  renderer::RendererFrameTimingStats current_frame_timing_stats_{};
-  renderer::RendererFrameTimingStats last_frame_timing_stats_{};
-  renderer::ParticlePassStats particle_stats_log_totals_{};
+  rendering::ForwardPlusStats forward_plus_stats_{};
+  rendering::InstancingStats instancing_stats_{};
+  rendering::ParticlePassStats particle_pass_stats_{};
+  rendering::TerrainStats terrain_stats_{};
+  rendering::RendererFrameTimingStats current_frame_timing_stats_{};
+  rendering::RendererFrameTimingStats last_frame_timing_stats_{};
+  rendering::ParticlePassStats particle_stats_log_totals_{};
   double particle_stats_log_elapsed_seconds_ = 0.0;
   float last_frame_delta_seconds_ = 0.0f;
   uint32_t particle_stats_log_frame_count_ = 0;
@@ -1319,7 +1319,7 @@ class DiligentBackend final : public Backend {
   int current_width_ = 0;
   int current_height_ = 0;
   bool warned_no_draws_ = false;
-  static constexpr renderer::TextureId kRenderTargetTextureHandleBit = 0x80000000u;
+  static constexpr rendering::TextureId kRenderTargetTextureHandleBit = 0x80000000u;
   int forward_plus_max_local_lights_ = 4096;
 
   bool directional_shadow_cache_valid_ = false;
@@ -1353,4 +1353,4 @@ class DiligentBackend final : public Backend {
   float point_shadow_range_threshold_ = 0.05f;
 };
 
-}  // namespace karma::renderer_backend
+}  // namespace karma::rendering::backend

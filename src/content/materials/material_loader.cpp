@@ -1,4 +1,4 @@
-#include "karma/content/materials/material_loader.h"
+#include "karma/assets.h"
 
 #include <fstream>
 #include <initializer_list>
@@ -6,9 +6,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include "karma/content/assets/asset_registry.h"
+#include "karma/assets.h"
 
-namespace karma::content {
+namespace karma::assets {
 
 namespace {
 
@@ -95,7 +95,7 @@ bool readBool(const Json& object, const char* key, bool& out, std::string* diagn
   return true;
 }
 
-bool readColorValue(const Json& value, renderer::Color& out) {
+bool readColorValue(const Json& value, rendering::Color& out) {
   if (!value.is_array() || value.size() != 4u) {
     return false;
   }
@@ -104,7 +104,7 @@ bool readColorValue(const Json& value, renderer::Color& out) {
       return false;
     }
   }
-  out = renderer::Color{
+  out = rendering::Color{
       value[0].get<float>(),
       value[1].get<float>(),
       value[2].get<float>(),
@@ -115,7 +115,7 @@ bool readColorValue(const Json& value, renderer::Color& out) {
 
 bool readColor(const Json& object,
                const char* key,
-               renderer::Color& out,
+               rendering::Color& out,
                std::string* diagnostic) {
   const auto it = object.find(key);
   if (it == object.end()) {
@@ -142,7 +142,7 @@ bool readVec3(const Json& object, const char* key, glm::vec3& out, std::string* 
 
 bool parsePipeline(const Json& root,
                    const std::filesystem::path& base_dir,
-                   renderer::MaterialPipelineDesc& out,
+                   rendering::MaterialPipelineDesc& out,
                    std::string* diagnostic) {
   const auto it = root.find("pipeline");
   if (it == root.end()) {
@@ -238,7 +238,7 @@ bool parsePipeline(const Json& root,
   return true;
 }
 
-bool parseSurface(const Json& root, renderer::MaterialDesc& out, std::string* diagnostic) {
+bool parseSurface(const Json& root, rendering::MaterialDesc& out, std::string* diagnostic) {
   const auto it = root.find("surface");
   if (it == root.end()) {
     return true;
@@ -295,7 +295,7 @@ bool parseSurface(const Json& root, renderer::MaterialDesc& out, std::string* di
   return true;
 }
 
-bool parseRenderState(const Json& root, renderer::MaterialDesc& out, std::string* diagnostic) {
+bool parseRenderState(const Json& root, rendering::MaterialDesc& out, std::string* diagnostic) {
   const auto it = root.find("render_state");
   if (it == root.end()) {
     return true;
@@ -337,9 +337,9 @@ bool parseRenderState(const Json& root, renderer::MaterialDesc& out, std::string
     }
     const std::string blend = blend_it->get<std::string>();
     if (blend == "alpha") {
-      out.blend_mode = renderer::MaterialDesc::BlendMode::Alpha;
+      out.blend_mode = rendering::MaterialDesc::BlendMode::Alpha;
     } else if (blend == "additive") {
-      out.blend_mode = renderer::MaterialDesc::BlendMode::Additive;
+      out.blend_mode = rendering::MaterialDesc::BlendMode::Additive;
     } else {
       return fail(diagnostic, "render_state.blend_mode must be 'alpha' or 'additive'");
     }
@@ -350,25 +350,25 @@ bool parseRenderState(const Json& root, renderer::MaterialDesc& out, std::string
     }
     const std::string alpha = alpha_it->get<std::string>();
     if (alpha == "opaque") {
-      out.alpha_mode = renderer::MaterialDesc::AlphaMode::Opaque;
+      out.alpha_mode = rendering::MaterialDesc::AlphaMode::Opaque;
       out.transparent = false;
     } else if (alpha == "masked") {
-      out.alpha_mode = renderer::MaterialDesc::AlphaMode::Masked;
+      out.alpha_mode = rendering::MaterialDesc::AlphaMode::Masked;
       out.transparent = false;
     } else if (alpha == "blend") {
-      out.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+      out.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
       out.transparent = true;
     } else {
       return fail(diagnostic, "render_state.alpha_mode must be 'opaque', 'masked', or 'blend'");
     }
-  } else if (out.transparent && out.alpha_mode == renderer::MaterialDesc::AlphaMode::Opaque) {
-    out.alpha_mode = renderer::MaterialDesc::AlphaMode::Blend;
+  } else if (out.transparent && out.alpha_mode == rendering::MaterialDesc::AlphaMode::Opaque) {
+    out.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
   }
   return true;
 }
 
 bool parseParameterValue(const Json& value,
-                         renderer::MaterialParameterValue& out,
+                         rendering::MaterialParameterValue& out,
                          std::string* diagnostic) {
   if (value.is_boolean()) {
     out = value.get<bool>();
@@ -397,7 +397,7 @@ bool parseParameterValue(const Json& value,
       return true;
     }
     if (value.size() == 4u) {
-      out = renderer::Color{
+      out = rendering::Color{
           value[0].get<float>(),
           value[1].get<float>(),
           value[2].get<float>(),
@@ -410,7 +410,7 @@ bool parseParameterValue(const Json& value,
 }
 
 bool parseParams(const Json& root,
-                 std::unordered_map<std::string, renderer::MaterialParameterValue>& out,
+                 std::unordered_map<std::string, rendering::MaterialParameterValue>& out,
                  std::string* diagnostic) {
   const auto it = root.find("params");
   if (it == root.end()) {
@@ -420,7 +420,7 @@ bool parseParams(const Json& root,
     return fail(diagnostic, "params must be an object");
   }
   for (const auto& [name, value] : it->items()) {
-    renderer::MaterialParameterValue parsed{};
+    rendering::MaterialParameterValue parsed{};
     if (!parseParameterValue(value, parsed, diagnostic)) {
       return false;
     }
@@ -431,7 +431,7 @@ bool parseParams(const Json& root,
 
 bool parseSectionAsParams(const Json& root,
                           const char* section,
-                          std::unordered_map<std::string, renderer::MaterialParameterValue>& out,
+                          std::unordered_map<std::string, rendering::MaterialParameterValue>& out,
                           std::string* diagnostic) {
   const auto it = root.find(section);
   if (it == root.end()) {
@@ -441,7 +441,7 @@ bool parseSectionAsParams(const Json& root,
     return fail(diagnostic, std::string(section) + " must be an object");
   }
   for (const auto& [name, value] : it->items()) {
-    renderer::MaterialParameterValue parsed{};
+    rendering::MaterialParameterValue parsed{};
     if (!parseParameterValue(value, parsed, diagnostic)) {
       return false;
     }
@@ -484,7 +484,7 @@ bool isVariantDocument(const Json& root) {
 
 }  // namespace
 
-std::optional<renderer::MaterialAssetDesc> loadMaterialAssetDesc(
+std::optional<rendering::MaterialAssetDesc> loadMaterialAssetDesc(
     const std::filesystem::path& path,
     std::string* diagnostic) {
   Json root;
@@ -496,7 +496,7 @@ std::optional<renderer::MaterialAssetDesc> loadMaterialAssetDesc(
     return std::nullopt;
   }
 
-  renderer::MaterialAssetDesc desc{};
+  rendering::MaterialAssetDesc desc{};
   const std::filesystem::path base_dir = path.parent_path();
   if (!parsePipeline(root, base_dir, desc.pipeline, diagnostic) ||
       !parseSurface(root, desc.surface, diagnostic) ||
@@ -508,7 +508,7 @@ std::optional<renderer::MaterialAssetDesc> loadMaterialAssetDesc(
   return desc;
 }
 
-std::optional<renderer::MaterialVariantDesc> loadMaterialVariantDesc(
+std::optional<rendering::MaterialVariantDesc> loadMaterialVariantDesc(
     const std::filesystem::path& path,
     std::string* diagnostic) {
   Json root;
@@ -525,7 +525,7 @@ std::optional<renderer::MaterialVariantDesc> loadMaterialVariantDesc(
     return std::nullopt;
   }
 
-  renderer::MaterialVariantDesc desc{};
+  rendering::MaterialVariantDesc desc{};
   desc.base_material_key = base_it->get<std::string>();
   if (!AssetRegistry::isValidAssetKey(desc.base_material_key)) {
     fail(diagnostic,
@@ -578,4 +578,4 @@ MaterialLoadResult loadMaterialFile(AssetRegistry& assets,
   return result;
 }
 
-}  // namespace karma::content
+}  // namespace karma::assets

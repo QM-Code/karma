@@ -8,8 +8,9 @@ commands, and retargeting notes, see `docs/ANIMATION_V2.md`.
 
 ## Imported glTF Flow
 
-`karma::scene::loadGltfScenePrefab(...)` imports glTF nodes, transforms, skins,
-skeletons, animation clips, and mesh primitive data. `instantiateGltfScenePrefab(...)`
+Package `gltf_scene` entries import glTF nodes, transforms, skins, skeletons,
+animation clips, and mesh primitive data into a registered
+`karma::content::GltfSceneAsset` plus child assets. `instantiateGltfSceneAsset(...)`
 creates ECS entities for the node tree and separate child entities for renderable
 mesh primitives.
 
@@ -24,10 +25,10 @@ available. The animator stores the imported clips, node entity map, and
 node-to-morph-primitive map needed for runtime sampling.
 
 Imported animation clips are plain `karma::animation::AnimationClip` values.
-They are copied from `GltfScenePrefab::animations` into
-`AnimatorComponent::clips`; they do not retain file handles, renderer handles,
-or mesh ownership. They remain authored in the imported node/skeleton index
-space until retargeted.
+They are resolved from the registry keys stored on `GltfSceneAsset` and copied
+into `AnimatorComponent::clips`; they do not retain file handles, renderer
+handles, or mesh ownership. They remain authored in the imported node/skeleton
+index space until retargeted.
 
 ## Runtime Update Order
 

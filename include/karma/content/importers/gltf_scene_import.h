@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 #include <vector>
 
 #include "karma/world/ecs/entity.h"
@@ -28,9 +27,6 @@ constexpr uint32_t kInvalidGltfSceneNode = Node::kInvalidId;
 struct GltfSceneInstantiateOptions {
   bool create_synthetic_root = false;
   bool autoplay_animations = true;
-  /// Retained for older call sites. Registered glTF scene assets already carry
-  /// deterministic mesh/material keys, so this is ignored for asset instantiation.
-  std::string asset_key_prefix;
 };
 
 /// \ingroup karma_content

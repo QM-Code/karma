@@ -35,11 +35,10 @@ binary `.glb` and JSON `.gltf` sources.
 
 ## Asset Boundaries
 
-The source `.glb` or `.gltf` is only an import container. After
-`loadGltfScenePrefab(...)`, clips live as plain
-`karma::animation::AnimationClip` values in `GltfScenePrefab::animations`.
-After instantiation, those clips are copied into
-`AnimatorComponent::clips`.
+The source `.glb` or `.gltf` is only an import container. Package `gltf_scene`
+entries register clips as plain `karma::animation::AnimationClip` assets and
+store their keys on `karma::content::GltfSceneAsset`. After instantiation, those
+clips are copied into `AnimatorComponent::clips`.
 
 Clips are not tied to the source file bytes, renderer resources, or mesh
 objects. They are still authored in the imported node/skeleton index space. To

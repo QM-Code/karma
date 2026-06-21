@@ -40,11 +40,22 @@ Public headers are split by API role:
 4. Call `findPath`, `findNearestPoint`, `raycast`, sliced path queries, or the
    local spatial helpers.
 
-glTF scenes can be baked directly from `scene::GltfScenePrefab`:
+glTF scene navigation geometry is collected from instantiated ECS data. Import
+the scene through a package, instantiate the registered `GltfSceneAsset`, then
+collect geometry with the asset registry available:
 
 ```cpp
-const auto prefab = scene::loadGltfScenePrefab(path);
-const auto geometry = navigation::collectNavMeshGeometry(prefab);
+content::AssetRegistry assets;
+std::string diagnostic;
+auto package = content::importAssetPackage(assets, package_path, &diagnostic);
+const content::GltfSceneAsset* level = assets.findGltfSceneAsset("game/level");
+
+ecs::World world;
+scene::Scene scene;
+auto imported =
+    scene::instantiateGltfSceneAsset(world, scene, assets, *level);
+
+const auto geometry = navigation::collectNavMeshGeometry(world, &assets);
 
 navigation::NavMesh nav_mesh;
 navigation::NavMeshBuildResult result;

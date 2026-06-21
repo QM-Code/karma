@@ -967,8 +967,12 @@ Assigning a material to slot `0`:
 class MyGame : public karma::app::GameInterface {
  public:
   void onStart() override {
-    const std::string tank_mesh = "examples/tank";
-    assets->importMeshAsset(tank_mesh, "assets/tank_final.glb");
+    const std::string tank_mesh = "examples/mesh/tank_final";
+    std::string diagnostic;
+    (void)karma::content::importAssetPackage(
+        *assets,
+        "examples/assets/common_meshes/tank_final",
+        &diagnostic);
 
     karma::renderer::MaterialDesc blue{};
     blue.base_color = karma::math::Color{0.35f, 0.55f, 1.0f, 1.0f};
@@ -1069,43 +1073,55 @@ Current limitation:
 - hot reload is not implemented for `.mat` files
 
 ## glTF Scene Import
-Karma has a separate glTF scene-import path for authored scenes.
-This is distinct from flat mesh assets: import a mesh source with
-`assets->importMeshAsset("mesh/key", "model.glb")`, then assign
-`MeshComponent::mesh_asset_key = "mesh/key"`.
+Karma imports authored glTF scenes through asset packages. This is distinct from
+flat mesh assets: a package `mesh` entry registers a shared mesh key for
+`MeshComponent::mesh_asset_key`, while a `gltf_scene` entry registers scene
+metadata plus deterministic child mesh, material, texture, animation, skeleton,
+and skin assets.
 
-Use the convenience import directly:
+Declare the source in `assets.package.json`:
+
+```json
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "game/level",
+      "path": "level.glb",
+      "import_meshes": true,
+      "import_lights": true
+    }
+  ]
+}
+```
+
+Load the package and instantiate the registered scene asset:
 
 ```cpp
-auto imported = karma::scene::importGltfScene(
+karma::content::AssetRegistry assets;
+std::string diagnostic;
+auto package = karma::content::importAssetPackage(assets, "assets/level", &diagnostic);
+if (!package.has_value()) {
+  return;
+}
+
+const karma::content::GltfSceneAsset* level =
+    assets.findGltfSceneAsset("game/level");
+if (level == nullptr) {
+  return;
+}
+
+auto imported = karma::scene::instantiateGltfSceneAsset(
     *world,
     *scene,
-    *graphics,
-    "assets/level.glb",
-    karma::scene::GltfSceneImportOptions{
-        .load = {
-            .import_meshes = true,
-            .import_lights = true,
-        },
-        .instantiate = {
-            .create_synthetic_root = true,
-        }});
+    assets,
+    *level,
+    {.create_synthetic_root = true});
 
 if (imported.valid()) {
   // imported.root_entity is the top-level handle for this imported scene.
 }
-```
-
-You can also split loading and instantiation:
-
-```cpp
-const auto prefab = karma::scene::loadGltfScenePrefab("assets/level.glb");
-auto imported = karma::scene::instantiateGltfScenePrefab(
-    *world,
-    *scene,
-    *graphics,
-    prefab,
-    {.create_synthetic_root = true});
 ```
 
 Current behavior:
@@ -1131,10 +1147,11 @@ Current behavior:
 Animation asset boundary:
 
 - a source `.glb` or `.gltf` is only an import container
-- `loadGltfScenePrefab(...)` stores clips as plain
-  `karma::animation::AnimationClip` values in `GltfScenePrefab::animations`
-- `instantiateGltfScenePrefab(...)` copies those clips into
-  `AnimatorComponent::clips`
+- `gltf_scene` package entries register clips as
+  `karma::animation::AnimationClip` assets and store their keys on
+  `GltfSceneAsset`
+- `instantiateGltfSceneAsset(...)` resolves those clip keys and copies the
+  clips into `AnimatorComponent::clips`
 - clips do not own renderer resources, mesh resources, or file handles
 - imported clips still target the source node/skeleton index space until they
   are retargeted

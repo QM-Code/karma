@@ -9,7 +9,8 @@ The important boundary is:
 
 ```text
 glTF/GLB file
-  -> GltfScenePrefab
+  -> assets.package.json gltf_scene entry
+  -> GltfSceneAsset + registered child assets
   -> ECS entities + AnimatorComponent + DeformableMeshComponent
   -> AnimationSystem + DeformationSystem + RenderSystem
 ```
@@ -18,27 +19,46 @@ After import, animation playback does not need to read the source file again.
 
 ## Public Import API
 
-Use the glTF-generic scene APIs:
+Declare the source in an asset package and instantiate the registered scene
+asset:
 
 ```cpp
-auto prefab = karma::scene::loadGltfScenePrefab("assets/character.glb");
+karma::content::AssetRegistry assets;
+std::string diagnostic;
+auto package =
+    karma::content::importAssetPackage(assets, "assets/character", &diagnostic);
+if (!package.has_value()) {
+  return;
+}
 
-auto imported = karma::scene::instantiateGltfScenePrefab(
+const karma::content::GltfSceneAsset* character =
+    assets.findGltfSceneAsset("characters/hero");
+if (character == nullptr) {
+  return;
+}
+
+auto imported = karma::scene::instantiateGltfSceneAsset(
     *world,
     *scene,
-    *graphics,
-    prefab,
+    assets,
+    *character,
     {.create_synthetic_root = true});
 ```
 
-Or load and instantiate in one call:
+The package manifest owns source options:
 
-```cpp
-auto imported = karma::scene::importGltfScene(
-    *world,
-    *scene,
-    *graphics,
-    "assets/character.gltf");
+```json
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "characters/hero",
+      "path": "character.gltf",
+      "import_lights": false
+    }
+  ]
+}
 ```
 
 The API accepts binary `.glb` and JSON `.gltf` sources. JSON `.gltf` sources may
@@ -47,18 +67,20 @@ External image and buffer paths are resolved relative to the source `.gltf`.
 
 ## Imported Data
 
-`karma::scene::GltfScenePrefab` is the in-memory imported asset. It contains:
+`karma::content::GltfSceneAsset` is the package-imported scene metadata. It
+contains:
 
 - `nodes`: glTF node names, local/world transforms, lights, and renderable mesh
-  primitives.
-- `animations`: renderer-agnostic `karma::animation::AnimationClip` values.
-- `skeletons`: joint topology, joint names, joint node indices, and inverse bind
-  matrices.
-- `skins`: imported skin bindings used by skinned primitives.
-- `imported_materials`: source material data used to register renderer
-  material resources.
+  primitive asset keys.
+- `animation_clip_keys`: registered renderer-agnostic
+  `karma::animation::AnimationClip` assets.
+- `skeleton_keys` and `skin_keys`: registered joint topology and skin binding
+  assets used by skinned primitives.
+- `mesh_asset_keys`, `texture_asset_keys`, and `material_keys`: deterministic
+  runtime asset keys produced during package import.
 
-`GltfSceneImportResult` contains the ECS binding created from a prefab:
+`GltfSceneImportResult` contains the ECS binding created from a registered
+scene asset:
 
 - `root_entity`: the top-level imported entity.
 - `node_entities_by_index`: imported glTF node index to ECS entity.
@@ -75,7 +97,8 @@ duration, transform channels, morph target tracks, optional events, and optional
 root-motion data. It does not hold a GLB handle, renderer handle, mesh pointer,
 or file path.
 
-Imported clips are copied into `karma::components::AnimatorComponent::clips`.
+Imported clips are registered in `karma::content::AssetRegistry` and copied into
+`karma::components::AnimatorComponent::clips` during scene asset instantiation.
 The animator also receives the node and morph binding maps needed to apply clip
 channels to the current ECS instance.
 
@@ -236,6 +259,6 @@ weights, CPU reference deformation, explicit skeleton retargeting, external
 - Humanoid semantic profiles are not implemented.
 - Retargeting requires explicit source-joint to target-joint maps.
 - Imported cameras are not part of the glTF scene importer yet.
-- Flat `MeshComponent::mesh_asset_key` remains a registered static mesh key. Import a
-  source path with `AssetRegistry::importMeshAsset(...)`, then assign the key; this path
-  does not instantiate animation, skeleton, or morph runtime data.
+- Flat `MeshComponent::mesh_asset_key` remains a registered static mesh key. Use
+  a package `mesh` entry for static mesh sources; that path does not instantiate
+  animation, skeleton, or morph runtime data.

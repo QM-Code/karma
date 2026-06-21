@@ -80,18 +80,6 @@ public:
 };
 
 /// \ingroup karma_physics
-/// Backend interface for immovable physics geometry.
-class PhysicsStaticBodyBackend {
-public:
-    virtual ~PhysicsStaticBodyBackend() = default;
-    virtual bool isValid() const = 0;
-    virtual glm::vec3 getPosition() const = 0;
-    virtual glm::quat getRotation() const = 0;
-    virtual void destroy() = 0;
-    virtual std::uintptr_t nativeHandle() const = 0;
-};
-
-/// \ingroup karma_physics
 /// Backend interface for a vehicle constraint/controller.
 class PhysicsVehicleBackend {
 public:

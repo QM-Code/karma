@@ -28,10 +28,17 @@ struct GltfSceneLoadOptions {
   bool import_lights = true;
 };
 
+/// Controls how an in-memory glTF prefab is instantiated during source import.
+struct GltfScenePrefabInstantiateOptions {
+  bool create_synthetic_root = false;
+  bool autoplay_animations = true;
+  std::string asset_key_prefix;
+};
+
 /// Combined glTF load and instantiate options for internal importer tests.
 struct GltfSceneImportOptions {
   GltfSceneLoadOptions load{};
-  GltfSceneInstantiateOptions instantiate{};
+  GltfScenePrefabInstantiateOptions instantiate{};
 };
 
 /// One renderable primitive inside an imported glTF node.
@@ -99,7 +106,7 @@ GltfSceneImportResult instantiateGltfScenePrefab(
     scene::Scene& scene,
     content::AssetRegistry& assets,
     const GltfScenePrefab& prefab,
-    const GltfSceneInstantiateOptions& options = {});
+    const GltfScenePrefabInstantiateOptions& options = {});
 
 GltfSceneImportResult importGltfScene(ecs::World& world,
                                       scene::Scene& scene,

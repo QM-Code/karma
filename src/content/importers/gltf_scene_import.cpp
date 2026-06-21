@@ -833,7 +833,7 @@ GltfSceneImportResult instantiateGltfScenePrefab(
     scene::Scene& scene,
     content::AssetRegistry& assets,
     const GltfScenePrefab& prefab,
-    const GltfSceneInstantiateOptions& options) {
+    const GltfScenePrefabInstantiateOptions& options) {
   GltfSceneImportResult result{};
   if (!prefab.valid()) {
     return result;

@@ -805,9 +805,7 @@ bool EngineApp::renderLoadingSplash(float progress) {
   }
   loading_splash_presented_ = true;
 #if !defined(KARMA_RENDER_BACKEND_DILIGENT)
-      if (!skip_present_this_frame) {
-        window_->swapBuffers();
-      }
+  window_->swapBuffers();
 #endif
   if (startup_diag) {
     spdlog::info("Engine startup diag: area=loading_splash stage=frame total ms={:.2f}",

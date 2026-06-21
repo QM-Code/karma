@@ -946,7 +946,6 @@ void testGltfSceneInstantiationRegistersLogicalMeshKeys() {
           karma::scene::GltfSceneInstantiateOptions{
               .create_synthetic_root = false,
               .autoplay_animations = false,
-              .asset_key_prefix = "tests/gltf/world",
           });
   assert(imported.valid());
 

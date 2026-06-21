@@ -161,7 +161,6 @@ karma_add_static(karma_simulation_physics
   src/simulation/physics/constraint.cpp
   src/simulation/physics/rigid_body.cpp
   src/simulation/physics/soft_body.cpp
-  src/simulation/physics/static_body.cpp
   src/simulation/physics/vehicle.cpp
   src/simulation/physics/character_controller.cpp
   src/simulation/physics/physics_world.cpp
@@ -281,8 +280,13 @@ endif()
 
 karma_add_static(karma_content
   src/content/assets/asset_cache.cpp
+  src/content/assets/asset_cache_json.cpp
+  src/content/assets/asset_cache_mesh.cpp
+  src/content/assets/asset_cache_texture.cpp
   src/content/assets/asset_package.cpp
   src/content/assets/asset_registry.cpp
+  src/content/assets/asset_source_import.cpp
+  src/content/assets/asset_texture.cpp
   src/content/importers/gltf_document.cpp
   src/content/importers/mesh_import.cpp
   src/content/importers/gltf_scene_animation_import.cpp

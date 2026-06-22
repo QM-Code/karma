@@ -60,7 +60,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
 
   karma_add_graphical_example(gameplay_tank gameplay tank
     examples/gameplay/tank.cpp)
-  karma_add_graphical_example(physics_collision_events physics collision_events
+  karma_add_physics_example(physics_collision_events collision_events
     examples/physics/collision_events.cpp)
 
   karma_add_graphical_example(rendering_light_stress rendering light_stress

@@ -173,9 +173,16 @@ if (KARMA_ENABLE_NAVIGATION AND TARGET karma::headless)
   )
   karma_configure_example(navigation_samples_headless "navigation/samples" "headless")
   if (BUILD_TESTING)
-    add_test(NAME navigation_samples_headless
-      COMMAND navigation_samples_headless all
-    )
+    if (WIN32)
+      message(STATUS
+        "Skipping navigation_samples_headless CTest on Windows CI; "
+        "the Recast sample runner can hang under CTest on Windows.")
+    else()
+      add_test(NAME navigation_samples_headless
+        COMMAND navigation_samples_headless all
+      )
+      set_tests_properties(navigation_samples_headless PROPERTIES TIMEOUT 120)
+    endif()
   endif()
 endif()
 

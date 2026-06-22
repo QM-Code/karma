@@ -194,6 +194,18 @@ if (@KARMA_RENDER_BACKEND_DILIGENT@)
     )
     FetchContent_MakeAvailable(diligentcore)
   endif()
+  foreach (_karma_diligent_shared_target IN ITEMS
+      Diligent-GraphicsEngineVk-shared
+      Diligent-Archiver-shared)
+    if (TARGET ${_karma_diligent_shared_target})
+      get_target_property(_karma_diligent_shared_imported ${_karma_diligent_shared_target} IMPORTED)
+      if (NOT _karma_diligent_shared_imported)
+        set_target_properties(${_karma_diligent_shared_target} PROPERTIES
+          EXCLUDE_FROM_ALL TRUE
+          EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+      endif()
+    endif()
+  endforeach()
   set(_karma_diligent_target "@KARMA_DILIGENT_TARGET@")
   if (_karma_diligent_target)
     _karma_require_target(${_karma_diligent_target} DiligentCore)

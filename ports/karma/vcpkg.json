@@ -9,6 +9,7 @@
   "dependencies": [
     "assimp",
     "glm",
+    "ktx",
     "nlohmann-json",
     "spdlog",
     {

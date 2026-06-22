@@ -22,6 +22,7 @@ void DiligentBackend::setCameraActive(bool active) {
 }
 
 void DiligentBackend::setDirectionalLight(const rendering::DirectionalLightData& light) {
+  const rendering::DirectionalLightData previous_light = directional_light_;
   directional_light_ = light;
   if (glm::length(directional_light_.direction) < 1e-4f) {
     directional_light_.direction = glm::vec3(0.3f, -1.0f, 0.2f);
@@ -31,6 +32,11 @@ void DiligentBackend::setDirectionalLight(const rendering::DirectionalLightData&
   // Directional sun lights should point toward the scene (negative Y in world-up convention).
   if (directional_light_.direction.y > 0.0f) {
     directional_light_.direction = -directional_light_.direction;
+  }
+  if (previous_light.casts_shadows != directional_light_.casts_shadows ||
+      previous_light.shadow_extent != directional_light_.shadow_extent ||
+      glm::length(previous_light.direction - directional_light_.direction) > 1e-4f) {
+    directional_shadow_scene_dirty_ = true;
   }
 }
 

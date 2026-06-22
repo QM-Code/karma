@@ -16,6 +16,12 @@ concurrency:
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 2
   CTEST_OUTPUT_ON_FAILURE: 1
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 2G
+  CCACHE_COMPILERCHECK: content
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CMAKE_C_COMPILER_LAUNCHER: ccache
+  CMAKE_CXX_COMPILER_LAUNCHER: ccache
 
 jobs:
   headless:
@@ -25,6 +31,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install compiler cache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+
+      - name: Cache compiler outputs
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.job }}-
+            ccache-${{ runner.os }}-
 
       - name: Cache fetched dependencies
         uses: actions/cache@v4
@@ -61,6 +81,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install compiler cache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+
+      - name: Cache compiler outputs
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.job }}-
+            ccache-${{ runner.os }}-
 
       - name: Cache fetched dependencies
         uses: actions/cache@v4

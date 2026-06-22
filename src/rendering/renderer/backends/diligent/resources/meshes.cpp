@@ -248,9 +248,21 @@ void DiligentBackend::destroyMesh(rendering::MeshId mesh) {
 
   for (auto it = instances_.begin(); it != instances_.end();) {
     if (it->second.mesh == mesh) {
+      if (it->second.shadow_visible) {
+        directional_shadow_scene_dirty_ = true;
+        point_shadow_scene_dirty_ = true;
+      }
       it = instances_.erase(it);
     } else {
       ++it;
+    }
+  }
+  for (const auto& entry : instanced_records_) {
+    const auto& record = entry.second;
+    if (record.mesh == mesh && record.shadow_visible) {
+      directional_shadow_scene_dirty_ = true;
+      point_shadow_scene_dirty_ = true;
+      break;
     }
   }
 

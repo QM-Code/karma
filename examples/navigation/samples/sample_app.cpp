@@ -617,7 +617,8 @@ class RecastNavigationSampleApp final : public app::GameInterface {
                                    });
     helpers::spawnEnvironment(*world, assets,
                               "Environment",
-                              registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
+                              registerExampleEnvironmentMap(
+                                  assets, "diligent_gltf_viewer/textures/papermill.ktx"),
                               0.35f,
                               true);
   }

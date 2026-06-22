@@ -41,11 +41,11 @@ void appendQuad(world::MeshData& mesh,
   mesh.indices.insert(mesh.indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
 }
 
-glm::vec3 toGlm(const math::Vec3& v) {
+glm::vec3 toHelperGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
 }
 
-glm::quat toGlm(const math::Quat& q) {
+glm::quat toHelperGlm(const math::Quat& q) {
   return {q.w, q.x, q.y, q.z};
 }
 
@@ -89,11 +89,11 @@ GltfSceneAssetBounds computeGltfSceneAssetBounds(const assets::AssetRegistry& as
   GltfSceneAssetBounds fallback_bounds{};
 
   for (const assets::GltfSceneAssetNode& node : scene.nodes) {
-    const glm::vec3 world_pos = toGlm(node.world_position);
+    const glm::vec3 world_pos = toHelperGlm(node.world_position);
     expandBounds(fallback_bounds, world_pos);
 
-    const glm::vec3 world_scale = toGlm(node.world_scale);
-    const glm::mat3 rotation = glm::mat3_cast(toGlm(node.world_rotation));
+    const glm::vec3 world_scale = toHelperGlm(node.world_scale);
+    const glm::mat3 rotation = glm::mat3_cast(toHelperGlm(node.world_rotation));
     for (const assets::GltfSceneAssetPrimitive& primitive : node.primitives) {
       const world::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);
       if (mesh == nullptr) {

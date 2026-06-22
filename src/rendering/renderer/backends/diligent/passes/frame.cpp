@@ -513,15 +513,35 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
   }
 
   if (meshes_.find(item.mesh) == meshes_.end()) {
+    auto stale_it = instances_.find(item.instance);
+    if (stale_it != instances_.end()) {
+      if (stale_it->second.shadow_visible) {
+        directional_shadow_scene_dirty_ = true;
+        point_shadow_scene_dirty_ = true;
+      }
+      instances_.erase(stale_it);
+    }
     return;
   }
 
   auto it = instances_.find(item.instance);
-  if (it == instances_.end()) {
+  const bool new_record = it == instances_.end();
+  if (new_record) {
     it = instances_.emplace(item.instance, InstanceRecord{}).first;
   }
   auto& record = it->second;
   const bool mesh_changed = record.mesh != item.mesh;
+  const bool shadow_scene_changed =
+      new_record ? item.shadow_visible
+                 : ((record.layer != item.layer ||
+                     mesh_changed ||
+                     record.deformation != item.deformation ||
+                     record.shadow_visible != item.shadow_visible) &&
+                    (record.shadow_visible || item.shadow_visible));
+  if (shadow_scene_changed) {
+    directional_shadow_scene_dirty_ = true;
+    point_shadow_scene_dirty_ = true;
+  }
   record.transform_changed =
       mesh_changed || matrixChangedBeyondEpsilon(record.transform, item.transform) ||
       record.deformation != item.deformation;
@@ -538,19 +558,38 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
 
 void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) {
   const size_t item_instance_count = item.instanceCount();
-  if (item.instance == rendering::kInvalidInstance || item_instance_count == 0u) {
+  if (item.instance == rendering::kInvalidInstance) {
     return;
   }
 
-  if (meshes_.find(item.mesh) == meshes_.end()) {
+  if (item_instance_count == 0u || meshes_.find(item.mesh) == meshes_.end()) {
+    auto stale_it = instanced_records_.find(item.instance);
+    if (stale_it != instanced_records_.end()) {
+      if (stale_it->second.shadow_visible) {
+        directional_shadow_scene_dirty_ = true;
+        point_shadow_scene_dirty_ = true;
+      }
+      instanced_records_.erase(stale_it);
+    }
     return;
   }
 
   auto it = instanced_records_.find(item.instance);
-  if (it == instanced_records_.end()) {
+  const bool new_record = it == instanced_records_.end();
+  if (new_record) {
     it = instanced_records_.emplace(item.instance, InstancedRecord{}).first;
   }
   auto& record = it->second;
+  const bool shadow_scene_changed =
+      new_record ? item.shadow_visible
+                 : ((record.layer != item.layer ||
+                     record.mesh != item.mesh ||
+                     record.shadow_visible != item.shadow_visible) &&
+                    (record.shadow_visible || item.shadow_visible));
+  if (shadow_scene_changed) {
+    directional_shadow_scene_dirty_ = true;
+    point_shadow_scene_dirty_ = true;
+  }
   const bool payload_changed = item.payload_changed ||
                                item.dynamic ||
                                record.mesh != item.mesh ||
@@ -773,8 +812,22 @@ void DiligentBackend::retireInstance(rendering::InstanceId instance) {
   if (instance == rendering::kInvalidInstance) {
     return;
   }
-  instances_.erase(instance);
-  instanced_records_.erase(instance);
+  auto instance_it = instances_.find(instance);
+  if (instance_it != instances_.end()) {
+    if (instance_it->second.shadow_visible) {
+      directional_shadow_scene_dirty_ = true;
+      point_shadow_scene_dirty_ = true;
+    }
+    instances_.erase(instance_it);
+  }
+  auto instanced_it = instanced_records_.find(instance);
+  if (instanced_it != instanced_records_.end()) {
+    if (instanced_it->second.shadow_visible) {
+      directional_shadow_scene_dirty_ = true;
+      point_shadow_scene_dirty_ = true;
+    }
+    instanced_records_.erase(instanced_it);
+  }
   auto particle_it = particle_emitter_runtime_states_.find(static_cast<uint64_t>(instance));
   if (particle_it == particle_emitter_runtime_states_.end()) {
     return;

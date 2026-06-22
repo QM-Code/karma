@@ -40,7 +40,31 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config xorg-dev libglu1-mesa-dev
+          sudo apt-get install -y ccache pkg-config xorg-dev libglu1-mesa-dev
+
+      - name: Install macOS compiler cache
+        if: runner.os == 'macOS'
+        run: brew install ccache
+
+      - name: Enable compiler cache
+        if: runner.os != 'Windows'
+        run: |
+          echo "CCACHE_DIR=${{ github.workspace }}/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=${{ github.workspace }}" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+
+      - name: Cache compiler outputs
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.job }}-
+            ccache-${{ runner.os }}-
 
       - name: Cache fetched dependencies
         uses: actions/cache@v4

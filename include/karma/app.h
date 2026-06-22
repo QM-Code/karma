@@ -607,6 +607,7 @@ class EngineApp {
  private:
   void initSubsystems();
   void shutdownSubsystems();
+  void shutdownRunningGame();
   void syncSceneEntities();
   bool ensureLoadingSplashTexture();
   void releaseLoadingSplashTexture();

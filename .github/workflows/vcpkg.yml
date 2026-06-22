@@ -46,10 +46,24 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/../vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-linux
       VCPKG_DISABLE_METRICS: 1
+      VCPKG_BINARY_CACHE: ${{ github.workspace }}/build/vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build/vcpkg-binary-cache,readwrite
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: build/vcpkg-binary-cache
+          key: vcpkg-binary-${{ runner.os }}-${{ github.job }}-${{ hashFiles('ports/**', 'vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-binary-${{ runner.os }}-${{ github.job }}-
+            vcpkg-binary-${{ runner.os }}-
+
+      - name: Prepare vcpkg binary cache
+        run: mkdir -p "$VCPKG_BINARY_CACHE"
 
       - name: Install host tools
         run: |
@@ -86,10 +100,24 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/../vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-linux
       VCPKG_DISABLE_METRICS: 1
+      VCPKG_BINARY_CACHE: ${{ github.workspace }}/build/vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build/vcpkg-binary-cache,readwrite
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: build/vcpkg-binary-cache
+          key: vcpkg-binary-${{ runner.os }}-${{ github.job }}-${{ hashFiles('ports/**', 'vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-binary-${{ runner.os }}-${{ github.job }}-
+            vcpkg-binary-${{ runner.os }}-
+
+      - name: Prepare vcpkg binary cache
+        run: mkdir -p "$VCPKG_BINARY_CACHE"
 
       - name: Install host tools
         run: |

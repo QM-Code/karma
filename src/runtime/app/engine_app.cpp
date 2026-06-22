@@ -594,6 +594,14 @@ void EngineApp::shutdownSubsystems() {
   running_ = false;
 }
 
+void EngineApp::shutdownRunningGame() {
+  if (game_) {
+    game_->onShutdown();
+  }
+  shutdownSubsystems();
+  game_ = nullptr;
+}
+
 void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
   if (user_ui_) {
     user_ui_->onShutdown();
@@ -1039,11 +1047,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   finish_startup_stage("runtime module attach");
 
   auto shutdown_started_game = [&]() {
-    if (game_) {
-      game_->onShutdown();
-    }
-    shutdownSubsystems();
-    game_ = nullptr;
+    shutdownRunningGame();
   };
 
   bool startup_close_requested = false;
@@ -1336,10 +1340,21 @@ void EngineApp::tick() {
   if (window_) {
     auto event_section_start = section_start;
     window_->pollEvents();
+    const auto& polled_events = window_->events();
+    const bool window_close_event =
+        std::any_of(polled_events.begin(), polled_events.end(), [](const platform::Event& event) {
+          return event.type == platform::EventType::WindowClose;
+        });
+    if (window_close_event || window_->shouldClose()) {
+      requestStop();
+      window_->clearEvents();
+      shutdownRunningGame();
+      return;
+    }
     auto event_section_end = core::SteadyClock::now();
     poll_events_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
 
-    const auto& events = window_->events();
+    const auto& events = polled_events;
     event_count = events.size();
     for (const auto& event : events) {
       switch (event.type) {
@@ -1409,11 +1424,7 @@ void EngineApp::tick() {
           static_cast<int64_t>(config_.mouse_button_present_skip_frames);
 
   if (!running_) {
-    if (game_) {
-      game_->onShutdown();
-    }
-    shutdownSubsystems();
-    game_ = nullptr;
+    shutdownRunningGame();
     return;
   }
 
@@ -1456,6 +1467,10 @@ void EngineApp::tick() {
   game_->onUpdate(frame_dt);
   section_end = core::SteadyClock::now();
   const double game_update_ms = core::elapsedMilliseconds(section_start, section_end);
+  if (!running_) {
+    shutdownRunningGame();
+    return;
+  }
 
   section_start = section_end;
   light_pulse_system_->update(world_, frame_dt);
@@ -1534,6 +1549,10 @@ void EngineApp::tick() {
 #endif
     section_end = core::SteadyClock::now();
     ui_frame_ms = core::elapsedMilliseconds(section_start, section_end);
+    if (!running_) {
+      shutdownRunningGame();
+      return;
+    }
 
     rendering::FrameInfo frame{};
     frame.width = fb_width;
@@ -1755,11 +1774,7 @@ void EngineApp::tick() {
   }
 
   if (!running_) {
-    if (game_) {
-      game_->onShutdown();
-    }
-    shutdownSubsystems();
-    game_ = nullptr;
+    shutdownRunningGame();
   }
 }
 

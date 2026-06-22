@@ -1323,6 +1323,8 @@ class DiligentBackend final : public Backend {
   int forward_plus_max_local_lights_ = 4096;
 
   bool directional_shadow_cache_valid_ = false;
+  bool directional_shadow_scene_dirty_ = false;
+  bool point_shadow_scene_dirty_ = false;
   std::array<glm::mat4, kShadowCascadeCount> cached_cascade_light_view_proj_{};
   std::array<glm::mat4, kShadowCascadeCount> cached_cascade_shadow_uv_proj_{};
   std::array<float, kShadowCascadeCount> cached_cascade_world_texel_{};

@@ -1190,12 +1190,15 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       [&](const world::Entity entity) {
     const auto& light_component = world.get<components::LightComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
+    bool visible = true;
+    if (world.has<components::VisibilityComponent>(entity)) {
+      visible = world.get<components::VisibilityComponent>(entity).visible;
+    }
+    if (!visible || light_component.intensity <= 0.0f) {
+      return true;
+    }
     if (light_component.type != components::LightComponent::Type::Directional) {
-      bool visible = true;
-      if (world.has<components::VisibilityComponent>(entity)) {
-        visible = world.get<components::VisibilityComponent>(entity).visible;
-      }
-      if (!visible || light_component.intensity <= 0.0f || light_component.range <= 0.0f) {
+      if (light_component.range <= 0.0f) {
         return true;
       }
     }

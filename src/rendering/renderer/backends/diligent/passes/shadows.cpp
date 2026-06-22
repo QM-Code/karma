@@ -401,7 +401,8 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
         directional_shadow_position_threshold, cached_cascade_world_texel_[0] * 1.5f);
   }
 
-  bool directional_shadow_needs_update = !directional_shadow_cache_valid_;
+  bool directional_shadow_needs_update =
+      !directional_shadow_cache_valid_ || directional_shadow_scene_dirty_;
   if (!directional_shadow_needs_update) {
     const float camera_delta = glm::length(camera_position - cached_shadow_camera_position_);
     directional_shadow_needs_update =
@@ -620,7 +621,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
     }
   };
 
-  bool point_shadow_force_full_refresh = false;
+  bool point_shadow_force_full_refresh = point_shadow_scene_dirty_;
   bool point_shadow_light_transform_changed = false;
   for (Diligent::Uint32 slot = 0; slot < out_state.point_shadow_light_count; ++slot) {
     if (slot >= static_cast<Diligent::Uint32>(kMaxPointShadowLights)) {
@@ -702,6 +703,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
   }
   if (out_state.point_shadow_light_count == 0) {
     point_shadow_cache_initialized_ = false;
+    point_shadow_scene_dirty_ = false;
     point_shadow_face_dirty_.fill(1u);
   }
 
@@ -1183,6 +1185,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
     cached_shadow_camera_far_ = camera_.far_clip;
     cached_shadow_camera_perspective_ = camera_.perspective;
     directional_shadow_cache_valid_ = true;
+    directional_shadow_scene_dirty_ = false;
   }
 
   if (render_point_shadows) {
@@ -1312,6 +1315,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       context_->TransitionResourceStates(1, &barrier);
       out_state.point_shadow_ready = true;
     }
+    point_shadow_scene_dirty_ = false;
   }
 
   bool any_point_shadow_slot_valid = false;

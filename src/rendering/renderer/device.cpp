@@ -318,6 +318,8 @@ class GraphicsDevice::RenderScheduler {
 
  private:
   struct FramePacket {
+    FramePacket() : commands(), record_start(), record_ms(0.0f), submit_ms(0.0f) {}
+
     std::vector<RenderCommand> commands;
     core::SteadyClock::time_point record_start{};
     float record_ms = 0.0f;

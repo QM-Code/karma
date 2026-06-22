@@ -561,12 +561,13 @@ ServerListEventType ServerListCache::upsert(ServerListing listing,
 }
 
 bool ServerListCache::removeByServerId(const std::string& server_id,
-                                       ServerListing* removed) {
+                                        ServerListing* removed) {
   auto it = id_to_key_.find(server_id);
   if (it == id_to_key_.end()) {
     return false;
   }
-  return removeByKey(it->second, removed);
+  const std::string key = it->second;
+  return removeByKey(key, removed);
 }
 
 bool ServerListCache::removeByEndpoint(const Endpoint& endpoint,
@@ -575,7 +576,8 @@ bool ServerListCache::removeByEndpoint(const Endpoint& endpoint,
   if (it == endpoint_to_key_.end()) {
     return false;
   }
-  return removeByKey(it->second, removed);
+  const std::string key = it->second;
+  return removeByKey(key, removed);
 }
 
 std::vector<ServerListing> ServerListCache::expire(

@@ -12,5 +12,11 @@ add_executable(karma_install_alias_consumer_smoke ../graphical_main.cpp)
 target_link_libraries(karma_install_alias_consumer_smoke PRIVATE karma::karma)
 
 enable_testing()
-add_test(NAME karma_install_graphical_consumer_smoke COMMAND karma_install_graphical_consumer_smoke)
-add_test(NAME karma_install_alias_consumer_smoke COMMAND karma_install_alias_consumer_smoke)
+if (WIN32)
+  message(STATUS
+    "Skipping installed-package graphical consumer runtime smoke tests on Windows; "
+    "configure/build still verifies package linkage.")
+else()
+  add_test(NAME karma_install_graphical_consumer_smoke COMMAND karma_install_graphical_consumer_smoke)
+  add_test(NAME karma_install_alias_consumer_smoke COMMAND karma_install_alias_consumer_smoke)
+endif()

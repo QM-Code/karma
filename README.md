@@ -293,11 +293,12 @@ CTest, and runs a separate AddressSanitizer/UBSan debug test job.
 
 The heavier cross-platform workflow lives at
 `.github/workflows/full-build.yml`. It runs on Linux, macOS, and Windows for
-manual dispatches, pushes to `main`, and pull requests labeled
-`ci/full-build`. The workflow builds headless profiles with examples, runs
-CTest, builds the graphical profile and graphical examples without launching a
-window, installs the minimal headless package, uploads that install tree as a
-workflow artifact, and builds source/installed consumer smoke projects.
+manual dispatches, pull requests labeled `ci/full-build`, and nightly scheduled
+runs when the root `VERSION` has changed since the latest successful full build
+on `main`. The workflow builds headless profiles with examples, runs CTest,
+builds the graphical profile and graphical examples without launching a window,
+installs the minimal headless package, uploads that install tree as a workflow
+artifact, and builds source/installed consumer smoke projects.
 
 Code scanning lives at `.github/workflows/codeql.yml` and runs CodeQL for C/C++
 on pull requests, pushes to `main`, weekly schedule, and manual dispatches.

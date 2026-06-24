@@ -448,19 +448,24 @@ bool DiligentBackend::ensureInstancedGpuCullingResources() {
   pso_ci.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_COMPUTE;
   pso_ci.pCS = culling_cs;
 
+  constexpr auto kStorageBufferVariableFlags =
+      Diligent::SHADER_VARIABLE_FLAG_NO_DYNAMIC_BUFFERS;
   Diligent::ShaderResourceVariableDesc variables[] = {
       {Diligent::SHADER_TYPE_COMPUTE,
        "InstancedGpuCullingConstants",
        Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_SourceInstances",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_VisibleInstances",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_DrawArgs",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
   };
   pso_ci.PSODesc.ResourceLayout.Variables = variables;
   pso_ci.PSODesc.ResourceLayout.NumVariables =
@@ -560,37 +565,48 @@ bool DiligentBackend::ensureInstancedGpuLodCullingResources() {
   pso_ci.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_COMPUTE;
   pso_ci.pCS = culling_cs;
 
+  constexpr auto kStorageBufferVariableFlags =
+      Diligent::SHADER_VARIABLE_FLAG_NO_DYNAMIC_BUFFERS;
   Diligent::ShaderResourceVariableDesc variables[] = {
       {Diligent::SHADER_TYPE_COMPUTE,
        "InstancedGpuCullingConstants",
        Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_SourceInstances",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_VisibleInstances0",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_VisibleInstances1",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_VisibleInstances2",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_VisibleInstances3",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_DrawArgs0",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_DrawArgs1",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_DrawArgs2",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_DrawArgs3",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE,
+       kStorageBufferVariableFlags},
   };
   pso_ci.PSODesc.ResourceLayout.Variables = variables;
   pso_ci.PSODesc.ResourceLayout.NumVariables =

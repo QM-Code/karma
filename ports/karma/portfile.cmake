@@ -63,8 +63,6 @@ vcpkg_copy_pdbs()
 file(REMOVE_RECURSE
   "${CURRENT_PACKAGES_DIR}/debug/include"
   "${CURRENT_PACKAGES_DIR}/debug/share"
-  "${CURRENT_PACKAGES_DIR}/include/karma/content/geometry"
-  "${CURRENT_PACKAGES_DIR}/include/karma/runtime/scene"
 )
 
 configure_file("${CMAKE_CURRENT_LIST_DIR}/usage" "${CURRENT_PACKAGES_DIR}/share/${PORT}/usage" COPYONLY)

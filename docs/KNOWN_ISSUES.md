@@ -35,7 +35,8 @@ native presentation engine.
 
 Current mitigations:
 
-- Use frame pacing for dense examples:
+- Default apps already CPU-pace frame starts at 60 FPS. For dense examples,
+  lower the cap if present/acquire stalls remain visible:
 
   ```bash
   KARMA_ENGINE_FRAME_PACING_FPS=30 ./build/examples/rendering/grass_field 50000
@@ -50,7 +51,8 @@ Current mitigations:
   ./build/examples/rendering/grass_field 50000
   ```
 
-- For diagnostics, capture both engine and Diligent present timing:
+- For uncapped diagnostics, disable CPU pacing and capture both engine and
+  Diligent present timing:
 
   ```bash
   KARMA_ENGINE_FRAME_PACING_FPS=0 \

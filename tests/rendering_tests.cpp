@@ -15,6 +15,7 @@
 #include "karma/assets.h"
 #include "karma/assets.h"
 #include "karma/assets.h"
+#include "karma/app.h"
 #include <glm/common.hpp>
 #include <glm/mat4x4.hpp>
 
@@ -99,6 +100,14 @@ void testTerrainHeadlessNoopApi() {
 
 bool nearly(float a, float b) {
   return std::abs(a - b) < 0.0001f;
+}
+
+void testEngineConfigFramePacingDefaultAndOptOut() {
+  karma::app::EngineConfig config{};
+  assert(nearly(config.frame_pacing_fps, 60.0f));
+
+  config.frame_pacing_fps = 0.0f;
+  assert(nearly(config.frame_pacing_fps, 0.0f));
 }
 
 karma::world::MeshData makeTriangleMesh() {
@@ -1142,6 +1151,7 @@ void testDeformationHeadlessNoopApi() {
 }  // namespace
 
 int main() {
+  testEngineConfigFramePacingDefaultAndOptOut();
   testPrimitiveMeshAndDiffuseMaterialHelpers();
   testAssetRegistryMaterialInheritance();
   testMaterialFileLoading();

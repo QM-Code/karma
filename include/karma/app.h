@@ -519,9 +519,10 @@ struct EngineConfig {
   /// Renderer execution ownership. Threaded keeps backend present off the game thread.
   rendering::RendererExecutionMode renderer_execution_mode =
       rendering::RendererExecutionMode::Threaded;
-  /// Optional CPU-side frame-start cap. 0 disables it. This is useful with low-latency
-  /// present modes that can otherwise run into swapchain acquire/present pacing stalls.
-  float frame_pacing_fps = 0.0f;
+  /// CPU-side frame-start cap in frames per second. Defaults to 60 FPS for normal apps.
+  /// Set to 0 to disable CPU pacing for profiling or custom loops. This is separate
+  /// from swapchain present/vsync policy; use `vsync` or `present_mode` for that.
+  float frame_pacing_fps = 60.0f;
   /// Skips swapchain present on frames that consumed mouse-button events. This is
   /// an opt-in workaround for Linux compositor/driver present stalls on clicks.
   bool skip_present_on_mouse_button = false;

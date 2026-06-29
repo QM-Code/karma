@@ -360,11 +360,15 @@ This avoids FIFO/FIFO_RELAXED stalls observed on some Linux Vulkan surfaces, whe
 mailbox is not supported, the backend may use immediate mode; that removes the
 stall at the cost of possible tearing unless the app caps frame rate elsewhere.
 
-For low-latency present runs, set `config.frame_pacing_fps` or override it with
-`KARMA_ENGINE_FRAME_PACING_FPS` to cap frame starts before input polling and
-rendering. Frame diagnostics report this explicit wait as `pace=...`. To move
-normal compositor throttling out of the renderer `present` bucket, choose a cap
-below the observed present-paced frame rate:
+Present mode and CPU frame pacing are separate controls. By default,
+`EngineConfig::frame_pacing_fps` caps frame starts at 60 FPS before input polling
+and rendering while keeping the low-latency present policy above. Frame
+diagnostics report this wait as `pace=...`.
+
+Set `config.frame_pacing_fps` or override it with
+`KARMA_ENGINE_FRAME_PACING_FPS` to choose a different CPU cap. To move normal
+compositor throttling out of the renderer `present` bucket, choose a cap below
+the observed present-paced frame rate:
 
 ```bash
 KARMA_ENGINE_FRAME_PACING_FPS=30 ./build/examples/rendering/grass_field 50000

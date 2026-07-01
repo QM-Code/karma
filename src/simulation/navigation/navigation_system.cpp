@@ -2,7 +2,6 @@
 
 #include "karma/core.h"
 #include "karma/components.h"
-#include "karma/components.h"
 #include "karma/world.h"
 #include "detail/navigation_system_helpers.h"
 
@@ -18,7 +17,7 @@ using detail::syncTileCaches;
 void NavigationSystem::update(world::World& world, float dt) {
   const auto update_start = core::SteadyClock::now();
   auto section_start = update_start;
-  rebuildNavMeshes(world, assets_);
+  rebuildNavMeshes(world, assets_, &stats_);
   syncTileCaches(world, dt);
   syncCrowds(world, dt);
   auto section_end = core::SteadyClock::now();
@@ -138,6 +137,17 @@ void NavigationSystem::clearCrowdTarget(world::World& world, world::Entity agent
   agent.target_state = NavCrowdTargetState::None;
   agent.reached_destination = false;
   agent.last_request_status = NavStatus::Success;
+}
+
+bool NavigationSystem::requestBuildDebugDraw(world::World& world, world::Entity nav_entity) {
+  if (!world.isAlive(nav_entity) ||
+      !world.has<components::NavMeshComponent>(nav_entity)) {
+    return false;
+  }
+  auto& nav_mesh = world.get<components::NavMeshComponent>(nav_entity);
+  nav_mesh.rebuild_requested = true;
+  nav_mesh.build_debug_draw_requested = true;
+  return true;
 }
 
 }  // namespace karma::navigation

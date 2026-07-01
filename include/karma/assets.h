@@ -261,6 +261,9 @@ class AssetRegistry {
   AssetRegistry& operator=(const AssetRegistry&) = delete;
 
   void clear();
+  bool moveAssetFrom(AssetRegistry& source,
+                     const std::string& type,
+                     const std::string& key);
 
   static bool isValidAssetKey(std::string_view key);
   static std::string assetKeyValidationError(std::string_view key);

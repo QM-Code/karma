@@ -3,7 +3,70 @@
 #include "karma/assets.h"
 #include "karma/assets.h"
 
+#include <fstream>
+
 namespace karma::tests::navigation {
+namespace {
+
+void setEnvVar(const char* name, const char* value) {
+#if defined(_WIN32)
+  _putenv_s(name, value);
+#else
+  setenv(name, value, 1);
+#endif
+}
+
+std::filesystem::path navCacheTestDir() {
+  static const std::filesystem::path dir = [] {
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        ("karma-nav-cache-tests-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::remove_all(root);
+    setEnvVar("KARMA_NAV_CACHE", "1");
+    setEnvVar("KARMA_NAV_CACHE_DIR", root.string().c_str());
+    return root;
+  }();
+  return dir;
+}
+
+karma::world::Entity addPlaneSurface(karma::world::World& world, float half_extent = 5.0f) {
+  const auto surface = world.createEntity();
+  world.add(surface, karma::components::TransformComponent{});
+  world.add(surface, karma::components::NavMeshSurfaceComponent{
+                         .mesh_data = std::make_shared<karma::world::MeshData>(
+                             makePlaneMesh(half_extent)),
+                     });
+  return surface;
+}
+
+karma::world::Entity addCachedNavMesh(karma::world::World& world,
+                                    karma::navigation::NavMeshBuildConfig config = {}) {
+  const auto nav_entity = world.createEntity();
+  config.agent_radius = config.agent_radius > 0.0f ? config.agent_radius : 0.2f;
+  karma::components::NavMeshComponent nav_component;
+  nav_component.cache.enabled = true;
+  nav_component.build_config = std::move(config);
+  world.add(nav_entity, std::move(nav_component));
+  return nav_entity;
+}
+
+std::vector<std::filesystem::path> navCacheFiles(const std::filesystem::path& root,
+                                                 const char* extension) {
+  std::vector<std::filesystem::path> paths;
+  if (!std::filesystem::exists(root)) {
+    return paths;
+  }
+  for (const std::filesystem::directory_entry& entry :
+       std::filesystem::recursive_directory_iterator(root)) {
+    if (entry.is_regular_file() && entry.path().extension() == extension) {
+      paths.push_back(entry.path());
+    }
+  }
+  return paths;
+}
+
+}  // namespace
 
 void testNavigationSystemBuildsAndMovesAgent() {
   karma::world::World world;
@@ -124,6 +187,220 @@ void testNavigationSystemTileCacheObstacleComponent() {
   karma::navigation::NavQuery restored_query(nav_component_ref.nav_mesh);
   assert(restored_query.findPath({-4.0f, 0.1f, 0.0f},
                                  {4.0f, 0.1f, 0.0f}).success());
+}
+
+void testNavigationSystemNavMeshCacheHitAndInvalidation() {
+  const std::filesystem::path cache_dir = navCacheTestDir();
+
+  {
+    karma::world::World world;
+    addPlaneSurface(world);
+    karma::navigation::NavMeshBuildConfig config;
+    config.agent_radius = 0.2f;
+    config.collect_build_debug_draw = true;
+    const auto nav_entity = addCachedNavMesh(world, config);
+
+    karma::navigation::NavigationSystem system;
+    system.update(world, 0.0f);
+
+    const auto& nav = world.get<karma::components::NavMeshComponent>(nav_entity);
+    assert(nav.built);
+    assert(system.stats().last_cache_miss);
+    assert(system.stats().last_cache_write);
+    assert(system.stats().cache_misses == 1);
+    assert(system.stats().cache_writes == 1);
+    assert(!nav.nav_mesh.config().collect_build_debug_draw);
+    assert(nav.nav_mesh.boundsMin().x <= -5.0f);
+    assert(nav.nav_mesh.boundsMax().z >= 5.0f);
+  }
+
+  {
+    karma::world::World world;
+    addPlaneSurface(world);
+    karma::navigation::NavMeshBuildConfig config;
+    config.agent_radius = 0.2f;
+    config.collect_build_debug_draw = true;
+    const auto nav_entity = addCachedNavMesh(world, config);
+
+    karma::navigation::NavigationSystem system;
+    system.update(world, 0.0f);
+
+    const auto& nav = world.get<karma::components::NavMeshComponent>(nav_entity);
+    assert(nav.built);
+    assert(system.stats().last_cache_hit);
+    assert(system.stats().cache_hits == 1);
+    assert(nav.last_build_result.status == karma::navigation::NavStatus::Success);
+    assert(nav.last_build_result.vertex_count == 4);
+    assert(nav.last_build_result.triangle_count == 2);
+    assert(nav.nav_mesh.boundsMin().x <= -5.0f);
+    assert(nav.nav_mesh.boundsMax().z >= 5.0f);
+    karma::navigation::NavQuery query(nav.nav_mesh);
+    assert(query.findPath({-4.0f, 0.1f, -4.0f}, {4.0f, 0.1f, 4.0f}).success());
+  }
+
+  {
+    karma::world::World world;
+    addPlaneSurface(world);
+    karma::navigation::NavMeshBuildConfig config;
+    config.agent_radius = 0.3f;
+    const auto nav_entity = addCachedNavMesh(world, config);
+
+    karma::navigation::NavigationSystem system;
+    system.update(world, 0.0f);
+
+    assert(world.get<karma::components::NavMeshComponent>(nav_entity).built);
+    assert(system.stats().last_cache_miss);
+    assert(system.stats().last_cache_write);
+  }
+
+  {
+    karma::world::World world;
+    addPlaneSurface(world, 4.0f);
+    karma::navigation::NavMeshBuildConfig config;
+    config.agent_radius = 0.2f;
+    const auto nav_entity = addCachedNavMesh(world, config);
+
+    karma::navigation::NavigationSystem system;
+    system.update(world, 0.0f);
+
+    assert(world.get<karma::components::NavMeshComponent>(nav_entity).built);
+    assert(system.stats().last_cache_miss);
+    assert(system.stats().last_cache_write);
+  }
+
+  const std::vector<std::filesystem::path> files = navCacheFiles(cache_dir, ".knav");
+  assert(!files.empty());
+  for (const std::filesystem::path& path : files) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << "corrupt";
+  }
+
+  {
+    karma::world::World world;
+    addPlaneSurface(world);
+    karma::navigation::NavMeshBuildConfig config;
+    config.agent_radius = 0.2f;
+    config.collect_build_debug_draw = true;
+    const auto nav_entity = addCachedNavMesh(world, config);
+
+    karma::navigation::NavigationSystem system;
+    system.update(world, 0.0f);
+
+    assert(world.get<karma::components::NavMeshComponent>(nav_entity).built);
+    assert(system.stats().last_cache_miss);
+    assert(system.stats().last_cache_write);
+  }
+}
+
+void testNavigationSystemTileCacheCacheHitAndObstacleResync() {
+  (void)navCacheTestDir();
+
+  auto setup_world = [](karma::world::World& world, bool with_obstacle) {
+    auto surface_mesh = std::make_shared<karma::world::MeshData>();
+    appendQuad(*surface_mesh,
+               {-5.0f, 0.0f, -1.0f},
+               {5.0f, 0.0f, -1.0f},
+               {5.0f, 0.0f, 1.0f},
+               {-5.0f, 0.0f, 1.0f});
+
+    const auto surface = world.createEntity();
+    world.add(surface, karma::components::TransformComponent{});
+    world.add(surface, karma::components::NavMeshSurfaceComponent{
+                           .mesh_data = surface_mesh,
+                       });
+
+    karma::navigation::NavMeshBuildConfig config;
+    config.tile_size = 16;
+    config.agent_radius = 0.2f;
+    config.agent_height = 1.0f;
+    config.agent_max_climb = 0.2f;
+    const auto nav_entity = addCachedNavMesh(world, config);
+    world.add(nav_entity, karma::components::NavTileCacheComponent{});
+
+    karma::world::Entity obstacle_entity{};
+    if (with_obstacle) {
+      obstacle_entity = world.createEntity();
+      world.add(obstacle_entity, karma::components::TransformComponent{{0.0f, 0.0f, 0.0f}});
+      karma::components::NavTileCacheObstacleComponent obstacle;
+      obstacle.nav_mesh_entity = nav_entity;
+      obstacle.shape = karma::navigation::NavTileCacheObstacleShape::Box;
+      obstacle.bounds_min = {-0.5f, -0.2f, -2.0f};
+      obstacle.bounds_max = {0.5f, 2.0f, 2.0f};
+      world.add(obstacle_entity, obstacle);
+    }
+    return std::pair{nav_entity, obstacle_entity};
+  };
+
+  {
+    karma::world::World world;
+    const auto [nav_entity, obstacle_entity] = setup_world(world, false);
+    (void)obstacle_entity;
+    karma::navigation::NavigationSystem system;
+    system.update(world, 0.0f);
+    assert(world.get<karma::components::NavMeshComponent>(nav_entity).built);
+    assert(world.get<karma::components::NavTileCacheComponent>(nav_entity).built);
+    assert(system.stats().last_cache_miss);
+    assert(system.stats().last_cache_write);
+  }
+
+  {
+    karma::world::World world;
+    const auto [nav_entity, obstacle_entity] = setup_world(world, true);
+    karma::navigation::NavigationSystem system;
+    for (int i = 0; i < 8; ++i) {
+      system.update(world, 0.0f);
+    }
+
+    auto& nav = world.get<karma::components::NavMeshComponent>(nav_entity);
+    auto& cache = world.get<karma::components::NavTileCacheComponent>(nav_entity);
+    assert(nav.built);
+    assert(cache.built);
+    assert(system.stats().cache_hits >= 1);
+    assert(cache.tile_cache.obstacleCount() == 1);
+
+    karma::navigation::NavQuery blocked_query(nav.nav_mesh);
+    const karma::navigation::NavPath blocked =
+        blocked_query.findPath({-4.0f, 0.1f, 0.0f}, {4.0f, 0.1f, 0.0f});
+    assert(blocked.status != karma::navigation::NavStatus::Success || blocked.partial);
+
+    auto& obstacle =
+        world.get<karma::components::NavTileCacheObstacleComponent>(obstacle_entity);
+    obstacle.remove_requested = true;
+    for (int i = 0; i < 8; ++i) {
+      system.update(world, 0.0f);
+    }
+
+    karma::navigation::NavQuery restored_query(nav.nav_mesh);
+    assert(restored_query.findPath({-4.0f, 0.1f, 0.0f},
+                                   {4.0f, 0.1f, 0.0f}).success());
+  }
+}
+
+void testNavigationSystemBuildDebugDrawBypassesCacheOnce() {
+  (void)navCacheTestDir();
+
+  karma::world::World world;
+  addPlaneSurface(world);
+  karma::navigation::NavMeshBuildConfig config;
+  config.agent_radius = 0.2f;
+  config.collect_build_debug_draw = true;
+  const auto nav_entity = addCachedNavMesh(world, config);
+
+  karma::navigation::NavigationSystem system;
+  system.update(world, 0.0f);
+  auto& nav = world.get<karma::components::NavMeshComponent>(nav_entity);
+  assert(nav.built);
+  assert(!nav.nav_mesh.config().collect_build_debug_draw);
+
+  assert(karma::navigation::NavigationSystem::requestBuildDebugDraw(world, nav_entity));
+  system.update(world, 0.0f);
+  assert(nav.built);
+  assert(!system.stats().last_cache_hit);
+  assert(!system.stats().last_cache_miss);
+  assert(nav.nav_mesh.config().collect_build_debug_draw);
+  assert(nav.nav_mesh.hasDebugDrawMode(karma::navigation::NavMeshDebugDrawMode::Contours));
+  assert(!nav.nav_mesh.debugDrawLines(
+      karma::navigation::NavMeshDebugDrawMode::Contours).empty());
 }
 
 void testNavigationSystemCrowdAgentComponent() {

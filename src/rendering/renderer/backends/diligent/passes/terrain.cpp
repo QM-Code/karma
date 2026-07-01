@@ -940,7 +940,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       pso.PSODesc.ResourceLayout.NumVariables =
           static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
       const auto pso_start = core::SteadyClock::now();
-      pipelines.cpu_pipeline_state = device_with_cache_.CreateGraphicsPipelineState(pso);
+      pipelines.cpu_pipeline_state = createGraphicsPipelineState(pso);
       logRenderPipelineDiag("terrain",
                             "Karma Terrain CPU Pipeline",
                             pso_start,
@@ -1046,7 +1046,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       pso.PSODesc.ResourceLayout.NumVariables =
           static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
       const auto pso_start = core::SteadyClock::now();
-      pipelines.tess_pipeline_state = device_with_cache_.CreateGraphicsPipelineState(pso);
+      pipelines.tess_pipeline_state = createGraphicsPipelineState(pso);
       logRenderPipelineDiag("terrain",
                             "Karma Terrain Tessellation Pipeline",
                             pso_start,

@@ -130,7 +130,7 @@ void DiligentBackend::ensureLineResources() {
         static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
 
     const auto pso_start = core::SteadyClock::now();
-    out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    out_pso = createGraphicsPipelineState(pso);
     recordPipelineCreation("line", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return false;

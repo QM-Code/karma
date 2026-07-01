@@ -19,6 +19,7 @@
 #include <string_view>
 
 #include <Primitives/interface/BasicTypes.h>
+#include <Primitives/interface/DataBlob.h>
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/GraphicsTypes.h>
@@ -74,6 +75,21 @@ std::filesystem::path defaultShaderCachePath(std::uint32_t version) {
     base = "cache";
   }
   const std::string filename = "karma_shader_cache_v" + std::to_string(version) + ".diligentcache";
+  return base / "karma" / filename;
+}
+
+std::filesystem::path defaultPipelineCachePath(std::uint32_t version) {
+  const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
+  const char* home = std::getenv("HOME");
+  std::filesystem::path base;
+  if (xdg_cache && xdg_cache[0] != '\0') {
+    base = xdg_cache;
+  } else if (home && home[0] != '\0') {
+    base = std::filesystem::path(home) / ".cache";
+  } else {
+    base = "cache";
+  }
+  const std::string filename = "karma_pipeline_cache_v" + std::to_string(version) + ".vkpipelinecache";
   return base / "karma" / filename;
 }
 
@@ -549,6 +565,9 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window,
   if (const char* env = std::getenv("KARMA_SHADER_CACHE")) {
     shader_cache_enabled_ = envFlagEnabled(env);
   }
+  if (const char* env = std::getenv("KARMA_PIPELINE_CACHE")) {
+    pipeline_cache_enabled_ = envFlagEnabled(env);
+  }
   if (const char* env = std::getenv("KARMA_SHADER_CACHE_LOG")) {
     shader_cache_log_ = envFlagEnabled(env);
   }
@@ -566,14 +585,26 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window,
       render_state_cache_path_ = env;
     }
   }
+  if (const char* env = std::getenv("KARMA_PIPELINE_CACHE_PATH")) {
+    if (env[0] != '\0') {
+      pipeline_state_cache_path_ = env;
+    }
+  }
   if (render_state_cache_path_.empty()) {
     render_state_cache_path_ = defaultShaderCachePath(shader_cache_version_);
+  }
+  if (pipeline_state_cache_path_.empty()) {
+    pipeline_state_cache_path_ = defaultPipelineCachePath(shader_cache_version_);
   }
   if (shader_cache_log_) {
     spdlog::info("Render state cache config: enabled={} path='{}' version={} flush={}",
                  shader_cache_enabled_,
                  render_state_cache_path_.string(),
                  shader_cache_version_,
+                 shader_cache_flush_);
+    spdlog::info("Native pipeline cache config: enabled={} path='{}' flush={}",
+                 pipeline_cache_enabled_,
+                 pipeline_state_cache_path_.string(),
                  shader_cache_flush_);
   }
   auto stage_end = core::SteadyClock::now();
@@ -645,6 +676,119 @@ void DiligentBackend::saveRenderStateCache(std::string_view reason) {
   }
 }
 
+void DiligentBackend::initializePipelineStateCache() {
+  if (!pipeline_cache_enabled_ || !device_ || pipeline_state_cache_path_.empty()) {
+    return;
+  }
+
+  std::error_code ec;
+  const auto cache_parent = pipeline_state_cache_path_.parent_path();
+  if (!cache_parent.empty()) {
+    std::filesystem::create_directories(cache_parent, ec);
+    if (ec && shader_cache_log_) {
+      spdlog::warn("Native pipeline cache directory create failed: path='{}' error='{}'",
+                   cache_parent.string(),
+                   ec.message());
+    }
+  }
+
+  const auto bytes = readFileBytes(pipeline_state_cache_path_);
+  Diligent::PipelineStateCacheCreateInfo cache_ci{};
+  cache_ci.Desc.Name = "Karma Native Pipeline Cache";
+  if (!bytes.empty() && bytes.size() <= std::numeric_limits<Diligent::Uint32>::max()) {
+    cache_ci.pCacheData = bytes.data();
+    cache_ci.CacheDataSize = static_cast<Diligent::Uint32>(bytes.size());
+  }
+
+  const auto start = core::SteadyClock::now();
+  device_->CreatePipelineStateCache(cache_ci, &pipeline_state_cache_);
+  const auto end = core::SteadyClock::now();
+  logStartupDiag("diligent_device", "native pipeline cache load", start, end);
+
+  if (shader_cache_log_) {
+    const FileInfo info = inspectFile(pipeline_state_cache_path_);
+    spdlog::info("Native pipeline cache load end: path='{}' existed={} bytes={} used_initial_data={} ms={:.2f}",
+                 pipeline_state_cache_path_.string(),
+                 info.exists,
+                 info.size,
+                 cache_ci.pCacheData != nullptr,
+                 core::elapsedMilliseconds(start, end));
+  }
+}
+
+void DiligentBackend::savePipelineStateCache(std::string_view reason) {
+  if (!pipeline_cache_enabled_ || pipeline_state_cache_path_.empty() || !pipeline_state_cache_) {
+    return;
+  }
+
+  Diligent::RefCntAutoPtr<Diligent::IDataBlob> blob;
+  const std::string stage_name =
+      reason.empty() ? std::string("native pipeline cache save") : std::string(reason);
+  const auto before = inspectFile(pipeline_state_cache_path_);
+  const auto start = core::SteadyClock::now();
+  pipeline_state_cache_->GetData(&blob);
+  bool wrote = false;
+  if (blob && blob->GetDataPtr() != nullptr && blob->GetSize() > 0) {
+    std::error_code ec;
+    const auto parent = pipeline_state_cache_path_.parent_path();
+    if (!parent.empty()) {
+      std::filesystem::create_directories(parent, ec);
+    }
+    const auto temp_path = pipeline_state_cache_path_.string() + ".tmp";
+    {
+      std::ofstream file(temp_path, std::ios::binary | std::ios::trunc);
+      if (file) {
+        file.write(static_cast<const char*>(blob->GetDataPtr()),
+                   static_cast<std::streamsize>(blob->GetSize()));
+        wrote = static_cast<bool>(file);
+      }
+    }
+    if (wrote) {
+      std::filesystem::rename(temp_path, pipeline_state_cache_path_, ec);
+      if (ec) {
+        std::filesystem::remove(pipeline_state_cache_path_, ec);
+        ec.clear();
+        std::filesystem::rename(temp_path, pipeline_state_cache_path_, ec);
+        wrote = !ec;
+      }
+    } else {
+      std::filesystem::remove(temp_path, ec);
+    }
+  }
+  const auto end = core::SteadyClock::now();
+  const auto after = inspectFile(pipeline_state_cache_path_);
+  logStartupDiag("diligent_backend", stage_name.c_str(), start, end);
+  if (shader_cache_log_) {
+    spdlog::info(
+        "Native pipeline cache save: reason='{}' path='{}' wrote={} existed_before={} "
+        "bytes_before={} existed_after={} bytes_after={} ms={:.2f}",
+        stage_name,
+        pipeline_state_cache_path_.string(),
+        wrote,
+        before.exists,
+        before.size,
+        after.exists,
+        after.size,
+        core::elapsedMilliseconds(start, end));
+  }
+}
+
+Diligent::RefCntAutoPtr<Diligent::IPipelineState> DiligentBackend::createGraphicsPipelineState(
+    Diligent::GraphicsPipelineStateCreateInfo create_info) {
+  if (pipeline_state_cache_) {
+    create_info.pPSOCache = pipeline_state_cache_.RawPtr();
+  }
+  return device_with_cache_.CreateGraphicsPipelineState(create_info);
+}
+
+Diligent::RefCntAutoPtr<Diligent::IPipelineState> DiligentBackend::createComputePipelineState(
+    Diligent::ComputePipelineStateCreateInfo create_info) {
+  if (pipeline_state_cache_) {
+    create_info.pPSOCache = pipeline_state_cache_.RawPtr();
+  }
+  return device_with_cache_.CreateComputePipelineState(create_info);
+}
+
 void DiligentBackend::applyDiligentPresentEnvironment() const {
   setProcessEnvironment("KARMA_DILIGENT_INITIAL_VSYNC",
                         vsync_enabled_ ? "1" : "0",
@@ -659,10 +803,12 @@ void DiligentBackend::flushRenderStateCache() {
     return;
   }
   saveRenderStateCache("renderer warm-up shader cache flush");
+  savePipelineStateCache("renderer warm-up native pipeline cache flush");
 }
 
 DiligentBackend::~DiligentBackend() {
   saveRenderStateCache("destructor shader cache save");
+  savePipelineStateCache("destructor native pipeline cache save");
 }
 
 }  // namespace karma::rendering::backend

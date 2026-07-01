@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -10,9 +12,10 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
-#include "karma/assets.h"
+#include "karma/core.h"
 #include "karma/visual.h"
 
 #include "asset_texture_internal.h"
@@ -22,6 +25,60 @@
 namespace karma::assets {
 
 namespace {
+
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 &&
+         std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 &&
+         std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
+
+bool startupDiagnosticsEnabled() {
+  static const bool enabled = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  return enabled;
+}
+
+void logSourceImportDiag(const char* type,
+                         const std::string& key,
+                         const std::filesystem::path& path,
+                         const char* stage,
+                         core::SteadyClock::time_point start,
+                         core::SteadyClock::time_point end) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Engine startup diag: area=asset_source_import type={} key='{}' path='{}' stage={} ms={:.2f}",
+      type ? type : "unknown",
+      key,
+      path.string(),
+      stage ? stage : "unknown",
+      core::elapsedMilliseconds(start, end));
+}
+
+void logSourceImportDiag(const char* type,
+                         const std::string& key,
+                         const std::filesystem::path& path,
+                         const char* stage,
+                         core::SteadyClock::time_point start,
+                         core::SteadyClock::time_point end,
+                         std::size_t count) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Engine startup diag: area=asset_source_import type={} key='{}' path='{}' stage={} ms={:.2f} count={}",
+      type ? type : "unknown",
+      key,
+      path.string(),
+      stage ? stage : "unknown",
+      core::elapsedMilliseconds(start, end),
+      count);
+}
 
 std::string childKey(const std::string& parent,
                      std::string_view kind,
@@ -108,12 +165,27 @@ bool importMeshAsset(AssetRegistry& assets,
   if (!AssetRegistry::isValidAssetKey(key)) {
     return false;
   }
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
   std::vector<world::MeshData> imported = importMeshes(path);
+  logSourceImportDiag("mesh",
+                      key,
+                      path,
+                      "import meshes",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      imported.size());
+  stage_start = core::SteadyClock::now();
   world::MeshData combined = combineMeshes(std::move(imported));
+  logSourceImportDiag("mesh", key, path, "combine meshes", stage_start, core::SteadyClock::now());
   if (combined.vertices.empty() || combined.indices.empty()) {
     return false;
   }
-  return assets.registerMeshAsset(key, std::move(combined));
+  stage_start = core::SteadyClock::now();
+  const bool registered = assets.registerMeshAsset(key, std::move(combined));
+  logSourceImportDiag("mesh", key, path, "register", stage_start, core::SteadyClock::now());
+  logSourceImportDiag("mesh", key, path, "total", total_start, core::SteadyClock::now());
+  return registered;
 }
 
 bool importTextureAsset(AssetRegistry& assets,
@@ -123,6 +195,8 @@ bool importTextureAsset(AssetRegistry& assets,
   if (!AssetRegistry::isValidAssetKey(key)) {
     return false;
   }
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
   AssetCache cache;
   const nlohmann::json cache_options{
       {"srgb", options.srgb},
@@ -139,17 +213,30 @@ bool importTextureAsset(AssetRegistry& assets,
                           cache_options,
                           {},
                           textureDependencyVersion());
+  logSourceImportDiag("texture", key, path, "cache key", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
   if (auto cached = cache.readTexture(cache_key)) {
-    return assets.registerTextureAsset(key, std::move(*cached));
+    logSourceImportDiag("texture", key, path, "cache read hit", stage_start, core::SteadyClock::now());
+    stage_start = core::SteadyClock::now();
+    const bool registered = assets.registerTextureAsset(key, std::move(*cached));
+    logSourceImportDiag("texture", key, path, "register cached", stage_start, core::SteadyClock::now());
+    logSourceImportDiag("texture", key, path, "total cache hit", total_start, core::SteadyClock::now());
+    return registered;
   }
+  logSourceImportDiag("texture", key, path, "cache read miss", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   std::optional<Rgba8Image> image = loadRgba8Image(path);
+  logSourceImportDiag("texture", key, path, "image decode", stage_start, core::SteadyClock::now());
   if (!image.has_value() || !image->valid()) {
     return false;
   }
   if (options.alpha_bleed) {
+    stage_start = core::SteadyClock::now();
     bleedTransparentRgb(*image);
+    logSourceImportDiag("texture", key, path, "alpha bleed", stage_start, core::SteadyClock::now());
   }
+  stage_start = core::SteadyClock::now();
   TextureAsset texture = makeTextureAssetFromImage(std::move(*image),
                                                    options.srgb,
                                                    options.generate_mips,
@@ -157,9 +244,16 @@ bool importTextureAsset(AssetRegistry& assets,
                                                    options.prefer_compressed,
                                                    options.alpha_bleed && options.generate_mips,
                                                    options.alpha_coverage_cutoff);
+  logSourceImportDiag("texture", key, path, "texture asset build", stage_start, core::SteadyClock::now());
   std::string diagnostic;
+  stage_start = core::SteadyClock::now();
   (void)cache.writeTexture(cache_key, texture, &diagnostic);
-  return assets.registerTextureAsset(key, std::move(texture));
+  logSourceImportDiag("texture", key, path, "cache write", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
+  const bool registered = assets.registerTextureAsset(key, std::move(texture));
+  logSourceImportDiag("texture", key, path, "register", stage_start, core::SteadyClock::now());
+  logSourceImportDiag("texture", key, path, "total source import", total_start, core::SteadyClock::now());
+  return registered;
 }
 
 bool importParticleEffect(AssetRegistry& assets,
@@ -182,11 +276,21 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
   if (!AssetRegistry::isValidAssetKey(key)) {
     return {};
   }
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
   world::GltfScenePrefab prefab = world::loadGltfScenePrefab(path, options);
+  logSourceImportDiag("gltf_scene",
+                      key,
+                      path,
+                      "load prefab",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      prefab.nodes.size());
   if (!prefab.valid()) {
     return {};
   }
 
+  stage_start = core::SteadyClock::now();
   GltfSceneAsset asset{};
   asset.source_path = prefab.source_path;
   asset.scene_key = key + "/scene";
@@ -195,6 +299,7 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
 
   std::size_t mesh_index = 0;
   std::size_t material_index = 0;
+  std::size_t primitive_count = 0;
   for (const world::GltfScenePrefabNode& node : prefab.nodes) {
     GltfSceneAssetNode asset_node{};
     asset_node.name = node.name;
@@ -210,6 +315,7 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
     asset_node.primitives.reserve(node.primitives.size());
 
     for (const world::GltfScenePrefabPrimitive& primitive : node.primitives) {
+      ++primitive_count;
       const std::string mesh_key = childKey(key, "meshes", mesh_index++);
       const std::string material_key = childKey(key, "materials", material_index++);
       rendering::MaterialAssetDesc material{};
@@ -250,7 +356,15 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
     }
     asset.nodes.push_back(std::move(asset_node));
   }
+  logSourceImportDiag("gltf_scene",
+                      key,
+                      path,
+                      "register node primitives",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      primitive_count);
 
+  stage_start = core::SteadyClock::now();
   for (std::size_t i = 0; i < prefab.animations.size(); ++i) {
     const std::string clip_key = childKey(key, "animation_clips", i);
     if (!assets.registerAnimationClip(clip_key, prefab.animations[i])) {
@@ -258,6 +372,14 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
     }
     asset.animation_clip_keys.push_back(clip_key);
   }
+  logSourceImportDiag("gltf_scene",
+                      key,
+                      path,
+                      "register animations",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      asset.animation_clip_keys.size());
+  stage_start = core::SteadyClock::now();
   for (std::size_t i = 0; i < prefab.skeletons.size(); ++i) {
     const std::string skeleton_key = childKey(key, "skeletons", i);
     if (!assets.registerSkeleton(skeleton_key, prefab.skeletons[i])) {
@@ -265,6 +387,14 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
     }
     asset.skeleton_keys.push_back(skeleton_key);
   }
+  logSourceImportDiag("gltf_scene",
+                      key,
+                      path,
+                      "register skeletons",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      asset.skeleton_keys.size());
+  stage_start = core::SteadyClock::now();
   for (std::size_t i = 0; i < prefab.skins.size(); ++i) {
     const std::string skin_key = childKey(key, "skins", i);
     if (!assets.registerSkin(skin_key, prefab.skins[i])) {
@@ -272,10 +402,26 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
     }
     asset.skin_keys.push_back(skin_key);
   }
+  logSourceImportDiag("gltf_scene",
+                      key,
+                      path,
+                      "register skins",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      asset.skin_keys.size());
 
+  stage_start = core::SteadyClock::now();
   if (!assets.registerGltfSceneAsset(key, asset)) {
     return {};
   }
+  logSourceImportDiag("gltf_scene", key, path, "register scene", stage_start, core::SteadyClock::now());
+  logSourceImportDiag("gltf_scene",
+                      key,
+                      path,
+                      "total",
+                      total_start,
+                      core::SteadyClock::now(),
+                      asset.nodes.size());
   return asset;
 }
 

@@ -219,7 +219,7 @@ void DiligentBackend::ensureUiResources() {
     }
 
     const auto pso_start = core::SteadyClock::now();
-    out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    out_pso = createGraphicsPipelineState(pso);
     recordPipelineCreation("ui", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return;

@@ -261,6 +261,15 @@ struct NavMeshSnapshot {
 };
 
 /// \ingroup karma_navigation
+/// Build metadata stored beside serialized navmesh payloads.
+struct NavMeshSnapshotMetadata {
+  NavMeshBuildConfig build_config{};
+  NavMeshBuildResult build_result{};
+  math::Vec3 bounds_min{};
+  math::Vec3 bounds_max{};
+};
+
+/// \ingroup karma_navigation
 /// Decoded Detour polygon reference fields.
 struct NavPolyRefParts {
   uint32_t salt = 0;
@@ -326,6 +335,10 @@ class NavMesh {
   bool removeAllTiles();
   /// Rehydrates a navmesh from snapshot data.
   bool loadSnapshot(const NavMeshSnapshot& snapshot,
+                    NavMeshBuildResult* result = nullptr);
+  /// Rehydrates a navmesh from snapshot data and restores build metadata.
+  bool loadSnapshot(const NavMeshSnapshot& snapshot,
+                    const NavMeshSnapshotMetadata& metadata,
                     NavMeshBuildResult* result = nullptr);
   /// Sets Detour flags for one polygon reference.
   bool setPolyFlags(uint64_t poly_ref, uint16_t flags);
@@ -1135,15 +1148,23 @@ struct NavigationSystemStats {
   double last_apply_ms = 0.0;
   double last_worker_queue_wait_ms = 0.0;
   double last_worker_solve_ms = 0.0;
+  double last_cache_read_ms = 0.0;
+  double last_cache_write_ms = 0.0;
   uint64_t submitted_requests = 0;
   uint64_t completed_requests = 0;
   uint64_t failed_requests = 0;
   uint64_t stale_results = 0;
   uint64_t pending_requests = 0;
+  uint64_t cache_hits = 0;
+  uint64_t cache_misses = 0;
+  uint64_t cache_writes = 0;
   uint64_t last_request_id = 0;
   uint32_t last_path_point_count = 0;
   NavStatus last_path_status = NavStatus::QueryFailed;
   bool last_worker_cache_rebuilt = false;
+  bool last_cache_hit = false;
+  bool last_cache_miss = false;
+  bool last_cache_write = false;
 };
 
 /// \ingroup karma_navigation
@@ -1187,6 +1208,8 @@ class NavigationSystem : public world::ISystem {
                                    const math::Vec3& velocity);
   /// Clears a crowd-controlled agent target/request state.
   static void clearCrowdTarget(world::World& world, world::Entity agent_entity);
+  /// Requests a one-shot cache-bypassing rebuild that captures Recast build-debug lines.
+  static bool requestBuildDebugDraw(world::World& world, world::Entity nav_entity);
 
  private:
   struct WorkerState;

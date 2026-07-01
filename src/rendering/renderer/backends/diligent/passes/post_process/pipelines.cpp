@@ -134,7 +134,7 @@ bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format
     graphics.BlendDesc.RenderTargets[0].RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
 
     const auto pso_start = core::SteadyClock::now();
-    out_pass.pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    out_pass.pso = createGraphicsPipelineState(pso);
     recordPipelineCreation("post_process", pipeline_name, pso_start, core::SteadyClock::now());
     if (!out_pass.pso) {
       return false;

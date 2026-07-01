@@ -253,6 +253,9 @@ std::optional<TextureAsset> AssetCache::readTexture(std::string_view cache_key,
     return std::nullopt;
   }
   auto texture = detail::deserializeTexture(*bytes, diagnostic);
+  if (texture.has_value()) {
+    texture->content_hash = "asset-cache:" + std::string(cache_key);
+  }
   return texture;
 }
 

@@ -32,6 +32,7 @@ constexpr uint32_t kKindAnimationClip = 7u;
 constexpr uint32_t kKindSkeleton = 8u;
 constexpr uint32_t kKindSkin = 9u;
 constexpr uint32_t kChunkJson = 0x4a534f4eu;      // JSON
+constexpr uint32_t kChunkAnimationClip = 0x414e494du;  // ANIM
 
 void appendU32(std::vector<uint8_t>& out, uint32_t value) {
   out.push_back(static_cast<uint8_t>(value & 0xffu));
@@ -51,6 +52,10 @@ void appendF32(std::vector<uint8_t>& out, float value) {
   uint32_t bits = 0u;
   std::memcpy(&bits, &value, sizeof(bits));
   appendU32(out, bits);
+}
+
+void appendU8(std::vector<uint8_t>& out, uint8_t value) {
+  out.push_back(value);
 }
 
 bool readU32(const std::vector<uint8_t>& bytes, std::size_t& offset, uint32_t& out) {
@@ -83,6 +88,14 @@ bool readF32(const std::vector<uint8_t>& bytes, std::size_t& offset, float& out)
     return false;
   }
   std::memcpy(&out, &bits, sizeof(out));
+  return true;
+}
+
+bool readU8(const std::vector<uint8_t>& bytes, std::size_t& offset, uint8_t& out) {
+  if (offset + 1u > bytes.size()) {
+    return false;
+  }
+  out = bytes[offset++];
   return true;
 }
 
@@ -124,6 +137,96 @@ bool readFloatJson(const Json& value, float& out) {
     return true;
   }
   return false;
+}
+
+bool readCount(const std::vector<uint8_t>& bytes, std::size_t& offset, std::size_t& out) {
+  uint64_t count = 0u;
+  if (!readU64(bytes, offset, count) ||
+      count > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    return false;
+  }
+  out = static_cast<std::size_t>(count);
+  return true;
+}
+
+void appendStringBinary(std::vector<uint8_t>& out, const std::string& value) {
+  appendU64(out, static_cast<uint64_t>(value.size()));
+  const auto* bytes = reinterpret_cast<const uint8_t*>(value.data());
+  out.insert(out.end(), bytes, bytes + value.size());
+}
+
+bool readStringBinary(const std::vector<uint8_t>& bytes,
+                      std::size_t& offset,
+                      std::string& out) {
+  std::size_t size = 0u;
+  if (!readCount(bytes, offset, size) || size > bytes.size() - offset) {
+    return false;
+  }
+  out.assign(reinterpret_cast<const char*>(bytes.data() + offset), size);
+  offset += size;
+  return true;
+}
+
+void appendMathVec3Binary(std::vector<uint8_t>& out, const math::Vec3& value) {
+  appendF32(out, value.x);
+  appendF32(out, value.y);
+  appendF32(out, value.z);
+}
+
+bool readMathVec3Binary(const std::vector<uint8_t>& bytes,
+                        std::size_t& offset,
+                        math::Vec3& out) {
+  return readF32(bytes, offset, out.x) &&
+         readF32(bytes, offset, out.y) &&
+         readF32(bytes, offset, out.z);
+}
+
+void appendQuatBinary(std::vector<uint8_t>& out, const math::Quat& value) {
+  appendF32(out, value.x);
+  appendF32(out, value.y);
+  appendF32(out, value.z);
+  appendF32(out, value.w);
+}
+
+bool readQuatBinary(const std::vector<uint8_t>& bytes,
+                    std::size_t& offset,
+                    math::Quat& out) {
+  return readF32(bytes, offset, out.x) &&
+         readF32(bytes, offset, out.y) &&
+         readF32(bytes, offset, out.z) &&
+         readF32(bytes, offset, out.w);
+}
+
+template <typename T, typename Writer>
+void appendBinaryVector(std::vector<uint8_t>& out,
+                        const std::vector<T>& values,
+                        Writer writer) {
+  appendU64(out, static_cast<uint64_t>(values.size()));
+  for (const T& value : values) {
+    writer(out, value);
+  }
+}
+
+template <typename T, typename Reader>
+bool readBinaryVector(const std::vector<uint8_t>& bytes,
+                      std::size_t& offset,
+                      std::vector<T>& out,
+                      Reader reader) {
+  std::size_t count = 0u;
+  if (!readCount(bytes, offset, count)) {
+    return false;
+  }
+  std::vector<T> parsed;
+  parsed.reserve(count);
+  for (std::size_t i = 0u; i < count; ++i) {
+    T value{};
+    if (!reader(bytes, offset, value)) {
+      return false;
+    }
+    parsed.push_back(std::move(value));
+  }
+  out = std::move(parsed);
+  return true;
 }
 
 Json vec2Json(const glm::vec2& value) {
@@ -1303,6 +1406,289 @@ bool readAnimationClipJson(const Json& json, world::AnimationClip& clip) {
   return true;
 }
 
+void appendVec3KeyframeBinary(std::vector<uint8_t>& out,
+                              const world::Vec3Keyframe& key) {
+  appendF32(out, key.time_seconds);
+  appendMathVec3Binary(out, key.value);
+  appendMathVec3Binary(out, key.in_tangent);
+  appendMathVec3Binary(out, key.out_tangent);
+}
+
+bool readVec3KeyframeBinary(const std::vector<uint8_t>& bytes,
+                            std::size_t& offset,
+                            world::Vec3Keyframe& key) {
+  return readF32(bytes, offset, key.time_seconds) &&
+         readMathVec3Binary(bytes, offset, key.value) &&
+         readMathVec3Binary(bytes, offset, key.in_tangent) &&
+         readMathVec3Binary(bytes, offset, key.out_tangent);
+}
+
+void appendQuatKeyframeBinary(std::vector<uint8_t>& out,
+                              const world::QuatKeyframe& key) {
+  appendF32(out, key.time_seconds);
+  appendQuatBinary(out, key.value);
+  appendQuatBinary(out, key.in_tangent);
+  appendQuatBinary(out, key.out_tangent);
+}
+
+bool readQuatKeyframeBinary(const std::vector<uint8_t>& bytes,
+                            std::size_t& offset,
+                            world::QuatKeyframe& key) {
+  return readF32(bytes, offset, key.time_seconds) &&
+         readQuatBinary(bytes, offset, key.value) &&
+         readQuatBinary(bytes, offset, key.in_tangent) &&
+         readQuatBinary(bytes, offset, key.out_tangent);
+}
+
+void appendFloatVectorBinary(std::vector<uint8_t>& out, const std::vector<float>& values) {
+  appendBinaryVector(out, values, [](std::vector<uint8_t>& payload, float value) {
+    appendF32(payload, value);
+  });
+}
+
+bool readFloatVectorBinary(const std::vector<uint8_t>& bytes,
+                           std::size_t& offset,
+                           std::vector<float>& values) {
+  return readBinaryVector(bytes,
+                          offset,
+                          values,
+                          [](const std::vector<uint8_t>& payload,
+                             std::size_t& payload_offset,
+                             float& value) {
+                            return readF32(payload, payload_offset, value);
+                          });
+}
+
+void appendMorphWeightKeyframeBinary(std::vector<uint8_t>& out,
+                                     const world::MorphWeightKeyframe& key) {
+  appendF32(out, key.time_seconds);
+  appendFloatVectorBinary(out, key.values);
+  appendFloatVectorBinary(out, key.in_tangents);
+  appendFloatVectorBinary(out, key.out_tangents);
+}
+
+bool readMorphWeightKeyframeBinary(const std::vector<uint8_t>& bytes,
+                                   std::size_t& offset,
+                                   world::MorphWeightKeyframe& key) {
+  return readF32(bytes, offset, key.time_seconds) &&
+         readFloatVectorBinary(bytes, offset, key.values) &&
+         readFloatVectorBinary(bytes, offset, key.in_tangents) &&
+         readFloatVectorBinary(bytes, offset, key.out_tangents);
+}
+
+void appendInterpolationBinary(std::vector<uint8_t>& out,
+                               world::InterpolationMode interpolation) {
+  appendU8(out, static_cast<uint8_t>(interpolation));
+}
+
+bool readInterpolationBinary(const std::vector<uint8_t>& bytes,
+                             std::size_t& offset,
+                             world::InterpolationMode& interpolation) {
+  uint8_t value = 0u;
+  if (!readU8(bytes, offset, value) ||
+      value > static_cast<uint8_t>(world::InterpolationMode::CubicSpline)) {
+    return false;
+  }
+  interpolation = static_cast<world::InterpolationMode>(value);
+  return true;
+}
+
+void appendAnimationChannelBinary(std::vector<uint8_t>& out,
+                                  const world::AnimationChannel& channel) {
+  appendU32(out, channel.target_node_index);
+  appendU32(out, channel.target_skin_index);
+  appendU32(out, channel.target_joint_index);
+  appendInterpolationBinary(out, channel.position_interpolation);
+  appendInterpolationBinary(out, channel.rotation_interpolation);
+  appendInterpolationBinary(out, channel.scale_interpolation);
+  appendBinaryVector(out, channel.position_keys, appendVec3KeyframeBinary);
+  appendBinaryVector(out, channel.rotation_keys, appendQuatKeyframeBinary);
+  appendBinaryVector(out, channel.scale_keys, appendVec3KeyframeBinary);
+}
+
+bool readAnimationChannelBinary(const std::vector<uint8_t>& bytes,
+                                std::size_t& offset,
+                                world::AnimationChannel& channel) {
+  return readU32(bytes, offset, channel.target_node_index) &&
+         readU32(bytes, offset, channel.target_skin_index) &&
+         readU32(bytes, offset, channel.target_joint_index) &&
+         readInterpolationBinary(bytes, offset, channel.position_interpolation) &&
+         readInterpolationBinary(bytes, offset, channel.rotation_interpolation) &&
+         readInterpolationBinary(bytes, offset, channel.scale_interpolation) &&
+         readBinaryVector(bytes, offset, channel.position_keys, readVec3KeyframeBinary) &&
+         readBinaryVector(bytes, offset, channel.rotation_keys, readQuatKeyframeBinary) &&
+         readBinaryVector(bytes, offset, channel.scale_keys, readVec3KeyframeBinary);
+}
+
+void appendMorphTargetTrackBinary(std::vector<uint8_t>& out,
+                                  const world::MorphTargetTrack& track) {
+  appendU32(out, track.target_node_index);
+  appendU32(out, track.target_mesh_index);
+  appendInterpolationBinary(out, track.interpolation);
+  appendBinaryVector(out, track.weight_keys, appendMorphWeightKeyframeBinary);
+}
+
+bool readMorphTargetTrackBinary(const std::vector<uint8_t>& bytes,
+                                std::size_t& offset,
+                                world::MorphTargetTrack& track) {
+  return readU32(bytes, offset, track.target_node_index) &&
+         readU32(bytes, offset, track.target_mesh_index) &&
+         readInterpolationBinary(bytes, offset, track.interpolation) &&
+         readBinaryVector(bytes, offset, track.weight_keys, readMorphWeightKeyframeBinary);
+}
+
+void appendAnimationEventBinary(std::vector<uint8_t>& out,
+                                const world::AnimationEvent& event) {
+  appendStringBinary(out, event.name);
+  appendF32(out, event.time_seconds);
+  appendStringBinary(out, event.payload);
+}
+
+bool readAnimationEventBinary(const std::vector<uint8_t>& bytes,
+                              std::size_t& offset,
+                              world::AnimationEvent& event) {
+  return readStringBinary(bytes, offset, event.name) &&
+         readF32(bytes, offset, event.time_seconds) &&
+         readStringBinary(bytes, offset, event.payload);
+}
+
+void appendRootMotionTrackBinary(std::vector<uint8_t>& out,
+                                 const world::RootMotionTrack& track) {
+  appendU32(out, track.target_node_index);
+  appendInterpolationBinary(out, track.position_interpolation);
+  appendInterpolationBinary(out, track.rotation_interpolation);
+  appendBinaryVector(out, track.position_keys, appendVec3KeyframeBinary);
+  appendBinaryVector(out, track.rotation_keys, appendQuatKeyframeBinary);
+}
+
+bool readRootMotionTrackBinary(const std::vector<uint8_t>& bytes,
+                               std::size_t& offset,
+                               world::RootMotionTrack& track) {
+  return readU32(bytes, offset, track.target_node_index) &&
+         readInterpolationBinary(bytes, offset, track.position_interpolation) &&
+         readInterpolationBinary(bytes, offset, track.rotation_interpolation) &&
+         readBinaryVector(bytes, offset, track.position_keys, readVec3KeyframeBinary) &&
+         readBinaryVector(bytes, offset, track.rotation_keys, readQuatKeyframeBinary);
+}
+
+std::vector<uint8_t> serializeAnimationClipPayload(const world::AnimationClip& clip) {
+  std::vector<uint8_t> payload;
+  appendStringBinary(payload, clip.name);
+  appendF32(payload, clip.duration_seconds);
+  appendF32(payload, clip.ticks_per_second);
+  appendU32(payload, clip.source_index);
+  appendBinaryVector(payload, clip.channels, appendAnimationChannelBinary);
+  appendBinaryVector(payload, clip.morph_target_tracks, appendMorphTargetTrackBinary);
+  appendBinaryVector(payload, clip.events, appendAnimationEventBinary);
+  appendU8(payload, clip.root_motion.has_value() ? uint8_t{1} : uint8_t{0});
+  if (clip.root_motion.has_value()) {
+    appendRootMotionTrackBinary(payload, *clip.root_motion);
+  }
+  return payload;
+}
+
+bool parseAnimationClipPayload(const std::vector<uint8_t>& payload,
+                               world::AnimationClip& clip) {
+  std::size_t offset = 0u;
+  world::AnimationClip parsed{};
+  uint8_t has_root_motion = 0u;
+  if (!readStringBinary(payload, offset, parsed.name) ||
+      !readF32(payload, offset, parsed.duration_seconds) ||
+      !readF32(payload, offset, parsed.ticks_per_second) ||
+      !readU32(payload, offset, parsed.source_index) ||
+      !readBinaryVector(payload, offset, parsed.channels, readAnimationChannelBinary) ||
+      !readBinaryVector(payload,
+                        offset,
+                        parsed.morph_target_tracks,
+                        readMorphTargetTrackBinary) ||
+      !readBinaryVector(payload, offset, parsed.events, readAnimationEventBinary) ||
+      !readU8(payload, offset, has_root_motion) ||
+      has_root_motion > 1u) {
+    return false;
+  }
+  if (has_root_motion != 0u) {
+    world::RootMotionTrack track;
+    if (!readRootMotionTrackBinary(payload, offset, track)) {
+      return false;
+    }
+    parsed.root_motion = std::move(track);
+  }
+  if (offset != payload.size()) {
+    return false;
+  }
+  clip = std::move(parsed);
+  return true;
+}
+
+std::vector<uint8_t> serializeAnimationClipBinary(const world::AnimationClip& clip) {
+  std::vector<uint8_t> out;
+  out.insert(out.end(), kMagic.begin(), kMagic.end());
+  appendU32(out, AssetCache::kSchemaVersion);
+  appendU32(out, kKindAnimationClip);
+  appendChunk(out, kChunkAnimationClip, serializeAnimationClipPayload(clip));
+  return out;
+}
+
+std::optional<world::AnimationClip> deserializeAnimationClipBinary(
+    const std::vector<uint8_t>& bytes,
+    std::string* diagnostic) {
+  if (bytes.size() < kMagic.size() + 8u ||
+      !std::equal(kMagic.begin(), kMagic.end(), bytes.begin())) {
+    if (diagnostic != nullptr) {
+      *diagnostic = "cache blob magic mismatch";
+    }
+    return std::nullopt;
+  }
+
+  std::size_t offset = kMagic.size();
+  uint32_t schema = 0u;
+  uint32_t kind = 0u;
+  if (!readU32(bytes, offset, schema) || !readU32(bytes, offset, kind) ||
+      schema != AssetCache::kSchemaVersion || kind != kKindAnimationClip) {
+    if (diagnostic != nullptr) {
+      *diagnostic = "cache blob version or kind mismatch";
+    }
+    return std::nullopt;
+  }
+
+  while (offset < bytes.size()) {
+    uint32_t chunk_id = 0u;
+    uint64_t chunk_size = 0u;
+    if (!readU32(bytes, offset, chunk_id) || !readU64(bytes, offset, chunk_size) ||
+        chunk_size > bytes.size() - offset) {
+      if (diagnostic != nullptr) {
+        *diagnostic = "cache blob chunk is truncated";
+      }
+      return std::nullopt;
+    }
+    if (chunk_id == kChunkAnimationClip) {
+      try {
+        const std::vector<uint8_t> payload(
+            bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+            bytes.begin() + static_cast<std::ptrdiff_t>(offset + chunk_size));
+        world::AnimationClip clip{};
+        if (!parseAnimationClipPayload(payload, clip)) {
+          if (diagnostic != nullptr) {
+            *diagnostic = "cache animation clip payload failed validation";
+          }
+          return std::nullopt;
+        }
+        return clip;
+      } catch (const std::exception& e) {
+        if (diagnostic != nullptr) {
+          *diagnostic = e.what();
+        }
+        return std::nullopt;
+      }
+    }
+    offset += static_cast<std::size_t>(chunk_size);
+  }
+  if (diagnostic != nullptr) {
+    *diagnostic = "cache blob is missing animation clip payload";
+  }
+  return std::nullopt;
+}
+
 Json skeletonJson(const world::Skeleton& skeleton) {
   Json joints = Json::array();
   for (const auto& joint : skeleton.joints) {
@@ -1518,16 +1904,13 @@ std::optional<GltfSceneAsset> deserializeGltfScene(const std::vector<uint8_t>& b
 }
 
 std::vector<uint8_t> serializeAnimationClip(const world::AnimationClip& clip) {
-  return serializeJsonAsset(kKindAnimationClip, animationClipJson(clip));
+  return serializeAnimationClipBinary(clip);
 }
 
 std::optional<world::AnimationClip> deserializeAnimationClip(
     const std::vector<uint8_t>& bytes,
     std::string* diagnostic) {
-  return deserializeJsonAsset<world::AnimationClip>(bytes,
-                                                        kKindAnimationClip,
-                                                        readAnimationClipJson,
-                                                        diagnostic);
+  return deserializeAnimationClipBinary(bytes, diagnostic);
 }
 
 std::vector<uint8_t> serializeSkeleton(const world::Skeleton& skeleton) {

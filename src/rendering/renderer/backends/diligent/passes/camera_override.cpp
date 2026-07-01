@@ -126,7 +126,7 @@ bool DiligentBackend::ensureCameraOverridePipeline(const rendering::CameraData& 
   pso_ci.PSODesc.ResourceLayout.NumImmutableSamplers = 0;
 
   const auto pso_start = core::SteadyClock::now();
-  camera_override_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
+  camera_override_pipeline_state_ = createGraphicsPipelineState(pso_ci);
   recordPipelineCreation("camera_override",
                          "Karma Camera Override Pipeline",
                          pso_start,

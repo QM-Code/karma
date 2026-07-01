@@ -205,6 +205,7 @@ list(APPEND KARMA_INSTALL_TARGETS karma_simulation_physics)
 if (KARMA_ENABLE_NAVIGATION)
   karma_add_static(karma_simulation_navigation
     src/simulation/navigation/nav_crowd.cpp
+    src/simulation/navigation/nav_cache.cpp
     src/simulation/navigation/nav_geometry.cpp
     src/simulation/navigation/nav_mesh.cpp
     src/simulation/navigation/nav_mesh_build.cpp

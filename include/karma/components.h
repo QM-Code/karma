@@ -1279,6 +1279,14 @@ struct NavConvexVolumeComponent : world::ComponentTag {
 };
 
 /// \ingroup karma_components
+/// Controls persistent navigation cache use for a navmesh build.
+struct NavMeshCacheSettings {
+  bool enabled = false;
+  bool read = true;
+  bool write = true;
+};
+
+/// \ingroup karma_components
 /// Owns a baked navigation mesh and build settings for an entity.
 struct NavMeshComponent : world::ComponentTag {
   bool enabled = true;
@@ -1289,9 +1297,11 @@ struct NavMeshComponent : world::ComponentTag {
   navigation::NavMeshDebugDrawMode debug_draw_mode = navigation::NavMeshDebugDrawMode::NavMeshEdges;
   uint64_t build_version = 0;
   uint32_t source_mask = 0xffffffffu;
+  NavMeshCacheSettings cache{};
   navigation::NavMeshBuildConfig build_config{};
   navigation::NavMeshBuildResult last_build_result{};
   navigation::NavMesh nav_mesh{};
+  bool build_debug_draw_requested = false;
 };
 
 }  // namespace karma::components

@@ -242,7 +242,6 @@ std::optional<TextureAsset> deserializeTextureBlob(const std::vector<uint8_t>& b
   if (!saw_desc || !saw_bytes) {
     return std::nullopt;
   }
-  texture.content_hash = hashBytes(texture.bytes.data(), texture.bytes.size());
   return texture;
 }
 

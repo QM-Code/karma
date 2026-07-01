@@ -674,7 +674,7 @@ void DiligentBackend::recreateShadowPipeline() {
       static_cast<Diligent::Uint32>(sizeof(shadow_vars) / sizeof(shadow_vars[0]));
 
   const auto shadow_pso_start = core::SteadyClock::now();
-  shadow_pipeline_state_ = device_with_cache_.CreateGraphicsPipelineState(shadow_pso);
+  shadow_pipeline_state_ = createGraphicsPipelineState(shadow_pso);
   recordPipelineCreation("shadow",
                          "Karma Shadow Pipeline",
                          shadow_pso_start,
@@ -1016,7 +1016,7 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   }
 
   const auto pso_start = core::SteadyClock::now();
-  *out_pso = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
+  *out_pso = createGraphicsPipelineState(pso_ci);
   recordPipelineCreation("forward", name, pso_start, core::SteadyClock::now());
   bindForwardPipelineStaticResources(out_pso->RawPtr());
   if (depth_prepass && *out_pso) {
@@ -1342,7 +1342,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
       static_cast<Diligent::Uint32>(sizeof(vars) / sizeof(vars[0]));
 
   const auto pso_start = core::SteadyClock::now();
-  cached.pso = device_with_cache_.CreateGraphicsPipelineState(pso_ci);
+  cached.pso = createGraphicsPipelineState(pso_ci);
   recordPipelineCreation("custom_forward", pso_name.c_str(), pso_start, core::SteadyClock::now());
   if (!cached.pso) {
     spdlog::warn("Failed to create custom material pipeline: vertex='{}' fragment='{}'",
@@ -1486,6 +1486,8 @@ void DiligentBackend::initializeDevice() {
     spdlog::info("Render state cache disabled by KARMA_SHADER_CACHE");
   }
   mark_stage("render state cache load");
+  initializePipelineStateCache();
+  mark_stage("native pipeline cache load");
 
   Diligent::ShaderCreateInfo shader_ci{};
   shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
@@ -3825,7 +3827,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         static_cast<Diligent::Uint32>(sizeof(forward_plus_vars) / sizeof(forward_plus_vars[0]));
 
     const auto forward_plus_pso_start = core::SteadyClock::now();
-    forward_plus_compute_pso_ = device_with_cache_.CreateComputePipelineState(forward_plus_pso_ci);
+    forward_plus_compute_pso_ = createComputePipelineState(forward_plus_pso_ci);
     recordPipelineCreation("forward",
                            "Karma Forward+ Compute Pipeline",
                            forward_plus_pso_start,
@@ -3954,6 +3956,9 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
 
   if (shader_cache_enabled_ && shader_cache_flush_ && device_with_cache_.GetCache()) {
     saveRenderStateCache("device init shader cache flush");
+  }
+  if (shader_cache_flush_) {
+    savePipelineStateCache("device init native pipeline cache flush");
   }
   mark_stage("shader cache flush");
   logStartupDiag("diligent_device", "total", init_start, core::SteadyClock::now());

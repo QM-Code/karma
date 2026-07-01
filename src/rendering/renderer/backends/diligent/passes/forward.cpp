@@ -473,7 +473,7 @@ bool DiligentBackend::ensureInstancedGpuCullingResources() {
 
   const auto pso_start = core::SteadyClock::now();
   instanced_gpu_culling_pso_ =
-      device_with_cache_.CreateComputePipelineState(pso_ci);
+      createComputePipelineState(pso_ci);
   recordPipelineCreation("instancing",
                          "Karma Instanced GPU Culling Pipeline",
                          pso_start,
@@ -614,7 +614,7 @@ bool DiligentBackend::ensureInstancedGpuLodCullingResources() {
 
   const auto pso_start = core::SteadyClock::now();
   instanced_gpu_lod_culling_pso_ =
-      device_with_cache_.CreateComputePipelineState(pso_ci);
+      createComputePipelineState(pso_ci);
   recordPipelineCreation("instancing",
                          "Karma Instanced GPU LOD Culling Pipeline",
                          pso_start,

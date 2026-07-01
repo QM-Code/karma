@@ -10,6 +10,7 @@
 #include <DetourTileCache.h>
 
 #include "detail/detour_utils.h"
+#include "detail/nav_cache.h"
 #include "detail/nav_tile_cache_impl.h"
 
 namespace karma::navigation {
@@ -352,8 +353,15 @@ bool NavTileCache::loadSnapshot(NavMesh& nav_mesh,
   }
 
   NavMeshSnapshot nav_snapshot;
+  NavMeshBuildResult nav_result;
+  nav_result.status = NavStatus::Success;
+  nav_result.message = "Navigation tile-cache navmesh snapshot loaded.";
+  nav_result.vertex_count = static_cast<uint32_t>(geometry.vertices.size());
+  nav_result.triangle_count = geometry.triangleCount();
+  const NavMeshSnapshotMetadata nav_metadata =
+      detail::makeSnapshotMetadata(geometry, nav_config, nav_result);
   if (!readVector(snapshot.data, offset, header.navmesh_snapshot_size, nav_snapshot.data) ||
-      !nav_mesh.loadSnapshot(nav_snapshot)) {
+      !nav_mesh.loadSnapshot(nav_snapshot, nav_metadata)) {
     setResult(result, NavStatus::BuildFailed, "Navigation tile-cache navmesh snapshot is invalid.");
     impl_->last_result = result != nullptr
         ? *result

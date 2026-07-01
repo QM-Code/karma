@@ -640,7 +640,7 @@ void DiligentBackend::ensureEnvironmentResources() {
           static_cast<Diligent::Uint32>(sizeof(samplers) / sizeof(samplers[0]));
 
       const auto pso_start = core::SteadyClock::now();
-      out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+      out_pso = createGraphicsPipelineState(pso);
       logRenderPipelineDiag("environment", name, pso_start, core::SteadyClock::now());
       if (!out_pso) {
         return;
@@ -692,7 +692,7 @@ void DiligentBackend::ensureEnvironmentResources() {
       graphics.InputLayout.NumElements = 0;
 
       const auto pso_start = core::SteadyClock::now();
-      brdf_lut_pso_ = device_with_cache_.CreateGraphicsPipelineState(pso);
+      brdf_lut_pso_ = createGraphicsPipelineState(pso);
       logRenderPipelineDiag("environment",
                             "Karma BRDF LUT PSO",
                             pso_start,

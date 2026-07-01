@@ -57,7 +57,8 @@ bool envFlagEnabled(const char* value) {
 }
 
 bool renderSystemDiagEnabled() {
-  static const bool enabled = envFlagEnabled(std::getenv("KARMA_RENDER_SYSTEM_DIAG"));
+  static const bool enabled = envFlagEnabled(std::getenv("KARMA_RENDER_SYSTEM_DIAG")) ||
+                              envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
   return enabled;
 }
 
@@ -964,6 +965,9 @@ RenderPrewarmHandle RenderSystem::Impl::prewarmAssets(
     const std::vector<std::string>& mesh_keys,
     const std::vector<std::string>& material_keys,
     const std::vector<std::string>& texture_keys) {
+  const bool diag_enabled = renderSystemDiagEnabled();
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
   PrewarmRecord record{};
   record.mesh_asset_keys.reserve(mesh_keys.size());
   record.material_keys.reserve(material_keys.size());
@@ -976,27 +980,51 @@ RenderPrewarmHandle RenderSystem::Impl::prewarmAssets(
       record.mesh_asset_keys.push_back(mesh_key);
     }
   }
+  logRenderSystemStage(diag_enabled, "prewarm mesh acquire", stage_start, core::SteadyClock::now());
+  if (diag_enabled) {
+    spdlog::info("RenderSystem prewarm mesh acquire requested={} acquired={}",
+                 mesh_keys.size(),
+                 record.mesh_asset_keys.size());
+  }
 
+  stage_start = core::SteadyClock::now();
   for (const std::string& material_key : material_keys) {
     if (acquireSharedMaterial(material_key) != rendering::kInvalidMaterial) {
       record.material_keys.push_back(material_key);
     }
   }
+  logRenderSystemStage(diag_enabled, "prewarm material acquire", stage_start, core::SteadyClock::now());
+  if (diag_enabled) {
+    spdlog::info("RenderSystem prewarm material acquire requested={} acquired={}",
+                 material_keys.size(),
+                 record.material_keys.size());
+  }
 
+  stage_start = core::SteadyClock::now();
   for (const std::string& texture_key : texture_keys) {
     if (acquireSharedTexture(texture_key) != rendering::kInvalidTexture) {
       record.texture_keys.push_back(texture_key);
     }
   }
+  logRenderSystemStage(diag_enabled, "prewarm texture acquire", stage_start, core::SteadyClock::now());
+  if (diag_enabled) {
+    spdlog::info("RenderSystem prewarm texture acquire requested={} acquired={}",
+                 texture_keys.size(),
+                 record.texture_keys.size());
+  }
 
   if (record.mesh_asset_keys.empty() &&
       record.material_keys.empty() &&
       record.texture_keys.empty()) {
+    logRenderSystemStage(diag_enabled, "prewarm total empty", total_start, core::SteadyClock::now());
     return {};
   }
 
+  stage_start = core::SteadyClock::now();
   const RenderPrewarmHandle handle{.id = next_prewarm_id_++};
   prewarm_records_.emplace(handle.id, std::move(record));
+  logRenderSystemStage(diag_enabled, "prewarm record store", stage_start, core::SteadyClock::now());
+  logRenderSystemStage(diag_enabled, "prewarm total", total_start, core::SteadyClock::now());
   return handle;
 }
 

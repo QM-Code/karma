@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -19,8 +20,10 @@
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+#include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
+#include "karma/core.h"
 #include "gltf_document.h"
 #include "gltf_scene_animation_import.h"
 #include "gltf_scene_mesh_import.h"
@@ -35,6 +38,51 @@
 namespace karma::world {
 
 namespace {
+
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 &&
+         std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 &&
+         std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
+
+bool startupDiagnosticsEnabled() {
+  static const bool enabled = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  return enabled;
+}
+
+void logGltfStartupDiag(const std::filesystem::path& path,
+                        const char* stage,
+                        core::SteadyClock::time_point start,
+                        core::SteadyClock::time_point end) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info("Engine startup diag: area=gltf_scene_load path='{}' stage={} ms={:.2f}",
+               path.string(),
+               stage ? stage : "unknown",
+               core::elapsedMilliseconds(start, end));
+}
+
+void logGltfStartupDiag(const std::filesystem::path& path,
+                        const char* stage,
+                        core::SteadyClock::time_point start,
+                        core::SteadyClock::time_point end,
+                        std::size_t count) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Engine startup diag: area=gltf_scene_load path='{}' stage={} ms={:.2f} count={}",
+      path.string(),
+      stage ? stage : "unknown",
+      core::elapsedMilliseconds(start, end),
+      count);
+}
 
 math::Vec3 toVec3(const aiVector3D& v) {
   return {v.x, v.y, v.z};
@@ -776,18 +824,23 @@ world::MeshData buildCombinedNodeMesh(const GltfScenePrefab& prefab,
 
 GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
                                   const GltfSceneLoadOptions& options) {
+  const auto total_start = core::SteadyClock::now();
   GltfScenePrefab prefab{};
   prefab.source_path = path;
 
   Assimp::Importer importer;
+  auto stage_start = total_start;
   const aiScene* scene = importer.ReadFile(path.string(),
                                            aiProcess_Triangulate |
                                            aiProcess_GenNormals |
                                            aiProcess_CalcTangentSpace);
+  logGltfStartupDiag(path, "assimp read file", stage_start, core::SteadyClock::now());
   if (scene == nullptr || scene->mRootNode == nullptr) {
+    logGltfStartupDiag(path, "total failed", total_start, core::SteadyClock::now());
     return prefab;
   }
 
+  stage_start = core::SteadyClock::now();
   prefab.imported_materials.reserve(scene->mNumMaterials);
   for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
     if (scene->mMaterials[i] == nullptr) {
@@ -797,7 +850,13 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
     prefab.imported_materials.push_back(std::make_shared<rendering::ImportedMaterialData>(
         buildImportedMaterialData(*scene, *scene->mMaterials[i], path)));
   }
+  logGltfStartupDiag(path,
+                     "imported material metadata",
+                     stage_start,
+                     core::SteadyClock::now(),
+                     prefab.imported_materials.size());
 
+  stage_start = core::SteadyClock::now();
   std::unordered_map<std::string, const aiLight*> lights_by_name;
   lights_by_name.reserve(scene->mNumLights);
   for (unsigned int i = 0; i < scene->mNumLights; ++i) {
@@ -807,7 +866,13 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
     }
     lights_by_name[light->mName.C_Str()] = light;
   }
+  logGltfStartupDiag(path,
+                     "light map",
+                     stage_start,
+                     core::SteadyClock::now(),
+                     lights_by_name.size());
 
+  stage_start = core::SteadyClock::now();
   std::unordered_map<std::string, uint32_t> node_indices_by_name;
   node_indices_by_name.reserve(128);
   prefab.root_node = loadNodePrefab(*scene,
@@ -817,14 +882,48 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
                                     options,
                                     prefab,
                                     node_indices_by_name);
+  logGltfStartupDiag(path,
+                     "node prefab",
+                     stage_start,
+                     core::SteadyClock::now(),
+                     prefab.nodes.size());
+  stage_start = core::SteadyClock::now();
   const GltfDocument gltf = loadGltfDocument(path);
+  logGltfStartupDiag(path, "gltf document", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
   populateGltfMeshData(gltf, node_indices_by_name, prefab);
+  logGltfStartupDiag(path, "mesh metadata", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
   populateGltfSkins(gltf, node_indices_by_name, prefab);
+  logGltfStartupDiag(path,
+                     "skin metadata",
+                     stage_start,
+                     core::SteadyClock::now(),
+                     prefab.skins.size());
+  stage_start = core::SteadyClock::now();
   populatePrimitiveSkinning(*scene, node_indices_by_name, prefab);
+  logGltfStartupDiag(path, "primitive skinning", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
   prefab.animations = loadGltfAnimationClips(gltf, node_indices_by_name, prefab);
+  logGltfStartupDiag(path,
+                     "gltf animations",
+                     stage_start,
+                     core::SteadyClock::now(),
+                     prefab.animations.size());
   if (prefab.animations.empty()) {
+    stage_start = core::SteadyClock::now();
     prefab.animations = loadAnimationClips(*scene, node_indices_by_name);
+    logGltfStartupDiag(path,
+                       "assimp fallback animations",
+                       stage_start,
+                       core::SteadyClock::now(),
+                       prefab.animations.size());
   }
+  logGltfStartupDiag(path,
+                     "total",
+                     total_start,
+                     core::SteadyClock::now(),
+                     prefab.nodes.size());
   return prefab;
 }
 

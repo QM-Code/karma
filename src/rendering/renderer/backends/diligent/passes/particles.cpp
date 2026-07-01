@@ -2221,7 +2221,7 @@ void DiligentBackend::ensureParticleResources() {
         static_cast<Diligent::Uint32>(sizeof(sim_vars) / sizeof(sim_vars[0]));
 
     const auto pso_start = core::SteadyClock::now();
-    particle_sim_compute_pso_ = device_with_cache_.CreateComputePipelineState(sim_pso);
+    particle_sim_compute_pso_ = createComputePipelineState(sim_pso);
     logRenderPipelineDiag("particle", "Karma Particle Sim Compute Pipeline", pso_start, core::SteadyClock::now());
     if (particle_sim_compute_pso_) {
       if (!particle_sim_cb_) {
@@ -2300,7 +2300,7 @@ void DiligentBackend::ensureParticleResources() {
     pso.PSODesc.ResourceLayout.Variables = variables;
     pso.PSODesc.ResourceLayout.NumVariables = variable_count;
     const auto pso_start = core::SteadyClock::now();
-    out_pso = device_with_cache_.CreateComputePipelineState(pso);
+    out_pso = createComputePipelineState(pso);
     logRenderPipelineDiag("particle", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return;
@@ -2720,7 +2720,7 @@ void DiligentBackend::ensureParticleResources() {
         static_cast<Diligent::Uint32>(sizeof(kParticleSamplers) / sizeof(kParticleSamplers[0]));
 
     const auto pso_start = core::SteadyClock::now();
-    out_pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    out_pso = createGraphicsPipelineState(pso);
     logRenderPipelineDiag("particle", name, pso_start, core::SteadyClock::now());
     if (!out_pso) {
       return false;
@@ -2793,7 +2793,7 @@ void DiligentBackend::ensureParticleResources() {
                                       sizeof(kParticleGlobalSamplers[0]));
 
     const auto pso_start = core::SteadyClock::now();
-    out_pipeline.pso = device_with_cache_.CreateGraphicsPipelineState(pso);
+    out_pipeline.pso = createGraphicsPipelineState(pso);
     logRenderPipelineDiag("particle", name, pso_start, core::SteadyClock::now());
     if (!out_pipeline.pso) {
       return false;
@@ -3038,7 +3038,7 @@ void DiligentBackend::ensureParticleResources() {
 
       const auto pso_start = core::SteadyClock::now();
       particle_half_res_composite_pipeline_state_ =
-          device_with_cache_.CreateGraphicsPipelineState(composite_pso);
+          createGraphicsPipelineState(composite_pso);
       logRenderPipelineDiag("particle",
                             "Karma Particle Half Res Composite",
                             pso_start,

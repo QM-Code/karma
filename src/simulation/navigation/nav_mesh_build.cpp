@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -12,7 +13,9 @@
 #include <DetourNavMesh.h>
 #include <DetourNavMeshBuilder.h>
 #include <Recast.h>
+#include <spdlog/spdlog.h>
 
+#include "karma/core.h"
 #include "detail/detour_utils.h"
 #include "detail/nav_mesh_debug.h"
 #include "detail/nav_mesh_result.h"
@@ -30,6 +33,50 @@ using detail::setResult;
 using detail::succeeded;
 
 namespace {
+
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 &&
+         std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 &&
+         std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
+
+bool startupDiagnosticsEnabled() {
+  static const bool enabled = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  return enabled;
+}
+
+void logNavMeshBuildDiag(const char* stage,
+                         core::SteadyClock::time_point start,
+                         core::SteadyClock::time_point end) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info("Engine startup diag: area=nav_mesh_build stage={} ms={:.2f}",
+               stage ? stage : "unknown",
+               core::elapsedMilliseconds(start, end));
+}
+
+void logNavMeshBuildDiag(const char* stage,
+                         core::SteadyClock::time_point start,
+                         core::SteadyClock::time_point end,
+                         const NavMeshInputGeometry& geometry) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Engine startup diag: area=nav_mesh_build stage={} ms={:.2f} vertices={} triangles={} off_mesh={} convex_volumes={}",
+      stage ? stage : "unknown",
+      core::elapsedMilliseconds(start, end),
+      geometry.vertices.size(),
+      geometry.triangleCount(),
+      geometry.off_mesh_connections.size(),
+      geometry.convex_volumes.size());
+}
 
 bool validConfig(const NavMeshBuildConfig& config) {
   if (config.cell_size <= 0.0f ||
@@ -470,6 +517,8 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     return buildTiled(geometry, config, result);
   }
 
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
   reset();
   config_ = config;
 
@@ -489,7 +538,9 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::InvalidConfig, "Navigation build config is invalid."};
     return false;
   }
+  logNavMeshBuildDiag("validate input", stage_start, core::SteadyClock::now(), geometry);
 
+  stage_start = core::SteadyClock::now();
   std::vector<float> vertices = flattenVertices(geometry.vertices);
   std::vector<int> indices;
   if (!flattenIndices(geometry.indices, indices)) {
@@ -497,12 +548,15 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Navigation indices exceed Recast limits."};
     return false;
   }
+  logNavMeshBuildDiag("flatten geometry", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   computeBounds(geometry, bounds_min_, bounds_max_);
 
   rcContext context;
   rcConfig cfg{};
   configureRecast(config, bounds_min_, bounds_max_, cfg);
+  logNavMeshBuildDiag("configure recast", stage_start, core::SteadyClock::now());
 
   rcHeightfield* solid = rcAllocHeightfield();
   rcCompactHeightfield* compact = nullptr;
@@ -521,6 +575,7 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
   const int vertex_count = static_cast<int>(geometry.vertices.size());
   const int triangle_count = static_cast<int>(geometry.triangleCount());
 
+  stage_start = core::SteadyClock::now();
   if (solid == nullptr ||
       !rcCreateHeightfield(&context, *solid, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)) {
     cleanup_recast();
@@ -528,7 +583,9 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to create Recast heightfield."};
     return false;
   }
+  logNavMeshBuildDiag("create heightfield", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   std::vector<unsigned char> slope_areas(static_cast<size_t>(triangle_count), kNavAreaNull);
   rcMarkWalkableTriangles(&context,
                           cfg.walkableSlopeAngle,
@@ -547,6 +604,8 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
         has_explicit_areas ? geometry.triangle_areas[static_cast<size_t>(i)] : kNavAreaDefault;
     triangle_areas[static_cast<size_t>(i)] = sanitizeArea(requested_area);
   }
+  logNavMeshBuildDiag("mark walkable triangles", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
   if (!rcRasterizeTriangles(&context,
                             vertices.data(),
                             vertex_count,
@@ -560,11 +619,15 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to rasterize navigation triangles."};
     return false;
   }
+  logNavMeshBuildDiag("rasterize triangles", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   rcFilterLowHangingWalkableObstacles(&context, cfg.walkableClimb, *solid);
   rcFilterLedgeSpans(&context, cfg.walkableHeight, cfg.walkableClimb, *solid);
   rcFilterWalkableLowHeightSpans(&context, cfg.walkableHeight, *solid);
+  logNavMeshBuildDiag("filter walkable spans", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   compact = rcAllocCompactHeightfield();
   if (compact == nullptr ||
       !rcBuildCompactHeightfield(&context, cfg.walkableHeight, cfg.walkableClimb, *solid, *compact)) {
@@ -573,21 +636,27 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to build compact navigation heightfield."};
     return false;
   }
+  logNavMeshBuildDiag("build compact heightfield", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   if (!rcErodeWalkableArea(&context, cfg.walkableRadius, *compact)) {
     cleanup_recast();
     setResult(result, NavStatus::BuildFailed, "Failed to erode navigation regions.");
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to erode navigation regions."};
     return false;
   }
+  logNavMeshBuildDiag("erode walkable area", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   markConvexVolumes(context, geometry, *compact);
   if (!buildRegions(context, config, cfg, *compact, result)) {
     cleanup_recast();
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to build navigation regions."};
     return false;
   }
+  logNavMeshBuildDiag("mark volumes and build regions", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   contours = rcAllocContourSet();
   if (contours == nullptr ||
       !rcBuildContours(&context, *compact, cfg.maxSimplificationError, cfg.maxEdgeLen, *contours)) {
@@ -596,7 +665,9 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to build navigation contours."};
     return false;
   }
+  logNavMeshBuildDiag("build contours", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   poly_mesh = rcAllocPolyMesh();
   if (poly_mesh == nullptr ||
       !rcBuildPolyMesh(&context, *contours, cfg.maxVertsPerPoly, *poly_mesh)) {
@@ -605,7 +676,9 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to build navigation polygon mesh."};
     return false;
   }
+  logNavMeshBuildDiag("build poly mesh", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   detail_mesh = rcAllocPolyMeshDetail();
   if (detail_mesh == nullptr ||
       !rcBuildPolyMeshDetail(&context,
@@ -619,20 +692,28 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to build navigation detail mesh."};
     return false;
   }
+  logNavMeshBuildDiag("build detail mesh", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   for (int i = 0; i < poly_mesh->npolys; ++i) {
     poly_mesh->flags[i] = flagsForArea(config, poly_mesh->areas[i]);
   }
+  logNavMeshBuildDiag("assign poly flags", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
   debug_edges_ = buildDebugEdges(*poly_mesh);
+  logNavMeshBuildDiag("build debug edges", stage_start, core::SteadyClock::now());
   if (config.collect_build_debug_draw) {
+    stage_start = core::SteadyClock::now();
     captureBuildDebugLines(*solid,
                            *compact,
                            *contours,
                            *poly_mesh,
                            *detail_mesh,
                            debug_draw_lines_);
+    logNavMeshBuildDiag("capture build debug draw", stage_start, core::SteadyClock::now());
   }
 
+  stage_start = core::SteadyClock::now();
   unsigned char* nav_data = nullptr;
   int nav_data_size = 0;
   std::vector<float> off_mesh_vertices;
@@ -678,18 +759,24 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
   params.cs = cfg.cs;
   params.ch = cfg.ch;
   params.buildBvTree = true;
+  logNavMeshBuildDiag("build detour params", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   if (!dtCreateNavMeshData(&params, &nav_data, &nav_data_size)) {
     cleanup_recast();
     setResult(result, NavStatus::BuildFailed, "Failed to create Detour navmesh data.");
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to create Detour navmesh data."};
     return false;
   }
+  logNavMeshBuildDiag("create detour nav data", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   auto snapshot = std::make_shared<NavMeshSnapshot>();
   snapshot->data.resize(static_cast<size_t>(nav_data_size));
   std::memcpy(snapshot->data.data(), nav_data, static_cast<size_t>(nav_data_size));
+  logNavMeshBuildDiag("copy nav snapshot", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   dtNavMesh* mesh = dtAllocNavMesh();
   if (mesh == nullptr || !succeeded(mesh->init(nav_data, nav_data_size, DT_TILE_FREE_DATA))) {
     dtFree(nav_data);
@@ -699,10 +786,13 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
     last_result_ = result != nullptr ? *result : NavMeshBuildResult{NavStatus::BuildFailed, "Failed to initialize Detour navmesh."};
     return false;
   }
+  logNavMeshBuildDiag("init detour navmesh", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   nav_mesh_ = mesh;
   snapshot_ = std::move(snapshot);
   refreshDetourDebugDraw();
+  logNavMeshBuildDiag("refresh debug draw", stage_start, core::SteadyClock::now());
   NavMeshBuildResult success{};
   success.status = NavStatus::Success;
   success.message = "Navigation mesh built.";
@@ -715,6 +805,7 @@ bool NavMesh::build(const NavMeshInputGeometry& geometry,
   }
 
   cleanup_recast();
+  logNavMeshBuildDiag("total", total_start, core::SteadyClock::now(), geometry);
   return true;
 }
 

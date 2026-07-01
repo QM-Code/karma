@@ -24,6 +24,9 @@ int main() {
   testSlicedPathCompletes();
   testNavigationSystemBuildsAndMovesAgent();
   testNavigationSystemTileCacheObstacleComponent();
+  testNavigationSystemNavMeshCacheHitAndInvalidation();
+  testNavigationSystemTileCacheCacheHitAndObstacleResync();
+  testNavigationSystemBuildDebugDrawBypassesCacheOnce();
   testNavigationSystemCrowdAgentComponent();
   testCrowdAgentCharacterControllerVelocityMode();
   testReplacementRequestKeepsCurrentPathMoving();

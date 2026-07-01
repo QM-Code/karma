@@ -212,4 +212,31 @@ bool NavMesh::loadSnapshot(const NavMeshSnapshot& snapshot,
   return true;
 }
 
+bool NavMesh::loadSnapshot(const NavMeshSnapshot& snapshot,
+                           const NavMeshSnapshotMetadata& metadata,
+                           NavMeshBuildResult* result) {
+  NavMeshBuildResult loaded_result;
+  if (!loadSnapshot(snapshot, &loaded_result)) {
+    if (result != nullptr) {
+      *result = loaded_result;
+    }
+    return false;
+  }
+
+  config_ = metadata.build_config;
+  bounds_min_ = metadata.bounds_min;
+  bounds_max_ = metadata.bounds_max;
+  last_result_ = metadata.build_result;
+  if (last_result_.message.empty()) {
+    last_result_.message = loaded_result.message;
+  }
+  if (last_result_.polygon_count == 0) {
+    last_result_.polygon_count = loaded_result.polygon_count;
+  }
+  if (result != nullptr) {
+    *result = last_result_;
+  }
+  return true;
+}
+
 }  // namespace karma::navigation

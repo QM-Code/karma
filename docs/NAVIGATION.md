@@ -80,6 +80,17 @@ mesh. Low-level state helpers expose polygon flags/areas, polygon reference
 decoding, active tile metadata, tile state store/restore, and off-mesh
 connection endpoint lookup without exposing Detour types.
 
+`NavMeshComponent::cache.enabled` opts an ECS bake into persistent navmesh
+caching. Cache keys fingerprint collected geometry, source mask, build config
+excluding `collect_build_debug_draw`, and tile-cache config when a
+`NavTileCacheComponent` is present. Static navmeshes are stored as
+`navmesh/<fingerprint>.knav`; tile-cache builds are stored as
+`tilecache/<fingerprint>.kntc`. `KARMA_NAV_CACHE=0` disables the cache,
+`KARMA_NAV_CACHE_DIR` selects the root, and `KARMA_NAV_CACHE_FLUSH=1` clears it
+before first use. Without an explicit root, navigation uses
+`KARMA_ASSET_CACHE_DIR/navigation` when available, then the platform user cache
+root under `karma/navigation`.
+
 ## ECS Request Pipeline
 
 `NavigationSystem::requestMoveTo(world, entity, destination)` writes intent onto
@@ -147,6 +158,10 @@ line layers for voxels, walkable voxels, compact heightfields, distance fields,
 regions, region connections, raw/processed contours, poly mesh, and detail mesh.
 `NavMeshComponent::debug_draw_mode` selects which layer the ECS
 `NavigationSystem` submits.
+When component caching is enabled, normal bakes suppress build-debug capture so
+cache misses do not pay the Recast intermediate capture cost.
+`NavigationSystem::requestBuildDebugDraw(world, nav_entity)` performs one
+cache-bypassing rebuild that captures those layers.
 
 ## Dynamic Obstacles
 

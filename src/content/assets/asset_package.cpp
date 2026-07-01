@@ -2,16 +2,21 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <fstream>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <assimp/version.h>
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
 
@@ -25,13 +30,122 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr std::string_view kPackageCacheContentVersion =
-    "package-cache-v2-gltf-scene-metadata-mesh-binary";
+    "package-cache-v3-source-metadata-fingerprint";
+
+bool envFlagEnabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") != 0 &&
+         std::strcmp(value, "false") != 0 &&
+         std::strcmp(value, "FALSE") != 0 &&
+         std::strcmp(value, "off") != 0 &&
+         std::strcmp(value, "OFF") != 0;
+}
+
+bool startupDiagnosticsEnabled() {
+  static const bool enabled = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  return enabled;
+}
+
+void logAssetPackageDiag(const std::filesystem::path& manifest_path,
+                         const char* stage,
+                         core::SteadyClock::time_point start,
+                         core::SteadyClock::time_point end) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info("Engine startup diag: area=asset_package package='{}' stage={} ms={:.2f}",
+               manifest_path.string(),
+               stage ? stage : "unknown",
+               core::elapsedMilliseconds(start, end));
+}
+
+void logAssetPackageDiag(const std::filesystem::path& manifest_path,
+                         const char* stage,
+                         core::SteadyClock::time_point start,
+                         core::SteadyClock::time_point end,
+                         std::size_t count) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Engine startup diag: area=asset_package package='{}' stage={} ms={:.2f} count={}",
+      manifest_path.string(),
+      stage ? stage : "unknown",
+      core::elapsedMilliseconds(start, end),
+      count);
+}
+
+void logAssetPackageEntryDiag(const std::filesystem::path& manifest_path,
+                              const std::string& type,
+                              const std::string& key,
+                              const std::filesystem::path& source_path,
+                              core::SteadyClock::time_point start,
+                              core::SteadyClock::time_point end) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Engine startup diag: area=asset_package_entry package='{}' type={} key='{}' source='{}' ms={:.2f}",
+      manifest_path.string(),
+      type,
+      key,
+      source_path.empty() ? std::string{} : source_path.string(),
+      core::elapsedMilliseconds(start, end));
+}
+
+void logAssetPackageCacheAssetDiag(const std::filesystem::path& manifest_path,
+                                   const std::string& type,
+                                   const std::string& key,
+                                   const std::string& blob_type,
+                                   core::SteadyClock::time_point start,
+                                   core::SteadyClock::time_point end) {
+  if (!startupDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Engine startup diag: area=asset_package_cache_asset package='{}' type={} blob_type={} key='{}' ms={:.2f}",
+      manifest_path.string(),
+      type,
+      blob_type,
+      key,
+      core::elapsedMilliseconds(start, end));
+}
 
 bool fail(std::string* diagnostic, std::string message) {
   if (diagnostic != nullptr) {
     *diagnostic = std::move(message);
   }
   return false;
+}
+
+struct CachedAssetRecord {
+  std::string type;
+  std::string key;
+  std::string blob_key;
+  std::string blob_type;
+};
+
+bool readCachedAssetRecord(const Json& entry,
+                           CachedAssetRecord& out,
+                           std::string* diagnostic) {
+  if (!entry.is_object() ||
+      !entry.contains("type") ||
+      !entry.contains("key") ||
+      !entry["type"].is_string() ||
+      !entry["key"].is_string()) {
+    return fail(diagnostic, "package cache asset record is malformed");
+  }
+  out.type = entry["type"].get<std::string>();
+  out.key = entry["key"].get<std::string>();
+  out.blob_key = entry.value("blob_key", std::string{});
+  out.blob_type = entry.value("blob_type", out.type);
+  return true;
+}
+
+bool isTextureBlobType(std::string_view blob_type) {
+  return blob_type == "texture" || blob_type == "texture_rgba8";
 }
 
 std::filesystem::path packageDirectory(const std::filesystem::path& manifest_path) {
@@ -231,6 +345,7 @@ void addLoaded(AssetPackageHandle& handle,
 
 bool importEntry(AssetRegistry& assets,
                  const Json& entry,
+                 const std::filesystem::path& manifest_path,
                  const std::filesystem::path& base_dir,
                  AssetPackageHandle& handle,
                  std::string* diagnostic) {
@@ -253,6 +368,7 @@ bool importEntry(AssetRegistry& assets,
   }
 
   std::filesystem::path source_path;
+  const auto entry_start = core::SteadyClock::now();
   if (type == "texture_rgba8") {
     if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
       return false;
@@ -290,6 +406,12 @@ bool importEntry(AssetRegistry& assets,
       return fail(diagnostic, "failed to import texture asset: " + source_path.string());
     }
     addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
     return true;
   }
 
@@ -301,6 +423,12 @@ bool importEntry(AssetRegistry& assets,
       return fail(diagnostic, "failed to import mesh asset: " + source_path.string());
     }
     addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
     return true;
   }
 
@@ -314,6 +442,12 @@ bool importEntry(AssetRegistry& assets,
                                   "': " + result.diagnostic);
     }
     addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
     return true;
   }
 
@@ -325,6 +459,12 @@ bool importEntry(AssetRegistry& assets,
       return fail(diagnostic, "failed to import particle effect: " + source_path.string());
     }
     addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
     return true;
   }
 
@@ -336,6 +476,12 @@ bool importEntry(AssetRegistry& assets,
       return fail(diagnostic, "failed to register environment map: " + key);
     }
     addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
     return true;
   }
 
@@ -369,6 +515,12 @@ bool importEntry(AssetRegistry& assets,
     for (const std::string& child_key : scene.skin_keys) {
       addLoaded(handle, "skin", child_key);
     }
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
     return true;
   }
 
@@ -430,10 +582,15 @@ Json packageEntryCacheRecord(const Json& entry,
   if (const auto path_it = entry.find("path"); path_it != entry.end() && path_it->is_string()) {
     const std::filesystem::path source = resolveEntryPath(base_dir, path_it->get<std::string>());
     record["source"] = source.lexically_normal().generic_string();
-    if (const auto file_hash = hashFile(source)) {
-      record["source_hash"] = *file_hash;
+    std::error_code ec;
+    if (std::filesystem::exists(source, ec)) {
+      record["source_size"] = static_cast<uint64_t>(std::filesystem::file_size(source, ec));
+      const auto mtime = std::filesystem::last_write_time(source, ec);
+      if (!ec) {
+        record["source_mtime"] = mtime.time_since_epoch().count();
+      }
     } else if (diagnostic != nullptr) {
-      *diagnostic = "failed to hash package source: " + source.string();
+      *diagnostic = "failed to stat package source: " + source.string();
     }
   }
   return record;
@@ -600,89 +757,139 @@ bool writePackageCache(AssetCache& cache,
                                     diagnostic);
 }
 
+bool restoreCachedTextureAsset(AssetRegistry& staging,
+                               const std::filesystem::path& manifest_path,
+                               const CachedAssetRecord& record,
+                               TextureAsset texture,
+                               AssetPackageHandle& handle,
+                               std::string* diagnostic,
+                               core::SteadyClock::time_point restore_start) {
+  if (keyAlreadyExists(staging, record.type, record.key)) {
+    addLoaded(handle, record.type, record.key, record.blob_key);
+    logAssetPackageCacheAssetDiag(manifest_path,
+                                  record.type,
+                                  record.key,
+                                  record.blob_type,
+                                  restore_start,
+                                  core::SteadyClock::now());
+    return true;
+  }
+  if (!staging.registerTextureAsset(record.key, std::move(texture))) {
+    return fail(diagnostic, "failed to restore cached texture: " + record.key);
+  }
+  addLoaded(handle, record.type, record.key, record.blob_key);
+  logAssetPackageCacheAssetDiag(manifest_path,
+                                record.type,
+                                record.key,
+                                record.blob_type,
+                                restore_start,
+                                core::SteadyClock::now());
+  return true;
+}
+
 bool restoreCachedAsset(AssetCache& cache,
                         AssetRegistry& staging,
+                        const std::filesystem::path& manifest_path,
                         const Json& entry,
                         AssetPackageHandle& handle,
                         std::string* diagnostic) {
-  if (!entry.is_object() ||
-      !entry.contains("type") ||
-      !entry.contains("key") ||
-      !entry["type"].is_string() ||
-      !entry["key"].is_string()) {
-    return fail(diagnostic, "package cache asset record is malformed");
+  CachedAssetRecord record;
+  if (!readCachedAssetRecord(entry, record, diagnostic)) {
+    return false;
   }
-  const std::string type = entry["type"].get<std::string>();
-  const std::string key = entry["key"].get<std::string>();
-  const std::string blob_key = entry.value("blob_key", std::string{});
-  const std::string blob_type = entry.value("blob_type", type);
+  const auto restore_start = core::SteadyClock::now();
 
-  if (keyAlreadyExists(staging, type, key)) {
-    addLoaded(handle, type, key, blob_key);
+  if (keyAlreadyExists(staging, record.type, record.key)) {
+    addLoaded(handle, record.type, record.key, record.blob_key);
+    logAssetPackageCacheAssetDiag(manifest_path,
+                                  record.type,
+                                  record.key,
+                                  record.blob_type,
+                                  restore_start,
+                                  core::SteadyClock::now());
     return true;
   }
 
-  if (type == "environment_map") {
+  if (record.type == "environment_map") {
     const std::filesystem::path path = entry.value("path", std::string{});
-    if (!staging.registerEnvironmentMap(key, EnvironmentMapAsset{.path = path})) {
-      return fail(diagnostic, "failed to restore cached environment map: " + key);
+    if (!staging.registerEnvironmentMap(record.key, EnvironmentMapAsset{.path = path})) {
+      return fail(diagnostic, "failed to restore cached environment map: " + record.key);
     }
-    addLoaded(handle, type, key);
+    addLoaded(handle, record.type, record.key);
+    logAssetPackageCacheAssetDiag(manifest_path,
+                                  record.type,
+                                  record.key,
+                                  record.blob_type,
+                                  restore_start,
+                                  core::SteadyClock::now());
     return true;
   }
-  if (blob_key.empty()) {
-    return fail(diagnostic, "package cache asset record is missing blob key: " + key);
+  if (record.blob_key.empty()) {
+    return fail(diagnostic, "package cache asset record is missing blob key: " + record.key);
   }
-  if (blob_type == "texture" || blob_type == "texture_rgba8") {
-    auto texture = cache.readTexture(blob_key, diagnostic);
-    if (!texture.has_value() || !staging.registerTextureAsset(key, std::move(*texture))) {
-      return fail(diagnostic, "failed to restore cached texture: " + key);
+  if (isTextureBlobType(record.blob_type)) {
+    auto texture = cache.readTexture(record.blob_key, diagnostic);
+    if (!texture.has_value()) {
+      return fail(diagnostic, "failed to restore cached texture: " + record.key);
     }
-  } else if (blob_type == "mesh") {
-    auto mesh = cache.readMesh(blob_key, diagnostic);
-    if (!mesh.has_value() || !staging.registerMeshAsset(key, std::move(*mesh))) {
-      return fail(diagnostic, "failed to restore cached mesh: " + key);
+    return restoreCachedTextureAsset(staging,
+                                     manifest_path,
+                                     record,
+                                     std::move(*texture),
+                                     handle,
+                                     diagnostic,
+                                     restore_start);
+  } else if (record.blob_type == "mesh") {
+    auto mesh = cache.readMesh(record.blob_key, diagnostic);
+    if (!mesh.has_value() || !staging.registerMeshAsset(record.key, std::move(*mesh))) {
+      return fail(diagnostic, "failed to restore cached mesh: " + record.key);
     }
-  } else if (blob_type == "material_asset") {
-    auto material = cache.readMaterialAsset(blob_key, diagnostic);
-    if (!material.has_value() || !staging.registerMaterialAsset(key, std::move(*material))) {
-      return fail(diagnostic, "failed to restore cached material asset: " + key);
+  } else if (record.blob_type == "material_asset") {
+    auto material = cache.readMaterialAsset(record.blob_key, diagnostic);
+    if (!material.has_value() || !staging.registerMaterialAsset(record.key, std::move(*material))) {
+      return fail(diagnostic, "failed to restore cached material asset: " + record.key);
     }
-  } else if (blob_type == "material_variant") {
-    auto material = cache.readMaterialVariant(blob_key, diagnostic);
-    if (!material.has_value() || !staging.registerMaterialVariant(key, std::move(*material))) {
-      return fail(diagnostic, "failed to restore cached material variant: " + key);
+  } else if (record.blob_type == "material_variant") {
+    auto material = cache.readMaterialVariant(record.blob_key, diagnostic);
+    if (!material.has_value() || !staging.registerMaterialVariant(record.key, std::move(*material))) {
+      return fail(diagnostic, "failed to restore cached material variant: " + record.key);
     }
-  } else if (blob_type == "particle_effect") {
-    auto effect = cache.readParticleEffect(blob_key, diagnostic);
-    if (!effect.has_value() || !staging.registerParticleEffect(key, std::move(*effect))) {
-      return fail(diagnostic, "failed to restore cached particle effect: " + key);
+  } else if (record.blob_type == "particle_effect") {
+    auto effect = cache.readParticleEffect(record.blob_key, diagnostic);
+    if (!effect.has_value() || !staging.registerParticleEffect(record.key, std::move(*effect))) {
+      return fail(diagnostic, "failed to restore cached particle effect: " + record.key);
     }
-  } else if (blob_type == "gltf_scene") {
-    auto scene = cache.readGltfScene(blob_key, diagnostic);
-    if (!scene.has_value() || !staging.registerGltfSceneAsset(key, std::move(*scene))) {
-      return fail(diagnostic, "failed to restore cached glTF scene: " + key);
+  } else if (record.blob_type == "gltf_scene") {
+    auto scene = cache.readGltfScene(record.blob_key, diagnostic);
+    if (!scene.has_value() || !staging.registerGltfSceneAsset(record.key, std::move(*scene))) {
+      return fail(diagnostic, "failed to restore cached glTF scene: " + record.key);
     }
-  } else if (blob_type == "animation_clip") {
-    auto clip = cache.readAnimationClip(blob_key, diagnostic);
-    if (!clip.has_value() || !staging.registerAnimationClip(key, std::move(*clip))) {
-      return fail(diagnostic, "failed to restore cached animation clip: " + key);
+  } else if (record.blob_type == "animation_clip") {
+    auto clip = cache.readAnimationClip(record.blob_key, diagnostic);
+    if (!clip.has_value() || !staging.registerAnimationClip(record.key, std::move(*clip))) {
+      return fail(diagnostic, "failed to restore cached animation clip: " + record.key);
     }
-  } else if (blob_type == "skeleton") {
-    auto skeleton = cache.readSkeleton(blob_key, diagnostic);
-    if (!skeleton.has_value() || !staging.registerSkeleton(key, std::move(*skeleton))) {
-      return fail(diagnostic, "failed to restore cached skeleton: " + key);
+  } else if (record.blob_type == "skeleton") {
+    auto skeleton = cache.readSkeleton(record.blob_key, diagnostic);
+    if (!skeleton.has_value() || !staging.registerSkeleton(record.key, std::move(*skeleton))) {
+      return fail(diagnostic, "failed to restore cached skeleton: " + record.key);
     }
-  } else if (blob_type == "skin") {
-    auto skin = cache.readSkin(blob_key, diagnostic);
-    if (!skin.has_value() || !staging.registerSkin(key, std::move(*skin))) {
-      return fail(diagnostic, "failed to restore cached skin: " + key);
+  } else if (record.blob_type == "skin") {
+    auto skin = cache.readSkin(record.blob_key, diagnostic);
+    if (!skin.has_value() || !staging.registerSkin(record.key, std::move(*skin))) {
+      return fail(diagnostic, "failed to restore cached skin: " + record.key);
     }
   } else {
-    return fail(diagnostic, "unsupported cached blob type: " + blob_type);
+    return fail(diagnostic, "unsupported cached blob type: " + record.blob_type);
   }
 
-  addLoaded(handle, type, key, blob_key);
+  addLoaded(handle, record.type, record.key, record.blob_key);
+  logAssetPackageCacheAssetDiag(manifest_path,
+                                record.type,
+                                record.key,
+                                record.blob_type,
+                                restore_start,
+                                core::SteadyClock::now());
   return true;
 }
 
@@ -701,10 +908,69 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
       !(*manifest)["assets"].is_array()) {
     return std::nullopt;
   }
+
+  struct TextureRestoreResult {
+    std::optional<TextureAsset> texture;
+    std::string diagnostic;
+  };
+  struct TextureRestoreJob {
+    std::size_t entry_index = 0u;
+    CachedAssetRecord record;
+    core::SteadyClock::time_point start;
+    std::future<TextureRestoreResult> future;
+  };
+
+  const Json& entries = (*manifest)["assets"];
+  std::vector<TextureRestoreJob> texture_jobs;
+  texture_jobs.reserve(entries.size());
+  for (std::size_t index = 0u; index < entries.size(); ++index) {
+    CachedAssetRecord record;
+    std::string record_diagnostic;
+    if (!readCachedAssetRecord(entries[index], record, &record_diagnostic) ||
+        record.blob_key.empty() ||
+        !isTextureBlobType(record.blob_type)) {
+      continue;
+    }
+    const auto start = core::SteadyClock::now();
+    texture_jobs.push_back(TextureRestoreJob{
+        .entry_index = index,
+        .record = record,
+        .start = start,
+        .future = std::async(std::launch::async, [&cache, blob_key = record.blob_key]() {
+          TextureRestoreResult result;
+          result.texture = cache.readTexture(blob_key, &result.diagnostic);
+          return result;
+        }),
+    });
+  }
+
   AssetPackageHandle handle{};
   handle.manifest_path = manifest_path;
-  for (const Json& entry : (*manifest)["assets"]) {
-    if (!restoreCachedAsset(cache, staging, entry, handle, diagnostic)) {
+  std::size_t texture_job_index = 0u;
+  for (std::size_t entry_index = 0u; entry_index < entries.size(); ++entry_index) {
+    if (texture_job_index < texture_jobs.size() &&
+        texture_jobs[texture_job_index].entry_index == entry_index) {
+      TextureRestoreJob& job = texture_jobs[texture_job_index];
+      TextureRestoreResult result = job.future.get();
+      if (!result.texture.has_value() ||
+          !restoreCachedTextureAsset(staging,
+                                     manifest_path,
+                                     job.record,
+                                     std::move(*result.texture),
+                                     handle,
+                                     diagnostic,
+                                     job.start)) {
+        if (diagnostic != nullptr && !result.diagnostic.empty()) {
+          *diagnostic = result.diagnostic;
+        }
+        staging.clear();
+        return std::nullopt;
+      }
+      ++texture_job_index;
+      continue;
+    }
+    const Json& entry = entries[entry_index];
+    if (!restoreCachedAsset(cache, staging, manifest_path, entry, handle, diagnostic)) {
       staging.clear();
       return std::nullopt;
     }
@@ -713,9 +979,10 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
 }
 
 std::optional<AssetPackageHandle> commitStagedPackage(AssetRegistry& target,
-                                                      const AssetRegistry& staging,
+                                                      AssetRegistry& staging,
                                                       const AssetPackageHandle& staged,
-                                                      std::string* diagnostic) {
+                                                      std::string* diagnostic,
+                                                      bool move_assets = false) {
   for (const auto& asset : staged.assets) {
     if (keyAlreadyExists(target, asset.type, asset.key)) {
       fail(diagnostic, "asset package would overwrite existing key: " + asset.key);
@@ -726,6 +993,10 @@ std::optional<AssetPackageHandle> commitStagedPackage(AssetRegistry& target,
   AssetPackageHandle committed{};
   committed.manifest_path = staged.manifest_path;
   for (const auto& asset : staged.assets) {
+    if (move_assets && target.moveAssetFrom(staging, asset.type, asset.key)) {
+      committed.assets.push_back(asset);
+      continue;
+    }
     if (!copyAssetTo(target, staging, asset, diagnostic)) {
       unloadAssetPackage(target, committed);
       return std::nullopt;
@@ -768,52 +1039,110 @@ std::optional<AssetPackageHandle> importAssetPackage(AssetRegistry& assets,
                                                      const AssetPackageOptions& options,
                                                      std::string* diagnostic) {
   const std::filesystem::path manifest_path = resolveAssetPackagePath(path);
+  const auto package_start = core::SteadyClock::now();
+  auto stage_start = package_start;
   Json root;
   if (!readJson(manifest_path, root, diagnostic)) {
     return std::nullopt;
   }
+  logAssetPackageDiag(manifest_path,
+                      "manifest read",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      root["assets"].size());
+  stage_start = core::SteadyClock::now();
   AssetCache cache(options.cache);
   const std::string manifest_hash =
       hashFile(manifest_path).value_or(hashString(manifest_path.lexically_normal().generic_string()));
+  logAssetPackageDiag(manifest_path, "manifest hash", stage_start, core::SteadyClock::now());
+  stage_start = core::SteadyClock::now();
   const std::string package_cache_key =
       packageCacheKey(manifest_path,
                       root,
                       manifest_hash,
                       nullptr);
+  logAssetPackageDiag(manifest_path, "cache key build", stage_start, core::SteadyClock::now());
 
   if (cache.enabled()) {
     AssetRegistry cached_staging;
     std::string cache_diagnostic;
+    stage_start = core::SteadyClock::now();
     if (auto cached = loadPackageFromCache(cache,
                                            manifest_path,
                                            package_cache_key,
                                            cached_staging,
                                            &cache_diagnostic)) {
-      if (auto committed = commitStagedPackage(assets, cached_staging, *cached, diagnostic)) {
+      logAssetPackageDiag(manifest_path,
+                          "cache restore",
+                          stage_start,
+                          core::SteadyClock::now(),
+                          cached->assets.size());
+      stage_start = core::SteadyClock::now();
+      if (auto committed = commitStagedPackage(assets,
+                                               cached_staging,
+                                               *cached,
+                                               diagnostic,
+                                               true)) {
+        logAssetPackageDiag(manifest_path,
+                            "cache commit",
+                            stage_start,
+                            core::SteadyClock::now(),
+                            committed->assets.size());
+        logAssetPackageDiag(manifest_path,
+                            "total cache hit",
+                            package_start,
+                            core::SteadyClock::now(),
+                            committed->assets.size());
         return committed;
       }
       return std::nullopt;
     }
+    logAssetPackageDiag(manifest_path, "cache miss lookup", stage_start, core::SteadyClock::now());
   }
 
   AssetRegistry staging;
   AssetPackageHandle staged{};
   staged.manifest_path = manifest_path;
   const std::filesystem::path base_dir = packageDirectory(manifest_path);
+  stage_start = core::SteadyClock::now();
   for (const Json& entry : root["assets"]) {
-    if (!importEntry(staging, entry, base_dir, staged, diagnostic)) {
+    if (!importEntry(staging, entry, manifest_path, base_dir, staged, diagnostic)) {
       return std::nullopt;
     }
   }
+  logAssetPackageDiag(manifest_path,
+                      "source import",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      staged.assets.size());
+  stage_start = core::SteadyClock::now();
   assignPackageBlobKeys(staged, package_cache_key);
+  logAssetPackageDiag(manifest_path, "assign cache blob keys", stage_start, core::SteadyClock::now());
 
+  stage_start = core::SteadyClock::now();
   auto committed = commitStagedPackage(assets, staging, staged, diagnostic);
   if (!committed.has_value()) {
     return std::nullopt;
   }
+  logAssetPackageDiag(manifest_path,
+                      "commit staged",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      committed->assets.size());
 
   std::string cache_write_diagnostic;
+  stage_start = core::SteadyClock::now();
   (void)writePackageCache(cache, staging, staged, package_cache_key, &cache_write_diagnostic);
+  logAssetPackageDiag(manifest_path,
+                      "cache write",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      staged.assets.size());
+  logAssetPackageDiag(manifest_path,
+                      "total source import",
+                      package_start,
+                      core::SteadyClock::now(),
+                      committed->assets.size());
   return committed;
 }
 
@@ -922,7 +1251,8 @@ bool commitAssetPackageJob(AssetRegistry& assets,
   auto committed = commitStagedPackage(assets,
                                        job.state_->staging,
                                        *job.state_->handle,
-                                       &job.state_->diagnostic);
+                                       &job.state_->diagnostic,
+                                       true);
   if (!committed.has_value()) {
     return false;
   }

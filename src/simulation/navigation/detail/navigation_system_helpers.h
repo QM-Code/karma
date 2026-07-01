@@ -5,9 +5,6 @@
 #include "karma/math.h"
 #include "karma/navigation.h"
 #include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
 #include "karma/world.h"
 
 namespace karma::world {
@@ -72,7 +69,9 @@ math::Vec3 crowdWorldPosition(const math::Vec3& crowd_position,
                               const components::NavCrowdAgentComponent& agent);
 float horizontalDistance(const math::Vec3& a, const math::Vec3& b);
 
-void rebuildNavMeshes(world::World& world, const assets::AssetRegistry* assets);
+void rebuildNavMeshes(world::World& world,
+                      const assets::AssetRegistry* assets,
+                      NavigationSystemStats* stats = nullptr);
 void syncTileCaches(world::World& world, float dt);
 void syncCrowds(world::World& world, float dt);
 void moveAgents(world::World& world, float dt);

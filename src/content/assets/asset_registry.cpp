@@ -197,6 +197,132 @@ void AssetRegistry::clear() {
   bumpTextureVersion();
 }
 
+bool AssetRegistry::moveAssetFrom(AssetRegistry& source,
+                                  const std::string& type,
+                                  const std::string& key) {
+  if (!isValidAssetKey(key)) {
+    return false;
+  }
+
+  if (type == "texture_rgba8" || type == "texture") {
+    if (impl_->textures.find(key) != impl_->textures.end()) {
+      return false;
+    }
+    auto node = source.impl_->textures.extract(key);
+    if (node.empty() || !node.mapped()) {
+      return false;
+    }
+    const std::shared_ptr<TextureAsset> payload = node.mapped();
+    impl_->textures.insert(std::move(node));
+    if (!payload->content_hash.empty()) {
+      impl_->texture_payloads_by_hash[payload->content_hash] = payload;
+    }
+    bumpTextureVersion();
+    source.bumpTextureVersion();
+    return true;
+  }
+
+  if (type == "mesh") {
+    if (impl_->meshes.find(key) != impl_->meshes.end()) {
+      return false;
+    }
+    auto node = source.impl_->meshes.extract(key);
+    if (node.empty() || !node.mapped()) {
+      return false;
+    }
+    impl_->meshes.insert(std::move(node));
+    bumpMeshVersion();
+    source.bumpMeshVersion();
+    return true;
+  }
+
+  if (type == "particle_effect") {
+    if (impl_->particle_effects.find(key) != impl_->particle_effects.end()) {
+      return false;
+    }
+    auto node = source.impl_->particle_effects.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->particle_effects.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "environment_map") {
+    if (impl_->environment_maps.find(key) != impl_->environment_maps.end()) {
+      return false;
+    }
+    auto node = source.impl_->environment_maps.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->environment_maps.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "gltf_scene") {
+    if (impl_->gltf_scenes.find(key) != impl_->gltf_scenes.end()) {
+      return false;
+    }
+    auto node = source.impl_->gltf_scenes.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->gltf_scenes.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "animation_clip") {
+    if (impl_->animation_clips.find(key) != impl_->animation_clips.end()) {
+      return false;
+    }
+    auto node = source.impl_->animation_clips.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->animation_clips.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "skeleton") {
+    if (impl_->skeletons.find(key) != impl_->skeletons.end()) {
+      return false;
+    }
+    auto node = source.impl_->skeletons.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->skeletons.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "skin") {
+    if (impl_->skins.find(key) != impl_->skins.end()) {
+      return false;
+    }
+    auto node = source.impl_->skins.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->skins.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  return false;
+}
+
 bool AssetRegistry::registerMeshAsset(const std::string& key, world::MeshData mesh) {
   if (!isValidAssetKey(key)) {
     return false;

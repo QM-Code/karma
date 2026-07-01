@@ -6,6 +6,8 @@
 #include "passes/pass_shared.h"
 
 #include <Common/interface/RefCntAutoPtr.hpp>
+#include <Graphics/GraphicsEngine/interface/PipelineState.h>
+#include <Graphics/GraphicsEngine/interface/PipelineStateCache.h>
 #include <Graphics/GraphicsTools/interface/RenderStateCache.hpp>
 #include <filesystem>
 #include <cstdint>
@@ -31,6 +33,7 @@ class ISwapChain;
 class IBuffer;
 class IBufferView;
 class IPipelineState;
+class IPipelineStateCache;
 class IShaderResourceBinding;
 class ITexture;
 class ITextureView;
@@ -798,6 +801,12 @@ class DiligentBackend final : public Backend {
   };
 	  RenderStateCacheFileInfo renderStateCacheFileInfo() const;
 	  void saveRenderStateCache(std::string_view reason);
+  void initializePipelineStateCache();
+  void savePipelineStateCache(std::string_view reason);
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> createGraphicsPipelineState(
+      Diligent::GraphicsPipelineStateCreateInfo create_info);
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> createComputePipelineState(
+      Diligent::ComputePipelineStateCreateInfo create_info);
 	  void applyDiligentPresentEnvironment() const;
 
   karma::platform::Window* window_ = nullptr;
@@ -806,7 +815,10 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ISwapChain> swap_chain_;
   Diligent::RenderDeviceWithCache<false> device_with_cache_;
   std::filesystem::path render_state_cache_path_;
+  std::filesystem::path pipeline_state_cache_path_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineStateCache> pipeline_state_cache_;
   bool shader_cache_enabled_ = true;
+  bool pipeline_cache_enabled_ = true;
   bool shader_cache_log_ = false;
   std::uint32_t shader_cache_version_ = 29;
   bool shader_cache_flush_ = false;

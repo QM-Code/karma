@@ -952,6 +952,8 @@ struct ParticleEmitterGpuDesc {
   math::Vec3 velocity_max{0.6f, 4.5f, 0.6f};
   math::Vec3 acceleration{0.0f, -3.5f, 0.0f};
   float drag = 0.0f;
+  math::Vec3 orbit_axis{0.0f, 1.0f, 0.0f};
+  float orbit_speed = 0.0f;
   bool collide_with_ground = false;
   float ground_height = 0.0f;
   float bounce_damping = 0.35f;
@@ -959,6 +961,34 @@ struct ParticleEmitterGpuDesc {
   float rest_speed_threshold = 0.35f;
   math::Color start_color{1.0f, 0.8f, 0.35f, 0.9f};
   math::Color end_color{1.0f, 0.15f, 0.05f, 0.0f};
+};
+
+/// \ingroup karma_rendering
+/// Renderer-facing particle beam/ribbon submission.
+struct ParticleBeamGpuDesc {
+  uint64_t instance_id = 0;
+  uint32_t restart_count = 0;
+  float delta_seconds = 0.0f;
+  bool visible = true;
+
+  math::Vec3 position{};
+  math::Quat rotation{};
+  math::Vec3 scale{1.0f, 1.0f, 1.0f};
+
+  bool enabled = true;
+  LayerId layer = 0;
+  bool depth_test = true;
+  ParticleBlendMode blend_mode = ParticleBlendMode::Additive;
+  TextureId texture = kInvalidTexture;
+  std::vector<math::Vec3> local_path_points;
+  float start_width = 0.2f;
+  float end_width = 0.2f;
+  math::Color start_color{1.0f, 1.0f, 1.0f, 1.0f};
+  math::Color end_color{1.0f, 1.0f, 1.0f, 1.0f};
+  float edge_softness = 0.0f;
+  float uv_repeat = 1.0f;
+  float uv_scroll_speed = 0.0f;
+  float time_scale = 1.0f;
 };
 
 }  // namespace karma::rendering
@@ -1028,6 +1058,9 @@ struct ParticlePassStats {
   uint32_t gpu_culled_particles = 0;
   uint32_t gpu_culling_dispatches = 0;
   uint32_t cpu_fallback_particles = 0;
+  uint32_t submitted_beams = 0;
+  uint32_t beam_segments = 0;
+  uint32_t beam_draw_calls = 0;
   float sync_effect_bindings_ms = 0.0f;
   float simulation_ms = 0.0f;
   float packing_ms = 0.0f;
@@ -1113,6 +1146,9 @@ inline void accumulateParticleStats(ParticlePassStats& totals,
   totals.gpu_culled_particles += frame.gpu_culled_particles;
   totals.gpu_culling_dispatches += frame.gpu_culling_dispatches;
   totals.cpu_fallback_particles += frame.cpu_fallback_particles;
+  totals.submitted_beams += frame.submitted_beams;
+  totals.beam_segments += frame.beam_segments;
+  totals.beam_draw_calls += frame.beam_draw_calls;
   totals.sync_effect_bindings_ms += frame.sync_effect_bindings_ms;
   totals.simulation_ms += frame.simulation_ms;
   totals.packing_ms += frame.packing_ms;
@@ -1219,6 +1255,9 @@ inline std::string formatParticleStatsReport(const ParticleStatsReport& report) 
          << " gpu_culled_particles=" << avg(report.totals.gpu_culled_particles)
          << " gpu_culling_dispatches=" << avg(report.totals.gpu_culling_dispatches)
          << " cpu_fallback_particles=" << avg(report.totals.cpu_fallback_particles)
+         << " submitted_beams=" << avg(report.totals.submitted_beams)
+         << " beam_segments=" << avg(report.totals.beam_segments)
+         << " beam_draw_calls=" << avg(report.totals.beam_draw_calls)
          << std::setprecision(3)
          << " sync_effect_bindings_ms=" << avg_ms(report.totals.sync_effect_bindings_ms)
          << " simulation_ms=" << avg_ms(report.totals.simulation_ms)
@@ -1744,6 +1783,8 @@ class GraphicsDevice {
   void submitPackedParticles(PackedParticleBatch batch);
   /// Submits a renderer-owned particle emitter descriptor.
   void submitParticleEmitter(const ParticleEmitterGpuDesc& emitter);
+  /// Submits a renderer-owned particle beam/ribbon descriptor.
+  void submitParticleBeam(const ParticleBeamGpuDesc& beam);
   /// Provides particle-system timings/counters to the renderer.
   void setParticleSystemStats(const ParticlePassStats& stats);
   /// Retires a renderer instance id.
@@ -1773,6 +1814,8 @@ class GraphicsDevice {
   void setLights(const std::vector<LightData>& lights);
   /// Sets environment map and skybox state.
   void setEnvironmentMap(const std::filesystem::path& path, float intensity, bool draw_skybox);
+  /// Sets the framebuffer clear color used when no skybox/background geometry covers a pixel.
+  void setClearColor(const math::Color& color);
   /// Sets presentation vsync policy.
   void setVsync(bool enabled);
   /// Enables/disables anisotropic filtering.

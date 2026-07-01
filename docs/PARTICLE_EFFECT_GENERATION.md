@@ -1,160 +1,193 @@
-# Particle Effect Generation Plan
+# Particle Effect Generation
 
-This note captures the current state of `.kpeffect` authoring and what needs to
-exist before an agent can reliably generate particle effect files from an image
-or visual reference.
+Karma has a constrained particle-generation path for agents and tools. Agents
+write small `*.kpspec.json` files, then the content tools expand those specs into
+a prefab package containing validated `.kpeffect` files, copied texture assets,
+and a `prefab.json` composition.
 
-## Current State
+Generated packages keep the same authoring boundaries as hand-written content:
 
-Particle effects are reusable emitter templates stored as `.kpeffect` files.
-The runtime flow is:
+- `.kpeffect`: v3 JSON emitter layers for sparks, smoke, halos, heat, impacts,
+  and other particle simulation.
+- `ParticleBeamComponent`: prefab/component data for continuous textured
+  beams/ribbons such as fire rays and magic-missile trails.
+- `prefab.json`: transform hierarchy and component composition.
+- `assets.package.json`: texture imports, particle effect registrations, and the
+  prefab entry.
 
-1. Register borrowed particle texture handles in `AssetRegistry`.
-2. Register `.kpeffect` files under stable effect keys.
-3. Bind ECS entities to those effect keys with `ParticleEffectComponent`.
-4. Optionally apply `ParticleEffectOverrideComponent` for per-instance scale,
-   color, timing, or texture changes.
-5. Let `ParticleSystem` resolve the binding and submit an emitter descriptor to
-   the renderer. Live particle state is renderer-owned.
+## Build Targets
 
-The format is simple and strict:
+Enable tool targets with `KARMA_BUILD_TOOLS`:
 
-- JSON document with `"version": 3`
-- one or more entries in an `"emitters"` array
-- required grouped blocks for playback, render, atlas, emission, lifetime, size,
-  rotation, source, motion, collision, and color
-- the ECS binding path retains and submits every emitter in the asset
-- unknown fields are fatal parse errors
-- texture references are aliases, not raw texture paths
+```bash
+cmake -S . -B build -DKARMA_BUILD_TOOLS=ON
+cmake --build build --target \
+  karma_particle_effect_validate \
+  karma_particle_effect_format \
+  karma_particle_effect_generate
+```
 
-Primary files:
+Top-level builds enable tools by default. Consumer builds can opt in with the
+CMake option above.
 
-- [particle_emitter.h](../include/karma/components.h"style": "smoke_plume",
-  "palette": ["#5a5650", "#161412"],
-  "motion": "rising",
-  "density": 0.55,
-  "scale": 4.0,
-  "duration": 2.2,
-  "loop": false,
-  "softness": 0.8,
-  "turbulence": 0.35
+## Specs
+
+The v1 generation schema lives at
+[`../schemas/particles/kpspec.v1.schema.json`](../schemas/particles/kpspec.v1.schema.json).
+The current generator accepts these presets:
+
+- `fire_ray`: a continuous additive beam plus sparks, smoke, and heat haze.
+- `magic_missile`: a continuous additive trail plus head halo and trailing
+  sparks.
+- `arcane_barrage`: six teal-white missile ribbons with caster flare, comet
+  heads, sparks, mist, and distortion.
+- `blade_barrier`: a shrouded spherical barrier of spinning blade shards with
+  moving wind rings, swish streaks, dust, glints, and subtle distortion.
+- `breathe_fire`: a wide, source-point flame cone with dense additive ribbons,
+  embers, smoke, and heat haze.
+- `chromatic_ray`: a prismatic ray with twisting helix ribbons, sparks, wisps,
+  and subtle distortion.
+- `daze`: a blue-purple burst halo with stars, crescents, haze, pulse, and no
+  orb shell.
+- `heal`: a blue healing shimmer with stacked rings, glints, mist, pulse, and
+  subtle distortion.
+- `impact_burst`: a particle-only burst with flash, sparks, smoke, and shock
+  ring.
+- `energy_orb`: a mesh shell plus local-space core, arc, halo, distortion, and
+  light layers.
+
+Minimal spec:
+
+```json
+{
+  "version": 1,
+  "preset": "fire_ray",
+  "namespace": "generated/fire_ray",
+  "name": "Fire Ray",
+  "length": 5.0
 }
 ```
 
-The generation pipeline should be:
+For bent beams, provide local path points instead of relying on `length`:
 
-1. Analyze the image or prompt into high-level visual intent.
-2. Choose one or more known effect archetypes.
-3. Emit a constrained intermediate JSON description.
-4. Map the JSON through presets and safe field ranges into `.kpeffect` v3.
-5. Validate and format the generated file.
-6. Optionally generate a prefab directory when the effect needs multiple layers.
-7. Run a preview scene and capture visual/performance feedback.
-8. Iterate the JSON, not raw emitter fields, when the result is wrong.
+```json
+{
+  "version": 1,
+  "preset": "magic_missile",
+  "namespace": "generated/magic",
+  "path_points": [
+    [0.0, 0.0, 0.0],
+    [1.5, 0.2, 0.0],
+    [3.0, 0.0, 0.4]
+  ]
+}
+```
 
-## Preset Layer
+For orb effects, `radius` controls the generated shell, particles, and light:
 
-Before agent generation, define a small preset library. Each preset should own
-safe ranges and default field mappings for one visual archetype.
+```json
+{
+  "version": 1,
+  "preset": "energy_orb",
+  "namespace": "generated/energy_orb",
+  "name": "Energy Orb",
+  "radius": 1.15
+}
+```
 
-Initial presets:
+## Generate
 
-1. `spark_burst`: additive, short lifetime, sphere/sphere-surface emission,
-   high radial velocity, gravity, optional ground collision.
-2. `smoke_plume`: alpha, longer lifetime, low upward velocity, drag, expanding
-   size, dark-to-transparent color.
-3. `fireball`: additive or alpha, short-to-medium lifetime, warm palette,
-   outward radial motion, shrinking or expanding size depending on texture.
-4. `heat_haze`: distortion, low particle count, large soft particles,
-   scene-color sampling cost budget.
-5. `shock_ring`: ground aligned, one or two large particles, fast expansion,
-   short lifetime.
-6. `ground_decal`: ground aligned alpha, one particle, long fade.
-7. `orb_core`: local-space additive, sphere emission, low velocity, looping.
-8. `orb_halo`: local-space additive, very low count, large soft halo.
-9. `electric_arcs`: local-space additive, atlas flipbook, short lifetime,
-   random frames.
+Run the generator with the spec path and output directory:
 
-The preset layer should choose performance-safe defaults first. Hand-authored
-files can exceed those defaults, but generated effects should start conservative.
+```bash
+./build/karma_particle_effect_generate effects/fire_ray.kpspec.json generated/fire_ray
+```
 
-## Tooling Needed
+The output directory is a package root:
 
-Minimum tooling before unattended generation:
+```text
+generated/fire_ray/
+  assets.package.json
+  prefab.json
+  particles/
+    fire_ray_sparks.kpeffect
+    fire_ray_smoke.kpeffect
+    fire_ray_heat.kpeffect
+  textures/
+    ...
+```
 
-1. `karma_particle_effect_validate`
+The generator copies curated in-repo atlas assets into the package and registers
+them under namespaced texture keys. It also validates every generated
+`.kpeffect` before returning.
 
-   Parse one or more `.kpeffect` files, report exact field/value errors, warn
-   about suspicious ranges, and fail in CI.
+Checked-in generated spell examples live under `examples/assets/prefabs/` with
+stable `prefabs/<effect>/...` asset keys. The source specs remain under
+`examples/particles/specs/`, and `particles_generated_preview` can load either
+the checked-in package directory or a spec file.
 
-2. `karma_particle_effect_format`
+## Validate And Format
 
-   Rewrite fields in canonical order so generated and hand-authored files are
-   easy to diff.
+Validate any hand-authored or generated `.kpeffect` files:
 
-3. A schema file
+```bash
+./build/karma_particle_effect_validate examples/assets/prefabs/explosion/particles/*.kpeffect
+```
 
-   Store field names, types, defaults, enum values, aliases, and recommended
-   ranges in a machine-readable file such as JSON.
+Format files in place:
 
-4. A preview harness
+```bash
+./build/karma_particle_effect_format generated/fire_ray/particles/*.kpeffect
+```
 
-   Load a generated effect by path/key, instantiate it in a controlled scene,
-   run for a fixed duration, and optionally capture screenshots and
-   `KARMA_PARTICLE_STATS=1` output. The stats line includes one-frame-delayed
-   persistent GPU particle state counters, indirect draw/dispatch counts, sort
-   key counts, sort overflow/fallback flags, and `cpu_fallback_particles` for
-   producers that still submit baked batches.
+Check formatting without writing:
 
-5. Package helpers
+```bash
+./build/karma_particle_effect_format --check generated/fire_ray/particles/*.kpeffect
+```
 
-   Add scoped registration handles for texture aliases and effect files so a
-   generated package can register and clean up assets safely.
+CTest includes validator and formatter-check coverage for committed
+`.kpeffect` files when tools and tests are enabled.
 
-## Suggested File Boundaries
+## Preview
 
-Keep the existing authoring split:
+Generated packages can be loaded by the preview example:
 
-- `.kpeffect`: v3 JSON emitter layers, GPU simulation tuning, renderer particle
-  state, atlas metadata, texture alias, color/size/lifetime/motion.
-- `prefab.json`: composition of multiple layers, transforms, effect bindings,
-  playback defaults, and high-level component overrides.
-- `assets.package.json`: texture asset imports, effect file registration, and
-  prefab-local resource cleanup.
+```bash
+cmake --build build --target particles_generated_preview
+KARMA_PARTICLE_STATS=1 ./build/examples/particles/generated_preview
+```
 
-Do not put full emitter authoring into `prefab.json`. If generation needs a
-multi-layer effect, generate multiple `.kpeffect` files and a small prefab JSON
-that composes them.
+With tools enabled, no arguments generates the built-in
+`examples/particles/specs/fire_ray.kpspec.json` into `generated/fire_ray` and
+loads it. The preview also accepts either a package directory or a spec path:
 
-## Agent Workflow Target
+```bash
+KARMA_PARTICLE_STATS=1 ./build/examples/particles/generated_preview generated/fire_ray
+KARMA_PARTICLE_STATS=1 ./build/examples/particles/generated_preview \
+  examples/particles/specs/magic_missile.kpspec.json
+KARMA_PARTICLE_STATS=1 ./build/examples/particles/generated_preview \
+  examples/particles/specs/energy_orb.kpspec.json
+```
 
-The eventual agent workflow should look like this:
+When a spec path is passed, an optional second argument overrides the generated
+package output directory. Package paths may also come from
+`KARMA_GENERATED_PARTICLE_PACKAGE`.
 
-1. User supplies an image or visual reference.
-2. Agent describes the desired motion, color palette, silhouette, lifetime, and
-   layering.
-3. Agent chooses one or more presets.
-4. Agent generates intermediate JSON.
-5. Tool converts JSON to `.kpeffect` and optional prefab JSON.
-6. Validator and formatter run automatically.
-7. Preview scene runs and captures stats/screenshots.
-8. Agent adjusts the JSON/preset parameters until the effect is close.
+## Runtime Model
 
-The important constraint is that the agent should not freely invent raw fields.
-It should operate through schema, presets, validation, and preview feedback.
+`ParticleSystem` handles both generated emitters and generated beams:
 
-## First Implementation Slice
+1. Package import registers textures, `.kpeffect` files, and the prefab.
+2. Prefab instantiation creates `ParticleEffectComponent` entities for emitter
+   layers and an optional `ParticleBeamComponent` entity for continuous ribbons.
+3. `ParticleSystem` resolves effect keys and submits particle emitters to the
+   renderer.
+4. `ParticleSystem` submits enabled beam components as
+   `rendering::ParticleBeamGpuDesc`.
+5. The Diligent backend expands beam path segments into camera-facing textured
+   quads and draws them before normal particle passes.
 
-The first practical implementation should be small:
-
-1. Document every current `.kpeffect` field with type, default, enum values, and
-   recommended range.
-2. Add `karma_particle_effect_validate`.
-3. Add a canonical field order and formatter.
-4. Add three presets: `spark_burst`, `smoke_plume`, and `heat_haze`.
-5. Add a generated-effect preview example.
-6. Use existing texture aliases first; defer automatic texture generation until
-   the data-only pipeline is reliable.
-
-After that, image-to-effect generation can start as a controlled preset mapping
-problem instead of open-ended emitter synthesis.
+Use `.kpeffect` for noisy, volumetric, or short-lived layers. Use
+`ParticleBeamComponent` only for the continuous core/trail geometry that should
+read as one connected ribbon.

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "heal",
+  "namespace": "generated/heal",
+  "name": "Generated Heal",
+  "radius": 1.5
+}

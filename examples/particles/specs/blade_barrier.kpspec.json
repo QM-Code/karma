@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "blade_barrier",
+  "namespace": "generated/blade_barrier",
+  "name": "Blade Barrier",
+  "radius": 2.25
+}

@@ -138,6 +138,7 @@ class DiligentBackend final : public Backend {
   void submitParticles(rendering::ParticleBatch batch) override;
   void submitPackedParticles(rendering::PackedParticleBatch batch) override;
   void submitParticleEmitter(const rendering::ParticleEmitterGpuDesc& emitter) override;
+  void submitParticleBeam(const rendering::ParticleBeamGpuDesc& beam) override;
   void setParticleSystemStats(const rendering::ParticlePassStats& stats) override;
   void retireInstance(rendering::InstanceId instance) override;
   void renderLayer(rendering::LayerId layer,
@@ -154,6 +155,7 @@ class DiligentBackend final : public Backend {
   void setLights(const std::vector<rendering::LightData>& lights) override;
   void setEnvironmentMap(const std::filesystem::path& path, float intensity,
                          bool draw_skybox) override;
+  void setClearColor(const math::Color& color) override;
   void setVsync(bool enabled) override;
   void setAnisotropy(bool enabled, int level) override;
   void setGenerateMips(bool enabled) override;
@@ -603,6 +605,24 @@ class DiligentBackend final : public Backend {
     float previous_elapsed_seconds = 0.0f;
   };
 
+  struct ParticleBeamRuntimeState {
+    float elapsed_seconds = 0.0f;
+    uint32_t restart_count = 0u;
+    bool initialized = false;
+  };
+
+  struct ParticleBeamSubmission {
+    rendering::ParticleBeamGpuDesc desc{};
+    float elapsed_seconds = 0.0f;
+  };
+
+  struct ParticleBeamVertex {
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    float uv[2] = {0.0f, 0.0f};
+    float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float params[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  };
+
   struct ParticleGpuSlotRange {
     uint32_t offset = 0u;
     uint32_t capacity = 0u;
@@ -649,9 +669,11 @@ class DiligentBackend final : public Backend {
   void updateCameraOverrideUserConstants(const rendering::CameraData& camera);
   void ensureUiResources();
   void ensureLineResources();
+  void ensureParticleBeamResources();
   TerrainPipelineSet* ensureTerrainResources(Diligent::TEXTURE_FORMAT rtv_format,
                                              Diligent::TEXTURE_FORMAT dsv_format);
   void ensureParticleResources();
+  uint32_t renderParticleBeams(rendering::LayerId layer, const ParticlePassContext& context);
   void recordRenderLayerStageTiming(const char* stage, double ms);
   void recordResourceCreation(const char* area,
                               const char* stage,
@@ -996,6 +1018,20 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> line_srb_no_depth_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> line_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> line_cb_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_beam_pipeline_additive_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_beam_pipeline_additive_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_beam_pipeline_alpha_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_beam_pipeline_alpha_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_beam_srb_additive_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_beam_srb_additive_no_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_beam_srb_alpha_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> particle_beam_srb_alpha_no_depth_;
+  Diligent::IShaderResourceVariable* particle_beam_texture_var_additive_depth_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_beam_texture_var_additive_no_depth_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_beam_texture_var_alpha_depth_ = nullptr;
+  Diligent::IShaderResourceVariable* particle_beam_texture_var_alpha_no_depth_ = nullptr;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_beam_vb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> particle_beam_cb_;
   std::unordered_map<uint64_t, TerrainPipelineSet> terrain_pipeline_sets_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> terrain_cb_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> particle_pipeline_state_additive_depth_;
@@ -1233,6 +1269,8 @@ class DiligentBackend final : public Backend {
   std::vector<ParticleBatchRecord> particle_batches_;
   std::vector<ParticleEmitterSubmission> particle_emitter_submissions_;
   std::unordered_map<uint64_t, ParticleEmitterRuntimeState> particle_emitter_runtime_states_;
+  std::vector<ParticleBeamSubmission> particle_beam_submissions_;
+  std::unordered_map<uint64_t, ParticleBeamRuntimeState> particle_beam_runtime_states_;
   std::vector<LineVertex> line_vertices_depth_;
   std::vector<LineVertex> line_vertices_no_depth_;
 
@@ -1279,6 +1317,7 @@ class DiligentBackend final : public Backend {
   size_t forward_plus_tile_count_capacity_ = 0;
   size_t forward_plus_tile_index_capacity_ = 0;
   size_t line_vb_size_ = 0;
+  size_t particle_beam_vb_size_ = 0;
   size_t particle_instance_capacity_ = 0;
   size_t particle_gpu_emitter_desc_capacity_ = 0;
   size_t particle_gpu_emitter_state_capacity_ = 0;

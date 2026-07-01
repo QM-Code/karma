@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "energy_orb",
+  "namespace": "generated/energy_orb",
+  "name": "Energy Orb",
+  "radius": 1.15
+}

@@ -1,0 +1,30 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/magic_missile/orb_core_atlas",
+      "path": "textures/orb_core_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/magic_missile/orb_halo_atlas",
+      "path": "textures/orb_halo_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/magic_missile/spark_atlas",
+      "path": "textures/spark_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/magic_missile/trail_sparks",
+      "path": "particles/magic_trail_sparks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/magic_missile/head_halo",
+      "path": "particles/magic_head_halo.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

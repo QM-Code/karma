@@ -1,0 +1,45 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/chromatic_ray/chromatic_ribbon_atlas",
+      "path": "textures/chromatic_ribbon_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/chromatic_ray/chromatic_spark_atlas",
+      "path": "textures/chromatic_spark_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/chromatic_ray/chromatic_haze_atlas",
+      "path": "textures/chromatic_haze_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/chromatic_ray/heat_atlas",
+      "path": "textures/heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/chromatic_ray/flares",
+      "path": "particles/chromatic_flares.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/chromatic_ray/sparks",
+      "path": "particles/chromatic_sparks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/chromatic_ray/wisps",
+      "path": "particles/chromatic_wisps.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/chromatic_ray/distortion",
+      "path": "particles/chromatic_distortion.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

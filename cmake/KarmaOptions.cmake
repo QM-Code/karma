@@ -33,6 +33,7 @@ option(KARMA_ASSIMP_MINIMAL_IMPORTERS
 option(KARMA_BUILD_DEBUG_UI "Build engine debug UI overlay" ON)
 option(KARMA_BUILD_EXAMPLES "Build Karma example executables" ${KARMA_IS_TOP_LEVEL})
 option(KARMA_BUILD_TESTS "Build Karma test executables" ${KARMA_IS_TOP_LEVEL})
+option(KARMA_BUILD_TOOLS "Build Karma command-line content tools" ${KARMA_IS_TOP_LEVEL})
 option(KARMA_BUILD_IMGUI_DEMO "Build ImGui UI demo" ON)
 option(KARMA_BUILD_RMLUI_DEMO "Build RmlUi UI demo" OFF)
 option(KARMA_ENABLE_RMLUI "Build RmlUi UI adapter" OFF)

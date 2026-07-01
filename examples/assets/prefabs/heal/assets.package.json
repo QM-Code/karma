@@ -1,0 +1,50 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/heal/heal_ribbon_atlas",
+      "path": "textures/heal_ribbon_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/heal/heal_spark_atlas",
+      "path": "textures/heal_spark_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/heal/heal_haze_atlas",
+      "path": "textures/heal_haze_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/heal/heat_atlas",
+      "path": "textures/heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/heal/mist",
+      "path": "particles/heal_mist.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/heal/shimmer",
+      "path": "particles/heal_shimmer.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/heal/glints",
+      "path": "particles/heal_glints.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/heal/pulse",
+      "path": "particles/heal_pulse.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/heal/distortion",
+      "path": "particles/heal_distortion.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

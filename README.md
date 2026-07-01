@@ -201,11 +201,13 @@ before `find_package(karma)` to allow package-time fetching.
 - Content pipeline for glTF/GLB scene import, materials, lights, node animation,
   skeletal animation, GPU skinning with CPU fallback, morph target deformation,
   JSON prefabs, and prefab-local `assets.package.json` registrations.
-- Particle tooling with `.kpeffect` files, hot reload, emitter overrides,
-  flipbooks, distortion, ground-aligned particles, soft particles, and renderer
-  performance diagnostics.
-- Visual feature modules for particle beam prefabs, analytic volumetric solids,
-  light pulses, energy orbs, staged explosions, and prefab gallery scenes.
+- Particle tooling with `.kpeffect` files, constrained `*.kpspec.json`
+  generation, hot reload, emitter overrides, flipbooks, distortion,
+  ground-aligned particles, soft particles, runtime beam diagnostics, and
+  renderer performance counters.
+- Visual feature modules for runtime particle beams, prefab beam packages,
+  analytic volumetric solids, light pulses, energy orbs, staged explosions, and
+  prefab gallery scenes.
 - Simulation stack with Jolt physics as the production backend and an
   experimental Bullet backend, collision/contact ECS
   events, grounded/support state, character controllers, Jolt constraints,

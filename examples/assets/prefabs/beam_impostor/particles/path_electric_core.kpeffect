@@ -55,7 +55,7 @@
         "start_min": 0.12,
         "start_max": 0.26,
         "end_min": 0.04,
-        "end_max": 0.10,
+        "end_max": 0.1,
         "curve_exponent": 0.74
       },
       "rotation": {
@@ -67,8 +67,16 @@
       "source": {
         "shape": "path",
         "points": [
-          [-0.5, 0.0, 0.0],
-          [0.5, 0.0, 0.0]
+          [
+            -0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ]
         ],
         "closed_loop": false,
         "sampling": "sequential",
@@ -77,9 +85,21 @@
         "radial_speed_max": 0.0
       },
       "motion": {
-        "velocity_min": [-0.18, -0.18, -0.18],
-        "velocity_max": [0.18, 0.18, 0.18],
-        "acceleration": [0.0, 0.0, 0.0],
+        "velocity_min": [
+          -0.18,
+          -0.18,
+          -0.18
+        ],
+        "velocity_max": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
         "drag": 1.8
       },
       "collision": {
@@ -90,8 +110,18 @@
         "rest_speed_threshold": 0.35
       },
       "color": {
-        "start": [3.0, 2.15, 1.35, 0.95],
-        "end": [2.0, 0.38, 0.18, 0.0],
+        "start": [
+          3.0,
+          2.15,
+          1.35,
+          0.95
+        ],
+        "end": [
+          2.0,
+          0.38,
+          0.18,
+          0.0
+        ],
         "alpha_curve_exponent": 0.64
       }
     }

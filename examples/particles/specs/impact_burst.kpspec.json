@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "impact_burst",
+  "namespace": "generated/impact_burst",
+  "name": "Impact Burst",
+  "length": 1.0
+}

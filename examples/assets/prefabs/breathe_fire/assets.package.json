@@ -1,0 +1,55 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/breathe_fire/breathe_fire_ribbon_atlas",
+      "path": "textures/breathe_fire_ribbon_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/breathe_fire/breathe_fire_flame_atlas",
+      "path": "textures/breathe_fire_flame_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/breathe_fire/breathe_fire_ember_atlas",
+      "path": "textures/breathe_fire_ember_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/breathe_fire/breathe_fire_smoke_atlas",
+      "path": "textures/breathe_fire_smoke_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/breathe_fire/breathe_fire_heat_atlas",
+      "path": "textures/breathe_fire_heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/breathe_fire/mouth_flash",
+      "path": "particles/breathe_fire_mouth_flash.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/breathe_fire/flame_plumes",
+      "path": "particles/breathe_fire_flame_plumes.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/breathe_fire/embers",
+      "path": "particles/breathe_fire_embers.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/breathe_fire/smoke",
+      "path": "particles/breathe_fire_smoke.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/breathe_fire/heat",
+      "path": "particles/breathe_fire_heat.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

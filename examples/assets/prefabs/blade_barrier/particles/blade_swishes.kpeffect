@@ -1,0 +1,143 @@
+{
+  "emitters": [
+    {
+      "atlas": {
+        "animate_over_lifetime": true,
+        "animation_fps": 12.0,
+        "border_x": 0,
+        "border_y": 0,
+        "columns": 4,
+        "frame_count": 4,
+        "frame_height": 0,
+        "frame_width": 0,
+        "random_start_frame": true,
+        "rows": 1,
+        "spacing_x": 0,
+        "spacing_y": 0
+      },
+      "collision": {
+        "bounce_damping": 0.25,
+        "friction": 0.25,
+        "ground": false,
+        "ground_height": 0.0,
+        "rest_speed_threshold": 0.25
+      },
+      "color": {
+        "alpha_curve_exponent": 1.25,
+        "end": [
+          0.3199999928474426,
+          0.5,
+          0.5400000214576721,
+          0.0
+        ],
+        "start": [
+          1.4199999570846558,
+          1.7000000476837158,
+          1.8200000524520874,
+          0.5199999809265137
+        ]
+      },
+      "emission": {
+        "burst_count": 90,
+        "max_particles": 220,
+        "seed": 6123,
+        "spawn_rate": 170.0
+      },
+      "lifetime": {
+        "max": 0.46000000834465027,
+        "min": 0.18000000715255737
+      },
+      "motion": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "drag": 0.0,
+        "orbit_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "orbit_speed": 3.049999952316284,
+        "velocity_max": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "velocity_min": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "name": "blade_swishes",
+      "playback": {
+        "duration": 0.0,
+        "emit_burst_on_start": true,
+        "enabled": true,
+        "local_space": true,
+        "loop": true,
+        "playing": true,
+        "start_delay": 0.0,
+        "time_scale": 1.350000023841858
+      },
+      "render": {
+        "alignment": "billboard",
+        "blend_mode": "additive",
+        "depth_test": true,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "interior_glow": 0.0,
+        "layer": 0,
+        "refraction_strength": 0.0,
+        "shading_mode": "standard",
+        "soft_particle_distance": 0.0,
+        "use_soft_mask": false
+      },
+      "rotation": {
+        "angular_velocity_max": 8.0,
+        "angular_velocity_min": -8.0,
+        "initial_max": 6.2831854820251465,
+        "initial_min": 0.0
+      },
+      "size": {
+        "curve_exponent": 0.699999988079071,
+        "end_max": 0.4950000047683716,
+        "end_min": 0.17999999225139618,
+        "start_max": 1.3049999475479126,
+        "start_min": 0.675000011920929
+      },
+      "source": {
+        "angle": 0.0,
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "closed_loop": false,
+        "dimensions": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "distribution": "surface",
+        "height": 0.0,
+        "inner_radius": 0.0,
+        "jitter_radius": 0.05625000223517418,
+        "mesh_asset_key": "",
+        "outer_radius": 0.5,
+        "points": [],
+        "radial_speed_max": 0.0,
+        "radial_speed_min": 0.0,
+        "radius_max": 2.565000057220459,
+        "radius_min": 1.6649999618530273,
+        "sampling": "random",
+        "shape": "sphere_surface"
+      },
+      "texture": "prefabs/blade_barrier/blade_swish_atlas"
+    }
+  ],
+  "version": 3
+}

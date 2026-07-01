@@ -1,0 +1,160 @@
+{
+  "nodes": [
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.18000000715255737,
+          "enabled": true,
+          "end_color": [
+            0.7200000286102295,
+            0.3400000035762787,
+            1.0,
+            0.18000000715255737
+          ],
+          "end_width": 0.05999999865889549,
+          "layer": 0,
+          "local_path_points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.2000000476837158,
+              0.25,
+              -1.5
+            ],
+            [
+              0.10000000149011612,
+              0.0,
+              -3.200000047683716
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            0.30000001192092896,
+            0.8399999737739563,
+            1.0,
+            0.8999999761581421
+          ],
+          "start_width": 0.2199999988079071,
+          "texture_key": "prefabs/magic_missile/orb_core_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 2.200000047683716,
+          "uv_scroll_speed": -1.7999999523162842,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "Magic Missile"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0,
+      "name": "Magic Missile",
+      "parent": null
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/magic_missile/trail_sparks",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "trail_sparks"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1,
+      "name": "trail_sparks",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/magic_missile/head_halo",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "head_halo"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2,
+      "name": "head_halo",
+      "parent": 0
+    }
+  ],
+  "root": 0,
+  "version": 1
+}

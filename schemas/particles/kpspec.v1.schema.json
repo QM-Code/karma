@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://karma.local/schemas/particles/kpspec.v1.schema.json",
+  "title": "Karma Particle Generation Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "preset"],
+  "properties": {
+    "version": { "const": 1 },
+    "preset": {
+      "enum": [
+        "fire_ray",
+        "magic_missile",
+        "arcane_barrage",
+        "blade_barrier",
+        "chromatic_ray",
+        "daze",
+        "heal",
+        "breathe_fire",
+        "impact_burst",
+        "energy_orb"
+      ]
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "namespace": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$"
+    },
+    "length": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "radius": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "path_points": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          { "type": "number" },
+          { "type": "number" },
+          { "type": "number" }
+        ],
+        "minItems": 3,
+        "maxItems": 3
+      }
+    }
+  }
+}

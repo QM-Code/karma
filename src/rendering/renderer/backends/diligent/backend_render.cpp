@@ -1186,6 +1186,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   mark_stage("opaque pass");
 
   bool has_particle_work = !particle_emitter_runtime_states_.empty();
+  bool has_beam_work = false;
   bool allow_distortion_particles = false;
   bool require_scene_color_copy = !forward_state.scene_reflection_draws.empty() ||
                                   !forward_state.pre_particle_scene_sample_draws.empty();
@@ -1223,11 +1224,29 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
       require_scene_color_copy = true;
     }
   }
+  for (const auto& submission : particle_beam_submissions_) {
+    const auto& beam = submission.desc;
+    if (beam.layer != layer ||
+        !beam.enabled ||
+        !beam.visible ||
+        beam.local_path_points.size() < 2u ||
+        beam.start_width <= 0.0f ||
+        beam.end_width <= 0.0f ||
+        beam.blend_mode == rendering::ParticleBlendMode::Distortion) {
+      continue;
+    }
+    has_beam_work = true;
+    break;
+  }
 
   if (has_particle_work) {
     ensureParticleResources();
   }
   mark_stage(has_particle_work ? "particle resources prewarm" : "particle resources skipped");
+  if (has_beam_work) {
+    ensureParticleBeamResources();
+  }
+  mark_stage(has_beam_work ? "particle beam resources ensure" : "particle beam resources skipped");
   ensureLineResources();
   mark_stage("line resources ensure");
 
@@ -1306,6 +1325,10 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
       particle_scene_texture ? particle_scene_texture->GetDesc().Format
                              : Diligent::TEX_FORMAT_UNKNOWN;
   particle_pass.allow_distortion_particles = allow_distortion_particles;
+  if (has_beam_work) {
+    draw_count += renderParticleBeams(layer, particle_pass);
+  }
+  mark_stage(has_beam_work ? "particle beam pass" : "particle beam pass skipped");
   if (has_particle_work) {
     renderParticlePasses(layer, particle_pass);
   }

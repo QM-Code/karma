@@ -906,6 +906,8 @@ Json emitterJson(const components::ParticleEmitterComponent& emitter) {
       {"velocity_max", mathVec3Json(emitter.velocity_max)},
       {"acceleration", mathVec3Json(emitter.acceleration)},
       {"drag", floatJson(emitter.drag)},
+      {"orbit_axis", mathVec3Json(emitter.orbit_axis)},
+      {"orbit_speed", floatJson(emitter.orbit_speed)},
       {"collide_with_ground", emitter.collide_with_ground},
       {"ground_height", floatJson(emitter.ground_height)},
       {"bounce_damping", floatJson(emitter.bounce_damping)},
@@ -1009,6 +1011,9 @@ bool readEmitterJson(const Json& json, components::ParticleEmitterComponent& emi
       !readMathVec3Json(json.value("acceleration", Json::array({0.0f, 0.0f, 0.0f})),
                         parsed.acceleration) ||
       !read_float_field("drag", parsed.drag) ||
+      !readMathVec3Json(json.value("orbit_axis", Json::array({0.0f, 1.0f, 0.0f})),
+                        parsed.orbit_axis) ||
+      !read_float_field("orbit_speed", parsed.orbit_speed) ||
       !read_float_field("ground_height", parsed.ground_height) ||
       !read_float_field("bounce_damping", parsed.bounce_damping) ||
       !read_float_field("collision_friction", parsed.collision_friction) ||

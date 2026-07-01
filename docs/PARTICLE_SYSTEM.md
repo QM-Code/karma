@@ -1,15 +1,20 @@
 # Karma Particle System
 
-This engine now has a reusable particle workflow built around five pieces:
+This engine has a reusable particle workflow built around these pieces:
 
 - `assets::AssetRegistry`: stores named effect templates and CPU texture assets.
 - `components::ParticleEffectComponent`: binds an entity to a named effect key.
 - `components::ParticleEffectOverrideComponent`: applies per-entity overrides on top of a named effect.
 - `components::ParticleEmitterComponent`: lightweight playback metadata and the in-memory template shape used by code-authored emitters.
+- `components::ParticleBeamComponent`: authored continuous textured beam/ribbon
+  geometry for prefab effects.
 - `visual::particles::ParticleSystem`: resolves effects/overrides and submits emitter descriptors to the renderer.
 
 Most game code should work through `AssetRegistry` plus the ECS helpers in
-`karma/visual.h>registerTextureAsset("smoke_atlas", std::move(smoke_texture));
+`karma/visual.h`.
+
+```cpp
+assets->registerTextureAsset("smoke_atlas", std::move(smoke_texture));
 
 assets->importTextureAsset("prefabs/explosion/spark_atlas",
                            "examples/assets/prefabs/explosion/textures/spark_atlas.png");
@@ -119,6 +124,47 @@ visual::particles::setEffectPlayback(*world, smoke_entity, true, true);
 `restartEffect(...)` increments `ParticleEffectComponent::restart_count` and
 reactivates the emitter, which is the supported way to replay one-shot effects.
 
+## Runtime Beams
+
+Use `ParticleBeamComponent` for continuous cores and trails that should render as
+connected textured geometry. Use normal `.kpeffect` emitters for secondary
+sparks, smoke, heat haze, halos, and impacts.
+
+```cpp
+world::Entity trail = visual::particles::createBeamEntity(
+    *world,
+    visual::particles::ParticleBeamEntityDesc{
+        .name = "Magic Missile Trail",
+        .texture_key = "generated/magic/beam_core",
+        .local_path_points = {
+            {0.0f, 0.0f, 0.0f},
+            {0.0f, 0.0f, -3.0f},
+        },
+        .start_width = 0.28f,
+        .end_width = 0.08f,
+        .uv_repeat = 3.0f,
+        .uv_scroll_speed = 1.8f,
+    });
+```
+
+The local path must contain at least two finite points, and widths must be
+positive. Beam prefab serialization supports `enabled`, `visible`, `layer`,
+`depth_test`, `blend_mode`, `texture_key`, `local_path_points`, `start_width`,
+`end_width`, `start_color`, `end_color`, `edge_softness`, `uv_repeat`,
+`uv_scroll_speed`, `time_scale`, and `restart_count`.
+
+Runtime helpers mirror the particle-effect helpers:
+
+```cpp
+visual::particles::setBeamPath(*world, trail, new_local_points);
+visual::particles::setBeamEnabled(*world, trail, true);
+visual::particles::restartBeam(*world, trail);
+```
+
+The renderer expands each path segment into camera-facing quads. Beams render
+after transparent pre-particle scene draws and before normal particle passes, so
+beam cores sit underneath sparks, smoke, halos, and heat/distortion particles.
+
 ## Authoring Model
 
 `.kpeffect` files are strict JSON v3 templates with one or more emitters. Each
@@ -223,6 +269,9 @@ debug editor `Particles` tab once per second:
 KARMA_PARTICLE_STATS=1 ./build/examples/particles/billboard
 ```
 
+Code that needs the most recent feature-side counters, including headless tests,
+can read `visual::particles::ParticleSystem::lastStats()`.
+
 The GPU-first counters to watch are:
 
 - `gpu_particle_capacity`, `gpu_alive_particles`, and `gpu_compacted_particles`
@@ -242,6 +291,8 @@ The GPU-first counters to watch are:
 - `cpu_fallback_particles` for compatibility batches still submitted from CPU
 - blend-specific submitted particles/draw calls for additive, alpha, and
   distortion paths
+- `submitted_beams`, `beam_segments`, and `beam_draw_calls` for runtime beam
+  components
 
 GPU state counters come from async staging readback. They are exact for the
 completed GPU work but normally appear one frame late; `gpu_stats_readback_age`

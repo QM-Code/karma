@@ -18,6 +18,18 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     target_link_libraries(karma_rendering_tests PRIVATE karma::headless)
     add_test(NAME karma_rendering_tests COMMAND karma_rendering_tests)
 
+    if (TARGET karma_particle_effect_tools_lib)
+      add_executable(karma_particle_generation_tests
+        tests/particle_generation_tests.cpp
+      )
+      target_link_libraries(karma_particle_generation_tests
+        PRIVATE
+          karma::headless
+          karma_particle_effect_tools_lib
+      )
+      add_test(NAME karma_particle_generation_tests COMMAND karma_particle_generation_tests)
+    endif()
+
     add_executable(karma_physics_tests
       tests/physics_tests.cpp
     )

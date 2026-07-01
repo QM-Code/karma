@@ -538,6 +538,7 @@ struct EngineConfig {
   std::filesystem::path environment_map_source_path;
   float environment_intensity = 0.0f;
   bool environment_draw_skybox = true;
+  math::Color background_color{0.0f, 0.0f, 0.0f, 1.0f};
   bool enable_anisotropy = false;
   int anisotropy_level = 1;
   bool generate_mipmaps = false;

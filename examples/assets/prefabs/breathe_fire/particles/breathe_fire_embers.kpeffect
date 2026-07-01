@@ -1,0 +1,184 @@
+{
+  "emitters": [
+    {
+      "atlas": {
+        "animate_over_lifetime": false,
+        "animation_fps": 0.0,
+        "border_x": 0,
+        "border_y": 0,
+        "columns": 8,
+        "frame_count": 8,
+        "frame_height": 0,
+        "frame_width": 0,
+        "random_start_frame": true,
+        "rows": 1,
+        "spacing_x": 0,
+        "spacing_y": 0
+      },
+      "collision": {
+        "bounce_damping": 0.25,
+        "friction": 0.25,
+        "ground": false,
+        "ground_height": 0.0,
+        "rest_speed_threshold": 0.25
+      },
+      "color": {
+        "alpha_curve_exponent": 1.0,
+        "end": [
+          1.0,
+          0.05000000074505806,
+          0.0,
+          0.0
+        ],
+        "start": [
+          2.8499999046325684,
+          1.5499999523162842,
+          0.2800000011920929,
+          0.9800000190734863
+        ]
+      },
+      "emission": {
+        "burst_count": 190,
+        "max_particles": 620,
+        "seed": 7129,
+        "spawn_rate": 165.0
+      },
+      "lifetime": {
+        "max": 1.1200000047683716,
+        "min": 0.3400000035762787
+      },
+      "motion": {
+        "acceleration": [
+          -0.8640000820159912,
+          0.46400001645088196,
+          0.0
+        ],
+        "drag": 0.7200000286102295,
+        "orbit_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "orbit_speed": 0.0,
+        "velocity_max": [
+          4.128000259399414,
+          1.6320000886917114,
+          2.496000051498413
+        ],
+        "velocity_min": [
+          1.3440001010894775,
+          -1.055999994277954,
+          -2.496000051498413
+        ]
+      },
+      "name": "breathe_fire_embers",
+      "playback": {
+        "duration": 0.0,
+        "emit_burst_on_start": true,
+        "enabled": true,
+        "local_space": true,
+        "loop": true,
+        "playing": true,
+        "start_delay": 0.0,
+        "time_scale": 1.0
+      },
+      "render": {
+        "alignment": "billboard",
+        "blend_mode": "additive",
+        "depth_test": true,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "interior_glow": 0.0,
+        "layer": 0,
+        "refraction_strength": 0.0,
+        "shading_mode": "standard",
+        "soft_particle_distance": 0.0,
+        "use_soft_mask": false
+      },
+      "rotation": {
+        "angular_velocity_max": 4.800000190734863,
+        "angular_velocity_min": -4.800000190734863,
+        "initial_max": 6.2831854820251465,
+        "initial_min": 0.0
+      },
+      "size": {
+        "curve_exponent": 1.0,
+        "end_max": 0.0507500022649765,
+        "end_min": 0.014500000514090061,
+        "start_max": 0.18850000202655792,
+        "start_min": 0.06525000184774399
+      },
+      "source": {
+        "angle": 0.0,
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "closed_loop": false,
+        "dimensions": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "distribution": "uniform",
+        "height": 0.0,
+        "inner_radius": 0.0,
+        "jitter_radius": 1.0440000295639038,
+        "mesh_asset_key": "",
+        "outer_radius": 0.5,
+        "points": [
+          [
+            -2.30400013923645,
+            1.5660001039505005,
+            0.0
+          ],
+          [
+            -1.6320000886917114,
+            1.6180400848388672,
+            -0.46848002076148987
+          ],
+          [
+            -0.7680000066757202,
+            1.5903000831604004,
+            0.8198400735855103
+          ],
+          [
+            0.19200000166893005,
+            1.7161600589752197,
+            -1.405440092086792
+          ],
+          [
+            0.9600000381469727,
+            1.5570000410079956,
+            1.8739200830459595
+          ],
+          [
+            1.8240000009536743,
+            1.7767400741577148,
+            -3.279360294342041
+          ],
+          [
+            2.5920002460479736,
+            1.4896000623703003,
+            5.8560004234313965
+          ],
+          [
+            2.880000114440918,
+            1.7076201438903809,
+            -1.171200156211853
+          ]
+        ],
+        "radial_speed_max": 3.190000057220459,
+        "radial_speed_min": 0.6525000333786011,
+        "radius_max": 0.5,
+        "radius_min": 0.0,
+        "sampling": "random",
+        "shape": "path"
+      },
+      "texture": "prefabs/breathe_fire/breathe_fire_ember_atlas"
+    }
+  ],
+  "version": 3
+}

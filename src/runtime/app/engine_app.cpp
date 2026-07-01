@@ -973,6 +973,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
 #endif
 
   if (graphics_) {
+    graphics_->setClearColor(config_.background_color);
     graphics_->setGenerateMips(config_.generate_mipmaps);
     graphics_->setAnisotropy(config_.enable_anisotropy, config_.anisotropy_level);
     graphics_->setForwardPlusSettings(config_.forward_plus_tile_size,

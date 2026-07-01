@@ -1,0 +1,60 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/blade_barrier/blade_shard_atlas",
+      "path": "textures/blade_shard_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/blade_barrier/blade_wind_atlas",
+      "path": "textures/blade_wind_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/blade_barrier/blade_swish_atlas",
+      "path": "textures/blade_swish_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/blade_barrier/blade_dust_atlas",
+      "path": "textures/blade_dust_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/blade_barrier/heat_atlas",
+      "path": "textures/heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/blade_barrier/blade_shell",
+      "path": "particles/blade_shell.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/blade_barrier/blade_glints",
+      "path": "particles/blade_glints.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/blade_barrier/dust_shroud",
+      "path": "particles/blade_dust.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/blade_barrier/wind_shroud",
+      "path": "particles/blade_wind.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/blade_barrier/blade_swishes",
+      "path": "particles/blade_swishes.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/blade_barrier/blade_distortion",
+      "path": "particles/blade_distortion.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,157 @@
+{
+  "nodes": [
+    {
+      "components": {
+        "TagComponent": {
+          "name": "Impact Burst"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0,
+      "name": "Impact Burst",
+      "parent": null
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/impact_burst/flash",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "flash"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1,
+      "name": "flash",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/impact_burst/sparks",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "sparks"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2,
+      "name": "sparks",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/impact_burst/smoke",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "smoke"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 3,
+      "name": "smoke",
+      "parent": 0
+    }
+  ],
+  "root": 0,
+  "version": 1
+}

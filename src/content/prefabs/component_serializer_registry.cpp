@@ -2246,6 +2246,89 @@ std::optional<components::ParticleEmitterComponent> deserializeParticleEmitter(
   return component;
 }
 
+Json serializeParticleBeam(const components::ParticleBeamComponent& component) {
+  Json points = Json::array();
+  for (const math::Vec3& point : component.local_path_points) {
+    points.push_back(toJson(point));
+  }
+  return Json{
+      {"enabled", component.enabled},
+      {"visible", component.visible},
+      {"layer", component.layer},
+      {"depth_test", component.depth_test},
+      {"blend_mode", blendModeName(component.blend_mode)},
+      {"texture_key", component.texture_key},
+      {"local_path_points", std::move(points)},
+      {"start_width", component.start_width},
+      {"end_width", component.end_width},
+      {"start_color", toJson(component.start_color)},
+      {"end_color", toJson(component.end_color)},
+      {"edge_softness", component.edge_softness},
+      {"uv_repeat", component.uv_repeat},
+      {"uv_scroll_speed", component.uv_scroll_speed},
+      {"time_scale", component.time_scale},
+      {"restart_count", component.restart_count},
+  };
+}
+
+std::optional<components::ParticleBeamComponent> deserializeParticleBeam(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::ParticleBeamComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readBool(json, "visible", component.visible) ||
+      !readUint32(json, "layer", component.layer) ||
+      !readBool(json, "depth_test", component.depth_test) ||
+      !readBlendMode(json, component.blend_mode) ||
+      !readString(json, "texture_key", component.texture_key) ||
+      !readFloat(json, "start_width", component.start_width) ||
+      !readFloat(json, "end_width", component.end_width) ||
+      !readColor(json, "start_color", component.start_color) ||
+      !readColor(json, "end_color", component.end_color) ||
+      !readFloat(json, "edge_softness", component.edge_softness) ||
+      !readFloat(json, "uv_repeat", component.uv_repeat) ||
+      !readFloat(json, "uv_scroll_speed", component.uv_scroll_speed) ||
+      !readFloat(json, "time_scale", component.time_scale) ||
+      !readUint32(json, "restart_count", component.restart_count)) {
+    return std::nullopt;
+  }
+  if (component.blend_mode == components::ParticleBlendMode::Distortion ||
+      component.start_width <= 0.0f ||
+      component.end_width <= 0.0f ||
+      component.edge_softness < 0.0f ||
+      component.uv_repeat < 0.0f ||
+      component.time_scale < 0.0f ||
+      !std::isfinite(component.start_width) ||
+      !std::isfinite(component.end_width) ||
+      !std::isfinite(component.edge_softness) ||
+      !std::isfinite(component.uv_repeat) ||
+      !std::isfinite(component.uv_scroll_speed) ||
+      !std::isfinite(component.time_scale)) {
+    return std::nullopt;
+  }
+  const auto points_it = json.find("local_path_points");
+  if (points_it == json.end() || !points_it->is_array()) {
+    return std::nullopt;
+  }
+  component.local_path_points.clear();
+  component.local_path_points.reserve(points_it->size());
+  for (const Json& point_json : *points_it) {
+    math::Vec3 point{};
+    if (!readVec3Value(point_json, point) ||
+        !std::isfinite(point.x) ||
+        !std::isfinite(point.y) ||
+        !std::isfinite(point.z)) {
+      return std::nullopt;
+    }
+    component.local_path_points.push_back(point);
+  }
+  if (component.local_path_points.size() < 2u) {
+    return std::nullopt;
+  }
+  return component;
+}
+
 Json serializeLightPulse(const components::LightPulseComponent& component) {
   return Json{
       {"enabled", component.enabled},
@@ -2483,6 +2566,8 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       deserializeParticleEffectOverride);
   registerComponent<components::ParticleEmitterComponent>(
       registry, "ParticleEmitterComponent", serializeParticleEmitter, deserializeParticleEmitter);
+  registerComponent<components::ParticleBeamComponent>(
+      registry, "ParticleBeamComponent", serializeParticleBeam, deserializeParticleBeam);
   registerComponent<components::VolumetricComponent>(
       registry, "VolumetricComponent", serializeVolumetric, deserializeVolumetric);
 }

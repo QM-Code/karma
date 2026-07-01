@@ -1435,6 +1435,10 @@ void DebugOverlayLayer::drawParticlesTab() {
                 static_cast<unsigned int>(stats.distortion_batches),
                 static_cast<unsigned int>(stats.distortion_particles),
                 static_cast<unsigned int>(stats.distortion_draw_calls));
+    ImGui::Text("Beams: %u submitted, %u segments, %u draw calls",
+                static_cast<unsigned int>(stats.submitted_beams),
+                static_cast<unsigned int>(stats.beam_segments),
+                static_cast<unsigned int>(stats.beam_draw_calls));
   }
 
   if (ImGui::CollapsingHeader("GPU Runtime", ImGuiTreeNodeFlags_DefaultOpen)) {

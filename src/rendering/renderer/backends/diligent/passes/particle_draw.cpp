@@ -928,6 +928,10 @@ void DiligentBackend::renderParticlePasses(rendering::LayerId layer,
     constants.acceleration_drag[1] = emitter.acceleration.y;
     constants.acceleration_drag[2] = emitter.acceleration.z;
     constants.acceleration_drag[3] = std::max(emitter.drag, 0.0f);
+    constants.orbit[0] = emitter.orbit_axis.x;
+    constants.orbit[1] = emitter.orbit_axis.y;
+    constants.orbit[2] = emitter.orbit_axis.z;
+    constants.orbit[3] = emitter.orbit_speed;
     constants.collision[0] = emitter.ground_height;
     constants.collision[1] = std::clamp(emitter.bounce_damping, 0.0f, 1.0f);
     constants.collision[2] = std::clamp(emitter.collision_friction, 0.0f, 1.0f);
@@ -1761,6 +1765,10 @@ void DiligentBackend::renderParticlePasses(rendering::LayerId layer,
       gpu_desc.acceleration_drag[1] = emitter.acceleration.y;
       gpu_desc.acceleration_drag[2] = emitter.acceleration.z;
       gpu_desc.acceleration_drag[3] = std::max(emitter.drag, 0.0f);
+      gpu_desc.orbit[0] = emitter.orbit_axis.x;
+      gpu_desc.orbit[1] = emitter.orbit_axis.y;
+      gpu_desc.orbit[2] = emitter.orbit_axis.z;
+      gpu_desc.orbit[3] = emitter.orbit_speed;
       gpu_desc.collision[0] = emitter.ground_height;
       gpu_desc.collision[1] = std::clamp(emitter.bounce_damping, 0.0f, 1.0f);
       gpu_desc.collision[2] = std::clamp(emitter.collision_friction, 0.0f, 1.0f);

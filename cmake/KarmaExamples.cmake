@@ -97,6 +97,13 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     examples/particles/gallery.cpp)
   karma_add_graphical_example(particles_explosion_stress particles explosion_stress
     examples/particles/explosion_stress.cpp)
+  karma_add_graphical_example(particles_generated_preview particles generated_preview
+    examples/particles/generated_preview.cpp)
+  if (TARGET karma_particle_effect_tools_lib)
+    target_link_libraries(particles_generated_preview PRIVATE karma_particle_effect_tools_lib)
+    target_compile_definitions(particles_generated_preview PRIVATE
+      KARMA_PARTICLE_PREVIEW_GENERATION=1)
+  endif()
 
   karma_add_graphical_example(effects_energy_orb effects energy_orb
     examples/effects/energy_orb.cpp)

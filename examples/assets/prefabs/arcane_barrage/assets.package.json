@@ -1,0 +1,60 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/arcane_barrage/orb_core_atlas",
+      "path": "textures/orb_core_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/arcane_barrage/orb_halo_atlas",
+      "path": "textures/orb_halo_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/arcane_barrage/spark_atlas",
+      "path": "textures/spark_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/arcane_barrage/smoke_atlas",
+      "path": "textures/smoke_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/arcane_barrage/heat_atlas",
+      "path": "textures/heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/arcane_barrage/arcane_ribbon_atlas",
+      "path": "textures/arcane_ribbon_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/arcane_barrage/caster_flare",
+      "path": "particles/arcane_caster_flare.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/arcane_barrage/missile_heads",
+      "path": "particles/arcane_missile_heads.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/arcane_barrage/trail_sparks",
+      "path": "particles/arcane_trail_sparks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/arcane_barrage/trail_mist",
+      "path": "particles/arcane_trail_mist.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/arcane_barrage/trail_distortion",
+      "path": "particles/arcane_trail_distortion.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

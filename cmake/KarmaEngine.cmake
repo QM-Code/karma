@@ -96,6 +96,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       src/rendering/renderer/backends/diligent/backend_textures.cpp
       src/rendering/renderer/backends/diligent/backend_ui.cpp
       src/rendering/renderer/backends/diligent/access.cpp
+      src/rendering/renderer/backends/diligent/passes/beam.cpp
       src/rendering/renderer/backends/diligent/passes/camera_override.cpp
       src/rendering/renderer/backends/diligent/passes/environment.cpp
       src/rendering/renderer/backends/diligent/passes/frame.cpp

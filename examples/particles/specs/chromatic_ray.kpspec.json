@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "preset": "chromatic_ray",
+  "namespace": "generated/chromatic_ray",
+  "name": "Generated Chromatic Ray",
+  "length": 6.4,
+  "radius": 1.0
+}

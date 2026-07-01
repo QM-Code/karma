@@ -612,6 +612,7 @@ cbuffer ParticleSimConstants
     float4 g_VelocityMin;
     float4 g_VelocityMax;
     float4 g_AccelerationDrag;
+    float4 g_Orbit;
     float4 g_Collision;
     float4 g_ColorStart;
     float4 g_ColorEnd;
@@ -656,6 +657,19 @@ float Range(float a, float b, uint slot, uint salt)
 float3 RotateByQuat(float4 q, float3 v)
 {
     return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
+float3 RotateAroundAxis(float3 value, float3 axis, float angle)
+{
+    float s = sin(angle);
+    float c = cos(angle);
+    return value * c + cross(axis, value) * s + axis * dot(axis, value) * (1.0 - c);
+}
+
+float3 OrbitAxis()
+{
+    float len = length(g_Orbit.xyz);
+    return len > 1.0e-4 ? g_Orbit.xyz / len : float3(0.0, 1.0, 0.0);
 }
 
 float3 RandomUnitVector(uint slot)
@@ -933,6 +947,13 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                              (drag > 0.0 ? (1.0 - drag_factor) / max(drag, 1.0e-4) : age) +
                          g_AccelerationDrag.xyz * (0.5 * age * age);
     }
+    if (abs(g_Orbit.w) > 1.0e-5 && age > 0.0)
+    {
+        world_position =
+            g_PositionTime.xyz + RotateAroundAxis(world_position - g_PositionTime.xyz,
+                                                  OrbitAxis(),
+                                                  g_Orbit.w * age);
+    }
 
     if (collide_ground && world_position.y < g_Collision.x)
     {
@@ -996,6 +1017,7 @@ struct ParticleGpuEmitterDesc
     float4 velocity_min;
     float4 velocity_max;
     float4 acceleration_drag;
+    float4 orbit;
     float4 collision;
     float4 color_start;
     float4 color_end;
@@ -1227,6 +1249,19 @@ float3 MeshFallbackOffset(ParticleGpuEmitterDesc emitter, uint slot)
 {
     float mesh_radius = max(emitter.source_mesh.w, max(emitter.spawn_sphere.y, 0.0));
     return emitter.source_mesh.xyz + RandomUnitVector(emitter.seed, slot) * mesh_radius;
+}
+
+float3 RotateAroundAxis(float3 value, float3 axis, float angle)
+{
+    float s = sin(angle);
+    float c = cos(angle);
+    return value * c + cross(axis, value) * s + axis * dot(axis, value) * (1.0 - c);
+}
+
+float3 OrbitAxis(ParticleGpuEmitterDesc emitter)
+{
+    float len = length(emitter.orbit.xyz);
+    return len > 1.0e-4 ? emitter.orbit.xyz / len : float3(0.0, 1.0, 0.0);
 }
 
 float3 SampleMeshSurface(ParticleGpuEmitterDesc emitter, uint slot)
@@ -1691,6 +1726,16 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         float drag = max(emitter.acceleration_drag.w, 0.0);
         if ((state.flags & kParticleFlagResting) == 0u)
         {
+            float orbit_speed = emitter.orbit.w;
+            if (abs(orbit_speed) > 1.0e-5 && dt > 0.0)
+            {
+                float3 axis = OrbitAxis(emitter);
+                float angle = orbit_speed * dt;
+                float3 center = emitter.position.xyz;
+                state.position_lifetime.xyz =
+                    center + RotateAroundAxis(state.position_lifetime.xyz - center, axis, angle);
+                velocity = RotateAroundAxis(velocity, axis, angle);
+            }
             velocity += emitter.acceleration_drag.xyz * dt;
             if (drag > 0.0)
             {

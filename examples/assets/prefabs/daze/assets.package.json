@@ -1,0 +1,50 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/daze/daze_ribbon_atlas",
+      "path": "textures/daze_ribbon_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/daze/daze_star_atlas",
+      "path": "textures/daze_star_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/daze/daze_haze_atlas",
+      "path": "textures/daze_haze_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/daze/heat_atlas",
+      "path": "textures/heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/daze/haze",
+      "path": "particles/daze_haze.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/daze/stars",
+      "path": "particles/daze_stars.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/daze/streaks",
+      "path": "particles/daze_streaks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/daze/pulse",
+      "path": "particles/daze_pulse.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/daze/distortion",
+      "path": "particles/daze_distortion.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "fire_ray",
+  "namespace": "generated/fire_ray",
+  "name": "Fire Ray",
+  "length": 5.0
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "preset": "magic_missile",
+  "namespace": "generated/magic_missile",
+  "name": "Magic Missile",
+  "path_points": [
+    [0.0, 0.0, 0.0],
+    [1.2, 0.25, -1.5],
+    [0.1, 0.0, -3.2]
+  ]
+}

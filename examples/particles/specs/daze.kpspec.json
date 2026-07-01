@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "daze",
+  "namespace": "generated/daze",
+  "name": "Generated Daze",
+  "radius": 1.6
+}

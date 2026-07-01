@@ -61,6 +61,28 @@ struct ParticleEffectEntityDesc {
   std::optional<components::ParticleEffectOverrideComponent> effect_override;
 };
 
+/// \ingroup karma_particles
+/// Creation options for a textured particle beam/ribbon entity.
+struct ParticleBeamEntityDesc {
+  std::string_view name;
+  components::TransformComponent transform{};
+  bool enabled = true;
+  bool visible = true;
+  uint32_t layer = 0;
+  bool depth_test = true;
+  components::ParticleBlendMode blend_mode = components::ParticleBlendMode::Additive;
+  std::string_view texture_key;
+  std::vector<math::Vec3> local_path_points;
+  float start_width = 0.2f;
+  float end_width = 0.2f;
+  math::Color start_color{1.0f, 1.0f, 1.0f, 1.0f};
+  math::Color end_color{1.0f, 1.0f, 1.0f, 1.0f};
+  float edge_softness = 0.0f;
+  float uv_repeat = 1.0f;
+  float uv_scroll_speed = 0.0f;
+  float time_scale = 1.0f;
+};
+
 /// Binds an existing entity to a named particle effect.
 inline bool bindEffect(world::World& world,
                        world::Entity entity,
@@ -113,6 +135,75 @@ inline world::Entity createEffectEntity(world::World& world,
                  .effect_override = desc.effect_override,
              });
   return entity;
+}
+
+/// Creates a transform entity with a particle beam component.
+inline world::Entity createBeamEntity(world::World& world,
+                                      const ParticleBeamEntityDesc& desc) {
+  world::Entity entity = world.createEntity();
+  if (!desc.name.empty()) {
+    world.setName(entity, std::string(desc.name));
+  }
+  world.add(entity, desc.transform);
+  world.add(entity, components::ParticleBeamComponent{
+                        .enabled = desc.enabled,
+                        .visible = desc.visible,
+                        .layer = desc.layer,
+                        .depth_test = desc.depth_test,
+                        .blend_mode = desc.blend_mode,
+                        .texture_key = std::string(desc.texture_key),
+                        .local_path_points = desc.local_path_points,
+                        .start_width = desc.start_width,
+                        .end_width = desc.end_width,
+                        .start_color = desc.start_color,
+                        .end_color = desc.end_color,
+                        .edge_softness = desc.edge_softness,
+                        .uv_repeat = desc.uv_repeat,
+                        .uv_scroll_speed = desc.uv_scroll_speed,
+                        .time_scale = desc.time_scale,
+                    });
+  return entity;
+}
+
+/// Replaces the local path points for an existing beam entity.
+inline bool setBeamPath(world::World& world,
+                        world::Entity entity,
+                        std::vector<math::Vec3> local_path_points) {
+  if (!world.isAlive(entity) || !world.has<components::ParticleBeamComponent>(entity)) {
+    return false;
+  }
+  world.get<components::ParticleBeamComponent>(entity).local_path_points =
+      std::move(local_path_points);
+  return true;
+}
+
+/// Enables or disables a beam and matching visibility when present.
+inline bool setBeamEnabled(world::World& world, world::Entity entity, bool enabled) {
+  if (!world.isAlive(entity) || !world.has<components::ParticleBeamComponent>(entity)) {
+    return false;
+  }
+  auto& beam = world.get<components::ParticleBeamComponent>(entity);
+  beam.enabled = enabled;
+  beam.visible = enabled;
+  if (world.has<components::VisibilityComponent>(entity)) {
+    world.get<components::VisibilityComponent>(entity).visible = enabled;
+  }
+  return true;
+}
+
+/// Restarts beam UV time by incrementing its restart counter.
+inline bool restartBeam(world::World& world, world::Entity entity) {
+  if (!world.isAlive(entity) || !world.has<components::ParticleBeamComponent>(entity)) {
+    return false;
+  }
+  auto& beam = world.get<components::ParticleBeamComponent>(entity);
+  beam.enabled = true;
+  beam.visible = true;
+  beam.restart_count += 1u;
+  if (world.has<components::VisibilityComponent>(entity)) {
+    world.get<components::VisibilityComponent>(entity).visible = true;
+  }
+  return true;
 }
 
 /// Adds or replaces per-instance effect overrides.
@@ -264,17 +355,22 @@ class ParticleSystem {
   void update(world::World& world, float dt, float interpolation_alpha);
   /// Returns current feature-owned live particle count for one entity.
   std::size_t liveParticleCount(world::Entity entity) const;
+  /// Returns the most recent stats computed by this particle system.
+  const rendering::ParticlePassStats& lastStats() const { return last_stats_; }
 
  private:
   uint32_t syncEffectBindings(world::World& world);
   rendering::TextureId resolveTextureAsset(const std::string& texture_key);
   void releaseTextureCache();
+  void releaseMeshCache();
 
   rendering::GraphicsDevice* device_ = nullptr;
   const assets::AssetRegistry* assets_ = nullptr;
   std::unordered_map<std::string, rendering::MeshId> mesh_asset_cache_;
   std::unordered_map<std::string, rendering::TextureId> texture_asset_cache_;
+  uint64_t last_mesh_version_ = 0;
   uint64_t last_texture_version_ = 0;
+  rendering::ParticlePassStats last_stats_{};
 };
 
 }  // namespace karma::visual::particles

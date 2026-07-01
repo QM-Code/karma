@@ -1,0 +1,201 @@
+{
+  "nodes": [
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.18000000715255737,
+          "enabled": true,
+          "end_color": [
+            1.0,
+            0.07999999821186066,
+            0.019999999552965164,
+            0.44999998807907104
+          ],
+          "end_width": 0.2800000011920929,
+          "layer": 0,
+          "local_path_points": [
+            [
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.25,
+              1.1200000047683716,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            1.0,
+            0.44999998807907104,
+            0.10000000149011612,
+            0.949999988079071
+          ],
+          "start_width": 0.41999998688697815,
+          "texture_key": "prefabs/fire_ray/glow_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 3.0,
+          "uv_scroll_speed": -1.2000000476837158,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "Fire Ray"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0,
+      "name": "Fire Ray",
+      "parent": null
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fire_ray/sparks",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "sparks"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1,
+      "name": "sparks",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fire_ray/smoke",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "smoke"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2,
+      "name": "smoke",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fire_ray/heat",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "heat"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 3,
+      "name": "heat",
+      "parent": 0
+    }
+  ],
+  "root": 0,
+  "version": 1
+}

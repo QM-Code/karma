@@ -1,0 +1,164 @@
+{
+  "emitters": [
+    {
+      "atlas": {
+        "animate_over_lifetime": false,
+        "animation_fps": 0.0,
+        "border_x": 0,
+        "border_y": 0,
+        "columns": 8,
+        "frame_count": 8,
+        "frame_height": 0,
+        "frame_width": 0,
+        "random_start_frame": true,
+        "rows": 1,
+        "spacing_x": 0,
+        "spacing_y": 0
+      },
+      "collision": {
+        "bounce_damping": 0.25,
+        "friction": 0.25,
+        "ground": false,
+        "ground_height": 0.0,
+        "rest_speed_threshold": 0.25
+      },
+      "color": {
+        "alpha_curve_exponent": 1.4199999570846558,
+        "end": [
+          0.44999998807907104,
+          0.18000000715255737,
+          1.399999976158142,
+          0.0
+        ],
+        "start": [
+          1.9500000476837158,
+          1.600000023841858,
+          1.1799999475479126,
+          0.9399999976158142
+        ]
+      },
+      "emission": {
+        "burst_count": 148,
+        "max_particles": 620,
+        "seed": 7311,
+        "spawn_rate": 180.0
+      },
+      "lifetime": {
+        "max": 1.0499999523162842,
+        "min": 0.2800000011920929
+      },
+      "motion": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "drag": 0.41999998688697815,
+        "orbit_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "orbit_speed": 0.0,
+        "velocity_max": [
+          0.5199999809265137,
+          0.36000001430511475,
+          0.20000000298023224
+        ],
+        "velocity_min": [
+          -0.20000000298023224,
+          -0.07999999821186066,
+          -0.20000000298023224
+        ]
+      },
+      "name": "chromatic_color_sparks",
+      "playback": {
+        "duration": 0.0,
+        "emit_burst_on_start": true,
+        "enabled": true,
+        "local_space": true,
+        "loop": true,
+        "playing": true,
+        "start_delay": 0.0,
+        "time_scale": 1.0
+      },
+      "render": {
+        "alignment": "billboard",
+        "blend_mode": "additive",
+        "depth_test": true,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "interior_glow": 0.0,
+        "layer": 0,
+        "refraction_strength": 0.0,
+        "shading_mode": "standard",
+        "soft_particle_distance": 0.0,
+        "use_soft_mask": false
+      },
+      "rotation": {
+        "angular_velocity_max": 3.5999999046325684,
+        "angular_velocity_min": -3.5999999046325684,
+        "initial_max": 6.2831854820251465,
+        "initial_min": 0.0
+      },
+      "size": {
+        "curve_exponent": 0.6200000047683716,
+        "end_max": 0.035999998450279236,
+        "end_min": 0.006000000052154064,
+        "start_max": 0.1550000011920929,
+        "start_min": 0.04500000178813934
+      },
+      "source": {
+        "angle": 0.0,
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "closed_loop": false,
+        "dimensions": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "distribution": "uniform",
+        "height": 0.0,
+        "inner_radius": 0.0,
+        "jitter_radius": 0.46000000834465027,
+        "mesh_asset_key": "",
+        "outer_radius": 0.5,
+        "points": [
+          [
+            -3.1500000953674316,
+            0.7200000286102295,
+            0.0
+          ],
+          [
+            -1.350000023841858,
+            0.9800000190734863,
+            0.03999999910593033
+          ],
+          [
+            0.8500000238418579,
+            1.3799999952316284,
+            -0.05999999865889549
+          ],
+          [
+            3.180000066757202,
+            1.8799999952316284,
+            0.0
+          ]
+        ],
+        "radial_speed_max": 0.46000000834465027,
+        "radial_speed_min": 0.05999999865889549,
+        "radius_max": 0.5,
+        "radius_min": 0.0,
+        "sampling": "sequential",
+        "shape": "path"
+      },
+      "texture": "prefabs/chromatic_ray/chromatic_spark_atlas"
+    }
+  ],
+  "version": 3
+}

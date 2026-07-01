@@ -21,7 +21,14 @@ the main thread because they mutate live Detour state and entity transforms.
 
 Public headers are split by API role:
 
-- `karma/navigation.h"game/level");
+- `karma/navigation.h`: runtime navigation API and ECS components.
+- `karma/assets.h`: snapshot asset load/save helpers.
+- `karma/world.h`: scene/entity storage used by geometry collection.
+
+Minimal query workflow:
+
+```cpp
+auto level = assets.loadGltfScene("game/level");
 
 world::World world;
 world::Scene scene;

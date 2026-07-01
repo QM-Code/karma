@@ -1263,6 +1263,180 @@ void testParticleSystemRendererOwnedState() {
   KARMA_REQUIRE(system.liveParticleCount(entity) == 0u);
 }
 
+void testParticleSystemBeamStatsWithNullDevice() {
+  karma::assets::AssetRegistry assets;
+  karma::visual::particles::ParticleEffectDesc effect{};
+  effect.emitters.push_back(karma::visual::particles::ParticleEmitterDesc{});
+  auto& emitter = effect.emitters.front();
+  emitter.texture_key = "generated/test/spark";
+  emitter.emitter.enabled = true;
+  emitter.emitter.playing = true;
+  emitter.emitter.max_particles = 16u;
+  emitter.emitter.burst_count = 4u;
+  assets.registerParticleEffect("generated/test/sparks", effect);
+
+  karma::world::World world;
+  const karma::world::Entity effect_entity = world.createEntity();
+  world.add(effect_entity, karma::components::TransformComponent{});
+  world.add(effect_entity,
+            karma::components::ParticleEffectComponent{
+                .effect_key = "generated/test/sparks",
+            });
+
+  const karma::world::Entity beam_entity = world.createEntity();
+  world.add(beam_entity, karma::components::TransformComponent{});
+  world.add(beam_entity,
+            karma::components::ParticleBeamComponent{
+                .texture_key = "generated/test/beam",
+                .local_path_points = {
+                    {0.0f, 0.0f, 0.0f},
+                    {1.0f, 0.25f, 0.0f},
+                    {2.0f, 0.0f, 0.0f},
+                },
+                .start_width = 0.25f,
+                .end_width = 0.1f,
+            });
+
+  karma::visual::particles::ParticleSystem system(nullptr, &assets);
+  system.update(world, 0.016f, 1.0f);
+
+  KARMA_REQUIRE(world.has<karma::components::ParticleEmitterComponent>(effect_entity));
+  const auto& stats = system.lastStats();
+  KARMA_REQUIRE(stats.effect_binding_updates == 1u);
+  KARMA_REQUIRE(stats.simulated_emitters == 1u);
+  KARMA_REQUIRE(stats.visible_emitters == 1u);
+  KARMA_REQUIRE(stats.submitted_emitters == 0u);
+  KARMA_REQUIRE(stats.submitted_beams == 1u);
+  KARMA_REQUIRE(stats.beam_segments == 2u);
+}
+
+void testParticleBeamComponentPrefabRoundTrip(const std::filesystem::path& dir) {
+  karma::world::World world;
+  karma::world::Scene scene;
+  const auto root = world.createEntity();
+  world.setName(root, "beam");
+  world.add(root, karma::components::TransformComponent{});
+  auto node = scene.createNode(root);
+  (void)node;
+
+  karma::components::ParticleBeamComponent beam{};
+  beam.enabled = true;
+  beam.visible = true;
+  beam.layer = 3u;
+  beam.depth_test = false;
+  beam.blend_mode = karma::components::ParticleBlendMode::Alpha;
+  beam.texture_key = "generated/test/beam";
+  beam.local_path_points = {
+      {0.0f, 0.0f, 0.0f},
+      {1.0f, 0.5f, 0.0f},
+      {2.0f, 0.0f, 0.0f},
+  };
+  beam.start_width = 0.35f;
+  beam.end_width = 0.12f;
+  beam.start_color = {0.2f, 0.8f, 1.0f, 0.9f};
+  beam.end_color = {0.7f, 0.2f, 1.0f, 0.2f};
+  beam.edge_softness = 0.16f;
+  beam.uv_repeat = 2.5f;
+  beam.uv_scroll_speed = -1.25f;
+  beam.time_scale = 0.75f;
+  beam.restart_count = 4u;
+  world.add(root, beam);
+
+  const std::filesystem::path path = dir / "particle_beam.prefab.json";
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+  const Json saved = readJson(path);
+  const Json& serialized = saved["nodes"][0]["components"]["ParticleBeamComponent"];
+  KARMA_REQUIRE(serialized["blend_mode"] == "alpha");
+  KARMA_REQUIRE(serialized["local_path_points"].size() == 3u);
+  KARMA_REQUIRE(serialized["restart_count"] == 4u);
+
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  KARMA_REQUIRE(loaded_world.has<karma::components::ParticleBeamComponent>(instance->root));
+  const auto& loaded =
+      loaded_world.get<karma::components::ParticleBeamComponent>(instance->root);
+  KARMA_REQUIRE(loaded.layer == 3u);
+  KARMA_REQUIRE(!loaded.depth_test);
+  KARMA_REQUIRE(loaded.blend_mode == karma::components::ParticleBlendMode::Alpha);
+  KARMA_REQUIRE(loaded.texture_key == "generated/test/beam");
+  KARMA_REQUIRE(loaded.local_path_points.size() == 3u);
+  KARMA_REQUIRE(nearly(loaded.start_width, 0.35f));
+  KARMA_REQUIRE(nearly(loaded.end_width, 0.12f));
+  KARMA_REQUIRE(nearly(loaded.edge_softness, 0.16f));
+  KARMA_REQUIRE(nearly(loaded.uv_repeat, 2.5f));
+  KARMA_REQUIRE(nearly(loaded.uv_scroll_speed, -1.25f));
+  KARMA_REQUIRE(nearly(loaded.time_scale, 0.75f));
+  KARMA_REQUIRE(loaded.restart_count == 4u);
+}
+
+void testParticleBeamComponentValidation(const std::filesystem::path& dir) {
+  auto prefabWithBeamPayload = [](const std::string& payload) {
+    return R"({
+  "version": 1,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "beam",
+      "parent": null,
+      "components": {
+        "TagComponent": { "name": "beam" },
+        "TransformComponent": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1]
+        },
+        "ParticleBeamComponent": )" + payload + R"(
+      }
+    }
+  ]
+})";
+  };
+
+  const std::string valid = R"({
+  "enabled": true,
+  "visible": true,
+  "layer": 0,
+  "depth_test": true,
+  "blend_mode": "additive",
+  "texture_key": "generated/test/beam",
+  "local_path_points": [[0, 0, 0], [1, 0, 0]],
+  "start_width": 0.2,
+  "end_width": 0.1,
+  "start_color": [1, 1, 1, 1],
+  "end_color": [1, 1, 1, 0],
+  "edge_softness": 0.1,
+  "uv_repeat": 1.0,
+  "uv_scroll_speed": 0.0,
+  "time_scale": 1.0,
+  "restart_count": 0
+})";
+  const std::filesystem::path valid_path = dir / "valid_particle_beam.prefab.json";
+  writeText(valid_path, prefabWithBeamPayload(valid));
+  karma::world::World valid_world;
+  karma::world::Scene valid_scene;
+  KARMA_REQUIRE(karma::prefabs::instantiatePrefab(valid_world, valid_scene, valid_path)
+                    .has_value());
+
+  const std::string invalid_payloads[] = {
+      R"({"local_path_points": [[0, 0, 0]], "start_width": 0.2, "end_width": 0.1})",
+      R"({"local_path_points": [[0, 0, 0], [1, 0, 0]], "start_width": 0.0, "end_width": 0.1})",
+      R"({"local_path_points": [[0, 0, 0], [1, 0, 0]], "start_width": 0.2, "end_width": -0.1})",
+      R"({"local_path_points": [[0, 0, 0], [1, 0, 0]], "start_width": 0.2, "end_width": 0.1, "blend_mode": "distortion"})",
+  };
+  for (std::size_t i = 0; i < std::size(invalid_payloads); ++i) {
+    const std::filesystem::path path =
+        dir / ("invalid_particle_beam_" + std::to_string(i) + ".prefab.json");
+    writeText(path, prefabWithBeamPayload(invalid_payloads[i]));
+    karma::world::World invalid_world;
+    karma::world::Scene invalid_scene;
+    KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(invalid_world, invalid_scene, path)
+                       .has_value());
+  }
+}
+
 void testParticleSystemEffectLifecycleReapply() {
   karma::assets::AssetRegistry assets;
   karma::visual::particles::ParticleEffectDesc effect{};
@@ -1608,6 +1782,88 @@ void testPathEnergyBeamPrefabDirectLoad() {
   karma::prefabs::clearPrefabAssetPackages();
 }
 
+void testGeneratedParticleExamplePrefabsDirectLoad() {
+  const std::filesystem::path repo_root = findRepoRoot();
+  KARMA_REQUIRE(!repo_root.empty());
+
+  struct Example {
+    const char* name;
+    std::size_t expected_beams;
+    std::size_t expected_effects;
+  };
+  const std::array<Example, 9> examples{{
+      {"arcane_barrage", 12u, 5u},
+      {"blade_barrier", 8u, 6u},
+      {"breathe_fire", 120u, 5u},
+      {"chromatic_ray", 10u, 4u},
+      {"daze", 7u, 5u},
+      {"fire_ray", 1u, 3u},
+      {"heal", 7u, 5u},
+      {"impact_burst", 0u, 3u},
+      {"magic_missile", 1u, 2u},
+  }};
+
+  for (const Example& example : examples) {
+    const std::filesystem::path prefab_dir =
+        repo_root / "examples/assets/prefabs" / example.name;
+    const std::string asset_namespace = std::string("prefabs/") + example.name;
+    const Json manifest = readJson(prefab_dir / "assets.package.json");
+    KARMA_REQUIRE(manifest.is_object());
+    KARMA_REQUIRE(manifest["assets"].is_array());
+    for (const Json& asset : manifest["assets"]) {
+      KARMA_REQUIRE(asset.is_object());
+      KARMA_REQUIRE(asset["key"].is_string());
+      KARMA_REQUIRE(asset["path"].is_string());
+      const std::string key = asset["key"].get<std::string>();
+      KARMA_REQUIRE(key.rfind(asset_namespace + "/", 0u) == 0u);
+      KARMA_REQUIRE(karma::assets::AssetRegistry::isValidAssetKey(key));
+      KARMA_REQUIRE(std::filesystem::exists(prefab_dir /
+                                            asset["path"].get<std::string>()));
+    }
+
+    karma::assets::AssetRegistry assets;
+    karma::prefabs::bindPrefabAssetRegistry(&assets);
+
+    karma::world::World world;
+    karma::world::Scene scene;
+    const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
+    KARMA_REQUIRE(instance.has_value());
+    KARMA_REQUIRE(instance->valid());
+
+    std::size_t beam_count = 0u;
+    std::size_t effect_count = 0u;
+    for (const karma::world::Entity entity : instance->entities) {
+      if (world.has<karma::components::ParticleBeamComponent>(entity)) {
+        ++beam_count;
+        const auto& beam = world.get<karma::components::ParticleBeamComponent>(entity);
+        KARMA_REQUIRE(!beam.texture_key.empty());
+        KARMA_REQUIRE(beam.texture_key.rfind(asset_namespace + "/", 0u) == 0u);
+        KARMA_REQUIRE(beam.local_path_points.size() >= 2u);
+        KARMA_REQUIRE(beam.start_width > 0.0f);
+        KARMA_REQUIRE(beam.end_width > 0.0f);
+        KARMA_REQUIRE(assets.findTextureAsset(beam.texture_key) != nullptr);
+      }
+      if (world.has<karma::components::ParticleEffectComponent>(entity)) {
+        ++effect_count;
+        const auto& effect = world.get<karma::components::ParticleEffectComponent>(entity);
+        KARMA_REQUIRE(effect.effect_key.rfind(asset_namespace + "/", 0u) == 0u);
+        const auto* effect_asset = assets.findParticleEffect(effect.effect_key);
+        KARMA_REQUIRE(effect_asset != nullptr);
+        KARMA_REQUIRE(!effect_asset->emitters.empty());
+        for (const auto& emitter : effect_asset->emitters) {
+          KARMA_REQUIRE(emitter.texture_key.rfind(asset_namespace + "/", 0u) == 0u);
+          KARMA_REQUIRE(assets.findTextureAsset(emitter.texture_key) != nullptr);
+        }
+      }
+    }
+    KARMA_REQUIRE(beam_count == example.expected_beams);
+    KARMA_REQUIRE(effect_count == example.expected_effects);
+
+    KARMA_REQUIRE(karma::prefabs::destroyPrefab(world, scene, instance->root));
+    karma::prefabs::clearPrefabAssetPackages();
+  }
+}
+
 void testParticleStatsReportFormatting() {
   karma::rendering::ParticlePassStats totals{};
   karma::rendering::ParticlePassStats frame{};
@@ -1632,6 +1888,9 @@ void testParticleStatsReportFormatting() {
   frame.gpu_culled_particles = 9u;
   frame.gpu_culling_dispatches = 2u;
   frame.cpu_fallback_particles = 7u;
+  frame.submitted_beams = 2u;
+  frame.beam_segments = 5u;
+  frame.beam_draw_calls = 1u;
   frame.simulation_ms = 0.5f;
   frame.scene_color_copy = true;
   frame.gpu_sort_overflow = true;
@@ -1666,6 +1925,9 @@ void testParticleStatsReportFormatting() {
   KARMA_REQUIRE(line.find("gpu_culled_particles=9.0") != std::string::npos);
   KARMA_REQUIRE(line.find("gpu_culling_dispatches=2.0") != std::string::npos);
   KARMA_REQUIRE(line.find("cpu_fallback_particles=7.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("submitted_beams=2.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("beam_segments=5.0") != std::string::npos);
+  KARMA_REQUIRE(line.find("beam_draw_calls=1.0") != std::string::npos);
   KARMA_REQUIRE(line.find("simulation_ms=0.500") != std::string::npos);
   KARMA_REQUIRE(line.find("scene_color_copy=true") != std::string::npos);
   KARMA_REQUIRE(line.find("gpu_sort_overflow=true") != std::string::npos);
@@ -1695,12 +1957,16 @@ int main() {
   testParticleEffectParserV3();
   testParticleEffectParserV3SourceShapesAndMultiEmitter();
   testParticleSystemRendererOwnedState();
+  testParticleSystemBeamStatsWithNullDevice();
+  testParticleBeamComponentPrefabRoundTrip(dir);
+  testParticleBeamComponentValidation(dir);
   testParticleSystemEffectLifecycleReapply();
   testParticleStatsReportFormatting();
   testLightPulseSystem();
   testExplosionPrefabDirectLoad();
   testEnergyOrbPrefabDirectLoad();
   testPathEnergyBeamPrefabDirectLoad();
+  testGeneratedParticleExamplePrefabsDirectLoad();
   std::filesystem::remove_all(dir);
   return 0;
 }

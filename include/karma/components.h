@@ -1603,6 +1603,8 @@ struct ParticleEmitterComponent : world::ComponentTag {
   math::Vec3 velocity_max{0.6f, 4.5f, 0.6f};
   math::Vec3 acceleration{0.0f, -3.5f, 0.0f};
   float drag = 0.0f;
+  math::Vec3 orbit_axis{0.0f, 1.0f, 0.0f};
+  float orbit_speed = 0.0f;
   bool collide_with_ground = false;
   float ground_height = 0.0f;
   float bounce_damping = 0.35f;
@@ -1610,6 +1612,30 @@ struct ParticleEmitterComponent : world::ComponentTag {
   float rest_speed_threshold = 0.35f;
   math::Color start_color{1.0f, 0.8f, 0.35f, 0.9f};
   math::Color end_color{1.0f, 0.15f, 0.05f, 0.0f};
+};
+
+/// \ingroup karma_components
+/// Runtime textured particle beam/ribbon authored on prefabs.
+///
+/// Beam geometry is expanded by the renderer from local path points. Use
+/// particle effects for secondary sparks, smoke, heat, and impacts.
+struct ParticleBeamComponent : world::ComponentTag {
+  bool enabled = true;
+  bool visible = true;
+  uint32_t layer = 0;
+  bool depth_test = true;
+  ParticleBlendMode blend_mode = ParticleBlendMode::Additive;
+  std::string texture_key;
+  std::vector<math::Vec3> local_path_points;
+  float start_width = 0.2f;
+  float end_width = 0.2f;
+  math::Color start_color{1.0f, 1.0f, 1.0f, 1.0f};
+  math::Color end_color{1.0f, 1.0f, 1.0f, 1.0f};
+  float edge_softness = 0.0f;
+  float uv_repeat = 1.0f;
+  float uv_scroll_speed = 0.0f;
+  float time_scale = 1.0f;
+  uint32_t restart_count = 0u;
 };
 
 }  // namespace karma::components

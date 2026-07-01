@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -433,6 +434,8 @@ rendering::ParticleEmitterGpuDesc makeRendererEmitterDesc(
   desc.velocity_max = emitter.velocity_max;
   desc.acceleration = emitter.acceleration;
   desc.drag = emitter.drag;
+  desc.orbit_axis = emitter.orbit_axis;
+  desc.orbit_speed = emitter.orbit_speed;
   desc.collide_with_ground = emitter.collide_with_ground;
   desc.ground_height = emitter.ground_height;
   desc.bounce_damping = emitter.bounce_damping;
@@ -443,10 +446,57 @@ rendering::ParticleEmitterGpuDesc makeRendererEmitterDesc(
   return desc;
 }
 
+rendering::ParticleBeamGpuDesc makeRendererBeamDesc(
+    world::Entity entity,
+    const components::ParticleBeamComponent& beam,
+    const components::TransformComponent& transform,
+    rendering::TextureId texture,
+    bool visible,
+    float dt,
+    float interpolation_alpha) {
+  rendering::ParticleBeamGpuDesc desc{};
+  desc.instance_id = hashCombine(entityKey(entity), 0xbea00001ull);
+  if (desc.instance_id == 0u) {
+    desc.instance_id = 1u;
+  }
+  desc.restart_count = beam.restart_count;
+  desc.delta_seconds = std::max(dt, 0.0f);
+  desc.visible = visible;
+  desc.position = transform.getInterpolatedPosition(interpolation_alpha);
+  desc.rotation = transform.getInterpolatedRotation(interpolation_alpha);
+  desc.scale = transform.getScale();
+  desc.enabled = beam.enabled;
+  desc.layer = static_cast<rendering::LayerId>(beam.layer);
+  desc.depth_test = beam.depth_test;
+  desc.blend_mode = toRendererBlendMode(beam.blend_mode);
+  desc.texture = texture;
+  desc.local_path_points = beam.local_path_points;
+  desc.start_width = beam.start_width;
+  desc.end_width = beam.end_width;
+  desc.start_color = beam.start_color;
+  desc.end_color = beam.end_color;
+  desc.edge_softness = beam.edge_softness;
+  desc.uv_repeat = beam.uv_repeat;
+  desc.uv_scroll_speed = beam.uv_scroll_speed;
+  desc.time_scale = beam.time_scale;
+  return desc;
+}
+
 }  // namespace
 
 ParticleSystem::~ParticleSystem() {
+  releaseMeshCache();
   releaseTextureCache();
+}
+
+void ParticleSystem::releaseMeshCache() {
+  if (device_ != nullptr) {
+    for (const auto& [key, mesh] : mesh_asset_cache_) {
+      (void)mesh;
+      device_->unregisterRuntimeMesh(key);
+    }
+  }
+  mesh_asset_cache_.clear();
 }
 
 void ParticleSystem::releaseTextureCache() {
@@ -568,6 +618,10 @@ uint32_t ParticleSystem::syncEffectBindings(world::World& world) {
 }
 
 void ParticleSystem::update(world::World& world, float dt, float interpolation_alpha) {
+  if (assets_ != nullptr && assets_->meshVersion() != last_mesh_version_) {
+    releaseMeshCache();
+    last_mesh_version_ = assets_->meshVersion();
+  }
   if (assets_ != nullptr && assets_->textureVersion() != last_texture_version_) {
     releaseTextureCache();
     last_texture_version_ = assets_->textureVersion();
@@ -729,8 +783,44 @@ void ParticleSystem::update(world::World& world, float dt, float interpolation_a
                    restart_count,
                    emitter_visible(entity, emitter));
   });
+
+  world.forEach<components::ParticleBeamComponent, components::TransformComponent>(
+      [&](const world::Entity entity) {
+    const auto& beam = world.get<components::ParticleBeamComponent>(entity);
+    bool visible = beam.enabled && beam.visible;
+    if (world.has<components::VisibilityComponent>(entity)) {
+      visible = visible && world.get<components::VisibilityComponent>(entity).visible;
+    }
+    if (beam.local_path_points.size() < 2u ||
+        beam.start_width <= 0.0f ||
+        beam.end_width <= 0.0f ||
+        beam.blend_mode == components::ParticleBlendMode::Distortion) {
+      return;
+    }
+
+    frame_stats.submitted_beams += 1u;
+    frame_stats.beam_segments += static_cast<uint32_t>(std::min<std::size_t>(
+        beam.local_path_points.size() - 1u,
+        static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())));
+
+    if (device_ == nullptr) {
+      return;
+    }
+
+    const rendering::TextureId texture = resolveTextureAsset(beam.texture_key);
+    const rendering::ParticleBeamGpuDesc desc =
+        makeRendererBeamDesc(entity,
+                             beam,
+                             world.get<components::TransformComponent>(entity),
+                             texture,
+                             visible,
+                             dt,
+                             interpolation_alpha);
+    device_->submitParticleBeam(desc);
+  });
   frame_stats.simulation_ms = core::elapsedMilliseconds(submit_start, core::SteadyClock::now());
 
+  last_stats_ = frame_stats;
   if (device_ != nullptr) {
     device_->setParticleSystemStats(frame_stats);
   }

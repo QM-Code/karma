@@ -90,6 +90,14 @@ Shared example helpers live in `examples/common/`.
 - `particles/explosion_stress.cpp`: target `particles_explosion_stress`, output
   `examples/particles/explosion_stress`. Configurable staged-explosion stress
   scene.
+- `particles/generated_preview.cpp`: target `particles_generated_preview`,
+  output `examples/particles/generated_preview`. Loads a generated particle
+  package path, accepts a `.kpspec.json` for auto-generation when tools are
+  enabled, and defaults to the fire-ray spec with no arguments.
+- Generated spell effect prefabs are checked in under `assets/prefabs/` for
+  direct loading: `arcane_barrage`, `blade_barrier`, `breathe_fire`,
+  `chromatic_ray`, `daze`, `fire_ray`, `heal`, `impact_burst`, and
+  `magic_missile`. Their source specs live in `particles/specs/`.
 - `effects/laser.cpp`: target `effects_laser`, output `examples/effects/laser`.
 - `effects/energy_orb.cpp`: target `effects_energy_orb`, output
   `examples/effects/energy_orb`.

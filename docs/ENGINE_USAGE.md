@@ -159,9 +159,6 @@ Karma's foundational math and timing helpers live under `karma/core`.
 
 ```cpp
 #include "karma/math.h"
-#include "karma/math.h"
-#include "karma/math.h"
-#include "karma/math.h"
 #include "karma/core.h"
 
 const karma::math::Vec3 a{1.0f, 0.0f, 0.0f};
@@ -193,12 +190,7 @@ const double elapsed_ms = karma::core::elapsedMillisecondsSince(start);
 Use these helpers instead of adding local `Vec3` arithmetic, quaternion
 conversion, clamp/interpolation, scale, or elapsed-time wrappers in systems,
 runtime code, and examples. GLM conversions for engine math types should go
-through `karma/math.h>createEntity();
-world->add(entity, karma::components::TransformComponent{});
-world->add(entity, karma::components::ColliderComponent::box(
-    karma::components::BoxColliderShape{.half_extents = {0.5f, 1.0f, 0.5f}}));
-world->add(entity, karma::components::CharacterControllerComponent{});
-```
+through `karma/math.h`.
 
 ## Renderer Diagnostics
 For Vulkan-side renderer debugging, Karma exposes two environment variables:
@@ -602,11 +594,13 @@ engine.setUi(karma::ui::rmlui::createUiLayer([](Rml::Context& context) {
 ## Particle Effects
 
 Particle effects are ECS-driven through `assets::AssetRegistry`,
-`ParticleEffectComponent`, `ParticleEffectOverrideComponent`, and
-`ParticleSystem`.
+`ParticleEffectComponent`, `ParticleEffectOverrideComponent`,
+`ParticleBeamComponent`, and `ParticleSystem`.
 
 For the intended registration/binding/restart workflow, see
 [PARTICLE_SYSTEM.md](PARTICLE_SYSTEM.md).
+For constrained generated packages, see
+[PARTICLE_EFFECT_GENERATION.md](PARTICLE_EFFECT_GENERATION.md).
 
 ## Prefabs
 

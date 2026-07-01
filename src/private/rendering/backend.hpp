@@ -136,6 +136,7 @@ class Backend {
   virtual void submitParticles(rendering::ParticleBatch batch) = 0;
   virtual void submitPackedParticles(rendering::PackedParticleBatch batch) = 0;
   virtual void submitParticleEmitter(const rendering::ParticleEmitterGpuDesc& emitter) = 0;
+  virtual void submitParticleBeam(const rendering::ParticleBeamGpuDesc& beam) = 0;
   virtual void setParticleSystemStats(const rendering::ParticlePassStats& stats) = 0;
   virtual void retireInstance(rendering::InstanceId instance) = 0;
   /// Renders one extracted layer into a target using per-pass post settings.
@@ -153,6 +154,7 @@ class Backend {
   virtual void setLights(const std::vector<rendering::LightData>& lights) = 0;
   virtual void setEnvironmentMap(const std::filesystem::path& path, float intensity,
                                  bool draw_skybox) = 0;
+  virtual void setClearColor(const math::Color& color) = 0;
   virtual void setVsync(bool enabled) = 0;
   virtual void setAnisotropy(bool enabled, int level) = 0;
   virtual void setGenerateMips(bool enabled) = 0;

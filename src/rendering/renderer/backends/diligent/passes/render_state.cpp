@@ -148,6 +148,13 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
   }
 }
 
+void DiligentBackend::setClearColor(const math::Color& color) {
+  clear_color_[0] = std::clamp(color.r, 0.0f, 1.0f);
+  clear_color_[1] = std::clamp(color.g, 0.0f, 1.0f);
+  clear_color_[2] = std::clamp(color.b, 0.0f, 1.0f);
+  clear_color_[3] = std::clamp(color.a, 0.0f, 1.0f);
+}
+
 void DiligentBackend::setVsync(bool enabled) {
   vsync_enabled_ = enabled;
   present_mode_ = rendering::PresentMode::Auto;
@@ -414,6 +421,8 @@ void DiligentBackend::setParticleSystemStats(const rendering::ParticlePassStats&
   particle_pass_stats_.gpu_culled_particles = stats.gpu_culled_particles;
   particle_pass_stats_.gpu_culling_dispatches = stats.gpu_culling_dispatches;
   particle_pass_stats_.cpu_fallback_particles = stats.cpu_fallback_particles;
+  particle_pass_stats_.submitted_beams = stats.submitted_beams;
+  particle_pass_stats_.beam_segments = stats.beam_segments;
   particle_pass_stats_.sync_effect_bindings_ms = stats.sync_effect_bindings_ms;
   particle_pass_stats_.simulation_ms = stats.simulation_ms;
   particle_pass_stats_.packing_ms = stats.packing_ms;

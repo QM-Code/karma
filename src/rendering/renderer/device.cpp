@@ -949,6 +949,15 @@ void GraphicsDevice::submitParticleEmitter(const ParticleEmitterGpuDesc& emitter
   }
 }
 
+void GraphicsDevice::submitParticleBeam(const ParticleBeamGpuDesc& beam) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (scheduler_) {
+    scheduler_->recordFrameCommand([beam](RenderScheduler::Backend& backend) {
+      backend.submitParticleBeam(beam);
+    });
+  }
+}
+
 void GraphicsDevice::setParticleSystemStats(const ParticlePassStats& stats) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
@@ -1046,6 +1055,17 @@ void GraphicsDevice::setEnvironmentMap(const std::filesystem::path& path, float 
         }
       });
     }
+  }
+}
+
+void GraphicsDevice::setClearColor(const math::Color& color) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (scheduler_) {
+    scheduler_->invokeVoid([color](RenderScheduler::Backend* backend) {
+      if (backend != nullptr) {
+        backend->setClearColor(color);
+      }
+    });
   }
 }
 

@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://karma.local/schemas/particles/kpeffect.v3.schema.json",
+  "title": "Karma Particle Effect v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "emitters"],
+  "properties": {
+    "version": { "const": 3 },
+    "emitters": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/emitter" }
+    }
+  },
+  "$defs": {
+    "vec3": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "color": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "emitter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "playback",
+        "render",
+        "atlas",
+        "emission",
+        "lifetime",
+        "size",
+        "rotation",
+        "source",
+        "motion",
+        "collision",
+        "color"
+      ],
+      "properties": {
+        "name": { "type": "string" },
+        "texture": { "type": "string" },
+        "playback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "playing": { "type": "boolean" },
+            "loop": { "type": "boolean" },
+            "emit_burst_on_start": { "type": "boolean" },
+            "local_space": { "type": "boolean" },
+            "time_scale": { "type": "number", "minimum": 0 },
+            "start_delay": { "type": "number", "minimum": 0 },
+            "duration": { "type": "number", "minimum": 0 }
+          }
+        },
+        "render": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "layer": { "type": "integer", "minimum": 0 },
+            "depth_test": { "type": "boolean" },
+            "blend_mode": { "enum": ["additive", "alpha", "distortion"] },
+            "alignment": { "enum": ["billboard", "ground"] },
+            "shading_mode": { "enum": ["standard", "shell"] },
+            "use_soft_mask": { "type": "boolean" },
+            "soft_particle_distance": { "type": "number" },
+            "distortion_strength": { "type": "number" },
+            "fresnel_power": { "type": "number" },
+            "fresnel_strength": { "type": "number" },
+            "refraction_strength": { "type": "number" },
+            "interior_glow": { "type": "number" }
+          }
+        },
+        "atlas": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "columns": { "type": "integer", "minimum": 1 },
+            "rows": { "type": "integer", "minimum": 1 },
+            "frame_count": { "type": "integer", "minimum": 0 },
+            "frame_width": { "type": "integer", "minimum": 0 },
+            "frame_height": { "type": "integer", "minimum": 0 },
+            "border_x": { "type": "integer", "minimum": 0 },
+            "border_y": { "type": "integer", "minimum": 0 },
+            "spacing_x": { "type": "integer", "minimum": 0 },
+            "spacing_y": { "type": "integer", "minimum": 0 },
+            "animation_fps": { "type": "number" },
+            "animate_over_lifetime": { "type": "boolean" },
+            "random_start_frame": { "type": "boolean" }
+          }
+        },
+        "emission": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_particles": { "type": "integer", "minimum": 0 },
+            "burst_count": { "type": "integer", "minimum": 0 },
+            "seed": { "type": "integer", "minimum": 0 },
+            "spawn_rate": { "type": "number", "minimum": 0 }
+          }
+        },
+        "lifetime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min": { "type": "number", "minimum": 0 },
+            "max": { "type": "number", "minimum": 0 }
+          }
+        },
+        "size": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "start_min": { "type": "number", "minimum": 0 },
+            "start_max": { "type": "number", "minimum": 0 },
+            "end_min": { "type": "number", "minimum": 0 },
+            "end_max": { "type": "number", "minimum": 0 },
+            "curve_exponent": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "rotation": { "type": "object" },
+        "source": {
+          "type": "object",
+          "required": ["shape"],
+          "additionalProperties": true,
+          "properties": {
+            "shape": {
+              "enum": [
+                "box",
+                "sphere",
+                "sphere_surface",
+                "disc",
+                "ring",
+                "cylinder",
+                "capsule",
+                "cone",
+                "line",
+                "path",
+                "trail_path",
+                "mesh_surface"
+              ]
+            },
+            "points": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/vec3" }
+            }
+          }
+        },
+        "motion": { "type": "object" },
+        "collision": { "type": "object" },
+        "color": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "start": { "$ref": "#/$defs/color" },
+            "end": { "$ref": "#/$defs/color" },
+            "alpha_curve_exponent": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

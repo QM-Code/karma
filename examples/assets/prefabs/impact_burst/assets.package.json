@@ -1,0 +1,40 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/impact_burst/glow_atlas",
+      "path": "textures/glow_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/impact_burst/spark_atlas",
+      "path": "textures/spark_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/impact_burst/smoke_atlas",
+      "path": "textures/smoke_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/impact_burst/shock_ring_atlas",
+      "path": "textures/shock_ring_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/impact_burst/flash",
+      "path": "particles/impact_flash.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/impact_burst/sparks",
+      "path": "particles/impact_sparks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/impact_burst/smoke",
+      "path": "particles/impact_smoke.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

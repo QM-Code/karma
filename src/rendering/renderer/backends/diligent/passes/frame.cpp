@@ -177,6 +177,9 @@ void DiligentBackend::beginFrame(const rendering::FrameInfo& frame) {
   if (!particle_emitter_submissions_.empty()) {
     particle_emitter_submissions_.clear();
   }
+  if (!particle_beam_submissions_.empty()) {
+    particle_beam_submissions_.clear();
+  }
   if (!terrain_submissions_.empty()) {
     terrain_submissions_.clear();
   }
@@ -808,6 +811,39 @@ void DiligentBackend::submitParticleEmitter(const rendering::ParticleEmitterGpuD
   });
 }
 
+void DiligentBackend::submitParticleBeam(const rendering::ParticleBeamGpuDesc& beam) {
+  if (beam.instance_id == 0u || beam.local_path_points.size() < 2u) {
+    return;
+  }
+  if (beam.blend_mode == rendering::ParticleBlendMode::Distortion) {
+    return;
+  }
+
+  ParticleBeamRuntimeState& state = particle_beam_runtime_states_[beam.instance_id];
+  if (state.initialized && state.restart_count != beam.restart_count) {
+    state.elapsed_seconds = 0.0f;
+    state.restart_count = beam.restart_count;
+  }
+  if (!state.initialized) {
+    state.restart_count = beam.restart_count;
+    state.initialized = true;
+  }
+
+  if (beam.enabled && beam.visible) {
+    state.elapsed_seconds += std::max(beam.delta_seconds, 0.0f) *
+                             std::max(beam.time_scale, 0.0f);
+  }
+
+  particle_beam_submissions_.push_back(ParticleBeamSubmission{
+      .desc = beam,
+      .elapsed_seconds = state.elapsed_seconds,
+  });
+  particle_pass_stats_.submitted_beams += 1u;
+  particle_pass_stats_.beam_segments += static_cast<uint32_t>(std::min<std::size_t>(
+      beam.local_path_points.size() - 1u,
+      static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())));
+}
+
 void DiligentBackend::retireInstance(rendering::InstanceId instance) {
   if (instance == rendering::kInvalidInstance) {
     return;
@@ -829,20 +865,20 @@ void DiligentBackend::retireInstance(rendering::InstanceId instance) {
     instanced_records_.erase(instanced_it);
   }
   auto particle_it = particle_emitter_runtime_states_.find(static_cast<uint64_t>(instance));
-  if (particle_it == particle_emitter_runtime_states_.end()) {
-    return;
+  if (particle_it != particle_emitter_runtime_states_.end()) {
+    const ParticleEmitterRuntimeState state = particle_it->second;
+    if (state.gpu_slot_capacity > 0u) {
+      particle_gpu_free_particle_slots_.push_back(ParticleGpuSlotRange{
+          .offset = state.gpu_slot_offset,
+          .capacity = state.gpu_slot_capacity,
+      });
+    }
+    if (state.gpu_emitter_state_allocated) {
+      particle_gpu_free_emitter_state_slots_.push_back(state.gpu_emitter_state_index);
+    }
+    particle_emitter_runtime_states_.erase(particle_it);
   }
-  const ParticleEmitterRuntimeState state = particle_it->second;
-  if (state.gpu_slot_capacity > 0u) {
-    particle_gpu_free_particle_slots_.push_back(ParticleGpuSlotRange{
-        .offset = state.gpu_slot_offset,
-        .capacity = state.gpu_slot_capacity,
-    });
-  }
-  if (state.gpu_emitter_state_allocated) {
-    particle_gpu_free_emitter_state_slots_.push_back(state.gpu_emitter_state_index);
-  }
-  particle_emitter_runtime_states_.erase(particle_it);
+  particle_beam_runtime_states_.erase(static_cast<uint64_t>(instance));
 }
 
 void DiligentBackend::drawLine(const math::Vec3& start, const math::Vec3& end,

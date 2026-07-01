@@ -615,13 +615,20 @@ bool parseEmitter(const Json& json, ParticleEmitterDesc& out_desc, std::string& 
   }
 
   if (!rejectUnknownFields(*motion,
-                           {"velocity_min", "velocity_max", "acceleration", "drag"},
+                           {"velocity_min",
+                            "velocity_max",
+                            "acceleration",
+                            "drag",
+                            "orbit_axis",
+                            "orbit_speed"},
                            "motion",
                            out_error) ||
       !readVec3(*motion, "velocity_min", emitter.velocity_min, out_error) ||
       !readVec3(*motion, "velocity_max", emitter.velocity_max, out_error) ||
       !readVec3(*motion, "acceleration", emitter.acceleration, out_error) ||
-      !readFloat(*motion, "drag", emitter.drag, out_error)) {
+      !readFloat(*motion, "drag", emitter.drag, out_error) ||
+      !readVec3(*motion, "orbit_axis", emitter.orbit_axis, out_error) ||
+      !readFloat(*motion, "orbit_speed", emitter.orbit_speed, out_error)) {
     return false;
   }
 

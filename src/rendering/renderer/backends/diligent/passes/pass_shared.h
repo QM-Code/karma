@@ -8,6 +8,10 @@ struct alignas(16) LineConstants {
   float view_proj[16];
 };
 
+struct alignas(16) ParticleBeamConstants {
+  float view_proj[16];
+};
+
 struct alignas(16) ParticleConstants {
   float view_proj[16];
   float camera_right[4];
@@ -50,6 +54,7 @@ struct alignas(16) ParticleSimComputeConstants {
   float velocity_min[4];
   float velocity_max[4];
   float acceleration_drag[4];
+  float orbit[4];
   float collision[4];
   float color_start[4];
   float color_end[4];
@@ -101,6 +106,7 @@ struct alignas(16) ParticleGpuEmitterDesc {
   float velocity_min[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float velocity_max[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float acceleration_drag[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  float orbit[4] = {0.0f, 1.0f, 0.0f, 0.0f};
   float collision[4] = {0.0f, 0.0f, 0.0f, 0.0f};
   float color_start[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   float color_end[4] = {1.0f, 1.0f, 1.0f, 0.0f};

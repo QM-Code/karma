@@ -694,7 +694,63 @@ struct FrameGraphValidationResult {
 };
 
 /// Returns the engine's scene-only default frame graph.
-const FrameGraphDesc& defaultFrameGraphDesc();
+inline const FrameGraphDesc& defaultFrameGraphDesc() {
+  static const FrameGraphDesc graph = [] {
+    FrameGraphDesc desc{};
+    desc.frame_graph_key = std::string(kDefaultFrameGraphKey);
+    desc.output_resource = std::string(kFrameGraphCameraColor);
+    desc.enabled = true;
+
+    auto add_builtin = [&](std::string name,
+                           std::string builtin,
+                           std::unordered_map<std::string, std::string> inputs,
+                           std::unordered_map<std::string, std::string> outputs) {
+      FrameGraphPassDesc pass{};
+      pass.name = std::move(name);
+      pass.kind = FrameGraphPassKind::Builtin;
+      pass.builtin_pass = std::move(builtin);
+      pass.inputs = std::move(inputs);
+      pass.outputs = std::move(outputs);
+      pass.enabled = true;
+      desc.passes.push_back(std::move(pass));
+    };
+
+    add_builtin("clear", "clear", {},
+                {{"target", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}});
+    add_builtin("skybox", "skybox",
+                {{"depth", std::string(kFrameGraphCameraDepth)}},
+                {{"target", std::string(kFrameGraphCameraColor)}});
+    add_builtin("shadows", "shadows", {}, {});
+    add_builtin("opaque", "opaque",
+                {{"source", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}},
+                {{"target", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}});
+    add_builtin("terrain", "terrain",
+                {{"source", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}},
+                {{"target", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}});
+    add_builtin("transparent", "transparent",
+                {{"source", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}},
+                {{"target", std::string(kFrameGraphCameraColor)}});
+    add_builtin("particles", "particles",
+                {{"source", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}},
+                {{"target", std::string(kFrameGraphCameraColor)}});
+    add_builtin("lines", "lines",
+                {{"source", std::string(kFrameGraphCameraColor)},
+                 {"depth", std::string(kFrameGraphCameraDepth)}},
+                {{"target", std::string(kFrameGraphCameraColor)}});
+    add_builtin("present", "present",
+                {{"source", std::string(kFrameGraphCameraColor)}},
+                {{"target", std::string(kFrameGraphBackbuffer)}});
+    return desc;
+  }();
+  return graph;
+}
 
 /// Validates resource declarations and pass dependencies for a frame graph.
 FrameGraphValidationResult validateFrameGraphDesc(

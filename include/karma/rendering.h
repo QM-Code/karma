@@ -8,7 +8,15 @@
 
 
 #include <cstdint>
+#include <algorithm>
+#include <functional>
 #include <limits>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace karma::rendering {
 
@@ -752,10 +760,469 @@ inline const FrameGraphDesc& defaultFrameGraphDesc() {
   return graph;
 }
 
+namespace detail {
+
+enum class FrameGraphResourceClass {
+  Any,
+  Color,
+  Depth,
+  Backbuffer,
+};
+
+inline bool isImplicitFrameGraphResource(std::string_view name) {
+  return name == kFrameGraphCameraColor ||
+         name == kFrameGraphCameraDepth ||
+         name == kFrameGraphBackbuffer;
+}
+
+inline bool isKnownBuiltinFrameGraphPass(std::string_view name) {
+  return name == "clear" ||
+         name == "skybox" ||
+         name == "shadows" ||
+         name == "opaque" ||
+         name == "terrain" ||
+         name == "transparent" ||
+         name == "particles" ||
+         name == "lines" ||
+         name == "post_process" ||
+         name == "present" ||
+         name == "copy" ||
+         name == "blit" ||
+         name == "final_composite" ||
+         name == "bloom" ||
+         name == "taa";
+}
+
+inline bool containsFrameGraphKey(const std::vector<std::string>& keys,
+                                  std::string_view key) {
+  return std::find(keys.begin(), keys.end(), key) != keys.end();
+}
+
+inline bool isFrameGraphColorResource(FrameGraphResourceKind kind) {
+  return kind == FrameGraphResourceKind::ColorTexture ||
+         kind == FrameGraphResourceKind::ExternalColor ||
+         kind == FrameGraphResourceKind::Backbuffer;
+}
+
+inline bool isFrameGraphDepthResource(FrameGraphResourceKind kind) {
+  return kind == FrameGraphResourceKind::DepthTexture ||
+         kind == FrameGraphResourceKind::ExternalDepth;
+}
+
+inline const char* frameGraphResourceClassName(FrameGraphResourceClass resource_class) {
+  switch (resource_class) {
+    case FrameGraphResourceClass::Any: return "resource";
+    case FrameGraphResourceClass::Color: return "color resource";
+    case FrameGraphResourceClass::Depth: return "depth resource";
+    case FrameGraphResourceClass::Backbuffer: return "backbuffer resource";
+  }
+  return "resource";
+}
+
+inline bool matchesFrameGraphResourceClass(FrameGraphResourceKind kind,
+                                           FrameGraphResourceClass resource_class) {
+  switch (resource_class) {
+    case FrameGraphResourceClass::Any:
+      return true;
+    case FrameGraphResourceClass::Color:
+      return isFrameGraphColorResource(kind);
+    case FrameGraphResourceClass::Depth:
+      return isFrameGraphDepthResource(kind);
+    case FrameGraphResourceClass::Backbuffer:
+      return kind == FrameGraphResourceKind::Backbuffer;
+  }
+  return false;
+}
+
+inline void addFrameGraphDiagnostic(FrameGraphValidationResult& result,
+                                    std::string message) {
+  result.diagnostics.push_back(std::move(message));
+}
+
+inline bool requireFrameGraphSlot(
+    const FrameGraphPassDesc& pass,
+    const std::unordered_map<std::string, FrameGraphResourceKind>& resources,
+    const std::unordered_map<std::string, std::string>& slots,
+    std::string_view slot,
+    FrameGraphResourceClass resource_class,
+    std::string_view direction,
+    FrameGraphValidationResult& result) {
+  const auto found_slot = slots.find(std::string(slot));
+  if (found_slot == slots.end() || found_slot->second.empty()) {
+    addFrameGraphDiagnostic(result,
+                            "graph pass '" + pass.name + "' requires " +
+                                std::string(direction) + " slot '" +
+                                std::string(slot) + "'");
+    return false;
+  }
+
+  const auto found_resource = resources.find(found_slot->second);
+  if (found_resource == resources.end()) {
+    return false;
+  }
+  if (!matchesFrameGraphResourceClass(found_resource->second, resource_class)) {
+    addFrameGraphDiagnostic(result,
+                            "graph pass '" + pass.name + "' " +
+                                std::string(direction) + " slot '" +
+                                std::string(slot) + "' expects " +
+                                frameGraphResourceClassName(resource_class) + ": " +
+                                found_slot->second);
+    return false;
+  }
+  return true;
+}
+
+inline void validateOptionalFrameGraphSlot(
+    const FrameGraphPassDesc& pass,
+    const std::unordered_map<std::string, FrameGraphResourceKind>& resources,
+    const std::unordered_map<std::string, std::string>& slots,
+    std::string_view slot,
+    FrameGraphResourceClass resource_class,
+    std::string_view direction,
+    FrameGraphValidationResult& result) {
+  const auto found_slot = slots.find(std::string(slot));
+  if (found_slot == slots.end() || found_slot->second.empty()) {
+    return;
+  }
+  const auto found_resource = resources.find(found_slot->second);
+  if (found_resource == resources.end()) {
+    return;
+  }
+  if (!matchesFrameGraphResourceClass(found_resource->second, resource_class)) {
+    addFrameGraphDiagnostic(result,
+                            "graph pass '" + pass.name + "' " +
+                                std::string(direction) + " slot '" +
+                                std::string(slot) + "' expects " +
+                                frameGraphResourceClassName(resource_class) + ": " +
+                                found_slot->second);
+  }
+}
+
+inline void validateBuiltinFrameGraphContract(
+    const FrameGraphPassDesc& pass,
+    const std::unordered_map<std::string, FrameGraphResourceKind>& resources,
+    FrameGraphValidationResult& result) {
+  const std::string_view builtin = pass.builtin_pass;
+  if (builtin == "clear") {
+    requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                          FrameGraphResourceClass::Color, "output", result);
+    requireFrameGraphSlot(pass, resources, pass.outputs, "depth",
+                          FrameGraphResourceClass::Depth, "output", result);
+  } else if (builtin == "skybox") {
+    validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "depth",
+                                   FrameGraphResourceClass::Depth, "input", result);
+    requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                          FrameGraphResourceClass::Color, "output", result);
+  } else if (builtin == "opaque" || builtin == "terrain") {
+    validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "source",
+                                   FrameGraphResourceClass::Color, "input", result);
+    validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "depth",
+                                   FrameGraphResourceClass::Depth, "input", result);
+    requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                          FrameGraphResourceClass::Color, "output", result);
+    requireFrameGraphSlot(pass, resources, pass.outputs, "depth",
+                          FrameGraphResourceClass::Depth, "output", result);
+  } else if (builtin == "transparent" || builtin == "particles" ||
+             builtin == "lines") {
+    validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "source",
+                                   FrameGraphResourceClass::Color, "input", result);
+    requireFrameGraphSlot(pass, resources, pass.inputs, "depth",
+                          FrameGraphResourceClass::Depth, "input", result);
+    requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                          FrameGraphResourceClass::Color, "output", result);
+  } else if (builtin == "post_process" || builtin == "final_composite" ||
+             builtin == "bloom" || builtin == "taa") {
+    requireFrameGraphSlot(pass, resources, pass.inputs, "source",
+                          FrameGraphResourceClass::Color, "input", result);
+    validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "depth",
+                                   FrameGraphResourceClass::Depth, "input", result);
+    requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                          FrameGraphResourceClass::Color, "output", result);
+  } else if (builtin == "present") {
+    requireFrameGraphSlot(pass, resources, pass.inputs, "source",
+                          FrameGraphResourceClass::Color, "input", result);
+    requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                          FrameGraphResourceClass::Backbuffer, "output", result);
+  }
+}
+
+inline void validateShaderFrameGraphContract(
+    const FrameGraphPassDesc& pass,
+    const std::unordered_map<std::string, FrameGraphResourceKind>& resources,
+    FrameGraphValidationResult& result) {
+  validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "source",
+                                 FrameGraphResourceClass::Color, "input", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "history",
+                                 FrameGraphResourceClass::Color, "input", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.inputs, "depth",
+                                 FrameGraphResourceClass::Depth, "input", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.outputs, "target",
+                                 FrameGraphResourceClass::Color, "output", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.outputs, "color",
+                                 FrameGraphResourceClass::Color, "output", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.outputs, "depth",
+                                 FrameGraphResourceClass::Depth, "output", result);
+}
+
+inline void validateSceneFrameGraphContract(
+    const FrameGraphPassDesc& pass,
+    const std::unordered_map<std::string, FrameGraphResourceKind>& resources,
+    FrameGraphValidationResult& result) {
+  validateOptionalFrameGraphSlot(pass, resources, pass.outputs, "target",
+                                 FrameGraphResourceClass::Color, "output", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.outputs, "color",
+                                 FrameGraphResourceClass::Color, "output", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.outputs, "depth",
+                                 FrameGraphResourceClass::Depth, "output", result);
+}
+
+inline void validateCopyFrameGraphContract(
+    const FrameGraphPassDesc& pass,
+    const std::unordered_map<std::string, FrameGraphResourceKind>& resources,
+    FrameGraphValidationResult& result) {
+  requireFrameGraphSlot(pass, resources, pass.inputs, "source",
+                        FrameGraphResourceClass::Color, "input", result);
+  requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                        FrameGraphResourceClass::Color, "output", result);
+}
+
+inline void validateSceneMaskFrameGraphContract(
+    const FrameGraphPassDesc& pass,
+    const std::unordered_map<std::string, FrameGraphResourceKind>& resources,
+    FrameGraphValidationResult& result) {
+  requireFrameGraphSlot(pass, resources, pass.outputs, "target",
+                        FrameGraphResourceClass::Color, "output", result);
+  validateOptionalFrameGraphSlot(pass, resources, pass.outputs, "depth",
+                                 FrameGraphResourceClass::Depth, "output", result);
+  std::unordered_set<std::string> tags;
+  for (const std::string& tag : pass.render_tags) {
+    if (tag.empty()) {
+      addFrameGraphDiagnostic(result, "scene_mask graph pass '" + pass.name +
+                                          "' render tags must not be empty");
+    } else if (!tags.insert(tag).second) {
+      addFrameGraphDiagnostic(result, "scene_mask graph pass '" + pass.name +
+                                          "' has duplicate render tag: " + tag);
+    }
+  }
+  if (pass.clear_depth) {
+    const auto depth = pass.outputs.find("depth");
+    if (depth == pass.outputs.end() || depth->second.empty()) {
+      addFrameGraphDiagnostic(result, "scene_mask graph pass '" + pass.name +
+                                          "' clear_depth requires depth output");
+    }
+  }
+}
+
+inline void addFrameGraphEdge(std::vector<std::vector<size_t>>& edges,
+                              size_t from,
+                              size_t to) {
+  if (from == to) {
+    return;
+  }
+  std::vector<size_t>& outgoing = edges[from];
+  if (std::find(outgoing.begin(), outgoing.end(), to) == outgoing.end()) {
+    outgoing.push_back(to);
+  }
+}
+
+}  // namespace detail
+
 /// Validates resource declarations and pass dependencies for a frame graph.
-FrameGraphValidationResult validateFrameGraphDesc(
+inline FrameGraphValidationResult validateFrameGraphDesc(
     const FrameGraphDesc& graph,
-    const FrameGraphValidationOptions& options = {});
+    const FrameGraphValidationOptions& options = {}) {
+  FrameGraphValidationResult result{};
+  if (!graph.enabled) {
+    return result;
+  }
+
+  std::unordered_map<std::string, FrameGraphResourceKind> resources;
+  resources.emplace(std::string(kFrameGraphCameraColor),
+                    FrameGraphResourceKind::ExternalColor);
+  resources.emplace(std::string(kFrameGraphCameraDepth),
+                    FrameGraphResourceKind::ExternalDepth);
+  resources.emplace(std::string(kFrameGraphBackbuffer),
+                    FrameGraphResourceKind::Backbuffer);
+
+  for (const FrameGraphResourceDesc& resource : graph.resources) {
+    if (resource.name.empty()) {
+      detail::addFrameGraphDiagnostic(result, "frame graph resource name must not be empty");
+      continue;
+    }
+    if (detail::isImplicitFrameGraphResource(resource.name)) {
+      detail::addFrameGraphDiagnostic(result, "frame graph resource '" + resource.name +
+                                                  "' conflicts with an implicit camera resource");
+    }
+    if (!resources.emplace(resource.name, resource.kind).second) {
+      detail::addFrameGraphDiagnostic(result,
+                                      "duplicate frame graph resource: " + resource.name);
+    }
+    if (resource.size_mode == FrameGraphResourceSizeMode::CameraRelative) {
+      if (resource.width_scale <= 0.0f || resource.height_scale <= 0.0f) {
+        detail::addFrameGraphDiagnostic(result,
+                                        "camera-relative resource '" + resource.name +
+                                            "' must have positive scale");
+      }
+    } else if (resource.width == 0u || resource.height == 0u) {
+      detail::addFrameGraphDiagnostic(result,
+                                      "absolute resource '" + resource.name +
+                                          "' must have non-zero width and height");
+    }
+    if (resource.kind == FrameGraphResourceKind::Backbuffer &&
+        resource.name != kFrameGraphBackbuffer) {
+      detail::addFrameGraphDiagnostic(
+          result, "backbuffer resources must use the implicit backbuffer name");
+    }
+  }
+
+  if (graph.output_resource.empty()) {
+    detail::addFrameGraphDiagnostic(result,
+                                    "frame graph output_resource must not be empty");
+  } else if (const auto output = resources.find(graph.output_resource);
+             output == resources.end()) {
+    detail::addFrameGraphDiagnostic(
+        result, "frame graph output_resource references missing resource: " +
+                    graph.output_resource);
+  } else if (!detail::isFrameGraphColorResource(output->second)) {
+    detail::addFrameGraphDiagnostic(
+        result, "frame graph output_resource must be a color resource: " +
+                    graph.output_resource);
+  }
+
+  std::unordered_set<std::string> pass_names;
+  std::unordered_map<std::string, size_t> first_writer_by_resource;
+  std::vector<std::vector<size_t>> edges(graph.passes.size());
+
+  for (size_t index = 0; index < graph.passes.size(); ++index) {
+    const FrameGraphPassDesc& pass = graph.passes[index];
+    if (!pass.enabled) {
+      continue;
+    }
+    for (const auto& [slot, resource_name] : pass.outputs) {
+      (void)slot;
+      if (!resource_name.empty()) {
+        first_writer_by_resource.try_emplace(resource_name, index);
+      }
+    }
+  }
+
+  std::unordered_map<std::string, size_t> last_writer_by_resource;
+  for (size_t index = 0; index < graph.passes.size(); ++index) {
+    const FrameGraphPassDesc& pass = graph.passes[index];
+    if (!pass.enabled) {
+      continue;
+    }
+    if (pass.name.empty()) {
+      detail::addFrameGraphDiagnostic(result, "frame graph pass name must not be empty");
+    } else if (!pass_names.insert(pass.name).second) {
+      detail::addFrameGraphDiagnostic(result, "duplicate frame graph pass: " + pass.name);
+    }
+
+    switch (pass.kind) {
+      case FrameGraphPassKind::Scene:
+        detail::validateSceneFrameGraphContract(pass, resources, result);
+        break;
+      case FrameGraphPassKind::Builtin:
+        if (pass.builtin_pass.empty()) {
+          detail::addFrameGraphDiagnostic(result, "builtin graph pass '" + pass.name +
+                                                      "' requires builtin_pass");
+        } else if (!detail::isKnownBuiltinFrameGraphPass(pass.builtin_pass)) {
+          detail::addFrameGraphDiagnostic(result,
+                                          "unknown builtin graph pass '" +
+                                              pass.builtin_pass + "' in pass '" +
+                                              pass.name + "'");
+        } else {
+          detail::validateBuiltinFrameGraphContract(pass, resources, result);
+        }
+        break;
+      case FrameGraphPassKind::Shader:
+        if (pass.shader_pass_key.empty()) {
+          detail::addFrameGraphDiagnostic(result, "shader graph pass '" + pass.name +
+                                                      "' requires shader_pass_key");
+        } else if (options.require_shader_pass_keys &&
+                   !detail::containsFrameGraphKey(options.shader_pass_keys,
+                                                  pass.shader_pass_key)) {
+          detail::addFrameGraphDiagnostic(result,
+                                          "shader graph pass '" + pass.name +
+                                              "' references missing shader pass: " +
+                                              pass.shader_pass_key);
+        }
+        detail::validateShaderFrameGraphContract(pass, resources, result);
+        break;
+      case FrameGraphPassKind::Copy:
+        detail::validateCopyFrameGraphContract(pass, resources, result);
+        break;
+      case FrameGraphPassKind::SceneMask:
+        if (pass.render_tags.empty()) {
+          detail::addFrameGraphDiagnostic(result, "scene_mask graph pass '" + pass.name +
+                                                      "' requires at least one render tag");
+        }
+        detail::validateSceneMaskFrameGraphContract(pass, resources, result);
+        break;
+    }
+
+    for (const auto& [slot, resource_name] : pass.inputs) {
+      (void)slot;
+      if (resource_name.empty() || resources.find(resource_name) == resources.end()) {
+        detail::addFrameGraphDiagnostic(result,
+                                        "graph pass '" + pass.name +
+                                            "' input references missing resource: " +
+                                            resource_name);
+        continue;
+      }
+      if (const auto writer = last_writer_by_resource.find(resource_name);
+          writer != last_writer_by_resource.end()) {
+        detail::addFrameGraphEdge(edges, writer->second, index);
+      } else if (const auto writer = first_writer_by_resource.find(resource_name);
+                 writer != first_writer_by_resource.end() && writer->second != index) {
+        detail::addFrameGraphEdge(edges, writer->second, index);
+      }
+    }
+
+    for (const auto& [slot, resource_name] : pass.outputs) {
+      (void)slot;
+      if (resource_name.empty() || resources.find(resource_name) == resources.end()) {
+        detail::addFrameGraphDiagnostic(result,
+                                        "graph pass '" + pass.name +
+                                            "' output references missing resource: " +
+                                            resource_name);
+        continue;
+      }
+      if (const auto writer = last_writer_by_resource.find(resource_name);
+          writer != last_writer_by_resource.end()) {
+        detail::addFrameGraphEdge(edges, writer->second, index);
+      }
+      last_writer_by_resource[resource_name] = index;
+    }
+  }
+
+  std::vector<uint8_t> visit_state(graph.passes.size(), 0u);
+  std::function<bool(size_t)> visit = [&](size_t node) {
+    if (visit_state[node] == 1u) {
+      return true;
+    }
+    if (visit_state[node] == 2u) {
+      return false;
+    }
+    visit_state[node] = 1u;
+    for (size_t next : edges[node]) {
+      if (visit(next)) {
+        return true;
+      }
+    }
+    visit_state[node] = 2u;
+    return false;
+  };
+
+  for (size_t index = 0; index < graph.passes.size(); ++index) {
+    if (visit(index)) {
+      detail::addFrameGraphDiagnostic(result, "frame graph contains a dependency cycle");
+      break;
+    }
+  }
+
+  return result;
+}
 
 /// Builds a default scene graph with a post-process param pass for legacy
 /// bloom/TAA/tone controls.

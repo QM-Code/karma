@@ -11,11 +11,15 @@ int main() {
   testGlbPrefabCollectionAppliesWorldTransform();
   testWorldSurfaceCollectionUsesNavMeshSurfaceArea();
   testWorldSurfaceCollectionResolvesMeshAssetKey();
+  testWorldSurfaceCollectionHonorsLayerMasks();
   testAreaFlagsFilterQueries();
   testConvexVolumeMarksArea();
   testPartitionModesAndTiledSnapshot();
   testBuildDebugDrawArtifacts();
   testAdvancedQueryHelpers();
+  testDynamicTraversalCostAvoidsExpensiveRegion();
+  testDynamicTraversalCostUsesShorterExpensiveRegionWhenCheaper();
+  testDefaultTraversalCostKeepsNormalPath();
   testTileCacheDynamicObstacleBlocksAndRestoresPath();
   testTileCacheBoxObstacleDiagnostics();
   testTileCacheSnapshotAndContentRoundTrip();
@@ -30,6 +34,8 @@ int main() {
   testNavigationSystemCrowdAgentComponent();
   testCrowdAgentCharacterControllerVelocityMode();
   testReplacementRequestKeepsCurrentPathMoving();
+  testNavigationSystemFollowsPrecomputedPath();
+  testNavigationSystemFollowPathSkipsPassedPrefix();
   testExampleWorldGlbCanBake();
   std::cout << "navmesh tests passed\n";
   return 0;

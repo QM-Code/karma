@@ -28,6 +28,8 @@ math::Vec3 worldSpacePosition(const math::Vec3& nav_position,
 void clearStoredPath(components::NavMeshAgentComponent& agent);
 bool hasActivePath(const components::NavMeshAgentComponent& agent);
 void failPathRequest(components::NavMeshAgentComponent& agent, NavStatus status);
+void alignPathToCurrentPosition(components::NavMeshAgentComponent& agent,
+                                const math::Vec3& current_nav_position);
 
 struct NavMeshSelection {
   world::Entity entity{};

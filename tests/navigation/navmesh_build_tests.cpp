@@ -157,6 +157,50 @@ void testWorldSurfaceCollectionResolvesMeshAssetKey() {
   assert(geometry.triangle_areas[1] == 3);
 }
 
+void testWorldSurfaceCollectionHonorsLayerMasks() {
+  constexpr std::uint32_t ground_layer = 1u << 0u;
+  constexpr std::uint32_t landing_layer = 1u << 1u;
+
+  karma::world::World world;
+  const auto ground_surface = world.createEntity();
+  world.add(ground_surface, karma::components::TransformComponent{});
+  world.add(ground_surface, karma::components::NavMeshSurfaceComponent{
+                                .layer_mask = ground_layer | landing_layer,
+                                .mesh_data =
+                                    std::make_shared<karma::world::MeshData>(
+                                        makePlaneMesh(1.0f)),
+                            });
+
+  const auto landing_surface = world.createEntity();
+  karma::components::TransformComponent landing_transform{};
+  landing_transform.setPosition({0.0f, 2.0f, 0.0f});
+  world.add(landing_surface, landing_transform);
+  world.add(landing_surface, karma::components::NavMeshSurfaceComponent{
+                                 .layer_mask = landing_layer,
+                                 .mesh_data =
+                                     std::make_shared<karma::world::MeshData>(
+                                         makePlaneMesh(1.0f)),
+                             });
+
+  const karma::navigation::NavMeshInputGeometry ground_geometry =
+      karma::navigation::collectNavMeshGeometry(world, nullptr, ground_layer);
+  assert(ground_geometry.triangleCount() == 2);
+  for (const karma::math::Vec3& vertex : ground_geometry.vertices) {
+    assert(std::abs(vertex.y) < 0.001f);
+  }
+
+  const karma::navigation::NavMeshInputGeometry landing_geometry =
+      karma::navigation::collectNavMeshGeometry(world, nullptr, landing_layer);
+  assert(landing_geometry.triangleCount() == 4);
+
+  bool found_landing_height = false;
+  for (const karma::math::Vec3& vertex : landing_geometry.vertices) {
+    found_landing_height =
+        found_landing_height || std::abs(vertex.y - 2.0f) < 0.001f;
+  }
+  assert(found_landing_height);
+}
+
 void testAreaFlagsFilterQueries() {
   karma::navigation::NavMeshInputGeometry geometry;
   karma::navigation::appendGeometry(geometry,

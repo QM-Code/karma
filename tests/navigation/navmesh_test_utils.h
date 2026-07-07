@@ -63,11 +63,15 @@ void testNearestPolyFlagsAndSnapshotRefresh();
 void testGlbPrefabCollectionAppliesWorldTransform();
 void testWorldSurfaceCollectionUsesNavMeshSurfaceArea();
 void testWorldSurfaceCollectionResolvesMeshAssetKey();
+void testWorldSurfaceCollectionHonorsLayerMasks();
 void testAreaFlagsFilterQueries();
 void testConvexVolumeMarksArea();
 void testPartitionModesAndTiledSnapshot();
 void testBuildDebugDrawArtifacts();
 void testAdvancedQueryHelpers();
+void testDynamicTraversalCostAvoidsExpensiveRegion();
+void testDynamicTraversalCostUsesShorterExpensiveRegionWhenCheaper();
+void testDefaultTraversalCostKeepsNormalPath();
 void testTileCacheDynamicObstacleBlocksAndRestoresPath();
 void testTileCacheBoxObstacleDiagnostics();
 void testTileCacheSnapshotAndContentRoundTrip();
@@ -82,6 +86,8 @@ void testNavigationSystemBuildDebugDrawBypassesCacheOnce();
 void testNavigationSystemCrowdAgentComponent();
 void testCrowdAgentCharacterControllerVelocityMode();
 void testReplacementRequestKeepsCurrentPathMoving();
+void testNavigationSystemFollowsPrecomputedPath();
+void testNavigationSystemFollowPathSkipsPassedPrefix();
 void testExampleWorldGlbCanBake();
 
 }  // namespace karma::tests::navigation

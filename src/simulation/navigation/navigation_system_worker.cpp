@@ -32,6 +32,7 @@ struct PathJob {
   math::Vec3 destination{};
   math::Vec3 search_extents{2.0f, 4.0f, 2.0f};
   NavQueryFilter filter{};
+  std::shared_ptr<const NavTraversalCostProvider> traversal_cost_provider;
   core::SteadyClock::time_point submitted_at{};
   int max_points = 256;
 };
@@ -51,6 +52,7 @@ struct PathResult {
 }  // namespace
 
 using detail::failPathRequest;
+using detail::alignPathToCurrentPosition;
 using detail::findNavMesh;
 using detail::hasActivePath;
 using detail::navMeshUsable;
@@ -139,7 +141,9 @@ struct NavigationSystem::WorkerState {
                                                job.destination,
                                                job.search_extents,
                                                job.max_points,
-                                               job.filter);
+                                               job.filter,
+                                               NavStraightPathOptionNone,
+                                               job.traversal_cost_provider.get());
         }
       }
       result.worker_solve_ms =
@@ -206,12 +210,14 @@ void NavigationSystem::submitPathRequests(world::World& world) {
         job.destination = agent.destination;
         job.search_extents = agent.search_extents;
         job.filter = agent.query_filter;
+        job.traversal_cost_provider = agent.traversal_cost_provider;
         job.submitted_at = core::SteadyClock::now();
 
         const bool active_path = hasActivePath(agent);
         agent.path_requested = false;
         agent.path_pending = true;
         agent.path_resolved = false;
+        agent.traversal_cost_provider.reset();
         agent.path_request_id = request_id;
         agent.last_path_status = NavStatus::InProgress;
         if (!active_path) {
@@ -282,7 +288,15 @@ void NavigationSystem::applyCompletedPaths(world::World& world) {
 
     agent.path = std::move(result.path.points);
     agent.path_point_flags = std::move(result.path.point_flags);
-    agent.next_waypoint = agent.path.size() > 1u ? 1u : 0u;
+    if (world.has<components::TransformComponent>(result.agent_entity)) {
+      const auto& transform =
+          world.get<components::TransformComponent>(result.agent_entity);
+      alignPathToCurrentPosition(
+          agent,
+          navSpacePosition(transform.getPosition(), agent));
+    } else {
+      agent.next_waypoint = agent.path.size() > 1u ? 1u : 0u;
+    }
     agent.current_path_partial = result.path.partial;
     agent.path_resolved = true;
     agent.status = components::NavMeshAgentStatus::PathResolved;

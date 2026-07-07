@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cmath>
 
 #include <DetourNavMeshQuery.h>
 #include <DetourStatus.h>
@@ -46,6 +47,73 @@ inline dtQueryFilter makeDetourFilter(const NavQueryFilter& filter) {
   dtQueryFilter out;
   applyDetourFilter(out, filter);
   return out;
+}
+
+class NavDetourQueryFilter final : public dtQueryFilter {
+ public:
+  explicit NavDetourQueryFilter(const NavQueryFilter& filter,
+                                const NavTraversalCostProvider* provider = nullptr)
+      : filter_(filter), provider_(provider) {
+    applyDetourFilter(*this, filter_);
+  }
+
+#ifdef DT_VIRTUAL_QUERYFILTER
+  float getCost(const float* pa,
+                const float* pb,
+                const dtPolyRef prevRef,
+                const dtMeshTile* prevTile,
+                const dtPoly* prevPoly,
+                const dtPolyRef curRef,
+                const dtMeshTile* curTile,
+                const dtPoly* curPoly,
+                const dtPolyRef nextRef,
+                const dtMeshTile* nextTile,
+                const dtPoly* nextPoly) const override {
+    (void)prevTile;
+    (void)prevPoly;
+    (void)curTile;
+    (void)nextTile;
+    (void)nextPoly;
+    const float dx = pb[0] - pa[0];
+    const float dy = pb[1] - pa[1];
+    const float dz = pb[2] - pa[2];
+    const float base_distance = std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
+    const unsigned char area =
+        curPoly != nullptr ? curPoly->getArea() : kNavAreaDefault;
+    const float area_cost = filter_.areaCost(area);
+    const float base_cost = base_distance * area_cost;
+    if (provider_ == nullptr) {
+      return base_cost;
+    }
+
+    const NavTraversalContext context{
+        .previous_poly_ref = static_cast<uint64_t>(prevRef),
+        .current_poly_ref = static_cast<uint64_t>(curRef),
+        .next_poly_ref = static_cast<uint64_t>(nextRef),
+        .from = toVec3(pa),
+        .to = toVec3(pb),
+        .base_distance = base_distance,
+        .area = area,
+        .area_cost = area_cost,
+        .base_cost = base_cost,
+        .filter = &filter_,
+    };
+    const float cost = provider_->traversalCost(context);
+    return std::isfinite(cost) && cost >= 0.0f ? cost : base_cost;
+  }
+#else
+#error "Karma dynamic navigation costs require Detour built with DT_VIRTUAL_QUERYFILTER."
+#endif
+
+ private:
+  NavQueryFilter filter_{};
+  const NavTraversalCostProvider* provider_ = nullptr;
+};
+
+inline NavDetourQueryFilter makeTraversalDetourFilter(
+    const NavQueryFilter& filter,
+    const NavTraversalCostProvider* provider = nullptr) {
+  return NavDetourQueryFilter(filter, provider);
 }
 
 inline uint8_t mapStraightPathFlags(unsigned char flags) {

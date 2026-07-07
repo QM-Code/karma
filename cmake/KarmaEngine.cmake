@@ -236,7 +236,7 @@ if (KARMA_ENABLE_NAVIGATION)
   target_link_libraries(karma_simulation_navigation PUBLIC karma_core karma_world)
   target_include_directories(karma_simulation_navigation PRIVATE src/simulation/navigation/third_party/fastlz)
   karma_link_build_and_install(karma_simulation_navigation PUBLIC KARMA_NAVIGATION_LINK_LIBS KARMA_INSTALL_LINK_LIBS)
-  target_compile_definitions(karma_simulation_navigation PUBLIC KARMA_ENABLE_NAVIGATION)
+  target_compile_definitions(karma_simulation_navigation PUBLIC KARMA_ENABLE_NAVIGATION DT_VIRTUAL_QUERYFILTER)
   list(APPEND KARMA_INSTALL_TARGETS karma_simulation_navigation)
 endif()
 

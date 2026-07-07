@@ -8,8 +8,10 @@
 namespace karma::navigation {
 
 using detail::clearStoredPath;
+using detail::alignPathToCurrentPosition;
 using detail::hasActivePath;
 using detail::moveAgents;
+using detail::navSpacePosition;
 using detail::rebuildNavMeshes;
 using detail::syncCrowds;
 using detail::syncTileCaches;
@@ -42,7 +44,8 @@ void NavigationSystem::update(world::World& world, float dt) {
 
 bool NavigationSystem::requestMoveTo(world::World& world,
                                      world::Entity agent_entity,
-                                     const math::Vec3& destination) {
+                                     const math::Vec3& destination,
+                                     std::shared_ptr<const NavTraversalCostProvider> traversal_cost_provider) {
   if (!world.isAlive(agent_entity) ||
       !world.has<components::NavMeshAgentComponent>(agent_entity)) {
     return false;
@@ -54,11 +57,53 @@ bool NavigationSystem::requestMoveTo(world::World& world,
   agent.has_destination = true;
   agent.path_requested = true;
   agent.path_resolved = false;
+  agent.traversal_cost_provider = std::move(traversal_cost_provider);
   if (!active_path) {
     agent.current_path_partial = false;
     agent.status = components::NavMeshAgentStatus::Requested;
     agent.current_velocity = {};
   }
+  return true;
+}
+
+bool NavigationSystem::requestFollowPath(world::World& world,
+                                         world::Entity agent_entity,
+                                         const NavPath& path) {
+  if (!world.isAlive(agent_entity) ||
+      !world.has<components::NavMeshAgentComponent>(agent_entity) ||
+      !path.success() ||
+      path.points.empty()) {
+    return false;
+  }
+
+  auto& agent = world.get<components::NavMeshAgentComponent>(agent_entity);
+  if (path.partial && !agent.accept_partial_paths) {
+    return false;
+  }
+
+  agent.destination = path.points.back();
+  agent.has_destination = true;
+  agent.path_requested = false;
+  agent.path_pending = false;
+  agent.path_resolved = true;
+  agent.current_path_partial = path.partial;
+  agent.path_request_id = 0;
+  agent.traversal_cost_provider.reset();
+  agent.last_path_status = path.status;
+  agent.path = path.points;
+  agent.path_point_flags = path.point_flags;
+  if (agent.path_point_flags.size() != agent.path.size()) {
+    agent.path_point_flags.clear();
+  }
+  if (world.has<components::TransformComponent>(agent_entity)) {
+    const auto& transform =
+        world.get<components::TransformComponent>(agent_entity);
+    alignPathToCurrentPosition(agent, navSpacePosition(transform.getPosition(), agent));
+  } else {
+    agent.next_waypoint = agent.path.size() > 1u ? 1u : 0u;
+  }
+  agent.status = components::NavMeshAgentStatus::PathResolved;
+  agent.current_velocity = {};
   return true;
 }
 
@@ -76,6 +121,7 @@ void NavigationSystem::clearPath(world::World& world, world::Entity agent_entity
   agent.path_resolved = false;
   agent.current_path_partial = false;
   agent.path_request_id = 0;
+  agent.traversal_cost_provider.reset();
   agent.has_destination = false;
   agent.status = components::NavMeshAgentStatus::Idle;
   agent.current_velocity = {};

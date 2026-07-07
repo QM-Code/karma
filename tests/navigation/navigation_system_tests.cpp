@@ -571,6 +571,85 @@ void testReplacementRequestKeepsCurrentPathMoving() {
   assert(moved_agent.status != karma::components::NavMeshAgentStatus::Failed);
 }
 
+void testNavigationSystemFollowsPrecomputedPath() {
+  karma::world::World world;
+
+  const auto agent_entity = world.createEntity();
+  world.add(agent_entity, karma::components::TransformComponent{{-4.0f, 0.0f, -4.0f}});
+  karma::components::NavMeshAgentComponent agent;
+  agent.speed = 8.0f;
+  agent.stopping_distance = 0.05f;
+  world.add(agent_entity, std::move(agent));
+
+  karma::navigation::NavPath path;
+  path.status = karma::navigation::NavStatus::Success;
+  path.points = {
+      {-4.0f, 0.0f, -4.0f},
+      {-4.0f, 0.0f, 4.0f},
+      {4.0f, 0.0f, 4.0f},
+  };
+  path.point_flags = {
+      karma::navigation::NavPathPointFlagStart,
+      karma::navigation::NavPathPointFlagNone,
+      karma::navigation::NavPathPointFlagEnd,
+  };
+  assert(karma::navigation::NavigationSystem::requestFollowPath(
+      world, agent_entity, path));
+
+  karma::navigation::NavigationSystem system;
+  for (int i = 0; i < 200; ++i) {
+    system.update(world, 0.1f);
+    if (world.get<karma::components::NavMeshAgentComponent>(agent_entity).status ==
+        karma::components::NavMeshAgentStatus::Arrived) {
+      break;
+    }
+  }
+
+  const auto& moved_agent =
+      world.get<karma::components::NavMeshAgentComponent>(agent_entity);
+  const auto& transform =
+      world.get<karma::components::TransformComponent>(agent_entity);
+  assert(moved_agent.status == karma::components::NavMeshAgentStatus::Arrived);
+  assert(system.stats().submitted_requests == 0);
+  assert(std::abs(transform.getPosition().x - 4.0f) < 0.25f);
+  assert(std::abs(transform.getPosition().z - 4.0f) < 0.25f);
+}
+
+void testNavigationSystemFollowPathSkipsPassedPrefix() {
+  karma::world::World world;
+
+  const auto agent_entity = world.createEntity();
+  world.add(agent_entity, karma::components::TransformComponent{{2.0f, 0.0f, 0.0f}});
+  karma::components::NavMeshAgentComponent agent;
+  agent.speed = 2.0f;
+  agent.stopping_distance = 0.05f;
+  world.add(agent_entity, std::move(agent));
+
+  karma::navigation::NavPath path;
+  path.status = karma::navigation::NavStatus::Success;
+  path.points = {
+      {0.0f, 0.0f, 0.0f},
+      {1.0f, 0.0f, 0.0f},
+      {4.0f, 0.0f, 0.0f},
+  };
+  assert(karma::navigation::NavigationSystem::requestFollowPath(
+      world, agent_entity, path));
+
+  const auto& requested_agent =
+      world.get<karma::components::NavMeshAgentComponent>(agent_entity);
+  assert(requested_agent.path.size() == 2u);
+  assert(std::abs(requested_agent.path.front().x - 2.0f) < 0.001f);
+  assert(std::abs(requested_agent.path.back().x - 4.0f) < 0.001f);
+  assert(requested_agent.next_waypoint == 1u);
+
+  karma::navigation::NavigationSystem system;
+  system.update(world, 0.1f);
+
+  const auto& transform =
+      world.get<karma::components::TransformComponent>(agent_entity);
+  assert(transform.getPosition().x > 2.0f);
+}
+
 void testExampleWorldGlbCanBake() {
   const std::filesystem::path package_path =
       resolveRepoPath("examples/assets/common_meshes/world");

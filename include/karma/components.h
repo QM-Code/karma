@@ -1345,6 +1345,7 @@ struct NavMeshAgentComponent : world::ComponentTag {
   math::Vec3 current_velocity{};
   world::Entity nav_mesh_entity{};
   navigation::NavQueryFilter query_filter{};
+  std::shared_ptr<const navigation::NavTraversalCostProvider> traversal_cost_provider;
   navigation::NavStatus last_path_status = navigation::NavStatus::QueryFailed;
   NavMeshAgentStatus status = NavMeshAgentStatus::Idle;
   bool has_destination = false;

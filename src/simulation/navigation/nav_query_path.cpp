@@ -17,6 +17,7 @@ namespace {
 using detail::failed;
 using detail::kMaxPathPolys;
 using detail::makeDetourFilter;
+using detail::makeTraversalDetourFilter;
 using detail::mapStraightPathFlags;
 using detail::ptr;
 using detail::succeeded;
@@ -29,14 +30,15 @@ NavPath NavQuery::findPath(const math::Vec3& start,
                            const math::Vec3& search_extents,
                            int max_points,
                            const NavQueryFilter& filter,
-                           int straight_path_options) const {
+                           int straight_path_options,
+                           const NavTraversalCostProvider* traversal_cost_provider) const {
   NavPath result{};
   if (!isValid()) {
     result.status = NavStatus::NoNavMesh;
     return result;
   }
 
-  dtQueryFilter detour_filter = makeDetourFilter(filter);
+  auto detour_filter = makeTraversalDetourFilter(filter, traversal_cost_provider);
   dtPolyRef start_ref = 0;
   dtPolyRef end_ref = 0;
   float nearest_start[3]{};

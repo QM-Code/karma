@@ -1,7 +1,11 @@
 #include "detail/navigation_system_helpers.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
+#include <limits>
+#include <utility>
+#include <vector>
 
 #include "karma/components.h"
 #include "karma/world.h"
@@ -45,10 +49,82 @@ bool hasActivePath(const components::NavMeshAgentComponent& agent) {
   return !agent.path.empty() && agent.next_waypoint < agent.path.size();
 }
 
+void alignPathToCurrentPosition(components::NavMeshAgentComponent& agent,
+                                const math::Vec3& current_nav_position) {
+  if (agent.path.empty()) {
+    agent.next_waypoint = 0;
+    return;
+  }
+  if (agent.path.size() == 1u) {
+    agent.next_waypoint = 0;
+    return;
+  }
+
+  auto distance_squared = [](const math::Vec3& a, const math::Vec3& b) {
+    const math::Vec3 delta = math::subtract(a, b);
+    return math::dot(delta, delta);
+  };
+
+  std::size_t best_segment = 0;
+  float best_t = 0.0f;
+  float best_distance_sq = std::numeric_limits<float>::max();
+  for (std::size_t index = 0; index + 1u < agent.path.size(); ++index) {
+    const math::Vec3 from = agent.path[index];
+    const math::Vec3 to = agent.path[index + 1u];
+    const math::Vec3 segment = math::subtract(to, from);
+    const float segment_length_sq = math::dot(segment, segment);
+    const float t =
+        segment_length_sq <= 0.000001f
+            ? 0.0f
+            : std::clamp(
+                  math::dot(math::subtract(current_nav_position, from),
+                            segment) /
+                      segment_length_sq,
+                  0.0f,
+                  1.0f);
+    const math::Vec3 projected = math::add(from, math::scale(segment, t));
+    const float distance_sq = distance_squared(current_nav_position, projected);
+    if (distance_sq < best_distance_sq) {
+      best_distance_sq = distance_sq;
+      best_segment = index;
+      best_t = t;
+    }
+  }
+
+  std::size_t keep_from = best_t >= 0.99f ? best_segment + 2u
+                                          : best_segment + 1u;
+  const float stop = std::max(agent.stopping_distance, 0.01f);
+  const float stop_sq = stop * stop;
+  while (keep_from < agent.path.size() &&
+         distance_squared(current_nav_position, agent.path[keep_from]) <=
+             stop_sq) {
+    ++keep_from;
+  }
+
+  std::vector<math::Vec3> aligned;
+  aligned.reserve(1u + agent.path.size() -
+                  std::min(keep_from, agent.path.size()));
+  aligned.push_back(current_nav_position);
+  if (keep_from < agent.path.size()) {
+    aligned.insert(
+        aligned.end(),
+        agent.path.begin() + static_cast<std::ptrdiff_t>(keep_from),
+        agent.path.end());
+  } else if (distance_squared(current_nav_position, agent.path.back()) >
+             stop_sq) {
+    aligned.push_back(agent.path.back());
+  }
+
+  agent.path = std::move(aligned);
+  agent.path_point_flags.clear();
+  agent.next_waypoint = agent.path.size() > 1u ? 1u : 0u;
+}
+
 void failPathRequest(components::NavMeshAgentComponent& agent, NavStatus status) {
   agent.path_requested = false;
   agent.path_pending = false;
   agent.path_resolved = false;
+  agent.traversal_cost_provider.reset();
   agent.last_path_status = status;
   if (!hasActivePath(agent)) {
     clearStoredPath(agent);

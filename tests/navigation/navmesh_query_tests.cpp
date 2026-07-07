@@ -1,6 +1,91 @@
 #include "navmesh_test_utils.h"
 
+#include <algorithm>
+
 namespace karma::tests::navigation {
+namespace {
+
+karma::navigation::NavMeshInputGeometry makeTwoRouteGeometry() {
+  karma::world::MeshData mesh;
+  appendQuad(mesh,
+             {-5.0f, 0.0f, -0.5f},
+             {5.0f, 0.0f, -0.5f},
+             {5.0f, 0.0f, 0.5f},
+             {-5.0f, 0.0f, 0.5f});
+  appendQuad(mesh,
+             {-5.0f, 0.0f, 0.5f},
+             {-4.0f, 0.0f, 0.5f},
+             {-4.0f, 0.0f, 4.5f},
+             {-5.0f, 0.0f, 4.5f});
+  appendQuad(mesh,
+             {-5.0f, 0.0f, 4.0f},
+             {5.0f, 0.0f, 4.0f},
+             {5.0f, 0.0f, 5.0f},
+             {-5.0f, 0.0f, 5.0f});
+  appendQuad(mesh,
+             {4.0f, 0.0f, 0.5f},
+             {5.0f, 0.0f, 0.5f},
+             {5.0f, 0.0f, 4.5f},
+             {4.0f, 0.0f, 4.5f});
+
+  karma::navigation::NavMeshInputGeometry geometry;
+  karma::navigation::appendGeometry(geometry, mesh);
+  return geometry;
+}
+
+class MiddleCorridorCostProvider final
+    : public karma::navigation::NavTraversalCostProvider {
+ public:
+  explicit MiddleCorridorCostProvider(float multiplier)
+      : multiplier_(multiplier) {}
+
+  float traversalCost(
+      const karma::navigation::NavTraversalContext& context) const override {
+    const karma::math::Vec3 midpoint{
+        (context.from.x + context.to.x) * 0.5f,
+        (context.from.y + context.to.y) * 0.5f,
+        (context.from.z + context.to.z) * 0.5f,
+    };
+    if (std::abs(midpoint.z) <= 0.75f && std::abs(midpoint.x) <= 4.5f) {
+      return context.base_cost * multiplier_;
+    }
+    return context.base_cost;
+  }
+
+ private:
+  float multiplier_ = 1.0f;
+};
+
+bool pathUsesUpperCorridor(const karma::navigation::NavPath& path) {
+  return std::any_of(path.points.begin(),
+                     path.points.end(),
+                     [](const karma::math::Vec3& point) {
+                       return point.z > 2.0f;
+                     });
+}
+
+karma::navigation::NavPath findTwoRoutePath(
+    const karma::navigation::NavTraversalCostProvider* provider) {
+  karma::navigation::NavMesh nav_mesh;
+  karma::navigation::NavMeshBuildConfig config;
+  config.agent_radius = 0.1f;
+  config.agent_height = 1.0f;
+  config.agent_max_climb = 0.2f;
+  config.cell_size = 0.15f;
+  config.cell_height = 0.1f;
+  assert(nav_mesh.build(makeTwoRouteGeometry(), config));
+
+  karma::navigation::NavQuery query(nav_mesh);
+  return query.findPath({-4.5f, 0.1f, 0.0f},
+                        {4.5f, 0.1f, 0.0f},
+                        {1.0f, 2.0f, 1.0f},
+                        256,
+                        karma::navigation::NavQueryFilter{},
+                        karma::navigation::NavStraightPathOptionNone,
+                        provider);
+}
+
+}  // namespace
 
 void testAdvancedQueryHelpers() {
   karma::navigation::NavMesh nav_mesh;
@@ -95,6 +180,26 @@ void testAdvancedQueryHelpers() {
       assert(query.edgeMidPoint(aabb.polys[0], aabb.polys[1], midpoint));
     }
   }
+}
+
+void testDynamicTraversalCostAvoidsExpensiveRegion() {
+  MiddleCorridorCostProvider provider(5.0f);
+  const karma::navigation::NavPath path = findTwoRoutePath(&provider);
+  assert(path.success());
+  assert(pathUsesUpperCorridor(path));
+}
+
+void testDynamicTraversalCostUsesShorterExpensiveRegionWhenCheaper() {
+  MiddleCorridorCostProvider provider(1.2f);
+  const karma::navigation::NavPath path = findTwoRoutePath(&provider);
+  assert(path.success());
+  assert(!pathUsesUpperCorridor(path));
+}
+
+void testDefaultTraversalCostKeepsNormalPath() {
+  const karma::navigation::NavPath path = findTwoRoutePath(nullptr);
+  assert(path.success());
+  assert(!pathUsesUpperCorridor(path));
 }
 
 void testOffMeshConnectionBridgesGap() {

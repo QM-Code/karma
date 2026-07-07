@@ -134,6 +134,31 @@ struct NavQueryFilter {
 };
 
 /// \ingroup karma_navigation
+/// Per-edge traversal data supplied to dynamic path-cost providers.
+struct NavTraversalContext {
+  uint64_t previous_poly_ref = 0;
+  uint64_t current_poly_ref = 0;
+  uint64_t next_poly_ref = 0;
+  math::Vec3 from{};
+  math::Vec3 to{};
+  float base_distance = 0.0f;
+  unsigned char area = kNavAreaDefault;
+  float area_cost = 1.0f;
+  float base_cost = 0.0f;
+  const NavQueryFilter* filter = nullptr;
+};
+
+/// \ingroup karma_navigation
+/// Dynamic traversal-cost provider called by Detour during path search.
+class NavTraversalCostProvider {
+ public:
+  virtual ~NavTraversalCostProvider() = default;
+
+  /// Returns the final cost for traversing `context.from` to `context.to`.
+  virtual float traversalCost(const NavTraversalContext& context) const = 0;
+};
+
+/// \ingroup karma_navigation
 /// Static navmesh build settings.
 struct NavMeshBuildConfig {
   NavMeshBuildMode build_mode = NavMeshBuildMode::Solo;
@@ -544,7 +569,8 @@ class NavQuery {
                    const math::Vec3& search_extents = {2.0f, 4.0f, 2.0f},
                    int max_points = 256,
                    const NavQueryFilter& filter = NavQueryFilter{},
-                   int straight_path_options = NavStraightPathOptionNone) const;
+                   int straight_path_options = NavStraightPathOptionNone,
+                   const NavTraversalCostProvider* traversal_cost_provider = nullptr) const;
   /// Finds a smoothed path by iteratively moving along the Detour corridor.
   NavPath findSmoothPath(const math::Vec3& start,
                          const math::Vec3& end,
@@ -1195,7 +1221,12 @@ class NavigationSystem : public world::ISystem {
   /// Requests a path for an agent entity.
   static bool requestMoveTo(world::World& world,
                             world::Entity agent_entity,
-                            const math::Vec3& destination);
+                            const math::Vec3& destination,
+                            std::shared_ptr<const NavTraversalCostProvider> traversal_cost_provider = nullptr);
+  /// Installs an already solved path for an agent entity without recomputing it.
+  static bool requestFollowPath(world::World& world,
+                                world::Entity agent_entity,
+                                const NavPath& path);
   /// Clears an agent path/request state.
   static void clearPath(world::World& world, world::Entity agent_entity);
   /// Requests a crowd-controlled move target for an agent entity.

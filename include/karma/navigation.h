@@ -470,6 +470,7 @@ struct NavPath {
   NavStatus status = NavStatus::QueryFailed;
   std::vector<math::Vec3> points;
   std::vector<uint8_t> point_flags;
+  std::vector<float> point_speed_multipliers;
   bool partial = false;
 
   /// Returns true for complete or partial path success.

@@ -95,6 +95,10 @@ bool NavigationSystem::requestFollowPath(world::World& world,
   if (agent.path_point_flags.size() != agent.path.size()) {
     agent.path_point_flags.clear();
   }
+  agent.path_point_speed_multipliers = path.point_speed_multipliers;
+  if (agent.path_point_speed_multipliers.size() != agent.path.size()) {
+    agent.path_point_speed_multipliers.clear();
+  }
   if (world.has<components::TransformComponent>(agent_entity)) {
     const auto& transform =
         world.get<components::TransformComponent>(agent_entity);

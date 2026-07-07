@@ -88,6 +88,7 @@ void testCrowdAgentCharacterControllerVelocityMode();
 void testReplacementRequestKeepsCurrentPathMoving();
 void testNavigationSystemFollowsPrecomputedPath();
 void testNavigationSystemFollowPathSkipsPassedPrefix();
+void testNavigationSystemFollowPathUsesSpeedMultipliers();
 void testExampleWorldGlbCanBake();
 
 }  // namespace karma::tests::navigation

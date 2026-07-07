@@ -42,6 +42,7 @@ math::Vec3 worldSpacePosition(const math::Vec3& nav_position,
 void clearStoredPath(components::NavMeshAgentComponent& agent) {
   agent.path.clear();
   agent.path_point_flags.clear();
+  agent.path_point_speed_multipliers.clear();
   agent.next_waypoint = 0;
 }
 
@@ -53,10 +54,14 @@ void alignPathToCurrentPosition(components::NavMeshAgentComponent& agent,
                                 const math::Vec3& current_nav_position) {
   if (agent.path.empty()) {
     agent.next_waypoint = 0;
+    agent.path_point_speed_multipliers.clear();
     return;
   }
   if (agent.path.size() == 1u) {
     agent.next_waypoint = 0;
+    if (agent.path_point_speed_multipliers.size() != agent.path.size()) {
+      agent.path_point_speed_multipliers.clear();
+    }
     return;
   }
 
@@ -68,6 +73,10 @@ void alignPathToCurrentPosition(components::NavMeshAgentComponent& agent,
   std::size_t best_segment = 0;
   float best_t = 0.0f;
   float best_distance_sq = std::numeric_limits<float>::max();
+  const bool has_speed_multipliers =
+      agent.path_point_speed_multipliers.size() == agent.path.size();
+  const std::vector<float> original_speed_multipliers =
+      agent.path_point_speed_multipliers;
   for (std::size_t index = 0; index + 1u < agent.path.size(); ++index) {
     const math::Vec3 from = agent.path[index];
     const math::Vec3 to = agent.path[index + 1u];
@@ -117,6 +126,29 @@ void alignPathToCurrentPosition(components::NavMeshAgentComponent& agent,
 
   agent.path = std::move(aligned);
   agent.path_point_flags.clear();
+  if (has_speed_multipliers) {
+    std::vector<float> aligned_speed_multipliers;
+    aligned_speed_multipliers.reserve(agent.path.size());
+    const std::size_t first_multiplier_index =
+        std::min(best_segment + 1u, original_speed_multipliers.size() - 1u);
+    aligned_speed_multipliers.push_back(
+        original_speed_multipliers[first_multiplier_index]);
+    if (keep_from < original_speed_multipliers.size()) {
+      aligned_speed_multipliers.insert(
+          aligned_speed_multipliers.end(),
+          original_speed_multipliers.begin() +
+              static_cast<std::ptrdiff_t>(keep_from),
+          original_speed_multipliers.end());
+    } else if (agent.path.size() > 1u) {
+      aligned_speed_multipliers.push_back(original_speed_multipliers.back());
+    }
+    agent.path_point_speed_multipliers =
+        aligned_speed_multipliers.size() == agent.path.size()
+            ? std::move(aligned_speed_multipliers)
+            : std::vector<float>{};
+  } else {
+    agent.path_point_speed_multipliers.clear();
+  }
   agent.next_waypoint = agent.path.size() > 1u ? 1u : 0u;
 }
 

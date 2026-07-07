@@ -1362,6 +1362,7 @@ struct NavMeshAgentComponent : world::ComponentTag {
   uint64_t path_request_id = 0;
   std::vector<math::Vec3> path;
   std::vector<uint8_t> path_point_flags;
+  std::vector<float> path_point_speed_multipliers;
   size_t next_waypoint = 0;
 };
 

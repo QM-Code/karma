@@ -650,6 +650,38 @@ void testNavigationSystemFollowPathSkipsPassedPrefix() {
   assert(transform.getPosition().x > 2.0f);
 }
 
+void testNavigationSystemFollowPathUsesSpeedMultipliers() {
+  karma::world::World world;
+
+  const auto agent_entity = world.createEntity();
+  world.add(agent_entity,
+            karma::components::TransformComponent{{0.0f, 0.0f, 0.0f}});
+  karma::components::NavMeshAgentComponent agent;
+  agent.speed = 4.0f;
+  agent.stopping_distance = 0.001f;
+  world.add(agent_entity, std::move(agent));
+
+  karma::navigation::NavPath path;
+  path.status = karma::navigation::NavStatus::Success;
+  path.points = {
+      {0.0f, 0.0f, 0.0f},
+      {4.0f, 0.0f, 0.0f},
+  };
+  path.point_speed_multipliers = {1.0f, 0.5f};
+  assert(karma::navigation::NavigationSystem::requestFollowPath(
+      world, agent_entity, path));
+
+  karma::navigation::NavigationSystem system;
+  system.update(world, 1.0f);
+
+  const auto& transform =
+      world.get<karma::components::TransformComponent>(agent_entity);
+  const auto& moved_agent =
+      world.get<karma::components::NavMeshAgentComponent>(agent_entity);
+  assert(std::abs(transform.getPosition().x - 2.0f) < 0.05f);
+  assert(moved_agent.status == karma::components::NavMeshAgentStatus::Moving);
+}
+
 void testExampleWorldGlbCanBake() {
   const std::filesystem::path package_path =
       resolveRepoPath("examples/assets/common_meshes/world");

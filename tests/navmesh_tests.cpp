@@ -36,6 +36,7 @@ int main() {
   testReplacementRequestKeepsCurrentPathMoving();
   testNavigationSystemFollowsPrecomputedPath();
   testNavigationSystemFollowPathSkipsPassedPrefix();
+  testNavigationSystemFollowPathUsesSpeedMultipliers();
   testExampleWorldGlbCanBake();
   std::cout << "navmesh tests passed\n";
   return 0;

@@ -67,6 +67,7 @@ variation without duplicating effect assets.
 ```cpp
 components::ParticleEffectOverrideComponent effect_override{};
 effect_override.time_scale = 0.5f;
+effect_override.emission_scale = 1.5f;
 effect_override.radius_scale = 1.35f;
 effect_override.start_color = math::Color{1.0f, 1.0f, 1.0f, 0.95f};
 effect_override.end_color = math::Color{0.18f, 1.0f, 0.28f, 0.0f};
@@ -91,6 +92,7 @@ visual::particles::clearEffectOverrides(*world, entity);
 Supported override fields are intentionally general-purpose:
 
 - `time_scale`
+- `emission_scale`
 - `spawn_rate_scale`
 - `lifetime_scale`
 - `size_scale`

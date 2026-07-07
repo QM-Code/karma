@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "haste",
+  "namespace": "prefabs/haste",
+  "name": "Haste",
+  "radius": 1.0
+}

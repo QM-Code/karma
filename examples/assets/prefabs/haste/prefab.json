@@ -1,0 +1,4441 @@
+{
+  "nodes": [
+    {
+      "components": {
+        "TagComponent": {
+          "name": "Haste"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0,
+      "name": "Haste",
+      "parent": null
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.41999998688697815,
+          "enabled": true,
+          "end_color": [
+            1.600000023841858,
+            1.600000023841858,
+            1.600000023841858,
+            0.20000000298023224
+          ],
+          "end_width": {
+            "$expr": "radius * (0.060000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (1.140265)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.231143)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.119900)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.330861)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.090309)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.428587)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.051476)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.523311)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.003566)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.614003)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.946933)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.699650)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.882116)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.779310)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.809822)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.852157)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.730889)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.917510)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.646248)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.974864)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.556874)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.023894)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.463736)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.064445)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.367758)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.096515)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.269785)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.120219)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.170566)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.135743)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.070746)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.143311)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.029119)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.143132)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.128540)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.135380)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.227069)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.120164)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.324251)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.097526)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.419602)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.067451)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.512566)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (1.029886)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.602505)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.984775)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.688691)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.932101)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.770309)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.871927)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.846485)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.804431)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.916321)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.729942)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.978939)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.648949)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.033525)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.562112)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.079381)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.470243)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.115961)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.374280)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.142900)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.275248)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.160031)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.174213)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.167381)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.072235)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.165155)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.029679)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.153704)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.130615)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.133489)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.229770)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.105030)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.326468)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.068865)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.420158)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-1.025509)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.510388)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.975422)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.596784)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.918998)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.679009)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.856556)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.756729)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.788360)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.829573)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.714639)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.897111)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.635624)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.958838)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.551587)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.014173)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.462878)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.062474)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.369957)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.103070)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.273416)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.135293)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.173988)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.158528)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.072538)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.172261)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.029959)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.176115)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.132448)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.169893)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.233844)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.153590)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.333078)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.127405)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.429143)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.091723)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.521133)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-1.047099)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.608281)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.994214)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.689968)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.933830)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.765731)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.866746)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.835245)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.793751)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.898299)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.715586)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.954763)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.632923)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.004541)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.546349)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.047538)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.456371)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.083625)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.363435)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.112611)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.267953)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.134240)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.170341)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.148190)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (-0.071048)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.154093)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.029398)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.151569)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.130373)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (1.140265)"
+              },
+              {
+                "$expr": "height * (0.050000)"
+              },
+              {
+                "$expr": "radius * (0.231143)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": {
+            "$var": "color"
+          },
+          "start_width": {
+            "$expr": "radius * (0.145000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 2.4000000953674316,
+          "uv_scroll_speed": -2.0999999046325684,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "base_speed_ring"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1,
+      "name": "base_speed_ring",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.3400000035762787,
+          "enabled": true,
+          "end_color": [
+            1.600000023841858,
+            1.600000023841858,
+            1.600000023841858,
+            0.10000000149011612
+          ],
+          "end_width": {
+            "$expr": "radius * (0.035000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (0.700783)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.614634)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.639551)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.682913)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.570842)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.744015)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.495492)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.796909)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.414568)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.840771)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.329293)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.875048)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.240966)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.899483)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.150872)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.914114)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.060202)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.919233)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.030012)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.915329)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.118930)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.903001)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.205906)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.882877)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.290464)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.855534)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.372241)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.821439)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.450919)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.780922)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.526156)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.734169)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.597512)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.681261)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.664416)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.622229)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.726137)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.557124)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.781803)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.486100)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.830450)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.409479)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.871082)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.327800)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.902765)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.241845)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.924711)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.152621)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.936355)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.061323)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.937415)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.030736)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.927921)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.122212)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.908205)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.211813)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.878866)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.298386)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.840704)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.380971)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.794639)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.458840)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.741618)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.531494)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.682540)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.598634)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.618189)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.660102)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.549204)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.715813)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.476071)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.765674)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.399158)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.809517)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.318758)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.847053)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.235169)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.877845)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.148761)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.901326)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.060045)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.916833)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.030286)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.923683)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.121333)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.921245)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.212007)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.909035)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.301075)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.886787)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.387227)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.854511)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.469163)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.812518)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.545681)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.761414)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.615756)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.702061)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.678599)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.635511)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.733692)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.562921)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.780779)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.485464)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.819839)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.404247)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.851019)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.320251)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.874563)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.234290)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.890729)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.147012)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.899712)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (-0.058923)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.901596)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.029562)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.896325)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.118051)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.883707)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.206100)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.863455)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.293153)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.835246)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.378497)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.798800)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.461243)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.753964)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.540343)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.700783)"
+              },
+              {
+                "$expr": "height * (0.120000)"
+              },
+              {
+                "$expr": "radius * (0.614634)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.4000000953674316,
+            2.4000000953674316,
+            2.4000000953674316,
+            0.7799999713897705
+          ],
+          "start_width": {
+            "$expr": "radius * (0.085000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.7999999523162842,
+          "uv_scroll_speed": 2.299999952316284,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "ankle_speed_ring"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2,
+      "name": "ankle_speed_ring",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.36000001430511475,
+          "enabled": true,
+          "end_color": [
+            1.600000023841858,
+            1.600000023841858,
+            1.600000023841858,
+            0.1599999964237213
+          ],
+          "end_width": {
+            "$expr": "radius * (0.050000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (0.208663)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.975175)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.112111)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.991258)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.014394)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.996289)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.083111)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.990315)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.179094)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.973677)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.272384)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.946968)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.362005)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.910962)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.447199)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.866533)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.527420)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.814573)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.602301)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.755916)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.671595)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.691285)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.735102)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.621270)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.792605)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.546327)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.843802)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.466818)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.888272)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.383060)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.925459)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.295400)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.954698)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.204282)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.975258)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.110302)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.986412)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.014252)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.987521)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.082877)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.978116)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.179911)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.957963)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.275547)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.927117)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.368425)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.885931)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.457209)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.835050)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.540678)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.775358)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.617792)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.707913)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.687749)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.633864)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.750004)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.554362)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.804263)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.470490)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.850440)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.383203)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.888603)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.293303)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.918890)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.201445)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.941440)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.108160)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.956325)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.013920)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.963506)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.080804)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.962819)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.175472)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.953985)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.269419)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.936658)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.361817)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.910488)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.451671)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.875200)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.537842)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.830668)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.619093)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.776990)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.694169)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.714521)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.761877)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.643898)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.821174)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.566019)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.871235)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.481994)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.911508)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.393080)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.941729)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.300593)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.961917)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.205826)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.972326)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.109970)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.973384)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (-0.014063)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.965613)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.081039)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.949547)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.174656)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.925663)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.266256)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.894334)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.355398)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.855802)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.441660)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.810191)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.524583)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.757547)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.603601)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.697893)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.678014)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.631304)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.746976)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.557984)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.809517)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.478322)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.864598)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.392938)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.911177)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.302690)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.948299)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.208663)"
+              },
+              {
+                "$expr": "height * (0.470000)"
+              },
+              {
+                "$expr": "radius * (0.975175)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": {
+            "$var": "color"
+          },
+          "start_width": {
+            "$expr": "radius * (0.115000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 2.200000047683716,
+          "uv_scroll_speed": -2.549999952316284,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "waist_speed_ring"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 3,
+      "name": "waist_speed_ring",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.30000001192092896,
+          "enabled": true,
+          "end_color": [
+            1.600000023841858,
+            1.600000023841858,
+            1.600000023841858,
+            0.07999999821186066
+          ],
+          "end_width": {
+            "$expr": "radius * (0.030000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (-0.404492)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.579722)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.465553)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.529306)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.520020)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.472155)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.567349)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.409328)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.607216)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.341882)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.639472)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.270812)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.664074)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.197007)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.681021)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.121249)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.690292)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.044235)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.691812)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.033375)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.685440)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.110901)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.670996)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.187587)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.648312)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.262563)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.617299)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.334834)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.578015)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.403301)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.530731)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.466806)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.475962)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.524213)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.414473)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.574481)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.347249)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.616748)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.275435)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.650389)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.200261)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.675042)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.122957)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.690612)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.044680)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.697228)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.033538)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.695186)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.110809)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.684875)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.186386)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.666702)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.259618)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.641041)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.329899)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.608199)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.396608)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.568423)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.459062)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.521925)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.516482)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.468943)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.568005)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.409801)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.612712)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.344976)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.649689)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.275139)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.678109)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.201171)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.697304)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.124149)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.706842)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (-0.045296)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.706562)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.034086)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.696588)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.112704)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.677306)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.189351)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.649308)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.262966)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.613322)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.332678)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.570131)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.397800)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.520500)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.457809)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.465135)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.512289)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.404655)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.560873)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.339609)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.603180)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.270516)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.638773)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.197917)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.667140)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.122440)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.687713)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.044852)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.699906)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.033923)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.703187)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.112796)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.697153)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.190552)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.681600)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.265911)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.656580)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.337613)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.622422)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.404492)"
+              },
+              {
+                "$expr": "height * (0.740000)"
+              },
+              {
+                "$expr": "radius * (0.579722)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.299999952316284,
+            2.299999952316284,
+            2.299999952316284,
+            0.6800000071525574
+          ],
+          "start_width": {
+            "$expr": "radius * (0.075000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.5,
+          "uv_scroll_speed": 2.799999952316284,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "shoulder_speed_ring"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 4,
+      "name": "shoulder_speed_ring",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (0.538693)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (0.134626)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.739830)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (0.134626)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.940966)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (0.134626)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.070000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -3.25,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_0"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 5,
+      "name": "speed_streak_0",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (0.170183)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (0.587115)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.406337)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (0.587115)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.642491)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (0.587115)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.088000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -3.359999895095825,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_1"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 6,
+      "name": "speed_streak_1",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (0.058621)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (0.550875)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.100242)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (0.550875)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.259106)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (0.550875)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.106000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -3.4700000286102295,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_2"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 7,
+      "name": "speed_streak_2",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (-0.546971)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (0.464266)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.670817)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (0.464266)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.794663)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (0.464266)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.070000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -3.5799999237060547,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_3"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 8,
+      "name": "speed_streak_3",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (-0.397061)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (-0.108854)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.598197)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (-0.108854)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.799334)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (-0.108854)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.088000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -3.690000057220459,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_4"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 9,
+      "name": "speed_streak_4",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (-0.131471)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (-0.531180)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.367625)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (-0.531180)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.603779)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (-0.531180)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.106000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -3.799999952316284,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_5"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 10,
+      "name": "speed_streak_5",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (-0.015626)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (-0.787153)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.143238)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (-0.787153)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.302101)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (-0.787153)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.070000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -3.9099998474121094,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_6"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 11,
+      "name": "speed_streak_6",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "additive",
+          "depth_test": true,
+          "edge_softness": 0.2800000011920929,
+          "enabled": true,
+          "end_color": [
+            1.7999999523162842,
+            1.7999999523162842,
+            1.7999999523162842,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.028000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (0.323632)"
+              },
+              {
+                "$expr": "height * (0.040000)"
+              },
+              {
+                "$expr": "radius * (-0.309695)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.447478)"
+              },
+              {
+                "$expr": "height * (0.500000)"
+              },
+              {
+                "$expr": "radius * (-0.309695)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.571324)"
+              },
+              {
+                "$expr": "height * (1.030000)"
+              },
+              {
+                "$expr": "radius * (-0.309695)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            2.799999952316284,
+            2.799999952316284,
+            2.799999952316284,
+            0.800000011920929
+          ],
+          "start_width": {
+            "$expr": "radius * (0.088000)"
+          },
+          "texture_key": "prefabs/haste/haste_streak_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 1.100000023841858,
+          "uv_scroll_speed": -4.019999980926514,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "speed_streak_7"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 12,
+      "name": "speed_streak_7",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "alpha",
+          "depth_test": true,
+          "edge_softness": 0.7599999904632568,
+          "enabled": true,
+          "end_color": [
+            1.2000000476837158,
+            1.2000000476837158,
+            1.2000000476837158,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.180000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (-0.520000)"
+              },
+              {
+                "$expr": "height * (0.100000)"
+              },
+              {
+                "$expr": "radius * (-0.780000)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.320000)"
+              },
+              {
+                "$expr": "height * (0.460000)"
+              },
+              {
+                "$expr": "radius * (-0.327600)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (-0.100000)"
+              },
+              {
+                "$expr": "height * (0.920000)"
+              },
+              {
+                "$expr": "radius * (0.040000)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            1.399999976158142,
+            1.399999976158142,
+            1.399999976158142,
+            0.3400000035762787
+          ],
+          "start_width": {
+            "$expr": "radius * (0.560000)"
+          },
+          "texture_key": "prefabs/haste/haste_haze_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 0.8500000238418579,
+          "uv_scroll_speed": -0.41999998688697815,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "afterimage_left"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 13,
+      "name": "afterimage_left",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleBeamComponent": {
+          "blend_mode": "alpha",
+          "depth_test": true,
+          "edge_softness": 0.7200000286102295,
+          "enabled": true,
+          "end_color": [
+            1.2000000476837158,
+            1.2000000476837158,
+            1.2000000476837158,
+            0.0
+          ],
+          "end_width": {
+            "$expr": "radius * (0.160000)"
+          },
+          "layer": 0,
+          "local_path_points": [
+            [
+              {
+                "$expr": "radius * (0.520000)"
+              },
+              {
+                "$expr": "height * (0.080000)"
+              },
+              {
+                "$expr": "radius * (-0.700000)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.320000)"
+              },
+              {
+                "$expr": "height * (0.420000)"
+              },
+              {
+                "$expr": "radius * (-0.294000)"
+              }
+            ],
+            [
+              {
+                "$expr": "radius * (0.100000)"
+              },
+              {
+                "$expr": "height * (0.880000)"
+              },
+              {
+                "$expr": "radius * (0.040000)"
+              }
+            ]
+          ],
+          "restart_count": 0,
+          "start_color": [
+            1.399999976158142,
+            1.399999976158142,
+            1.399999976158142,
+            0.30000001192092896
+          ],
+          "start_width": {
+            "$expr": "radius * (0.480000)"
+          },
+          "texture_key": "prefabs/haste/haste_haze_atlas",
+          "time_scale": 1.0,
+          "uv_repeat": 0.800000011920929,
+          "uv_scroll_speed": -0.36000001430511475,
+          "visible": true
+        },
+        "TagComponent": {
+          "name": "afterimage_right"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 14,
+      "name": "afterimage_right",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/haste/speed_streaks",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "emission_scale": {
+            "$var": "intensity"
+          },
+          "lifetime_scale": {
+            "$var": "duration"
+          },
+          "radius_scale": {
+            "$expr": "radius / (1.000000)"
+          },
+          "size_scale": {
+            "$expr": "(radius / (1.000000)) * (1.000000)"
+          },
+          "source_height": {
+            "$var": "height"
+          },
+          "source_jitter_radius": {
+            "$expr": "radius * (0.025000)"
+          },
+          "source_outer_radius": {
+            "$expr": "radius * (1.060000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (1.000000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "speed_streaks"
+        },
+        "TransformComponent": {
+          "position": [
+            {
+              "$expr": "radius * (0.000000)"
+            },
+            {
+              "$expr": "height * (0.500000)"
+            },
+            {
+              "$expr": "radius * (0.000000)"
+            }
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 15,
+      "name": "speed_streaks",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/haste/tick_sparks",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "emission_scale": {
+            "$var": "intensity"
+          },
+          "lifetime_scale": {
+            "$var": "duration"
+          },
+          "radius_scale": {
+            "$expr": "radius / (1.000000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (1.000000)"
+          },
+          "source_inner_radius": {
+            "$expr": "radius * (0.580000)"
+          },
+          "source_jitter_radius": {
+            "$expr": "radius * (0.030000)"
+          },
+          "source_outer_radius": {
+            "$expr": "radius * (1.220000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (1.000000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "tick_sparks"
+        },
+        "TransformComponent": {
+          "position": [
+            {
+              "$expr": "radius * (0.000000)"
+            },
+            {
+              "$expr": "height * (0.480000)"
+            },
+            {
+              "$expr": "radius * (0.000000)"
+            }
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 16,
+      "name": "tick_sparks",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/haste/afterimage_haze",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "emission_scale": {
+            "$var": "intensity"
+          },
+          "lifetime_scale": {
+            "$var": "duration"
+          },
+          "radius_scale": {
+            "$expr": "radius / (1.000000)"
+          },
+          "size_scale": {
+            "$expr": "(radius / (1.000000)) * (1.080000)"
+          },
+          "source_height": {
+            "$var": "height"
+          },
+          "source_jitter_radius": {
+            "$expr": "radius * (0.055000)"
+          },
+          "source_outer_radius": {
+            "$expr": "radius * (0.740000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (1.000000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "afterimage_haze"
+        },
+        "TransformComponent": {
+          "position": [
+            {
+              "$expr": "radius * (0.000000)"
+            },
+            {
+              "$expr": "height * (0.500000)"
+            },
+            {
+              "$expr": "radius * (0.000000)"
+            }
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 17,
+      "name": "afterimage_haze",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/haste/distortion",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "emission_scale": {
+            "$var": "intensity"
+          },
+          "lifetime_scale": {
+            "$var": "duration"
+          },
+          "radius_scale": {
+            "$expr": "radius / (1.000000)"
+          },
+          "size_scale": {
+            "$expr": "(radius / (1.000000)) * (1.000000)"
+          },
+          "source_height": {
+            "$var": "height"
+          },
+          "source_jitter_radius": {
+            "$expr": "radius * (0.060000)"
+          },
+          "source_outer_radius": {
+            "$expr": "radius * (1.020000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (1.000000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "distortion"
+        },
+        "TransformComponent": {
+          "position": [
+            {
+              "$expr": "radius * (0.000000)"
+            },
+            {
+              "$expr": "height * (0.500000)"
+            },
+            {
+              "$expr": "radius * (0.000000)"
+            }
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 18,
+      "name": "distortion",
+      "parent": 0
+    },
+    {
+      "components": {
+        "LightComponent": {
+          "casts_shadows": false,
+          "color": {
+            "$var": "color"
+          },
+          "inner_cone_degrees": 15.0,
+          "intensity": {
+            "$expr": "intensity * 3.4"
+          },
+          "outer_cone_degrees": 30.0,
+          "range": {
+            "$expr": "radius * (3.600000)"
+          },
+          "shadow_extent": 0.0,
+          "type": "point"
+        },
+        "TagComponent": {
+          "name": "haste_glow"
+        },
+        "TransformComponent": {
+          "position": [
+            {
+              "$expr": "radius * (0.000000)"
+            },
+            {
+              "$expr": "height * (0.540000)"
+            },
+            {
+              "$expr": "radius * (0.000000)"
+            }
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 19,
+      "name": "haste_glow",
+      "parent": 0
+    }
+  ],
+  "root": 0,
+  "variables": {
+    "color": {
+      "default": [
+        1.7999999523162842,
+        1.7999999523162842,
+        1.7999999523162842,
+        1.0
+      ],
+      "type": "color"
+    },
+    "duration": {
+      "default": 1.0,
+      "type": "float"
+    },
+    "height": {
+      "default": 2.549999952316284,
+      "type": "float"
+    },
+    "intensity": {
+      "default": 1.0,
+      "type": "float"
+    },
+    "radius": {
+      "default": 1.0,
+      "type": "float"
+    }
+  },
+  "version": 2
+}

@@ -337,6 +337,10 @@ class DiligentBackend final : public Backend {
     rendering::DeformationId deformation = rendering::kInvalidDeformation;
     glm::mat4 transform{1.0f};
     glm::vec4 params{0.0f};
+    rendering::VolumeDrawParams volume_params{};
+    bool has_volume_params = false;
+    bool requires_scene_sample = false;
+    bool post_particle_scene_sample = false;
     bool visible = true;
     bool shadow_visible = true;
     bool transform_changed = true;
@@ -500,11 +504,14 @@ class DiligentBackend final : public Backend {
     enum class SceneSampleMode : uint32_t {
       None = 0,
       ReflectionOverlay = 1,
+      Required = 2,
     };
 
     ForwardBatchKey key{};
     glm::mat4 transform{1.0f};
     glm::vec4 params{0.0f};
+    rendering::VolumeDrawParams volume_params{};
+    bool has_volume_params = false;
     rendering::DeformationId deformation = rendering::kInvalidDeformation;
     float depth = 0.0f;
     SceneSampleMode scene_sample_mode = SceneSampleMode::None;

@@ -1,0 +1,45 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/haste/haste_streak_atlas",
+      "path": "textures/haste_streak_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/haste/haste_spark_atlas",
+      "path": "textures/haste_spark_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/haste/haste_haze_atlas",
+      "path": "textures/haste_haze_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/haste/heat_atlas",
+      "path": "textures/heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/haste/speed_streaks",
+      "path": "particles/haste_speed_streaks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/haste/tick_sparks",
+      "path": "particles/haste_tick_sparks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/haste/afterimage_haze",
+      "path": "particles/haste_afterimage_haze.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/haste/distortion",
+      "path": "particles/haste_distortion.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

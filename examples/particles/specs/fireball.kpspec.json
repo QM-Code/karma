@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "fireball",
+  "namespace": "prefabs/fireball",
+  "name": "Generated Fireball",
+  "radius": 9.144
+}

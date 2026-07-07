@@ -206,6 +206,21 @@ bool parsePipeline(const Json& root,
       (!out.vertex_shader_path.empty() || !out.fragment_shader_path.empty())) {
     return fail(diagnostic, "shader paths are only valid for custom material pipelines");
   }
+  if (out.name == "custom") {
+    auto require_shader_file = [&](const char* label, const std::filesystem::path& shader_path) {
+      std::ifstream shader(shader_path);
+      if (!shader) {
+        return fail(diagnostic,
+                    std::string("custom material pipeline ") + label +
+                        " shader is missing or unreadable: " + shader_path.string());
+      }
+      return true;
+    };
+    if (!require_shader_file("vertex", out.vertex_shader_path) ||
+        !require_shader_file("fragment", out.fragment_shader_path)) {
+      return false;
+    }
+  }
 
   auto read_entry = [&](const char* key, std::string& dst) {
     const auto entry_it = pipeline.find(key);

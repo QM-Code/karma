@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "root": 0,
   "nodes": [
     {
@@ -7,11 +7,26 @@
       "name": "Purple Gallery Wave",
       "parent": null,
       "components": {
-        "TagComponent": { "name": "Purple Gallery Wave" },
+        "TagComponent": {
+          "name": "Purple Gallery Wave"
+        },
         "TransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
         }
       }
     },
@@ -20,24 +35,36 @@
       "name": "body",
       "parent": 0,
       "components": {
-        "TagComponent": { "name": "body" },
+        "TagComponent": {
+          "name": "body"
+        },
         "TransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
         },
         "VolumetricComponent": {
           "shape": "sphere",
-          "color": [0.78, 0.34, 1, 1],
-          "emissive_color": [1.872, 0.816, 2.4, 1],
           "radius": 2.4,
-          "density": 0.201580,
-          "center_opacity": 0.62,
-          "distortion_strength": 1.8,
-          "noise_strength": 1,
-          "overlay_depth": 0.12,
+          "scale_with_transform": false,
           "visible": true,
-          "scale_with_transform": false
+          "overlay_depth": 0.12,
+          "capsule_half_length": 0.0,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -46,15 +73,35 @@
       "name": "glow",
       "parent": 0,
       "components": {
-        "TagComponent": { "name": "glow" },
+        "TagComponent": {
+          "name": "glow"
+        },
         "TransformComponent": {
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0, 1],
-          "scale": [1, 1, 1]
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
         },
         "LightComponent": {
           "type": "point",
-          "color": [0.8196, 0.4588, 1, 1],
+          "color": [
+            0.8196,
+            0.4588,
+            1,
+            1
+          ],
           "intensity": 82,
           "range": 13,
           "inner_cone_degrees": 15,

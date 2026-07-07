@@ -22,7 +22,7 @@ Directory prefabs are loaded from `prefab.json`:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "root": 0,
   "nodes": [
     {

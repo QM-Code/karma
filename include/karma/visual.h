@@ -588,7 +588,8 @@ namespace karma::visual::volumes {
 /// `VolumetricComponent` entities.
 class VolumeSystem {
  public:
-  explicit VolumeSystem(rendering::GraphicsDevice* device);
+  explicit VolumeSystem(rendering::GraphicsDevice* device,
+                        const assets::AssetRegistry* assets = nullptr);
   ~VolumeSystem();
 
   VolumeSystem(const VolumeSystem&) = delete;
@@ -598,7 +599,11 @@ class VolumeSystem {
 
  private:
   struct RuntimeState {
-    rendering::MaterialId material = rendering::kInvalidMaterial;
+    rendering::MaterialId interior_material = rendering::kInvalidMaterial;
+    rendering::MaterialId surface_material = rendering::kInvalidMaterial;
+    std::string interior_material_key;
+    std::string surface_material_key;
+    uint64_t material_registry_version = 0u;
   };
 
   void ensureSharedResources();
@@ -612,6 +617,7 @@ class VolumeSystem {
   }
 
   rendering::GraphicsDevice* device_ = nullptr;
+  const assets::AssetRegistry* assets_ = nullptr;
   rendering::MeshId overlay_mesh_ = rendering::kInvalidMesh;
   std::unordered_map<uint64_t, RuntimeState> runtime_;
 };

@@ -16,7 +16,10 @@
         "chromatic_ray",
         "daze",
         "heal",
+        "haste",
+        "detect_magic",
         "breathe_fire",
+        "fireball",
         "impact_burst",
         "energy_orb"
       ]

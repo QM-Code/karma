@@ -99,9 +99,16 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     examples/particles/explosion_stress.cpp)
   karma_add_graphical_example(particles_generated_preview particles generated_preview
     examples/particles/generated_preview.cpp)
+  karma_add_graphical_example(particles_generated_scale_preview particles generated_scale_preview
+    examples/particles/generated_preview.cpp)
+  target_compile_definitions(particles_generated_scale_preview PRIVATE
+    KARMA_PARTICLE_SCALE_REFERENCE_PREVIEW=1)
   if (TARGET karma_particle_effect_tools_lib)
     target_link_libraries(particles_generated_preview PRIVATE karma_particle_effect_tools_lib)
+    target_link_libraries(particles_generated_scale_preview PRIVATE karma_particle_effect_tools_lib)
     target_compile_definitions(particles_generated_preview PRIVATE
+      KARMA_PARTICLE_PREVIEW_GENERATION=1)
+    target_compile_definitions(particles_generated_scale_preview PRIVATE
       KARMA_PARTICLE_PREVIEW_GENERATION=1)
   endif()
 

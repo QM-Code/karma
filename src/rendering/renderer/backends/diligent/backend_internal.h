@@ -75,6 +75,11 @@ struct DrawConstants {
   float material_params4[4];
   float material_params5[4];
   float material_params6[4];
+  float volume_params0[4];
+  float volume_params1[4];
+  float volume_params2[4];
+  float volume_params3[4];
+  float volume_params4[4];
   float texcoord_row0[12][4];
   float texcoord_row1[12][4];
 };

@@ -93,11 +93,17 @@ Shared example helpers live in `examples/common/`.
 - `particles/generated_preview.cpp`: target `particles_generated_preview`,
   output `examples/particles/generated_preview`. Loads a generated particle
   package path, accepts a `.kpspec.json` for auto-generation when tools are
-  enabled, and defaults to the fire-ray spec with no arguments.
+  enabled, accepts `--scene`/`--scenery` for preview geometry, and defaults to
+  the fire-ray spec with no arguments.
+- `particles/generated_preview.cpp`: target `particles_generated_scale_preview`,
+  output `examples/particles/generated_scale_preview`. Uses the same particle
+  package loading path, but adds a stationary capsule actor and ground grid for
+  judging effect scale.
 - Generated spell effect prefabs are checked in under `assets/prefabs/` for
   direct loading: `arcane_barrage`, `blade_barrier`, `breathe_fire`,
-  `chromatic_ray`, `daze`, `fire_ray`, `heal`, `impact_burst`, and
-  `magic_missile`. Their source specs live in `particles/specs/`.
+  `chromatic_ray`, `daze`, `detect_magic`, `fire_ray`, `fireball`, `heal`,
+  `haste`, `impact_burst`, and `magic_missile`. Their source specs live in
+  `particles/specs/`.
 - `effects/laser.cpp`: target `effects_laser`, output `examples/effects/laser`.
 - `effects/energy_orb.cpp`: target `effects_energy_orb`, output
   `examples/effects/energy_orb`.

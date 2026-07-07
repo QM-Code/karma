@@ -1,6 +1,7 @@
 #include "karma/visual.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -93,6 +94,7 @@ uint64_t hashParticleEffectOverride(
 
   uint64_t seed = 0xcbf29ce484222325ull;
   seed = hashFloat(seed, effect_override->time_scale);
+  seed = hashFloat(seed, effect_override->emission_scale);
   seed = hashFloat(seed, effect_override->spawn_rate_scale);
   seed = hashFloat(seed, effect_override->lifetime_scale);
   seed = hashFloat(seed, effect_override->size_scale);
@@ -142,6 +144,19 @@ uint64_t hashParticleEffectOverride(
   return seed;
 }
 
+uint32_t scaleParticleCount(uint32_t count, float scale) {
+  if (count == 0u || !std::isfinite(scale) || scale <= 0.0f) {
+    return 0u;
+  }
+
+  const double scaled =
+      std::ceil(static_cast<double>(count) * static_cast<double>(scale));
+  if (scaled >= static_cast<double>(std::numeric_limits<uint32_t>::max())) {
+    return std::numeric_limits<uint32_t>::max();
+  }
+  return static_cast<uint32_t>(scaled);
+}
+
 void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideComponent& effect_override,
                                   components::ParticleEmitterComponent& emitter) {
   if (!effect_override.active) {
@@ -149,6 +164,10 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   }
 
   const float time_scale = std::max(effect_override.time_scale, 0.0f);
+  const float emission_scale =
+      std::isfinite(effect_override.emission_scale)
+          ? std::max(effect_override.emission_scale, 0.0f)
+          : 0.0f;
   const float spawn_rate_scale = std::max(effect_override.spawn_rate_scale, 0.0f);
   const float lifetime_scale = std::max(effect_override.lifetime_scale, 0.0f);
   const float size_scale = std::max(effect_override.size_scale, 0.0f);
@@ -158,7 +177,9 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   const float alpha_scale = std::max(effect_override.alpha_scale, 0.0f);
 
   emitter.time_scale *= time_scale;
-  emitter.spawn_rate *= spawn_rate_scale;
+  emitter.max_particles = scaleParticleCount(emitter.max_particles, emission_scale);
+  emitter.burst_count = scaleParticleCount(emitter.burst_count, emission_scale);
+  emitter.spawn_rate *= spawn_rate_scale * emission_scale;
   emitter.particle_lifetime_min *= lifetime_scale;
   emitter.particle_lifetime_max *= lifetime_scale;
   emitter.start_size_min *= size_scale;

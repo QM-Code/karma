@@ -1,0 +1,323 @@
+{
+  "nodes": [
+    {
+      "components": {
+        "TagComponent": {
+          "name": "Generated Fireball Projectile"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0,
+      "name": "Generated Fireball Projectile",
+      "parent": null
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/projectile/core",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "projectile_core"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1,
+      "name": "projectile_core",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/projectile/flames",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "projectile_flames"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2,
+      "name": "projectile_flames",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/projectile/smoke_trail",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "projectile_smoke_trail"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 3,
+      "name": "projectile_smoke_trail",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/projectile/embers",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "projectile_embers"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 4,
+      "name": "projectile_embers",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/projectile/ember_sparks",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "projectile_ember_sparks"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 5,
+      "name": "projectile_ember_sparks",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/projectile/heat",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "projectile_heat"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 6,
+      "name": "projectile_heat",
+      "parent": 0
+    },
+    {
+      "components": {
+        "LightComponent": {
+          "casts_shadows": false,
+          "color": [
+            1.0,
+            0.41999998688697815,
+            0.07999999821186066,
+            1.0
+          ],
+          "inner_cone_degrees": 15.0,
+          "intensity": 7.0,
+          "outer_cone_degrees": 30.0,
+          "range": 2.5999999046325684,
+          "shadow_extent": 0.0,
+          "type": "point"
+        },
+        "TagComponent": {
+          "name": "projectile_light"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 7,
+      "name": "projectile_light",
+      "parent": 0
+    }
+  ],
+  "root": 0,
+  "version": 2
+}

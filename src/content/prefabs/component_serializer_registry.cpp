@@ -2030,6 +2030,7 @@ Json serializeParticleEffectOverride(
   Json json{
       {"active", component.active},
       {"time_scale", component.time_scale},
+      {"emission_scale", component.emission_scale},
       {"spawn_rate_scale", component.spawn_rate_scale},
       {"lifetime_scale", component.lifetime_scale},
       {"size_scale", component.size_scale},
@@ -2110,6 +2111,7 @@ deserializeParticleEffectOverride(const Json& json) {
   components::ParticleEffectOverrideComponent component{};
   if (!readBool(json, "active", component.active) ||
       !readFloat(json, "time_scale", component.time_scale) ||
+      !readFloat(json, "emission_scale", component.emission_scale) ||
       !readFloat(json, "spawn_rate_scale", component.spawn_rate_scale) ||
       !readFloat(json, "lifetime_scale", component.lifetime_scale) ||
       !readFloat(json, "size_scale", component.size_scale) ||
@@ -2368,15 +2370,6 @@ std::optional<components::LightPulseComponent> deserializeLightPulse(const Json&
   return component;
 }
 
-float computeVolumeDensity(float radius, float center_opacity) {
-  if (center_opacity >= 0.9999f) {
-    return 1000.0f / std::max(radius * 2.0f, 1.0e-4f);
-  }
-  const float clamped_opacity = std::clamp(center_opacity, 0.001f, 0.999f);
-  const float center_transmittance = 1.0f - clamped_opacity;
-  return -std::log(center_transmittance) / std::max(radius * 2.0f, 1.0e-4f);
-}
-
 std::string volumetricShapeName(components::VolumetricShape shape) {
   switch (shape) {
     case components::VolumetricShape::Sphere:
@@ -2410,20 +2403,14 @@ bool readVolumetricShape(const Json& object, components::VolumetricShape& out) {
 Json serializeVolumetric(const components::VolumetricComponent& component) {
   return Json{
       {"shape", volumetricShapeName(component.shape)},
-      {"color", toJson(component.color)},
-      {"emissive_color", toJson(component.emissive_color)},
-      {"density", component.density},
-      {"center_opacity", component.center_opacity},
-      {"scattering", component.scattering},
-      {"anisotropy", component.anisotropy},
-      {"absorption", component.absorption},
-      {"distortion_strength", component.distortion_strength},
-      {"noise_strength", component.noise_strength},
       {"radius", component.radius},
       {"capsule_half_length", component.capsule_half_length},
       {"scale_with_transform", component.scale_with_transform},
       {"visible", component.visible},
       {"overlay_depth", component.overlay_depth},
+      {"surface_double_sided", component.surface_double_sided},
+      {"interior_material_key", component.interior_material_key},
+      {"surface_material_key", component.surface_material_key},
   };
 }
 
@@ -2431,35 +2418,38 @@ std::optional<components::VolumetricComponent> deserializeVolumetric(const Json&
   if (!json.is_object()) {
     return std::nullopt;
   }
+  static constexpr std::string_view kLegacyFields[] = {
+      "color",
+      "emissive_color",
+      "density",
+      "center_opacity",
+      "scattering",
+      "anisotropy",
+      "absorption",
+      "distortion_strength",
+      "noise_strength",
+  };
+  for (std::string_view field : kLegacyFields) {
+    if (json.find(std::string(field)) != json.end()) {
+      return std::nullopt;
+    }
+  }
   components::VolumetricComponent component{};
-  const bool has_density = json.find("density") != json.end();
   if (!readVolumetricShape(json, component.shape) ||
-      !readColor(json, "color", component.color) ||
-      !readColor(json, "emissive_color", component.emissive_color) ||
-      !readFloat(json, "density", component.density) ||
-      !readFloat(json, "center_opacity", component.center_opacity) ||
-      !readFloat(json, "scattering", component.scattering) ||
-      !readFloat(json, "anisotropy", component.anisotropy) ||
-      !readFloat(json, "absorption", component.absorption) ||
-      !readFloat(json, "distortion_strength", component.distortion_strength) ||
-      !readFloat(json, "noise_strength", component.noise_strength) ||
       !readFloat(json, "radius", component.radius) ||
       !readFloat(json, "capsule_half_length", component.capsule_half_length) ||
       !readBool(json, "scale_with_transform", component.scale_with_transform) ||
       !readBool(json, "visible", component.visible) ||
-      !readFloat(json, "overlay_depth", component.overlay_depth)) {
+      !readFloat(json, "overlay_depth", component.overlay_depth) ||
+      !readBool(json, "surface_double_sided", component.surface_double_sided) ||
+      !readString(json, "interior_material_key", component.interior_material_key) ||
+      !readString(json, "surface_material_key", component.surface_material_key)) {
     return std::nullopt;
   }
   if (component.radius <= 0.0f ||
       component.capsule_half_length < 0.0f ||
-      component.density < 0.0f ||
-      component.scattering < 0.0f ||
-      component.absorption < 0.0f ||
       component.overlay_depth <= 0.0f) {
     return std::nullopt;
-  }
-  if (!has_density) {
-    component.density = computeVolumeDensity(component.radius, component.center_opacity);
   }
   return component;
 }

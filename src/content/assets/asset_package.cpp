@@ -30,7 +30,7 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr std::string_view kPackageCacheContentVersion =
-    "package-cache-v3-source-metadata-fingerprint";
+    "package-cache-v4-material-shader-dependencies";
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -591,6 +591,40 @@ Json packageEntryCacheRecord(const Json& entry,
       }
     } else if (diagnostic != nullptr) {
       *diagnostic = "failed to stat package source: " + source.string();
+    }
+    if (type == "material") {
+      std::string material_diagnostic;
+      if (auto material = loadMaterialAssetDesc(source, &material_diagnostic);
+          material.has_value()) {
+        auto append_shader_dependency =
+            [&](const char* label, const std::filesystem::path& shader_path) {
+          if (shader_path.empty()) {
+            return;
+          }
+          Json dependency{{"label", label},
+                          {"path", shader_path.lexically_normal().generic_string()}};
+          std::error_code shader_ec;
+          if (std::filesystem::exists(shader_path, shader_ec)) {
+            dependency["size"] =
+                static_cast<uint64_t>(std::filesystem::file_size(shader_path, shader_ec));
+            const auto mtime = std::filesystem::last_write_time(shader_path, shader_ec);
+            if (!shader_ec) {
+              dependency["mtime"] = mtime.time_since_epoch().count();
+            }
+            if (auto hash = hashFile(shader_path); hash.has_value()) {
+              dependency["hash"] = *hash;
+            }
+          } else if (diagnostic != nullptr) {
+            *diagnostic = "failed to stat material shader dependency: " +
+                          shader_path.string();
+          }
+          record["dependencies"].push_back(std::move(dependency));
+        };
+        append_shader_dependency("vertex", material->pipeline.vertex_shader_path);
+        append_shader_dependency("fragment", material->pipeline.fragment_shader_path);
+      } else if (diagnostic != nullptr && !material_diagnostic.empty()) {
+        *diagnostic = material_diagnostic;
+      }
     }
   }
   return record;

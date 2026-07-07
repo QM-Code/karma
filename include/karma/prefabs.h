@@ -82,8 +82,9 @@ struct PrefabNode {
 /// \ingroup karma_prefabs
 /// Serialized prefab document.
 struct PrefabDocument {
-  uint32_t version = 1;
+  uint32_t version = 2;
   size_t root = 0;
+  nlohmann::json variables = nlohmann::json::object();
   std::vector<PrefabNode> nodes;
 };
 
@@ -94,11 +95,12 @@ struct PrefabSaveOptions {
 };
 
 /// \ingroup karma_prefabs
-/// Instantiation-time root transform and naming overrides.
+/// Instantiation-time root transform, naming, asset, and variable overrides.
 struct PrefabInstantiateDesc {
   components::TransformComponent root_transform{};
   std::string name_override;
   assets::AssetRegistry* assets = nullptr;
+  std::unordered_map<std::string, nlohmann::json> variables;
 };
 
 /// \ingroup karma_prefabs

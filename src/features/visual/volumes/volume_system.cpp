@@ -4,17 +4,18 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
+#include <string>
 #include <unordered_set>
 #include <utility>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <spdlog/spdlog.h>
 
+#include "karma/assets.h"
 #include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/math.h"
 #include "karma/math.h"
 #include "karma/rendering.h"
 
@@ -82,15 +83,6 @@ world::MeshData buildOverlayQuadMesh() {
   };
   mesh.indices = {0u, 1u, 2u, 0u, 2u, 3u};
   return mesh;
-}
-
-float computeVolumeDensity(float radius, float center_opacity) {
-  if (center_opacity >= 0.9999f) {
-    return 1000.0f / std::max(radius * 2.0f, 1.0e-4f);
-  }
-  const float clamped_opacity = std::clamp(center_opacity, 0.001f, 0.999f);
-  const float center_transmittance = 1.0f - clamped_opacity;
-  return -std::log(center_transmittance) / std::max(radius * 2.0f, 1.0e-4f);
 }
 
 float maxAbsScale(const math::Vec3& scale) {
@@ -247,8 +239,12 @@ void includeProjectedSphere(OverlayRectNdc& rect,
   const float center_y = glm::dot(to_center, frame.up);
   const float ndc_x = center_x / (center_z * frame.tan_half_x);
   const float ndc_y = center_y / (center_z * frame.tan_half_y);
-  const float radius_x = radius / (center_z * frame.tan_half_x);
-  const float radius_y = radius / (center_z * frame.tan_half_y);
+  const float projected_depth =
+      std::sqrt(std::max(center_z * center_z - radius * radius,
+                         frame.near_clip * frame.near_clip));
+  const float conservative_radius = radius * 1.12f;
+  const float radius_x = conservative_radius / (projected_depth * frame.tan_half_x);
+  const float radius_y = conservative_radius / (projected_depth * frame.tan_half_y);
 
   rect.min_x = std::min(rect.min_x, ndc_x - radius_x);
   rect.min_y = std::min(rect.min_y, ndc_y - radius_y);
@@ -325,13 +321,6 @@ OverlayRectNdc projectVolumeOverlayRect(const CameraFrame& frame,
   return rect;
 }
 
-float resolveVolumeDensity(const components::VolumetricComponent& volume, float radius) {
-  if (volume.density > 0.0f) {
-    return volume.density;
-  }
-  return computeVolumeDensity(radius, volume.center_opacity);
-}
-
 uint32_t volumeShapeId(components::VolumetricShape shape) {
   switch (shape) {
     case components::VolumetricShape::Capsule:
@@ -342,39 +331,41 @@ uint32_t volumeShapeId(components::VolumetricShape shape) {
   return 0u;
 }
 
-rendering::ResolvedMaterialDesc buildMaterialDesc(const components::VolumetricComponent& volume,
-                                                 const ResolvedVolume& resolved) {
-  rendering::ResolvedMaterialDesc desc{};
-  desc.pipeline.name = "volumetric_solid";
-  desc.surface.base_color = volume.color;
-  desc.surface.emissive_color = volume.emissive_color;
-  desc.surface.metallic = 0.0f;
-  desc.surface.roughness = 1.0f;
-  desc.surface.unlit = true;
-  desc.surface.transparent = true;
-  desc.surface.blend_mode = rendering::MaterialDesc::BlendMode::Alpha;
-  desc.surface.double_sided = true;
-  desc.surface.depth_test = false;
-  desc.surface.depth_write = false;
-  desc.params["volume_shape"] = volumeShapeId(volume.shape);
-  desc.params["volume_center"] = resolved.center;
-  desc.params["volume_axis_x"] = resolved.axis_x;
-  desc.params["volume_axis_y"] = resolved.axis_y;
-  desc.params["volume_axis_z"] = resolved.axis_z;
-  desc.params["volume_radius"] = resolved.radius;
-  desc.params["volume_capsule_half_length"] = resolved.capsule_half_length;
-  desc.params["volume_density"] = resolveVolumeDensity(volume, resolved.radius);
-  desc.params["volume_scattering"] = std::max(volume.scattering, 0.0f);
-  desc.params["volume_anisotropy"] = std::clamp(volume.anisotropy, -0.95f, 0.95f);
-  desc.params["volume_absorption"] = std::max(volume.absorption, 0.0f);
-  desc.params["volume_distortion_strength"] = std::max(volume.distortion_strength, 0.0f);
-  desc.params["volume_noise_strength"] = std::max(volume.noise_strength, 0.0f);
-  return desc;
+rendering::InstanceId volumeSlotInstance(uint64_t key, uint32_t slot_id) {
+  return (key << 1u) | static_cast<uint64_t>(slot_id & 1u);
+}
+
+rendering::VolumeDrawParams buildVolumeDrawParams(
+    const components::VolumetricComponent& volume,
+    const ResolvedVolume& resolved,
+    uint32_t slot_id) {
+  rendering::VolumeDrawParams params{};
+  params.center = resolved.center;
+  params.axis_x = resolved.axis_x;
+  params.axis_y = resolved.axis_y;
+  params.axis_z = resolved.axis_z;
+  params.radius = resolved.radius;
+  params.capsule_half_length = resolved.capsule_half_length;
+  params.shape = volumeShapeId(volume.shape);
+  params.slot = slot_id;
+  params.overlay_depth = volume.overlay_depth;
+  params.surface_double_sided = volume.surface_double_sided;
+  return params;
+}
+
+void retireVolumeSlotInstances(rendering::GraphicsDevice* device, uint64_t key) {
+  if (device == nullptr) {
+    return;
+  }
+  device->retireInstance(volumeSlotInstance(key, 0u));
+  device->retireInstance(volumeSlotInstance(key, 1u));
 }
 
 }  // namespace
 
-VolumeSystem::VolumeSystem(rendering::GraphicsDevice* device) : device_(device) {}
+VolumeSystem::VolumeSystem(rendering::GraphicsDevice* device,
+                           const assets::AssetRegistry* assets)
+    : device_(device), assets_(assets) {}
 
 VolumeSystem::~VolumeSystem() {
   destroySharedResources();
@@ -392,8 +383,8 @@ void VolumeSystem::destroySharedResources() {
     return;
   }
   for (auto& [key, state] : runtime_) {
-    (void)key;
     destroyRuntimeState(state);
+    retireVolumeSlotInstances(device_, key);
   }
   runtime_.clear();
   if (overlay_mesh_ != rendering::kInvalidMesh) {
@@ -403,10 +394,17 @@ void VolumeSystem::destroySharedResources() {
 }
 
 void VolumeSystem::destroyRuntimeState(RuntimeState& state) {
-  if (device_ != nullptr && state.material != rendering::kInvalidMaterial) {
-    device_->destroyMaterial(state.material);
-    state.material = rendering::kInvalidMaterial;
+  if (device_ != nullptr && state.interior_material != rendering::kInvalidMaterial) {
+    device_->destroyMaterial(state.interior_material);
+    state.interior_material = rendering::kInvalidMaterial;
   }
+  if (device_ != nullptr && state.surface_material != rendering::kInvalidMaterial) {
+    device_->destroyMaterial(state.surface_material);
+    state.surface_material = rendering::kInvalidMaterial;
+  }
+  state.interior_material_key.clear();
+  state.surface_material_key.clear();
+  state.material_registry_version = 0u;
 }
 
 VolumeSystem::RuntimeState& VolumeSystem::ensureRuntimeState(world::Entity source) {
@@ -488,22 +486,78 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
                                    aspect,
                                    volume.overlay_depth,
                                    overlay_rect);
-    if (device_ != nullptr) {
-      if (state.material != rendering::kInvalidMaterial) {
-        device_->destroyMaterial(state.material);
+    auto sync_material_slot = [&](const std::string& key,
+                                  uint32_t slot_id,
+                                  rendering::MaterialId& material,
+                                  std::string& cached_key) {
+      const uint64_t registry_version = assets_ != nullptr ? assets_->version() : 0u;
+      if (key.empty()) {
+        if (material != rendering::kInvalidMaterial && device_ != nullptr) {
+          device_->destroyMaterial(material);
+        }
+        material = rendering::kInvalidMaterial;
+        cached_key.clear();
+        if (device_ != nullptr) {
+          device_->retireInstance(volumeSlotInstance(entityKey(entity), slot_id));
+        }
+        return;
       }
-      state.material = device_->createMaterial(buildMaterialDesc(volume, resolved));
-    }
-    if (device_ != nullptr && state.material != rendering::kInvalidMaterial) {
+      if (material != rendering::kInvalidMaterial &&
+          cached_key == key &&
+          state.material_registry_version == registry_version) {
+        return;
+      }
+      if (material != rendering::kInvalidMaterial && device_ != nullptr) {
+        device_->destroyMaterial(material);
+        material = rendering::kInvalidMaterial;
+      }
+      cached_key = key;
+      if (assets_ == nullptr || device_ == nullptr) {
+        spdlog::error("VolumetricComponent material '{}' cannot be resolved without an AssetRegistry",
+                      key);
+        return;
+      }
+      std::optional<rendering::ResolvedMaterialDesc> resolved_material =
+          assets_->resolveMaterial(key);
+      if (!resolved_material.has_value()) {
+        spdlog::error("VolumetricComponent material '{}' is not registered", key);
+        return;
+      }
+      material = device_->createMaterial(*resolved_material);
+      if (material == rendering::kInvalidMaterial) {
+        spdlog::error("VolumetricComponent material '{}' failed to create", key);
+      }
+    };
+
+    sync_material_slot(volume.interior_material_key,
+                       0u,
+                       state.interior_material,
+                       state.interior_material_key);
+    sync_material_slot(volume.surface_material_key,
+                       1u,
+                       state.surface_material,
+                       state.surface_material_key);
+    state.material_registry_version = assets_ != nullptr ? assets_->version() : 0u;
+
+    auto submit_volume_slot = [&](rendering::MaterialId material, uint32_t slot_id) {
+      if (device_ == nullptr || material == rendering::kInvalidMaterial) {
+        return;
+      }
       rendering::DrawItem item{};
-      item.instance = key;
+      item.instance = volumeSlotInstance(key, slot_id);
       item.mesh = overlay_mesh_;
-      item.material = state.material;
+      item.material = material;
       item.transform = toGlmMat4(overlay_transform);
       item.visible = volume.visible && overlay_rect.visible;
       item.shadow_visible = false;
+      item.volume_params = buildVolumeDrawParams(volume, resolved, slot_id);
+      item.has_volume_params = true;
+      item.requires_scene_sample = true;
+      item.post_particle_scene_sample = true;
       device_->submit(item);
-    }
+    };
+    submit_volume_slot(state.interior_material, 0u);
+    submit_volume_slot(state.surface_material, 1u);
   }
 
   for (auto it = runtime_.begin(); it != runtime_.end();) {
@@ -512,6 +566,7 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
       continue;
     }
     destroyRuntimeState(it->second);
+    retireVolumeSlotInstances(device_, it->first);
     it = runtime_.erase(it);
   }
 }

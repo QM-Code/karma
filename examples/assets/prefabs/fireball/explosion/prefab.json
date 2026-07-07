@@ -1,0 +1,659 @@
+{
+  "nodes": [
+    {
+      "components": {
+        "TagComponent": {
+          "name": "Generated Fireball Explosion"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0,
+      "name": "Generated Fireball Explosion",
+      "parent": null
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/core_flash",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "core_flash"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1,
+      "name": "core_flash",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/core_flipbook",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "core_flipbook"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2,
+      "name": "core_flipbook",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/flame_shell",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "flame_shell"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 3,
+      "name": "flame_shell",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/flame_tongues",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "flame_tongues"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 4,
+      "name": "flame_tongues",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/embers",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "embers"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 5,
+      "name": "embers",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/ember_storm",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "ember_storm"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 6,
+      "name": "ember_storm",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/hot_ash_embers",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "hot_ash_embers"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 7,
+      "name": "hot_ash_embers",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/smoke_edge",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "smoke_edge"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 8,
+      "name": "smoke_edge",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/smoke_plumes",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "smoke_plumes"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 9,
+      "name": "smoke_plumes",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/smoke_roll",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "smoke_roll"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 10,
+      "name": "smoke_roll",
+      "parent": 0
+    },
+    {
+      "components": {
+        "ParticleEffectComponent": {
+          "auto_apply": true,
+          "effect_key": "prefabs/fireball/explosion/heat_shimmer",
+          "preserve_enabled": true,
+          "preserve_playing": true,
+          "preserve_start_delay": false
+        },
+        "ParticleEffectOverrideComponent": {
+          "radius_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "size_scale": {
+            "$expr": "radius / (9.144000)"
+          },
+          "velocity_scale": {
+            "$expr": "radius / (9.144000)"
+          }
+        },
+        "ParticleEmitterComponent": {
+          "enabled": true,
+          "playing": true,
+          "start_delay": 0.0,
+          "texture_key": ""
+        },
+        "TagComponent": {
+          "name": "heat_shimmer"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 11,
+      "name": "heat_shimmer",
+      "parent": 0
+    },
+    {
+      "components": {
+        "LightComponent": {
+          "casts_shadows": false,
+          "color": [
+            1.0,
+            0.46000000834465027,
+            0.07999999821186066,
+            1.0
+          ],
+          "inner_cone_degrees": 15.0,
+          "intensity": {
+            "$expr": "radius * 2.9"
+          },
+          "outer_cone_degrees": 30.0,
+          "range": {
+            "$expr": "radius * 1.4"
+          },
+          "shadow_extent": 0.0,
+          "type": "point"
+        },
+        "TagComponent": {
+          "name": "fireball_light"
+        },
+        "TransformComponent": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 12,
+      "name": "fireball_light",
+      "parent": 0
+    }
+  ],
+  "root": 0,
+  "variables": {
+    "radius": {
+      "default": 9.144000053405762,
+      "type": "float"
+    }
+  },
+  "version": 2
+}

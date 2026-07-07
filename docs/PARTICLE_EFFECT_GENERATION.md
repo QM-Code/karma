@@ -45,12 +45,20 @@ The current generator accepts these presets:
   moving wind rings, swish streaks, dust, glints, and subtle distortion.
 - `breathe_fire`: a wide, source-point flame cone with dense additive ribbons,
   embers, smoke, and heat haze.
+- `fireball`: an instantaneous spherical burst with a hot flash, OpenAI-sourced
+  core/smoke flipbooks, turbulent flame lobes, embers, smoke edge, and heat
+  shimmer.
 - `chromatic_ray`: a prismatic ray with twisting helix ribbons, sparks, wisps,
   and subtle distortion.
 - `daze`: a blue-purple burst halo with stars, crescents, haze, pulse, and no
   orb shell.
 - `heal`: a blue healing shimmer with stacked rings, glints, mist, pulse, and
   subtle distortion.
+- `haste`: a golden-cyan speed aura with circular body rings, vertical streaks,
+  afterimage haze, tick sparks, distortion, light, and prefab variables for
+  creature-scale overrides.
+- `detect_magic`: a 30-foot white emanation with a volumetric shimmer field,
+  pixie dust, thin mist, and light distortion.
 - `impact_burst`: a particle-only burst with flash, sparks, smoke, and shock
   ring.
 - `energy_orb`: a mesh shell plus local-space core, arc, halo, distortion, and
@@ -169,6 +177,9 @@ KARMA_PARTICLE_STATS=1 ./build/examples/particles/generated_preview \
 KARMA_PARTICLE_STATS=1 ./build/examples/particles/generated_preview \
   examples/particles/specs/energy_orb.kpspec.json
 ```
+
+Pass `--scene` or `--scenery` to load a simple plane and colored cubes for
+checking shimmer and distortion against visible materials.
 
 When a spec path is passed, an optional second argument overrides the generated
 package output directory. Package paths may also come from

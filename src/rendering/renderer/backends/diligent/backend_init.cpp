@@ -273,6 +273,11 @@ cbuffer Constants
     float4 g_MaterialParams4;
     float4 g_MaterialParams5;
     float4 g_MaterialParams6;
+    float4 g_VolumeParams0;
+    float4 g_VolumeParams1;
+    float4 g_VolumeParams2;
+    float4 g_VolumeParams3;
+    float4 g_VolumeParams4;
     float4 g_TexCoordRow0[12];
     float4 g_TexCoordRow1[12];
 };
@@ -1533,6 +1538,11 @@ cbuffer Constants
     float4 g_MaterialParams4;
     float4 g_MaterialParams5;
     float4 g_MaterialParams6;
+    float4 g_VolumeParams0;
+    float4 g_VolumeParams1;
+    float4 g_VolumeParams2;
+    float4 g_VolumeParams3;
+    float4 g_VolumeParams4;
     float4 g_TexCoordRow0[12];
     float4 g_TexCoordRow1[12];
 };
@@ -1768,6 +1778,11 @@ cbuffer Constants
     float4 g_MaterialParams4;
     float4 g_MaterialParams5;
     float4 g_MaterialParams6;
+    float4 g_VolumeParams0;
+    float4 g_VolumeParams1;
+    float4 g_VolumeParams2;
+    float4 g_VolumeParams3;
+    float4 g_VolumeParams4;
     float4 g_TexCoordRow0[12];
     float4 g_TexCoordRow1[12];
 };

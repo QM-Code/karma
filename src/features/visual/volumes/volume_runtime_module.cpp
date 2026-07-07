@@ -11,7 +11,7 @@ VolumeRuntimeModule::~VolumeRuntimeModule() = default;
 void VolumeRuntimeModule::onAttach(const app::RuntimeModuleContext& context) {
   system_.reset();
   if (context.graphics != nullptr) {
-    system_ = std::make_unique<VolumeSystem>(context.graphics);
+    system_ = std::make_unique<VolumeSystem>(context.graphics, context.assets);
   }
 }
 

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "preset": "detect_magic",
+  "namespace": "prefabs/detect_magic",
+  "name": "Detect Magic",
+  "radius": 9.144
+}

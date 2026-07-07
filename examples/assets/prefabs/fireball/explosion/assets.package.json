@@ -1,0 +1,115 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/fireball/explosion/fireball_core_atlas",
+      "path": "textures/fireball_core_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_flame_atlas",
+      "path": "textures/fireball_flame_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_tongue_atlas",
+      "path": "textures/fireball_tongue_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_ember_atlas",
+      "path": "textures/fireball_ember_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_ember_burst_atlas",
+      "path": "textures/fireball_ember_burst_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_smoke_atlas",
+      "path": "textures/fireball_smoke_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_smoke_plumes_atlas",
+      "path": "textures/fireball_smoke_plumes_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_heat_atlas",
+      "path": "textures/fireball_heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_core_flipbook_atlas",
+      "path": "textures/fireball_core_flipbook_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_smoke_flipbook_atlas",
+      "path": "textures/fireball_smoke_flipbook_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/fireball_flame_lobes_atlas",
+      "path": "textures/fireball_flame_lobes_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/explosion/core_flash",
+      "path": "particles/fireball_core_flash.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/core_flipbook",
+      "path": "particles/fireball_core_flipbook.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/flame_shell",
+      "path": "particles/fireball_flame_shell.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/flame_tongues",
+      "path": "particles/fireball_flame_tongues.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/embers",
+      "path": "particles/fireball_embers.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/ember_storm",
+      "path": "particles/fireball_ember_storm.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/hot_ash_embers",
+      "path": "particles/fireball_hot_ash_embers.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/smoke_edge",
+      "path": "particles/fireball_smoke_edge.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/smoke_plumes",
+      "path": "particles/fireball_smoke_plumes.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/smoke_roll",
+      "path": "particles/fireball_smoke_roll.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/explosion/heat_shimmer",
+      "path": "particles/fireball_heat_shimmer.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

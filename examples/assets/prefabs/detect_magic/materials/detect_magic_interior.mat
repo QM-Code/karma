@@ -1,0 +1,35 @@
+{
+  "pipeline": {
+    "fragment": "../shaders/detect_magic_interior_ps.hlsl",
+    "fragment_entry": "PSMain",
+    "name": "custom",
+    "vertex": "../shaders/detect_magic_volume_vs.hlsl",
+    "vertex_entry": "VSMain"
+  },
+  "render_state": {
+    "alpha_mode": "blend",
+    "blend_mode": "alpha",
+    "depth_test": false,
+    "depth_write": false,
+    "double_sided": true,
+    "transparent": true
+  },
+  "surface": {
+    "base_color": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "emissive_color": [
+      0.9399999976158142,
+      0.9800000190734863,
+      1.0,
+      1.0
+    ],
+    "metallic": 0.0,
+    "roughness": 1.0,
+    "unlit": true
+  },
+  "version": 2
+}

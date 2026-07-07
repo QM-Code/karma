@@ -907,6 +907,26 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
             mat->transmission_factor > 0.001f);
   };
 
+  auto select_transparent_draws = [&](const MaterialRecord* mat,
+                                      bool requires_scene_sample,
+                                      bool post_particle_scene_sample)
+      -> std::vector<TransparentForwardDraw>& {
+    if (requires_scene_sample) {
+      return post_particle_scene_sample ? out_state.post_particle_draws
+                                        : out_state.pre_particle_scene_sample_draws;
+    }
+    return uses_pre_particle_scene_sample_pass(mat)
+               ? out_state.pre_particle_scene_sample_draws
+               : (uses_post_particle_transparent_pass(mat)
+                      ? out_state.post_particle_draws
+                      : out_state.transparent_draws);
+  };
+
+  auto scene_sample_mode_for = [](const InstanceRecord& instance) {
+    return instance.requires_scene_sample ? TransparentForwardDraw::SceneSampleMode::Required
+                                          : TransparentForwardDraw::SceneSampleMode::None;
+  };
+
   auto uses_scene_reflection_overlay = [&](const MaterialRecord* mat) {
     if (!mat || mat->shading_model != MaterialPipelineKind::Standard) {
       return false;
@@ -981,17 +1001,21 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
         const MaterialRecord* mat = lookup_material(mat_id);
         const bool transparent = uses_transparent_forward_path(mat, mesh);
         if (transparent) {
-          auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
-                                   ? out_state.pre_particle_scene_sample_draws
-                                   : (uses_post_particle_transparent_pass(mat)
-                                          ? out_state.post_particle_draws
-                                          : out_state.transparent_draws);
+          auto& target_draws = select_transparent_draws(mat,
+                                                        instance.requires_scene_sample,
+                                                        instance.post_particle_scene_sample);
           target_draws.push_back(TransparentForwardDraw{
               .key = key,
               .transform = instance.transform,
               .params = instance.params,
+              .volume_params = instance.volume_params,
+              .has_volume_params = instance.has_volume_params,
               .deformation = instance.deformation,
-              .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
+              .depth = instance.has_volume_params
+                           ? glm::dot(instance.volume_params.center - camera_position,
+                                      camera_forward)
+                           : resolve_transparent_sort_depth(mat, mesh, instance.transform),
+              .scene_sample_mode = scene_sample_mode_for(instance),
           });
         } else {
           append_opaque_forward_batch(key, submitted_instance, instance.deformation);
@@ -1024,17 +1048,21 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
       const MaterialRecord* mat = lookup_material(mat_id);
       const bool transparent = uses_transparent_forward_path(mat, mesh);
       if (transparent) {
-        auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
-                                 ? out_state.pre_particle_scene_sample_draws
-                                 : (uses_post_particle_transparent_pass(mat)
-                                        ? out_state.post_particle_draws
-                                        : out_state.transparent_draws);
+        auto& target_draws = select_transparent_draws(mat,
+                                                      instance.requires_scene_sample,
+                                                      instance.post_particle_scene_sample);
         target_draws.push_back(TransparentForwardDraw{
             .key = key,
             .transform = instance.transform,
             .params = instance.params,
+            .volume_params = instance.volume_params,
+            .has_volume_params = instance.has_volume_params,
             .deformation = instance.deformation,
-            .depth = resolve_transparent_sort_depth(mat, mesh, instance.transform),
+            .depth = instance.has_volume_params
+                         ? glm::dot(instance.volume_params.center - camera_position,
+                                    camera_forward)
+                         : resolve_transparent_sort_depth(mat, mesh, instance.transform),
+            .scene_sample_mode = scene_sample_mode_for(instance),
         });
       } else {
         append_opaque_forward_batch(key, submitted_instance, instance.deformation);
@@ -2788,16 +2816,41 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
                                                const MeshRecord& mesh,
                                                const MaterialRecord* mat,
                                                TransparentForwardDraw::SceneSampleMode scene_sample_mode,
+                                               const rendering::VolumeDrawParams& volume_params,
+                                               bool has_volume_params,
                                                rendering::MaterialId& last_constants_material,
                                                rendering::MeshId& last_constants_mesh,
                                                TransparentForwardDraw::SceneSampleMode&
                                                    last_constants_scene_sample_mode) -> bool {
-    if (material_id == last_constants_material &&
+    if (!has_volume_params &&
+        material_id == last_constants_material &&
         scene_sample_mode == last_constants_scene_sample_mode &&
         (material_id != rendering::kInvalidMaterial || mesh_id == last_constants_mesh)) {
       return true;
     }
     DrawConstants constants = base_constants;
+    if (has_volume_params) {
+      constants.volume_params0[0] = volume_params.center.x;
+      constants.volume_params0[1] = volume_params.center.y;
+      constants.volume_params0[2] = volume_params.center.z;
+      constants.volume_params0[3] = volume_params.radius;
+      constants.volume_params1[0] = volume_params.axis_x.x;
+      constants.volume_params1[1] = volume_params.axis_x.y;
+      constants.volume_params1[2] = volume_params.axis_x.z;
+      constants.volume_params1[3] = volume_params.capsule_half_length;
+      constants.volume_params2[0] = volume_params.axis_y.x;
+      constants.volume_params2[1] = volume_params.axis_y.y;
+      constants.volume_params2[2] = volume_params.axis_y.z;
+      constants.volume_params2[3] = static_cast<float>(volume_params.shape);
+      constants.volume_params3[0] = volume_params.axis_z.x;
+      constants.volume_params3[1] = volume_params.axis_z.y;
+      constants.volume_params3[2] = volume_params.axis_z.z;
+      constants.volume_params3[3] = static_cast<float>(volume_params.slot);
+      constants.volume_params4[0] = volume_params.overlay_depth;
+      constants.volume_params4[1] = static_cast<float>(static_cast<uint32_t>(scene_sample_mode));
+      constants.volume_params4[2] = constants.camera_clip_params[0];
+      constants.volume_params4[3] = volume_params.surface_double_sided ? 1.0f : 0.0f;
+    }
     constants.instance_params[0] = 0.0f;
     constants.instance_params[1] = 0.0f;
     constants.instance_params[2] = 0.0f;
@@ -2976,9 +3029,10 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       }
       *mapped_constants = constants;
     }
-    last_constants_material = material_id;
-    last_constants_mesh = mesh_id;
-    last_constants_scene_sample_mode = scene_sample_mode;
+    last_constants_material = has_volume_params ? rendering::kInvalidMaterial : material_id;
+    last_constants_mesh = has_volume_params ? rendering::kInvalidMesh : mesh_id;
+    last_constants_scene_sample_mode =
+        has_volume_params ? TransparentForwardDraw::SceneSampleMode::None : scene_sample_mode;
     return true;
   };
 
@@ -3228,6 +3282,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
                                            mesh,
                                            mat,
                                            draw.scene_sample_mode,
+                                           draw.volume_params,
+                                           draw.has_volume_params,
                                            last_constants_material,
                                            last_constants_mesh,
                                            last_constants_scene_sample_mode)) {
@@ -3304,6 +3360,9 @@ bool DiligentBackend::forwardDrawsRequireSceneColorCopy(
       continue;
     }
     const auto& mat = mat_it->second;
+    if (draw.scene_sample_mode != TransparentForwardDraw::SceneSampleMode::None) {
+      return true;
+    }
     if (mat.shading_model == MaterialPipelineKind::WaveVolume ||
         mat.shading_model == MaterialPipelineKind::VolumetricSolid) {
       return true;

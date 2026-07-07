@@ -362,6 +362,21 @@ struct DrawMaterialBinding {
 };
 
 /// \ingroup karma_rendering
+/// Per-draw analytic volume metadata exposed to custom material shaders.
+struct VolumeDrawParams {
+  glm::vec3 center{0.0f, 0.0f, 0.0f};
+  glm::vec3 axis_x{1.0f, 0.0f, 0.0f};
+  glm::vec3 axis_y{0.0f, 1.0f, 0.0f};
+  glm::vec3 axis_z{0.0f, 0.0f, 1.0f};
+  float radius = 1.0f;
+  float capsule_half_length = 0.0f;
+  uint32_t shape = 0u;
+  uint32_t slot = 0u;
+  float overlay_depth = 0.0f;
+  bool surface_double_sided = false;
+};
+
+/// \ingroup karma_rendering
 /// One renderable mesh submission.
 ///
 /// `RenderSystem` builds draw items from ECS mesh/deformation data. Runtime
@@ -374,6 +389,10 @@ struct DrawItem {
   DeformationId deformation = kInvalidDeformation;
   glm::mat4 transform{1.0f};
   glm::vec4 instance_params{0.0f};
+  VolumeDrawParams volume_params{};
+  bool has_volume_params = false;
+  bool requires_scene_sample = false;
+  bool post_particle_scene_sample = false;
   LayerId layer = 0;
   bool visible = true;
   bool shadow_visible = true;

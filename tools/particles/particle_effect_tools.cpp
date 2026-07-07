@@ -9,9 +9,11 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <initializer_list>
 #include <iterator>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -26,6 +28,12 @@ namespace {
 
 using Json = nlohmann::json;
 using OrderedJson = nlohmann::ordered_json;
+
+constexpr float kFeetToMeters = 0.3048f;
+constexpr float kFireballDefaultBlastRadius = 30.0f * kFeetToMeters;
+constexpr float kFireballMaxBlastRadius = 50.0f * kFeetToMeters;
+constexpr float kFireballOrbRadius = 0.18f;
+constexpr float kDetectMagicRadius = 30.0f * kFeetToMeters;
 
 bool fail(std::string* diagnostic, std::string message) {
   if (diagnostic != nullptr) {
@@ -63,6 +71,27 @@ bool writeJson(const std::filesystem::path& path, const Json& json, std::string*
     return fail(diagnostic, "failed to write JSON file: " + path.string());
   }
   stream << json.dump(2) << '\n';
+  return static_cast<bool>(stream);
+}
+
+bool writeTextFile(const std::filesystem::path& path,
+                   std::string_view text,
+                   std::string* diagnostic) {
+  std::error_code ec;
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+      return fail(diagnostic, "failed to create directory: " + path.parent_path().string());
+    }
+  }
+  std::ofstream stream(path);
+  if (!stream) {
+    return fail(diagnostic, "failed to write text file: " + path.string());
+  }
+  stream << text;
+  if (text.empty() || text.back() != '\n') {
+    stream << '\n';
+  }
   return static_cast<bool>(stream);
 }
 
@@ -147,8 +176,17 @@ std::string presetDefaultName(std::string_view preset) {
   if (preset == "heal") {
     return "Generated Heal";
   }
+  if (preset == "haste") {
+    return "Generated Haste";
+  }
+  if (preset == "detect_magic") {
+    return "Generated Detect Magic";
+  }
   if (preset == "breathe_fire") {
     return "Generated Breathe Fire";
+  }
+  if (preset == "fireball") {
+    return "Generated Fireball";
   }
   if (preset == "impact_burst") {
     return "Generated Impact Burst";
@@ -211,6 +249,34 @@ Json color(float r, float g, float b, float a) {
 
 Json vec3(float x, float y, float z) {
   return Json::array({x, y, z});
+}
+
+Json vec3(const math::Vec3& value) {
+  return vec3(value.x, value.y, value.z);
+}
+
+std::string numberExpr(float value) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(6) << value;
+  return stream.str();
+}
+
+Json expr(std::string expression) {
+  return Json{{"$expr", std::move(expression)}};
+}
+
+Json var(std::string name) {
+  return Json{{"$var", std::move(name)}};
+}
+
+Json scaledVar(std::string_view name, float scale) {
+  return expr(std::string(name) + " * (" + numberExpr(scale) + ")");
+}
+
+Json variableVec3(float radius_x, float height_y, float radius_z) {
+  return Json::array({scaledVar("radius", radius_x),
+                      scaledVar("height", height_y),
+                      scaledVar("radius", radius_z)});
 }
 
 Json makeEmitter(std::string name,
@@ -411,6 +477,16 @@ void addEffect(std::vector<GeneratedAsset>& assets,
   });
 }
 
+void addMaterial(std::vector<GeneratedAsset>& assets,
+                 std::string key,
+                 std::string path) {
+  assets.push_back(GeneratedAsset{
+      .type = "material",
+      .key = std::move(key),
+      .path = std::move(path),
+  });
+}
+
 Json makeParticleNode(uint32_t id,
                       uint32_t parent,
                       std::string name,
@@ -448,6 +524,456 @@ Json makeParticleNode(uint32_t id,
   };
 }
 
+Json makeParticleNodeWithOverride(uint32_t id,
+                                  uint32_t parent,
+                                  std::string name,
+                                  std::string effect_key,
+                                  Json effect_override,
+                                  Json position = vec3(0.0f, 0.0f, 0.0f)) {
+  Json node = makeParticleNode(id,
+                               parent,
+                               std::move(name),
+                               std::move(effect_key),
+                               std::move(position));
+  node["components"]["ParticleEffectOverrideComponent"] = std::move(effect_override);
+  return node;
+}
+
+Json makeVolumetricNode(uint32_t id,
+                        uint32_t parent,
+                        std::string name,
+                        Json position,
+                        Json radius,
+                        std::string interior_material_key,
+                        std::string surface_material_key,
+                        bool surface_double_sided = false) {
+  return Json{
+      {"id", id},
+      {"name", name},
+      {"parent", parent},
+      {"components",
+       {
+           {"TagComponent", {{"name", name}}},
+           {"TransformComponent",
+            {
+                {"position", std::move(position)},
+                {"rotation", Json::array({0.0f, 0.0f, 0.0f, 1.0f})},
+                {"scale", vec3(1.0f, 1.0f, 1.0f)},
+            }},
+           {"VolumetricComponent",
+            {
+                {"shape", "sphere"},
+                {"radius", std::move(radius)},
+                {"capsule_half_length", 0.0f},
+                {"scale_with_transform", false},
+                {"visible", true},
+                {"overlay_depth", 0.10f},
+                {"surface_double_sided", surface_double_sided},
+                {"interior_material_key", std::move(interior_material_key)},
+                {"surface_material_key", std::move(surface_material_key)},
+            }},
+       }},
+  };
+}
+
+constexpr std::string_view kDetectMagicVolumeVertexShader = R"(cbuffer Constants
+{
+    float4x4 g_MVP;
+};
+
+struct VSInput
+{
+    float3 Pos : ATTRIB0;
+    float3 Normal : ATTRIB1;
+    float4 Tangent : ATTRIB2;
+    float2 UV : ATTRIB3;
+    float2 UV1 : ATTRIB10;
+    float4 ModelCol0 : ATTRIB4;
+    float4 ModelCol1 : ATTRIB5;
+    float4 ModelCol2 : ATTRIB6;
+    float4 ModelCol3 : ATTRIB7;
+    float4 InstanceParams : ATTRIB11;
+};
+
+struct PSInput
+{
+    float4 Pos : SV_POSITION;
+    float3 Normal : NORMAL0;
+    float2 UV : TEXCOORD0;
+    float2 UV1 : TEXCOORD1;
+    float4 Tangent : TEXCOORD2;
+    float3 WorldPos : TEXCOORD3;
+    float4 InstanceParams : TEXCOORD4;
+};
+
+PSInput VSMain(VSInput input)
+{
+    PSInput output;
+    float4 world_pos = input.ModelCol0 * input.Pos.x +
+                       input.ModelCol1 * input.Pos.y +
+                       input.ModelCol2 * input.Pos.z +
+                       input.ModelCol3;
+    output.Pos = mul(g_MVP, world_pos);
+    output.Normal = input.Normal;
+    output.UV = input.UV;
+    output.UV1 = input.UV1;
+    output.Tangent = input.Tangent;
+    output.WorldPos = world_pos.xyz;
+    output.InstanceParams = input.InstanceParams;
+    return output;
+}
+)";
+
+constexpr std::string_view kDetectMagicVolumePixelHeader = R"(cbuffer Constants
+{
+    float4x4 g_MVP;
+    float4x4 g_Model;
+    float4x4 g_LightViewProj;
+    float4x4 g_ShadowUVProj;
+    float4x4 g_ShadowCascadeUVProj[4];
+    float4x4 g_PointShadowUVProj[96];
+    float4 g_BaseColorFactor;
+    float4 g_EmissiveFactor;
+    float4 g_PbrParams;
+    float4 g_EnvParams;
+    float4 g_ShadowParams;
+    float4 g_PointShadowParams;
+    float4 g_LocalLightParams;
+    float4 g_PointShadowTuning;
+    float4 g_ShadowBiasParams;
+    float4 g_ShadowCascadeSplits;
+    float4 g_ShadowCascadeWorldTexel;
+    float4 g_ShadowCascadeParams;
+    float4 g_LightDir;
+    float4 g_LightColor;
+    float4 g_CameraPos;
+    float4 g_CameraForward;
+    float4 g_ScreenParams;
+    float4 g_CameraClipParams;
+    float4 g_ForwardPlusParams;
+    float4 g_LocalLightPositionRange[64];
+    float4 g_LocalLightDirectionType[64];
+    float4 g_LocalLightColorIntensity[64];
+    float4 g_LocalLightSpotParams[64];
+    float4 g_LocalLightMeta;
+    float4 g_InstanceParams;
+    float4 g_MaterialParams0;
+    float4 g_MaterialParams1;
+    float4 g_MaterialParams2;
+    float4 g_MaterialParams3;
+    float4 g_MaterialParams4;
+    float4 g_MaterialParams5;
+    float4 g_MaterialParams6;
+    float4 g_VolumeParams0;
+    float4 g_VolumeParams1;
+    float4 g_VolumeParams2;
+    float4 g_VolumeParams3;
+    float4 g_VolumeParams4;
+    float4 g_TexCoordRow0[12];
+    float4 g_TexCoordRow1[12];
+};
+
+Texture2D g_SceneColor;
+Texture2D<float> g_SceneDepth;
+SamplerState g_SamplerColor;
+SamplerState g_SamplerData;
+
+struct PSInput
+{
+    float4 Pos : SV_POSITION;
+    float3 Normal : NORMAL0;
+    float2 UV : TEXCOORD0;
+    float2 UV1 : TEXCOORD1;
+    float4 Tangent : TEXCOORD2;
+    float3 WorldPos : TEXCOORD3;
+    float4 InstanceParams : TEXCOORD4;
+};
+
+float3 SafeNormalize(float3 v, float3 fallback)
+{
+    float len_sq = dot(v, v);
+    return len_sq > 1.0e-8 ? v * rsqrt(len_sq) : fallback;
+}
+
+float LinearizeSceneDepth(float depth)
+{
+    float near_clip = max(g_CameraClipParams.x, 0.001);
+    float far_clip = max(g_CameraClipParams.y, near_clip + 0.001);
+    if (g_CameraClipParams.z > 0.5)
+    {
+        return (near_clip * far_clip) /
+               max(far_clip - depth * (far_clip - near_clip), 1.0e-4);
+    }
+    return near_clip + depth * (far_clip - near_clip);
+}
+
+bool IntersectSphere(float3 ro, float3 rd, float radius, out float t0, out float t1)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0)
+    {
+        t0 = 0.0;
+        t1 = 0.0;
+        return false;
+    }
+    h = sqrt(h);
+    t0 = -b - h;
+    t1 = -b + h;
+    return true;
+}
+
+float Hash21(float2 p)
+{
+    p = frac(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return frac(p.x * p.y);
+}
+)";
+
+constexpr std::string_view kDetectMagicInteriorPixelShader = R"(float4 PSMain(PSInput input) : SV_TARGET
+{
+    float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+    float3 center = g_VolumeParams0.xyz;
+    float radius = max(g_VolumeParams0.w, 1.0e-4);
+    float3 axis_x = SafeNormalize(g_VolumeParams1.xyz, float3(1.0, 0.0, 0.0));
+    float3 axis_y = SafeNormalize(g_VolumeParams2.xyz, float3(0.0, 1.0, 0.0));
+    float3 axis_z = SafeNormalize(g_VolumeParams3.xyz, float3(0.0, 0.0, 1.0));
+    float3 ray_dir = SafeNormalize(input.WorldPos - g_CameraPos.xyz, -g_CameraForward.xyz);
+    float3 ro = g_CameraPos.xyz - center;
+
+    float t0;
+    float t1;
+    if (!IntersectSphere(ro, ray_dir, radius, t0, t1) || t1 <= 0.0)
+    {
+        discard;
+    }
+    float t_enter = max(t0, 0.0);
+    float t_exit = max(t1, t_enter + 1.0e-4);
+    float ray_forward = max(dot(ray_dir, g_CameraForward.xyz), 1.0e-4);
+    float raw_depth = g_SceneDepth.Sample(g_SamplerData, screen_uv);
+    if (raw_depth >= 0.9999)
+    {
+        discard;
+    }
+    float scene_t = LinearizeSceneDepth(raw_depth) / ray_forward;
+    if (scene_t < t_enter || scene_t > t_exit)
+    {
+        discard;
+    }
+
+    float time = g_LocalLightMeta.w;
+    float3 scene_pos = g_CameraPos.xyz + ray_dir * scene_t;
+    float3 scene_offset = scene_pos - center;
+    float3 scene_local3 = float3(dot(scene_offset, axis_x),
+                                 dot(scene_offset, axis_y),
+                                 dot(scene_offset, axis_z)) / radius;
+    float volume_radius = length(scene_local3);
+    if (volume_radius > 1.0)
+    {
+        discard;
+    }
+
+    float boundary_fade = 1.0 - smoothstep(0.82, 1.0, volume_radius);
+    float surface_depth = min(scene_t - t_enter, t_exit - scene_t);
+    float surface_fade = smoothstep(0.0, radius * 0.08, surface_depth);
+    float mask = saturate(boundary_fade * surface_fade);
+    if (mask <= 0.001)
+    {
+        discard;
+    }
+
+    float2 local_plane = scene_local3.xz;
+    float radial = length(local_plane);
+    float angle = atan2(local_plane.y, local_plane.x);
+    float2 tangent = SafeNormalize(float3(-local_plane.y, local_plane.x, 0.0),
+                                   float3(1.0, 0.0, 0.0)).xy;
+    float2 radial_dir = SafeNormalize(float3(local_plane, 0.0),
+                                      float3(0.0, 1.0, 0.0)).xy;
+    float inner_gate = smoothstep(0.03, 0.24, radial) *
+                       (1.0 - smoothstep(0.88, 1.0, volume_radius));
+
+    float3 heat_p = scene_local3 * 8.0;
+    float plume_a = sin(heat_p.x * 1.91 + heat_p.y * 3.37 + time * 2.10);
+    float plume_b = sin(heat_p.z * 2.47 - heat_p.y * 2.81 - time * 1.73);
+    float plume_c = sin(dot(heat_p, float3(1.43, -2.11, 1.67)) + time * 2.87);
+    float thread_a = sin(scene_local3.y * 42.0 + scene_local3.x * 12.0 + time * 4.10);
+    float thread_b = cos(scene_local3.y * 31.0 - scene_local3.z * 15.0 - time * 3.30);
+    float shimmer_a = sin(angle * 4.0 + scene_local3.y * 16.0 + time * 3.10);
+    float shimmer_b = cos((scene_local3.x - scene_local3.z) * 21.0 - time * 2.45);
+    float shimmer_c = sin(dot(scene_local3, float3(17.0, 11.0, -13.0)) + time * 4.70);
+    float turbulence = saturate(0.50 + 0.18 * plume_a + 0.18 * plume_b + 0.14 * plume_c);
+    float threads = saturate(0.50 + 0.28 * thread_a + 0.22 * thread_b);
+    float shimmer = smoothstep(0.24,
+                               0.88,
+                               0.50 + 0.20 * shimmer_a + 0.18 * shimmer_b +
+                                   0.16 * shimmer_c);
+    float flicker_cell = Hash21(floor((local_plane + radial_dir * time * 0.035) * 10.0) +
+                                floor(time * 6.0));
+    float flicker = saturate(0.82 +
+                             0.10 * sin(time * 10.5 + shimmer * 6.2831853) +
+                             0.08 * step(0.62, flicker_cell));
+    float2 drift = float2(plume_a + plume_c * 0.65 + thread_a * 0.45,
+                          plume_b - plume_c * 0.55 + thread_b * 0.40);
+    float2 rise = float2(sin(scene_local3.y * 24.0 + time * 2.60),
+                         cos((scene_local3.x - scene_local3.z) * 18.0 - time * 2.20));
+    float heat_strength = (0.0025 + turbulence * 0.0030 + threads * 0.0020) * mask;
+    float rainbow_strength = (0.0008 + shimmer * 0.0019) * inner_gate * mask * flicker;
+    float2 rainbow_axis =
+        SafeNormalize(float3(tangent * (0.72 + 0.28 * shimmer_a) +
+                                 radial_dir * (0.24 * shimmer_b),
+                             0.0),
+                      float3(1.0, 0.0, 0.0)).xy;
+    float2 warp = (drift * 0.62 + rise * 0.38) * heat_strength;
+    float2 chroma = rainbow_axis * rainbow_strength;
+
+    float3 scene_base = g_SceneColor.Sample(g_SamplerColor, screen_uv).rgb;
+    float2 uv_mid = clamp(screen_uv + warp, 0.001, 0.999);
+    float3 scene_mid = g_SceneColor.Sample(g_SamplerColor, uv_mid).rgb;
+    float red = g_SceneColor.Sample(g_SamplerColor,
+                                    clamp(uv_mid + chroma * 1.25, 0.001, 0.999)).r;
+    float green = g_SceneColor.Sample(g_SamplerColor,
+                                      clamp(uv_mid - chroma * 0.20, 0.001, 0.999)).g;
+    float blue = g_SceneColor.Sample(g_SamplerColor,
+                                     clamp(uv_mid - chroma * 1.05, 0.001, 0.999)).b;
+    float3 chromatic = float3(red, green, blue);
+    float3 rainbow_wave = 0.5 + 0.5 * sin(float3(0.0, 2.0944, 4.1888) +
+                                          angle * 2.0 +
+                                          scene_local3.y * 8.0 +
+                                          time * 2.6);
+    float heat_lift = (turbulence - 0.5) * 0.028 + threads * 0.012;
+    float3 refracted = lerp(scene_mid, chromatic, 0.18 + shimmer * 0.08);
+    refracted = lerp(scene_base, refracted, 0.42);
+    float3 shimmer_tint = (rainbow_wave - 0.42) * shimmer * flicker * 0.020 * mask;
+    float3 color = refracted * (1.0 + heat_lift * mask + (flicker - 0.86) * 0.04 * mask) +
+                   shimmer_tint;
+    float alpha = saturate(mask * g_BaseColorFactor.a);
+    return float4(color, alpha);
+}
+)";
+
+constexpr std::string_view kDetectMagicSurfacePixelShader = R"(float4 PSMain(PSInput input) : SV_TARGET
+{
+    float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
+    float3 center = g_VolumeParams0.xyz;
+    float radius = max(g_VolumeParams0.w, 1.0e-4);
+    float3 axis_y = SafeNormalize(g_VolumeParams2.xyz, float3(0.0, 1.0, 0.0));
+    float3 axis_z = SafeNormalize(g_VolumeParams3.xyz, float3(0.0, 0.0, 1.0));
+    float3 ray_dir = SafeNormalize(input.WorldPos - g_CameraPos.xyz, -g_CameraForward.xyz);
+    float3 ro = g_CameraPos.xyz - center;
+
+    float t0;
+    float t1;
+    if (!IntersectSphere(ro, ray_dir, radius, t0, t1) || t1 <= 0.0)
+    {
+        discard;
+    }
+
+    float t_surface = t0 > 0.0 ? t0 : t1;
+    if (t_surface <= 0.0)
+    {
+        discard;
+    }
+    float ray_forward = max(dot(ray_dir, g_CameraForward.xyz), 1.0e-4);
+    float raw_depth = g_SceneDepth.Sample(g_SamplerData, screen_uv);
+    float scene_t = 1.0e20;
+    if (raw_depth < 0.9999)
+    {
+        scene_t = LinearizeSceneDepth(raw_depth) / ray_forward;
+    }
+    float shell_depth_bias = radius * 0.006;
+    bool front_visible = scene_t >= t_surface - shell_depth_bias;
+    bool surface_double_sided = g_VolumeParams4.w > 0.5;
+    bool back_visible = surface_double_sided &&
+                        t0 > 0.0 &&
+                        t1 > t_surface + radius * 0.01 &&
+                        scene_t >= t1 - shell_depth_bias;
+    if (!front_visible && !back_visible)
+    {
+        discard;
+    }
+    float back_layer = back_visible ? 1.0 : 0.0;
+
+    float3 surface_pos = g_CameraPos.xyz + ray_dir * t_surface;
+    float3 normal = SafeNormalize(surface_pos - center, -ray_dir);
+    float3 view_dir = SafeNormalize(g_CameraPos.xyz - surface_pos, -ray_dir);
+    float ndv = saturate(abs(dot(normal, view_dir)));
+    float fresnel = pow(1.0 - ndv, 3.0);
+
+    float2 normal_uv = float2(dot(normal, axis_y), dot(normal, axis_z));
+    float edge = smoothstep(0.30, 0.92, fresnel);
+    float time = g_LocalLightMeta.w;
+    float glint = smoothstep(0.86,
+                             1.0,
+                             0.5 + 0.5 * sin(dot(normal, float3(17.0, 9.0, -13.0)) +
+                                             time * 2.4));
+    float2 reflect_uv_offset =
+        normal_uv * (0.018 + fresnel * 0.045) +
+        float2(sin(time * 1.7 + normal.y * 8.0),
+               cos(time * 1.3 + normal.z * 7.0)) * 0.003;
+
+    float3 scene = g_SceneColor.Sample(g_SamplerColor, screen_uv).rgb;
+    float3 reflected = g_SceneColor.Sample(g_SamplerColor,
+                                           clamp(screen_uv + reflect_uv_offset,
+                                                 0.001,
+                                                 0.999)).rgb;
+    float3 reflected_opposite =
+        g_SceneColor.Sample(g_SamplerColor,
+                            clamp(screen_uv - reflect_uv_offset * 0.42,
+                                  0.001,
+                                  0.999)).rgb;
+
+    float3 shell_tint = float3(0.82, 0.92, 1.0);
+    float3 highlight =
+        shell_tint * (0.10 + edge * 0.42 + glint * fresnel * 0.20 + back_layer * 0.08);
+    float3 reflection = lerp(reflected, reflected_opposite, 0.22);
+    reflection = max(reflection, scene * 0.82);
+    float3 color = lerp(scene * 1.02,
+                        reflection + highlight,
+                        0.25 + fresnel * 0.30 + back_layer * 0.08);
+    float alpha = saturate((0.18 + fresnel * 0.36 + glint * edge * 0.08 +
+                            back_layer * 0.12) *
+                           g_BaseColorFactor.a);
+    if (alpha <= 0.002)
+    {
+        discard;
+    }
+    return float4(color, alpha);
+}
+)";
+
+Json makeDetectMagicVolumeMaterial(std::string fragment_shader, float base_alpha) {
+  return Json{
+      {"version", 2},
+      {"pipeline",
+       {
+           {"name", "custom"},
+           {"vertex", "../shaders/detect_magic_volume_vs.hlsl"},
+           {"fragment", std::move(fragment_shader)},
+           {"vertex_entry", "VSMain"},
+           {"fragment_entry", "PSMain"},
+       }},
+      {"surface",
+       {
+           {"base_color", Json::array({1.0f, 1.0f, 1.0f, base_alpha})},
+           {"emissive_color", Json::array({0.94f, 0.98f, 1.0f, 1.0f})},
+           {"metallic", 0.0f},
+           {"roughness", 1.0f},
+           {"unlit", true},
+       }},
+      {"render_state",
+       {
+           {"transparent", true},
+           {"alpha_mode", "blend"},
+           {"blend_mode", "alpha"},
+           {"depth_test", false},
+           {"depth_write", false},
+           {"double_sided", true},
+       }},
+  };
+}
+
 Json makeMeshNode(uint32_t id,
                   uint32_t parent,
                   std::string name,
@@ -481,8 +1007,8 @@ Json makePointLightNode(uint32_t id,
                         uint32_t parent,
                         std::string name,
                         Json light_color,
-                        float intensity,
-                        float range,
+                        Json intensity,
+                        Json range,
                         Json position = vec3(0.0f, 0.0f, 0.0f)) {
   return Json{
       {"id", id},
@@ -501,8 +1027,8 @@ Json makePointLightNode(uint32_t id,
             {
                 {"type", "point"},
                 {"color", std::move(light_color)},
-                {"intensity", intensity},
-                {"range", range},
+                {"intensity", std::move(intensity)},
+                {"range", std::move(range)},
                 {"inner_cone_degrees", 15.0f},
                 {"outer_cone_degrees", 30.0f},
                 {"casts_shadows", false},
@@ -725,6 +1251,17 @@ void configureDazeAtlas(Json& emitter, bool random_start_frame = true) {
   emitter["atlas"]["random_start_frame"] = random_start_frame;
 }
 
+void configurePixieDustAtlas(Json& emitter) {
+  emitter["playback"]["local_space"] = true;
+  emitter["render"]["use_soft_mask"] = false;
+  emitter["atlas"]["columns"] = 4;
+  emitter["atlas"]["rows"] = 4;
+  emitter["atlas"]["frame_count"] = 16;
+  emitter["atlas"]["animation_fps"] = 0.0f;
+  emitter["atlas"]["animate_over_lifetime"] = false;
+  emitter["atlas"]["random_start_frame"] = true;
+}
+
 void configureDazeRingSource(Json& emitter,
                              float radius,
                              float inner_scale,
@@ -742,6 +1279,10 @@ void configureDazeRingSource(Json& emitter,
 }
 
 void configureHealAtlas(Json& emitter, bool random_start_frame = true) {
+  configureDazeAtlas(emitter, random_start_frame);
+}
+
+void configureHasteAtlas(Json& emitter, bool random_start_frame = true) {
   configureDazeAtlas(emitter, random_start_frame);
 }
 
@@ -764,6 +1305,35 @@ void configureBreatheFireAtlas(Json& emitter, bool random_start_frame = true) {
   emitter["atlas"]["frame_count"] = 8;
   emitter["atlas"]["animation_fps"] = 0.0f;
   emitter["atlas"]["animate_over_lifetime"] = false;
+  emitter["atlas"]["random_start_frame"] = random_start_frame;
+}
+
+void configureFireballBurstEmitter(Json& emitter,
+                                   float duration,
+                                   float start_delay = 0.0f,
+                                   bool random_start_frame = true) {
+  emitter["playback"]["loop"] = false;
+  emitter["playback"]["local_space"] = true;
+  emitter["playback"]["start_delay"] = start_delay;
+  emitter["playback"]["duration"] = duration;
+  emitter["render"]["use_soft_mask"] = false;
+  emitter["render"]["soft_particle_distance"] = 0.55f;
+  emitter["atlas"]["columns"] = 4;
+  emitter["atlas"]["rows"] = 1;
+  emitter["atlas"]["frame_count"] = 4;
+  emitter["atlas"]["animation_fps"] = 18.0f;
+  emitter["atlas"]["animate_over_lifetime"] = true;
+  emitter["atlas"]["random_start_frame"] = random_start_frame;
+}
+
+void configureFireballRealismAtlas(Json& emitter, bool random_start_frame = false) {
+  emitter["atlas"]["columns"] = 4;
+  emitter["atlas"]["rows"] = 2;
+  emitter["atlas"]["frame_count"] = 8;
+  emitter["atlas"]["frame_width"] = 0;
+  emitter["atlas"]["frame_height"] = 0;
+  emitter["atlas"]["animation_fps"] = 18.0f;
+  emitter["atlas"]["animate_over_lifetime"] = true;
   emitter["atlas"]["random_start_frame"] = random_start_frame;
 }
 
@@ -817,8 +1387,8 @@ Json makeBreatheFireEmitterPath(float length, float radius) {
 
 Json makeBeam(std::string texture_key,
               Json path_points,
-              float start_width,
-              float end_width,
+              Json start_width,
+              Json end_width,
               Json start_color,
               Json end_color,
               float uv_repeat,
@@ -933,57 +1503,105 @@ Json makeHealSpiralPath(float radius_x,
   return path;
 }
 
+Json makeHasteRingPath(float radius_scale,
+                       float height_scale,
+                       std::size_t segments,
+                       float phase,
+                       float ripple = 0.0f) {
+  Json path = Json::array();
+  constexpr float kPi = 3.14159265358979323846f;
+  for (std::size_t i = 0u; i <= segments; ++i) {
+    const float u = static_cast<float>(i) / static_cast<float>(segments);
+    const float t = phase + u * kPi * 2.0f;
+    const float pulse = 1.0f + ripple * std::sin(u * kPi * 6.0f + phase);
+    path.push_back(variableVec3(radius_scale * pulse * std::cos(t),
+                                height_scale,
+                                radius_scale * pulse * std::sin(t)));
+  }
+  return path;
+}
+
+Json makeHasteStreakPath(float phase,
+                         float radius_scale,
+                         float y_start,
+                         float y_mid,
+                         float y_end,
+                         float lean = 0.0f) {
+  const float c = std::cos(phase);
+  const float s = std::sin(phase);
+  return Json::array({
+      variableVec3(radius_scale * c - lean, y_start, radius_scale * s),
+      variableVec3(radius_scale * c, y_mid, radius_scale * s),
+      variableVec3(radius_scale * c + lean, y_end, radius_scale * s),
+  });
+}
+
+Json makeHasteAfterimagePath(float side,
+                             float y_start,
+                             float y_mid,
+                             float y_end,
+                             float depth_scale) {
+  return Json::array({
+      variableVec3(side * 0.52f, y_start, -depth_scale),
+      variableVec3(side * 0.32f, y_mid, -depth_scale * 0.42f),
+      variableVec3(side * 0.10f, y_end, 0.04f),
+  });
+}
+
+constexpr float kDefaultChromaticLength = 6.4f;
+constexpr float kChromaticRayAxisY = 1.30f;
+constexpr float kDefaultChromaticHelixTurns = 2.45f;
+constexpr float kChromaticHelixRadius = 0.25f;
+
+float chromaticHelixTurnsForLength(float length) {
+  return (std::max(length, 0.25f) / kDefaultChromaticLength) *
+         kDefaultChromaticHelixTurns;
+}
+
+std::pair<math::Vec3, math::Vec3> chromaticRayEndpoints(float length) {
+  const float scale = std::max(length, 0.25f) / kDefaultChromaticLength;
+  return {
+      {-3.20f * scale, kChromaticRayAxisY, 0.0f},
+      {3.20f * scale, kChromaticRayAxisY, 0.0f},
+  };
+}
+
 Json makeChromaticRayPath(float length,
                           float y_offset = 0.0f,
                           float z_offset = 0.0f) {
-  constexpr float kDefaultChromaticLength = 6.4f;
-  const float scale = std::max(length, 0.25f) / kDefaultChromaticLength;
-  auto point = [scale, y_offset, z_offset](float x, float y, float z) {
-    return vec3(x * scale, y * scale + y_offset, z * scale + z_offset);
-  };
+  auto [start, end] = chromaticRayEndpoints(length);
+  start.y += y_offset;
+  start.z += z_offset;
+  end.y += y_offset;
+  end.z += z_offset;
 
   return Json::array({
-      point(-3.15f, 0.72f, 0.00f),
-      point(-1.35f, 0.98f, 0.04f),
-      point(0.85f, 1.38f, -0.06f),
-      point(3.18f, 1.88f, 0.00f),
+      vec3(math::lerp(start, end, 0.0f)),
+      vec3(math::lerp(start, end, 1.0f / 3.0f)),
+      vec3(math::lerp(start, end, 2.0f / 3.0f)),
+      vec3(math::lerp(start, end, 1.0f)),
   });
 }
 
 Json makeChromaticHelixPath(float length,
                             float strand_radius,
                             float phase,
-                            float turns = 2.35f,
                             std::size_t segments = 22u) {
   constexpr float kPi = 3.14159265358979323846f;
-  constexpr float kDefaultChromaticLength = 6.4f;
-  constexpr std::array<std::array<float, 3>, 4> kBasePoints{{
-      {-3.15f, 0.72f, 0.00f},
-      {-1.35f, 0.98f, 0.04f},
-      {0.85f, 1.38f, -0.06f},
-      {3.18f, 1.88f, 0.00f},
-  }};
-
-  const float scale = std::max(length, 0.25f) / kDefaultChromaticLength;
+  auto [start, end] = chromaticRayEndpoints(length);
+  const math::Vec3 axis = math::normalize(math::subtract(end, start));
+  const math::Vec3 normal = math::normalize(math::cross(axis, {0.0f, 1.0f, 0.0f}));
+  const math::Vec3 binormal = math::normalize(math::cross(normal, axis));
+  const float turns = chromaticHelixTurnsForLength(length);
   Json path = Json::array();
   for (std::size_t i = 0u; i <= segments; ++i) {
     const float u = static_cast<float>(i) / static_cast<float>(segments);
-    const float segment_position = u * static_cast<float>(kBasePoints.size() - 1u);
-    const std::size_t segment =
-        std::min<std::size_t>(static_cast<std::size_t>(segment_position),
-                              kBasePoints.size() - 2u);
-    const float t = segment_position - static_cast<float>(segment);
-    const auto& a = kBasePoints[segment];
-    const auto& b = kBasePoints[segment + 1u];
-    const float x = (a[0] + (b[0] - a[0]) * t) * scale;
-    const float y = (a[1] + (b[1] - a[1]) * t) * scale;
-    const float z = (a[2] + (b[2] - a[2]) * t) * scale;
-
     const float angle = phase + u * turns * kPi * 2.0f;
-    const float tapered_orbit = strand_radius * (0.54f + 0.46f * std::sin(u * kPi));
-    path.push_back(vec3(x,
-                        y + std::cos(angle) * tapered_orbit,
-                        z + std::sin(angle) * tapered_orbit * 0.54f));
+    const math::Vec3 center = math::lerp(start, end, u);
+    const math::Vec3 offset =
+        math::add(math::scale(normal, std::cos(angle) * strand_radius),
+                  math::scale(binormal, std::sin(angle) * strand_radius));
+    path.push_back(vec3(math::add(center, offset)));
   }
   return path;
 }
@@ -1079,6 +1697,10 @@ bool copyTexture(const std::filesystem::path& repo_root,
   if (ec) {
     return fail(diagnostic, "failed to create texture directory: " + destination.parent_path().string());
   }
+  std::error_code equivalent_ec;
+  if (std::filesystem::equivalent(source, destination, equivalent_ec)) {
+    return true;
+  }
   std::filesystem::copy_file(source,
                              destination,
                              std::filesystem::copy_options::overwrite_existing,
@@ -1138,6 +1760,901 @@ Json packageManifest(const std::vector<GeneratedAsset>& assets) {
   return Json{{"version", 1}, {"assets", std::move(entries)}};
 }
 
+bool prepareGeneratedPackageDir(const std::filesystem::path& package_dir,
+                                std::string* diagnostic) {
+  std::error_code ec;
+  std::filesystem::create_directories(package_dir / "particles", ec);
+  if (ec) {
+    return fail(diagnostic, "failed to create output particles directory: " + ec.message());
+  }
+  std::filesystem::create_directories(package_dir / "textures", ec);
+  if (ec) {
+    return fail(diagnostic, "failed to create output textures directory: " + ec.message());
+  }
+  return true;
+}
+
+bool writeGeneratedPrefabPackage(const std::filesystem::path& package_dir,
+                                 std::vector<GeneratedAsset>& assets,
+                                 std::vector<std::string>& effect_paths,
+                                 Json nodes,
+                                 Json variables,
+                                 std::string* diagnostic) {
+  if (!writeJson(package_dir / "assets.package.json", packageManifest(assets), diagnostic)) {
+    return false;
+  }
+  Json prefab{{"version", 2}, {"root", 0}, {"nodes", std::move(nodes)}};
+  if (!variables.empty()) {
+    prefab["variables"] = std::move(variables);
+  }
+  if (!writeJson(package_dir / "prefab.json", prefab, diagnostic)) {
+    return false;
+  }
+  return validateGeneratedEffects(package_dir, effect_paths, diagnostic);
+}
+
+bool copyFireballTexture(const std::filesystem::path& repo_root,
+                         const std::filesystem::path& package_dir,
+                         const std::string& file_name,
+                         std::string* diagnostic) {
+  return copyTexture(repo_root,
+                     package_dir,
+                     "examples/assets/prefabs/fireball/textures/" + file_name,
+                     "textures/" + file_name,
+                     diagnostic);
+}
+
+bool addFireballTextureSet(const std::filesystem::path& repo_root,
+                           const std::filesystem::path& package_dir,
+                           const std::string& asset_namespace,
+                           std::vector<GeneratedAsset>& assets,
+                           std::initializer_list<std::pair<std::string_view, std::string_view>> textures,
+                           std::string* diagnostic) {
+  for (const auto& [suffix, file_name] : textures) {
+    const std::string file{file_name};
+    if (!copyFireballTexture(repo_root, package_dir, file, diagnostic)) {
+      return false;
+    }
+    addTexture(assets,
+               asset_namespace + "/" + std::string{suffix},
+               "textures/" + file);
+  }
+  return true;
+}
+
+bool generateFireballEffectPackages(const std::filesystem::path& repo_root,
+                                    const std::filesystem::path& output_dir,
+                                    const std::string& asset_namespace,
+                                    const std::string& name,
+                                    float radius,
+                                    std::string* diagnostic) {
+  const std::filesystem::path projectile_dir = output_dir / "projectile";
+  const std::filesystem::path explosion_dir = output_dir / "explosion";
+  const std::string projectile_namespace = asset_namespace + "/projectile";
+  const std::string explosion_namespace = asset_namespace + "/explosion";
+  std::error_code ec;
+  std::filesystem::remove(projectile_dir / "prefab.json", ec);
+  ec.clear();
+  std::filesystem::remove(projectile_dir / "assets.package.json", ec);
+  ec.clear();
+  std::filesystem::remove_all(projectile_dir / "particles", ec);
+  ec.clear();
+  std::filesystem::remove_all(projectile_dir / "textures", ec);
+  ec.clear();
+  std::filesystem::remove(explosion_dir / "prefab.json", ec);
+  ec.clear();
+  std::filesystem::remove(explosion_dir / "assets.package.json", ec);
+  ec.clear();
+  std::filesystem::remove_all(explosion_dir / "particles", ec);
+  ec.clear();
+  std::filesystem::remove_all(explosion_dir / "textures", ec);
+  ec.clear();
+  if (!prepareGeneratedPackageDir(projectile_dir, diagnostic) ||
+      !prepareGeneratedPackageDir(explosion_dir, diagnostic)) {
+    return false;
+  }
+
+  std::filesystem::remove(output_dir / "prefab.json", ec);
+  ec.clear();
+  std::filesystem::remove(output_dir / "assets.package.json", ec);
+  ec.clear();
+  std::filesystem::remove_all(output_dir / "particles", ec);
+
+  auto projectile_texture_key = [&](std::string_view suffix) {
+    return projectile_namespace + "/" + std::string{suffix};
+  };
+  auto projectile_effect_key = [&](std::string_view suffix) {
+    return projectile_namespace + "/" + std::string{suffix};
+  };
+  auto explosion_texture_key = [&](std::string_view suffix) {
+    return explosion_namespace + "/" + std::string{suffix};
+  };
+  auto explosion_effect_key = [&](std::string_view suffix) {
+    return explosion_namespace + "/" + std::string{suffix};
+  };
+
+  std::vector<GeneratedAsset> projectile_assets;
+  std::vector<std::string> projectile_effect_paths;
+  auto write_projectile_effect = [&](std::string file_name, std::string key, Json effect_json) {
+    const std::string relative = "particles/" + file_name;
+    if (!writeJson(projectile_dir / relative, effect_json, diagnostic)) {
+      return false;
+    }
+    addEffect(projectile_assets, std::move(key), relative);
+    projectile_effect_paths.push_back(relative);
+    return true;
+  };
+
+  if (!addFireballTextureSet(repo_root,
+                             projectile_dir,
+                             projectile_namespace,
+                             projectile_assets,
+                             {
+                                 {"fireball_core_atlas", "fireball_core_atlas.png"},
+                                 {"fireball_flame_atlas", "fireball_flame_atlas.png"},
+                                 {"fireball_tongue_atlas", "fireball_tongue_atlas.png"},
+                                 {"fireball_ember_atlas", "fireball_ember_atlas.png"},
+                                 {"fireball_ember_burst_atlas", "fireball_ember_burst_atlas.png"},
+                                 {"fireball_smoke_atlas", "fireball_smoke_atlas.png"},
+                                 {"fireball_heat_atlas", "fireball_heat_atlas.png"},
+                             },
+                             diagnostic)) {
+    return false;
+  }
+
+  constexpr float projectile_radius = kFireballOrbRadius;
+  Json projectile_core = makeEmitter("fireball_projectile_core",
+                                     projectile_texture_key("fireball_core_atlas"),
+                                     "additive",
+                                     "sphere",
+                                     180,
+                                     36,
+                                     128.0f,
+                                     0.12f,
+                                     0.28f,
+                                     0.42f * projectile_radius,
+                                     1.12f * projectile_radius,
+                                     0.12f * projectile_radius,
+                                     0.38f * projectile_radius,
+                                     color(3.4f, 2.55f, 1.05f, 0.95f),
+                                     color(1.15f, 0.16f, 0.02f, 0.0f),
+                                     Json::array(),
+                                     8401u);
+  projectile_core["playback"]["local_space"] = false;
+  projectile_core["source"]["radius_min"] = 0.0f;
+  projectile_core["source"]["radius_max"] = 0.72f * projectile_radius;
+  projectile_core["source"]["jitter_radius"] = 0.04f * projectile_radius;
+  projectile_core["source"]["radial_speed_min"] = 0.24f * projectile_radius;
+  projectile_core["source"]["radial_speed_max"] = 1.25f * projectile_radius;
+  projectile_core["motion"]["velocity_min"] = vec3(-0.20f, -0.05f, -0.12f);
+  projectile_core["motion"]["velocity_max"] = vec3(0.12f, 0.18f, 0.12f);
+  projectile_core["motion"]["acceleration"] = vec3(0.0f, 0.08f, 0.0f);
+  projectile_core["motion"]["drag"] = 0.30f;
+  projectile_core["size"]["curve_exponent"] = 0.52f;
+  projectile_core["color"]["alpha_curve_exponent"] = 0.95f;
+
+  Json projectile_flames = makeEmitter("fireball_projectile_flames",
+                                       projectile_texture_key("fireball_flame_atlas"),
+                                       "additive",
+                                       "sphere_surface",
+                                       260,
+                                       18,
+                                       160.0f,
+                                       0.18f,
+                                       0.42f,
+                                       0.34f * projectile_radius,
+                                       0.92f * projectile_radius,
+                                       0.04f * projectile_radius,
+                                       0.22f * projectile_radius,
+                                       color(2.75f, 1.08f, 0.18f, 0.84f),
+                                       color(0.92f, 0.08f, 0.01f, 0.0f),
+                                       Json::array(),
+                                       8411u);
+  projectile_flames["playback"]["local_space"] = false;
+  projectile_flames["source"]["radius_min"] = 0.48f * projectile_radius;
+  projectile_flames["source"]["radius_max"] = 1.08f * projectile_radius;
+  projectile_flames["source"]["jitter_radius"] = 0.16f * projectile_radius;
+  projectile_flames["source"]["radial_speed_min"] = 0.30f * projectile_radius;
+  projectile_flames["source"]["radial_speed_max"] = 1.75f * projectile_radius;
+  projectile_flames["motion"]["velocity_min"] = vec3(-0.34f, -0.06f, -0.16f);
+  projectile_flames["motion"]["velocity_max"] = vec3(0.08f, 0.22f, 0.16f);
+  projectile_flames["motion"]["acceleration"] = vec3(0.0f, 0.18f, 0.0f);
+  projectile_flames["motion"]["drag"] = 0.42f;
+  projectile_flames["rotation"]["angular_velocity_min"] = -4.8f;
+  projectile_flames["rotation"]["angular_velocity_max"] = 4.8f;
+  projectile_flames["size"]["curve_exponent"] = 0.66f;
+  projectile_flames["color"]["alpha_curve_exponent"] = 0.92f;
+
+  Json projectile_smoke = makeEmitter("fireball_projectile_smoke",
+                                      projectile_texture_key("fireball_smoke_atlas"),
+                                      "alpha",
+                                      "sphere",
+                                      360,
+                                      0,
+                                      96.0f,
+                                      0.92f,
+                                      1.95f,
+                                      0.68f * projectile_radius,
+                                      1.48f * projectile_radius,
+                                      2.70f * projectile_radius,
+                                      5.90f * projectile_radius,
+                                      color(0.42f, 0.31f, 0.23f, 0.34f),
+                                      color(0.055f, 0.050f, 0.046f, 0.0f),
+                                      Json::array(),
+                                      8421u);
+  projectile_smoke["playback"]["local_space"] = false;
+  projectile_smoke["render"]["layer"] = 0u;
+  projectile_smoke["render"]["soft_particle_distance"] = 0.55f;
+  projectile_smoke["source"]["radius_min"] = 0.10f * projectile_radius;
+  projectile_smoke["source"]["radius_max"] = 0.82f * projectile_radius;
+  projectile_smoke["source"]["jitter_radius"] = 0.24f * projectile_radius;
+  projectile_smoke["source"]["radial_speed_min"] = 0.02f * projectile_radius;
+  projectile_smoke["source"]["radial_speed_max"] = 0.40f * projectile_radius;
+  projectile_smoke["motion"]["velocity_min"] = vec3(-0.28f, 0.04f, -0.12f);
+  projectile_smoke["motion"]["velocity_max"] = vec3(-0.04f, 0.34f, 0.12f);
+  projectile_smoke["motion"]["acceleration"] = vec3(0.0f, 0.18f, 0.0f);
+  projectile_smoke["motion"]["drag"] = 0.72f;
+  projectile_smoke["size"]["curve_exponent"] = 0.78f;
+  projectile_smoke["color"]["alpha_curve_exponent"] = 0.88f;
+
+  Json projectile_embers = makeEmitter("fireball_projectile_embers",
+                                       projectile_texture_key("fireball_ember_atlas"),
+                                       "additive",
+                                       "sphere_surface",
+                                       320,
+                                       12,
+                                       72.0f,
+                                       0.48f,
+                                       1.12f,
+                                       0.07f * projectile_radius,
+                                       0.22f * projectile_radius,
+                                       0.012f * projectile_radius,
+                                       0.045f * projectile_radius,
+                                       color(1.0f, 0.64f, 0.18f, 1.0f),
+                                       color(1.0f, 0.04f, 0.0f, 0.0f),
+                                       Json::array(),
+                                       8431u);
+  projectile_embers["playback"]["local_space"] = false;
+  projectile_embers["source"]["radius_min"] = 0.40f * projectile_radius;
+  projectile_embers["source"]["radius_max"] = 1.05f * projectile_radius;
+  projectile_embers["source"]["jitter_radius"] = 0.10f * projectile_radius;
+  projectile_embers["source"]["radial_speed_min"] = 0.32f * projectile_radius;
+  projectile_embers["source"]["radial_speed_max"] = 1.40f * projectile_radius;
+  projectile_embers["motion"]["velocity_min"] = vec3(-0.46f, -0.10f, -0.18f);
+  projectile_embers["motion"]["velocity_max"] = vec3(0.06f, 0.24f, 0.18f);
+  projectile_embers["motion"]["acceleration"] = vec3(0.0f, -0.42f, 0.0f);
+  projectile_embers["motion"]["drag"] = 0.24f;
+  projectile_embers["size"]["curve_exponent"] = 0.72f;
+  projectile_embers["color"]["alpha_curve_exponent"] = 1.18f;
+
+  Json projectile_ember_sparks = makeEmitter("fireball_projectile_ember_sparks",
+                                             projectile_texture_key("fireball_ember_burst_atlas"),
+                                             "additive",
+                                             "sphere_surface",
+                                             420,
+                                             18,
+                                             54.0f,
+                                             0.40f,
+                                             1.18f,
+                                             0.09f * projectile_radius,
+                                             0.24f * projectile_radius,
+                                             0.010f * projectile_radius,
+                                             0.036f * projectile_radius,
+                                             color(1.0f, 0.58f, 0.12f, 0.78f),
+                                             color(1.0f, 0.035f, 0.0f, 0.0f),
+                                             Json::array(),
+                                             8437u);
+  projectile_ember_sparks["playback"]["local_space"] = false;
+  projectile_ember_sparks["source"]["radius_min"] = 0.36f * projectile_radius;
+  projectile_ember_sparks["source"]["radius_max"] = 1.18f * projectile_radius;
+  projectile_ember_sparks["source"]["jitter_radius"] = 0.16f * projectile_radius;
+  projectile_ember_sparks["source"]["radial_speed_min"] = 0.44f * projectile_radius;
+  projectile_ember_sparks["source"]["radial_speed_max"] = 2.10f * projectile_radius;
+  projectile_ember_sparks["motion"]["velocity_min"] = vec3(-0.66f, -0.14f, -0.24f);
+  projectile_ember_sparks["motion"]["velocity_max"] = vec3(0.04f, 0.34f, 0.24f);
+  projectile_ember_sparks["motion"]["acceleration"] = vec3(0.0f, -0.58f, 0.0f);
+  projectile_ember_sparks["motion"]["drag"] = 0.20f;
+  projectile_ember_sparks["rotation"]["angular_velocity_min"] = -8.0f;
+  projectile_ember_sparks["rotation"]["angular_velocity_max"] = 8.0f;
+  projectile_ember_sparks["size"]["curve_exponent"] = 0.76f;
+  projectile_ember_sparks["color"]["alpha_curve_exponent"] = 1.32f;
+  configureFireballRealismAtlas(projectile_ember_sparks, true);
+
+  Json projectile_heat = makeEmitter("fireball_projectile_heat",
+                                     projectile_texture_key("fireball_heat_atlas"),
+                                     "distortion",
+                                     "sphere",
+                                     36,
+                                     0,
+                                     28.0f,
+                                     0.22f,
+                                     0.48f,
+                                     0.82f * projectile_radius,
+                                     1.60f * projectile_radius,
+                                     1.20f * projectile_radius,
+                                     2.40f * projectile_radius,
+                                     color(1.0f, 1.0f, 1.0f, 0.22f),
+                                     color(1.0f, 1.0f, 1.0f, 0.0f),
+                                     Json::array(),
+                                     8441u);
+  projectile_heat["playback"]["local_space"] = false;
+  projectile_heat["render"]["soft_particle_distance"] = 0.55f;
+  projectile_heat["render"]["distortion_strength"] = 5.8f;
+  projectile_heat["source"]["radius_max"] = 0.95f * projectile_radius;
+  projectile_heat["source"]["jitter_radius"] = 0.08f * projectile_radius;
+  projectile_heat["motion"]["drag"] = 1.2f;
+  projectile_heat["size"]["curve_exponent"] = 0.58f;
+
+  if (!write_projectile_effect("fireball_projectile_core.kpeffect",
+                               projectile_effect_key("core"),
+                               effect(std::move(projectile_core))) ||
+      !write_projectile_effect("fireball_projectile_flames.kpeffect",
+                               projectile_effect_key("flames"),
+                               effect(std::move(projectile_flames))) ||
+      !write_projectile_effect("fireball_projectile_smoke.kpeffect",
+                               projectile_effect_key("smoke_trail"),
+                               effect(std::move(projectile_smoke))) ||
+      !write_projectile_effect("fireball_projectile_embers.kpeffect",
+                               projectile_effect_key("embers"),
+                               effect(std::move(projectile_embers))) ||
+      !write_projectile_effect("fireball_projectile_ember_sparks.kpeffect",
+                               projectile_effect_key("ember_sparks"),
+                               effect(std::move(projectile_ember_sparks))) ||
+      !write_projectile_effect("fireball_projectile_heat.kpeffect",
+                               projectile_effect_key("heat"),
+                               effect(std::move(projectile_heat)))) {
+    return false;
+  }
+
+  Json projectile_nodes = Json::array();
+  projectile_nodes.push_back(makeRootNode(name + " Projectile"));
+  uint32_t projectile_node_id = 1u;
+  projectile_nodes.push_back(makeParticleNode(projectile_node_id++,
+                                              0u,
+                                              "projectile_core",
+                                              projectile_effect_key("core")));
+  projectile_nodes.push_back(makeParticleNode(projectile_node_id++,
+                                              0u,
+                                              "projectile_flames",
+                                              projectile_effect_key("flames")));
+  projectile_nodes.push_back(makeParticleNode(projectile_node_id++,
+                                              0u,
+                                              "projectile_smoke_trail",
+                                              projectile_effect_key("smoke_trail")));
+  projectile_nodes.push_back(makeParticleNode(projectile_node_id++,
+                                              0u,
+                                              "projectile_embers",
+                                              projectile_effect_key("embers")));
+  projectile_nodes.push_back(makeParticleNode(projectile_node_id++,
+                                              0u,
+                                              "projectile_ember_sparks",
+                                              projectile_effect_key("ember_sparks")));
+  projectile_nodes.push_back(makeParticleNode(projectile_node_id++,
+                                              0u,
+                                              "projectile_heat",
+                                              projectile_effect_key("heat")));
+  projectile_nodes.push_back(makePointLightNode(projectile_node_id++,
+                                                0u,
+                                                "projectile_light",
+                                                color(1.0f, 0.42f, 0.08f, 1.0f),
+                                                7.0f,
+                                                2.6f));
+  if (!writeGeneratedPrefabPackage(projectile_dir,
+                                   projectile_assets,
+                                   projectile_effect_paths,
+                                   std::move(projectile_nodes),
+                                   Json::object(),
+                                   diagnostic)) {
+    return false;
+  }
+
+  std::vector<GeneratedAsset> explosion_assets;
+  std::vector<std::string> explosion_effect_paths;
+  auto write_explosion_effect = [&](std::string file_name, std::string key, Json effect_json) {
+    const std::string relative = "particles/" + file_name;
+    if (!writeJson(explosion_dir / relative, effect_json, diagnostic)) {
+      return false;
+    }
+    addEffect(explosion_assets, std::move(key), relative);
+    explosion_effect_paths.push_back(relative);
+    return true;
+  };
+
+  if (!addFireballTextureSet(repo_root,
+                             explosion_dir,
+                             explosion_namespace,
+                             explosion_assets,
+                             {
+                                 {"fireball_core_atlas", "fireball_core_atlas.png"},
+                                 {"fireball_flame_atlas", "fireball_flame_atlas.png"},
+                                 {"fireball_tongue_atlas", "fireball_tongue_atlas.png"},
+                                 {"fireball_ember_atlas", "fireball_ember_atlas.png"},
+                                 {"fireball_ember_burst_atlas", "fireball_ember_burst_atlas.png"},
+                                 {"fireball_smoke_atlas", "fireball_smoke_atlas.png"},
+                                 {"fireball_smoke_plumes_atlas", "fireball_smoke_plumes_atlas.png"},
+                                 {"fireball_heat_atlas", "fireball_heat_atlas.png"},
+                                 {"fireball_core_flipbook_atlas", "fireball_core_flipbook_atlas.png"},
+                                 {"fireball_smoke_flipbook_atlas", "fireball_smoke_flipbook_atlas.png"},
+                                 {"fireball_flame_lobes_atlas", "fireball_flame_lobes_atlas.png"},
+                             },
+                             diagnostic)) {
+    return false;
+  }
+
+  constexpr float kFlameParticleSizeScale = 0.5f;
+  constexpr uint32_t kFlameParticleQuantityScale = 4u;
+  const std::string radius_scale_expression =
+      "radius / (" + numberExpr(radius) + ")";
+  auto blast_radius_override = [&]() {
+    return Json{
+        {"radius_scale", expr(radius_scale_expression)},
+        {"size_scale", expr(radius_scale_expression)},
+        {"velocity_scale", expr(radius_scale_expression)},
+    };
+  };
+  Json explosion_variables{
+      {"radius", Json{{"type", "float"}, {"default", radius}}},
+  };
+
+  Json core_flash = makeEmitter("fireball_core_flash",
+                                explosion_texture_key("fireball_core_atlas"),
+                                "additive",
+                                "sphere",
+                                128,
+                                104,
+                                0.0f,
+                                0.22f,
+                                0.48f,
+                                0.18f,
+                                0.34f,
+                                2.30f * radius,
+                                3.05f * radius,
+                                color(3.20f, 2.70f, 1.35f, 1.0f),
+                                color(1.05f, 0.26f, 0.02f, 0.0f),
+                                Json::array(),
+                                8011u);
+  configureFireballBurstEmitter(core_flash, 0.56f, 0.0f);
+  core_flash["source"]["radius_min"] = 0.0f;
+  core_flash["source"]["radius_max"] = 1.10f * kFireballOrbRadius;
+  core_flash["source"]["radial_speed_min"] = 1.10f * radius;
+  core_flash["source"]["radial_speed_max"] = 3.40f * radius;
+  core_flash["motion"]["velocity_min"] = vec3(-0.04f * radius, -0.02f * radius, -0.04f * radius);
+  core_flash["motion"]["velocity_max"] = vec3(0.04f * radius, 0.04f * radius, 0.04f * radius);
+  core_flash["motion"]["acceleration"] = vec3(0.0f, 0.0f, 0.0f);
+  core_flash["motion"]["drag"] = 0.25f;
+  core_flash["size"]["curve_exponent"] = 2.60f;
+  core_flash["color"]["alpha_curve_exponent"] = 2.05f;
+
+  Json core_flipbook = makeEmitter("fireball_core_flipbook",
+                                   explosion_texture_key("fireball_core_flipbook_atlas"),
+                                   "additive",
+                                   "sphere",
+                                   8,
+                                   2,
+                                   0.0f,
+                                   0.72f,
+                                   1.05f,
+                                   0.20f,
+                                   0.36f,
+                                   2.45f * radius,
+                                   2.95f * radius,
+                                   color(1.55f, 1.05f, 0.54f, 0.58f),
+                                   color(0.55f, 0.08f, 0.02f, 0.0f),
+                                   Json::array(),
+                                   8017u);
+  configureFireballBurstEmitter(core_flipbook, 1.08f, 0.01f, false);
+  configureFireballRealismAtlas(core_flipbook, false);
+  core_flipbook["source"]["radius_min"] = 0.0f;
+  core_flipbook["source"]["radius_max"] = 0.55f * kFireballOrbRadius;
+  core_flipbook["source"]["radial_speed_min"] = 0.24f * radius;
+  core_flipbook["source"]["radial_speed_max"] = 1.35f * radius;
+  core_flipbook["source"]["jitter_radius"] = 0.0f;
+  core_flipbook["motion"]["velocity_min"] = vec3(0.0f, 0.0f, 0.0f);
+  core_flipbook["motion"]["velocity_max"] = vec3(0.0f, 0.0f, 0.0f);
+  core_flipbook["motion"]["acceleration"] = vec3(0.0f, 0.03f * radius, 0.0f);
+  core_flipbook["motion"]["drag"] = 0.45f;
+  core_flipbook["rotation"]["angular_velocity_min"] = -0.22f;
+  core_flipbook["rotation"]["angular_velocity_max"] = 0.22f;
+  core_flipbook["size"]["curve_exponent"] = 2.35f;
+  core_flipbook["color"]["alpha_curve_exponent"] = 1.38f;
+
+  Json flame_shell = makeEmitter("fireball_flame_shell",
+                                 explosion_texture_key("fireball_flame_lobes_atlas"),
+                                 "additive",
+                                 "sphere_surface",
+                                 560u * kFlameParticleQuantityScale,
+                                 380u * kFlameParticleQuantityScale,
+                                 0.0f,
+                                 0.34f,
+                                 0.74f,
+                                 0.12f,
+                                 0.28f,
+                                 1.34f * radius * kFlameParticleSizeScale,
+                                 2.28f * radius * kFlameParticleSizeScale,
+                                 color(2.15f, 0.92f, 0.16f, 0.92f),
+                                 color(0.95f, 0.08f, 0.01f, 0.0f),
+                                 Json::array(),
+                                 8023u);
+  configureFireballBurstEmitter(flame_shell, 0.80f, 0.03f);
+  flame_shell["source"]["radius_min"] = 0.35f * kFireballOrbRadius;
+  flame_shell["source"]["radius_max"] = 1.45f * kFireballOrbRadius;
+  flame_shell["source"]["radial_speed_min"] = 1.65f * radius;
+  flame_shell["source"]["radial_speed_max"] = 4.20f * radius;
+  flame_shell["source"]["jitter_radius"] = 0.25f * kFireballOrbRadius;
+  flame_shell["motion"]["velocity_min"] = vec3(-0.08f * radius, -0.02f * radius, -0.08f * radius);
+  flame_shell["motion"]["velocity_max"] = vec3(0.08f * radius, 0.10f * radius, 0.08f * radius);
+  flame_shell["motion"]["acceleration"] = vec3(0.0f, 0.16f * radius, 0.0f);
+  flame_shell["motion"]["drag"] = 0.10f;
+  flame_shell["rotation"]["angular_velocity_min"] = -3.2f;
+  flame_shell["rotation"]["angular_velocity_max"] = 3.2f;
+  flame_shell["size"]["curve_exponent"] = 2.20f;
+  flame_shell["color"]["alpha_curve_exponent"] = 1.18f;
+  configureFireballRealismAtlas(flame_shell, true);
+
+  Json flame_tongues = makeEmitter("fireball_flame_tongues",
+                                   explosion_texture_key("fireball_flame_lobes_atlas"),
+                                   "additive",
+                                   "sphere_surface",
+                                   460u * kFlameParticleQuantityScale,
+                                   260u * kFlameParticleQuantityScale,
+                                   0.0f,
+                                   0.42f,
+                                   0.92f,
+                                   0.10f,
+                                   0.24f,
+                                   1.08f * radius * kFlameParticleSizeScale,
+                                   2.02f * radius * kFlameParticleSizeScale,
+                                   color(2.45f, 1.10f, 0.22f, 0.88f),
+                                   color(0.86f, 0.06f, 0.01f, 0.0f),
+                                   Json::array(),
+                                   8039u);
+  configureFireballBurstEmitter(flame_tongues, 0.96f, 0.05f);
+  flame_tongues["source"]["radius_min"] = 0.45f * kFireballOrbRadius;
+  flame_tongues["source"]["radius_max"] = 1.75f * kFireballOrbRadius;
+  flame_tongues["source"]["radial_speed_min"] = 1.45f * radius;
+  flame_tongues["source"]["radial_speed_max"] = 3.70f * radius;
+  flame_tongues["source"]["jitter_radius"] = 0.35f * kFireballOrbRadius;
+  flame_tongues["motion"]["velocity_min"] = vec3(-0.14f * radius, -0.06f * radius, -0.14f * radius);
+  flame_tongues["motion"]["velocity_max"] = vec3(0.14f * radius, 0.22f * radius, 0.14f * radius);
+  flame_tongues["motion"]["acceleration"] = vec3(0.0f, 0.26f * radius, 0.0f);
+  flame_tongues["motion"]["drag"] = 0.14f;
+  flame_tongues["rotation"]["angular_velocity_min"] = -5.0f;
+  flame_tongues["rotation"]["angular_velocity_max"] = 5.0f;
+  flame_tongues["size"]["curve_exponent"] = 2.10f;
+  flame_tongues["color"]["alpha_curve_exponent"] = 1.10f;
+  configureFireballRealismAtlas(flame_tongues, true);
+
+  Json embers = makeEmitter("fireball_embers",
+                            explosion_texture_key("fireball_ember_atlas"),
+                            "additive",
+                            "sphere_surface",
+                            760,
+                            260,
+                            0.0f,
+                            0.55f,
+                            1.35f,
+                            0.032f * radius,
+                            0.085f * radius,
+                            0.006f * radius,
+                            0.018f * radius,
+                            color(1.0f, 0.68f, 0.20f, 1.0f),
+                            color(1.0f, 0.05f, 0.0f, 0.0f),
+                            Json::array(),
+                            8053u);
+  configureFireballBurstEmitter(embers, 1.36f, 0.06f);
+  embers["source"]["radius_min"] = 0.90f * kFireballOrbRadius;
+  embers["source"]["radius_max"] = 3.40f * kFireballOrbRadius;
+  embers["source"]["radial_speed_min"] = 2.30f * radius;
+  embers["source"]["radial_speed_max"] = 5.10f * radius;
+  embers["source"]["jitter_radius"] = 0.10f * radius;
+  embers["motion"]["velocity_min"] = vec3(-0.18f * radius, -0.18f * radius, -0.18f * radius);
+  embers["motion"]["velocity_max"] = vec3(0.18f * radius, 0.34f * radius, 0.18f * radius);
+  embers["motion"]["acceleration"] = vec3(0.0f, -0.72f * radius, 0.0f);
+  embers["motion"]["drag"] = 0.22f;
+  embers["rotation"]["angular_velocity_min"] = -7.0f;
+  embers["rotation"]["angular_velocity_max"] = 7.0f;
+  embers["size"]["curve_exponent"] = 0.72f;
+  embers["color"]["alpha_curve_exponent"] = 1.45f;
+
+  Json ember_storm = makeEmitter("fireball_ember_storm",
+                                 explosion_texture_key("fireball_ember_burst_atlas"),
+                                 "additive",
+                                 "sphere_surface",
+                                 900,
+                                 360,
+                                 0.0f,
+                                 0.44f,
+                                 1.62f,
+                                 0.10f,
+                                 0.24f,
+                                 0.014f * radius,
+                                 0.050f * radius,
+                                 color(1.0f, 0.58f, 0.12f, 0.86f),
+                                 color(1.0f, 0.035f, 0.0f, 0.0f),
+                                 Json::array(),
+                                 8061u);
+  configureFireballBurstEmitter(ember_storm, 1.72f, 0.04f);
+  configureFireballRealismAtlas(ember_storm, true);
+  ember_storm["source"]["radius_min"] = 0.55f * kFireballOrbRadius;
+  ember_storm["source"]["radius_max"] = 2.30f * kFireballOrbRadius;
+  ember_storm["source"]["radial_speed_min"] = 2.80f * radius;
+  ember_storm["source"]["radial_speed_max"] = 6.40f * radius;
+  ember_storm["source"]["jitter_radius"] = 0.25f * kFireballOrbRadius;
+  ember_storm["motion"]["velocity_min"] = vec3(-0.20f * radius, -0.24f * radius, -0.20f * radius);
+  ember_storm["motion"]["velocity_max"] = vec3(0.20f * radius, 0.42f * radius, 0.20f * radius);
+  ember_storm["motion"]["acceleration"] = vec3(0.0f, -0.82f * radius, 0.0f);
+  ember_storm["motion"]["drag"] = 0.16f;
+  ember_storm["rotation"]["angular_velocity_min"] = -9.5f;
+  ember_storm["rotation"]["angular_velocity_max"] = 9.5f;
+  ember_storm["size"]["curve_exponent"] = 0.72f;
+  ember_storm["color"]["alpha_curve_exponent"] = 1.45f;
+
+  Json hot_ash_embers = makeEmitter("fireball_hot_ash_embers",
+                                    explosion_texture_key("fireball_ember_atlas"),
+                                    "alpha",
+                                    "sphere",
+                                    2200,
+                                    1400,
+                                    0.0f,
+                                    4.20f,
+                                    7.20f,
+                                    0.110f,
+                                    0.240f,
+                                    0.045f,
+                                    0.100f,
+                                    color(1.0f, 0.72f, 0.20f, 1.0f),
+                                    color(0.22f, 0.20f, 0.18f, 0.0f),
+                                    Json::array(),
+                                    8065u);
+  configureFireballBurstEmitter(hot_ash_embers, 7.40f, 0.02f);
+  hot_ash_embers["source"]["radius_min"] = 0.0f;
+  hot_ash_embers["source"]["radius_max"] = 0.85f * kFireballOrbRadius;
+  hot_ash_embers["source"]["radial_speed_min"] = 0.45f * radius;
+  hot_ash_embers["source"]["radial_speed_max"] = 1.35f * radius;
+  hot_ash_embers["source"]["jitter_radius"] = 0.12f * kFireballOrbRadius;
+  hot_ash_embers["motion"]["velocity_min"] = vec3(-0.06f * radius, -0.04f * radius, -0.06f * radius);
+  hot_ash_embers["motion"]["velocity_max"] = vec3(0.06f * radius, 0.12f * radius, 0.06f * radius);
+  hot_ash_embers["motion"]["acceleration"] = vec3(0.0f, -0.12f * radius, 0.0f);
+  hot_ash_embers["motion"]["drag"] = 0.18f;
+  hot_ash_embers["rotation"]["angular_velocity_min"] = -3.6f;
+  hot_ash_embers["rotation"]["angular_velocity_max"] = 3.6f;
+  hot_ash_embers["size"]["curve_exponent"] = 0.68f;
+  hot_ash_embers["color"]["alpha_curve_exponent"] = 2.20f;
+
+  Json smoke = makeEmitter("fireball_smoke_edge",
+                           explosion_texture_key("fireball_smoke_atlas"),
+                           "alpha",
+                           "sphere_surface",
+                           420,
+                           210,
+                           0.0f,
+                           0.86f,
+                           1.70f,
+                           0.32f,
+                           0.70f,
+                           1.48f * radius,
+                           2.45f * radius,
+                           color(0.34f, 0.22f, 0.14f, 0.38f),
+                           color(0.05f, 0.045f, 0.04f, 0.0f),
+                           Json::array(),
+                           8069u);
+  configureFireballBurstEmitter(smoke, 1.72f, 0.22f);
+  smoke["source"]["radius_min"] = 0.75f * kFireballOrbRadius;
+  smoke["source"]["radius_max"] = 2.20f * kFireballOrbRadius;
+  smoke["source"]["radial_speed_min"] = 0.85f * radius;
+  smoke["source"]["radial_speed_max"] = 1.65f * radius;
+  smoke["source"]["jitter_radius"] = 0.45f * kFireballOrbRadius;
+  smoke["motion"]["velocity_min"] = vec3(-0.12f * radius, 0.06f * radius, -0.12f * radius);
+  smoke["motion"]["velocity_max"] = vec3(0.12f * radius, 0.46f * radius, 0.12f * radius);
+  smoke["motion"]["acceleration"] = vec3(0.0f, 0.18f * radius, 0.0f);
+  smoke["motion"]["drag"] = 0.55f;
+  smoke["size"]["curve_exponent"] = 2.15f;
+  smoke["color"]["alpha_curve_exponent"] = 1.20f;
+
+  Json smoke_plumes = makeEmitter("fireball_smoke_plumes",
+                                  explosion_texture_key("fireball_smoke_plumes_atlas"),
+                                  "alpha",
+                                  "sphere",
+                                  320,
+                                  150,
+                                  0.0f,
+                                  1.25f,
+                                  2.80f,
+                                  0.38f,
+                                  0.85f,
+                                  2.10f * radius,
+                                  3.40f * radius,
+                                  color(0.42f, 0.30f, 0.22f, 0.42f),
+                                  color(0.055f, 0.050f, 0.046f, 0.0f),
+                                  Json::array(),
+                                  8071u);
+  configureFireballBurstEmitter(smoke_plumes, 2.65f, 0.30f, false);
+  configureFireballRealismAtlas(smoke_plumes, false);
+  smoke_plumes["source"]["radius_min"] = 0.80f * kFireballOrbRadius;
+  smoke_plumes["source"]["radius_max"] = 3.80f * kFireballOrbRadius;
+  smoke_plumes["source"]["radial_speed_min"] = 0.72f * radius;
+  smoke_plumes["source"]["radial_speed_max"] = 1.90f * radius;
+  smoke_plumes["source"]["jitter_radius"] = 0.58f * kFireballOrbRadius;
+  smoke_plumes["motion"]["velocity_min"] = vec3(-0.10f * radius, 0.05f * radius, -0.10f * radius);
+  smoke_plumes["motion"]["velocity_max"] = vec3(0.10f * radius, 0.50f * radius, 0.10f * radius);
+  smoke_plumes["motion"]["acceleration"] = vec3(0.0f, 0.16f * radius, 0.0f);
+  smoke_plumes["motion"]["drag"] = 0.62f;
+  smoke_plumes["rotation"]["angular_velocity_min"] = -0.45f;
+  smoke_plumes["rotation"]["angular_velocity_max"] = 0.45f;
+  smoke_plumes["size"]["curve_exponent"] = 2.20f;
+  smoke_plumes["color"]["alpha_curve_exponent"] = 1.10f;
+
+  Json smoke_roll = makeEmitter("fireball_smoke_roll",
+                                explosion_texture_key("fireball_smoke_flipbook_atlas"),
+                                "alpha",
+                                "sphere",
+                                24,
+                                5,
+                                0.0f,
+                                1.10f,
+                                2.05f,
+                                0.48f,
+                                1.00f,
+                                2.45f * radius,
+                                3.10f * radius,
+                                color(0.56f, 0.38f, 0.25f, 0.52f),
+                                color(0.055f, 0.050f, 0.045f, 0.0f),
+                                Json::array(),
+                                8075u);
+  configureFireballBurstEmitter(smoke_roll, 2.08f, 0.58f, false);
+  configureFireballRealismAtlas(smoke_roll, false);
+  smoke_roll["source"]["radius_min"] = 0.0f;
+  smoke_roll["source"]["radius_max"] = 1.20f * kFireballOrbRadius;
+  smoke_roll["source"]["radial_speed_min"] = 0.08f * radius;
+  smoke_roll["source"]["radial_speed_max"] = 0.34f * radius;
+  smoke_roll["source"]["jitter_radius"] = 0.30f * kFireballOrbRadius;
+  smoke_roll["motion"]["velocity_min"] = vec3(-0.035f * radius, 0.03f * radius, -0.035f * radius);
+  smoke_roll["motion"]["velocity_max"] = vec3(0.035f * radius, 0.18f * radius, 0.035f * radius);
+  smoke_roll["motion"]["acceleration"] = vec3(0.0f, 0.12f * radius, 0.0f);
+  smoke_roll["motion"]["drag"] = 0.75f;
+  smoke_roll["rotation"]["angular_velocity_min"] = -0.30f;
+  smoke_roll["rotation"]["angular_velocity_max"] = 0.30f;
+  smoke_roll["size"]["curve_exponent"] = 2.05f;
+  smoke_roll["color"]["alpha_curve_exponent"] = 1.05f;
+
+  Json heat = makeEmitter("fireball_heat_shimmer",
+                          explosion_texture_key("fireball_heat_atlas"),
+                          "distortion",
+                          "sphere",
+                          12,
+                          8,
+                          0.0f,
+                          0.30f,
+                          0.72f,
+                          0.22f,
+                          0.44f,
+                          2.85f * radius,
+                          3.85f * radius,
+                          color(1.0f, 1.0f, 1.0f, 0.44f),
+                          color(1.0f, 1.0f, 1.0f, 0.0f),
+                          Json::array(),
+                          8081u);
+  configureFireballBurstEmitter(heat, 0.78f, 0.04f, false);
+  heat["render"]["soft_particle_distance"] = 1.0f;
+  heat["render"]["distortion_strength"] = 24.0f;
+  heat["source"]["radius_min"] = 0.0f;
+  heat["source"]["radius_max"] = 0.85f * kFireballOrbRadius;
+  heat["source"]["radial_speed_min"] = 0.65f * radius;
+  heat["source"]["radial_speed_max"] = 2.10f * radius;
+  heat["motion"]["velocity_min"] = vec3(0.0f, 0.0f, 0.0f);
+  heat["motion"]["velocity_max"] = vec3(0.0f, 0.0f, 0.0f);
+  heat["motion"]["acceleration"] = vec3(0.0f, 0.0f, 0.0f);
+  heat["motion"]["drag"] = 1.7f;
+  heat["size"]["curve_exponent"] = 2.45f;
+
+  if (!write_explosion_effect("fireball_core_flash.kpeffect",
+                              explosion_effect_key("core_flash"),
+                              effect(std::move(core_flash))) ||
+      !write_explosion_effect("fireball_core_flipbook.kpeffect",
+                              explosion_effect_key("core_flipbook"),
+                              effect(std::move(core_flipbook))) ||
+      !write_explosion_effect("fireball_flame_shell.kpeffect",
+                              explosion_effect_key("flame_shell"),
+                              effect(std::move(flame_shell))) ||
+      !write_explosion_effect("fireball_flame_tongues.kpeffect",
+                              explosion_effect_key("flame_tongues"),
+                              effect(std::move(flame_tongues))) ||
+      !write_explosion_effect("fireball_embers.kpeffect",
+                              explosion_effect_key("embers"),
+                              effect(std::move(embers))) ||
+      !write_explosion_effect("fireball_ember_storm.kpeffect",
+                              explosion_effect_key("ember_storm"),
+                              effect(std::move(ember_storm))) ||
+      !write_explosion_effect("fireball_hot_ash_embers.kpeffect",
+                              explosion_effect_key("hot_ash_embers"),
+                              effect(std::move(hot_ash_embers))) ||
+      !write_explosion_effect("fireball_smoke_edge.kpeffect",
+                              explosion_effect_key("smoke_edge"),
+                              effect(std::move(smoke))) ||
+      !write_explosion_effect("fireball_smoke_plumes.kpeffect",
+                              explosion_effect_key("smoke_plumes"),
+                              effect(std::move(smoke_plumes))) ||
+      !write_explosion_effect("fireball_smoke_roll.kpeffect",
+                              explosion_effect_key("smoke_roll"),
+                              effect(std::move(smoke_roll))) ||
+      !write_explosion_effect("fireball_heat_shimmer.kpeffect",
+                              explosion_effect_key("heat_shimmer"),
+                              effect(std::move(heat)))) {
+    return false;
+  }
+
+  Json explosion_nodes = Json::array();
+  explosion_nodes.push_back(makeRootNode(name + " Explosion"));
+  uint32_t explosion_node_id = 1u;
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "core_flash",
+                                                         explosion_effect_key("core_flash"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "core_flipbook",
+                                                         explosion_effect_key("core_flipbook"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "flame_shell",
+                                                         explosion_effect_key("flame_shell"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "flame_tongues",
+                                                         explosion_effect_key("flame_tongues"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "embers",
+                                                         explosion_effect_key("embers"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "ember_storm",
+                                                         explosion_effect_key("ember_storm"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "hot_ash_embers",
+                                                         explosion_effect_key("hot_ash_embers"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "smoke_edge",
+                                                         explosion_effect_key("smoke_edge"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "smoke_plumes",
+                                                         explosion_effect_key("smoke_plumes"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "smoke_roll",
+                                                         explosion_effect_key("smoke_roll"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makeParticleNodeWithOverride(explosion_node_id++,
+                                                         0u,
+                                                         "heat_shimmer",
+                                                         explosion_effect_key("heat_shimmer"),
+                                                         blast_radius_override()));
+  explosion_nodes.push_back(makePointLightNode(explosion_node_id++,
+                                               0u,
+                                               "fireball_light",
+                                               color(1.0f, 0.46f, 0.08f, 1.0f),
+                                               expr("radius * 2.9"),
+                                               expr("radius * 1.4")));
+  return writeGeneratedPrefabPackage(explosion_dir,
+                                     explosion_assets,
+                                     explosion_effect_paths,
+                                     std::move(explosion_nodes),
+                                     std::move(explosion_variables),
+                                     diagnostic);
+}
+
 }  // namespace
 
 bool validateEffectFile(const std::filesystem::path& path, std::string* diagnostic) {
@@ -1194,12 +2711,16 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
       preset != "chromatic_ray" &&
       preset != "daze" &&
       preset != "heal" &&
+      preset != "haste" &&
+      preset != "detect_magic" &&
       preset != "breathe_fire" &&
+      preset != "fireball" &&
       preset != "impact_burst" && preset != "energy_orb") {
     return fail(diagnostic,
                 "preset must be one of: fire_ray, magic_missile, "
                 "arcane_barrage, blade_barrier, chromatic_ray, daze, "
-                "heal, breathe_fire, impact_burst, energy_orb");
+                "heal, haste, detect_magic, breathe_fire, fireball, "
+                "impact_burst, energy_orb");
   }
   const std::string asset_namespace =
       readString(*spec, "namespace", presetDefaultNamespace(preset));
@@ -1215,12 +2736,29 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
                                          ? 6.4f
                                          : (preset == "breathe_fire" ? 4.8f : 8.0f));
   const float length = std::max(readFloat(*spec, "length", default_length), 0.25f);
-  const float default_radius =
-      preset == "blade_barrier" ? 1.65f
-                                     : ((preset == "daze" || preset == "heal")
-                                            ? 1.55f
-                                            : (preset == "breathe_fire" ? 1.35f : 1.0f));
-  const float radius = std::clamp(readFloat(*spec, "radius", default_radius), 0.2f, 6.0f);
+  const float default_radius = [&]() {
+    if (preset == "blade_barrier") {
+      return 1.65f;
+    }
+    if (preset == "daze" || preset == "heal" || preset == "haste") {
+      return 1.55f;
+    }
+    if (preset == "breathe_fire") {
+      return 1.35f;
+    }
+    if (preset == "fireball") {
+      return kFireballDefaultBlastRadius;
+    }
+    if (preset == "detect_magic") {
+      return kDetectMagicRadius;
+    }
+    return 1.0f;
+  }();
+  const float max_radius =
+      preset == "fireball" ? kFireballMaxBlastRadius
+                            : (preset == "detect_magic" ? kDetectMagicRadius : 6.0f);
+  const float radius =
+      std::clamp(readFloat(*spec, "radius", default_radius), 0.2f, max_radius);
   std::vector<Json> path_points;
   if (!readPathPoints(*spec, length, path_points, diagnostic)) {
     return false;
@@ -1233,6 +2771,14 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
   const std::filesystem::path repo_root = findRepoRoot(spec_path.parent_path());
   if (repo_root.empty()) {
     return fail(diagnostic, "failed to locate Karma repo root for curated atlas assets");
+  }
+  if (preset == "fireball") {
+    return generateFireballEffectPackages(repo_root,
+                                          output_dir,
+                                          asset_namespace,
+                                          name,
+                                          radius,
+                                          diagnostic);
   }
   std::error_code ec;
   std::filesystem::create_directories(output_dir / "particles", ec);
@@ -1264,6 +2810,7 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
   };
 
   Json nodes = Json::array();
+  Json prefab_variables = Json::object();
   uint32_t next_node_id = 1u;
 
   if (preset == "fire_ray") {
@@ -2547,9 +4094,8 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
     constexpr float kPi = 3.14159265358979323846f;
     for (std::size_t i = 0u; i < 7u; ++i) {
       const float phase = (static_cast<float>(i) / 7.0f) * kPi * 2.0f;
-      const float strand_radius = (0.32f + 0.030f * static_cast<float>(i % 3u)) * radius;
       const Json thread_path =
-          makeChromaticHelixPath(length, strand_radius, phase, 2.45f, 24u);
+          makeChromaticHelixPath(length, kChromaticHelixRadius, phase, 24u);
       nodes.push_back(makeBeamNode(
           next_node_id++,
           0u,
@@ -3573,7 +5119,7 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
         "base_healing_ring",
         makeBeam(texture_key("heal_ribbon_atlas"),
                  makeDazeHaloPath(1.26f * radius,
-                                  0.72f * radius,
+                                  1.26f * radius,
                                   base_height,
                                   72u,
                                   0.00f,
@@ -3593,7 +5139,7 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
         "waist_healing_ring",
         makeBeam(texture_key("heal_ribbon_atlas"),
                  makeDazeHaloPath(1.04f * radius,
-                                  0.54f * radius,
+                                  1.04f * radius,
                                   waist_height,
                                   64u,
                                   0.36f,
@@ -3613,7 +5159,7 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
         "chest_healing_ring",
         makeBeam(texture_key("heal_ribbon_atlas"),
                  makeDazeHaloPath(1.18f * radius,
-                                  0.62f * radius,
+                                  1.18f * radius,
                                   chest_height,
                                   72u,
                                   0.74f,
@@ -3633,7 +5179,7 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
         "head_shimmer_ring",
         makeBeam(texture_key("heal_ribbon_atlas"),
                  makeDazeHaloPath(0.78f * radius,
-                                  0.38f * radius,
+                                  0.78f * radius,
                                   head_height,
                                   56u,
                                   1.18f,
@@ -3653,7 +5199,7 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
         "healing_spiral_1",
         makeBeam(texture_key("heal_ribbon_atlas"),
                  makeHealSpiralPath(0.92f * radius,
-                                    0.48f * radius,
+                                    0.92f * radius,
                                     base_height,
                                     body_height,
                                     1.62f,
@@ -3674,7 +5220,7 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
         "healing_spiral_2",
         makeBeam(texture_key("heal_ribbon_atlas"),
                  makeHealSpiralPath(1.12f * radius,
-                                    0.60f * radius,
+                                    1.12f * radius,
                                     base_height + 0.08f * radius,
                                     body_height * 0.88f,
                                     1.28f,
@@ -3921,6 +5467,697 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
                                        3.2f * radius,
                                        3.5f * radius,
                                        vec3(0.0f, chest_height, 0.0f)));
+  } else if (preset == "haste") {
+    if (!copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/haste/textures/haste_streak_atlas.png",
+                     "textures/haste_streak_atlas.png",
+                     diagnostic) ||
+        !copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/haste/textures/haste_spark_atlas.png",
+                     "textures/haste_spark_atlas.png",
+                     diagnostic) ||
+        !copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/haste/textures/haste_haze_atlas.png",
+                     "textures/haste_haze_atlas.png",
+                     diagnostic) ||
+        !copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/explosion/textures/heat_atlas.png",
+                     "textures/heat_atlas.png",
+                     diagnostic)) {
+      return false;
+    }
+    addTexture(package_assets, texture_key("haste_streak_atlas"),
+               "textures/haste_streak_atlas.png");
+    addTexture(package_assets, texture_key("haste_spark_atlas"),
+               "textures/haste_spark_atlas.png");
+    addTexture(package_assets, texture_key("haste_haze_atlas"),
+               "textures/haste_haze_atlas.png");
+    addTexture(package_assets, texture_key("heat_atlas"), "textures/heat_atlas.png");
+
+    constexpr float kPi = 3.14159265358979323846f;
+    const float body_height = 2.55f * radius;
+    const Json body_center = variableVec3(0.0f, 0.50f, 0.0f);
+    const std::string radius_scale_expression =
+        "radius / (" + numberExpr(radius) + ")";
+    prefab_variables = Json{
+        {"height", Json{{"type", "float"}, {"default", body_height}}},
+        {"radius", Json{{"type", "float"}, {"default", radius}}},
+        {"duration", Json{{"type", "float"}, {"default", 1.0f}}},
+        {"intensity", Json{{"type", "float"}, {"default", 1.0f}}},
+        {"color",
+         Json{{"type", "color"},
+              {"default", Json::array({1.8f, 1.8f, 1.8f, 1.0f})}}},
+    };
+
+    nodes.push_back(makeRootNode(name));
+
+    auto add_haste_beam = [&](std::string node_name,
+                              Json path,
+                              Json start_width,
+                              Json end_width,
+                              Json start_color,
+                              Json end_color,
+                              float uv_repeat,
+                              float uv_scroll_speed,
+                              std::string blend_mode = "additive",
+                              float edge_softness = 0.30f,
+                              std::string texture_suffix = "haste_streak_atlas") {
+      nodes.push_back(makeBeamNode(next_node_id++,
+                                   0u,
+                                   std::move(node_name),
+                                   makeBeam(texture_key(texture_suffix),
+                                            std::move(path),
+                                            std::move(start_width),
+                                            std::move(end_width),
+                                            std::move(start_color),
+                                            std::move(end_color),
+                                            uv_repeat,
+                                            uv_scroll_speed,
+                                            std::move(blend_mode),
+                                            edge_softness,
+                                            0u)));
+    };
+
+    add_haste_beam("base_speed_ring",
+                   makeHasteRingPath(1.16f, 0.05f, 72u, 0.20f, 0.015f),
+                   scaledVar("radius", 0.145f),
+                   scaledVar("radius", 0.060f),
+                   var("color"),
+                   color(1.6f, 1.6f, 1.6f, 0.20f),
+                   2.4f,
+                   -2.10f,
+                   "additive",
+                   0.42f);
+    add_haste_beam("ankle_speed_ring",
+                   makeHasteRingPath(0.92f, 0.12f, 64u, 0.72f, 0.020f),
+                   scaledVar("radius", 0.085f),
+                   scaledVar("radius", 0.035f),
+                   color(2.4f, 2.4f, 2.4f, 0.78f),
+                   color(1.6f, 1.6f, 1.6f, 0.10f),
+                   1.8f,
+                   2.30f,
+                   "additive",
+                   0.34f);
+    add_haste_beam("waist_speed_ring",
+                   makeHasteRingPath(0.98f, 0.47f, 64u, 1.36f, 0.018f),
+                   scaledVar("radius", 0.115f),
+                   scaledVar("radius", 0.050f),
+                   var("color"),
+                   color(1.6f, 1.6f, 1.6f, 0.16f),
+                   2.2f,
+                   -2.55f,
+                   "additive",
+                   0.36f);
+    add_haste_beam("shoulder_speed_ring",
+                   makeHasteRingPath(0.70f, 0.74f, 56u, 2.18f, 0.012f),
+                   scaledVar("radius", 0.075f),
+                   scaledVar("radius", 0.030f),
+                   color(2.3f, 2.3f, 2.3f, 0.68f),
+                   color(1.6f, 1.6f, 1.6f, 0.08f),
+                   1.5f,
+                   2.80f,
+                   "additive",
+                   0.30f);
+
+    for (uint32_t i = 0u; i < 8u; ++i) {
+      const float u = static_cast<float>(i) / 8.0f;
+      const float phase = u * kPi * 2.0f + 0.18f;
+      const float lean = (0.18f + 0.06f * std::sin(phase * 2.0f)) *
+                         (std::cos(phase) >= 0.0f ? 1.0f : -1.0f);
+      add_haste_beam("speed_streak_" + std::to_string(i),
+                     makeHasteStreakPath(phase,
+                                         0.68f + 0.14f * std::sin(phase * 3.0f),
+                                         0.04f,
+                                         0.50f,
+                                         1.03f,
+                                         lean),
+                     scaledVar("radius", 0.070f + 0.018f * static_cast<float>(i % 3u)),
+                     scaledVar("radius", 0.028f),
+                     color(2.8f, 2.8f, 2.8f, 0.80f),
+                     color(1.8f, 1.8f, 1.8f, 0.0f),
+                     1.1f,
+                     -3.25f - static_cast<float>(i) * 0.11f,
+                     "additive",
+                     0.28f);
+    }
+
+    add_haste_beam("afterimage_left",
+                   makeHasteAfterimagePath(-1.0f, 0.10f, 0.46f, 0.92f, 0.78f),
+                   scaledVar("radius", 0.56f),
+                   scaledVar("radius", 0.18f),
+                   color(1.4f, 1.4f, 1.4f, 0.34f),
+                   color(1.2f, 1.2f, 1.2f, 0.0f),
+                   0.85f,
+                   -0.42f,
+                   "alpha",
+                   0.76f,
+                   "haste_haze_atlas");
+    add_haste_beam("afterimage_right",
+                   makeHasteAfterimagePath(1.0f, 0.08f, 0.42f, 0.88f, 0.70f),
+                   scaledVar("radius", 0.48f),
+                   scaledVar("radius", 0.16f),
+                   color(1.4f, 1.4f, 1.4f, 0.30f),
+                   color(1.2f, 1.2f, 1.2f, 0.0f),
+                   0.80f,
+                   -0.36f,
+                   "alpha",
+                   0.72f,
+                   "haste_haze_atlas");
+
+    auto body_override = [&](float outer_radius_scale,
+                             float jitter_scale,
+                             float size_scale) {
+      return Json{
+          {"emission_scale", var("intensity")},
+          {"lifetime_scale", var("duration")},
+          {"size_scale",
+           expr("(" + radius_scale_expression + ") * (" + numberExpr(size_scale) + ")")},
+          {"radius_scale", expr(radius_scale_expression)},
+          {"velocity_scale", expr(radius_scale_expression)},
+          {"source_height", var("height")},
+          {"source_outer_radius", scaledVar("radius", outer_radius_scale)},
+          {"source_jitter_radius", scaledVar("radius", jitter_scale)},
+      };
+    };
+    Json ring_override{
+        {"emission_scale", var("intensity")},
+        {"lifetime_scale", var("duration")},
+        {"size_scale", expr(radius_scale_expression)},
+        {"radius_scale", expr(radius_scale_expression)},
+        {"velocity_scale", expr(radius_scale_expression)},
+        {"source_inner_radius", scaledVar("radius", 0.58f)},
+        {"source_outer_radius", scaledVar("radius", 1.22f)},
+        {"source_jitter_radius", scaledVar("radius", 0.030f)},
+    };
+
+    Json speed_streaks = makeEmitter("haste_speed_streaks",
+                                     texture_key("haste_streak_atlas"),
+                                     "additive",
+                                     "cylinder",
+                                     360,
+                                     132,
+                                     118.0f,
+                                     0.16f,
+                                     0.48f,
+                                     0.090f * radius,
+                                     0.260f * radius,
+                                     0.016f * radius,
+                                     0.060f * radius,
+                                     color(2.8f, 2.8f, 2.8f, 0.90f),
+                                     color(1.8f, 1.8f, 1.8f, 0.0f),
+                                     Json::array(),
+                                     8201u);
+    configureHasteAtlas(speed_streaks);
+    speed_streaks["render"]["layer"] = 1u;
+    speed_streaks["source"]["height"] = body_height;
+    speed_streaks["source"]["outer_radius"] = 1.06f * radius;
+    speed_streaks["source"]["jitter_radius"] = 0.025f * radius;
+    speed_streaks["source"]["radial_speed_min"] = 0.02f * radius;
+    speed_streaks["source"]["radial_speed_max"] = 0.34f * radius;
+    speed_streaks["motion"]["velocity_min"] = vec3(-0.22f * radius,
+                                                   0.46f * radius,
+                                                   -0.62f * radius);
+    speed_streaks["motion"]["velocity_max"] = vec3(0.22f * radius,
+                                                   1.18f * radius,
+                                                   0.20f * radius);
+    speed_streaks["motion"]["acceleration"] = vec3(0.0f, 0.12f * radius, 0.0f);
+    speed_streaks["motion"]["drag"] = 0.34f;
+    speed_streaks["motion"]["orbit_speed"] = 2.85f;
+    speed_streaks["rotation"]["angular_velocity_min"] = -5.4f;
+    speed_streaks["rotation"]["angular_velocity_max"] = 5.4f;
+    speed_streaks["size"]["curve_exponent"] = 0.42f;
+    speed_streaks["color"]["alpha_curve_exponent"] = 0.78f;
+
+    Json tick_sparks = makeEmitter("haste_tick_sparks",
+                                   texture_key("haste_spark_atlas"),
+                                   "additive",
+                                   "ring",
+                                   250,
+                                   66,
+                                   54.0f,
+                                   0.20f,
+                                   0.72f,
+                                   0.060f * radius,
+                                   0.180f * radius,
+                                   0.010f * radius,
+                                   0.040f * radius,
+                                   color(2.8f, 2.8f, 2.8f, 1.0f),
+                                   color(1.8f, 1.8f, 1.8f, 0.0f),
+                                   Json::array(),
+                                   8211u);
+    configureHasteAtlas(tick_sparks);
+    configureDazeRingSource(tick_sparks, radius, 0.58f, 1.22f, 0.08f, 0.42f);
+    tick_sparks["motion"]["velocity_min"] = vec3(-0.16f * radius,
+                                                 0.06f * radius,
+                                                 -0.16f * radius);
+    tick_sparks["motion"]["velocity_max"] = vec3(0.16f * radius,
+                                                 0.48f * radius,
+                                                 0.16f * radius);
+    tick_sparks["motion"]["acceleration"] = vec3(0.0f, 0.05f * radius, 0.0f);
+    tick_sparks["motion"]["drag"] = 0.40f;
+    tick_sparks["motion"]["orbit_speed"] = 4.10f;
+    tick_sparks["rotation"]["angular_velocity_min"] = -6.2f;
+    tick_sparks["rotation"]["angular_velocity_max"] = 6.2f;
+    tick_sparks["size"]["curve_exponent"] = 0.50f;
+    tick_sparks["color"]["alpha_curve_exponent"] = 0.86f;
+
+    Json afterimage_haze = makeEmitter("haste_afterimage_haze",
+                                       texture_key("haste_haze_atlas"),
+                                       "alpha",
+                                       "cylinder",
+                                       190,
+                                       44,
+                                       28.0f,
+                                       0.58f,
+                                       1.34f,
+                                       0.36f * radius,
+                                       0.82f * radius,
+                                       0.90f * radius,
+                                       1.58f * radius,
+                                       color(1.35f, 1.35f, 1.35f, 0.42f),
+                                       color(1.2f, 1.2f, 1.2f, 0.0f),
+                                       Json::array(),
+                                       8221u);
+    configureHasteAtlas(afterimage_haze);
+    afterimage_haze["render"]["soft_particle_distance"] = 0.85f;
+    afterimage_haze["source"]["height"] = body_height * 0.96f;
+    afterimage_haze["source"]["outer_radius"] = 0.74f * radius;
+    afterimage_haze["source"]["jitter_radius"] = 0.055f * radius;
+    afterimage_haze["source"]["radial_speed_min"] = 0.0f;
+    afterimage_haze["source"]["radial_speed_max"] = 0.045f * radius;
+    afterimage_haze["motion"]["velocity_min"] = vec3(-0.08f * radius,
+                                                     0.08f * radius,
+                                                     -0.82f * radius);
+    afterimage_haze["motion"]["velocity_max"] = vec3(0.08f * radius,
+                                                     0.38f * radius,
+                                                     -0.22f * radius);
+    afterimage_haze["motion"]["acceleration"] = vec3(0.0f, 0.025f * radius, 0.0f);
+    afterimage_haze["motion"]["drag"] = 0.58f;
+    afterimage_haze["motion"]["orbit_speed"] = 0.48f;
+    afterimage_haze["rotation"]["angular_velocity_min"] = -0.60f;
+    afterimage_haze["rotation"]["angular_velocity_max"] = 0.60f;
+    afterimage_haze["size"]["curve_exponent"] = 0.72f;
+    afterimage_haze["color"]["alpha_curve_exponent"] = 0.68f;
+
+    Json distortion = makeEmitter("haste_air_shear",
+                                  texture_key("heat_atlas"),
+                                  "distortion",
+                                  "cylinder",
+                                  62,
+                                  12,
+                                  8.0f,
+                                  0.26f,
+                                  0.74f,
+                                  0.22f * radius,
+                                  0.52f * radius,
+                                  0.58f * radius,
+                                  1.05f * radius,
+                                  color(1.0f, 1.0f, 1.0f, 0.12f),
+                                  color(1.0f, 1.0f, 1.0f, 0.0f),
+                                  Json::array(),
+                                  8231u);
+    distortion["playback"]["local_space"] = true;
+    distortion["render"]["soft_particle_distance"] = 0.92f;
+    distortion["render"]["distortion_strength"] = 3.0f;
+    distortion["source"]["height"] = body_height * 0.92f;
+    distortion["source"]["outer_radius"] = 1.02f * radius;
+    distortion["source"]["jitter_radius"] = 0.060f * radius;
+    distortion["source"]["radial_speed_min"] = 0.0f;
+    distortion["source"]["radial_speed_max"] = 0.075f * radius;
+    distortion["motion"]["velocity_min"] = vec3(-0.06f * radius,
+                                                0.04f * radius,
+                                                -0.18f * radius);
+    distortion["motion"]["velocity_max"] = vec3(0.06f * radius,
+                                                0.24f * radius,
+                                                0.18f * radius);
+    distortion["motion"]["acceleration"] = vec3(0.0f, 0.0f, 0.0f);
+    distortion["motion"]["drag"] = 0.62f;
+    distortion["motion"]["orbit_speed"] = 1.20f;
+    distortion["rotation"]["angular_velocity_min"] = -1.5f;
+    distortion["rotation"]["angular_velocity_max"] = 1.5f;
+    distortion["size"]["curve_exponent"] = 0.64f;
+    distortion["color"]["alpha_curve_exponent"] = 0.82f;
+
+    if (!write_effect("haste_speed_streaks.kpeffect",
+                      effect_key("speed_streaks"),
+                      effect(std::move(speed_streaks))) ||
+        !write_effect("haste_tick_sparks.kpeffect",
+                      effect_key("tick_sparks"),
+                      effect(std::move(tick_sparks))) ||
+        !write_effect("haste_afterimage_haze.kpeffect",
+                      effect_key("afterimage_haze"),
+                      effect(std::move(afterimage_haze))) ||
+        !write_effect("haste_distortion.kpeffect",
+                      effect_key("distortion"),
+                      effect(std::move(distortion)))) {
+      return false;
+    }
+
+    nodes.push_back(makeParticleNodeWithOverride(next_node_id++,
+                                                 0u,
+                                                 "speed_streaks",
+                                                 effect_key("speed_streaks"),
+                                                 body_override(1.06f, 0.025f, 1.0f),
+                                                 body_center));
+    nodes.push_back(makeParticleNodeWithOverride(next_node_id++,
+                                                 0u,
+                                                 "tick_sparks",
+                                                 effect_key("tick_sparks"),
+                                                 std::move(ring_override),
+                                                 variableVec3(0.0f, 0.48f, 0.0f)));
+    nodes.push_back(makeParticleNodeWithOverride(next_node_id++,
+                                                 0u,
+                                                 "afterimage_haze",
+                                                 effect_key("afterimage_haze"),
+                                                 body_override(0.74f, 0.055f, 1.08f),
+                                                 body_center));
+    nodes.push_back(makeParticleNodeWithOverride(next_node_id++,
+                                                 0u,
+                                                 "distortion",
+                                                 effect_key("distortion"),
+                                                 body_override(1.02f, 0.060f, 1.0f),
+                                                 body_center));
+    nodes.push_back(makePointLightNode(next_node_id++,
+                                       0u,
+                                       "haste_glow",
+                                       var("color"),
+                                       expr("intensity * 3.4"),
+                                       scaledVar("radius", 3.6f),
+                                       variableVec3(0.0f, 0.54f, 0.0f)));
+  } else if (preset == "detect_magic") {
+    if (!copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/explosion/textures/glow_atlas.png",
+                     "textures/glow_atlas.png",
+                     diagnostic) ||
+        !copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/explosion/textures/spark_atlas.png",
+                     "textures/spark_atlas.png",
+                     diagnostic) ||
+        !copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/explosion/textures/smoke_atlas.png",
+                     "textures/smoke_atlas.png",
+                     diagnostic) ||
+        !copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/explosion/textures/heat_atlas.png",
+                     "textures/heat_atlas.png",
+                     diagnostic) ||
+        !copyTexture(repo_root,
+                     output_dir,
+                     "examples/assets/prefabs/detect_magic/textures/pixie_dust_atlas.png",
+                     "textures/pixie_dust_atlas.png",
+                     diagnostic)) {
+      return false;
+    }
+    addTexture(package_assets, texture_key("glow_atlas"), "textures/glow_atlas.png");
+    addTexture(package_assets, texture_key("spark_atlas"), "textures/spark_atlas.png");
+    addTexture(package_assets, texture_key("smoke_atlas"), "textures/smoke_atlas.png");
+    addTexture(package_assets, texture_key("heat_atlas"), "textures/heat_atlas.png");
+    addTexture(package_assets, texture_key("pixie_dust_atlas"), "textures/pixie_dust_atlas.png");
+    const std::string interior_material_key =
+        asset_namespace + "/detect_magic_interior_volume";
+    const std::string surface_material_key =
+        asset_namespace + "/detect_magic_surface_volume";
+    if (!writeTextFile(output_dir / "shaders" / "detect_magic_volume_vs.hlsl",
+                       kDetectMagicVolumeVertexShader,
+                       diagnostic) ||
+        !writeTextFile(output_dir / "shaders" / "detect_magic_interior_ps.hlsl",
+                       std::string(kDetectMagicVolumePixelHeader) +
+                           std::string(kDetectMagicInteriorPixelShader),
+                       diagnostic) ||
+        !writeTextFile(output_dir / "shaders" / "detect_magic_surface_ps.hlsl",
+                       std::string(kDetectMagicVolumePixelHeader) +
+                           std::string(kDetectMagicSurfacePixelShader),
+                       diagnostic) ||
+        !writeJson(output_dir / "materials" / "detect_magic_interior.mat",
+                   makeDetectMagicVolumeMaterial("../shaders/detect_magic_interior_ps.hlsl",
+                                                 1.0f),
+                   diagnostic) ||
+        !writeJson(output_dir / "materials" / "detect_magic_surface.mat",
+                   makeDetectMagicVolumeMaterial("../shaders/detect_magic_surface_ps.hlsl",
+                                                 1.0f),
+                   diagnostic)) {
+      return false;
+    }
+    addMaterial(package_assets,
+                interior_material_key,
+                "materials/detect_magic_interior.mat");
+    addMaterial(package_assets,
+                surface_material_key,
+                "materials/detect_magic_surface.mat");
+
+    const std::string radius_scale_expression =
+        "radius / (" + numberExpr(radius) + ")";
+    prefab_variables = Json{
+        {"radius", Json{{"type", "float"}, {"default", radius}}},
+        {"duration", Json{{"type", "float"}, {"default", 1.0f}}},
+        {"intensity", Json{{"type", "float"}, {"default", 1.0f}}},
+        {"color",
+         Json{{"type", "color"},
+              {"default", Json::array({0.92f, 0.98f, 1.0f, 0.12f})}}},
+    };
+
+    nodes.push_back(makeRootNode(name));
+    nodes.push_back(makeVolumetricNode(next_node_id++,
+                                       0u,
+                                       "shimmer_volume",
+                                       vec3(0.0f, 0.92f, 0.0f),
+                                       var("radius"),
+                                       interior_material_key,
+                                       surface_material_key,
+                                       true));
+
+    auto area_override = [&](float outer_radius_scale,
+                             float height_scale,
+                             float jitter_scale,
+                             float size_scale,
+                             float velocity_scale) {
+      return Json{
+          {"emission_scale", var("intensity")},
+          {"lifetime_scale", var("duration")},
+          {"size_scale",
+           expr("(" + radius_scale_expression + ") * (" + numberExpr(size_scale) + ")")},
+          {"radius_scale", expr(radius_scale_expression)},
+          {"velocity_scale",
+           expr("(" + radius_scale_expression + ") * (" + numberExpr(velocity_scale) + ")")},
+          {"source_outer_radius", scaledVar("radius", outer_radius_scale)},
+          {"source_height", scaledVar("radius", height_scale)},
+          {"source_jitter_radius", scaledVar("radius", jitter_scale)},
+      };
+    };
+
+    Json swirl = makeEmitter("detect_magic_swirl",
+                             texture_key("glow_atlas"),
+                             "additive",
+                             "ring",
+                             720,
+                             180,
+                             168.0f,
+                             1.05f,
+                             2.35f,
+                             0.16f,
+                             0.42f,
+                             0.035f,
+                             0.095f,
+                             color(1.45f, 1.65f, 2.0f, 0.42f),
+                             color(0.88f, 0.96f, 1.0f, 0.0f),
+                             Json::array(),
+                             9301u);
+    configureDazeAtlas(swirl);
+    configureDazeRingSource(swirl, radius, 0.18f, 1.0f, 0.01f, 0.10f);
+    swirl["render"]["layer"] = 1u;
+    swirl["source"]["jitter_radius"] = 0.018f * radius;
+    swirl["motion"]["velocity_min"] = vec3(-0.018f * radius,
+                                           0.010f * radius,
+                                           -0.018f * radius);
+    swirl["motion"]["velocity_max"] = vec3(0.018f * radius,
+                                           0.050f * radius,
+                                           0.018f * radius);
+    swirl["motion"]["acceleration"] = vec3(0.0f, 0.004f * radius, 0.0f);
+    swirl["motion"]["drag"] = 0.36f;
+    swirl["motion"]["orbit_speed"] = 0.46f;
+    swirl["rotation"]["angular_velocity_min"] = -1.4f;
+    swirl["rotation"]["angular_velocity_max"] = 1.4f;
+    swirl["size"]["curve_exponent"] = 0.72f;
+    swirl["color"]["alpha_curve_exponent"] = 1.18f;
+
+    Json pixie_dust = makeEmitter("detect_magic_pixie_dust",
+                                  texture_key("pixie_dust_atlas"),
+                                  "additive",
+                                  "sphere",
+                                  2200,
+                                  360,
+                                  180.0f,
+                                  3.20f,
+                                  6.00f,
+                                  0.075f,
+                                  0.240f,
+                                  0.014f,
+                                  0.055f,
+                                  color(1.60f, 1.38f, 0.82f, 0.55f),
+                                  color(0.95f, 0.78f, 0.42f, 0.0f),
+                                  Json::array(),
+                                  9311u);
+    configurePixieDustAtlas(pixie_dust);
+    pixie_dust["render"]["layer"] = 0u;
+    pixie_dust["source"]["radius_min"] = 0.02f * radius;
+    pixie_dust["source"]["radius_max"] = 1.0f * radius;
+    pixie_dust["source"]["jitter_radius"] = 0.008f * radius;
+    pixie_dust["source"]["radial_speed_min"] = 0.000f * radius;
+    pixie_dust["source"]["radial_speed_max"] = 0.018f * radius;
+    pixie_dust["motion"]["velocity_min"] = vec3(-0.012f * radius,
+                                                0.003f * radius,
+                                                -0.012f * radius);
+    pixie_dust["motion"]["velocity_max"] = vec3(0.012f * radius,
+                                                0.035f * radius,
+                                                0.012f * radius);
+    pixie_dust["motion"]["acceleration"] = vec3(0.0f, 0.0f, 0.0f);
+    pixie_dust["motion"]["drag"] = 0.42f;
+    pixie_dust["motion"]["orbit_speed"] = 0.24f;
+    pixie_dust["rotation"]["angular_velocity_min"] = -1.2f;
+    pixie_dust["rotation"]["angular_velocity_max"] = 1.2f;
+    pixie_dust["size"]["curve_exponent"] = 0.62f;
+    pixie_dust["color"]["alpha_curve_exponent"] = 1.35f;
+
+    Json mist = makeEmitter("detect_magic_mist",
+                            texture_key("smoke_atlas"),
+                            "alpha",
+                            "cylinder",
+                            420,
+                            70,
+                            48.0f,
+                            2.20f,
+                            4.80f,
+                            0.28f,
+                            0.70f,
+                            0.72f,
+                            1.55f,
+                            color(0.82f, 0.90f, 1.0f, 0.12f),
+                            color(0.70f, 0.80f, 0.92f, 0.0f),
+                            Json::array(),
+                            9321u);
+    configureDazeAtlas(mist);
+    mist["render"]["soft_particle_distance"] = 1.0f;
+    mist["source"]["height"] = 0.26f * radius;
+    mist["source"]["outer_radius"] = 0.88f * radius;
+    mist["source"]["jitter_radius"] = 0.065f * radius;
+    mist["source"]["radial_speed_min"] = 0.0f;
+    mist["source"]["radial_speed_max"] = 0.018f * radius;
+    mist["motion"]["velocity_min"] = vec3(-0.012f * radius,
+                                          0.006f * radius,
+                                          -0.012f * radius);
+    mist["motion"]["velocity_max"] = vec3(0.012f * radius,
+                                          0.040f * radius,
+                                          0.012f * radius);
+    mist["motion"]["acceleration"] = vec3(0.0f, 0.001f * radius, 0.0f);
+    mist["motion"]["drag"] = 0.50f;
+    mist["motion"]["orbit_speed"] = 0.16f;
+    mist["rotation"]["angular_velocity_min"] = -0.22f;
+    mist["rotation"]["angular_velocity_max"] = 0.22f;
+    mist["size"]["curve_exponent"] = 0.82f;
+    mist["color"]["alpha_curve_exponent"] = 1.55f;
+
+    Json shimmer_distortion = makeEmitter("detect_magic_shimmer_distortion",
+                                          texture_key("heat_atlas"),
+                                          "distortion",
+                                          "cylinder",
+                                          230,
+                                          44,
+                                          38.0f,
+                                          0.85f,
+                                          1.90f,
+                                          0.42f,
+                                          1.05f,
+                                          0.74f,
+                                          1.95f,
+                                          color(1.0f, 1.0f, 1.0f, 0.10f),
+                                          color(1.0f, 1.0f, 1.0f, 0.0f),
+                                          Json::array(),
+                                          9331u);
+    shimmer_distortion["playback"]["local_space"] = true;
+    shimmer_distortion["render"]["soft_particle_distance"] = 1.2f;
+    shimmer_distortion["render"]["distortion_strength"] = 2.8f;
+    shimmer_distortion["source"]["height"] = 0.30f * radius;
+    shimmer_distortion["source"]["outer_radius"] = 0.94f * radius;
+    shimmer_distortion["source"]["jitter_radius"] = 0.045f * radius;
+    shimmer_distortion["source"]["radial_speed_min"] = 0.0f;
+    shimmer_distortion["source"]["radial_speed_max"] = 0.030f * radius;
+    shimmer_distortion["motion"]["velocity_min"] = vec3(-0.010f * radius,
+                                                        0.004f * radius,
+                                                        -0.010f * radius);
+    shimmer_distortion["motion"]["velocity_max"] = vec3(0.010f * radius,
+                                                        0.032f * radius,
+                                                        0.010f * radius);
+    shimmer_distortion["motion"]["acceleration"] = vec3(0.0f, 0.0f, 0.0f);
+    shimmer_distortion["motion"]["drag"] = 0.60f;
+    shimmer_distortion["motion"]["orbit_speed"] = 0.34f;
+    shimmer_distortion["rotation"]["angular_velocity_min"] = -0.75f;
+    shimmer_distortion["rotation"]["angular_velocity_max"] = 0.75f;
+    shimmer_distortion["size"]["curve_exponent"] = 0.70f;
+    shimmer_distortion["color"]["alpha_curve_exponent"] = 1.25f;
+
+    if (!write_effect("detect_magic_swirl.kpeffect",
+                      effect_key("swirl"),
+                      effect(std::move(swirl))) ||
+        !write_effect("detect_magic_pixie_dust.kpeffect",
+                      effect_key("pixie_dust"),
+                      effect(std::move(pixie_dust))) ||
+        !write_effect("detect_magic_mist.kpeffect",
+                      effect_key("mist"),
+                      effect(std::move(mist))) ||
+        !write_effect("detect_magic_shimmer_distortion.kpeffect",
+                      effect_key("shimmer_distortion"),
+                      effect(std::move(shimmer_distortion)))) {
+      return false;
+    }
+
+    auto disabled_particle_node = [](Json node) {
+      node["components"]["ParticleEmitterComponent"]["enabled"] = false;
+      node["components"]["ParticleEmitterComponent"]["playing"] = false;
+      return node;
+    };
+
+    nodes.push_back(disabled_particle_node(
+        makeParticleNodeWithOverride(next_node_id++,
+                                     0u,
+                                     "swirl",
+                                     effect_key("swirl"),
+                                     area_override(1.0f, 0.0f, 0.018f, 1.0f, 1.0f),
+                                     vec3(0.0f, 0.08f, 0.0f))));
+    nodes.push_back(makeParticleNodeWithOverride(next_node_id++,
+                                                 0u,
+                                                 "pixie_dust",
+                                                 effect_key("pixie_dust"),
+                                                 area_override(1.0f, 0.0f, 0.008f, 1.08f, 0.55f),
+                                                 vec3(0.0f, 0.92f, 0.0f)));
+    nodes.push_back(disabled_particle_node(
+        makeParticleNodeWithOverride(next_node_id++,
+                                     0u,
+                                     "mist",
+                                     effect_key("mist"),
+                                     area_override(0.88f, 0.26f, 0.065f, 1.0f, 1.0f),
+                                     vec3(0.0f, 0.72f, 0.0f))));
+    nodes.push_back(disabled_particle_node(
+        makeParticleNodeWithOverride(next_node_id++,
+                                     0u,
+                                     "shimmer_distortion",
+                                     effect_key("shimmer_distortion"),
+                                     area_override(0.94f, 0.30f, 0.045f, 1.0f, 1.0f),
+                                     vec3(0.0f, 0.92f, 0.0f))));
+    nodes.push_back(makePointLightNode(next_node_id++,
+                                       0u,
+                                       "detect_magic_glow",
+                                       color(0.90f, 0.96f, 1.0f, 1.0f),
+                                       0.0f,
+                                       scaledVar("radius", 0.70f),
+                                       vec3(0.0f, 1.20f, 0.0f)));
   } else if (preset == "energy_orb") {
     const std::string mesh_key = asset_namespace + "/orb_shell";
     if (!copyAssetFile(repo_root,
@@ -4089,7 +6326,10 @@ bool generateParticleEffectPackage(const std::filesystem::path& spec_path,
   if (!writeJson(output_dir / "assets.package.json", packageManifest(package_assets), diagnostic)) {
     return false;
   }
-  Json prefab{{"version", 1}, {"root", 0}, {"nodes", std::move(nodes)}};
+  Json prefab{{"version", 2}, {"root", 0}, {"nodes", std::move(nodes)}};
+  if (!prefab_variables.empty()) {
+    prefab["variables"] = std::move(prefab_variables);
+  }
   if (!writeJson(output_dir / "prefab.json", prefab, diagnostic)) {
     return false;
   }

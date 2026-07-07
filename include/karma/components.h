@@ -1680,6 +1680,7 @@ namespace karma::components {
 struct ParticleEffectOverrideComponent : world::ComponentTag {
   bool active = true;
   float time_scale = 1.0f;
+  float emission_scale = 1.0f;
   float spawn_rate_scale = 1.0f;
   float lifetime_scale = 1.0f;
   float size_scale = 1.0f;
@@ -2365,20 +2366,14 @@ enum class VolumetricShape {
 /// Analytic volumetric solid visual effect consumed by `VolumeRuntimeModule`.
 struct VolumetricComponent : world::ComponentTag {
   VolumetricShape shape = VolumetricShape::Sphere;
-  math::Color color{0.18f, 0.82f, 1.0f, 1.0f};
-  math::Color emissive_color{0.0f, 0.0f, 0.0f, 1.0f};
-  float density = 0.34657359f;
-  float center_opacity = 0.5f;
-  float scattering = 1.0f;
-  float anisotropy = 0.0f;
-  float absorption = 0.0f;
-  float distortion_strength = 0.0f;
-  float noise_strength = 1.0f;
   float radius = 1.0f;
   float capsule_half_length = 1.0f;
   bool scale_with_transform = true;
   bool visible = true;
   float overlay_depth = 0.12f;
+  bool surface_double_sided = false;
+  std::string interior_material_key;
+  std::string surface_material_key;
 };
 
 }  // namespace karma::components

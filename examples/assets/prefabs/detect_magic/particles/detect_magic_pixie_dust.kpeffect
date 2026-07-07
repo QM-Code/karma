@@ -1,0 +1,143 @@
+{
+  "emitters": [
+    {
+      "atlas": {
+        "animate_over_lifetime": false,
+        "animation_fps": 0.0,
+        "border_x": 0,
+        "border_y": 0,
+        "columns": 4,
+        "frame_count": 16,
+        "frame_height": 0,
+        "frame_width": 0,
+        "random_start_frame": true,
+        "rows": 4,
+        "spacing_x": 0,
+        "spacing_y": 0
+      },
+      "collision": {
+        "bounce_damping": 0.25,
+        "friction": 0.25,
+        "ground": false,
+        "ground_height": 0.0,
+        "rest_speed_threshold": 0.25
+      },
+      "color": {
+        "alpha_curve_exponent": 1.350000023841858,
+        "end": [
+          0.949999988079071,
+          0.7799999713897705,
+          0.41999998688697815,
+          0.0
+        ],
+        "start": [
+          1.600000023841858,
+          1.3799999952316284,
+          0.8199999928474426,
+          0.550000011920929
+        ]
+      },
+      "emission": {
+        "burst_count": 360,
+        "max_particles": 2200,
+        "seed": 9311,
+        "spawn_rate": 180.0
+      },
+      "lifetime": {
+        "max": 6.0,
+        "min": 3.200000047683716
+      },
+      "motion": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "drag": 0.41999998688697815,
+        "orbit_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "orbit_speed": 0.23999999463558197,
+        "velocity_max": [
+          0.10972800105810165,
+          0.3200400173664093,
+          0.10972800105810165
+        ],
+        "velocity_min": [
+          -0.10972800105810165,
+          0.027432000264525414,
+          -0.10972800105810165
+        ]
+      },
+      "name": "detect_magic_pixie_dust",
+      "playback": {
+        "duration": 0.0,
+        "emit_burst_on_start": true,
+        "enabled": true,
+        "local_space": true,
+        "loop": true,
+        "playing": true,
+        "start_delay": 0.0,
+        "time_scale": 1.0
+      },
+      "render": {
+        "alignment": "billboard",
+        "blend_mode": "additive",
+        "depth_test": true,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "interior_glow": 0.0,
+        "layer": 0,
+        "refraction_strength": 0.0,
+        "shading_mode": "standard",
+        "soft_particle_distance": 0.0,
+        "use_soft_mask": false
+      },
+      "rotation": {
+        "angular_velocity_max": 1.2000000476837158,
+        "angular_velocity_min": -1.2000000476837158,
+        "initial_max": 6.2831854820251465,
+        "initial_min": 0.0
+      },
+      "size": {
+        "curve_exponent": 0.6200000047683716,
+        "end_max": 0.054999999701976776,
+        "end_min": 0.014000000432133675,
+        "start_max": 0.23999999463558197,
+        "start_min": 0.07500000298023224
+      },
+      "source": {
+        "angle": 0.0,
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "closed_loop": false,
+        "dimensions": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "distribution": "uniform",
+        "height": 0.0,
+        "inner_radius": 0.0,
+        "jitter_radius": 0.07315200567245483,
+        "mesh_asset_key": "",
+        "outer_radius": 0.5,
+        "points": [],
+        "radial_speed_max": 0.16459199786186218,
+        "radial_speed_min": 0.0,
+        "radius_max": 9.144000053405762,
+        "radius_min": 0.1828799992799759,
+        "sampling": "random",
+        "shape": "sphere"
+      },
+      "texture": "prefabs/detect_magic/pixie_dust_atlas"
+    }
+  ],
+  "version": 3
+}

@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "karma/assets.h"
@@ -434,6 +435,10 @@ void testMaterialFileLoading() {
       std::filesystem::temp_directory_path() / "karma_material_loader_tests";
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir / "materials");
+  writeText(dir / "shaders" / "custom_vs.hlsl",
+            "void VSMain() {}\n");
+  writeText(dir / "shaders" / "custom_ps.hlsl",
+            "void PSMain() {}\n");
 
   const std::filesystem::path standard = dir / "materials" / "standard.mat";
   writeText(standard,
@@ -467,7 +472,10 @@ void testMaterialFileLoading() {
                 "fragment_entry": "PSMain",
                 "defines": ["USE_FOG"]
               },
-              "params": { "wave_tint_strength": 0.75 }
+              "params": {
+                "wave_tint_strength": 0.75,
+                "material_params0": [0.1, 0.2, 0.3, 0.4]
+              }
             })");
   auto custom_desc = karma::assets::loadMaterialAssetDesc(custom, &diagnostic);
   assert(custom_desc.has_value());
@@ -476,6 +484,12 @@ void testMaterialFileLoading() {
          (dir / "shaders" / "custom_vs.hlsl").lexically_normal());
   assert(custom_desc->pipeline.vertex_entry_point == "VSMain");
   assert(custom_desc->pipeline.defines.size() == 1);
+  const auto custom_params = custom_desc->params.find("material_params0");
+  assert(custom_params != custom_desc->params.end());
+  const auto* custom_param_value =
+      std::get_if<karma::rendering::Color>(&custom_params->second);
+  assert(custom_param_value != nullptr);
+  assert(nearly(custom_param_value->b, 0.3f));
 
   const std::filesystem::path variant = dir / "materials" / "variant.mat";
   writeText(variant,
@@ -497,6 +511,22 @@ void testMaterialFileLoading() {
   auto invalid_desc = karma::assets::loadMaterialAssetDesc(invalid, &diagnostic);
   assert(!invalid_desc.has_value());
   assert(!diagnostic.empty());
+
+  const std::filesystem::path missing_shader = dir / "materials" / "missing_shader.mat";
+  writeText(missing_shader,
+            R"({
+              "version": 2,
+              "pipeline": {
+                "name": "custom",
+                "vertex": "../shaders/missing_vs.hlsl",
+                "fragment": "../shaders/custom_ps.hlsl"
+              }
+            })");
+  auto missing_shader_desc =
+      karma::assets::loadMaterialAssetDesc(missing_shader, &diagnostic);
+  assert(!missing_shader_desc.has_value());
+  assert(diagnostic.find("missing") != std::string::npos ||
+         diagnostic.find("unreadable") != std::string::npos);
 
   std::filesystem::remove_all(dir);
 }

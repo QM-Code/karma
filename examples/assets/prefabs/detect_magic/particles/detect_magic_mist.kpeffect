@@ -1,0 +1,143 @@
+{
+  "emitters": [
+    {
+      "atlas": {
+        "animate_over_lifetime": false,
+        "animation_fps": 0.0,
+        "border_x": 0,
+        "border_y": 0,
+        "columns": 4,
+        "frame_count": 4,
+        "frame_height": 0,
+        "frame_width": 0,
+        "random_start_frame": true,
+        "rows": 1,
+        "spacing_x": 0,
+        "spacing_y": 0
+      },
+      "collision": {
+        "bounce_damping": 0.25,
+        "friction": 0.25,
+        "ground": false,
+        "ground_height": 0.0,
+        "rest_speed_threshold": 0.25
+      },
+      "color": {
+        "alpha_curve_exponent": 1.5499999523162842,
+        "end": [
+          0.699999988079071,
+          0.800000011920929,
+          0.9200000166893005,
+          0.0
+        ],
+        "start": [
+          0.8199999928474426,
+          0.8999999761581421,
+          1.0,
+          0.11999999731779099
+        ]
+      },
+      "emission": {
+        "burst_count": 70,
+        "max_particles": 420,
+        "seed": 9321,
+        "spawn_rate": 48.0
+      },
+      "lifetime": {
+        "max": 4.800000190734863,
+        "min": 2.200000047683716
+      },
+      "motion": {
+        "acceleration": [
+          0.0,
+          0.009144000709056854,
+          0.0
+        ],
+        "drag": 0.5,
+        "orbit_axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "orbit_speed": 0.1599999964237213,
+        "velocity_max": [
+          0.10972800105810165,
+          0.3657599985599518,
+          0.10972800105810165
+        ],
+        "velocity_min": [
+          -0.10972800105810165,
+          0.05486400052905083,
+          -0.10972800105810165
+        ]
+      },
+      "name": "detect_magic_mist",
+      "playback": {
+        "duration": 0.0,
+        "emit_burst_on_start": true,
+        "enabled": true,
+        "local_space": true,
+        "loop": true,
+        "playing": true,
+        "start_delay": 0.0,
+        "time_scale": 1.0
+      },
+      "render": {
+        "alignment": "billboard",
+        "blend_mode": "alpha",
+        "depth_test": true,
+        "distortion_strength": 0.0,
+        "fresnel_power": 4.0,
+        "fresnel_strength": 1.0,
+        "interior_glow": 0.0,
+        "layer": 0,
+        "refraction_strength": 0.0,
+        "shading_mode": "standard",
+        "soft_particle_distance": 1.0,
+        "use_soft_mask": false
+      },
+      "rotation": {
+        "angular_velocity_max": 0.2199999988079071,
+        "angular_velocity_min": -0.2199999988079071,
+        "initial_max": 6.2831854820251465,
+        "initial_min": 0.0
+      },
+      "size": {
+        "curve_exponent": 0.8199999928474426,
+        "end_max": 1.5499999523162842,
+        "end_min": 0.7200000286102295,
+        "start_max": 0.699999988079071,
+        "start_min": 0.2800000011920929
+      },
+      "source": {
+        "angle": 0.0,
+        "box_extents": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "closed_loop": false,
+        "dimensions": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "distribution": "uniform",
+        "height": 2.3774399757385254,
+        "inner_radius": 0.0,
+        "jitter_radius": 0.5943599939346313,
+        "mesh_asset_key": "",
+        "outer_radius": 8.046719551086426,
+        "points": [],
+        "radial_speed_max": 0.16459199786186218,
+        "radial_speed_min": 0.0,
+        "radius_max": 0.5,
+        "radius_min": 0.0,
+        "sampling": "random",
+        "shape": "cylinder"
+      },
+      "texture": "prefabs/detect_magic/smoke_atlas"
+    }
+  ],
+  "version": 3
+}

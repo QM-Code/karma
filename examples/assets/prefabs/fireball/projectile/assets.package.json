@@ -1,0 +1,70 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/fireball/projectile/fireball_core_atlas",
+      "path": "textures/fireball_core_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/projectile/fireball_flame_atlas",
+      "path": "textures/fireball_flame_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/projectile/fireball_tongue_atlas",
+      "path": "textures/fireball_tongue_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/projectile/fireball_ember_atlas",
+      "path": "textures/fireball_ember_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/projectile/fireball_ember_burst_atlas",
+      "path": "textures/fireball_ember_burst_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/projectile/fireball_smoke_atlas",
+      "path": "textures/fireball_smoke_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/projectile/fireball_heat_atlas",
+      "path": "textures/fireball_heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/fireball/projectile/core",
+      "path": "particles/fireball_projectile_core.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/projectile/flames",
+      "path": "particles/fireball_projectile_flames.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/projectile/smoke_trail",
+      "path": "particles/fireball_projectile_smoke.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/projectile/embers",
+      "path": "particles/fireball_projectile_embers.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/projectile/ember_sparks",
+      "path": "particles/fireball_projectile_ember_sparks.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/fireball/projectile/heat",
+      "path": "particles/fireball_projectile_heat.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

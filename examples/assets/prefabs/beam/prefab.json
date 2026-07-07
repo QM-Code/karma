@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "root": 0,
   "nodes": [
     {
@@ -326,30 +326,13 @@
         },
         "VolumetricComponent": {
           "shape": "capsule",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.8,
-          "center_opacity": 0.9,
-          "scattering": 0.95,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.1,
-          "noise_strength": 0.26,
           "radius": 0.48,
           "capsule_half_length": 1.329893,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -381,30 +364,13 @@
         },
         "VolumetricComponent": {
           "shape": "capsule",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.8,
-          "center_opacity": 0.9,
-          "scattering": 0.95,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.1,
-          "noise_strength": 0.26,
           "radius": 0.48,
           "capsule_half_length": 1.575043,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -436,30 +402,13 @@
         },
         "VolumetricComponent": {
           "shape": "capsule",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.8,
-          "center_opacity": 0.9,
-          "scattering": 0.95,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.1,
-          "noise_strength": 0.26,
           "radius": 0.48,
           "capsule_half_length": 1.887044,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -491,30 +440,13 @@
         },
         "VolumetricComponent": {
           "shape": "capsule",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.8,
-          "center_opacity": 0.9,
-          "scattering": 0.95,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.1,
-          "noise_strength": 0.26,
           "radius": 0.48,
           "capsule_half_length": 1.443301,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -546,30 +478,13 @@
         },
         "VolumetricComponent": {
           "shape": "capsule",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.8,
-          "center_opacity": 0.9,
-          "scattering": 0.95,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.1,
-          "noise_strength": 0.26,
           "radius": 0.48,
           "capsule_half_length": 2.232944,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -601,30 +516,13 @@
         },
         "VolumetricComponent": {
           "shape": "sphere",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.45,
-          "center_opacity": 0.92,
-          "scattering": 1.05,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.12,
-          "noise_strength": 0.2,
           "radius": 0.72,
           "capsule_half_length": 0.0,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -656,30 +554,13 @@
         },
         "VolumetricComponent": {
           "shape": "sphere",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.45,
-          "center_opacity": 0.92,
-          "scattering": 1.05,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.12,
-          "noise_strength": 0.2,
           "radius": 0.72,
           "capsule_half_length": 0.0,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -711,30 +592,13 @@
         },
         "VolumetricComponent": {
           "shape": "sphere",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.45,
-          "center_opacity": 0.92,
-          "scattering": 1.05,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.12,
-          "noise_strength": 0.2,
           "radius": 0.72,
           "capsule_half_length": 0.0,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -766,30 +630,13 @@
         },
         "VolumetricComponent": {
           "shape": "sphere",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.45,
-          "center_opacity": 0.92,
-          "scattering": 1.05,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.12,
-          "noise_strength": 0.2,
           "radius": 0.72,
           "capsule_half_length": 0.0,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -821,30 +668,13 @@
         },
         "VolumetricComponent": {
           "shape": "sphere",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.45,
-          "center_opacity": 0.92,
-          "scattering": 1.05,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.12,
-          "noise_strength": 0.2,
           "radius": 0.72,
           "capsule_half_length": 0.0,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     },
@@ -876,30 +706,13 @@
         },
         "VolumetricComponent": {
           "shape": "sphere",
-          "color": [
-            1.0,
-            0.18,
-            0.14,
-            1.0
-          ],
-          "emissive_color": [
-            8.5,
-            8.33,
-            7.48,
-            1.0
-          ],
-          "density": 2.45,
-          "center_opacity": 0.92,
-          "scattering": 1.05,
-          "anisotropy": 0.18,
-          "absorption": 0.0,
-          "distortion_strength": 0.12,
-          "noise_strength": 0.2,
           "radius": 0.72,
           "capsule_half_length": 0.0,
           "scale_with_transform": false,
           "visible": true,
-          "overlay_depth": 0.12
+          "overlay_depth": 0.12,
+          "interior_material_key": "",
+          "surface_material_key": ""
         }
       }
     }

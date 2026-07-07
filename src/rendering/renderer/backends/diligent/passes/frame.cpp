@@ -555,6 +555,10 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
   record.deformation = item.deformation;
   record.transform = item.transform;
   record.params = item.instance_params;
+  record.volume_params = item.volume_params;
+  record.has_volume_params = item.has_volume_params;
+  record.requires_scene_sample = item.requires_scene_sample;
+  record.post_particle_scene_sample = item.post_particle_scene_sample;
   record.visible = item.visible;
   record.shadow_visible = item.shadow_visible;
 }

@@ -1894,6 +1894,31 @@ rendering::MaterialId DiligentBackend::createMaterial(const rendering::ResolvedM
                         record.sheen_roughness_srv);
   assign_texture_handle({"transmission"}, record.transmission_srv);
   assign_texture_handle({"thickness"}, record.thickness_srv);
+  if (materialUsesCustomForwardPipeline(record)) {
+    const bool transparent =
+        record.desc.transparent ||
+        record.desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Blend;
+    const bool additive =
+        transparent && record.desc.blend_mode == rendering::MaterialDesc::BlendMode::Additive;
+    const bool double_sided = record.desc.double_sided;
+    ForwardPipelineVariant variant = ForwardPipelineVariant::Opaque;
+    if (transparent) {
+      if (additive) {
+        variant = double_sided ? ForwardPipelineVariant::AdditiveDoubleSided
+                               : ForwardPipelineVariant::Additive;
+      } else {
+        variant = double_sided ? ForwardPipelineVariant::TransparentDoubleSided
+                               : ForwardPipelineVariant::Transparent;
+      }
+    } else if (double_sided) {
+      variant = ForwardPipelineVariant::OpaqueDoubleSided;
+    }
+    if (ensureCustomForwardPipeline(record,
+                                    variant,
+                                    rendering::InstanceGpuLayout::Matrix4x4Params) == nullptr) {
+      return rendering::kInvalidMaterial;
+    }
+  }
   initializeMaterialBindings(record);
 
   materials_[id] = std::move(record);

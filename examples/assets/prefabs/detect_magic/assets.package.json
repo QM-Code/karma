@@ -1,0 +1,60 @@
+{
+  "assets": [
+    {
+      "key": "prefabs/detect_magic/glow_atlas",
+      "path": "textures/glow_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/detect_magic/spark_atlas",
+      "path": "textures/spark_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/detect_magic/smoke_atlas",
+      "path": "textures/smoke_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/detect_magic/heat_atlas",
+      "path": "textures/heat_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/detect_magic/pixie_dust_atlas",
+      "path": "textures/pixie_dust_atlas.png",
+      "type": "texture_rgba8"
+    },
+    {
+      "key": "prefabs/detect_magic/detect_magic_interior_volume",
+      "path": "materials/detect_magic_interior.mat",
+      "type": "material"
+    },
+    {
+      "key": "prefabs/detect_magic/detect_magic_surface_volume",
+      "path": "materials/detect_magic_surface.mat",
+      "type": "material"
+    },
+    {
+      "key": "prefabs/detect_magic/swirl",
+      "path": "particles/detect_magic_swirl.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/detect_magic/pixie_dust",
+      "path": "particles/detect_magic_pixie_dust.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/detect_magic/mist",
+      "path": "particles/detect_magic_mist.kpeffect",
+      "type": "particle_effect"
+    },
+    {
+      "key": "prefabs/detect_magic/shimmer_distortion",
+      "path": "particles/detect_magic_shimmer_distortion.kpeffect",
+      "type": "particle_effect"
+    }
+  ],
+  "version": 1
+}

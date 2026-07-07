@@ -56,6 +56,7 @@ CameraData toCameraData(const components::CameraComponent& camera,
   out.ortho_bottom = camera.ortho_bottom;
   out.shader_override_vertex_path = camera.shader_override_vertex_path;
   out.shader_override_fragment_path = camera.shader_override_fragment_path;
+  out.anti_aliasing = rendering::clampAntiAliasingSettings(camera.anti_aliasing);
   out.shader_user_param_count = 0u;
   for (const auto& [key, value] : camera.shader_user_params) {
     if (out.shader_user_param_count >= kCameraShaderUserParamCapacity) {

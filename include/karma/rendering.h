@@ -187,6 +187,54 @@ struct PostProcessSettings {
   float dof_intensity = 1.0f;
 };
 
+/// \ingroup karma_rendering
+/// Camera anti-aliasing strategy selected before post-processing and frame graph passes.
+enum class AntiAliasingMode : uint32_t {
+  None = 0,
+  MSAA = 1,
+  SSAA = 2,
+};
+
+/// \ingroup karma_rendering
+/// Per-camera anti-aliasing request. Backends clamp this to supported values.
+struct AntiAliasingSettings {
+  AntiAliasingMode mode = AntiAliasingMode::None;
+  uint32_t msaa_samples = 4u;
+  float ssaa_scale = 2.0f;
+};
+
+inline uint32_t clampRequestedMsaaSamples(uint32_t samples) {
+  if (samples <= 2u) {
+    return 2u;
+  }
+  if (samples <= 4u) {
+    return 4u;
+  }
+  return 8u;
+}
+
+inline AntiAliasingSettings clampAntiAliasingSettings(AntiAliasingSettings settings) {
+  switch (settings.mode) {
+    case AntiAliasingMode::MSAA:
+      settings.msaa_samples = clampRequestedMsaaSamples(settings.msaa_samples);
+      settings.ssaa_scale = 1.0f;
+      return settings;
+    case AntiAliasingMode::SSAA:
+      settings.msaa_samples = 1u;
+      settings.ssaa_scale = std::clamp(settings.ssaa_scale, 1.0f, 4.0f);
+      if (settings.ssaa_scale <= 1.0f) {
+        settings.mode = AntiAliasingMode::None;
+      }
+      return settings;
+    case AntiAliasingMode::None:
+    default:
+      settings.mode = AntiAliasingMode::None;
+      settings.msaa_samples = 1u;
+      settings.ssaa_scale = 1.0f;
+      return settings;
+  }
+}
+
 }  // namespace karma::rendering
 
 
@@ -239,6 +287,7 @@ struct CameraData {
   float ortho_bottom = -1.0f;
   std::filesystem::path shader_override_vertex_path;
   std::filesystem::path shader_override_fragment_path;
+  AntiAliasingSettings anti_aliasing{};
   std::array<CameraShaderUserParam, kCameraShaderUserParamCapacity> shader_user_params{};
   uint32_t shader_user_param_count = 0;
 };
@@ -2043,6 +2092,13 @@ struct RendererFrameTimingStats {
   uint32_t pipeline_creation_count = 0;
   uint32_t resize_events = 0;
   uint32_t skipped_presents = 0;
+  AntiAliasingMode anti_aliasing_mode = AntiAliasingMode::None;
+  uint32_t anti_aliasing_msaa_samples = 1u;
+  float anti_aliasing_ssaa_scale = 1.0f;
+  uint32_t raster_width = 0u;
+  uint32_t raster_height = 0u;
+  uint32_t output_width = 0u;
+  uint32_t output_height = 0u;
   std::vector<RendererGraphPassTiming> graph_pass_timings;
 };
 

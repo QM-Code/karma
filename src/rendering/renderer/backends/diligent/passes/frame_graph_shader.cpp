@@ -1180,12 +1180,36 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
           source_binding.texture == target_binding.texture) {
         pass_ok = source_binding.texture == target_binding.texture;
       } else {
-        Diligent::CopyTextureAttribs copy_attribs{
-            source_binding.texture,
-            Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-            target_binding.texture,
-            Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-        context_->CopyTexture(copy_attribs);
+        const auto& source_desc = source_binding.texture->GetDesc();
+        const auto& target_desc = target_binding.texture->GetDesc();
+        const bool native_copy_supported =
+            source_desc.SampleCount == 1u &&
+            target_desc.SampleCount == 1u &&
+            source_binding.width == target_binding.width &&
+            source_binding.height == target_binding.height &&
+            source_desc.Format == target_desc.Format;
+        if (native_copy_supported) {
+          Diligent::CopyTextureAttribs copy_attribs{
+              source_binding.texture,
+              Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+              target_binding.texture,
+              Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
+          context_->CopyTexture(copy_attribs);
+        } else if (source_binding.srv && target_binding.rtv) {
+          const int target_width = target_binding.width > 0 ? target_binding.width : width;
+          const int target_height = target_binding.height > 0 ? target_binding.height : height;
+          const Diligent::TEXTURE_FORMAT target_format =
+              target_binding.format != Diligent::TEX_FORMAT_UNKNOWN
+                  ? target_binding.format
+                  : target_desc.Format;
+          pass_ok = runFullscreenBlit(source_binding.srv,
+                                      target_binding.rtv,
+                                      target_width,
+                                      target_height,
+                                      target_format);
+        } else {
+          pass_ok = false;
+        }
       }
     } else if (pass.kind == rendering::FrameGraphPassKind::Shader) {
       const rendering::ShaderPassAssetDesc* asset =

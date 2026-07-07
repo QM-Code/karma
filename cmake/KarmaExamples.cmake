@@ -65,6 +65,9 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
 
   karma_add_graphical_example(rendering_light_stress rendering light_stress
     examples/rendering/light_stress.cpp)
+  karma_add_graphical_example(rendering_antialiasing rendering antialiasing
+    examples/rendering/antialiasing.cpp
+    examples/common/scene_helpers.cpp)
   karma_add_graphical_example(rendering_material_assignment rendering material_assignment
     examples/rendering/material_assignment.cpp)
   karma_add_graphical_example(rendering_grass_card rendering grass_card

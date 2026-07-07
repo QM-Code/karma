@@ -603,6 +603,8 @@ void DiligentBackend::ensureEnvironmentResources() {
 
       auto& graphics = pso.GraphicsPipeline;
       graphics.NumRenderTargets = 1;
+      graphics.SmplDesc.Count =
+          static_cast<Diligent::Uint8>(depth_test ? activeRasterSampleCount() : 1u);
       graphics.RTVFormats[0] = rtv_format;
       graphics.DSVFormat = depth_test && swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                                      : Diligent::TEX_FORMAT_UNKNOWN;

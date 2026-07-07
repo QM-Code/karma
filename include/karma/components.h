@@ -442,6 +442,7 @@ struct CameraComponent : world::ComponentTag {
   std::string frame_graph_key;
   std::filesystem::path shader_override_vertex_path;
   std::filesystem::path shader_override_fragment_path;
+  rendering::AntiAliasingSettings anti_aliasing{};
   std::unordered_map<std::string, math::Color> shader_user_params;
 };
 

@@ -2728,6 +2728,9 @@ void DiligentBackend::ensureParticleResources() {
 
     auto& graphics = pso.GraphicsPipeline;
     graphics.NumRenderTargets = 1;
+    const bool half_res_target = std::string(name).find("HalfRes") != std::string::npos;
+    graphics.SmplDesc.Count =
+        static_cast<Diligent::Uint8>(half_res_target ? 1u : activeRasterSampleCount());
     graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
                                          : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
     graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
@@ -2799,6 +2802,9 @@ void DiligentBackend::ensureParticleResources() {
 
     auto& graphics = pso.GraphicsPipeline;
     graphics.NumRenderTargets = 1;
+    const bool half_res_target = std::string(name).find("HalfRes") != std::string::npos;
+    graphics.SmplDesc.Count =
+        static_cast<Diligent::Uint8>(half_res_target ? 1u : activeRasterSampleCount());
     graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
                                          : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
     graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
@@ -3053,6 +3059,7 @@ void DiligentBackend::ensureParticleResources() {
 
       auto& graphics = composite_pso.GraphicsPipeline;
       graphics.NumRenderTargets = 1;
+      graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
       graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
                                            : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
       graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat

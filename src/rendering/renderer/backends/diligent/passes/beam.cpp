@@ -243,6 +243,7 @@ void DiligentBackend::ensureParticleBeamResources() {
 
     auto& graphics = pso.GraphicsPipeline;
     graphics.NumRenderTargets = 1;
+    graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
     graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
                                          : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
     graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat

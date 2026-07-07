@@ -29,6 +29,8 @@
 #include "karma/world.h"
 #include "karma/world.h"
 
+#include "../src/rendering/renderer/render_system/extractors.h"
+
 namespace {
 
 bool diagnosticsContain(const karma::rendering::FrameGraphValidationResult& result,
@@ -120,6 +122,115 @@ void testEngineConfigFramePacingDefaultAndOptOut() {
 
   config.frame_pacing_fps = 0.0f;
   assert(nearly(config.frame_pacing_fps, 0.0f));
+}
+
+void testAntiAliasingSettingsDefaultsAndClamp() {
+  const karma::rendering::AntiAliasingSettings defaults{};
+  assert(defaults.mode == karma::rendering::AntiAliasingMode::None);
+  assert(defaults.msaa_samples == 4u);
+  assert(nearly(defaults.ssaa_scale, 2.0f));
+
+  const auto none = karma::rendering::clampAntiAliasingSettings(defaults);
+  assert(none.mode == karma::rendering::AntiAliasingMode::None);
+  assert(none.msaa_samples == 1u);
+  assert(nearly(none.ssaa_scale, 1.0f));
+
+  auto msaa = karma::rendering::AntiAliasingSettings{};
+  msaa.mode = karma::rendering::AntiAliasingMode::MSAA;
+  msaa.msaa_samples = 3u;
+  msaa.ssaa_scale = 3.0f;
+  msaa = karma::rendering::clampAntiAliasingSettings(msaa);
+  assert(msaa.mode == karma::rendering::AntiAliasingMode::MSAA);
+  assert(msaa.msaa_samples == 4u);
+  assert(nearly(msaa.ssaa_scale, 1.0f));
+
+  auto ssaa = karma::rendering::AntiAliasingSettings{};
+  ssaa.mode = karma::rendering::AntiAliasingMode::SSAA;
+  ssaa.msaa_samples = 8u;
+  ssaa.ssaa_scale = 8.0f;
+  ssaa = karma::rendering::clampAntiAliasingSettings(ssaa);
+  assert(ssaa.mode == karma::rendering::AntiAliasingMode::SSAA);
+  assert(ssaa.msaa_samples == 1u);
+  assert(nearly(ssaa.ssaa_scale, 4.0f));
+
+  ssaa.mode = karma::rendering::AntiAliasingMode::SSAA;
+  ssaa.ssaa_scale = 0.75f;
+  ssaa = karma::rendering::clampAntiAliasingSettings(ssaa);
+  assert(ssaa.mode == karma::rendering::AntiAliasingMode::None);
+  assert(ssaa.msaa_samples == 1u);
+  assert(nearly(ssaa.ssaa_scale, 1.0f));
+}
+
+void testCameraDataCarriesAntiAliasingSettings() {
+  karma::components::CameraComponent camera{};
+  karma::components::TransformComponent transform{};
+  camera.anti_aliasing.mode = karma::rendering::AntiAliasingMode::MSAA;
+  camera.anti_aliasing.msaa_samples = 8u;
+  camera.anti_aliasing.ssaa_scale = 3.0f;
+
+  const karma::rendering::CameraData data =
+      karma::rendering::render_system::toCameraData(camera, transform, 1.0f);
+  assert(data.anti_aliasing.mode == karma::rendering::AntiAliasingMode::MSAA);
+  assert(data.anti_aliasing.msaa_samples == 8u);
+  assert(nearly(data.anti_aliasing.ssaa_scale, 1.0f));
+
+  const karma::components::CameraComponent default_camera{};
+  const karma::rendering::CameraData default_data =
+      karma::rendering::render_system::toCameraData(default_camera, transform, 1.0f);
+  assert(default_data.anti_aliasing.mode == karma::rendering::AntiAliasingMode::None);
+  assert(default_data.anti_aliasing.msaa_samples == 1u);
+  assert(nearly(default_data.anti_aliasing.ssaa_scale, 1.0f));
+}
+
+void testFrameGraphCopyAndSceneMaskContractsForAaCameras() {
+  karma::components::CameraComponent camera{};
+  karma::components::TransformComponent transform{};
+  camera.frame_graph_key = "aa_graph";
+  camera.anti_aliasing.mode = karma::rendering::AntiAliasingMode::SSAA;
+  camera.anti_aliasing.ssaa_scale = 2.0f;
+
+  const karma::rendering::CameraData data =
+      karma::rendering::render_system::toCameraData(camera, transform, 1.0f);
+  assert(data.anti_aliasing.mode == karma::rendering::AntiAliasingMode::SSAA);
+
+  karma::rendering::FrameGraphDesc graph{};
+  graph.frame_graph_key = "aa_graph";
+  graph.output_resource = std::string(karma::rendering::kFrameGraphCameraColor);
+  graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "half_res",
+      .kind = karma::rendering::FrameGraphResourceKind::ColorTexture,
+      .size_mode = karma::rendering::FrameGraphResourceSizeMode::CameraRelative,
+      .width_scale = 0.5f,
+      .height_scale = 0.5f,
+  });
+  graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "mask_color",
+      .kind = karma::rendering::FrameGraphResourceKind::ColorTexture,
+  });
+  graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "mask_depth",
+      .kind = karma::rendering::FrameGraphResourceKind::DepthTexture,
+  });
+
+  karma::rendering::FrameGraphPassDesc copy{};
+  copy.name = "copy_to_half_res";
+  copy.kind = karma::rendering::FrameGraphPassKind::Copy;
+  copy.inputs["source"] = std::string(karma::rendering::kFrameGraphCameraColor);
+  copy.outputs["target"] = "half_res";
+  graph.passes.push_back(copy);
+
+  karma::rendering::FrameGraphPassDesc mask{};
+  mask.name = "aa_scene_mask";
+  mask.kind = karma::rendering::FrameGraphPassKind::SceneMask;
+  mask.render_tags = {"outline"};
+  mask.outputs["target"] = "mask_color";
+  mask.outputs["depth"] = "mask_depth";
+  mask.clear_depth = true;
+  graph.passes.push_back(mask);
+
+  const karma::rendering::FrameGraphValidationResult result =
+      karma::rendering::validateFrameGraphDesc(graph);
+  assert(result.valid());
 }
 
 karma::world::MeshData makeTriangleMesh() {
@@ -1548,6 +1659,9 @@ void testDeformationHeadlessNoopApi() {
 
 int main() {
   testEngineConfigFramePacingDefaultAndOptOut();
+  testAntiAliasingSettingsDefaultsAndClamp();
+  testCameraDataCarriesAntiAliasingSettings();
+  testFrameGraphCopyAndSceneMaskContractsForAaCameras();
   testPrimitiveMeshAndDiffuseMaterialHelpers();
   testAssetRegistryMaterialInheritance();
   testMaterialFileLoading();

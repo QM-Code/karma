@@ -514,9 +514,11 @@ Diligent::RefCntAutoPtr<Diligent::IBuffer> createStaticBuffer(
 }
 
 uint64_t terrainPipelineKey(Diligent::TEXTURE_FORMAT rtv_format,
-                            Diligent::TEXTURE_FORMAT dsv_format) {
+                            Diligent::TEXTURE_FORMAT dsv_format,
+                            uint32_t sample_count) {
   return (static_cast<uint64_t>(static_cast<uint32_t>(rtv_format)) << 32u) |
-         static_cast<uint32_t>(dsv_format);
+         (static_cast<uint64_t>(static_cast<uint32_t>(dsv_format) & 0xffffu) << 8u) |
+         static_cast<uint64_t>(std::max(sample_count, 1u));
 }
 
 Diligent::TEXTURE_FORMAT textureViewFormat(Diligent::ITextureView* view,
@@ -837,7 +839,8 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
                                                      terrain_default_control_tex_);
   }
 
-  const uint64_t pipeline_key = terrainPipelineKey(rtv_format, dsv_format);
+  const uint64_t pipeline_key =
+      terrainPipelineKey(rtv_format, dsv_format, activeRasterSampleCount());
   TerrainPipelineSet& pipelines = terrain_pipeline_sets_[pipeline_key];
   pipelines.rtv_format = rtv_format;
   pipelines.dsv_format = dsv_format;
@@ -887,6 +890,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       pso.pPS = ps;
       auto& graphics = pso.GraphicsPipeline;
       graphics.NumRenderTargets = 1u;
+      graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
       graphics.RTVFormats[0] = rtv_format;
       graphics.DSVFormat = dsv_format;
       graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -985,6 +989,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       pso.pPS = ps;
       auto& graphics = pso.GraphicsPipeline;
       graphics.NumRenderTargets = 1u;
+      graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
       graphics.RTVFormats[0] = rtv_format;
       graphics.DSVFormat = dsv_format;
       graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
@@ -1199,7 +1204,8 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
       (!pipelines->cpu_pipeline_state && !pipelines->tess_pipeline_state)) {
     return 0u;
   }
-  const uint64_t pipeline_key = terrainPipelineKey(rtv_format, dsv_format);
+  const uint64_t pipeline_key =
+      terrainPipelineKey(rtv_format, dsv_format, activeRasterSampleCount());
 
   auto* rtv = active_rtv;
   auto* dsv = active_dsv;

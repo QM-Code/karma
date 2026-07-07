@@ -105,6 +105,27 @@ bool DiligentBackend::runPostProcessPass(PostProcessPassResources& pass,
   return true;
 }
 
+bool DiligentBackend::runFullscreenBlit(Diligent::ITextureView* source_srv,
+                                        Diligent::ITextureView* target_rtv,
+                                        int target_width,
+                                        int target_height,
+                                        Diligent::TEXTURE_FORMAT format) {
+  if (!source_srv || !target_rtv || target_width <= 0 || target_height <= 0 ||
+      format == Diligent::TEX_FORMAT_UNKNOWN ||
+      !ensureFullscreenBlitPipeline(format)) {
+    return false;
+  }
+  return runPostProcessPass(fullscreen_blit_pass_,
+                            source_srv,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            target_rtv,
+                            target_width,
+                            target_height,
+                            false);
+}
+
 Diligent::ITextureView* DiligentBackend::runBloomChain(Diligent::ITextureView* source_srv,
                                                        int width,
                                                        int height,

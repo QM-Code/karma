@@ -1093,6 +1093,23 @@ void DebugOverlayLayer::drawComponentInspector(const world::Node& node) {
       if (inputTextString("Render Target", target)) {
         c.render_target_key = std::move(target);
       }
+      const char* aa_modes[] = {"None", "MSAA", "SSAA"};
+      int aa_mode = static_cast<int>(c.anti_aliasing.mode);
+      if (editEnumCombo("AA Mode", aa_mode, aa_modes, 3)) {
+        aa_mode = std::clamp(aa_mode, 0, 2);
+        c.anti_aliasing.mode = static_cast<rendering::AntiAliasingMode>(aa_mode);
+        c.anti_aliasing = rendering::clampAntiAliasingSettings(c.anti_aliasing);
+      }
+      int msaa_samples = static_cast<int>(c.anti_aliasing.msaa_samples);
+      if (editInt("MSAA Samples", msaa_samples)) {
+        c.anti_aliasing.msaa_samples = static_cast<uint32_t>(std::max(msaa_samples, 1));
+        c.anti_aliasing = rendering::clampAntiAliasingSettings(c.anti_aliasing);
+      }
+      float ssaa_scale = c.anti_aliasing.ssaa_scale;
+      if (editFloat("SSAA Scale", ssaa_scale)) {
+        c.anti_aliasing.ssaa_scale = ssaa_scale;
+        c.anti_aliasing = rendering::clampAntiAliasingSettings(c.anti_aliasing);
+      }
     }
   }
   if (world_->has<components::RigidbodyComponent>(node.entity)) {
@@ -1236,6 +1253,21 @@ void DebugOverlayLayer::drawRendererTab() {
                 static_cast<unsigned int>(timing.render_layer_count),
                 static_cast<unsigned int>(timing.render_layer_draws),
                 timing.render_layer_total_ms);
+    const char* aa_mode = "None";
+    switch (timing.anti_aliasing_mode) {
+      case rendering::AntiAliasingMode::MSAA: aa_mode = "MSAA"; break;
+      case rendering::AntiAliasingMode::SSAA: aa_mode = "SSAA"; break;
+      case rendering::AntiAliasingMode::None:
+      default: aa_mode = "None"; break;
+    }
+    ImGui::Text("AA: %s, MSAA %ux, SSAA %.2f, raster %ux%u, output %ux%u",
+                aa_mode,
+                static_cast<unsigned int>(timing.anti_aliasing_msaa_samples),
+                timing.anti_aliasing_ssaa_scale,
+                static_cast<unsigned int>(timing.raster_width),
+                static_cast<unsigned int>(timing.raster_height),
+                static_cast<unsigned int>(timing.output_width),
+                static_cast<unsigned int>(timing.output_height));
     ImGui::Text("Layer Setup/Clear/Camera: %.3f / %.3f / %.3f ms",
                 timing.target_setup_ms,
                 timing.clear_ms,

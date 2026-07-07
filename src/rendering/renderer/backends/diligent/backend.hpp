@@ -55,8 +55,11 @@ struct PostProcessTexture {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> rtv;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> dsv;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> read_only_dsv;
   int width = 0;
   int height = 0;
+  Diligent::TEXTURE_FORMAT format = Diligent::TEX_FORMAT_UNKNOWN;
+  uint32_t sample_count = 1u;
 };
 
 struct PostProcessPassResources {
@@ -701,6 +704,45 @@ class DiligentBackend final : public Backend {
   TerrainPipelineSet* ensureTerrainResources(Diligent::TEXTURE_FORMAT rtv_format,
                                              Diligent::TEXTURE_FORMAT dsv_format);
   void ensureParticleResources();
+  uint32_t activeRasterSampleCount() const;
+  void setActiveRasterSampleCount(uint32_t sample_count);
+  void releaseRasterSampleDependentResources();
+  uint32_t effectiveMsaaSampleCount(Diligent::TEXTURE_FORMAT color_format,
+                                    Diligent::TEXTURE_FORMAT depth_format,
+                                    uint32_t requested_samples);
+  bool ensureCameraRasterResources(int width,
+                                   int height,
+                                   Diligent::TEXTURE_FORMAT color_format,
+                                   Diligent::TEXTURE_FORMAT depth_format,
+                                   uint32_t sample_count);
+  bool ensureResolvedDepthResource(int width, int height);
+  bool ensureDepthResolvePipeline(Diligent::TEXTURE_FORMAT output_depth_format);
+  bool resolveMsaaCameraResources(Diligent::ITexture* msaa_color_texture,
+                                  Diligent::ITexture* resolved_color_texture,
+                                  Diligent::ITextureView* resolved_depth_dsv,
+                                  Diligent::TEXTURE_FORMAT color_format,
+                                  Diligent::TEXTURE_FORMAT depth_format,
+                                  uint32_t sample_count,
+                                  int width,
+                                  int height);
+  bool ensureSsaaDownsamplePipeline(Diligent::TEXTURE_FORMAT color_format,
+                                    Diligent::TEXTURE_FORMAT depth_format);
+  bool runSsaaDownsample(Diligent::ITextureView* source_color_srv,
+                         Diligent::ITextureView* source_depth_srv,
+                         Diligent::ITextureView* output_rtv,
+                         Diligent::ITextureView* output_dsv,
+                         Diligent::TEXTURE_FORMAT color_format,
+                         Diligent::TEXTURE_FORMAT depth_format,
+                         int source_width,
+                         int source_height,
+                         int output_width,
+                         int output_height);
+  bool ensureFullscreenBlitPipeline(Diligent::TEXTURE_FORMAT format);
+  bool runFullscreenBlit(Diligent::ITextureView* source_srv,
+                         Diligent::ITextureView* target_rtv,
+                         int target_width,
+                         int target_height,
+                         Diligent::TEXTURE_FORMAT format);
   uint32_t renderParticleBeams(rendering::LayerId layer, const ParticlePassContext& context);
   void recordRenderLayerStageTiming(const char* stage, double ms);
   void recordResourceCreation(const char* area,
@@ -892,7 +934,7 @@ class DiligentBackend final : public Backend {
   bool shader_cache_enabled_ = true;
   bool pipeline_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 29;
+  std::uint32_t shader_cache_version_ = 30;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_vs_;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_ps_;
@@ -1236,6 +1278,19 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_half_res_alpha_rtv_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> particle_fallback_depth_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> particle_fallback_depth_srv_;
+  PostProcessTexture camera_raster_color_;
+  PostProcessTexture camera_raster_depth_;
+  PostProcessTexture camera_resolved_depth_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> depth_resolve_pso_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> depth_resolve_srb_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> depth_resolve_cb_;
+  Diligent::IShaderResourceVariable* depth_resolve_source_var_ = nullptr;
+  Diligent::TEXTURE_FORMAT depth_resolve_pipeline_depth_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  PostProcessPassResources ssaa_downsample_pass_;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> ssaa_downsample_cb_;
+  Diligent::TEXTURE_FORMAT ssaa_downsample_color_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  Diligent::TEXTURE_FORMAT ssaa_downsample_depth_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  PostProcessPassResources fullscreen_blit_pass_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> post_process_ping_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_ping_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_ping_rtv_;
@@ -1257,6 +1312,7 @@ class DiligentBackend final : public Backend {
   int post_process_height_ = 0;
   Diligent::TEXTURE_FORMAT post_process_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   Diligent::TEXTURE_FORMAT post_process_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  Diligent::TEXTURE_FORMAT fullscreen_blit_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   int post_process_history_index_ = 0;
   bool post_process_history_valid_ = false;
   std::unordered_map<std::string, PostProcessTexture> frame_graph_color_textures_;
@@ -1400,6 +1456,8 @@ class DiligentBackend final : public Backend {
   std::vector<uint32_t> particle_gpu_free_emitter_state_slots_;
   int default_scene_width_ = 0;
   int default_scene_height_ = 0;
+  uint32_t active_raster_sample_count_ = 1u;
+  bool warned_msaa_downgrade_ = false;
   int particle_scene_color_copy_width_ = 0;
   int particle_scene_color_copy_height_ = 0;
   Diligent::TEXTURE_FORMAT particle_scene_color_copy_format_ = Diligent::TEX_FORMAT_UNKNOWN;

@@ -863,6 +863,7 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
 
   auto& graphics = pso_ci.GraphicsPipeline;
   graphics.NumRenderTargets = depth_prepass ? 0u : 1u;
+  graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
   if (!depth_prepass) {
     graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
                                          : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
@@ -1024,6 +1025,30 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   *out_pso = createGraphicsPipelineState(pso_ci);
   recordPipelineCreation("forward", name, pso_start, core::SteadyClock::now());
   bindForwardPipelineStaticResources(out_pso->RawPtr());
+  if (!depth_prepass && !compact_layout && variant == ForwardPipelineVariant::Opaque &&
+      constants_ &&
+      *out_pso && !shader_resources_) {
+    const auto main_srb_start = core::SteadyClock::now();
+    (*out_pso)->CreateShaderResourceBinding(&shader_resources_, true);
+    recordResourceCreation("forward",
+                           "main shader resources SRB",
+                           main_srb_start,
+                           core::SteadyClock::now());
+    if (shader_resources_) {
+      if (auto* var =
+              shader_resources_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
+        var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
+      }
+      if (auto* var =
+              shader_resources_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex")) {
+        var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
+      }
+      if (auto* var =
+              shader_resources_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
+        var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+      }
+    }
+  }
   if (depth_prepass && *out_pso) {
     const auto depth_srb_start = core::SteadyClock::now();
     (*out_pso)->CreateShaderResourceBinding(&depth_prepass_srb_, true);
@@ -1098,6 +1123,8 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
           : std::string("main");
 
   std::string cache_key = std::to_string(static_cast<uint32_t>(variant));
+  cache_key.append("|samples=");
+  cache_key.append(std::to_string(activeRasterSampleCount()));
   cache_key.append("|layout=");
   cache_key.append(std::to_string(static_cast<uint32_t>(layout)));
   cache_key.push_back('|');
@@ -1227,6 +1254,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
 
   auto& graphics = pso_ci.GraphicsPipeline;
   graphics.NumRenderTargets = 1u;
+  graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
   graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
                                        : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
   graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat

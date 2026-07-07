@@ -387,12 +387,25 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   Diligent::ITexture* present_source_texture = nullptr;
   Diligent::ITexture* present_destination_texture = nullptr;
   Diligent::TEXTURE_FORMAT active_color_format = Diligent::TEX_FORMAT_UNKNOWN;
+  Diligent::TEXTURE_FORMAT active_depth_format = Diligent::TEX_FORMAT_UNKNOWN;
   int render_width = current_width_;
   int render_height = current_height_;
+  Diligent::ITextureView* output_rtv = active_rtv;
+  Diligent::ITextureView* output_dsv = active_dsv;
+  Diligent::ITextureView* output_read_only_dsv = nullptr;
+  Diligent::ITextureView* output_color_srv = nullptr;
+  Diligent::ITextureView* output_depth_srv = nullptr;
+  Diligent::ITexture* output_color_texture = nullptr;
   if (rendering_to_default_target) {
     ensureDefaultSceneResources(render_width, render_height);
     active_rtv = default_scene_color_rtv_;
     active_dsv = default_scene_depth_dsv_;
+    output_rtv = active_rtv;
+    output_dsv = active_dsv;
+    output_read_only_dsv = default_scene_depth_read_only_dsv_;
+    output_color_srv = default_scene_color_srv_;
+    output_depth_srv = default_scene_depth_srv_;
+    output_color_texture = default_scene_color_tex_;
     particle_dsv = default_scene_depth_read_only_dsv_ ? default_scene_depth_read_only_dsv_
                                                       : active_dsv;
     particle_scene_color_srv = default_scene_color_srv_;
@@ -401,6 +414,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     present_source_texture = default_scene_color_tex_;
     if (default_scene_color_tex_) {
       active_color_format = default_scene_color_tex_->GetDesc().Format;
+    }
+    if (default_scene_depth_tex_) {
+      active_depth_format = default_scene_depth_tex_->GetDesc().Format;
     }
     if (auto* backbuffer_rtv = swap_chain_->GetCurrentBackBufferRTV()) {
       present_destination_texture = backbuffer_rtv->GetTexture();
@@ -412,6 +428,12 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     }
     active_rtv = target_it->second.color_rtv;
     active_dsv = target_it->second.depth_dsv;
+    output_rtv = active_rtv;
+    output_dsv = active_dsv;
+    output_read_only_dsv = target_it->second.depth_read_only_dsv;
+    output_color_srv = target_it->second.color_srv;
+    output_depth_srv = target_it->second.depth_srv;
+    output_color_texture = target_it->second.color_texture;
     particle_dsv = target_it->second.depth_read_only_dsv ? target_it->second.depth_read_only_dsv
                                                          : active_dsv;
     particle_scene_color_srv = target_it->second.color_srv;
@@ -420,12 +442,93 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     if (target_it->second.color_texture) {
       active_color_format = target_it->second.color_texture->GetDesc().Format;
     }
+    if (target_it->second.depth_texture) {
+      active_depth_format = target_it->second.depth_texture->GetDesc().Format;
+    }
     render_width = std::max(target_it->second.width, 1);
     render_height = std::max(target_it->second.height, 1);
   }
   if (!active_rtv || render_width <= 0 || render_height <= 0) {
     return;
   }
+  const int output_width = render_width;
+  const int output_height = render_height;
+
+  rendering::AntiAliasingSettings effective_aa =
+      rendering::clampAntiAliasingSettings(camera_.anti_aliasing);
+  uint32_t raster_sample_count = 1u;
+  float effective_ssaa_scale = 1.0f;
+  bool msaa_enabled = false;
+  bool ssaa_enabled = false;
+  if (effective_aa.mode == rendering::AntiAliasingMode::MSAA) {
+    raster_sample_count =
+        effectiveMsaaSampleCount(active_color_format,
+                                 active_depth_format,
+                                 effective_aa.msaa_samples);
+    if (raster_sample_count > 1u) {
+      msaa_enabled = true;
+      effective_aa.msaa_samples = raster_sample_count;
+    } else {
+      effective_aa.mode = rendering::AntiAliasingMode::None;
+      effective_aa.msaa_samples = 1u;
+      effective_aa.ssaa_scale = 1.0f;
+    }
+  } else if (effective_aa.mode == rendering::AntiAliasingMode::SSAA) {
+    effective_ssaa_scale = effective_aa.ssaa_scale;
+    if (effective_ssaa_scale > 1.0f) {
+      ssaa_enabled = true;
+      render_width = std::max(1, static_cast<int>(std::ceil(static_cast<float>(output_width) *
+                                                           effective_ssaa_scale)));
+      render_height = std::max(1, static_cast<int>(std::ceil(static_cast<float>(output_height) *
+                                                            effective_ssaa_scale)));
+      effective_aa.msaa_samples = 1u;
+    } else {
+      effective_aa.mode = rendering::AntiAliasingMode::None;
+      effective_aa.msaa_samples = 1u;
+      effective_aa.ssaa_scale = 1.0f;
+      effective_ssaa_scale = 1.0f;
+    }
+  }
+
+  setActiveRasterSampleCount(raster_sample_count);
+  if ((msaa_enabled || ssaa_enabled) &&
+      !ensureCameraRasterResources(render_width,
+                                   render_height,
+                                   active_color_format,
+                                   active_depth_format,
+                                   raster_sample_count)) {
+    effective_aa = rendering::clampAntiAliasingSettings({});
+    msaa_enabled = false;
+    ssaa_enabled = false;
+    effective_ssaa_scale = 1.0f;
+    render_width = output_width;
+    render_height = output_height;
+    setActiveRasterSampleCount(1u);
+  }
+  if (msaa_enabled || ssaa_enabled) {
+    active_rtv = camera_raster_color_.rtv;
+    active_dsv = camera_raster_depth_.dsv;
+    particle_dsv = camera_raster_depth_.read_only_dsv ? camera_raster_depth_.read_only_dsv
+                                                      : active_dsv;
+    if (ssaa_enabled) {
+      particle_scene_color_srv = camera_raster_color_.srv;
+      particle_scene_depth_srv = camera_raster_depth_.srv;
+      particle_scene_texture = camera_raster_color_.texture;
+    } else {
+      particle_scene_color_srv = output_color_srv;
+      particle_scene_depth_srv = output_depth_srv;
+      particle_scene_texture = output_color_texture;
+    }
+  }
+  current_frame_timing_stats_.anti_aliasing_mode = effective_aa.mode;
+  current_frame_timing_stats_.anti_aliasing_msaa_samples =
+      msaa_enabled ? raster_sample_count : 1u;
+  current_frame_timing_stats_.anti_aliasing_ssaa_scale =
+      ssaa_enabled ? effective_ssaa_scale : 1.0f;
+  current_frame_timing_stats_.raster_width = static_cast<uint32_t>(std::max(render_width, 0));
+  current_frame_timing_stats_.raster_height = static_cast<uint32_t>(std::max(render_height, 0));
+  current_frame_timing_stats_.output_width = static_cast<uint32_t>(std::max(output_width, 0));
+  current_frame_timing_stats_.output_height = static_cast<uint32_t>(std::max(output_height, 0));
   mark_stage("target setup");
 
   Diligent::Uint32 draw_count = 0;
@@ -453,7 +556,8 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
         command_stats.multi_draw + command_stats.multi_draw_indexed;
     spdlog::info(
         "Diligent render layer diag: reason={} layer={} target={} total={:.3f}ms "
-        "size={}x{} camera_active={} post_enabled={} taa={} draws={} "
+        "size={}x{} output={}x{} aa_mode={} msaa={} ssaa={:.2f} "
+        "camera_active={} post_enabled={} taa={} draws={} "
         "inst=[submitted={} drawn={} culled_batches={} draw_calls={} uploads={} bytes={} "
         "gpu_cull=[batches={} dispatch={} candidates={} indirect={}] "
         "lod=[buckets={} dispatch={} candidates={} indirect={} fallback={}] "
@@ -468,6 +572,11 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
         total_ms,
         render_width,
         render_height,
+        output_width,
+        output_height,
+        static_cast<int>(effective_aa.mode),
+        raster_sample_count,
+        ssaa_enabled ? effective_ssaa_scale : 1.0f,
         camera_active_,
         post_process.enabled,
         post_process.temporal_antialiasing_enabled,
@@ -522,6 +631,71 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     }
   };
 
+  bool msaa_resolve_dirty = msaa_enabled;
+  auto mark_msaa_dirty = [&]() {
+    if (msaa_enabled) {
+      msaa_resolve_dirty = true;
+    }
+  };
+  auto resolve_msaa_if_needed = [&]() -> bool {
+    if (!msaa_enabled || !msaa_resolve_dirty) {
+      return true;
+    }
+    if (!resolveMsaaCameraResources(camera_raster_color_.texture,
+                                    output_color_texture,
+                                    output_dsv,
+                                    active_color_format,
+                                    active_depth_format,
+                                    raster_sample_count,
+                                    render_width,
+                                    render_height)) {
+      return false;
+    }
+    particle_scene_texture = output_color_texture;
+    particle_scene_color_srv = output_color_srv;
+    particle_scene_depth_srv = camera_resolved_depth_.srv ? camera_resolved_depth_.srv.RawPtr()
+                                                          : output_depth_srv;
+    msaa_resolve_dirty = false;
+    return true;
+  };
+  auto finalize_camera_output = [&]() -> bool {
+    if (msaa_enabled && !resolve_msaa_if_needed()) {
+      return false;
+    }
+    if (ssaa_enabled) {
+      return runSsaaDownsample(camera_raster_color_.srv,
+                               camera_raster_depth_.srv,
+                               output_rtv,
+                               output_dsv,
+                               active_color_format,
+                               active_depth_format,
+                               render_width,
+                               render_height,
+                               output_width,
+                               output_height);
+    }
+    return true;
+  };
+  auto clear_output_target = [&](const float* color, bool clear_depth) {
+    if (!output_rtv) {
+      return;
+    }
+    context_->SetRenderTargets(1,
+                               &output_rtv,
+                               output_dsv,
+                               Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    context_->ClearRenderTarget(output_rtv,
+                                color,
+                                Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    if (clear_depth && output_dsv) {
+      context_->ClearDepthStencil(output_dsv,
+                                  Diligent::CLEAR_DEPTH_FLAG,
+                                  1.0f,
+                                  0,
+                                  Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    }
+  };
+
   auto present_active_target = [&]() {
     if (!rendering_to_default_target || !present_source_texture || !present_destination_texture) {
       return;
@@ -565,6 +739,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   if (!camera_active_) {
     const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     clear_active_target(black, true);
+    if ((msaa_enabled || ssaa_enabled) && !finalize_camera_output()) {
+      clear_output_target(black, true);
+    }
     present_active_target();
     mark_stage("clear inactive camera");
     log_layer_diag("inactive_camera");
@@ -574,10 +751,13 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   clear_active_target(clear_color_, true);
   mark_stage("clear target");
 
-  if (!constants_ || !pipeline_state_ || !shader_resources_) {
+  Diligent::IPipelineState* base_forward_pipeline =
+      ensureForwardPipeline(ForwardPipelineVariant::Opaque);
+  if (!constants_ || !base_forward_pipeline || !shader_resources_) {
     if (!warned_no_draws_) {
       warned_no_draws_ = true;
     }
+    finalize_camera_output();
     present_active_target();
     mark_stage("missing draw resources");
     log_layer_diag("missing_draw_resources");
@@ -667,6 +847,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   }
 
   renderSkybox(projection, view);
+  mark_msaa_dirty();
   mark_stage("skybox");
 
   const glm::mat4 camera_view_proj = projection * view;
@@ -1285,14 +1466,18 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   base_constants.env_params[3] =
       post_process_settings_.tone_mapping_enabled ? -lighting_exposure_ : lighting_exposure_;
 
-  draw_count += renderTerrainLayer(layer,
-                                   base_constants,
-                                   view_proj,
-                                   is_gl,
-                                   rtv,
-                                   dsv,
-                                   render_width,
-                                   render_height);
+  const Diligent::Uint32 terrain_draws = renderTerrainLayer(layer,
+                                                            base_constants,
+                                                            view_proj,
+                                                            is_gl,
+                                                            rtv,
+                                                            dsv,
+                                                            render_width,
+                                                            render_height);
+  draw_count += terrain_draws;
+  if (terrain_draws > 0u) {
+    mark_msaa_dirty();
+  }
   mark_stage("terrain pass");
 
   ForwardLayerState forward_state{};
@@ -1315,15 +1500,19 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   skipped_layer += forward_stats.skipped_layer;
   instancing_stats_.culled_batches += forward_stats.instanced_culled_batches;
 
-  draw_count += renderOpaqueForwardLayer(forward_state,
-                                         base_constants,
-                                         active_forward_pipeline,
-                                         use_custom_shader_override,
-                                         rtv,
-                                         dsv,
-                                         render_width,
-                                         render_height,
-                                         is_gl);
+  const Diligent::Uint32 opaque_draws = renderOpaqueForwardLayer(forward_state,
+                                                                 base_constants,
+                                                                 active_forward_pipeline,
+                                                                 use_custom_shader_override,
+                                                                 rtv,
+                                                                 dsv,
+                                                                 render_width,
+                                                                 render_height,
+                                                                 is_gl);
+  draw_count += opaque_draws;
+  if (opaque_draws > 0u) {
+    mark_msaa_dirty();
+  }
   mark_stage("opaque pass");
 
   bool has_particle_work = !particle_emitter_runtime_states_.empty();
@@ -1394,6 +1583,11 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   particle_pass_stats_.distortion_present =
       particle_pass_stats_.distortion_present || allow_distortion_particles;
   if (require_scene_color_copy && particle_scene_texture) {
+    if (msaa_enabled && !resolve_msaa_if_needed()) {
+      particle_scene_texture = nullptr;
+    }
+  }
+  if (require_scene_color_copy && particle_scene_texture) {
     ensureParticleSceneCopyResources(render_width,
                                      render_height,
                                      particle_scene_texture->GetDesc().Format);
@@ -1410,45 +1604,64 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   }
 
   if (!forward_state.scene_reflection_draws.empty()) {
-    draw_count += renderTransparentForwardDraws(forward_state.scene_reflection_draws,
-                                                base_constants,
-                                                active_forward_pipeline,
-                                                use_custom_shader_override,
-                                                rtv,
-                                                dsv,
-                                                particle_dsv,
-                                                render_width,
-                                                render_height,
-                                                particle_scene_color_sample_srv,
-                                                particle_scene_depth_srv);
+    const Diligent::Uint32 reflection_draws =
+        renderTransparentForwardDraws(forward_state.scene_reflection_draws,
+                                      base_constants,
+                                      active_forward_pipeline,
+                                      use_custom_shader_override,
+                                      rtv,
+                                      dsv,
+                                      particle_dsv,
+                                      render_width,
+                                      render_height,
+                                      particle_scene_color_sample_srv,
+                                      particle_scene_depth_srv);
+    draw_count += reflection_draws;
+    if (reflection_draws > 0u) {
+      mark_msaa_dirty();
+    }
   }
 
   if (!forward_state.pre_particle_scene_sample_draws.empty()) {
-    draw_count += renderTransparentForwardDraws(forward_state.pre_particle_scene_sample_draws,
-                                                base_constants,
-                                                active_forward_pipeline,
-                                                use_custom_shader_override,
-                                                rtv,
-                                                dsv,
-                                                particle_dsv,
-                                                render_width,
-                                                render_height,
-                                                particle_scene_color_sample_srv,
-                                                particle_scene_depth_srv);
+    const Diligent::Uint32 pre_particle_sample_draws =
+        renderTransparentForwardDraws(forward_state.pre_particle_scene_sample_draws,
+                                      base_constants,
+                                      active_forward_pipeline,
+                                      use_custom_shader_override,
+                                      rtv,
+                                      dsv,
+                                      particle_dsv,
+                                      render_width,
+                                      render_height,
+                                      particle_scene_color_sample_srv,
+                                      particle_scene_depth_srv);
+    draw_count += pre_particle_sample_draws;
+    if (pre_particle_sample_draws > 0u) {
+      mark_msaa_dirty();
+    }
   }
 
-  draw_count += renderTransparentForwardDraws(forward_state.transparent_draws,
-                                              base_constants,
-                                              active_forward_pipeline,
-                                              use_custom_shader_override,
-                                              rtv,
-                                              dsv,
-                                              particle_dsv,
-                                              render_width,
-                                              render_height,
-                                              nullptr,
-                                              nullptr);
+  const Diligent::Uint32 transparent_draws =
+      renderTransparentForwardDraws(forward_state.transparent_draws,
+                                    base_constants,
+                                    active_forward_pipeline,
+                                    use_custom_shader_override,
+                                    rtv,
+                                    dsv,
+                                    particle_dsv,
+                                    render_width,
+                                    render_height,
+                                    nullptr,
+                                    nullptr);
+  draw_count += transparent_draws;
+  if (transparent_draws > 0u) {
+    mark_msaa_dirty();
+  }
   mark_stage("transparent pre-particle pass");
+
+  if (msaa_enabled && (has_particle_work || has_beam_work)) {
+    resolve_msaa_if_needed();
+  }
 
   ParticlePassContext particle_pass{};
   particle_pass.view_proj = view_proj;
@@ -1467,11 +1680,16 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                              : Diligent::TEX_FORMAT_UNKNOWN;
   particle_pass.allow_distortion_particles = allow_distortion_particles;
   if (has_beam_work) {
-    draw_count += renderParticleBeams(layer, particle_pass);
+    const uint32_t beam_draws = renderParticleBeams(layer, particle_pass);
+    draw_count += beam_draws;
+    if (beam_draws > 0u) {
+      mark_msaa_dirty();
+    }
   }
   mark_stage(has_beam_work ? "particle beam pass" : "particle beam pass skipped");
   if (has_particle_work) {
     renderParticlePasses(layer, particle_pass);
+    mark_msaa_dirty();
   }
   mark_stage(has_particle_work ? "particle pass" : "particle pass skipped");
 
@@ -1562,6 +1780,11 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                             static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())));
   Diligent::ITextureView* post_particle_scene_color_sample_srv = particle_scene_color_srv;
   if (require_post_particle_scene_color_copy && particle_scene_texture) {
+    if (msaa_enabled && !resolve_msaa_if_needed()) {
+      particle_scene_texture = nullptr;
+    }
+  }
+  if (require_post_particle_scene_color_copy && particle_scene_texture) {
     ensureParticleSceneCopyResources(render_width,
                                      render_height,
                                      particle_scene_texture->GetDesc().Format);
@@ -1576,18 +1799,42 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
       post_particle_scene_color_sample_srv = particle_scene_color_copy_srv_;
     }
   }
-  draw_count += renderTransparentForwardDraws(forward_state.post_particle_draws,
-                                              base_constants,
-                                              active_forward_pipeline,
-                                              use_custom_shader_override,
-                                              rtv,
-                                              dsv,
-                                              particle_dsv,
-                                              render_width,
-                                              render_height,
-                                              post_particle_scene_color_sample_srv,
-                                              particle_scene_depth_srv);
+  const Diligent::Uint32 post_particle_draws =
+      renderTransparentForwardDraws(forward_state.post_particle_draws,
+                                    base_constants,
+                                    active_forward_pipeline,
+                                    use_custom_shader_override,
+                                    rtv,
+                                    dsv,
+                                    particle_dsv,
+                                    render_width,
+                                    render_height,
+                                    post_particle_scene_color_sample_srv,
+                                    particle_scene_depth_srv);
+  draw_count += post_particle_draws;
+  if (post_particle_draws > 0u) {
+    mark_msaa_dirty();
+  }
   mark_stage("transparent post-particle pass");
+  if (msaa_enabled) {
+    const bool has_line_work =
+        !line_vertices_depth_.empty() || !line_vertices_no_depth_.empty();
+    draw_lines(line_vertices_depth_, line_pipeline_state_depth_, line_srb_depth_);
+    draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
+    if (has_line_work) {
+      mark_msaa_dirty();
+    }
+    mark_stage("line draw");
+    if (!resolve_msaa_if_needed()) {
+      particle_scene_texture = nullptr;
+      particle_scene_color_srv = nullptr;
+    }
+    active_rtv = output_rtv;
+    active_dsv = output_dsv;
+    particle_dsv = output_read_only_dsv ? output_read_only_dsv : output_dsv;
+    rtv = active_rtv;
+    dsv = active_dsv;
+  }
   if (particle_scene_texture) {
     applyPostProcessChain(particle_scene_texture,
                           active_rtv,
@@ -1609,10 +1856,13 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                                 active_color_format,
                                 target);
   mark_stage("frame graph screen passes");
-  draw_lines(line_vertices_depth_, line_pipeline_state_depth_, line_srb_depth_);
-  draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
-  mark_stage("line draw");
+  if (!msaa_enabled) {
+    draw_lines(line_vertices_depth_, line_pipeline_state_depth_, line_srb_depth_);
+    draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
+    mark_stage("line draw");
+  }
 
+  finalize_camera_output();
   present_active_target();
   mark_stage("present copy");
   log_layer_diag("complete");

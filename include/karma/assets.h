@@ -292,10 +292,14 @@ class AssetRegistry {
   const rendering::MaterialVariantDesc* findMaterialVariant(std::string_view key) const;
   std::optional<rendering::ResolvedMaterialDesc> resolveMaterial(std::string_view key) const;
 
-  bool registerPostProcessProfile(const std::string& key, rendering::PostProcessSettings profile);
-  bool unregisterPostProcessProfile(const std::string& key);
-  const rendering::PostProcessSettings* findPostProcessProfile(std::string_view key) const;
-  const rendering::PostProcessSettings& resolvePostProcessProfile(std::string_view key) const;
+  bool registerShaderPass(const std::string& key, rendering::ShaderPassAssetDesc pass);
+  bool unregisterShaderPass(const std::string& key);
+  const rendering::ShaderPassAssetDesc* findShaderPass(std::string_view key) const;
+
+  bool registerFrameGraph(const std::string& key, rendering::FrameGraphDesc graph);
+  bool unregisterFrameGraph(const std::string& key);
+  const rendering::FrameGraphDesc* findFrameGraph(std::string_view key) const;
+  const rendering::FrameGraphDesc& resolveFrameGraph(std::string_view key) const;
 
   bool registerParticleEffect(const std::string& key, visual::particles::ParticleEffectAsset effect);
   bool unregisterParticleEffect(const std::string& key);

@@ -180,7 +180,7 @@ std::filesystem::path resolvePreviewPackage(const std::vector<std::filesystem::p
 #endif
 }
 
-constexpr std::string_view kPreviewPostProcessProfileKey =
+constexpr std::string_view kPreviewFrameGraphKey =
     "runtime/generated_preview/post_process";
 constexpr std::string_view kScaleCapsuleMeshKey = "runtime/generated_preview/scale_capsule_mesh";
 constexpr std::string_view kScaleCapsuleMaterialKey =
@@ -670,7 +670,7 @@ class GeneratedParticlePreview final : public app::GameInterface {
                    .near_clip = 0.05f,
                    .far_clip = 160.0f,
                    .is_primary = true,
-                   .post_process_profile_key = std::string{kPreviewPostProcessProfileKey},
+                   .frame_graph_key = std::string{kPreviewFrameGraphKey},
                });
   }
 
@@ -873,8 +873,10 @@ class GeneratedParticlePreview final : public app::GameInterface {
     settings.bloom_intensity = 0.82f;
     settings.bloom_radius = 4.2f;
     settings.tone_mapping_enabled = false;
-    assets->registerPostProcessProfile(std::string{kPreviewPostProcessProfileKey},
-                                       settings);
+    const std::string graph_key{kPreviewFrameGraphKey};
+    assets->registerFrameGraph(
+        graph_key,
+        rendering::frameGraphFromPostProcessSettings(settings, graph_key));
   }
 
   void spawnPreviewPrefab() {

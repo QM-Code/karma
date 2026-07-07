@@ -70,6 +70,7 @@ set(KARMA_RENDERER_CORE_SOURCES
   src/rendering/renderer/backend_factory.cpp
   src/rendering/renderer/camera_picking.cpp
   src/rendering/renderer/device.cpp
+  src/rendering/renderer/frame_graph.cpp
   src/rendering/renderer/render_system.cpp
   src/rendering/renderer/render_system/debug_draw.cpp
   src/rendering/renderer/render_system/extractors.cpp
@@ -100,6 +101,7 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       src/rendering/renderer/backends/diligent/passes/camera_override.cpp
       src/rendering/renderer/backends/diligent/passes/environment.cpp
       src/rendering/renderer/backends/diligent/passes/frame.cpp
+      src/rendering/renderer/backends/diligent/passes/frame_graph_shader.cpp
       src/rendering/renderer/backends/diligent/passes/forward.cpp
       src/rendering/renderer/backends/diligent/passes/line.cpp
       src/rendering/renderer/backends/diligent/passes/particle_draw.cpp

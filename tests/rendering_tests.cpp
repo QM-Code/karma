@@ -1,11 +1,13 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -28,6 +30,15 @@
 #include "karma/world.h"
 
 namespace {
+
+bool diagnosticsContain(const karma::rendering::FrameGraphValidationResult& result,
+                        std::string_view needle) {
+  return std::any_of(result.diagnostics.begin(),
+                     result.diagnostics.end(),
+                     [&](const std::string& diagnostic) {
+    return diagnostic.find(needle) != std::string::npos;
+  });
+}
 
 class DummyWindow final : public karma::platform::Window {
  public:
@@ -224,11 +235,27 @@ void testAssetRegistryRegisterResolveUnregister() {
   assert(nearly(resolved_material->surface.base_color.b, 0.3f));
   assert(resolved_material->params.contains("roughness"));
 
-  karma::rendering::PostProcessSettings profile{};
-  profile.bloom_enabled = true;
-  assets.registerPostProcessProfile("post/cinematic", profile);
-  assert(assets.findPostProcessProfile("post/cinematic") != nullptr);
-  assert(assets.resolvePostProcessProfile("post/cinematic").bloom_enabled);
+  karma::rendering::ShaderPassAssetDesc shader_pass{};
+  shader_pass.pipeline.name = "fullscreen";
+  shader_pass.pipeline.vertex_shader_path = "shaders/fullscreen_vs.hlsl";
+  shader_pass.pipeline.fragment_shader_path = "shaders/composite_ps.hlsl";
+  assert(assets.registerShaderPass("passes/composite", shader_pass));
+  assert(assets.findShaderPass("passes/composite") != nullptr);
+
+  karma::rendering::FrameGraphDesc graph =
+      karma::rendering::defaultFrameGraphDesc();
+  graph.frame_graph_key = "graphs/cinematic";
+  karma::rendering::FrameGraphPassDesc composite{};
+  composite.name = "composite";
+  composite.kind = karma::rendering::FrameGraphPassKind::Shader;
+  composite.shader_pass_key = "passes/composite";
+  composite.inputs["source"] = std::string(karma::rendering::kFrameGraphCameraColor);
+  composite.outputs["target"] = std::string(karma::rendering::kFrameGraphCameraColor);
+  graph.passes.push_back(composite);
+  assert(karma::rendering::validateFrameGraphDesc(graph).valid());
+  assert(assets.registerFrameGraph("graphs/cinematic", graph));
+  assert(assets.findFrameGraph("graphs/cinematic") != nullptr);
+  assert(assets.resolveFrameGraph("graphs/cinematic").frame_graph_key == "graphs/cinematic");
 
   karma::visual::particles::ParticleEffectAsset effect{};
   effect.emitters.push_back(karma::visual::particles::ParticleEmitterDesc{});
@@ -284,7 +311,8 @@ void testAssetRegistryRegisterResolveUnregister() {
   assert(!assets.unregisterMeshAsset("mesh/tri"));
   assert(assets.unregisterTextureAsset("texture/white"));
   assets.unregisterMaterial("material/variant");
-  assets.unregisterPostProcessProfile("post/cinematic");
+  assert(assets.unregisterShaderPass("passes/composite"));
+  assert(assets.unregisterFrameGraph("graphs/cinematic"));
   assert(assets.unregisterParticleEffect("particle/spark"));
   assert(assets.unregisterAudioClip("audio/wind"));
   assert(assets.unregisterEnvironmentMap("env/studio"));
@@ -298,6 +326,23 @@ void writeText(const std::filesystem::path& path, const std::string& text) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream stream(path);
   stream << text;
+}
+
+std::size_t countJsonFiles(const std::filesystem::path& dir) {
+  std::size_t count = 0u;
+  std::error_code ec;
+  if (!std::filesystem::exists(dir, ec) || ec) {
+    return 0u;
+  }
+  for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+    if (ec) {
+      break;
+    }
+    if (entry.is_regular_file(ec) && entry.path().extension() == ".json") {
+      ++count;
+    }
+  }
+  return count;
 }
 
 void writeSolidRowsTga(const std::filesystem::path& path) {
@@ -637,6 +682,327 @@ void testAssetKeyValidationAndPackages() {
   assert(!duplicate_package.has_value());
   assert(!diagnostic.empty());
   assert(assets.findEnvironmentMap("package/dupe_env") != nullptr);
+
+  std::filesystem::remove_all(dir);
+}
+
+void testFrameGraphValidationAndRegistryFallback() {
+  karma::assets::AssetRegistry assets;
+  const auto& fallback = assets.resolveFrameGraph("missing");
+  assert(fallback.frame_graph_key == karma::rendering::kDefaultFrameGraphKey);
+
+  const karma::rendering::FrameGraphDesc& default_graph =
+      karma::rendering::defaultFrameGraphDesc();
+  assert(karma::rendering::validateFrameGraphDesc(default_graph).valid());
+  assert(default_graph.passes.size() == 9u);
+  assert(default_graph.passes[0].builtin_pass == "clear");
+  assert(default_graph.passes[1].builtin_pass == "skybox");
+  assert(default_graph.passes[2].builtin_pass == "shadows");
+  assert(default_graph.passes[3].builtin_pass == "opaque");
+  assert(default_graph.passes[4].builtin_pass == "terrain");
+  assert(default_graph.passes[5].builtin_pass == "transparent");
+  assert(default_graph.passes[6].builtin_pass == "particles");
+  assert(default_graph.passes[7].builtin_pass == "lines");
+  assert(default_graph.passes[8].builtin_pass == "present");
+
+  karma::rendering::PostProcessSettings post_process{};
+  post_process.bloom_enabled = true;
+  karma::rendering::FrameGraphDesc post_graph =
+      karma::rendering::frameGraphFromPostProcessSettings(post_process, "graphs/post");
+  const auto post_it = std::find_if(
+      post_graph.passes.begin(),
+      post_graph.passes.end(),
+      [](const karma::rendering::FrameGraphPassDesc& pass) {
+    return pass.builtin_pass == "post_process";
+  });
+  const auto lines_it = std::find_if(
+      post_graph.passes.begin(),
+      post_graph.passes.end(),
+      [](const karma::rendering::FrameGraphPassDesc& pass) {
+    return pass.builtin_pass == "lines";
+  });
+  assert(post_it != post_graph.passes.end());
+  assert(lines_it != post_graph.passes.end());
+  assert(post_it < lines_it);
+  assert(karma::rendering::validateFrameGraphDesc(post_graph).valid());
+
+  karma::rendering::FrameGraphDesc unknown_builtin = default_graph;
+  unknown_builtin.passes.front().builtin_pass = "not_a_builtin";
+  karma::rendering::FrameGraphValidationResult unknown_builtin_result =
+      karma::rendering::validateFrameGraphDesc(unknown_builtin);
+  assert(!unknown_builtin_result.valid());
+  assert(diagnosticsContain(unknown_builtin_result, "unknown builtin"));
+
+  karma::rendering::FrameGraphDesc invalid_depth_slot = default_graph;
+  invalid_depth_slot.passes.front().outputs["depth"] =
+      std::string(karma::rendering::kFrameGraphCameraColor);
+  karma::rendering::FrameGraphValidationResult invalid_depth_result =
+      karma::rendering::validateFrameGraphDesc(invalid_depth_slot);
+  assert(!invalid_depth_result.valid());
+  assert(diagnosticsContain(invalid_depth_result, "expects depth resource"));
+
+  karma::rendering::FrameGraphDesc invalid_output = default_graph;
+  invalid_output.output_resource =
+      std::string(karma::rendering::kFrameGraphCameraDepth);
+  karma::rendering::FrameGraphValidationResult invalid_output_result =
+      karma::rendering::validateFrameGraphDesc(invalid_output);
+  assert(!invalid_output_result.valid());
+  assert(diagnosticsContain(invalid_output_result, "output_resource must be a color"));
+
+  karma::rendering::FrameGraphDesc disabled_invalid_pass = default_graph;
+  disabled_invalid_pass.passes.push_back(karma::rendering::FrameGraphPassDesc{
+      .name = "disabled-invalid-shader",
+      .kind = karma::rendering::FrameGraphPassKind::Shader,
+      .enabled = false,
+  });
+  assert(karma::rendering::validateFrameGraphDesc(disabled_invalid_pass).valid());
+
+  karma::rendering::FrameGraphDesc shader_graph{};
+  shader_graph.frame_graph_key = "graphs/shader";
+  shader_graph.output_resource =
+      std::string(karma::rendering::kFrameGraphCameraColor);
+  shader_graph.passes.push_back(karma::rendering::FrameGraphPassDesc{
+      .name = "fullscreen",
+      .kind = karma::rendering::FrameGraphPassKind::Shader,
+      .shader_pass_key = "passes/fullscreen",
+      .outputs = {{"target", std::string(karma::rendering::kFrameGraphCameraColor)}},
+  });
+  karma::rendering::FrameGraphValidationOptions shader_options{};
+  shader_options.require_shader_pass_keys = true;
+  shader_options.shader_pass_keys = {"passes/other"};
+  karma::rendering::FrameGraphValidationResult missing_shader_result =
+      karma::rendering::validateFrameGraphDesc(shader_graph, shader_options);
+  assert(!missing_shader_result.valid());
+  assert(diagnosticsContain(missing_shader_result, "references missing shader pass"));
+  shader_options.shader_pass_keys = {"passes/fullscreen"};
+  assert(karma::rendering::validateFrameGraphDesc(shader_graph, shader_options).valid());
+
+  karma::rendering::FrameGraphDesc mask_graph{};
+  mask_graph.frame_graph_key = "graphs/mask";
+  mask_graph.output_resource = std::string(karma::rendering::kFrameGraphCameraColor);
+  mask_graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "selection_mask",
+      .kind = karma::rendering::FrameGraphResourceKind::ColorTexture,
+      .format = karma::rendering::TextureFormat::R8,
+  });
+  mask_graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "selection_depth",
+      .kind = karma::rendering::FrameGraphResourceKind::DepthTexture,
+  });
+  mask_graph.passes.push_back(karma::rendering::FrameGraphPassDesc{
+      .name = "selected_mask",
+      .kind = karma::rendering::FrameGraphPassKind::SceneMask,
+      .render_tags = {"selected"},
+      .outputs = {{"target", "selection_mask"}, {"depth", "selection_depth"}},
+      .clear = true,
+      .clear_depth = true,
+  });
+  assert(karma::rendering::validateFrameGraphDesc(mask_graph).valid());
+
+  karma::rendering::FrameGraphDesc missing_mask_tags = mask_graph;
+  missing_mask_tags.passes.front().render_tags.clear();
+  karma::rendering::FrameGraphValidationResult missing_mask_tags_result =
+      karma::rendering::validateFrameGraphDesc(missing_mask_tags);
+  assert(!missing_mask_tags_result.valid());
+  assert(diagnosticsContain(missing_mask_tags_result, "requires at least one render tag"));
+
+  karma::rendering::FrameGraphDesc empty_mask_tag = mask_graph;
+  empty_mask_tag.passes.front().render_tags = {""};
+  karma::rendering::FrameGraphValidationResult empty_mask_tag_result =
+      karma::rendering::validateFrameGraphDesc(empty_mask_tag);
+  assert(!empty_mask_tag_result.valid());
+  assert(diagnosticsContain(empty_mask_tag_result, "must not be empty"));
+
+  karma::rendering::FrameGraphDesc duplicate_mask_tag = mask_graph;
+  duplicate_mask_tag.passes.front().render_tags = {"selected", "selected"};
+  karma::rendering::FrameGraphValidationResult duplicate_mask_tag_result =
+      karma::rendering::validateFrameGraphDesc(duplicate_mask_tag);
+  assert(!duplicate_mask_tag_result.valid());
+  assert(diagnosticsContain(duplicate_mask_tag_result, "duplicate render tag"));
+
+  karma::rendering::FrameGraphDesc mask_clear_depth_without_output = mask_graph;
+  mask_clear_depth_without_output.passes.front().outputs.erase("depth");
+  karma::rendering::FrameGraphValidationResult mask_clear_depth_without_output_result =
+      karma::rendering::validateFrameGraphDesc(mask_clear_depth_without_output);
+  assert(!mask_clear_depth_without_output_result.valid());
+  assert(diagnosticsContain(mask_clear_depth_without_output_result,
+                            "clear_depth requires depth output"));
+
+  karma::rendering::FrameGraphDesc graph{};
+  graph.frame_graph_key = "graphs/test";
+  graph.output_resource = "post";
+  graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "post",
+      .kind = karma::rendering::FrameGraphResourceKind::ColorTexture,
+  });
+  graph.passes.push_back(karma::rendering::FrameGraphPassDesc{
+      .name = "scene",
+      .kind = karma::rendering::FrameGraphPassKind::Scene,
+      .outputs = {{"color", "post"}},
+  });
+  assert(karma::rendering::validateFrameGraphDesc(graph).valid());
+  assert(assets.registerFrameGraph("graphs/test", graph));
+  assert(assets.resolveFrameGraph("graphs/test").output_resource == "post");
+  assert(assets.unregisterFrameGraph("graphs/test"));
+  assert(assets.resolveFrameGraph("graphs/test").frame_graph_key ==
+         karma::rendering::kDefaultFrameGraphKey);
+
+  karma::rendering::FrameGraphDesc duplicate_resource = graph;
+  duplicate_resource.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "post",
+      .kind = karma::rendering::FrameGraphResourceKind::ColorTexture,
+  });
+  assert(!karma::rendering::validateFrameGraphDesc(duplicate_resource).valid());
+
+  karma::rendering::FrameGraphDesc missing_resource = graph;
+  missing_resource.passes.front().inputs["missing"] = "does_not_exist";
+  assert(!karma::rendering::validateFrameGraphDesc(missing_resource).valid());
+
+  karma::rendering::FrameGraphDesc cyclic{};
+  cyclic.frame_graph_key = "graphs/cycle";
+  cyclic.output_resource = "a";
+  cyclic.resources.push_back(karma::rendering::FrameGraphResourceDesc{.name = "a"});
+  cyclic.resources.push_back(karma::rendering::FrameGraphResourceDesc{.name = "b"});
+  cyclic.passes.push_back(karma::rendering::FrameGraphPassDesc{
+      .name = "a_writer",
+      .kind = karma::rendering::FrameGraphPassKind::Copy,
+      .inputs = {{"source", "b"}},
+      .outputs = {{"target", "a"}},
+  });
+  cyclic.passes.push_back(karma::rendering::FrameGraphPassDesc{
+      .name = "b_writer",
+      .kind = karma::rendering::FrameGraphPassKind::Copy,
+      .inputs = {{"source", "a"}},
+      .outputs = {{"target", "b"}},
+  });
+  assert(!karma::rendering::validateFrameGraphDesc(cyclic).valid());
+}
+
+void testFrameGraphAssetPackageLoadCacheAndUnload() {
+  const std::filesystem::path dir = makeTempDir("karma_frame_graph_package_tests");
+  const std::filesystem::path cache_dir = dir / "cache";
+  std::filesystem::create_directories(dir / "shaders");
+  std::filesystem::create_directories(dir / "passes");
+  std::filesystem::create_directories(dir / "graphs");
+
+  writeText(dir / "shaders/fullscreen_vs.hlsl", "void main() {}\n");
+  writeText(dir / "shaders/composite_ps.hlsl", "void main() {}\n");
+  writeText(dir / "passes/composite.kshaderpass",
+            R"({
+              "version": 1,
+              "pipeline": {
+                "name": "fullscreen",
+                "vertex": "../shaders/fullscreen_vs.hlsl",
+                "fragment": "../shaders/composite_ps.hlsl",
+                "vertex_entry": "main",
+                "fragment_entry": "main",
+                "defines": ["TEST_SHADER_PASS"]
+              },
+              "params": { "tone_exposure": 1.25, "enabled": true },
+              "textures": {},
+              "render_state": { "depth_test": false, "depth_write": false, "blend": false }
+            })");
+  writeText(dir / "graphs/composite.kframegraph",
+            R"({
+              "version": 1,
+              "resources": [
+                { "name": "post_ping", "kind": "color_texture", "scale": [1.0, 1.0], "format": "rgba8" },
+                { "name": "selection_mask", "kind": "color_texture", "scale": [1.0, 1.0], "format": "r8" },
+                { "name": "selection_depth", "kind": "depth_texture", "scale": [1.0, 1.0] }
+              ],
+              "passes": [
+                { "name": "scene", "kind": "scene",
+                  "outputs": { "color": "camera_color", "depth": "camera_depth" } },
+                { "name": "selected_mask", "kind": "scene_mask", "render_tags": ["selected"],
+                  "outputs": { "target": "selection_mask", "depth": "selection_depth" },
+                  "clear": true, "clear_depth": true },
+                { "name": "composite", "kind": "shader", "shader_pass": "passes/composite",
+                  "inputs": { "source": "camera_color", "depth": "camera_depth" },
+                  "outputs": { "target": "camera_color" },
+                  "params": { "tone_mapping_enabled": true } }
+              ],
+              "output_resource": "camera_color"
+            })");
+  writeText(dir / "assets.package.json",
+            R"({
+              "version": 1,
+              "assets": [
+                { "type": "shader_pass", "key": "passes/composite", "path": "passes/composite.kshaderpass" },
+                { "type": "render_graph", "key": "graphs/composite", "path": "graphs/composite.kframegraph" }
+              ]
+            })");
+
+  karma::assets::AssetPackageOptions options{};
+  options.cache.root = cache_dir;
+  options.cache.enabled = true;
+  options.cache.flush = false;
+
+  karma::assets::AssetRegistry cold_assets;
+  std::string diagnostic;
+  auto cold_package =
+      karma::assets::importAssetPackage(cold_assets, dir, options, &diagnostic);
+  assert(cold_package.has_value());
+  assert(diagnostic.empty());
+  assert(cold_assets.findShaderPass("passes/composite") != nullptr);
+  assert(cold_assets.findFrameGraph("graphs/composite") != nullptr);
+  assert(countJsonFiles(cache_dir / "packages") == 1u);
+  for (const auto& asset : cold_package->assets) {
+    if (asset.type == "shader_pass" || asset.type == "render_graph") {
+      assert(asset.cache_blob_key.empty());
+    }
+  }
+  for (const auto& manifest_entry :
+       std::filesystem::directory_iterator(cache_dir / "packages")) {
+    std::ifstream stream(manifest_entry.path());
+    std::string contents((std::istreambuf_iterator<char>(stream)),
+                         std::istreambuf_iterator<char>());
+    assert(contents.find("shader_pass_assets") == std::string::npos);
+  }
+
+  karma::assets::AssetRegistry warm_assets;
+  diagnostic.clear();
+  auto warm_package =
+      karma::assets::importAssetPackage(warm_assets, dir, options, &diagnostic);
+  assert(warm_package.has_value());
+  assert(diagnostic.empty());
+  assert(warm_assets.findShaderPass("passes/composite") != nullptr);
+  assert(warm_assets.findFrameGraph("graphs/composite") != nullptr);
+  assert(countJsonFiles(cache_dir / "packages") == 1u);
+  assert(karma::assets::unloadAssetPackage(warm_assets, *warm_package));
+  assert(warm_assets.findShaderPass("passes/composite") == nullptr);
+  assert(warm_assets.findFrameGraph("graphs/composite") == nullptr);
+
+  writeText(dir / "shaders/composite_ps.hlsl", "void main() { float x = 1.0; }\n");
+  karma::assets::AssetRegistry changed_shader_assets;
+  diagnostic.clear();
+  auto changed_shader_package =
+      karma::assets::importAssetPackage(changed_shader_assets, dir, options, &diagnostic);
+  assert(changed_shader_package.has_value());
+  assert(diagnostic.empty());
+  assert(countJsonFiles(cache_dir / "packages") == 2u);
+
+  writeText(dir / "bad.package.json",
+            R"({
+              "version": 1,
+              "assets": [
+                { "type": "shader_pass", "key": "passes/bad", "path": "passes/missing_shader.kshaderpass" }
+              ]
+            })");
+  writeText(dir / "passes/missing_shader.kshaderpass",
+            R"({
+              "version": 1,
+              "pipeline": {
+                "name": "fullscreen",
+                "vertex": "../shaders/missing_vs.hlsl",
+                "fragment": "../shaders/composite_ps.hlsl"
+              }
+            })");
+  karma::assets::AssetRegistry bad_assets;
+  diagnostic.clear();
+  auto bad_package =
+      karma::assets::importAssetPackage(bad_assets, dir / "bad.package.json", options, &diagnostic);
+  assert(!bad_package.has_value());
+  assert(!diagnostic.empty());
 
   std::filesystem::remove_all(dir);
 }
@@ -1186,51 +1552,14 @@ int main() {
   testAssetRegistryMaterialInheritance();
   testMaterialFileLoading();
   testAssetKeyValidationAndPackages();
+  testFrameGraphValidationAndRegistryFallback();
+  testFrameGraphAssetPackageLoadCacheAndUnload();
   testAssetCacheV2AndPackageWarmRestore();
   testTexturePreparedUploadPreservesRowOrder();
   testImportedMaterialTextureMatchesRendererOrigin();
   testAssetPackageAsyncCommitAndStore();
   testGltfSceneInstantiationRegistersLogicalMeshKeys();
   testAssetRegistryRegisterResolveUnregister();
-
-  karma::assets::AssetRegistry assets;
-
-  constexpr const char* kDefaultPostProfile = "default";
-  assert(!assets.resolvePostProcessProfile(kDefaultPostProfile).bloom_enabled);
-  assert(!assets.resolvePostProcessProfile("missing").bloom_enabled);
-
-  karma::rendering::PostProcessSettings default_profile{};
-  default_profile.bloom_enabled = true;
-  default_profile.bloom_intensity = 0.6f;
-  assets.registerPostProcessProfile(kDefaultPostProfile, default_profile);
-  assert(assets.resolvePostProcessProfile(kDefaultPostProfile).bloom_enabled);
-  assert(assets.resolvePostProcessProfile("missing").bloom_enabled);
-  assert(assets.resolvePostProcessProfile("missing").bloom_intensity == 0.6f);
-
-  karma::rendering::PostProcessSettings named_profile{};
-  named_profile.tone_mapping_enabled = true;
-  named_profile.tone_exposure = 1.25f;
-  assets.registerPostProcessProfile("cinematic", named_profile);
-  assert(assets.resolvePostProcessProfile("cinematic").tone_mapping_enabled);
-  assert(assets.resolvePostProcessProfile("cinematic").tone_exposure == 1.25f);
-  assert(!assets.resolvePostProcessProfile("cinematic").bloom_enabled);
-
-  karma::rendering::PostProcessSettings replacement_default{};
-  replacement_default.depth_of_field_enabled = true;
-  assets.registerPostProcessProfile(kDefaultPostProfile, replacement_default);
-  assert(assets.resolvePostProcessProfile(kDefaultPostProfile).depth_of_field_enabled);
-  assert(assets.resolvePostProcessProfile("missing").depth_of_field_enabled);
-
-  karma::rendering::PostProcessSettings empty_key_default{};
-  empty_key_default.temporal_antialiasing_enabled = true;
-  empty_key_default.taa_feedback = 0.82f;
-  assert(assets.registerPostProcessProfile("", empty_key_default));
-  assert(assets.resolvePostProcessProfile("").temporal_antialiasing_enabled);
-  assert(assets.resolvePostProcessProfile("missing").temporal_antialiasing_enabled);
-  assert(assets.resolvePostProcessProfile("missing").taa_feedback == 0.82f);
-
-  assets.unregisterPostProcessProfile("cinematic");
-  assert(assets.resolvePostProcessProfile("cinematic").temporal_antialiasing_enabled);
 
   testTerrainHeadlessNoopApi();
   testDeformationHeadlessNoopApi();

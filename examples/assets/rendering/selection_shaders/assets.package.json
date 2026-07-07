@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "shader_pass",
+      "key": "examples/rendering/selection_shaders/passes/composite",
+      "path": "passes/selection_composite.kshaderpass"
+    },
+    {
+      "type": "render_graph",
+      "key": "examples/rendering/selection_shaders/graphs/selection_outline",
+      "path": "graphs/selection_outline.kframegraph"
+    }
+  ]
+}

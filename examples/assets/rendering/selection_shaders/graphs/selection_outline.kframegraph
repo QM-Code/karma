@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "selected_mask",
+      "kind": "color_texture",
+      "scale": [1.0, 1.0],
+      "format": "r8"
+    },
+    {
+      "name": "selected_depth",
+      "kind": "depth_texture",
+      "scale": [1.0, 1.0]
+    }
+  ],
+  "passes": [
+    {
+      "name": "clear",
+      "kind": "builtin",
+      "builtin": "clear",
+      "outputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      },
+      "clear": true,
+      "clear_depth": true,
+      "clear_color": [0.03, 0.034, 0.04, 1.0]
+    },
+    {
+      "name": "skybox",
+      "kind": "builtin",
+      "builtin": "skybox",
+      "inputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      },
+      "outputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      }
+    },
+    {
+      "name": "shadows",
+      "kind": "builtin",
+      "builtin": "shadows"
+    },
+    {
+      "name": "opaque",
+      "kind": "builtin",
+      "builtin": "opaque",
+      "inputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      },
+      "outputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      }
+    },
+    {
+      "name": "terrain",
+      "kind": "builtin",
+      "builtin": "terrain",
+      "inputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      },
+      "outputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      }
+    },
+    {
+      "name": "transparent",
+      "kind": "builtin",
+      "builtin": "transparent",
+      "inputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      },
+      "outputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      }
+    },
+    {
+      "name": "particles",
+      "kind": "builtin",
+      "builtin": "particles",
+      "inputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      },
+      "outputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      }
+    },
+    {
+      "name": "selected_mask",
+      "kind": "scene_mask",
+      "render_tags": ["selected"],
+      "outputs": {
+        "target": "selected_mask",
+        "depth": "selected_depth"
+      },
+      "clear": true,
+      "clear_depth": true,
+      "clear_color": [0.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "name": "selection_composite",
+      "kind": "shader",
+      "shader_pass": "examples/rendering/selection_shaders/passes/composite",
+      "inputs": {
+        "source": "camera_color",
+        "g_SceneDepth": "camera_depth",
+        "g_SelectedMask": "selected_mask",
+        "g_SelectedDepth": "selected_depth"
+      },
+      "outputs": {
+        "target": "camera_color"
+      }
+    },
+    {
+      "name": "lines",
+      "kind": "builtin",
+      "builtin": "lines",
+      "inputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      },
+      "outputs": {
+        "target": "camera_color",
+        "depth": "camera_depth"
+      }
+    },
+    {
+      "name": "present",
+      "kind": "builtin",
+      "builtin": "present",
+      "inputs": {
+        "source": "camera_color"
+      },
+      "outputs": {
+        "target": "backbuffer"
+      }
+    }
+  ],
+  "output_resource": "camera_color"
+}

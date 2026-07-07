@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "pipeline": {
+    "name": "selection_composite",
+    "vertex": "../shaders/fullscreen_triangle_vs.hlsl",
+    "fragment": "../shaders/selection_composite_ps.hlsl",
+    "vertex_entry": "main",
+    "fragment_entry": "main"
+  },
+  "params": {},
+  "textures": {},
+  "render_state": {
+    "depth_test": false,
+    "depth_write": false,
+    "blend": false
+  }
+}

@@ -74,6 +74,9 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_graphical_example(rendering_postwar_city rendering postwar_city
     examples/rendering/postwar_city.cpp
     examples/common/scene_helpers.cpp)
+  karma_add_graphical_example(rendering_selection_shaders rendering selection_shaders
+    examples/rendering/selection_shaders.cpp
+    examples/common/scene_helpers.cpp)
   karma_add_graphical_example(rendering_gltf_viewer rendering gltf_viewer
     examples/rendering/gltf_viewer.cpp
     examples/common/scene_helpers.cpp)

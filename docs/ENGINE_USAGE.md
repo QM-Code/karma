@@ -386,18 +386,18 @@ the requested swapchain image count. Values are clamped to `[2, 8]`, and the
 default remains `2`. Treat this as a diagnostic knob: extra images can change
 where a driver blocks without necessarily reducing total hitch time.
 
-## Post-Process Profiles
-Cameras select post-processing by name through
-`CameraComponent::post_process_profile_key`. An empty key uses the engine
-default profile. Missing named profiles also fall back to the default profile so
-camera authoring errors do not stop rendering.
+## Renderer Frame Graphs
+Cameras select renderer frame graphs by name through
+`CameraComponent::frame_graph_key`. An empty key uses the engine default graph.
+Missing named graphs also fall back to the default graph so camera authoring
+errors do not stop rendering.
 
-`EngineConfig::post_process` seeds the startup default profile. Games can
-register named profiles during `onStart()` or update them at runtime through
+`EngineConfig::default_frame_graph` seeds the startup default graph. Games can
+register named graphs during `onStart()` or update them at runtime through
 `assets`:
 
 ```cpp
-constexpr const char* kCinematicProfile = "camera/cinematic";
+constexpr const char* kCinematicGraph = "camera/cinematic";
 
 rendering::PostProcessSettings cinematic{};
 cinematic.bloom_enabled = true;
@@ -405,24 +405,26 @@ cinematic.bloom_threshold = 0.7f;
 cinematic.bloom_intensity = 0.35f;
 cinematic.tone_mapping_enabled = true;
 cinematic.tone_exposure = 1.1f;
-assets->registerPostProcessProfile(kCinematicProfile, cinematic);
+assets->registerFrameGraph(
+    kCinematicGraph,
+    rendering::frameGraphFromPostProcessSettings(cinematic, kCinematicGraph));
 
 world->add(camera_entity, components::CameraComponent{
     .is_primary = true,
-    .post_process_profile_key = kCinematicProfile,
+    .frame_graph_key = kCinematicGraph,
 });
 ```
 
-Offscreen render-target cameras resolve their own profile in the same way as the
-primary camera. Cameras only select profile intent; Diligent-owned post-process
-passes, render targets, bloom mip textures, and history resources stay inside
-the renderer backend.
+Offscreen render-target cameras resolve their own graph in the same way as the
+primary camera. Cameras only select graph intent; Diligent-owned passes, render
+targets, bloom mip textures, and history resources stay inside the renderer
+backend.
 
-`RenderSystem` resolves the active `PostProcessSettings` immediately before
-each camera pass and passes those settings to `GraphicsDevice::renderLayer`.
-There is no global `GraphicsDevice::setPostProcessSettings` or backend-wide
-post-process state. Custom render paths that bypass `RenderSystem` must pass
-the resolved settings explicitly for each layer/target render.
+`RenderSystem` resolves the active `FrameGraphDesc` immediately before each
+camera pass and passes that graph to `GraphicsDevice::renderLayer`. There is no
+global `GraphicsDevice::setPostProcessSettings` or backend-wide post-process
+state. Custom render paths that bypass `RenderSystem` must pass the resolved
+graph explicitly for each layer/target render.
 
 The Diligent backend loads built-in post-process HLSL assets from
 `src/rendering/renderer/backends/diligent/shaders/post_process/` in source-tree
@@ -1209,7 +1211,7 @@ runtime and asset-authoring contracts.
 - Cascaded shadow maps (CSM)
 - Point and spot lights via Forward+ tiled local lights (GPU light culling per screen tile)
 - Point-light shadows for `LightComponent::Type::Point` lights with `casts_shadows = true`
-- Camera-selected post-process profiles with Diligent bloom, tone/color,
+- Camera-selected renderer frame graphs with Diligent bloom, tone/color,
   SSAO, SSR, TAA, and DOF controls
 - Optional anisotropy + mip generation
 

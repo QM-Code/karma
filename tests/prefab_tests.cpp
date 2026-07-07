@@ -335,6 +335,9 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
                       .intensity = 4.0f,
                       .range = 12.0f,
                   });
+  world.add(root, karma::components::RenderTagsComponent{
+                      .tags = {"selected", "outline"},
+                  });
 
   const std::filesystem::path path = dir / "single.json";
   KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
@@ -352,6 +355,9 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("material_id"));
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("owns_mesh_id"));
   KARMA_REQUIRE(!saved["nodes"][0]["components"]["MeshComponent"].contains("owns_material_id"));
+  KARMA_REQUIRE(saved["nodes"][0]["components"]["RenderTagsComponent"]["tags"].is_array());
+  KARMA_REQUIRE(saved["nodes"][0]["components"]["RenderTagsComponent"]["tags"][0] == "selected");
+  KARMA_REQUIRE(saved["nodes"][0]["components"]["RenderTagsComponent"]["tags"][1] == "outline");
 
   karma::world::World loaded_world;
   karma::world::Scene loaded_scene;
@@ -380,6 +386,12 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
   KARMA_REQUIRE(nearly(light.color.r, 0.5f));
   KARMA_REQUIRE(nearly(light.intensity, 4.0f));
   KARMA_REQUIRE(nearly(light.range, 12.0f));
+
+  const auto& render_tags =
+      loaded_world.get<karma::components::RenderTagsComponent>(instance->root);
+  KARMA_REQUIRE(render_tags.tags.size() == 2);
+  KARMA_REQUIRE(render_tags.tags[0] == "selected");
+  KARMA_REQUIRE(render_tags.tags[1] == "outline");
 }
 
 void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {

@@ -71,9 +71,9 @@ extraction, particle submission, and backend abstractions.
 
 Gameplay code should prefer ECS components and high-level helpers. Use renderer
 types directly for resources, diagnostics, picking, debug drawing, custom
-runtime modules, or named post-process profile registration.
+runtime modules, or named renderer frame graph registration.
 
-See \ref karma_rendering_guide for camera-resolved post-processing and render
+See \ref karma_rendering_guide for camera-resolved frame graphs and render
 submission details.
 */
 

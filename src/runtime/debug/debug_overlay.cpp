@@ -1270,6 +1270,16 @@ void DebugOverlayLayer::drawRendererTab() {
     ImGui::Text("Resize Events: %u in %.3f ms",
                 static_cast<unsigned int>(timing.resize_events),
                 timing.resize_ms);
+    if (!timing.graph_pass_timings.empty()) {
+      ImGui::Separator();
+      ImGui::Text("Frame Graph Passes:");
+      for (const rendering::RendererGraphPassTiming& pass_timing :
+           timing.graph_pass_timings) {
+        ImGui::BulletText("%s: %.3f ms",
+                          pass_timing.name.c_str(),
+                          pass_timing.ms);
+      }
+    }
   }
 
   if (ImGui::CollapsingHeader("Instancing", ImGuiTreeNodeFlags_DefaultOpen)) {

@@ -552,6 +552,7 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
   record.mesh = item.mesh;
   record.material = item.material;
   record.materials = item.materials;
+  record.render_tags = item.render_tags;
   record.deformation = item.deformation;
   record.transform = item.transform;
   record.params = item.instance_params;
@@ -607,6 +608,7 @@ void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) 
   record.mesh = item.mesh;
   record.material = item.material;
   record.materials = item.materials;
+  record.render_tags = item.render_tags;
   if (record.lods.size() > item.lods.size()) {
     record.lods.resize(item.lods.size());
   }

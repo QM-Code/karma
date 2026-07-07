@@ -16,7 +16,6 @@
 
 #include "asset_texture_internal.h"
 #include "material_registry_backing.h"
-#include "post_process_profile_registry_backing.h"
 
 namespace karma::assets {
 
@@ -111,8 +110,9 @@ struct AssetRegistry::Impl {
   std::unordered_map<std::string, world::Skeleton> skeletons;
   std::unordered_map<std::string, world::Skin> skins;
   std::unordered_map<std::string, GltfSceneAsset> gltf_scenes;
+  std::unordered_map<std::string, rendering::ShaderPassAssetDesc> shader_passes;
+  std::unordered_map<std::string, rendering::FrameGraphDesc> frame_graphs;
   rendering::MaterialLibrary materials;
-  rendering::PostProcessProfileLibrary post_process_profiles;
   uint64_t version = 0;
   uint64_t mesh_version = 0;
   uint64_t texture_version = 0;
@@ -191,8 +191,9 @@ void AssetRegistry::clear() {
   impl_->skeletons.clear();
   impl_->skins.clear();
   impl_->gltf_scenes.clear();
+  impl_->shader_passes.clear();
+  impl_->frame_graphs.clear();
   impl_->materials.clear();
-  impl_->post_process_profiles = rendering::PostProcessProfileLibrary{};
   bumpMeshVersion();
   bumpTextureVersion();
 }
@@ -273,6 +274,34 @@ bool AssetRegistry::moveAssetFrom(AssetRegistry& source,
       return false;
     }
     impl_->gltf_scenes.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "shader_pass") {
+    if (impl_->shader_passes.find(key) != impl_->shader_passes.end()) {
+      return false;
+    }
+    auto node = source.impl_->shader_passes.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->shader_passes.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "render_graph") {
+    if (impl_->frame_graphs.find(key) != impl_->frame_graphs.end()) {
+      return false;
+    }
+    auto node = source.impl_->frame_graphs.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->frame_graphs.insert(std::move(node));
     bumpVersion();
     source.bumpVersion();
     return true;
@@ -498,34 +527,78 @@ std::optional<rendering::ResolvedMaterialDesc> AssetRegistry::resolveMaterial(
   return impl_->materials.resolve(std::string(key));
 }
 
-bool AssetRegistry::registerPostProcessProfile(const std::string& key,
-                                               rendering::PostProcessSettings profile) {
-  const bool default_profile_key =
-      key.empty() || key == rendering::kDefaultPostProcessProfileKey;
-  if (!default_profile_key && !isValidAssetKey(key)) {
+bool AssetRegistry::registerShaderPass(const std::string& key,
+                                       rendering::ShaderPassAssetDesc pass) {
+  if (!isValidAssetKey(key)) {
     return false;
   }
-  impl_->post_process_profiles.registerProfile(key, profile);
+  pass.shader_pass_key = key;
+  impl_->shader_passes[key] = std::move(pass);
   bumpVersion();
   return true;
 }
 
-bool AssetRegistry::unregisterPostProcessProfile(const std::string& key) {
-  const bool removed = impl_->post_process_profiles.unregisterProfile(key);
-  if (removed) {
-    bumpVersion();
+bool AssetRegistry::unregisterShaderPass(const std::string& key) {
+  if (impl_->shader_passes.erase(key) == 0) {
+    return false;
   }
-  return removed;
+  bumpVersion();
+  return true;
 }
 
-const rendering::PostProcessSettings* AssetRegistry::findPostProcessProfile(
+const rendering::ShaderPassAssetDesc* AssetRegistry::findShaderPass(
     std::string_view key) const {
-  return impl_->post_process_profiles.find(key);
+  const auto it = impl_->shader_passes.find(std::string(key));
+  return it == impl_->shader_passes.end() ? nullptr : &it->second;
 }
 
-const rendering::PostProcessSettings& AssetRegistry::resolvePostProcessProfile(
+bool AssetRegistry::registerFrameGraph(const std::string& key,
+                                       rendering::FrameGraphDesc graph) {
+  const bool default_graph_key =
+      key.empty() || key == rendering::kDefaultFrameGraphKey;
+  if (!default_graph_key && !isValidAssetKey(key)) {
+    return false;
+  }
+  const std::string resolved_key =
+      default_graph_key ? std::string(rendering::kDefaultFrameGraphKey) : key;
+  graph.frame_graph_key = resolved_key;
+  impl_->frame_graphs[resolved_key] = std::move(graph);
+  bumpVersion();
+  return true;
+}
+
+bool AssetRegistry::unregisterFrameGraph(const std::string& key) {
+  const std::string resolved_key =
+      (key.empty() || key == rendering::kDefaultFrameGraphKey)
+          ? std::string(rendering::kDefaultFrameGraphKey)
+          : key;
+  if (impl_->frame_graphs.erase(resolved_key) == 0) {
+    return false;
+  }
+  bumpVersion();
+  return true;
+}
+
+const rendering::FrameGraphDesc* AssetRegistry::findFrameGraph(
     std::string_view key) const {
-  return impl_->post_process_profiles.resolve(key);
+  const std::string resolved_key =
+      (key.empty() || key == rendering::kDefaultFrameGraphKey)
+          ? std::string(rendering::kDefaultFrameGraphKey)
+          : std::string(key);
+  const auto it = impl_->frame_graphs.find(resolved_key);
+  return it == impl_->frame_graphs.end() ? nullptr : &it->second;
+}
+
+const rendering::FrameGraphDesc& AssetRegistry::resolveFrameGraph(
+    std::string_view key) const {
+  if (const rendering::FrameGraphDesc* graph = findFrameGraph(key)) {
+    return *graph;
+  }
+  if (const rendering::FrameGraphDesc* graph =
+          findFrameGraph(rendering::kDefaultFrameGraphKey)) {
+    return *graph;
+  }
+  return rendering::defaultFrameGraphDesc();
 }
 
 bool AssetRegistry::registerParticleEffect(const std::string& key,

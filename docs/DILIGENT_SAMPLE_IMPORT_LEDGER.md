@@ -313,8 +313,8 @@ ports.
 - Existing Karma coverage: partial
 - Decision: skip
 - Reason: Karma already creates render targets and can render layers into them.
-  The engine now has camera-resolved built-in post-process profiles, but still
-  does not expose a general user-authored fullscreen material pass contract.
+  The engine now has camera-resolved renderer frame graphs, but still does not
+  expose a complete user-authored fullscreen material pass contract.
 - Files changed:
   - `docs/DILIGENT_SAMPLE_IMPORT_LEDGER.md`
 - Verification: inspected README, CMake, source, shader assets, and Karma render

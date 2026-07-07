@@ -978,11 +978,11 @@ void GraphicsDevice::retireInstance(InstanceId instance) {
 
 void GraphicsDevice::renderLayer(LayerId layer,
                                  RenderTargetId target,
-                                 const PostProcessSettings& post_process) {
+                                 const FrameGraphDesc& frame_graph) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
-    scheduler_->recordFrameCommand([layer, target, post_process](RenderScheduler::Backend& backend) {
-      backend.renderLayer(layer, target, post_process);
+    scheduler_->recordFrameCommand([layer, target, frame_graph](RenderScheduler::Backend& backend) {
+      backend.renderLayer(layer, target, frame_graph);
     });
   }
 }

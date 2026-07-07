@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <limits>
 #include <string_view>
+#include <vector>
 
 #include <Primitives/interface/BasicTypes.h>
 #include <Primitives/interface/DataBlob.h>
@@ -159,6 +160,70 @@ FileInfo inspectFile(const std::filesystem::path& path) {
   }
   return info;
 }
+
+const char* graphPassNameForStage(const char* stage) {
+  if (stage == nullptr) {
+    return nullptr;
+  }
+  if (std::strcmp(stage, "clear target") == 0 ||
+      std::strcmp(stage, "clear inactive camera") == 0 ||
+      std::strcmp(stage, "missing draw resources") == 0) {
+    return "clear";
+  }
+  if (std::strcmp(stage, "environment resources") == 0 ||
+      std::strcmp(stage, "skybox") == 0) {
+    return "skybox";
+  }
+  if (std::strcmp(stage, "shadow layer") == 0) {
+    return "shadows";
+  }
+  if (std::strcmp(stage, "forward plus setup") == 0 ||
+      std::strcmp(stage, "collect forward state") == 0 ||
+      std::strcmp(stage, "opaque pass") == 0) {
+    return "opaque";
+  }
+  if (std::strcmp(stage, "terrain pass") == 0) {
+    return "terrain";
+  }
+  if (std::strcmp(stage, "transparent pre-particle pass") == 0 ||
+      std::strcmp(stage, "transparent post-particle pass") == 0) {
+    return "transparent";
+  }
+  if (std::strcmp(stage, "particle resources prewarm") == 0 ||
+      std::strcmp(stage, "particle resources skipped") == 0 ||
+      std::strcmp(stage, "particle beam pass") == 0 ||
+      std::strcmp(stage, "particle beam pass skipped") == 0 ||
+      std::strcmp(stage, "particle pass") == 0 ||
+      std::strcmp(stage, "particle pass skipped") == 0) {
+    return "particles";
+  }
+  if (std::strcmp(stage, "line resources ensure") == 0 ||
+      std::strcmp(stage, "line draw") == 0) {
+    return "lines";
+  }
+  if (std::strcmp(stage, "post process") == 0) {
+    return "post_process";
+  }
+  if (std::strcmp(stage, "present copy") == 0) {
+    return "present";
+  }
+  return nullptr;
+}
+
+void accumulateGraphPassTiming(std::vector<rendering::RendererGraphPassTiming>& timings,
+                               const char* pass_name,
+                               float ms) {
+  if (pass_name == nullptr) {
+    return;
+  }
+  for (rendering::RendererGraphPassTiming& timing : timings) {
+    if (timing.name == pass_name) {
+      timing.ms += ms;
+      return;
+    }
+  }
+  timings.push_back(rendering::RendererGraphPassTiming{pass_name, ms});
+}
 }  // namespace
 
 bool isValidSize(int width, int height) {
@@ -242,6 +307,9 @@ void DiligentBackend::recordRenderLayerStageTiming(const char* stage, double ms)
   if (stage == nullptr) {
     return;
   }
+  accumulateGraphPassTiming(current_frame_timing_stats_.graph_pass_timings,
+                            graphPassNameForStage(stage),
+                            stage_ms);
   if (std::strcmp(stage, "target setup") == 0) {
     current_frame_timing_stats_.target_setup_ms += stage_ms;
   } else if (std::strcmp(stage, "clear target") == 0 ||

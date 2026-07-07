@@ -334,9 +334,12 @@ int main() {
   config.shadow_map_size = 2048;
   config.shadow_pcf_radius = 1;
   config.lighting_exposure = 1.0f;
-  config.post_process.temporal_antialiasing_enabled = true;
-  config.post_process.taa_feedback = 0.82f;
-  config.post_process.taa_sharpening = 0.04f;
+  karma::rendering::PostProcessSettings post_process{};
+  post_process.temporal_antialiasing_enabled = true;
+  post_process.taa_feedback = 0.82f;
+  post_process.taa_sharpening = 0.04f;
+  config.default_frame_graph =
+      karma::rendering::frameGraphFromPostProcessSettings(post_process);
   config.startup_asset_packages.push_back(
       karma::demo::resolveExampleAssetPath("rendering/grass_card"));
 

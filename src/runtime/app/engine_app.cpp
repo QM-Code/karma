@@ -874,7 +874,14 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
   spdlog::set_level(spdlog::level::trace);
   config_ = config;
-  assets_.registerPostProcessProfile("", config_.post_process);
+  const bool has_custom_default_graph =
+      !config_.default_frame_graph.resources.empty() ||
+      !config_.default_frame_graph.passes.empty() ||
+      !config_.default_frame_graph.frame_graph_key.empty();
+  assets_.registerFrameGraph(
+      std::string(rendering::kDefaultFrameGraphKey),
+      has_custom_default_graph ? config_.default_frame_graph
+                               : rendering::defaultFrameGraphDesc());
   loading_splash_presented_ = false;
   config_.loading_splash.image_path = resolveStartupPath(config_.loading_splash.image_path);
   config_.environment_map_source_path =

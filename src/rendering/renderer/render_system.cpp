@@ -79,14 +79,6 @@ void logRenderSystemStage(const bool enabled,
   }
 }
 
-rendering::PostProcessSettings resolvePostProcessSettings(const assets::AssetRegistry* assets,
-                                                         const std::string& key) {
-  if (assets != nullptr) {
-    return assets->resolvePostProcessProfile(key);
-  }
-  return {};
-}
-
 glm::mat4 toInstanceTransform(const components::MeshInstance& instance) {
   glm::mat4 transform = glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
   transform *= glm::mat4_cast(math::toGlm(instance.rotation));
@@ -445,6 +437,11 @@ struct RenderSystem::Impl {
   void releaseSharedMaterial(const std::string& material_key);
   rendering::TextureId acquireSharedTexture(const std::string& texture_key);
   void releaseSharedTexture(const std::string& texture_key);
+  rendering::FrameGraphDesc resolveFrameGraphDesc(
+      const std::string& key,
+      std::unordered_set<std::string>& referenced_texture_keys);
+  void releaseInactiveFrameGraphTextures(
+      const std::unordered_set<std::string>& referenced_texture_keys);
 
   GraphicsDevice& device_;
   const assets::AssetRegistry* assets_ = nullptr;
@@ -454,6 +451,7 @@ struct RenderSystem::Impl {
   std::unordered_map<std::string, SharedMaterialResource> shared_materials_;
   std::unordered_map<std::string, SharedMaterialAlias> shared_material_aliases_;
   std::unordered_map<std::string, SharedTextureResource> shared_textures_;
+  std::unordered_set<std::string> active_frame_graph_texture_keys_;
   std::unordered_map<uint64_t, PrewarmRecord> prewarm_records_;
   std::unordered_map<std::string, rendering::RenderTargetId> render_targets_by_key_;
   std::unordered_map<std::string, bool> warned_missing_mesh_asset_keys_;
@@ -838,6 +836,68 @@ void RenderSystem::Impl::releaseSharedTexture(const std::string& texture_key) {
   }
 }
 
+rendering::FrameGraphDesc RenderSystem::Impl::resolveFrameGraphDesc(
+    const std::string& key,
+    std::unordered_set<std::string>& referenced_texture_keys) {
+  rendering::FrameGraphDesc graph =
+      assets_ != nullptr ? assets_->resolveFrameGraph(key)
+                         : rendering::defaultFrameGraphDesc();
+  if (assets_ == nullptr) {
+    return graph;
+  }
+
+  std::unordered_set<std::string> shader_pass_keys;
+  for (const rendering::FrameGraphPassDesc& pass : graph.passes) {
+    if (!pass.enabled ||
+        pass.kind != rendering::FrameGraphPassKind::Shader ||
+        pass.shader_pass_key.empty() ||
+        !shader_pass_keys.insert(pass.shader_pass_key).second) {
+      continue;
+    }
+    const rendering::ShaderPassAssetDesc* shader_pass =
+        assets_->findShaderPass(pass.shader_pass_key);
+    if (shader_pass == nullptr) {
+      continue;
+    }
+
+    rendering::ShaderPassAssetDesc resolved = *shader_pass;
+    for (const auto& [alias, texture_key] : resolved.textures) {
+      if (texture_key.empty()) {
+        continue;
+      }
+      referenced_texture_keys.insert(texture_key);
+      if (active_frame_graph_texture_keys_.find(texture_key) ==
+          active_frame_graph_texture_keys_.end()) {
+        const rendering::TextureId acquired = acquireSharedTexture(texture_key);
+        if (acquired != rendering::kInvalidTexture) {
+          active_frame_graph_texture_keys_.insert(texture_key);
+        }
+      }
+      auto shared_it = shared_textures_.find(texture_key);
+      if (shared_it != shared_textures_.end() &&
+          shared_it->second.texture != rendering::kInvalidTexture) {
+        resolved.texture_handles[alias] = shared_it->second.texture;
+      }
+    }
+    graph.shader_pass_assets.push_back(std::move(resolved));
+  }
+  return graph;
+}
+
+void RenderSystem::Impl::releaseInactiveFrameGraphTextures(
+    const std::unordered_set<std::string>& referenced_texture_keys) {
+  for (auto it = active_frame_graph_texture_keys_.begin();
+       it != active_frame_graph_texture_keys_.end();) {
+    if (referenced_texture_keys.find(*it) != referenced_texture_keys.end()) {
+      ++it;
+      continue;
+    }
+    const std::string texture_key = *it;
+    it = active_frame_graph_texture_keys_.erase(it);
+    releaseSharedTexture(texture_key);
+  }
+}
+
 rendering::MaterialId RenderSystem::Impl::acquireSharedMaterial(const std::string& material_key) {
   if (material_key.empty() || assets_ == nullptr) {
     return rendering::kInvalidMaterial;
@@ -1083,6 +1143,10 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
   auto section_end = update_start;
 
   if (assets_ != nullptr && assets_->version() != last_asset_registry_version_) {
+    for (const std::string& texture_key : active_frame_graph_texture_keys_) {
+      releaseSharedTexture(texture_key);
+    }
+    active_frame_graph_texture_keys_.clear();
     for (auto& [key, record] : records_) {
       (void)key;
       components::MeshComponent mesh_binding{};
@@ -1115,21 +1179,22 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
   }
   bool has_camera = false;
   rendering::CameraData primary_camera{};
-  rendering::PostProcessSettings primary_post_process{};
+  rendering::FrameGraphDesc primary_frame_graph{};
   struct OffscreenPass {
     rendering::CameraData camera;
     rendering::RenderTargetId target = rendering::kDefaultRenderTarget;
-    rendering::PostProcessSettings post_process;
+    rendering::FrameGraphDesc frame_graph;
   };
   std::vector<OffscreenPass> offscreen_passes;
   std::unordered_set<std::string> active_render_target_keys;
+  std::unordered_set<std::string> active_frame_graph_texture_keys;
   world.forEach<components::CameraComponent, components::TransformComponent>(
       [&](const world::Entity entity) {
     const auto& camera = world.get<components::CameraComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
     const rendering::CameraData cam = toCameraData(camera, transform, interpolation_alpha);
-    const rendering::PostProcessSettings post_process =
-        resolvePostProcessSettings(assets_, camera.post_process_profile_key);
+    const rendering::FrameGraphDesc frame_graph =
+        resolveFrameGraphDesc(camera.frame_graph_key, active_frame_graph_texture_keys);
 
     if (camera.render_to_texture) {
       rendering::RenderTargetId target_id = camera.render_target;
@@ -1154,14 +1219,14 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
         offscreen_passes.push_back(OffscreenPass{
             .camera = cam,
             .target = target_id,
-            .post_process = post_process,
+            .frame_graph = frame_graph,
         });
       }
     }
 
     if (!has_camera && camera.is_primary) {
       primary_camera = cam;
-      primary_post_process = post_process;
+      primary_frame_graph = frame_graph;
       has_camera = true;
     }
     return true;
@@ -1170,6 +1235,8 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
   section_end = core::SteadyClock::now();
   logRenderSystemStage(diag_enabled, "camera collection", section_start, section_end);
   section_start = section_end;
+
+  releaseInactiveFrameGraphTextures(active_frame_graph_texture_keys);
 
   for (auto it = render_targets_by_key_.begin(); it != render_targets_by_key_.end();) {
     if (active_render_target_keys.find(it->first) != active_render_target_keys.end()) {
@@ -1190,9 +1257,11 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       warned_no_camera_ = true;
     }
     device_.setCameraActive(false);
+    std::unordered_set<std::string> no_camera_graph_texture_keys;
     device_.renderLayer(0,
                         rendering::kDefaultRenderTarget,
-                        resolvePostProcessSettings(assets_, {}));
+                        resolveFrameGraphDesc({}, no_camera_graph_texture_keys));
+    releaseInactiveFrameGraphTextures(no_camera_graph_texture_keys);
     logRenderSystemStage(diag_enabled, "total", update_start, core::SteadyClock::now());
     return;
   }
@@ -1368,6 +1437,9 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
     item.instance = static_cast<InstanceId>(key);
     item.mesh = it->second.mesh;
     item.materials = it->second.material_bindings;
+    if (world.has<components::RenderTagsComponent>(entity)) {
+      item.render_tags = world.get<components::RenderTagsComponent>(entity).tags;
+    }
     item.transform = world_matrix;
     item.layer = 0;
     item.visible = visible;
@@ -1470,6 +1542,9 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
     item.instance = static_cast<InstanceId>(key);
     item.mesh = it->second.mesh;
     item.materials = it->second.material_bindings;
+    if (world.has<components::RenderTagsComponent>(entity)) {
+      item.render_tags = world.get<components::RenderTagsComponent>(entity).tags;
+    }
     item.lods.reserve(it->second.instanced_lods.size());
     for (const auto& lod : it->second.instanced_lods) {
       item.lods.push_back(rendering::InstancedLodDrawDesc{
@@ -1562,11 +1637,11 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
   for (const auto& pass : offscreen_passes) {
     device_.setCamera(pass.camera);
     device_.setCameraActive(true);
-    device_.renderLayer(0, pass.target, pass.post_process);
+    device_.renderLayer(0, pass.target, pass.frame_graph);
   }
   device_.setCamera(primary_camera);
   device_.setCameraActive(true);
-  device_.renderLayer(0, rendering::kDefaultRenderTarget, primary_post_process);
+  device_.renderLayer(0, rendering::kDefaultRenderTarget, primary_frame_graph);
   section_end = core::SteadyClock::now();
   logRenderSystemStage(diag_enabled, "offscreen passes", section_start, section_end);
   logRenderSystemStage(diag_enabled, "total", update_start, section_end);

@@ -195,7 +195,7 @@ before `find_package(karma)` to allow package-time fetching.
 - ECS runtime with fixed-step updates, per-frame systems, scene graph transforms,
   app/game interfaces, and optional runtime modules.
 - Diligent renderer with Forward+ local lights, directional shadows, point-light
-  shadows, camera-selected post-process profiles, bloom/tone/color controls,
+  shadows, camera-selected renderer frame graphs, bloom/tone/color controls,
   transparent passes, debug lines, particles, UI draw-data composition, and
   environment/texture/mesh resource management.
 - Content pipeline for glTF/GLB scene import, materials, lights, node animation,

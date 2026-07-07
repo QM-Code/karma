@@ -21,7 +21,7 @@ constexpr const char* kCoolWindowMaterial = "diligentfx_bloom/material/window_co
 constexpr const char* kMagentaSignMaterial = "diligentfx_bloom/material/sign_magenta";
 constexpr const char* kAmberSignMaterial = "diligentfx_bloom/material/sign_amber";
 constexpr const char* kRoadGlowMaterial = "diligentfx_bloom/material/road_glow";
-constexpr const char* kBloomPostProcessProfileKey = "diligentfx/bloom";
+constexpr const char* kBloomFrameGraphKey = "diligentfx/bloom";
 constexpr const char* kBloomSceneKey = "examples/rendering/bloom_city";
 
 glm::vec3 toGlm(const math::Vec3& v) {
@@ -433,8 +433,7 @@ class DiligentFxBloomExample final : public app::GameInterface {
                                               .near_clip = 0.05f,
                                               .far_clip = std::max(500.0f, radius * 6.0f),
                                               .is_primary = true,
-                                              .post_process_profile_key =
-                                                  kBloomPostProcessProfileKey,
+                                              .frame_graph_key = kBloomFrameGraphKey,
                                           });
     camera_yaw_ = look.yaw;
     target_camera_yaw_ = look.yaw;
@@ -466,7 +465,9 @@ class DiligentFxBloomExample final : public app::GameInterface {
   void applyPostProcess() {
     post_process_.bloom_enabled = bloom_enabled_;
     if (assets) {
-      assets->registerPostProcessProfile(kBloomPostProcessProfileKey, post_process_);
+      assets->registerFrameGraph(
+          kBloomFrameGraphKey,
+          rendering::frameGraphFromPostProcessSettings(post_process_, kBloomFrameGraphKey));
     }
   }
 

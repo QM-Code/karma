@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "karma",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "description": "C++20 ECS-driven 3D game engine. This overlay port packages Karma profiles from the local checkout.",
   "homepage": "https://github.com/QM-Code/karma",
   "license": "MIT",

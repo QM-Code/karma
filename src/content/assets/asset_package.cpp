@@ -7,10 +7,13 @@
 #include <exception>
 #include <fstream>
 #include <future>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -30,7 +33,7 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr std::string_view kPackageCacheContentVersion =
-    "package-cache-v4-material-shader-dependencies";
+    "package-cache-v5-render-graph-assets";
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -186,6 +189,798 @@ bool readRequiredPath(const Json& object,
   return true;
 }
 
+bool readJsonObjectFile(const std::filesystem::path& path,
+                        Json& out,
+                        std::string* diagnostic,
+                        std::string_view label) {
+  std::ifstream stream(path);
+  if (!stream) {
+    return fail(diagnostic, "failed to open " + std::string(label) + ": " + path.string());
+  }
+  try {
+    stream >> out;
+  } catch (const std::exception& e) {
+    return fail(diagnostic,
+                "failed to parse " + std::string(label) + " JSON: " + e.what());
+  }
+  if (!out.is_object()) {
+    return fail(diagnostic, std::string(label) + " root must be an object");
+  }
+  const auto version_it = out.find("version");
+  if (version_it == out.end() ||
+      (!version_it->is_number_integer() && !version_it->is_number_unsigned()) ||
+      version_it->get<int>() != 1) {
+    return fail(diagnostic, std::string(label) + " version must be integer 1");
+  }
+  return true;
+}
+
+bool fieldAllowed(const Json& object,
+                  std::initializer_list<std::string_view> names,
+                  std::string_view section,
+                  std::string* diagnostic) {
+  for (const auto& [name, value] : object.items()) {
+    (void)value;
+    bool found = false;
+    for (std::string_view allowed : names) {
+      if (name == allowed) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      return fail(diagnostic,
+                  "unsupported " + std::string(section) + " field: " + name);
+    }
+  }
+  return true;
+}
+
+bool readStringMap(const Json& object,
+                   std::unordered_map<std::string, std::string>& out,
+                   std::string_view section,
+                   std::string* diagnostic) {
+  if (!object.is_object()) {
+    return fail(diagnostic, std::string(section) + " must be an object");
+  }
+  for (const auto& [name, value] : object.items()) {
+    if (!value.is_string()) {
+      return fail(diagnostic, std::string(section) + " values must be strings");
+    }
+    out[name] = value.get<std::string>();
+  }
+  return true;
+}
+
+bool parseColorValue(const Json& value, math::Color& out) {
+  if (!value.is_array() || value.size() != 4u) {
+    return false;
+  }
+  for (const Json& element : value) {
+    if (!element.is_number()) {
+      return false;
+    }
+  }
+  out = math::Color{
+      value[0].get<float>(),
+      value[1].get<float>(),
+      value[2].get<float>(),
+      value[3].get<float>(),
+  };
+  return true;
+}
+
+bool parseMaterialParameterValue(const Json& value,
+                                 rendering::MaterialParameterValue& out,
+                                 std::string* diagnostic) {
+  if (value.is_boolean()) {
+    out = value.get<bool>();
+    return true;
+  }
+  if (value.is_number_integer()) {
+    out = value.get<int32_t>();
+    return true;
+  }
+  if (value.is_number_unsigned()) {
+    out = value.get<uint32_t>();
+    return true;
+  }
+  if (value.is_number_float()) {
+    out = value.get<float>();
+    return true;
+  }
+  if (value.is_string()) {
+    out = value.get<std::string>();
+    return true;
+  }
+  if (value.is_array()) {
+    for (const Json& element : value) {
+      if (!element.is_number()) {
+        return fail(diagnostic, "parameter arrays must contain only numbers");
+      }
+    }
+    if (value.size() == 2u) {
+      out = glm::vec2(value[0].get<float>(), value[1].get<float>());
+      return true;
+    }
+    if (value.size() == 3u) {
+      out = glm::vec3(value[0].get<float>(), value[1].get<float>(), value[2].get<float>());
+      return true;
+    }
+    if (value.size() == 4u) {
+      out = math::Color{
+          value[0].get<float>(),
+          value[1].get<float>(),
+          value[2].get<float>(),
+          value[3].get<float>(),
+      };
+      return true;
+    }
+  }
+  return fail(diagnostic, "unsupported parameter value");
+}
+
+bool readParams(const Json& object,
+                std::unordered_map<std::string, rendering::MaterialParameterValue>& out,
+                std::string_view section,
+                std::string* diagnostic) {
+  if (!object.is_object()) {
+    return fail(diagnostic, std::string(section) + " must be an object");
+  }
+  for (const auto& [name, value] : object.items()) {
+    rendering::MaterialParameterValue parsed{};
+    if (!parseMaterialParameterValue(value, parsed, diagnostic)) {
+      return false;
+    }
+    out[name] = std::move(parsed);
+  }
+  return true;
+}
+
+Json materialParameterToJson(const rendering::MaterialParameterValue& value) {
+  return std::visit(
+      [](const auto& typed) -> Json {
+        using Value = std::decay_t<decltype(typed)>;
+        if constexpr (std::is_same_v<Value, bool> ||
+                      std::is_same_v<Value, int32_t> ||
+                      std::is_same_v<Value, uint32_t> ||
+                      std::is_same_v<Value, float> ||
+                      std::is_same_v<Value, std::string>) {
+          return typed;
+        } else if constexpr (std::is_same_v<Value, rendering::Color>) {
+          return Json::array({typed.r, typed.g, typed.b, typed.a});
+        } else if constexpr (std::is_same_v<Value, glm::vec2>) {
+          return Json::array({typed.x, typed.y});
+        } else if constexpr (std::is_same_v<Value, glm::vec3>) {
+          return Json::array({typed.x, typed.y, typed.z});
+        } else {
+          return Json::array({typed.x, typed.y, typed.z, typed.w});
+        }
+      },
+      value);
+}
+
+Json paramsToJson(const std::unordered_map<std::string, rendering::MaterialParameterValue>& params) {
+  Json out = Json::object();
+  for (const auto& [name, value] : params) {
+    out[name] = materialParameterToJson(value);
+  }
+  return out;
+}
+
+bool parseTextureFormat(std::string_view value, rendering::TextureFormat& out) {
+  if (value == "rgba8") {
+    out = rendering::TextureFormat::RGBA8;
+  } else if (value == "rgb8") {
+    out = rendering::TextureFormat::RGB8;
+  } else if (value == "r8") {
+    out = rendering::TextureFormat::R8;
+  } else if (value == "bc7_rgba_unorm") {
+    out = rendering::TextureFormat::BC7_RGBA_UNORM;
+  } else if (value == "bc7_rgba_unorm_srgb") {
+    out = rendering::TextureFormat::BC7_RGBA_UNORM_SRGB;
+  } else if (value == "ktx2_basis_uastc") {
+    out = rendering::TextureFormat::KTX2_BASIS_UASTC;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+std::string textureFormatName(rendering::TextureFormat format) {
+  switch (format) {
+    case rendering::TextureFormat::RGBA8:
+      return "rgba8";
+    case rendering::TextureFormat::RGB8:
+      return "rgb8";
+    case rendering::TextureFormat::R8:
+      return "r8";
+    case rendering::TextureFormat::BC7_RGBA_UNORM:
+      return "bc7_rgba_unorm";
+    case rendering::TextureFormat::BC7_RGBA_UNORM_SRGB:
+      return "bc7_rgba_unorm_srgb";
+    case rendering::TextureFormat::KTX2_BASIS_UASTC:
+      return "ktx2_basis_uastc";
+  }
+  return "rgba8";
+}
+
+bool parseBlendMode(std::string_view value, rendering::MaterialDesc::BlendMode& out) {
+  if (value == "alpha") {
+    out = rendering::MaterialDesc::BlendMode::Alpha;
+  } else if (value == "additive") {
+    out = rendering::MaterialDesc::BlendMode::Additive;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+std::string blendModeName(rendering::MaterialDesc::BlendMode mode) {
+  switch (mode) {
+    case rendering::MaterialDesc::BlendMode::Alpha:
+      return "alpha";
+    case rendering::MaterialDesc::BlendMode::Additive:
+      return "additive";
+  }
+  return "alpha";
+}
+
+bool parseShaderPipeline(const Json& root,
+                         const std::filesystem::path& base_dir,
+                         rendering::MaterialPipelineDesc& out,
+                         std::string* diagnostic) {
+  const auto pipeline_it = root.find("pipeline");
+  if (pipeline_it == root.end() || !pipeline_it->is_object()) {
+    return fail(diagnostic, "shader_pass requires object field: pipeline");
+  }
+  const Json& pipeline = *pipeline_it;
+  if (!fieldAllowed(pipeline,
+                    {"name",
+                     "vertex",
+                     "fragment",
+                     "vertex_entry",
+                     "fragment_entry",
+                     "defines"},
+                    "shader_pass.pipeline",
+                    diagnostic)) {
+    return false;
+  }
+
+  out.name = pipeline.value("name", std::string("fullscreen"));
+  auto read_path = [&](const char* field, std::filesystem::path& path) {
+    const auto it = pipeline.find(field);
+    if (it == pipeline.end() || !it->is_string() || it->get<std::string>().empty()) {
+      return fail(diagnostic, std::string("shader_pass.pipeline requires string field: ") + field);
+    }
+    path = resolveEntryPath(base_dir, it->get<std::string>());
+    std::ifstream shader(path);
+    if (!shader) {
+      return fail(diagnostic, "shader_pass pipeline shader is missing or unreadable: " +
+                                  path.string());
+    }
+    return true;
+  };
+  if (!read_path("vertex", out.vertex_shader_path) ||
+      !read_path("fragment", out.fragment_shader_path)) {
+    return false;
+  }
+  if (const auto entry = pipeline.find("vertex_entry"); entry != pipeline.end()) {
+    if (!entry->is_string()) {
+      return fail(diagnostic, "shader_pass.pipeline.vertex_entry must be a string");
+    }
+    out.vertex_entry_point = entry->get<std::string>();
+  }
+  if (const auto entry = pipeline.find("fragment_entry"); entry != pipeline.end()) {
+    if (!entry->is_string()) {
+      return fail(diagnostic, "shader_pass.pipeline.fragment_entry must be a string");
+    }
+    out.fragment_entry_point = entry->get<std::string>();
+  }
+  if (const auto defines = pipeline.find("defines"); defines != pipeline.end()) {
+    if (!defines->is_array()) {
+      return fail(diagnostic, "shader_pass.pipeline.defines must be an array");
+    }
+    out.defines.clear();
+    for (const Json& define : *defines) {
+      if (!define.is_string()) {
+        return fail(diagnostic, "shader_pass.pipeline.defines entries must be strings");
+      }
+      out.defines.push_back(define.get<std::string>());
+    }
+  }
+  return true;
+}
+
+std::optional<rendering::ShaderPassAssetDesc> parseShaderPassAssetDesc(
+    const Json& root,
+    const std::filesystem::path& asset_path,
+    const std::filesystem::path& base_dir,
+    std::string* diagnostic) {
+  const auto version_it = root.find("version");
+  if (version_it == root.end() ||
+      (!version_it->is_number_integer() && !version_it->is_number_unsigned()) ||
+      version_it->get<int>() != 1) {
+    fail(diagnostic, "shader_pass version must be integer 1");
+    return std::nullopt;
+  }
+  if (!fieldAllowed(root,
+                    {"version", "pipeline", "params", "textures", "render_state", "fullscreen"},
+                    "shader_pass",
+                    diagnostic)) {
+    return std::nullopt;
+  }
+
+  rendering::ShaderPassAssetDesc desc{};
+  desc.shader_pass_asset_path = asset_path;
+  if (!parseShaderPipeline(root, base_dir, desc.pipeline, diagnostic)) {
+    return std::nullopt;
+  }
+  if (const auto fullscreen = root.find("fullscreen"); fullscreen != root.end()) {
+    if (!fullscreen->is_boolean()) {
+      fail(diagnostic, "shader_pass.fullscreen must be a boolean");
+      return std::nullopt;
+    }
+    desc.fullscreen = fullscreen->get<bool>();
+  }
+  if (const auto params = root.find("params"); params != root.end() &&
+      !readParams(*params, desc.params, "shader_pass.params", diagnostic)) {
+    return std::nullopt;
+  }
+  if (const auto textures = root.find("textures"); textures != root.end()) {
+    if (!readStringMap(*textures, desc.textures, "shader_pass.textures", diagnostic)) {
+      return std::nullopt;
+    }
+    for (const auto& [slot, texture_key] : desc.textures) {
+      (void)slot;
+      if (!AssetRegistry::isValidAssetKey(texture_key)) {
+        fail(diagnostic,
+             "invalid shader_pass texture key '" + texture_key + "': " +
+                 AssetRegistry::assetKeyValidationError(texture_key));
+        return std::nullopt;
+      }
+    }
+  }
+  if (const auto state = root.find("render_state"); state != root.end()) {
+    if (!state->is_object() ||
+        !fieldAllowed(*state,
+                      {"depth_test", "depth_write", "blend", "blend_enabled", "blend_mode"},
+                      "shader_pass.render_state",
+                      diagnostic)) {
+      return std::nullopt;
+    }
+    if (const auto it = state->find("depth_test"); it != state->end()) {
+      if (!it->is_boolean()) {
+        fail(diagnostic, "shader_pass.render_state.depth_test must be a boolean");
+        return std::nullopt;
+      }
+      desc.depth_test = it->get<bool>();
+    }
+    if (const auto it = state->find("depth_write"); it != state->end()) {
+      if (!it->is_boolean()) {
+        fail(diagnostic, "shader_pass.render_state.depth_write must be a boolean");
+        return std::nullopt;
+      }
+      desc.depth_write = it->get<bool>();
+    }
+    if (const auto it = state->find("blend"); it != state->end()) {
+      if (!it->is_boolean()) {
+        fail(diagnostic, "shader_pass.render_state.blend must be a boolean");
+        return std::nullopt;
+      }
+      desc.blend_enabled = it->get<bool>();
+    }
+    if (const auto it = state->find("blend_enabled"); it != state->end()) {
+      if (!it->is_boolean()) {
+        fail(diagnostic, "shader_pass.render_state.blend_enabled must be a boolean");
+        return std::nullopt;
+      }
+      desc.blend_enabled = it->get<bool>();
+    }
+    if (const auto it = state->find("blend_mode"); it != state->end()) {
+      if (!it->is_string() || !parseBlendMode(it->get<std::string>(), desc.blend_mode)) {
+        fail(diagnostic,
+             "shader_pass.render_state.blend_mode must be 'alpha' or 'additive'");
+        return std::nullopt;
+      }
+    }
+  }
+  return desc;
+}
+
+std::optional<rendering::ShaderPassAssetDesc> loadShaderPassAssetDesc(
+    const std::filesystem::path& path,
+    std::string* diagnostic) {
+  Json root;
+  if (!readJsonObjectFile(path, root, diagnostic, "shader_pass")) {
+    return std::nullopt;
+  }
+  return parseShaderPassAssetDesc(root, path, packageDirectory(path), diagnostic);
+}
+
+bool parseResourceKind(std::string_view value, rendering::FrameGraphResourceKind& out) {
+  if (value == "color_texture") {
+    out = rendering::FrameGraphResourceKind::ColorTexture;
+  } else if (value == "depth_texture") {
+    out = rendering::FrameGraphResourceKind::DepthTexture;
+  } else if (value == "external_color") {
+    out = rendering::FrameGraphResourceKind::ExternalColor;
+  } else if (value == "external_depth") {
+    out = rendering::FrameGraphResourceKind::ExternalDepth;
+  } else if (value == "backbuffer") {
+    out = rendering::FrameGraphResourceKind::Backbuffer;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+std::string resourceKindName(rendering::FrameGraphResourceKind kind) {
+  switch (kind) {
+    case rendering::FrameGraphResourceKind::ColorTexture:
+      return "color_texture";
+    case rendering::FrameGraphResourceKind::DepthTexture:
+      return "depth_texture";
+    case rendering::FrameGraphResourceKind::ExternalColor:
+      return "external_color";
+    case rendering::FrameGraphResourceKind::ExternalDepth:
+      return "external_depth";
+    case rendering::FrameGraphResourceKind::Backbuffer:
+      return "backbuffer";
+  }
+  return "color_texture";
+}
+
+bool parsePassKind(std::string_view value, rendering::FrameGraphPassKind& out) {
+  if (value == "scene") {
+    out = rendering::FrameGraphPassKind::Scene;
+  } else if (value == "builtin") {
+    out = rendering::FrameGraphPassKind::Builtin;
+  } else if (value == "shader") {
+    out = rendering::FrameGraphPassKind::Shader;
+  } else if (value == "copy" || value == "blit") {
+    out = rendering::FrameGraphPassKind::Copy;
+  } else if (value == "scene_mask") {
+    out = rendering::FrameGraphPassKind::SceneMask;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+std::string passKindName(rendering::FrameGraphPassKind kind) {
+  switch (kind) {
+    case rendering::FrameGraphPassKind::Scene:
+      return "scene";
+    case rendering::FrameGraphPassKind::Builtin:
+      return "builtin";
+    case rendering::FrameGraphPassKind::Shader:
+      return "shader";
+    case rendering::FrameGraphPassKind::Copy:
+      return "copy";
+    case rendering::FrameGraphPassKind::SceneMask:
+      return "scene_mask";
+  }
+  return "shader";
+}
+
+bool readStringArray(const Json& value,
+                     std::vector<std::string>& out,
+                     std::string_view section,
+                     std::string* diagnostic) {
+  if (!value.is_array()) {
+    return fail(diagnostic, std::string(section) + " must be an array");
+  }
+  for (const Json& entry : value) {
+    if (!entry.is_string()) {
+      return fail(diagnostic, std::string(section) + " entries must be strings");
+    }
+    std::string text = entry.get<std::string>();
+    if (text.empty()) {
+      return fail(diagnostic, std::string(section) + " entries must not be empty");
+    }
+    out.push_back(std::move(text));
+  }
+  return true;
+}
+
+std::optional<rendering::FrameGraphDesc> parseFrameGraphDesc(
+    const Json& root,
+    std::string* diagnostic) {
+  const auto version_it = root.find("version");
+  if (version_it == root.end() ||
+      (!version_it->is_number_integer() && !version_it->is_number_unsigned()) ||
+      version_it->get<int>() != 1) {
+    fail(diagnostic, "render_graph version must be integer 1");
+    return std::nullopt;
+  }
+  if (!fieldAllowed(root,
+                    {"version", "enabled", "resources", "passes", "output_resource"},
+                    "render_graph",
+                    diagnostic)) {
+    return std::nullopt;
+  }
+
+  rendering::FrameGraphDesc desc{};
+  desc.output_resource = root.value("output_resource",
+                                    std::string(rendering::kFrameGraphCameraColor));
+  desc.enabled = root.value("enabled", true);
+
+  if (const auto resources = root.find("resources"); resources != root.end()) {
+    if (!resources->is_array()) {
+      fail(diagnostic, "render_graph.resources must be an array");
+      return std::nullopt;
+    }
+    for (const Json& resource : *resources) {
+      if (!resource.is_object() ||
+          !fieldAllowed(resource,
+                        {"name",
+                         "kind",
+                         "scale",
+                         "size",
+                         "width",
+                         "height",
+                         "format",
+                         "history_count"},
+                        "render_graph.resource",
+                        diagnostic)) {
+        return std::nullopt;
+      }
+      rendering::FrameGraphResourceDesc parsed{};
+      if (!readRequiredString(resource, "name", parsed.name, diagnostic)) {
+        return std::nullopt;
+      }
+      const std::string kind = resource.value("kind", std::string("color_texture"));
+      if (!parseResourceKind(kind, parsed.kind)) {
+        fail(diagnostic, "unknown render_graph resource kind: " + kind);
+        return std::nullopt;
+      }
+      if (const auto format = resource.find("format"); format != resource.end()) {
+        if (!format->is_string() ||
+            !parseTextureFormat(format->get<std::string>(), parsed.format)) {
+          fail(diagnostic, "unknown render_graph resource format");
+          return std::nullopt;
+        }
+      }
+      if (const auto scale = resource.find("scale"); scale != resource.end()) {
+        if (!scale->is_array() || scale->size() != 2u ||
+            !(*scale)[0].is_number() || !(*scale)[1].is_number()) {
+          fail(diagnostic, "render_graph resource scale must be [width, height]");
+          return std::nullopt;
+        }
+        parsed.size_mode = rendering::FrameGraphResourceSizeMode::CameraRelative;
+        parsed.width_scale = (*scale)[0].get<float>();
+        parsed.height_scale = (*scale)[1].get<float>();
+      }
+      if (const auto size = resource.find("size"); size != resource.end()) {
+        if (!size->is_array() || size->size() != 2u ||
+            !(*size)[0].is_number_unsigned() || !(*size)[1].is_number_unsigned()) {
+          fail(diagnostic, "render_graph resource size must be [width, height]");
+          return std::nullopt;
+        }
+        parsed.size_mode = rendering::FrameGraphResourceSizeMode::Absolute;
+        parsed.width = (*size)[0].get<uint32_t>();
+        parsed.height = (*size)[1].get<uint32_t>();
+      }
+      if (const auto width = resource.find("width"); width != resource.end()) {
+        if (!width->is_number_unsigned()) {
+          fail(diagnostic, "render_graph resource width must be unsigned");
+          return std::nullopt;
+        }
+        parsed.size_mode = rendering::FrameGraphResourceSizeMode::Absolute;
+        parsed.width = width->get<uint32_t>();
+      }
+      if (const auto height = resource.find("height"); height != resource.end()) {
+        if (!height->is_number_unsigned()) {
+          fail(diagnostic, "render_graph resource height must be unsigned");
+          return std::nullopt;
+        }
+        parsed.size_mode = rendering::FrameGraphResourceSizeMode::Absolute;
+        parsed.height = height->get<uint32_t>();
+      }
+      if (const auto history = resource.find("history_count"); history != resource.end()) {
+        if (!history->is_number_unsigned()) {
+          fail(diagnostic, "render_graph resource history_count must be unsigned");
+          return std::nullopt;
+        }
+        parsed.history_count = history->get<uint32_t>();
+      }
+      desc.resources.push_back(std::move(parsed));
+    }
+  }
+
+  const auto passes = root.find("passes");
+  if (passes == root.end() || !passes->is_array()) {
+    fail(diagnostic, "render_graph requires array field: passes");
+    return std::nullopt;
+  }
+  for (const Json& pass : *passes) {
+    if (!pass.is_object() ||
+        !fieldAllowed(pass,
+                      {"name",
+                       "kind",
+                       "builtin",
+                       "builtin_pass",
+                       "shader_pass",
+                       "shader_pass_key",
+                       "render_tags",
+                       "inputs",
+                       "outputs",
+                       "params",
+                       "enabled",
+                       "clear",
+                       "clear_depth",
+                       "clear_color"},
+                      "render_graph.pass",
+                      diagnostic)) {
+      return std::nullopt;
+    }
+    rendering::FrameGraphPassDesc parsed{};
+    if (!readRequiredString(pass, "name", parsed.name, diagnostic)) {
+      return std::nullopt;
+    }
+    const std::string kind = pass.value("kind", std::string("shader"));
+    if (!parsePassKind(kind, parsed.kind)) {
+      fail(diagnostic, "unknown render_graph pass kind: " + kind);
+      return std::nullopt;
+    }
+    parsed.enabled = pass.value("enabled", true);
+    parsed.clear = pass.value("clear", false);
+    parsed.clear_depth = pass.value("clear_depth", false);
+    if (const auto color = pass.find("clear_color"); color != pass.end() &&
+        !parseColorValue(*color, parsed.clear_color)) {
+      fail(diagnostic, "render_graph.pass.clear_color must be a four-number array");
+      return std::nullopt;
+    }
+    if (const auto builtin = pass.find("builtin"); builtin != pass.end()) {
+      if (!builtin->is_string()) {
+        fail(diagnostic, "render_graph.pass.builtin must be a string");
+        return std::nullopt;
+      }
+      parsed.builtin_pass = builtin->get<std::string>();
+    }
+    if (const auto builtin = pass.find("builtin_pass"); builtin != pass.end()) {
+      if (!builtin->is_string()) {
+        fail(diagnostic, "render_graph.pass.builtin_pass must be a string");
+        return std::nullopt;
+      }
+      parsed.builtin_pass = builtin->get<std::string>();
+    }
+    if (const auto shader = pass.find("shader_pass"); shader != pass.end()) {
+      if (!shader->is_string()) {
+        fail(diagnostic, "render_graph.pass.shader_pass must be a string");
+        return std::nullopt;
+      }
+      parsed.shader_pass_key = shader->get<std::string>();
+    }
+    if (const auto shader = pass.find("shader_pass_key"); shader != pass.end()) {
+      if (!shader->is_string()) {
+        fail(diagnostic, "render_graph.pass.shader_pass_key must be a string");
+        return std::nullopt;
+      }
+      parsed.shader_pass_key = shader->get<std::string>();
+    }
+    if (!parsed.shader_pass_key.empty() &&
+        !AssetRegistry::isValidAssetKey(parsed.shader_pass_key)) {
+      fail(diagnostic,
+           "invalid shader pass asset key '" + parsed.shader_pass_key + "': " +
+               AssetRegistry::assetKeyValidationError(parsed.shader_pass_key));
+      return std::nullopt;
+    }
+    if (const auto tags = pass.find("render_tags"); tags != pass.end() &&
+        !readStringArray(*tags, parsed.render_tags, "render_graph.pass.render_tags", diagnostic)) {
+      return std::nullopt;
+    }
+    if (const auto inputs = pass.find("inputs"); inputs != pass.end() &&
+        !readStringMap(*inputs, parsed.inputs, "render_graph.pass.inputs", diagnostic)) {
+      return std::nullopt;
+    }
+    if (const auto outputs = pass.find("outputs"); outputs != pass.end() &&
+        !readStringMap(*outputs, parsed.outputs, "render_graph.pass.outputs", diagnostic)) {
+      return std::nullopt;
+    }
+    if (const auto params = pass.find("params"); params != pass.end() &&
+        !readParams(*params, parsed.params, "render_graph.pass.params", diagnostic)) {
+      return std::nullopt;
+    }
+    desc.passes.push_back(std::move(parsed));
+  }
+
+  rendering::FrameGraphValidationResult validation = rendering::validateFrameGraphDesc(desc);
+  if (!validation.valid()) {
+    fail(diagnostic, "invalid render_graph: " + validation.diagnostics.front());
+    return std::nullopt;
+  }
+  return desc;
+}
+
+std::optional<rendering::FrameGraphDesc> loadFrameGraphDesc(
+    const std::filesystem::path& path,
+    std::string* diagnostic) {
+  Json root;
+  if (!readJsonObjectFile(path, root, diagnostic, "render_graph")) {
+    return std::nullopt;
+  }
+  return parseFrameGraphDesc(root, diagnostic);
+}
+
+Json shaderPassToJson(const rendering::ShaderPassAssetDesc& pass) {
+  Json root{
+      {"version", 1},
+      {"fullscreen", pass.fullscreen},
+      {"pipeline",
+       Json{
+           {"name", pass.pipeline.name},
+           {"vertex", pass.pipeline.vertex_shader_path.lexically_normal().generic_string()},
+           {"fragment", pass.pipeline.fragment_shader_path.lexically_normal().generic_string()},
+           {"vertex_entry", pass.pipeline.vertex_entry_point},
+           {"fragment_entry", pass.pipeline.fragment_entry_point},
+           {"defines", pass.pipeline.defines},
+       }},
+      {"params", paramsToJson(pass.params)},
+      {"textures", pass.textures},
+      {"render_state",
+       Json{
+           {"depth_test", pass.depth_test},
+           {"depth_write", pass.depth_write},
+           {"blend_enabled", pass.blend_enabled},
+           {"blend_mode", blendModeName(pass.blend_mode)},
+       }},
+  };
+  return root;
+}
+
+Json frameGraphToJson(const rendering::FrameGraphDesc& graph) {
+  Json root{
+      {"version", 1},
+      {"enabled", graph.enabled},
+      {"output_resource", graph.output_resource},
+      {"resources", Json::array()},
+      {"passes", Json::array()},
+  };
+  for (const rendering::FrameGraphResourceDesc& resource : graph.resources) {
+    Json item{
+        {"name", resource.name},
+        {"kind", resourceKindName(resource.kind)},
+        {"format", textureFormatName(resource.format)},
+        {"history_count", resource.history_count},
+    };
+    if (resource.size_mode == rendering::FrameGraphResourceSizeMode::Absolute) {
+      item["size"] = Json::array({resource.width, resource.height});
+    } else {
+      item["scale"] = Json::array({resource.width_scale, resource.height_scale});
+    }
+    root["resources"].push_back(std::move(item));
+  }
+  for (const rendering::FrameGraphPassDesc& pass : graph.passes) {
+    Json item{
+        {"name", pass.name},
+        {"kind", passKindName(pass.kind)},
+        {"enabled", pass.enabled},
+        {"inputs", pass.inputs},
+        {"outputs", pass.outputs},
+        {"params", paramsToJson(pass.params)},
+        {"clear", pass.clear},
+        {"clear_depth", pass.clear_depth},
+        {"clear_color", Json::array({pass.clear_color.r,
+                                      pass.clear_color.g,
+                                      pass.clear_color.b,
+                                      pass.clear_color.a})},
+    };
+    if (!pass.builtin_pass.empty()) {
+      item["builtin"] = pass.builtin_pass;
+    }
+    if (!pass.shader_pass_key.empty()) {
+      item["shader_pass"] = pass.shader_pass_key;
+    }
+    if (!pass.render_tags.empty()) {
+      item["render_tags"] = pass.render_tags;
+    }
+    root["passes"].push_back(std::move(item));
+  }
+  return root;
+}
+
 bool readJson(const std::filesystem::path& path, Json& out, std::string* diagnostic) {
   std::ifstream stream(path);
   if (!stream) {
@@ -233,6 +1028,12 @@ bool keyAlreadyExists(const AssetRegistry& assets,
   }
   if (type == "gltf_scene") {
     return assets.findGltfSceneAsset(key) != nullptr;
+  }
+  if (type == "shader_pass") {
+    return assets.findShaderPass(key) != nullptr;
+  }
+  if (type == "render_graph") {
+    return assets.findFrameGraph(key) != nullptr;
   }
   if (type == "animation_clip") {
     return assets.findAnimationClip(key) != nullptr;
@@ -297,6 +1098,20 @@ bool copyAssetTo(AssetRegistry& target,
     const GltfSceneAsset* scene = source.findGltfSceneAsset(asset.key);
     if (scene == nullptr || !target.registerGltfSceneAsset(asset.key, *scene)) {
       return fail(diagnostic, "failed to commit glTF scene: " + asset.key);
+    }
+    return true;
+  }
+  if (asset.type == "shader_pass") {
+    const rendering::ShaderPassAssetDesc* pass = source.findShaderPass(asset.key);
+    if (pass == nullptr || !target.registerShaderPass(asset.key, *pass)) {
+      return fail(diagnostic, "failed to commit shader pass: " + asset.key);
+    }
+    return true;
+  }
+  if (asset.type == "render_graph") {
+    const rendering::FrameGraphDesc* graph = source.findFrameGraph(asset.key);
+    if (graph == nullptr || !target.registerFrameGraph(asset.key, *graph)) {
+      return fail(diagnostic, "failed to commit render graph: " + asset.key);
     }
     return true;
   }
@@ -451,6 +1266,46 @@ bool importEntry(AssetRegistry& assets,
     return true;
   }
 
+  if (type == "shader_pass") {
+    if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
+      return false;
+    }
+    auto pass = loadShaderPassAssetDesc(source_path, diagnostic);
+    if (!pass.has_value() || !assets.registerShaderPass(key, std::move(*pass))) {
+      return fail(diagnostic, diagnostic != nullptr && !diagnostic->empty()
+                                  ? *diagnostic
+                                  : "failed to import shader pass: " + source_path.string());
+    }
+    addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
+    return true;
+  }
+
+  if (type == "render_graph") {
+    if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
+      return false;
+    }
+    auto graph = loadFrameGraphDesc(source_path, diagnostic);
+    if (!graph.has_value() || !assets.registerFrameGraph(key, std::move(*graph))) {
+      return fail(diagnostic, diagnostic != nullptr && !diagnostic->empty()
+                                  ? *diagnostic
+                                  : "failed to import render graph: " + source_path.string());
+    }
+    addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
+    return true;
+  }
+
   if (type == "particle_effect") {
     if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
       return false;
@@ -558,6 +1413,12 @@ std::string importerVersionForType(std::string_view type) {
   if (type == "material") {
     return "material-loader-v2";
   }
+  if (type == "shader_pass") {
+    return "shader-pass-v1";
+  }
+  if (type == "render_graph") {
+    return "render-graph-v1";
+  }
   if (type == "particle_effect") {
     return "particle-effect-v3";
   }
@@ -589,41 +1450,49 @@ Json packageEntryCacheRecord(const Json& entry,
       if (!ec) {
         record["source_mtime"] = mtime.time_since_epoch().count();
       }
-    } else if (diagnostic != nullptr) {
-      *diagnostic = "failed to stat package source: " + source.string();
     }
+    auto append_shader_dependency =
+        [&](const char* label, const std::filesystem::path& shader_path) {
+      if (shader_path.empty()) {
+        return;
+      }
+      Json dependency{{"label", label},
+                      {"path", shader_path.lexically_normal().generic_string()}};
+      std::error_code shader_ec;
+      if (std::filesystem::exists(shader_path, shader_ec)) {
+        dependency["size"] =
+            static_cast<uint64_t>(std::filesystem::file_size(shader_path, shader_ec));
+        const auto mtime = std::filesystem::last_write_time(shader_path, shader_ec);
+        if (!shader_ec) {
+          dependency["mtime"] = mtime.time_since_epoch().count();
+        }
+        if (auto hash = hashFile(shader_path); hash.has_value()) {
+          dependency["hash"] = *hash;
+        } else if (diagnostic != nullptr) {
+          *diagnostic = "failed to hash shader dependency: " + shader_path.string();
+        }
+      } else if (diagnostic != nullptr) {
+        *diagnostic = "failed to stat shader dependency: " + shader_path.string();
+      }
+      record["dependencies"].push_back(std::move(dependency));
+    };
     if (type == "material") {
       std::string material_diagnostic;
       if (auto material = loadMaterialAssetDesc(source, &material_diagnostic);
           material.has_value()) {
-        auto append_shader_dependency =
-            [&](const char* label, const std::filesystem::path& shader_path) {
-          if (shader_path.empty()) {
-            return;
-          }
-          Json dependency{{"label", label},
-                          {"path", shader_path.lexically_normal().generic_string()}};
-          std::error_code shader_ec;
-          if (std::filesystem::exists(shader_path, shader_ec)) {
-            dependency["size"] =
-                static_cast<uint64_t>(std::filesystem::file_size(shader_path, shader_ec));
-            const auto mtime = std::filesystem::last_write_time(shader_path, shader_ec);
-            if (!shader_ec) {
-              dependency["mtime"] = mtime.time_since_epoch().count();
-            }
-            if (auto hash = hashFile(shader_path); hash.has_value()) {
-              dependency["hash"] = *hash;
-            }
-          } else if (diagnostic != nullptr) {
-            *diagnostic = "failed to stat material shader dependency: " +
-                          shader_path.string();
-          }
-          record["dependencies"].push_back(std::move(dependency));
-        };
         append_shader_dependency("vertex", material->pipeline.vertex_shader_path);
         append_shader_dependency("fragment", material->pipeline.fragment_shader_path);
       } else if (diagnostic != nullptr && !material_diagnostic.empty()) {
         *diagnostic = material_diagnostic;
+      }
+    } else if (type == "shader_pass") {
+      std::string pass_diagnostic;
+      if (auto pass = loadShaderPassAssetDesc(source, &pass_diagnostic);
+          pass.has_value()) {
+        append_shader_dependency("vertex", pass->pipeline.vertex_shader_path);
+        append_shader_dependency("fragment", pass->pipeline.fragment_shader_path);
+      } else if (diagnostic != nullptr && !pass_diagnostic.empty()) {
+        *diagnostic = pass_diagnostic;
       }
     }
   }
@@ -666,7 +1535,9 @@ std::string packageAssetBlobKey(std::string_view package_key,
 
 void assignPackageBlobKeys(AssetPackageHandle& handle, std::string_view package_key) {
   for (auto& asset : handle.assets) {
-    if (asset.type == "environment_map") {
+    if (asset.type == "environment_map" ||
+        asset.type == "shader_pass" ||
+        asset.type == "render_graph") {
       asset.cache_blob_key.clear();
       continue;
     }
@@ -690,6 +1561,9 @@ bool writePackageAssetBlob(AssetCache& cache,
                            const AssetPackageLoadedAsset& asset,
                            std::string* diagnostic) {
   if (asset.type == "environment_map") {
+    return true;
+  }
+  if (asset.type == "shader_pass" || asset.type == "render_graph") {
     return true;
   }
   if (asset.cache_blob_key.empty()) {
@@ -754,6 +1628,16 @@ Json packageCacheManifest(const AssetPackageHandle& handle,
     if (asset.type == "environment_map") {
       if (const EnvironmentMapAsset* environment = assets.findEnvironmentMap(asset.key)) {
         entry["path"] = environment->path.lexically_normal().generic_string();
+      }
+    }
+    if (asset.type == "shader_pass") {
+      if (const rendering::ShaderPassAssetDesc* pass = assets.findShaderPass(asset.key)) {
+        entry["asset"] = shaderPassToJson(*pass);
+      }
+    }
+    if (asset.type == "render_graph") {
+      if (const rendering::FrameGraphDesc* graph = assets.findFrameGraph(asset.key)) {
+        entry["asset"] = frameGraphToJson(*graph);
       }
     }
     if (asset.type == "gltf_scene") {
@@ -848,6 +1732,46 @@ bool restoreCachedAsset(AssetCache& cache,
     const std::filesystem::path path = entry.value("path", std::string{});
     if (!staging.registerEnvironmentMap(record.key, EnvironmentMapAsset{.path = path})) {
       return fail(diagnostic, "failed to restore cached environment map: " + record.key);
+    }
+    addLoaded(handle, record.type, record.key);
+    logAssetPackageCacheAssetDiag(manifest_path,
+                                  record.type,
+                                  record.key,
+                                  record.blob_type,
+                                  restore_start,
+                                  core::SteadyClock::now());
+    return true;
+  }
+  if (record.type == "shader_pass") {
+    const auto asset_it = entry.find("asset");
+    if (asset_it == entry.end() || !asset_it->is_object()) {
+      return fail(diagnostic, "cached shader pass is missing inline asset: " + record.key);
+    }
+    auto pass = parseShaderPassAssetDesc(
+        *asset_it,
+        manifest_path,
+        packageDirectory(manifest_path),
+        diagnostic);
+    if (!pass.has_value() || !staging.registerShaderPass(record.key, std::move(*pass))) {
+      return fail(diagnostic, "failed to restore cached shader pass: " + record.key);
+    }
+    addLoaded(handle, record.type, record.key);
+    logAssetPackageCacheAssetDiag(manifest_path,
+                                  record.type,
+                                  record.key,
+                                  record.blob_type,
+                                  restore_start,
+                                  core::SteadyClock::now());
+    return true;
+  }
+  if (record.type == "render_graph") {
+    const auto asset_it = entry.find("asset");
+    if (asset_it == entry.end() || !asset_it->is_object()) {
+      return fail(diagnostic, "cached render graph is missing inline asset: " + record.key);
+    }
+    auto graph = parseFrameGraphDesc(*asset_it, diagnostic);
+    if (!graph.has_value() || !staging.registerFrameGraph(record.key, std::move(*graph))) {
+      return fail(diagnostic, "failed to restore cached render graph: " + record.key);
     }
     addLoaded(handle, record.type, record.key);
     logAssetPackageCacheAssetDiag(manifest_path,
@@ -1090,11 +2014,16 @@ std::optional<AssetPackageHandle> importAssetPackage(AssetRegistry& assets,
       hashFile(manifest_path).value_or(hashString(manifest_path.lexically_normal().generic_string()));
   logAssetPackageDiag(manifest_path, "manifest hash", stage_start, core::SteadyClock::now());
   stage_start = core::SteadyClock::now();
+  std::string package_cache_diagnostic;
   const std::string package_cache_key =
       packageCacheKey(manifest_path,
                       root,
                       manifest_hash,
-                      nullptr);
+                      &package_cache_diagnostic);
+  if (!package_cache_diagnostic.empty()) {
+    fail(diagnostic, package_cache_diagnostic);
+    return std::nullopt;
+  }
   logAssetPackageDiag(manifest_path, "cache key build", stage_start, core::SteadyClock::now());
 
   if (cache.enabled()) {
@@ -1312,6 +2241,10 @@ bool unloadAssetPackage(AssetRegistry& assets, const AssetPackageHandle& package
       removed_any = assets.unregisterEnvironmentMap(it->key) || removed_any;
     } else if (it->type == "gltf_scene") {
       removed_any = assets.unregisterGltfSceneAsset(it->key) || removed_any;
+    } else if (it->type == "shader_pass") {
+      removed_any = assets.unregisterShaderPass(it->key) || removed_any;
+    } else if (it->type == "render_graph") {
+      removed_any = assets.unregisterFrameGraph(it->key) || removed_any;
     } else if (it->type == "animation_clip") {
       removed_any = assets.unregisterAnimationClip(it->key) || removed_any;
     } else if (it->type == "skeleton") {

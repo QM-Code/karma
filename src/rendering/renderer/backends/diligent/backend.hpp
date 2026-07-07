@@ -54,6 +54,7 @@ struct PostProcessTexture {
   Diligent::RefCntAutoPtr<Diligent::ITexture> texture;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> srv;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> rtv;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> dsv;
   int width = 0;
   int height = 0;
 };
@@ -66,6 +67,24 @@ struct PostProcessPassResources {
   Diligent::IShaderResourceVariable* bloom_var = nullptr;
   Diligent::IShaderResourceVariable* history_var = nullptr;
   Diligent::IShaderResourceVariable* sampler_var = nullptr;
+};
+
+struct FrameGraphShaderPassResources {
+  std::string cache_key;
+  Diligent::TEXTURE_FORMAT rtv_format = Diligent::TEX_FORMAT_UNKNOWN;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
+  std::unordered_map<std::string, Diligent::IShaderResourceVariable*> texture_vars;
+  Diligent::IShaderResourceVariable* sampler_var = nullptr;
+};
+
+struct FrameGraphSceneMaskResources {
+  std::string cache_key;
+  Diligent::TEXTURE_FORMAT rtv_format = Diligent::TEX_FORMAT_UNKNOWN;
+  Diligent::TEXTURE_FORMAT dsv_format = Diligent::TEX_FORMAT_UNKNOWN;
+  rendering::InstanceGpuLayout layout = rendering::InstanceGpuLayout::Matrix4x4Params;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
 };
 
 enum class MaterialPipelineKind : uint32_t {
@@ -143,7 +162,7 @@ class DiligentBackend final : public Backend {
   void retireInstance(rendering::InstanceId instance) override;
   void renderLayer(rendering::LayerId layer,
                    rendering::RenderTargetId target,
-                   const rendering::PostProcessSettings& post_process) override;
+                   const rendering::FrameGraphDesc& frame_graph) override;
   void drawLine(const math::Vec3& start, const math::Vec3& end,
                 const math::Color& color, bool depth_test, float thickness) override;
 
@@ -334,6 +353,7 @@ class DiligentBackend final : public Backend {
     rendering::MeshId mesh = rendering::kInvalidMesh;
     rendering::MaterialId material = rendering::kInvalidMaterial;
     std::vector<rendering::DrawMaterialBinding> materials;
+    std::vector<std::string> render_tags;
     rendering::DeformationId deformation = rendering::kInvalidDeformation;
     glm::mat4 transform{1.0f};
     glm::vec4 params{0.0f};
@@ -368,6 +388,7 @@ class DiligentBackend final : public Backend {
     rendering::MeshId mesh = rendering::kInvalidMesh;
     rendering::MaterialId material = rendering::kInvalidMaterial;
     std::vector<rendering::DrawMaterialBinding> materials;
+    std::vector<std::string> render_tags;
     std::vector<LodRecord> lods;
     rendering::InstanceGpuLayout gpu_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
     std::vector<rendering::InstanceData> instances;
@@ -754,6 +775,28 @@ class DiligentBackend final : public Backend {
                           int width,
                           int height,
                           bool history_valid);
+  bool executeFrameGraphScreenPasses(
+      const rendering::FrameGraphDesc& graph,
+      rendering::LayerId layer,
+      Diligent::ITexture* camera_color_texture,
+      Diligent::ITextureView* camera_color_srv,
+      Diligent::ITextureView* camera_depth_srv,
+      Diligent::ITextureView* camera_color_rtv,
+      const DrawConstants& base_constants,
+      int width,
+      int height,
+      Diligent::TEXTURE_FORMAT color_format,
+      rendering::RenderTargetId target);
+  bool ensureFrameGraphShaderPassPipeline(
+      const rendering::ShaderPassAssetDesc& asset,
+      const rendering::FrameGraphPassDesc& pass,
+      Diligent::TEXTURE_FORMAT color_format,
+      FrameGraphShaderPassResources& out_pass);
+  bool ensureFrameGraphSceneMaskPipeline(
+      Diligent::TEXTURE_FORMAT color_format,
+      Diligent::TEXTURE_FORMAT depth_format,
+      rendering::InstanceGpuLayout layout,
+      FrameGraphSceneMaskResources& out_pass);
   Diligent::ITextureView* runBloomChain(Diligent::ITextureView* source_srv,
                                         int width,
                                         int height,
@@ -1216,6 +1259,13 @@ class DiligentBackend final : public Backend {
   Diligent::TEXTURE_FORMAT post_process_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   int post_process_history_index_ = 0;
   bool post_process_history_valid_ = false;
+  std::unordered_map<std::string, PostProcessTexture> frame_graph_color_textures_;
+  std::unordered_map<std::string, PostProcessTexture> frame_graph_depth_textures_;
+  std::unordered_map<std::string, FrameGraphShaderPassResources> frame_graph_shader_passes_;
+  std::unordered_map<std::string, FrameGraphSceneMaskResources> frame_graph_scene_mask_passes_;
+  PostProcessTexture frame_graph_source_copy_;
+  Diligent::TEXTURE_FORMAT frame_graph_source_copy_format_ =
+      Diligent::TEX_FORMAT_UNKNOWN;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_base_color_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_normal_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_metallic_roughness_tex_;

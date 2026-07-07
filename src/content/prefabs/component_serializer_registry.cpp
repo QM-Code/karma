@@ -141,6 +141,29 @@ bool readString(const Json& object, std::string_view key, std::string& out) {
   return true;
 }
 
+bool readStringVector(const Json& object, std::string_view key, std::vector<std::string>& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_array()) {
+    return false;
+  }
+  out.clear();
+  out.reserve(it->size());
+  for (const Json& entry : *it) {
+    if (!entry.is_string()) {
+      return false;
+    }
+    std::string value = entry.get<std::string>();
+    if (value.empty()) {
+      return false;
+    }
+    out.push_back(std::move(value));
+  }
+  return true;
+}
+
 bool readFloat(const Json& object, std::string_view key, float& out) {
   const auto it = object.find(key);
   if (it == object.end()) {
@@ -1252,6 +1275,23 @@ std::optional<components::VisibilityComponent> deserializeVisibility(const Json&
   if (!readBool(json, "visible", component.visible) ||
       !readUint32(json, "render_layer_mask", component.render_layer_mask) ||
       !readUint32(json, "collision_layer_mask", component.collision_layer_mask)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeRenderTags(const components::RenderTagsComponent& component) {
+  return Json{
+      {"tags", component.tags},
+  };
+}
+
+std::optional<components::RenderTagsComponent> deserializeRenderTags(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::RenderTagsComponent component{};
+  if (!readStringVector(json, "tags", component.tags)) {
     return std::nullopt;
   }
   return component;
@@ -2536,6 +2576,8 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "LightPulseComponent", serializeLightPulse, deserializeLightPulse);
   registerComponent<components::VisibilityComponent>(
       registry, "VisibilityComponent", serializeVisibility, deserializeVisibility);
+  registerComponent<components::RenderTagsComponent>(
+      registry, "RenderTagsComponent", serializeRenderTags, deserializeRenderTags);
   registerComponent<components::TerrainComponent>(
       registry, "TerrainComponent", serializeTerrain, deserializeTerrain);
   registerComponent<components::ColliderComponent>(

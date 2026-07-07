@@ -51,7 +51,7 @@ Current handwritten generated-reference pages:
 
 - `docs/api/mainpage.md`: generated API entry point.
 - `docs/api/animation.md`: animation, skinning, and morph-target runtime flow.
-- `docs/api/rendering.md`: renderer submission, camera post-process profiles,
+- `docs/api/rendering.md`: renderer submission, camera frame graphs,
   backend shader assets, and shadow authoring.
 - `docs/api/groups.dox`: Doxygen module/group definitions.
 

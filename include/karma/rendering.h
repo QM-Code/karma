@@ -130,17 +130,17 @@ struct TextureUploadData {
 namespace karma::rendering {
 
 /// \ingroup karma_rendering
-/// Renderer-owned image-space effects applied after scene rendering.
+/// Renderer-owned image-space effects used by the current Diligent graph bridge.
 ///
 /// All effects are opt-in. Backends may implement individual effects with
 /// different quality/performance tradeoffs, but unsupported features should be
 /// ignored rather than changing scene rendering semantics.
 ///
-/// Settings are normally registered in `assets::AssetRegistry` and selected
-/// by `CameraComponent::post_process_profile_key`. `RenderSystem` resolves the
-/// active settings per camera pass before calling the backend.
+/// New code should author these options as frame graph pass params. The
+/// Diligent backend still maps those graph params into this structure while the
+/// graph runtime replaces the older monolithic post-process path.
 struct PostProcessSettings {
-  /// Master switch for the profile. When false, backends skip post processing.
+  /// Master switch for the built-in post-process pass.
   bool enabled = true;
 
   /// Enables bloom prefilter/downsample/upsample composition.
@@ -386,6 +386,7 @@ struct DrawItem {
   MeshId mesh = kInvalidMesh;
   MaterialId material = kInvalidMaterial;
   std::vector<DrawMaterialBinding> materials;
+  std::vector<std::string> render_tags;
   DeformationId deformation = kInvalidDeformation;
   glm::mat4 transform{1.0f};
   glm::vec4 instance_params{0.0f};
@@ -417,6 +418,7 @@ struct InstancedDrawItem {
   MeshId mesh = kInvalidMesh;
   MaterialId material = kInvalidMaterial;
   std::vector<DrawMaterialBinding> materials;
+  std::vector<std::string> render_tags;
   std::vector<InstancedLodDrawDesc> lods;
   InstanceGpuLayout gpu_layout = InstanceGpuLayout::Matrix4x4Params;
   std::span<const InstanceData> instances;
@@ -588,6 +590,122 @@ using MaterialParameterValue =
                  glm::vec3,
                  glm::vec4,
                  std::string>;
+
+/// Conventional asset key for the engine default renderer frame graph.
+inline constexpr std::string_view kDefaultFrameGraphKey = "default";
+/// Built-in graph resource name for the active camera color target.
+inline constexpr std::string_view kFrameGraphCameraColor = "camera_color";
+/// Built-in graph resource name for the active camera depth target.
+inline constexpr std::string_view kFrameGraphCameraDepth = "camera_depth";
+/// Built-in graph resource name for the swapchain backbuffer.
+inline constexpr std::string_view kFrameGraphBackbuffer = "backbuffer";
+
+/// Renderer frame graph resource class.
+enum class FrameGraphResourceKind : uint32_t {
+  ColorTexture = 0,
+  DepthTexture = 1,
+  ExternalColor = 2,
+  ExternalDepth = 3,
+  Backbuffer = 4,
+};
+
+/// Sizing rule for graph-owned resources.
+enum class FrameGraphResourceSizeMode : uint32_t {
+  CameraRelative = 0,
+  Absolute = 1,
+};
+
+/// Texture or external target declared by a renderer frame graph.
+struct FrameGraphResourceDesc {
+  std::string name;
+  FrameGraphResourceKind kind = FrameGraphResourceKind::ColorTexture;
+  FrameGraphResourceSizeMode size_mode = FrameGraphResourceSizeMode::CameraRelative;
+  TextureFormat format = TextureFormat::RGBA8;
+  float width_scale = 1.0f;
+  float height_scale = 1.0f;
+  uint32_t width = 0u;
+  uint32_t height = 0u;
+  uint32_t history_count = 0u;
+};
+
+/// Renderer frame graph pass class.
+enum class FrameGraphPassKind : uint32_t {
+  Scene = 0,
+  Builtin = 1,
+  Shader = 2,
+  Copy = 3,
+  SceneMask = 4,
+};
+
+/// One renderer frame graph pass with declared resource edges.
+struct FrameGraphPassDesc {
+  std::string name;
+  FrameGraphPassKind kind = FrameGraphPassKind::Shader;
+  std::string builtin_pass;
+  std::string shader_pass_key;
+  std::vector<std::string> render_tags;
+  std::unordered_map<std::string, std::string> inputs;
+  std::unordered_map<std::string, std::string> outputs;
+  std::unordered_map<std::string, MaterialParameterValue> params;
+  bool enabled = true;
+  bool clear = false;
+  bool clear_depth = false;
+  math::Color clear_color{0.0f, 0.0f, 0.0f, 1.0f};
+};
+
+/// Fullscreen or screen-space shader pass asset referenced by graph passes.
+struct ShaderPassAssetDesc {
+  std::string shader_pass_key;
+  MaterialPipelineDesc pipeline{};
+  std::unordered_map<std::string, MaterialParameterValue> params;
+  std::unordered_map<std::string, std::string> textures;
+  std::unordered_map<std::string, TextureId> texture_handles;
+  bool fullscreen = true;
+  bool depth_test = false;
+  bool depth_write = false;
+  bool blend_enabled = false;
+  MaterialDesc::BlendMode blend_mode = MaterialDesc::BlendMode::Alpha;
+  std::filesystem::path shader_pass_asset_path;
+};
+
+/// Renderer-owned frame graph selected by cameras.
+struct FrameGraphDesc {
+  std::string frame_graph_key;
+  std::vector<FrameGraphResourceDesc> resources;
+  std::vector<FrameGraphPassDesc> passes;
+  std::vector<ShaderPassAssetDesc> shader_pass_assets;
+  std::string output_resource = std::string(kFrameGraphCameraColor);
+  bool enabled = true;
+};
+
+/// Options for frame graph validation.
+struct FrameGraphValidationOptions {
+  bool require_shader_pass_keys = false;
+  std::vector<std::string> shader_pass_keys;
+};
+
+/// Result from renderer frame graph validation.
+struct FrameGraphValidationResult {
+  std::vector<std::string> diagnostics;
+
+  bool valid() const {
+    return diagnostics.empty();
+  }
+};
+
+/// Returns the engine's scene-only default frame graph.
+const FrameGraphDesc& defaultFrameGraphDesc();
+
+/// Validates resource declarations and pass dependencies for a frame graph.
+FrameGraphValidationResult validateFrameGraphDesc(
+    const FrameGraphDesc& graph,
+    const FrameGraphValidationOptions& options = {});
+
+/// Builds a default scene graph with a post-process param pass for legacy
+/// bloom/TAA/tone controls.
+FrameGraphDesc frameGraphFromPostProcessSettings(
+    const PostProcessSettings& settings,
+    std::string frame_graph_key = std::string(kDefaultFrameGraphKey));
 
 /// Shared material asset definition registered by key.
 struct MaterialAssetDesc {
@@ -1354,6 +1472,12 @@ struct RendererCommandStats {
   uint32_t total_points = 0;
 };
 
+/// CPU timing for one renderer graph-authored pass.
+struct RendererGraphPassTiming {
+  std::string name;
+  float ms = 0.0f;
+};
+
 /// \ingroup karma_rendering
 /// CPU-side renderer timing and resource-creation counters for the most recent
 /// completed backend frame.
@@ -1396,6 +1520,7 @@ struct RendererFrameTimingStats {
   uint32_t pipeline_creation_count = 0;
   uint32_t resize_events = 0;
   uint32_t skipped_presents = 0;
+  std::vector<RendererGraphPassTiming> graph_pass_timings;
 };
 
 /// \ingroup karma_rendering
@@ -1808,14 +1933,14 @@ class GraphicsDevice {
   void setParticleSystemStats(const ParticlePassStats& stats);
   /// Retires a renderer instance id.
   void retireInstance(InstanceId instance);
-  /// Renders one layer into a target with resolved post-process settings.
+  /// Renders one layer into a target with a resolved renderer frame graph.
   ///
   /// Normal applications let `RenderSystem` call this after resolving the
-  /// active camera profile. Custom render paths must pass the settings for that
-  /// specific camera pass; there is no backend-global post-process state API.
+  /// active camera graph. Custom render paths must pass the graph for that
+  /// specific camera pass; there is no backend-global frame graph state API.
   void renderLayer(LayerId layer,
                    RenderTargetId target,
-                   const PostProcessSettings& post_process);
+                   const FrameGraphDesc& frame_graph);
   /// Queues a debug line.
   void drawLine(const math::Vec3& start, const math::Vec3& end, const math::Color& color,
                 bool depth_test = true, float thickness = 1.0f);
@@ -1945,7 +2070,7 @@ struct RenderPrewarmHandle {
 ///
 /// `RenderSystem` resolves mesh/material keys, maintains shared renderer
 /// resources, extracts cameras/lights/environment, resolves camera-selected
-/// post-process profiles, submits offscreen camera passes, submits the primary
+/// frame graphs, submits offscreen camera passes, submits the primary
 /// camera pass, and cleans up renderer resources for destroyed entities.
 class RenderSystem {
  public:

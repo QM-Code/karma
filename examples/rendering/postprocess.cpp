@@ -14,7 +14,7 @@
 namespace karma::demo {
 namespace {
 
-constexpr const char* kPostProcessProfileKey = "diligentfx/postprocess";
+constexpr const char* kPostProcessFrameGraphKey = "diligentfx/postprocess";
 constexpr const char* kPostProcessSceneKey = "examples/rendering/damaged_helmet";
 
 glm::vec3 toGlm(const math::Vec3& v) {
@@ -220,7 +220,7 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
                                               .near_clip = std::max(0.01f, radius * 0.01f),
                                               .far_clip = std::max(100.0f, radius * 20.0f),
                                               .is_primary = true,
-                                              .post_process_profile_key = kPostProcessProfileKey,
+                                              .frame_graph_key = kPostProcessFrameGraphKey,
                                           });
   }
 
@@ -250,7 +250,9 @@ class DiligentFxPostProcessExample final : public app::GameInterface {
     settings.dof_focus_range = std::max(1.0f, radius * 2.2f);
     settings.dof_intensity = 0.35f;
     if (assets) {
-      assets->registerPostProcessProfile(kPostProcessProfileKey, settings);
+      assets->registerFrameGraph(
+          kPostProcessFrameGraphKey,
+          rendering::frameGraphFromPostProcessSettings(settings, kPostProcessFrameGraphKey));
     }
   }
 

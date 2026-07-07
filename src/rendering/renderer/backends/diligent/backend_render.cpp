@@ -26,6 +26,9 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -193,11 +196,142 @@ struct RenderLayerStageTiming {
   double ms = 0.0;
 };
 
+bool readBoolParam(const std::unordered_map<std::string, rendering::MaterialParameterValue>& params,
+                   std::string_view name,
+                   bool& out) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return false;
+  }
+  if (const auto* value = std::get_if<bool>(&it->second)) {
+    out = *value;
+    return true;
+  }
+  return false;
+}
+
+bool readFloatParam(const std::unordered_map<std::string, rendering::MaterialParameterValue>& params,
+                    std::string_view name,
+                    float& out) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return false;
+  }
+  if (const auto* value = std::get_if<float>(&it->second)) {
+    out = *value;
+    return true;
+  }
+  if (const auto* value = std::get_if<int32_t>(&it->second)) {
+    out = static_cast<float>(*value);
+    return true;
+  }
+  if (const auto* value = std::get_if<uint32_t>(&it->second)) {
+    out = static_cast<float>(*value);
+    return true;
+  }
+  return false;
+}
+
+rendering::PostProcessSettings postProcessSettingsFromFrameGraph(
+    const rendering::FrameGraphDesc& graph) {
+  rendering::PostProcessSettings settings{};
+  settings.enabled = graph.enabled;
+  if (!graph.enabled) {
+    return settings;
+  }
+
+  for (const rendering::FrameGraphPassDesc& pass : graph.passes) {
+    if (!pass.enabled) {
+      continue;
+    }
+    if (pass.kind == rendering::FrameGraphPassKind::Builtin) {
+      if (pass.builtin_pass == "bloom") {
+        settings.bloom_enabled = true;
+      } else if (pass.builtin_pass == "taa") {
+        settings.temporal_antialiasing_enabled = true;
+      }
+    }
+
+    readBoolParam(pass.params, "enabled", settings.enabled);
+    readBoolParam(pass.params, "bloom_enabled", settings.bloom_enabled);
+    readFloatParam(pass.params, "bloom_threshold", settings.bloom_threshold);
+    readFloatParam(pass.params, "bloom_intensity", settings.bloom_intensity);
+    readFloatParam(pass.params, "bloom_radius", settings.bloom_radius);
+    readBoolParam(pass.params, "tone_mapping_enabled", settings.tone_mapping_enabled);
+    readFloatParam(pass.params, "tone_exposure", settings.tone_exposure);
+    readFloatParam(pass.params, "tone_contrast", settings.tone_contrast);
+    readFloatParam(pass.params, "tone_saturation", settings.tone_saturation);
+    readBoolParam(pass.params, "ssao_enabled", settings.ssao_enabled);
+    readFloatParam(pass.params, "ssao_radius", settings.ssao_radius);
+    readFloatParam(pass.params, "ssao_intensity", settings.ssao_intensity);
+    readFloatParam(pass.params, "ssao_power", settings.ssao_power);
+    readBoolParam(pass.params,
+                  "screen_space_reflections_enabled",
+                  settings.screen_space_reflections_enabled);
+    readFloatParam(pass.params, "ssr_intensity", settings.ssr_intensity);
+    readFloatParam(pass.params, "ssr_max_roughness", settings.ssr_max_roughness);
+    readFloatParam(pass.params, "ssr_thickness", settings.ssr_thickness);
+    readBoolParam(pass.params,
+                  "temporal_antialiasing_enabled",
+                  settings.temporal_antialiasing_enabled);
+    readFloatParam(pass.params, "taa_feedback", settings.taa_feedback);
+    readFloatParam(pass.params, "taa_sharpening", settings.taa_sharpening);
+    readBoolParam(pass.params, "depth_of_field_enabled", settings.depth_of_field_enabled);
+    readFloatParam(pass.params, "dof_focus_depth", settings.dof_focus_depth);
+    readFloatParam(pass.params, "dof_focus_range", settings.dof_focus_range);
+    readFloatParam(pass.params, "dof_intensity", settings.dof_intensity);
+  }
+  return settings;
+}
+
+rendering::FrameGraphValidationOptions validationOptionsForResolvedGraph(
+    const rendering::FrameGraphDesc& graph) {
+  rendering::FrameGraphValidationOptions options{};
+  for (const rendering::FrameGraphPassDesc& pass : graph.passes) {
+    if (pass.enabled && pass.kind == rendering::FrameGraphPassKind::Shader) {
+      options.require_shader_pass_keys = true;
+      break;
+    }
+  }
+  if (!options.require_shader_pass_keys) {
+    return options;
+  }
+  options.shader_pass_keys.reserve(graph.shader_pass_assets.size());
+  for (const rendering::ShaderPassAssetDesc& shader_pass : graph.shader_pass_assets) {
+    if (!shader_pass.shader_pass_key.empty()) {
+      options.shader_pass_keys.push_back(shader_pass.shader_pass_key);
+    }
+  }
+  return options;
+}
+
 }  // namespace
 
 void DiligentBackend::renderLayer(rendering::LayerId layer,
                                   rendering::RenderTargetId target,
-                                  const rendering::PostProcessSettings& post_process) {
+                                  const rendering::FrameGraphDesc& frame_graph) {
+  const rendering::FrameGraphDesc* active_frame_graph = &frame_graph;
+  const rendering::FrameGraphValidationOptions graph_validation_options =
+      validationOptionsForResolvedGraph(frame_graph);
+  const rendering::FrameGraphValidationResult graph_validation =
+      rendering::validateFrameGraphDesc(frame_graph, graph_validation_options);
+  if (!graph_validation.valid()) {
+    const std::string graph_key =
+        frame_graph.frame_graph_key.empty() ? std::string("<unnamed>")
+                                            : frame_graph.frame_graph_key;
+    static std::unordered_map<std::string, bool> warned_invalid_graphs;
+    if (!warned_invalid_graphs[graph_key]) {
+      warned_invalid_graphs[graph_key] = true;
+      spdlog::warn("Invalid renderer frame graph '{}'; using default graph. {}",
+                   graph_key,
+                   graph_validation.diagnostics.empty()
+                       ? std::string("No diagnostic reported.")
+                       : graph_validation.diagnostics.front());
+    }
+    active_frame_graph = &rendering::defaultFrameGraphDesc();
+  }
+  const rendering::PostProcessSettings post_process =
+      postProcessSettingsFromFrameGraph(*active_frame_graph);
   const bool frame_layer_diag = renderLayerFrameDiagEnabled();
   const float frame_layer_diag_threshold_ms =
       std::max(0.0f,
@@ -252,6 +386,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   Diligent::ITexture* particle_scene_texture = nullptr;
   Diligent::ITexture* present_source_texture = nullptr;
   Diligent::ITexture* present_destination_texture = nullptr;
+  Diligent::TEXTURE_FORMAT active_color_format = Diligent::TEX_FORMAT_UNKNOWN;
   int render_width = current_width_;
   int render_height = current_height_;
   if (rendering_to_default_target) {
@@ -264,6 +399,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     particle_scene_depth_srv = default_scene_depth_srv_;
     particle_scene_texture = default_scene_color_tex_;
     present_source_texture = default_scene_color_tex_;
+    if (default_scene_color_tex_) {
+      active_color_format = default_scene_color_tex_->GetDesc().Format;
+    }
     if (auto* backbuffer_rtv = swap_chain_->GetCurrentBackBufferRTV()) {
       present_destination_texture = backbuffer_rtv->GetTexture();
     }
@@ -279,6 +417,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     particle_scene_color_srv = target_it->second.color_srv;
     particle_scene_depth_srv = target_it->second.depth_srv;
     particle_scene_texture = target_it->second.color_texture;
+    if (target_it->second.color_texture) {
+      active_color_format = target_it->second.color_texture->GetDesc().Format;
+    }
     render_width = std::max(target_it->second.width, 1);
     render_height = std::max(target_it->second.height, 1);
   }
@@ -1456,6 +1597,18 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                           particle_scene_texture->GetDesc().Format);
   }
   mark_stage("post process");
+  executeFrameGraphScreenPasses(*active_frame_graph,
+                                layer,
+                                particle_scene_texture,
+                                particle_scene_color_srv,
+                                particle_scene_depth_srv,
+                                active_rtv,
+                                base_constants,
+                                render_width,
+                                render_height,
+                                active_color_format,
+                                target);
+  mark_stage("frame graph screen passes");
   draw_lines(line_vertices_depth_, line_pipeline_state_depth_, line_srb_depth_);
   draw_lines(line_vertices_no_depth_, line_pipeline_state_no_depth_, line_srb_no_depth_);
   mark_stage("line draw");

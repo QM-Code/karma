@@ -34,8 +34,8 @@ namespace karma::rendering::backend {
 ///
 /// `GraphicsDevice` owns an implementation and exposes the same operations to
 /// runtime code. Backends should keep API resources opaque and validate handles
-/// defensively. Post-process state is supplied per `renderLayer` call after
-/// cameras resolve profile intent through `RenderSystem`.
+/// defensively. Frame graphs are supplied per `renderLayer` call after cameras
+/// resolve graph intent through `RenderSystem`.
 class Backend {
  public:
   virtual ~Backend() = default;
@@ -139,10 +139,10 @@ class Backend {
   virtual void submitParticleBeam(const rendering::ParticleBeamGpuDesc& beam) = 0;
   virtual void setParticleSystemStats(const rendering::ParticlePassStats& stats) = 0;
   virtual void retireInstance(rendering::InstanceId instance) = 0;
-  /// Renders one extracted layer into a target using per-pass post settings.
+  /// Renders one extracted layer into a target using the resolved frame graph.
   virtual void renderLayer(rendering::LayerId layer,
                            rendering::RenderTargetId target,
-                           const rendering::PostProcessSettings& post_process) = 0;
+                           const rendering::FrameGraphDesc& frame_graph) = 0;
   virtual void drawLine(const math::Vec3& start, const math::Vec3& end,
                         const math::Color& color, bool depth_test, float thickness) = 0;
 

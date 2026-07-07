@@ -421,9 +421,9 @@ namespace karma::components {
 /// A scene should usually have one primary camera. Cameras can render to the
 /// default target or to named render targets, and may provide shader override
 /// paths plus small color parameter payloads for custom camera effects.
-/// `post_process_profile_key` selects a renderer post-process profile; empty
-/// or missing profile names use the engine default profile. Cameras do not own
-/// post-process passes, shader assets, render targets, or history resources.
+/// `frame_graph_key` selects a renderer frame graph; empty or missing graph
+/// names use the engine default graph. Cameras do not own graph passes, shader
+/// assets, render targets, or history resources.
 struct CameraComponent : world::ComponentTag {
   bool perspective = true;
   bool render_shadows = true;
@@ -438,8 +438,8 @@ struct CameraComponent : world::ComponentTag {
   bool render_to_texture = false;
   rendering::RenderTargetId render_target = rendering::kDefaultRenderTarget;
   std::string render_target_key;
-  /// Name of the post-process profile resolved for this camera pass.
-  std::string post_process_profile_key;
+  /// Asset key of the renderer frame graph resolved for this camera pass.
+  std::string frame_graph_key;
   std::filesystem::path shader_override_vertex_path;
   std::filesystem::path shader_override_fragment_path;
   std::unordered_map<std::string, math::Color> shader_user_params;
@@ -1015,6 +1015,11 @@ struct MeshComponent : world::ComponentTag {
   std::vector<MeshMaterialAssignment> materials;
   bool visible = true;
   bool shadow_visible = true;
+};
+
+/// Arbitrary renderer tags used by frame graph scene-mask passes.
+struct RenderTagsComponent : world::ComponentTag {
+  std::vector<std::string> tags;
 };
 
 }  // namespace karma::components

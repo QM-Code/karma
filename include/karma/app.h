@@ -562,8 +562,8 @@ struct EngineConfig {
   bool ao_affects_local_lights = false;
   float local_light_directional_shadow_lift_strength = 0.0f;
   float lighting_exposure = 1.0f;
-  /// Startup default post-process profile used by cameras with empty keys.
-  rendering::PostProcessSettings post_process{};
+  /// Startup default renderer frame graph used by cameras with empty keys.
+  rendering::FrameGraphDesc default_frame_graph{};
   /// Asset packages imported before `GameInterface::onStart`.
   std::vector<std::filesystem::path> startup_asset_packages;
   /// Prewarm startup packages after initial content and systems are committed.

@@ -405,7 +405,9 @@ class GrassFieldExample final : public app::GameInterface {
 
   void applyPostProcessSettings() {
     if (assets) {
-      assets->registerPostProcessProfile("", post_process_settings_);
+      assets->registerFrameGraph(
+          "",
+          rendering::frameGraphFromPostProcessSettings(post_process_settings_));
     }
   }
 
@@ -715,7 +717,8 @@ int main(int argc, char** argv) {
   config.shadow_map_size = 2048;
   config.shadow_pcf_radius = 1;
   config.lighting_exposure = 1.0f;
-  config.post_process = karma::demo::makeGrassPostProcessSettings(true);
+  config.default_frame_graph = karma::rendering::frameGraphFromPostProcessSettings(
+      karma::demo::makeGrassPostProcessSettings(true));
   config.startup_asset_packages.push_back(
       karma::demo::resolveExampleAssetPath("rendering/grass_field"));
 

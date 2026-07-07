@@ -5,11 +5,15 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <initializer_list>
 #include <limits>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
+#include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -243,6 +247,326 @@ bool isHeaderlessScalarTerrainPath(const std::filesystem::path& path) {
   });
   return extension == ".raw" || extension == ".r16" || extension == ".r16u" ||
          extension == ".r32";
+}
+
+std::string lowerCopy(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return value;
+}
+
+std::string lowerExtension(const std::filesystem::path& path) {
+  return lowerCopy(path.extension().string());
+}
+
+bool containsAny(std::string_view value, std::initializer_list<std::string_view> needles) {
+  for (std::string_view needle : needles) {
+    if (!needle.empty() && value.find(needle) != std::string_view::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isUnsupportedGaeaBitmapExtension(std::string_view extension) {
+  return extension == ".exr" || extension == ".tif" || extension == ".tiff";
+}
+
+bool isSupportedGaeaScalarExtension(std::string_view extension) {
+  return extension == ".raw" || extension == ".r16" || extension == ".r16u" ||
+         extension == ".r32" || extension == ".png" || extension == ".tga" ||
+         extension == ".jpg" || extension == ".jpeg" || extension == ".bmp" ||
+         extension == ".pgm" || extension == ".pnm" || extension == ".ppm" ||
+         extension == ".psd" || extension == ".hdr";
+}
+
+bool isSupportedGaeaRgbaExtension(std::string_view extension) {
+  return extension == ".png" || extension == ".tga" || extension == ".jpg" ||
+         extension == ".jpeg" || extension == ".bmp" || extension == ".psd" ||
+         extension == ".hdr";
+}
+
+int extensionHeightScore(std::string_view extension) {
+  if (extension == ".r32") {
+    return 40;
+  }
+  if (extension == ".raw" || extension == ".r16" || extension == ".r16u") {
+    return 34;
+  }
+  if (extension == ".png") {
+    return 28;
+  }
+  if (extension == ".tga") {
+    return 18;
+  }
+  if (extension == ".pgm" || extension == ".pnm" || extension == ".ppm") {
+    return 16;
+  }
+  if (extension == ".hdr") {
+    return 12;
+  }
+  if (extension == ".bmp" || extension == ".jpg" || extension == ".jpeg" ||
+      extension == ".psd") {
+    return 8;
+  }
+  return 0;
+}
+
+components::TerrainHeightFormat terrainHeightFormatForPath(
+    const std::filesystem::path& path) {
+  const std::string extension = lowerExtension(path);
+  if (extension == ".raw" || extension == ".r16" || extension == ".r16u") {
+    return components::TerrainHeightFormat::Raw16Unsigned;
+  }
+  if (extension == ".r32") {
+    return components::TerrainHeightFormat::R32Float;
+  }
+  return components::TerrainHeightFormat::ImageFile;
+}
+
+struct GaeaOutputFile {
+  std::filesystem::path path;
+  std::string stem_lower;
+  std::string extension;
+};
+
+std::vector<GaeaOutputFile> listGaeaOutputFiles(const std::filesystem::path& directory) {
+  std::vector<GaeaOutputFile> files;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(directory, ec)) {
+    if (ec) {
+      break;
+    }
+    std::error_code status_ec;
+    if (!entry.is_regular_file(status_ec) || status_ec) {
+      continue;
+    }
+    GaeaOutputFile file{};
+    file.path = entry.path().lexically_normal();
+    file.stem_lower = lowerCopy(file.path.stem().string());
+    file.extension = lowerExtension(file.path);
+    files.push_back(std::move(file));
+  }
+  std::sort(files.begin(), files.end(), [](const GaeaOutputFile& a,
+                                           const GaeaOutputFile& b) {
+    return a.path.generic_string() < b.path.generic_string();
+  });
+  return files;
+}
+
+int scoreGaeaHeightFile(const GaeaOutputFile& file, bool allow_unsupported) {
+  if (!isSupportedGaeaScalarExtension(file.extension) &&
+      !(allow_unsupported && isUnsupportedGaeaBitmapExtension(file.extension))) {
+    return 0;
+  }
+  if (containsAny(file.stem_lower,
+                  {"color", "albedo", "diffuse", "normal", "rough", "splat",
+                   "control", "weight", "mask", "flow", "wear", "deposit",
+                   "slope", "curvature"})) {
+    return 0;
+  }
+
+  int score = extensionHeightScore(file.extension);
+  if (containsAny(file.stem_lower, {"heightmap", "height_map"})) {
+    score += 90;
+  }
+  if (containsAny(file.stem_lower, {"height", "terrain", "shape", "displace"})) {
+    score += 75;
+  }
+  if (containsAny(file.stem_lower, {"final", "output", "main"})) {
+    score += 12;
+  }
+  return score;
+}
+
+int scoreGaeaColorFile(const GaeaOutputFile& file) {
+  if (!isSupportedGaeaRgbaExtension(file.extension)) {
+    return 0;
+  }
+  if (containsAny(file.stem_lower,
+                  {"height", "normal", "rough", "splat", "control", "weight",
+                   "flow", "wear", "deposit", "slope", "curvature"})) {
+    return 0;
+  }
+  int score = 0;
+  if (containsAny(file.stem_lower, {"color", "colour", "colormap", "satmap"})) {
+    score += 80;
+  }
+  if (containsAny(file.stem_lower, {"albedo", "diffuse", "texture"})) {
+    score += 60;
+  }
+  if (file.extension == ".png" || file.extension == ".tga") {
+    score += 12;
+  }
+  return score;
+}
+
+int scoreGaeaControlFile(const GaeaOutputFile& file) {
+  if (!isSupportedGaeaRgbaExtension(file.extension)) {
+    return 0;
+  }
+  if (containsAny(file.stem_lower,
+                  {"height", "color", "colour", "albedo", "diffuse", "normal",
+                   "rough", "flow", "wear", "deposit", "slope", "curvature"})) {
+    return 0;
+  }
+  int score = 0;
+  if (containsAny(file.stem_lower, {"splat", "control", "weight"})) {
+    score += 80;
+  }
+  if (containsAny(file.stem_lower, {"mask", "layer"})) {
+    score += 35;
+  }
+  if (file.extension == ".png" || file.extension == ".tga") {
+    score += 12;
+  }
+  return score;
+}
+
+std::optional<GaeaOutputFile> bestGaeaFile(
+    const std::vector<GaeaOutputFile>& files,
+    const std::function<int(const GaeaOutputFile&)>& score_file) {
+  const GaeaOutputFile* best = nullptr;
+  int best_score = 0;
+  for (const GaeaOutputFile& file : files) {
+    const int score = score_file(file);
+    if (score > best_score) {
+      best = &file;
+      best_score = score;
+    }
+  }
+  if (best == nullptr) {
+    return std::nullopt;
+  }
+  return *best;
+}
+
+std::filesystem::path resolveGaeaPath(const std::filesystem::path& directory,
+                                      const std::filesystem::path& path) {
+  if (path.empty()) {
+    return {};
+  }
+  return path.is_relative() ? (directory / path).lexically_normal() : path.lexically_normal();
+}
+
+bool sameNormalizedPath(const std::filesystem::path& a, const std::filesystem::path& b) {
+  return a.lexically_normal().generic_string() == b.lexically_normal().generic_string();
+}
+
+bool pathInUse(const std::filesystem::path& path,
+               std::initializer_list<std::filesystem::path> used_paths) {
+  for (const auto& used : used_paths) {
+    if (!used.empty() && sameNormalizedPath(path, used)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool gaeaFail(std::string* diagnostic, std::string message) {
+  if (diagnostic != nullptr) {
+    *diagnostic = std::move(message);
+  }
+  return false;
+}
+
+bool validateGaeaHeightPath(const std::filesystem::path& path,
+                            const components::TerrainComponent& terrain,
+                            std::string* diagnostic) {
+  const std::string extension = lowerExtension(path);
+  if (isUnsupportedGaeaBitmapExtension(extension)) {
+    return gaeaFail(diagnostic,
+                    "Gaea terrain height '" + path.string() +
+                        "' uses EXR/TIFF, which the built-in terrain loader does not decode");
+  }
+  if (!isSupportedGaeaScalarExtension(extension)) {
+    return gaeaFail(diagnostic,
+                    "Gaea terrain height '" + path.string() +
+                        "' has an unsupported extension");
+  }
+  if ((terrain.height_format == components::TerrainHeightFormat::Raw16Unsigned ||
+       terrain.height_format == components::TerrainHeightFormat::R32Float) &&
+      (terrain.raw_width == 0u || terrain.raw_height == 0u)) {
+    return gaeaFail(diagnostic,
+                    "Gaea RAW/R32 terrain heights require raw_width and raw_height");
+  }
+  return true;
+}
+
+bool validateGaeaRgbaPath(const std::filesystem::path& path,
+                          std::string_view role,
+                          std::string* diagnostic) {
+  const std::string extension = lowerExtension(path);
+  if (isUnsupportedGaeaBitmapExtension(extension)) {
+    return gaeaFail(diagnostic,
+                    "Gaea terrain " + std::string(role) + " '" + path.string() +
+                        "' uses EXR/TIFF, which the built-in RGBA loader does not decode");
+  }
+  if (!isSupportedGaeaRgbaExtension(extension)) {
+    return gaeaFail(diagnostic,
+                    "Gaea terrain " + std::string(role) + " '" + path.string() +
+                        "' has an unsupported extension");
+  }
+  return true;
+}
+
+std::optional<std::string> inferGaeaTilePattern(const std::filesystem::path& path) {
+  std::string stem = path.stem().string();
+  const std::string extension = path.extension().string();
+  struct Run {
+    std::size_t begin = 0u;
+    std::size_t end = 0u;
+  };
+  std::vector<Run> runs;
+  for (std::size_t i = 0u; i < stem.size();) {
+    if (!std::isdigit(static_cast<unsigned char>(stem[i]))) {
+      ++i;
+      continue;
+    }
+    std::size_t begin = i;
+    if (begin > 0u && stem[begin - 1u] == '-') {
+      --begin;
+    }
+    while (i < stem.size() && std::isdigit(static_cast<unsigned char>(stem[i]))) {
+      ++i;
+    }
+    runs.push_back(Run{begin, i});
+  }
+  if (runs.size() < 2u) {
+    return std::nullopt;
+  }
+  const Run z = runs[runs.size() - 1u];
+  const Run x = runs[runs.size() - 2u];
+  stem.replace(z.begin, z.end - z.begin, "{z}");
+  stem.replace(x.begin, x.end - x.begin, "{x}");
+  return stem + extension;
+}
+
+std::optional<components::TerrainDataMapKind> detectGaeaDataMapKind(
+    const GaeaOutputFile& file,
+    std::string& out_name) {
+  if (containsAny(file.stem_lower, {"flow"})) {
+    out_name = "flow";
+    return components::TerrainDataMapKind::Flow;
+  }
+  if (containsAny(file.stem_lower, {"wear"})) {
+    out_name = "wear";
+    return components::TerrainDataMapKind::Wear;
+  }
+  if (containsAny(file.stem_lower, {"deposit", "deposition"})) {
+    out_name = "deposit";
+    return components::TerrainDataMapKind::Deposit;
+  }
+  if (containsAny(file.stem_lower, {"slope"})) {
+    out_name = "slope";
+    return components::TerrainDataMapKind::Slope;
+  }
+  if (containsAny(file.stem_lower, {"curvature", "curve"})) {
+    out_name = "curvature";
+    return components::TerrainDataMapKind::Curvature;
+  }
+  return std::nullopt;
 }
 
 float sampleScalarImageBilinear(const assets::ScalarImage& image,
@@ -744,6 +1068,239 @@ std::optional<rendering::TerrainMaterialLayerData> loadTerrainMaterialLayer(
   }
 
   return loadTerrainMaterialLayer(layer, layer_index);
+}
+
+std::optional<components::TerrainComponent> importGaeaTerrainDirectory(
+    const GaeaTerrainImportDesc& desc,
+    std::string* diagnostic) {
+  if (diagnostic != nullptr) {
+    diagnostic->clear();
+  }
+  if (desc.directory.empty()) {
+    gaeaFail(diagnostic, "Gaea terrain import requires a directory");
+    return std::nullopt;
+  }
+
+  const std::filesystem::path directory = desc.directory.lexically_normal();
+  std::error_code ec;
+  if (!std::filesystem::exists(directory, ec) || ec ||
+      !std::filesystem::is_directory(directory, ec) || ec) {
+    gaeaFail(diagnostic, "Gaea terrain import directory does not exist: " +
+                             directory.string());
+    return std::nullopt;
+  }
+  if (desc.height_value_max <= desc.height_value_min) {
+    gaeaFail(diagnostic, "Gaea terrain height_value_max must exceed height_value_min");
+    return std::nullopt;
+  }
+  if (desc.tile_resolution < 2u ||
+      desc.base_patch_size == 0u ||
+      desc.tessellation_factor < 1.0f ||
+      desc.target_tessellated_edge_size <= 0.0f ||
+      desc.view_distance < 0.0f) {
+    gaeaFail(diagnostic, "Gaea terrain import descriptor has invalid terrain settings");
+    return std::nullopt;
+  }
+  if (desc.material_layers.size() > 4u) {
+    gaeaFail(diagnostic, "Gaea terrain supports at most four material layers");
+    return std::nullopt;
+  }
+
+  const std::vector<GaeaOutputFile> files = listGaeaOutputFiles(directory);
+  if (files.empty()) {
+    gaeaFail(diagnostic, "Gaea terrain import directory contains no files: " +
+                             directory.string());
+    return std::nullopt;
+  }
+
+  components::TerrainComponent terrain{};
+  terrain.source = desc.tiled ? components::TerrainSourceType::ImageTileDirectory
+                              : components::TerrainSourceType::SingleImage;
+  terrain.tile_directory = desc.tiled ? directory : std::filesystem::path{};
+  terrain.raw_width = desc.raw_width;
+  terrain.raw_height = desc.raw_height;
+  terrain.raw_little_endian = desc.raw_little_endian;
+  terrain.flip_y = desc.flip_y;
+  terrain.height_value_min = desc.height_value_min;
+  terrain.height_value_max = desc.height_value_max;
+  terrain.tile_index_base = desc.tile_index_base;
+  terrain.material_layers = desc.material_layers;
+  terrain.terrain_size = desc.terrain_size;
+  terrain.tile_size = desc.tile_size;
+  terrain.tile_resolution = desc.tile_resolution;
+  terrain.origin_tile_x = desc.origin_tile_x;
+  terrain.origin_tile_z = desc.origin_tile_z;
+  terrain.height_scale = desc.height_scale;
+  terrain.height_offset = desc.height_offset;
+  terrain.view_distance = desc.view_distance;
+  terrain.base_patch_size = desc.base_patch_size;
+  terrain.tessellation_factor = desc.tessellation_factor;
+  terrain.target_tessellated_edge_size = desc.target_tessellated_edge_size;
+  terrain.layer = desc.layer;
+  terrain.visible = desc.visible;
+  terrain.cpu_fallback_enabled = desc.cpu_fallback_enabled;
+
+  std::filesystem::path selected_height;
+  std::filesystem::path selected_color;
+  std::filesystem::path selected_control;
+
+  if (desc.tiled) {
+    terrain.height_pattern = desc.height_pattern;
+    terrain.color_pattern = desc.color_pattern;
+    terrain.control_pattern = desc.control_pattern;
+
+    if (terrain.height_pattern.empty()) {
+      const auto height = bestGaeaFile(files, [](const GaeaOutputFile& file) {
+        return scoreGaeaHeightFile(file, false);
+      });
+      if (!height) {
+        const auto unsupported_height = bestGaeaFile(files, [](const GaeaOutputFile& file) {
+          return scoreGaeaHeightFile(file, true);
+        });
+        if (unsupported_height &&
+            isUnsupportedGaeaBitmapExtension(unsupported_height->extension)) {
+          gaeaFail(diagnostic,
+                   "Gaea terrain height appears to be EXR/TIFF; export .r32, .raw/.r16, "
+                   "or 16-bit PNG for the built-in loader");
+        } else {
+          gaeaFail(diagnostic, "could not find a Gaea height tile in: " +
+                                   directory.string());
+        }
+        return std::nullopt;
+      }
+      selected_height = height->path;
+      auto pattern = inferGaeaTilePattern(height->path.filename());
+      if (!pattern) {
+        gaeaFail(diagnostic,
+                 "could not infer Gaea height tile pattern from: " +
+                     height->path.filename().string());
+        return std::nullopt;
+      }
+      terrain.height_pattern = *pattern;
+    }
+
+    terrain.height_format = terrainHeightFormatForPath(terrain.height_pattern);
+    if (!validateGaeaHeightPath(terrain.height_pattern, terrain, diagnostic)) {
+      return std::nullopt;
+    }
+
+    if (terrain.color_pattern.empty()) {
+      if (const auto color = bestGaeaFile(files, scoreGaeaColorFile)) {
+        if (auto pattern = inferGaeaTilePattern(color->path.filename())) {
+          selected_color = color->path;
+          terrain.color_pattern = *pattern;
+        }
+      }
+    } else if (!validateGaeaRgbaPath(terrain.color_pattern, "color pattern", diagnostic)) {
+      return std::nullopt;
+    }
+
+    if (terrain.control_pattern.empty()) {
+      if (const auto control = bestGaeaFile(files, scoreGaeaControlFile)) {
+        if (auto pattern = inferGaeaTilePattern(control->path.filename())) {
+          selected_control = control->path;
+          terrain.control_pattern = *pattern;
+        }
+      }
+    } else if (!validateGaeaRgbaPath(terrain.control_pattern, "control pattern", diagnostic)) {
+      return std::nullopt;
+    }
+  } else {
+    selected_height = resolveGaeaPath(directory, desc.height_image);
+    if (selected_height.empty()) {
+      const auto height = bestGaeaFile(files, [](const GaeaOutputFile& file) {
+        return scoreGaeaHeightFile(file, false);
+      });
+      if (!height) {
+        const auto unsupported_height = bestGaeaFile(files, [](const GaeaOutputFile& file) {
+          return scoreGaeaHeightFile(file, true);
+        });
+        if (unsupported_height &&
+            isUnsupportedGaeaBitmapExtension(unsupported_height->extension)) {
+          gaeaFail(diagnostic,
+                   "Gaea terrain height appears to be EXR/TIFF; export .r32, .raw/.r16, "
+                   "or 16-bit PNG for the built-in loader");
+        } else {
+          gaeaFail(diagnostic, "could not find a Gaea height image in: " +
+                                   directory.string());
+        }
+        return std::nullopt;
+      }
+      selected_height = height->path;
+    }
+    terrain.height_image = selected_height;
+    terrain.height_format = terrainHeightFormatForPath(selected_height);
+    if (!validateGaeaHeightPath(selected_height, terrain, diagnostic)) {
+      return std::nullopt;
+    }
+
+    selected_color = resolveGaeaPath(directory, desc.color_image);
+    if (!selected_color.empty()) {
+      if (!validateGaeaRgbaPath(selected_color, "color", diagnostic)) {
+        return std::nullopt;
+      }
+      terrain.color_image = selected_color;
+    } else if (const auto color = bestGaeaFile(files, scoreGaeaColorFile)) {
+      selected_color = color->path;
+      terrain.color_image = selected_color;
+    }
+
+    selected_control = resolveGaeaPath(directory, desc.control_image);
+    if (!selected_control.empty()) {
+      if (!validateGaeaRgbaPath(selected_control, "control", diagnostic)) {
+        return std::nullopt;
+      }
+      terrain.control_image = selected_control;
+    } else if (const auto control = bestGaeaFile(files, scoreGaeaControlFile)) {
+      selected_control = control->path;
+      terrain.control_image = selected_control;
+    }
+  }
+
+  std::vector<components::TerrainDataMapKind> added_kinds;
+  for (const GaeaOutputFile& file : files) {
+    if (pathInUse(file.path, {selected_height, selected_color, selected_control})) {
+      continue;
+    }
+    if (!isSupportedGaeaScalarExtension(file.extension)) {
+      continue;
+    }
+    if (isHeaderlessScalarTerrainPath(file.path) &&
+        (desc.raw_width == 0u || desc.raw_height == 0u)) {
+      continue;
+    }
+
+    std::string map_name;
+    auto kind = detectGaeaDataMapKind(file, map_name);
+    if (!kind) {
+      continue;
+    }
+    if (std::find(added_kinds.begin(), added_kinds.end(), *kind) != added_kinds.end()) {
+      continue;
+    }
+
+    components::TerrainDataMapBinding binding{};
+    binding.name = map_name;
+    binding.kind = *kind;
+    binding.format = terrainHeightFormatForPath(file.path);
+    if (isHeaderlessScalarTerrainPath(file.path)) {
+      binding.raw_width = desc.raw_width;
+      binding.raw_height = desc.raw_height;
+    }
+    if (desc.tiled) {
+      auto pattern = inferGaeaTilePattern(file.path.filename());
+      if (!pattern) {
+        continue;
+      }
+      binding.pattern = *pattern;
+    } else {
+      binding.image = file.path;
+    }
+    terrain.data_maps.push_back(std::move(binding));
+    added_kinds.push_back(*kind);
+  }
+
+  return terrain;
 }
 
 std::optional<rendering::TerrainTileData> loadSingleImageTerrainTile(

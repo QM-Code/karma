@@ -56,6 +56,14 @@ Gaea-style exports:
   `data_maps`. They are loaded with the terrain tile as normalized scalar maps
   so gameplay/tools can consume them without the renderer knowing their file
   format.
+- `visual::terrain::importGaeaTerrainDirectory(...)` scans a Gaea build output
+  directory and returns a normal `TerrainComponent`. It recognizes common
+  height, color/albedo, splat/control, and flow/wear/deposit/slope/curvature
+  output names. Because Gaea filenames come from authored node/output names, the
+  import descriptor also accepts explicit image paths and tile patterns.
+- For tiled Gaea folders, filenames such as `Height_0_0.r32` are inferred as
+  `Height_{x}_{z}.r32`. Set `height_pattern`, `color_pattern`, or
+  `control_pattern` directly when your build uses a different convention.
 
 Renderer behavior:
 

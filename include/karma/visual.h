@@ -441,6 +441,49 @@ std::optional<rendering::TerrainMaterialLayerData> loadTerrainMaterialLayer(
     uint32_t layer_index,
     const assets::AssetRegistry* assets);
 
+/// Options for converting a Gaea build output folder into a TerrainComponent.
+///
+/// Gaea does not emit a single canonical manifest; output filenames are usually
+/// the authored node/output names. This helper uses conservative filename
+/// heuristics and accepts explicit overrides for production pipelines.
+struct GaeaTerrainImportDesc {
+  std::filesystem::path directory;
+  bool tiled = false;
+  std::filesystem::path height_image;
+  std::filesystem::path color_image;
+  std::filesystem::path control_image;
+  std::string height_pattern;
+  std::string color_pattern;
+  std::string control_pattern;
+  uint32_t raw_width = 0u;
+  uint32_t raw_height = 0u;
+  bool raw_little_endian = true;
+  bool flip_y = false;
+  float height_value_min = 0.0f;
+  float height_value_max = 1.0f;
+  int32_t tile_index_base = 0;
+  std::vector<components::TerrainMaterialLayer> material_layers;
+  float terrain_size = 1000.0f;
+  float tile_size = 1000.0f;
+  uint32_t tile_resolution = 257u;
+  int32_t origin_tile_x = 0;
+  int32_t origin_tile_z = 0;
+  float height_scale = 120.0f;
+  float height_offset = 0.0f;
+  float view_distance = 4000.0f;
+  uint32_t base_patch_size = 16u;
+  float tessellation_factor = 16.0f;
+  float target_tessellated_edge_size = 12.0f;
+  uint32_t layer = 0u;
+  bool visible = true;
+  bool cpu_fallback_enabled = true;
+};
+
+/// Scans a Gaea build output directory and returns an authored terrain component.
+std::optional<components::TerrainComponent> importGaeaTerrainDirectory(
+    const GaeaTerrainImportDesc& desc,
+    std::string* diagnostic = nullptr);
+
 /// Streams terrain chunks around the primary camera and submits loaded tiles.
 class TerrainSystem {
  public:

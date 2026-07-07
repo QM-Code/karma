@@ -510,6 +510,154 @@ void testTerrainTilePatternFormatting() {
   assert(gaea_path == "tile_1_5_1_5.png");
 }
 
+void testGaeaSingleImageImportDetectsOutputs() {
+  const std::filesystem::path dir = makeTempDir();
+  writeR32Le(dir / "Erosion.r32", {0.0f, 1.0f, 0.5f, 0.25f});
+  writeRgbaTga(dir / "Color.tga",
+               2u,
+               2u,
+               {
+                   10, 20, 30, 255,
+                   40, 50, 60, 255,
+                   70, 80, 90, 255,
+                   100, 110, 120, 255,
+               });
+  writeRgbaTga(dir / "Splat.tga",
+               2u,
+               2u,
+               {
+                   255, 0, 0, 255,
+                   0, 255, 0, 255,
+                   0, 0, 255, 255,
+                   0, 0, 0, 255,
+               });
+  writeRgbaTga(dir / "Flow.tga",
+               2u,
+               2u,
+               {
+                   1, 0, 0, 255,
+                   2, 0, 0, 255,
+                   3, 0, 0, 255,
+                   4, 0, 0, 255,
+               });
+
+  std::string diagnostic;
+  const auto terrain = karma::visual::terrain::importGaeaTerrainDirectory(
+      karma::visual::terrain::GaeaTerrainImportDesc{
+          .directory = dir,
+          .raw_width = 2u,
+          .raw_height = 2u,
+          .terrain_size = 512.0f,
+          .tile_resolution = 2u,
+          .height_scale = 64.0f,
+          .height_offset = -8.0f,
+      },
+      &diagnostic);
+  assert(terrain.has_value());
+  assert(diagnostic.empty());
+  assert(terrain->source == karma::components::TerrainSourceType::SingleImage);
+  assert(terrain->height_image.filename() == "Erosion.r32");
+  assert(terrain->height_format == karma::components::TerrainHeightFormat::R32Float);
+  assert(terrain->raw_width == 2u);
+  assert(terrain->raw_height == 2u);
+  assert(terrain->color_image.filename() == "Color.tga");
+  assert(terrain->control_image.filename() == "Splat.tga");
+  assert(nearly(terrain->terrain_size, 512.0f));
+  assert(nearly(terrain->height_scale, 64.0f));
+  assert(nearly(terrain->height_offset, -8.0f));
+  assert(terrain->data_maps.size() == 1u);
+  assert(terrain->data_maps[0].name == "flow");
+  assert(terrain->data_maps[0].kind == karma::components::TerrainDataMapKind::Flow);
+  assert(terrain->data_maps[0].image.filename() == "Flow.tga");
+
+  const auto tile = karma::visual::terrain::loadSingleImageTerrainTile(*terrain);
+  assert(tile.has_value());
+  assert(tile->valid());
+  assert(tile->data_maps.size() == 1u);
+  assert(tile->data_maps[0].name == "flow");
+  assert(nearly(tile->data_maps[0].values[0], 1.0f / 255.0f));
+
+  std::filesystem::remove_all(dir);
+}
+
+void testGaeaTiledImportInfersPatterns() {
+  const std::filesystem::path dir = makeTempDir();
+  const std::vector<uint8_t> height_rgba{
+      0, 0, 0, 255,
+      255, 0, 0, 255,
+      128, 0, 0, 255,
+      64, 0, 0, 255,
+  };
+  const std::vector<uint8_t> color_rgba{
+      10, 20, 30, 255,
+      40, 50, 60, 255,
+      70, 80, 90, 255,
+      100, 110, 120, 255,
+  };
+  const std::vector<uint8_t> wear_rgba{
+      5, 0, 0, 255,
+      6, 0, 0, 255,
+      7, 0, 0, 255,
+      8, 0, 0, 255,
+  };
+  writeRgbaTga(dir / "Height_2_5.tga", 2u, 2u, height_rgba);
+  writeRgbaTga(dir / "Color_2_5.tga", 2u, 2u, color_rgba);
+  writeRgbaTga(dir / "Splat_2_5.tga",
+               2u,
+               2u,
+               {
+                   255, 0, 0, 255,
+                   0, 255, 0, 255,
+                   0, 0, 255, 255,
+                   0, 0, 0, 255,
+               });
+  writeRgbaTga(dir / "Wear_2_5.tga", 2u, 2u, wear_rgba);
+
+  std::string diagnostic;
+  const auto terrain = karma::visual::terrain::importGaeaTerrainDirectory(
+      karma::visual::terrain::GaeaTerrainImportDesc{
+          .directory = dir,
+          .tiled = true,
+          .tile_size = 256.0f,
+          .tile_resolution = 2u,
+      },
+      &diagnostic);
+  assert(terrain.has_value());
+  assert(diagnostic.empty());
+  assert(terrain->source == karma::components::TerrainSourceType::ImageTileDirectory);
+  assert(terrain->tile_directory == dir.lexically_normal());
+  assert(terrain->height_pattern == "Height_{x}_{z}.tga");
+  assert(terrain->color_pattern == "Color_{x}_{z}.tga");
+  assert(terrain->control_pattern == "Splat_{x}_{z}.tga");
+  assert(terrain->data_maps.size() == 1u);
+  assert(terrain->data_maps[0].kind == karma::components::TerrainDataMapKind::Wear);
+  assert(terrain->data_maps[0].pattern == "Wear_{x}_{z}.tga");
+
+  const auto tile =
+      karma::visual::terrain::loadImageTerrainTile(*terrain, TerrainTileCoord{.x = 2, .z = 5});
+  assert(tile.has_value());
+  assert(tile->valid());
+  assert(tile->color_rgba8 == color_rgba);
+  assert(tile->data_maps.size() == 1u);
+  assert(nearly(tile->data_maps[0].values[0], 5.0f / 255.0f));
+
+  std::filesystem::remove_all(dir);
+}
+
+void testGaeaImportRejectsUnsupportedHeightFormats() {
+  const std::filesystem::path dir = makeTempDir();
+  std::ofstream(dir / "Height.exr", std::ios::binary).put('\0');
+
+  std::string diagnostic;
+  const auto terrain = karma::visual::terrain::importGaeaTerrainDirectory(
+      karma::visual::terrain::GaeaTerrainImportDesc{.directory = dir},
+      &diagnostic);
+  assert(!terrain.has_value());
+  assert(diagnostic.find("EXR/TIFF") != std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+
 }  // namespace
 
 int main() {
@@ -528,5 +676,8 @@ int main() {
   testTerrainMaterialLayerResolvesAssetRegistryMaterialKey();
   testTerrainColliderSyncCreatesHeightField();
   testTerrainTilePatternFormatting();
+  testGaeaSingleImageImportDetectsOutputs();
+  testGaeaTiledImportInfersPatterns();
+  testGaeaImportRejectsUnsupportedHeightFormats();
   return 0;
 }

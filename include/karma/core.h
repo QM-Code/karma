@@ -34,8 +34,9 @@ struct EntityId {
 }  // namespace karma::core
 
 
-#include <cstdint>
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 
 namespace karma::core {
 
@@ -48,8 +49,8 @@ using TypeId = uint32_t;
 /// Prefer `typeId<T>()` for component and storage code; this helper is exposed
 /// for low-level type registry utilities.
 inline TypeId nextTypeId() {
-  static TypeId counter = 1;
-  return counter++;
+  static std::atomic<TypeId> counter{1};
+  return counter.fetch_add(1, std::memory_order_relaxed);
 }
 
 /// Returns a stable process-local id for `T`.

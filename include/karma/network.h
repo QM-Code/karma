@@ -10,10 +10,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <chrono>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -26,6 +28,10 @@ inline constexpr uint16_t kProtocolVersion = 1;
 /// \ingroup karma_platform
 /// Fixed packet header size in bytes.
 inline constexpr uint16_t kPacketHeaderSize = 28;
+/// Maximum application payload accepted by the built-in session protocol.
+inline constexpr std::size_t kMaxPacketPayloadSize = 1024u * 1024u;
+/// Maximum UTF-8 byte length accepted for a session peer name.
+inline constexpr std::size_t kMaxPeerNameLength = 64u;
 /// \ingroup karma_platform
 /// Packet magic for quick malformed datagram rejection.
 inline constexpr uint32_t kPacketMagic = 0x4B4E4554u;  // KNET
@@ -71,6 +77,19 @@ struct PacketHeader {
   uint32_t payload_length = 0;
 };
 
+/// Returns true when `candidate` is newer than `reference` in the wrapping
+/// 32-bit packet sequence space. Comparisons exactly half a range apart are
+/// intentionally treated as unordered.
+constexpr bool isPacketSequenceNewer(uint32_t candidate, uint32_t reference) {
+  const uint32_t distance = candidate - reference;
+  return distance != 0u && distance < 0x80000000u;
+}
+
+/// Advances a packet sequence while reserving zero for unsequenced packets.
+constexpr uint32_t nextPacketSequence(uint32_t current) {
+  return current == std::numeric_limits<uint32_t>::max() ? 1u : current + 1u;
+}
+
 /// \ingroup karma_platform
 /// Decoded protocol packet.
 struct Packet {
@@ -88,7 +107,9 @@ enum class DecodeStatus {
   HeaderSizeMismatch,
   AppIdMismatch,
   PayloadLengthMismatch,
-  PayloadTooLarge
+  PayloadTooLarge,
+  MalformedPayload,
+  UnexpectedMessage
 };
 
 /// \ingroup karma_platform
@@ -110,7 +131,7 @@ class BinaryWriter {
   void writeUInt64(uint64_t value);
   void writeFloat32(float value);
   void writeBytes(std::span<const std::byte> bytes);
-  void writeString(const std::string& value);
+  void writeString(std::string_view value);
 
   const std::vector<std::byte>& bytes() const { return bytes_; }
   std::vector<std::byte> takeBytes() { return std::move(bytes_); }
@@ -131,7 +152,9 @@ class BinaryReader {
   bool readUInt64(uint64_t& value);
   bool readFloat32(float& value);
   bool readBytes(uint32_t size, std::vector<std::byte>& value);
-  bool readString(std::string& value);
+  bool readString(
+      std::string& value,
+      std::size_t max_size = std::numeric_limits<std::size_t>::max());
 
   std::span<const std::byte> remainingBytes() const;
   std::size_t remaining() const { return bytes_.size() - offset_; }
@@ -145,7 +168,8 @@ class BinaryReader {
 };
 
 /// \ingroup karma_platform
-/// Encodes `header` and `payload` into one wire packet.
+/// Encodes `header` and `payload` into one wire packet. Returns an empty vector
+/// when the payload exceeds `kMaxPacketPayloadSize`.
 std::vector<std::byte> encodePacket(PacketHeader header,
                                     std::span<const std::byte> payload);
 
@@ -755,6 +779,7 @@ enum class SessionPeerState {
 struct SessionPeer {
   PeerId id{};
   Endpoint endpoint{};
+  std::string name;
   SessionPeerState state = SessionPeerState::TransportConnected;
   uint32_t last_received_sequence = 0;
   uint32_t last_sent_sequence = 0;
@@ -920,7 +945,7 @@ class ClientSession {
                               ChannelId channel = 1);
 
  private:
-  void sendHandshake(uint32_t tick = 0);
+  SendResult sendHandshake(uint32_t tick = 0);
   void handleTransportEvent(const TransportEvent& event,
                             std::vector<SessionEvent>& out_events);
   void handlePacket(const TransportEvent& event,

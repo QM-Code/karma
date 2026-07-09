@@ -5,6 +5,7 @@
 #include "private/audio/backends/miniaudio/clip.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -42,15 +43,8 @@ std::shared_ptr<Clip> MiniaudioBackend::loadClip(const std::string& filepath,
     throw std::runtime_error("Audio: Engine not initialized");
   }
 
-  auto stem = std::make_unique<ma_sound>();
-  if (ma_sound_init_from_file(engine_, filepath.c_str(), 0, nullptr, nullptr,
-                              stem.get()) != MA_SUCCESS) {
-    spdlog::error("Audio: Failed to load audio file '{}'", filepath);
-    throw std::runtime_error("Audio: Failed to load audio file");
-  }
-
   std::vector<ma_sound*> instances;
-  const int instance_count = std::max(1, options.max_instances);
+  const int instance_count = std::clamp(options.max_instances, 1, 256);
   instances.reserve(static_cast<size_t>(instance_count));
 
   for (int i = 0; i < instance_count; ++i) {
@@ -69,20 +63,41 @@ std::shared_ptr<Clip> MiniaudioBackend::loadClip(const std::string& filepath,
   }
 
   if (instances.empty()) {
-    ma_sound_uninit(stem.get());
     spdlog::error("Audio: Unable to create playable instances for '{}'", filepath);
     throw std::runtime_error("Audio: Clip has no playable instances");
   }
 
-  return std::make_shared<MiniaudioClip>(stem.release(), std::move(instances));
+  return std::make_shared<MiniaudioClip>(std::move(instances));
 }
 
 void MiniaudioBackend::setListenerPosition(const glm::vec3& position) {
+  if (engine_ == nullptr) {
+    return;
+  }
   ma_engine_listener_set_position(engine_, 0, position.x, position.y, position.z);
 }
 
 void MiniaudioBackend::setListenerRotation(const glm::quat& rotation) {
-  const glm::vec3 forward = rotation * glm::vec3(0.0f, 0.0f, -1.0f);
+  if (engine_ == nullptr) {
+    return;
+  }
+  const double length_squared =
+      static_cast<double>(rotation.w) * rotation.w +
+      static_cast<double>(rotation.x) * rotation.x +
+      static_cast<double>(rotation.y) * rotation.y +
+      static_cast<double>(rotation.z) * rotation.z;
+  if (!std::isfinite(length_squared) || length_squared <= 1.0e-12) {
+    return;
+  }
+  const float inverse_length =
+      static_cast<float>(1.0 / std::sqrt(length_squared));
+  const glm::quat normalized{
+      rotation.w * inverse_length,
+      rotation.x * inverse_length,
+      rotation.y * inverse_length,
+      rotation.z * inverse_length,
+  };
+  const glm::vec3 forward = normalized * glm::vec3(0.0f, 0.0f, -1.0f);
   ma_engine_listener_set_direction(engine_, 0, forward.x, forward.y, forward.z);
 }
 

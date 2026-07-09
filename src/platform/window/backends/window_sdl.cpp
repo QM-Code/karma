@@ -3,10 +3,70 @@
 #include <SDL3/SDL.h>
 #include <spdlog/spdlog.h>
 
+#include <cstddef>
+#include <cstring>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace karma::platform {
 namespace {
+
+class WindowSdl;
+
+struct SdlVideoRuntime {
+    std::mutex mutex;
+    std::size_t users = 0u;
+    std::unordered_map<SDL_WindowID, WindowSdl*> windows;
+};
+
+SdlVideoRuntime& sdlVideoRuntime() {
+    static SdlVideoRuntime runtime;
+    return runtime;
+}
+
+bool acquireSdlVideo() {
+    auto& runtime = sdlVideoRuntime();
+    std::lock_guard<std::mutex> lock(runtime.mutex);
+    if (runtime.users == 0u) {
+#if defined(KARMA_RENDER_BACKEND_DILIGENT) && defined(__linux__)
+        const char* requested_driver = SDL_getenv("SDL_VIDEODRIVER");
+        if (requested_driver == nullptr || requested_driver[0] == '\0') {
+            SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11");
+        }
+#endif
+        if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+            spdlog::error("SDL video subsystem failed to initialize: {}", SDL_GetError());
+            return false;
+        }
+#if defined(KARMA_RENDER_BACKEND_DILIGENT) && defined(__linux__)
+        const char* active_driver = SDL_GetCurrentVideoDriver();
+        if (active_driver == nullptr || std::strcmp(active_driver, "x11") != 0) {
+            spdlog::error(
+                "Karma's Diligent Vulkan backend requires SDL's x11 video driver on Linux; active driver is '{}'",
+                active_driver ? active_driver : "(null)");
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            return false;
+        }
+#endif
+        spdlog::info("SDL video driver: {}",
+                     SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "(null)");
+    }
+    ++runtime.users;
+    return true;
+}
+
+void releaseSdlVideo() {
+    auto& runtime = sdlVideoRuntime();
+    std::lock_guard<std::mutex> lock(runtime.mutex);
+    if (runtime.users == 0u) {
+        return;
+    }
+    --runtime.users;
+    if (runtime.users == 0u) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    }
+}
 
 Key toKey(SDL_Scancode scancode) {
     switch (scancode) {
@@ -240,38 +300,15 @@ Modifiers toModifiers(SDL_Keymod mods) {
     return out;
 }
 
-uint32_t DecodeUtf8(const char *&p) {
-    const unsigned char c = static_cast<unsigned char>(*p++);
-    if (c < 0x80) {
-        return c;
-    }
-    if ((c >> 5) == 0x6) {
-        const unsigned char c2 = static_cast<unsigned char>(*p++);
-        return ((c & 0x1f) << 6) | (c2 & 0x3f);
-    }
-    if ((c >> 4) == 0xe) {
-        const unsigned char c2 = static_cast<unsigned char>(*p++);
-        const unsigned char c3 = static_cast<unsigned char>(*p++);
-        return ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f);
-    }
-    if ((c >> 3) == 0x1e) {
-        const unsigned char c2 = static_cast<unsigned char>(*p++);
-        const unsigned char c3 = static_cast<unsigned char>(*p++);
-        const unsigned char c4 = static_cast<unsigned char>(*p++);
-        return ((c & 0x07) << 18) | ((c2 & 0x3f) << 12) | ((c3 & 0x3f) << 6) | (c4 & 0x3f);
-    }
-    return 0;
-}
-
 void AppendTextInputEvents(std::vector<Event> &buffer, const char *text) {
     if (!text) {
         return;
     }
     const char *p = text;
-    while (*p) {
-        const char *start = p;
-        uint32_t codepoint = DecodeUtf8(p);
-        if (codepoint == 0 && *start == '\0') {
+    std::size_t remaining = SDL_strlen(text);
+    while (remaining > 0u) {
+        const uint32_t codepoint = SDL_StepUTF8(&p, &remaining);
+        if (codepoint == 0u) {
             break;
         }
         Event ev;
@@ -281,47 +318,86 @@ void AppendTextInputEvents(std::vector<Event> &buffer, const char *text) {
     }
 }
 
-} // namespace
+SDL_WindowID sdlEventWindowId(const SDL_Event& event) {
+    switch (event.type) {
+        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            return event.window.windowID;
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+            return event.key.windowID;
+        case SDL_EVENT_TEXT_INPUT:
+            return event.text.windowID;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            return event.button.windowID;
+        case SDL_EVENT_MOUSE_MOTION:
+            return event.motion.windowID;
+        case SDL_EVENT_MOUSE_WHEEL:
+            return event.wheel.windowID;
+        default:
+            return 0;
+    }
+}
 
 class WindowSdl final : public Window {
 public:
     explicit WindowSdl(const WindowConfig &config) {
-        const bool sdlInitOk = SDL_Init(SDL_INIT_VIDEO);
-        spdlog::info("SDL_Init(SDL_INIT_VIDEO) returned {}", sdlInitOk ? 1 : 0);
-        if (!sdlInitOk) {
-            spdlog::error("SDL failed to initialize: {}", SDL_GetError());
-            spdlog::error("SDL video driver: {}", SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "(null)");
+        sdlVideoAcquired = acquireSdlVideo();
+        if (!sdlVideoAcquired) {
             return;
         }
-        spdlog::info("SDL video driver: {}", SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "(null)");
 
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, config.glMajor);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, config.glMinor);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, config.glCoreProfile ? SDL_GL_CONTEXT_PROFILE_CORE : SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+#if defined(KARMA_RENDER_BACKEND_DILIGENT)
+        const SDL_WindowFlags window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
+#else
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, config.gl_major);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, config.gl_minor);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, config.gl_core_profile ? SDL_GL_CONTEXT_PROFILE_CORE : SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, config.samples > 0 ? 1 : 0);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, config.samples);
+        const SDL_WindowFlags window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+#endif
 
-        window = SDL_CreateWindow(config.title.c_str(), config.width, config.height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        window = SDL_CreateWindow(config.title.c_str(), config.width, config.height, window_flags);
         if (!window) {
             spdlog::error("SDL window failed to create: {}", SDL_GetError());
-            SDL_Quit();
             return;
         }
 
+#if !defined(KARMA_RENDER_BACKEND_DILIGENT)
         glContext = SDL_GL_CreateContext(window);
         if (!glContext) {
             spdlog::error("SDL GL context failed to create: {}", SDL_GetError());
             SDL_DestroyWindow(window);
             window = nullptr;
-            SDL_Quit();
             return;
         }
 
         SDL_GL_MakeCurrent(window, glContext);
+#endif
         SDL_StartTextInput(window);
+        windowId = SDL_GetWindowID(window);
+        if (windowId != 0) {
+            auto& runtime = sdlVideoRuntime();
+            std::lock_guard<std::mutex> lock(runtime.mutex);
+            runtime.windows[windowId] = this;
+        }
     }
 
     ~WindowSdl() override {
+        if (windowId != 0) {
+            auto& runtime = sdlVideoRuntime();
+            std::lock_guard<std::mutex> lock(runtime.mutex);
+            const auto it = runtime.windows.find(windowId);
+            if (it != runtime.windows.end() && it->second == this) {
+                runtime.windows.erase(it);
+            }
+            windowId = 0;
+        }
         if (window) {
             SDL_StopTextInput(window);
         }
@@ -333,110 +409,32 @@ public:
             SDL_DestroyWindow(window);
             window = nullptr;
         }
-        SDL_Quit();
+        if (sdlVideoAcquired) {
+            releaseSdlVideo();
+            sdlVideoAcquired = false;
+        }
     }
 
     void pollEvents() override {
         eventsBuffer.clear();
+        auto& runtime = sdlVideoRuntime();
+        std::lock_guard<std::mutex> lock(runtime.mutex);
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-                case SDL_EVENT_QUIT: {
-                    closeRequested = true;
-                    Event ev;
-                    ev.type = EventType::WindowClose;
-                    eventsBuffer.push_back(ev);
-                    break;
+            if (event.type == SDL_EVENT_QUIT) {
+                for (const auto& [id, target] : runtime.windows) {
+                    (void)id;
+                    target->enqueueSdlEvent(event);
                 }
-                case SDL_EVENT_WINDOW_CLOSE_REQUESTED: {
-                    closeRequested = true;
-                    Event ev;
-                    ev.type = EventType::WindowClose;
-                    eventsBuffer.push_back(ev);
-                    break;
-                }
-                case SDL_EVENT_WINDOW_FOCUS_GAINED:
-                case SDL_EVENT_WINDOW_FOCUS_LOST: {
-                    Event ev;
-                    ev.type = EventType::WindowFocus;
-                    ev.focused = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
-                    eventsBuffer.push_back(ev);
-                    break;
-                }
-                case SDL_EVENT_WINDOW_RESIZED:
-                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
-                    Event ev;
-                    ev.type = EventType::WindowResize;
-                    int fbW = 0;
-                    int fbH = 0;
-                    SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
-                    ev.width = fbW;
-                    ev.height = fbH;
-                    eventsBuffer.push_back(ev);
-                    break;
-                }
-                case SDL_EVENT_KEY_DOWN:
-                case SDL_EVENT_KEY_UP: {
-                    Event ev;
-                    ev.type = (event.type == SDL_EVENT_KEY_DOWN) ? EventType::KeyDown : EventType::KeyUp;
-                    ev.key = toKey(event.key.scancode);
-                    ev.mods = toModifiers(event.key.mod);
-                    eventsBuffer.push_back(ev);
-                    break;
-                }
-                case SDL_EVENT_TEXT_INPUT: {
-                    AppendTextInputEvents(eventsBuffer, event.text.text);
-                    break;
-                }
-                case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                case SDL_EVENT_MOUSE_BUTTON_UP: {
-                    Event ev;
-                    ev.type = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) ? EventType::MouseButtonDown : EventType::MouseButtonUp;
-                    ev.mouseButton = toMouseButton(event.button.button);
-                    ev.mods = toModifiers(SDL_GetModState());
-                    int winW = 0;
-                    int winH = 0;
-                    int fbW = 0;
-                    int fbH = 0;
-                    SDL_GetWindowSize(window, &winW, &winH);
-                    SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
-                    const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
-                    const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
-                    ev.x = event.button.x * scaleX;
-                    ev.y = event.button.y * scaleY;
-                    eventsBuffer.push_back(ev);
-                    break;
-                }
-                case SDL_EVENT_MOUSE_MOTION: {
-                    Event ev;
-                    ev.type = EventType::MouseMove;
-                    ev.mods = toModifiers(SDL_GetModState());
-                    int winW = 0;
-                    int winH = 0;
-                    int fbW = 0;
-                    int fbH = 0;
-                    SDL_GetWindowSize(window, &winW, &winH);
-                    SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
-                    const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
-                    const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
-                    ev.x = event.motion.x * scaleX;
-                    ev.y = event.motion.y * scaleY;
-                    eventsBuffer.push_back(ev);
-                    break;
-                }
-                case SDL_EVENT_MOUSE_WHEEL: {
-                    Event ev;
-                    ev.type = EventType::MouseScroll;
-                    ev.mods = toModifiers(SDL_GetModState());
-                    ev.scrollX = event.wheel.x;
-                    ev.scrollY = event.wheel.y;
-                    eventsBuffer.push_back(ev);
-                    break;
-                }
-                default:
-                    break;
+                continue;
+            }
+            const SDL_WindowID target_id = sdlEventWindowId(event);
+            const auto target = runtime.windows.find(target_id);
+            if (target != runtime.windows.end()) {
+                target->second->enqueueSdlEvent(event);
             }
         }
+        eventsBuffer.swap(pendingEvents);
     }
 
     const std::vector<Event>& events() const override {
@@ -453,20 +451,24 @@ public:
 
     void requestClose() override {
         closeRequested = true;
-        if (window) {
-            SDL_DestroyWindow(window);
-            window = nullptr;
-        }
     }
 
     void swapBuffers() override {
+#if defined(KARMA_RENDER_BACKEND_DILIGENT)
+        return;
+#else
         if (window) {
             SDL_GL_SwapWindow(window);
         }
+#endif
     }
 
     void setVsync(bool enabled) override {
+#if defined(KARMA_RENDER_BACKEND_DILIGENT)
+        (void)enabled;
+#else
         SDL_GL_SetSwapInterval(enabled ? 1 : 0);
+#endif
     }
 
     void setFullscreen(bool enabled) override {
@@ -578,11 +580,107 @@ public:
     }
 
 private:
+    void enqueueSdlEvent(const SDL_Event& event) {
+        switch (event.type) {
+            case SDL_EVENT_QUIT:
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED: {
+                closeRequested = true;
+                Event ev;
+                ev.type = EventType::WindowClose;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            case SDL_EVENT_WINDOW_FOCUS_LOST: {
+                Event ev;
+                ev.type = EventType::WindowFocus;
+                ev.focused = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
+                Event ev;
+                ev.type = EventType::WindowResize;
+                int fbW = 0;
+                int fbH = 0;
+                SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
+                ev.width = fbW;
+                ev.height = fbH;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_UP: {
+                Event ev;
+                ev.type = (event.type == SDL_EVENT_KEY_DOWN) ? EventType::KeyDown : EventType::KeyUp;
+                ev.key = toKey(event.key.scancode);
+                ev.mods = toModifiers(event.key.mod);
+                ev.repeat = event.key.repeat;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_TEXT_INPUT:
+                AppendTextInputEvents(pendingEvents, event.text.text);
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP: {
+                Event ev;
+                ev.type = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) ? EventType::MouseButtonDown : EventType::MouseButtonUp;
+                ev.mouseButton = toMouseButton(event.button.button);
+                ev.mods = toModifiers(SDL_GetModState());
+                int winW = 0;
+                int winH = 0;
+                int fbW = 0;
+                int fbH = 0;
+                SDL_GetWindowSize(window, &winW, &winH);
+                SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
+                const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
+                const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
+                ev.x = event.button.x * scaleX;
+                ev.y = event.button.y * scaleY;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_MOUSE_MOTION: {
+                Event ev;
+                ev.type = EventType::MouseMove;
+                ev.mods = toModifiers(SDL_GetModState());
+                int winW = 0;
+                int winH = 0;
+                int fbW = 0;
+                int fbH = 0;
+                SDL_GetWindowSize(window, &winW, &winH);
+                SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
+                const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
+                const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
+                ev.x = event.motion.x * scaleX;
+                ev.y = event.motion.y * scaleY;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_MOUSE_WHEEL: {
+                Event ev;
+                ev.type = EventType::MouseScroll;
+                ev.mods = toModifiers(SDL_GetModState());
+                ev.scrollX = event.wheel.x;
+                ev.scrollY = event.wheel.y;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
     SDL_Window *window = nullptr;
     SDL_GLContext glContext = nullptr;
     std::vector<Event> eventsBuffer;
+    std::vector<Event> pendingEvents;
+    SDL_WindowID windowId = 0;
     bool fullscreen = false;
     bool closeRequested = false;
+    bool sdlVideoAcquired = false;
     int windowedX = 0;
     int windowedY = 0;
     int windowedW = 1280;
@@ -591,8 +689,12 @@ private:
 
 } // namespace
 
-std::unique_ptr<Window> CreateSdlWindow(const WindowConfig &config) {
-    return std::make_unique<WindowSdl>(config);
+std::unique_ptr<Window> createSdlWindow(const WindowConfig& config) {
+    auto window = std::make_unique<WindowSdl>(config);
+    if (window->nativeHandle() == nullptr) {
+        return nullptr;
+    }
+    return window;
 }
 
 } // namespace karma::platform

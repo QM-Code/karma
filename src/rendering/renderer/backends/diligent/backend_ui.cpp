@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 namespace karma::rendering::backend {
@@ -97,7 +98,9 @@ float4 main(PSInput input) : SV_TARGET
 void DiligentBackend::ensureUiResources() {
   static bool logged_once = false;
   if (ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ &&
-      ui_pso_texture_scissor_ && ui_cb_ && ui_vb_ && ui_ib_) {
+      ui_pso_texture_scissor_ && ui_pso_color_premultiplied_ &&
+      ui_pso_color_scissor_premultiplied_ && ui_pso_texture_premultiplied_ &&
+      ui_pso_texture_scissor_premultiplied_ && ui_cb_ && ui_vb_ && ui_ib_) {
     return;
   }
   if (!device_) {
@@ -172,6 +175,7 @@ void DiligentBackend::ensureUiResources() {
   auto create_pipeline = [&](Diligent::IShader* ps,
                              bool scissor,
                              bool textured,
+                             bool premultiplied_alpha,
                              const char* name,
                              Diligent::RefCntAutoPtr<Diligent::IPipelineState>& out_pso,
                              Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb) {
@@ -198,10 +202,12 @@ void DiligentBackend::ensureUiResources() {
 
     auto& blend = graphics.BlendDesc.RenderTargets[0];
     blend.BlendEnable = true;
-    blend.SrcBlend = Diligent::BLEND_FACTOR_SRC_ALPHA;
+    blend.SrcBlend = premultiplied_alpha ? Diligent::BLEND_FACTOR_ONE
+                                         : Diligent::BLEND_FACTOR_SRC_ALPHA;
     blend.DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
     blend.BlendOp = Diligent::BLEND_OPERATION_ADD;
-    blend.SrcBlendAlpha = Diligent::BLEND_FACTOR_SRC_ALPHA;
+    blend.SrcBlendAlpha = premultiplied_alpha ? Diligent::BLEND_FACTOR_ONE
+                                              : Diligent::BLEND_FACTOR_SRC_ALPHA;
     blend.DestBlendAlpha = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
     blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
     blend.RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
@@ -237,20 +243,43 @@ void DiligentBackend::ensureUiResources() {
     recordResourceCreation("ui", name, srb_start, core::SteadyClock::now());
   };
 
-  create_pipeline(ps_color, false, false, "Karma UI Color PSO",
+  create_pipeline(ps_color, false, false, false, "Karma UI Color PSO",
                   ui_pso_color_, ui_srb_color_);
-  create_pipeline(ps_color, true, false, "Karma UI Color PSO Scissor",
+  create_pipeline(ps_color, true, false, false, "Karma UI Color PSO Scissor",
                   ui_pso_color_scissor_, ui_srb_color_scissor_);
-  create_pipeline(ps_texture, false, true, "Karma UI Texture PSO",
+  create_pipeline(ps_texture, false, true, false, "Karma UI Texture PSO",
                   ui_pso_texture_, ui_srb_texture_);
-  create_pipeline(ps_texture, true, true, "Karma UI Texture PSO Scissor",
+  create_pipeline(ps_texture, true, true, false, "Karma UI Texture PSO Scissor",
                   ui_pso_texture_scissor_, ui_srb_texture_scissor_);
+  create_pipeline(ps_color, false, false, true, "Karma UI Color PSO Premultiplied",
+                  ui_pso_color_premultiplied_, ui_srb_color_premultiplied_);
+  create_pipeline(ps_color, true, false, true,
+                  "Karma UI Color PSO Scissor Premultiplied",
+                  ui_pso_color_scissor_premultiplied_,
+                  ui_srb_color_scissor_premultiplied_);
+  create_pipeline(ps_texture, false, true, true,
+                  "Karma UI Texture PSO Premultiplied",
+                  ui_pso_texture_premultiplied_, ui_srb_texture_premultiplied_);
+  create_pipeline(ps_texture, true, true, true,
+                  "Karma UI Texture PSO Scissor Premultiplied",
+                  ui_pso_texture_scissor_premultiplied_,
+                  ui_srb_texture_scissor_premultiplied_);
   if (ui_srb_texture_ && !ui_texture_var_) {
     ui_texture_var_ = ui_srb_texture_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture");
   }
   if (ui_srb_texture_scissor_ && !ui_texture_scissor_var_) {
     ui_texture_scissor_var_ =
         ui_srb_texture_scissor_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Texture");
+  }
+  if (ui_srb_texture_premultiplied_ && !ui_texture_premultiplied_var_) {
+    ui_texture_premultiplied_var_ = ui_srb_texture_premultiplied_->GetVariableByName(
+        Diligent::SHADER_TYPE_PIXEL, "g_Texture");
+  }
+  if (ui_srb_texture_scissor_premultiplied_ &&
+      !ui_texture_scissor_premultiplied_var_) {
+    ui_texture_scissor_premultiplied_var_ =
+        ui_srb_texture_scissor_premultiplied_->GetVariableByName(
+            Diligent::SHADER_TYPE_PIXEL, "g_Texture");
   }
 
   if (!ui_vb_) {
@@ -280,7 +309,10 @@ void DiligentBackend::ensureUiResources() {
   }
 
   if (!logged_once &&
-      ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ && ui_pso_texture_scissor_) {
+      ui_pso_color_ && ui_pso_color_scissor_ && ui_pso_texture_ &&
+      ui_pso_texture_scissor_ && ui_pso_color_premultiplied_ &&
+      ui_pso_color_scissor_premultiplied_ && ui_pso_texture_premultiplied_ &&
+      ui_pso_texture_scissor_premultiplied_) {
     logged_once = true;
   }
 }
@@ -401,16 +433,31 @@ void DiligentBackend::renderUi(const karma::rendering::UIDrawData& draw_data) {
   bool has_current_rect = false;
   for (const auto& cmd : draw_data.commands) {
     const bool use_texture = cmd.texture != 0;
-    auto* pipeline = use_texture
-        ? (cmd.scissor_enabled ? ui_pso_texture_scissor_.RawPtr()
-                               : ui_pso_texture_.RawPtr())
-        : (cmd.scissor_enabled ? ui_pso_color_scissor_.RawPtr()
-                               : ui_pso_color_.RawPtr());
-    auto* srb = use_texture
-        ? (cmd.scissor_enabled ? ui_srb_texture_scissor_.RawPtr()
-                               : ui_srb_texture_.RawPtr())
-        : (cmd.scissor_enabled ? ui_srb_color_scissor_.RawPtr()
-                               : ui_srb_color_.RawPtr());
+    Diligent::IPipelineState* pipeline = nullptr;
+    Diligent::IShaderResourceBinding* srb = nullptr;
+    if (draw_data.premultiplied_alpha) {
+      pipeline = use_texture
+          ? (cmd.scissor_enabled ? ui_pso_texture_scissor_premultiplied_.RawPtr()
+                                 : ui_pso_texture_premultiplied_.RawPtr())
+          : (cmd.scissor_enabled ? ui_pso_color_scissor_premultiplied_.RawPtr()
+                                 : ui_pso_color_premultiplied_.RawPtr());
+      srb = use_texture
+          ? (cmd.scissor_enabled ? ui_srb_texture_scissor_premultiplied_.RawPtr()
+                                 : ui_srb_texture_premultiplied_.RawPtr())
+          : (cmd.scissor_enabled ? ui_srb_color_scissor_premultiplied_.RawPtr()
+                                 : ui_srb_color_premultiplied_.RawPtr());
+    } else {
+      pipeline = use_texture
+          ? (cmd.scissor_enabled ? ui_pso_texture_scissor_.RawPtr()
+                                 : ui_pso_texture_.RawPtr())
+          : (cmd.scissor_enabled ? ui_pso_color_scissor_.RawPtr()
+                                 : ui_pso_color_.RawPtr());
+      srb = use_texture
+          ? (cmd.scissor_enabled ? ui_srb_texture_scissor_.RawPtr()
+                                 : ui_srb_texture_.RawPtr())
+          : (cmd.scissor_enabled ? ui_srb_color_scissor_.RawPtr()
+                                 : ui_srb_color_.RawPtr());
+    }
     if (!pipeline || !srb) {
       continue;
     }
@@ -424,12 +471,15 @@ void DiligentBackend::renderUi(const karma::rendering::UIDrawData& draw_data) {
     const bool scissor = cmd.scissor_enabled;
     Diligent::Rect rect{};
     if (scissor) {
-      const int right = std::max(0, cmd.scissor_x + cmd.scissor_w);
-      const int bottom = std::max(0, cmd.scissor_y + cmd.scissor_h);
-      rect.left = std::max(0, cmd.scissor_x);
-      rect.top = std::max(0, cmd.scissor_y);
-      rect.right = std::min(current_width_, right);
-      rect.bottom = std::min(current_height_, bottom);
+      const int64_t right = static_cast<int64_t>(cmd.scissor_x) + cmd.scissor_w;
+      const int64_t bottom = static_cast<int64_t>(cmd.scissor_y) + cmd.scissor_h;
+      rect.left = std::clamp(cmd.scissor_x, 0, current_width_);
+      rect.top = std::clamp(cmd.scissor_y, 0, current_height_);
+      rect.right = static_cast<int>(std::clamp<int64_t>(right, 0, current_width_));
+      rect.bottom = static_cast<int>(std::clamp<int64_t>(bottom, 0, current_height_));
+      if (rect.left >= rect.right || rect.top >= rect.bottom) {
+        continue;
+      }
     } else {
       rect.left = 0;
       rect.top = 0;
@@ -465,8 +515,13 @@ void DiligentBackend::renderUi(const karma::rendering::UIDrawData& draw_data) {
       }
       if (desired && (desired != current_texture || srb != current_srb)) {
         current_texture = desired;
-        Diligent::IShaderResourceVariable* texture_var =
-            cmd.scissor_enabled ? ui_texture_scissor_var_ : ui_texture_var_;
+        Diligent::IShaderResourceVariable* texture_var = nullptr;
+        if (draw_data.premultiplied_alpha) {
+          texture_var = cmd.scissor_enabled ? ui_texture_scissor_premultiplied_var_
+                                            : ui_texture_premultiplied_var_;
+        } else {
+          texture_var = cmd.scissor_enabled ? ui_texture_scissor_var_ : ui_texture_var_;
+        }
         if (texture_var) {
           texture_var->Set(current_texture);
           current_srb = nullptr;

@@ -61,7 +61,11 @@ SceneLoadResult loadSceneDocument(const SceneLoadDesc& desc) {
     return result;
   }
 
-  detail::parseSceneDocument(root, desc.path, result);
+  try {
+    detail::parseSceneDocument(root, desc.path, result);
+  } catch (const std::exception& e) {
+    fail(result, std::string("failed to validate scene document: ") + e.what());
+  }
   return result;
 }
 

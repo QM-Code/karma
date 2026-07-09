@@ -14,7 +14,11 @@
 
 struct aiScene;
 
+#if defined(KARMA_WINDOW_BACKEND_SDL)
+struct SDL_Window;
+#else
 struct GLFWwindow;
+#endif
 
 namespace karma::rendering::backend {
 
@@ -142,7 +146,9 @@ LoadedImage loadImageFromMemory(const unsigned char* data, size_t size);
 LoadedImage loadImageFromFile(const std::filesystem::path& path);
 LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path);
 
-#if !defined(KARMA_WINDOW_BACKEND_SDL)
+#if defined(KARMA_WINDOW_BACKEND_SDL)
+Diligent::NativeWindow toNativeWindow(SDL_Window* window);
+#else
 Diligent::NativeWindow toNativeWindow(GLFWwindow* window);
 #endif
 

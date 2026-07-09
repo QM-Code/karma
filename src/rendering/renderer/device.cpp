@@ -118,6 +118,10 @@ class GraphicsDevice::RenderScheduler {
       startRenderThread(window, create_info);
     } else {
       backend_ = rendering::backend::CreateGraphicsBackend(window, create_info);
+      {
+        std::lock_guard<std::mutex> lock(stats_mutex_);
+        backend_available_ = backend_ != nullptr && backend_->isValid();
+      }
       refreshCachedStats(0.0f, 0.0f, 0.0f);
     }
   }
@@ -336,7 +340,7 @@ class GraphicsDevice::RenderScheduler {
         backend_ = rendering::backend::CreateGraphicsBackend(window, create_info);
         {
           std::lock_guard<std::mutex> lock(stats_mutex_);
-          backend_available_ = backend_ != nullptr;
+          backend_available_ = backend_ != nullptr && backend_->isValid();
         }
         refreshCachedStats(0.0f, 0.0f, 0.0f);
         init_promise->set_value();
@@ -526,6 +530,11 @@ GraphicsDevice::GraphicsDevice(karma::platform::Window& window,
 }
 
 GraphicsDevice::~GraphicsDevice() = default;
+
+bool GraphicsDevice::isValid() const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return scheduler_ != nullptr && scheduler_->hasBackend();
+}
 
 void GraphicsDevice::beginFrame(const FrameInfo& frame) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -767,6 +776,10 @@ std::vector<TextureUploadBatchResult> GraphicsDevice::createAndUploadTextures(
     }
     for (TextureUploadBatchRequest& request : requests) {
       TextureUploadBatchResult result{};
+      if (!validateTextureUpload(request.desc, request.upload)) {
+        results.push_back(result);
+        continue;
+      }
       const auto create_start = core::SteadyClock::now();
       result.texture = backend->createTexture(request.desc);
       result.create_ms =
@@ -1189,6 +1202,25 @@ RendererFrameTimingStats GraphicsDevice::getRendererFrameTimingStats() const {
   return scheduler_ ? scheduler_->getRendererFrameTimingStats() : RendererFrameTimingStats{};
 }
 
+void GraphicsDevice::setShadowSettings(const ShadowSettings& requested_settings) {
+  const ShadowSettings settings = clampShadowSettings(requested_settings);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (scheduler_) {
+    scheduler_->invokeVoid(
+        [settings](RenderScheduler::Backend* backend) {
+      if (backend != nullptr) {
+        backend->setShadowSettings(settings.bias,
+                                   settings.map_size,
+                                   settings.pcf_radius,
+                                   settings.raster_depth_bias,
+                                   settings.raster_slope_bias,
+                                   settings.receiver_bias_scale,
+                                   settings.normal_bias_scale);
+      }
+    });
+  }
+}
+
 void GraphicsDevice::setShadowSettings(float bias,
                                        int map_size,
                                        int pcf_radius,
@@ -1196,18 +1228,29 @@ void GraphicsDevice::setShadowSettings(float bias,
                                        float raster_slope_bias,
                                        float receiver_bias_scale,
                                        float normal_bias_scale) {
+  setShadowSettings(ShadowSettings{
+      .bias = bias,
+      .map_size = map_size,
+      .pcf_radius = pcf_radius,
+      .raster_depth_bias = raster_depth_bias,
+      .raster_slope_bias = raster_slope_bias,
+      .receiver_bias_scale = receiver_bias_scale,
+      .normal_bias_scale = normal_bias_scale,
+  });
+}
+
+void GraphicsDevice::setPointShadowSettings(
+    const PointShadowSettings& requested_settings) {
+  const PointShadowSettings settings =
+      clampPointShadowSettings(requested_settings);
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
-    scheduler_->invokeVoid(
-        [=](RenderScheduler::Backend* backend) {
+    scheduler_->invokeVoid([settings](RenderScheduler::Backend* backend) {
       if (backend != nullptr) {
-        backend->setShadowSettings(bias,
-                                   map_size,
-                                   pcf_radius,
-                                   raster_depth_bias,
-                                   raster_slope_bias,
-                                   receiver_bias_scale,
-                                   normal_bias_scale);
+        backend->setPointShadowSettings(settings.constant_bias,
+                                        settings.slope_bias_scale,
+                                        settings.normal_bias_scale,
+                                        settings.receiver_bias_scale);
       }
     });
   }
@@ -1217,17 +1260,12 @@ void GraphicsDevice::setPointShadowSettings(float constant_bias,
                                             float slope_bias_scale,
                                             float normal_bias_scale,
                                             float receiver_bias_scale) {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
-  if (scheduler_) {
-    scheduler_->invokeVoid([=](RenderScheduler::Backend* backend) {
-      if (backend != nullptr) {
-        backend->setPointShadowSettings(constant_bias,
-                                        slope_bias_scale,
-                                        normal_bias_scale,
-                                        receiver_bias_scale);
-      }
-    });
-  }
+  setPointShadowSettings(PointShadowSettings{
+      .constant_bias = constant_bias,
+      .slope_bias_scale = slope_bias_scale,
+      .normal_bias_scale = normal_bias_scale,
+      .receiver_bias_scale = receiver_bias_scale,
+  });
 }
 
 void GraphicsDevice::setPointShadowLightLimit(int max_lights) {
@@ -1241,25 +1279,39 @@ void GraphicsDevice::setPointShadowLightLimit(int max_lights) {
   }
 }
 
-void GraphicsDevice::setLocalLightingSettings(float distance_damping,
-                                              float range_falloff_exponent,
-                                              bool ao_affects_local_lights,
-                                              float directional_shadow_lift_strength) {
+void GraphicsDevice::setLocalLightingSettings(
+    const LocalLightingSettings& requested_settings) {
+  const LocalLightingSettings settings =
+      clampLocalLightingSettings(requested_settings);
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
     scheduler_->invokeVoid(
-        [=](RenderScheduler::Backend* backend) {
+        [settings](RenderScheduler::Backend* backend) {
       if (backend != nullptr) {
-        backend->setLocalLightingSettings(distance_damping,
-                                          range_falloff_exponent,
-                                          ao_affects_local_lights,
-                                          directional_shadow_lift_strength);
+        backend->setLocalLightingSettings(
+            settings.distance_damping,
+            settings.range_falloff_exponent,
+            settings.ao_affects_local_lights,
+            settings.directional_shadow_lift_strength);
       }
     });
   }
 }
 
+void GraphicsDevice::setLocalLightingSettings(float distance_damping,
+                                              float range_falloff_exponent,
+                                              bool ao_affects_local_lights,
+                                              float directional_shadow_lift_strength) {
+  setLocalLightingSettings(LocalLightingSettings{
+      .distance_damping = distance_damping,
+      .range_falloff_exponent = range_falloff_exponent,
+      .ao_affects_local_lights = ao_affects_local_lights,
+      .directional_shadow_lift_strength = directional_shadow_lift_strength,
+  });
+}
+
 void GraphicsDevice::setExposure(float exposure) {
+  exposure = clampLightingExposure(exposure);
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
     scheduler_->invokeVoid([exposure](RenderScheduler::Backend* backend) {
@@ -1309,6 +1361,9 @@ void GraphicsDevice::updateTextureRGBA8(TextureId texture, int width, int height
 }
 
 void GraphicsDevice::renderUi(const karma::rendering::UIDrawData& draw_data) {
+  if (!validateUIDrawData(draw_data)) {
+    return;
+  }
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
     scheduler_->recordFrameCommand([draw_data](RenderScheduler::Backend& backend) {

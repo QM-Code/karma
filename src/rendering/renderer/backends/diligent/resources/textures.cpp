@@ -11,11 +11,6 @@ namespace karma::rendering::backend {
 
 namespace {
 
-bool isBc7(rendering::TextureFormat format) {
-  return format == rendering::TextureFormat::BC7_RGBA_UNORM ||
-         format == rendering::TextureFormat::BC7_RGBA_UNORM_SRGB;
-}
-
 Diligent::TEXTURE_FORMAT toDiligentTextureFormat(const rendering::TextureDesc& desc) {
   switch (desc.format) {
     case rendering::TextureFormat::BC7_RGBA_UNORM:
@@ -41,44 +36,45 @@ Diligent::TEXTURE_FORMAT toDiligentTextureFormat(rendering::TextureFormat format
   return toDiligentTextureFormat(desc);
 }
 
-std::size_t defaultRowStride(rendering::TextureFormat format, int width) {
-  if (isBc7(format)) {
-    const std::size_t blocks_x =
-        (static_cast<std::size_t>(std::max(width, 1)) + 3u) / 4u;
-    return blocks_x * 16u;
-  }
-  return static_cast<std::size_t>(std::max(width, 0)) * 4u;
-}
-
 }  // namespace
 
 rendering::TextureId DiligentBackend::createTexture(const rendering::TextureDesc& desc) {
-  const rendering::TextureId id = nextTextureId_++;
+  if (!device_ || !desc.valid() ||
+      desc.format == rendering::TextureFormat::KTX2_BASIS_UASTC ||
+      !supportsTextureFormat(desc.format)) {
+    return rendering::kInvalidTexture;
+  }
+
   TextureRecord record{};
   record.desc = desc;
-  if (device_ && desc.width > 0 && desc.height > 0) {
-    const bool compressed = isBc7(desc.format);
-    const bool generate_mips = desc.generate_mips && !compressed;
-    Diligent::TextureDesc tex_desc{};
-    tex_desc.Name = "Karma Texture";
-    tex_desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
-    tex_desc.Width = static_cast<Diligent::Uint32>(desc.width);
-    tex_desc.Height = static_cast<Diligent::Uint32>(desc.height);
-    tex_desc.MipLevels = generate_mips ? 0 : std::max<Diligent::Uint32>(1u, desc.mip_levels);
-    tex_desc.BindFlags = Diligent::BIND_SHADER_RESOURCE |
-                         (generate_mips ? Diligent::BIND_RENDER_TARGET : Diligent::BIND_NONE);
-    tex_desc.MiscFlags = generate_mips ? Diligent::MISC_TEXTURE_FLAG_GENERATE_MIPS
-                                       : Diligent::MISC_TEXTURE_FLAG_NONE;
-    tex_desc.Format = toDiligentTextureFormat(desc);
-    device_->CreateTexture(tex_desc, nullptr, &record.texture);
-    if (record.texture) {
-      auto* raw_view = record.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      if (raw_view) {
-        Diligent::RefCntAutoPtr<Diligent::ITextureView> view;
-        view = raw_view;
-        record.srv = view;
-      }
+  const bool generate_mips = desc.generate_mips;
+  Diligent::TextureDesc tex_desc{};
+  tex_desc.Name = "Karma Texture";
+  tex_desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+  tex_desc.Width = static_cast<Diligent::Uint32>(desc.width);
+  tex_desc.Height = static_cast<Diligent::Uint32>(desc.height);
+  tex_desc.MipLevels = generate_mips ? 0 : std::max<Diligent::Uint32>(1u, desc.mip_levels);
+  tex_desc.BindFlags = Diligent::BIND_SHADER_RESOURCE |
+                       (generate_mips ? Diligent::BIND_RENDER_TARGET : Diligent::BIND_NONE);
+  tex_desc.MiscFlags = generate_mips ? Diligent::MISC_TEXTURE_FLAG_GENERATE_MIPS
+                                     : Diligent::MISC_TEXTURE_FLAG_NONE;
+  tex_desc.Format = toDiligentTextureFormat(desc);
+  device_->CreateTexture(tex_desc, nullptr, &record.texture);
+  if (record.texture) {
+    auto* raw_view = record.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+    if (raw_view) {
+      Diligent::RefCntAutoPtr<Diligent::ITextureView> view;
+      view = raw_view;
+      record.srv = view;
     }
+  }
+  if (!record.texture || !record.srv) {
+    return rendering::kInvalidTexture;
+  }
+
+  const rendering::TextureId id = nextTextureId_++;
+  if (id == rendering::kInvalidTexture) {
+    return rendering::kInvalidTexture;
   }
   textures_[id] = std::move(record);
   return id;
@@ -96,11 +92,7 @@ bool DiligentBackend::supportsTextureFormat(rendering::TextureFormat format) con
 
 bool DiligentBackend::uploadTexture(rendering::TextureId texture,
                                     const rendering::TextureUploadData& upload) {
-  if (!device_ || !context_ || texture == rendering::kInvalidTexture ||
-      upload.bytes.empty() || upload.subresources.empty()) {
-    return false;
-  }
-  if (upload.format != rendering::TextureFormat::RGBA8 && !isBc7(upload.format)) {
+  if (!device_ || !context_ || texture == rendering::kInvalidTexture) {
     return false;
   }
 
@@ -108,22 +100,45 @@ bool DiligentBackend::uploadTexture(rendering::TextureId texture,
   if (it == textures_.end() || !it->second.texture) {
     return false;
   }
-  if (it->second.desc.format != upload.format) {
+  if (!rendering::validateTextureUpload(it->second.desc, upload)) {
     return false;
   }
 
   for (const rendering::TextureUploadSubresource& subresource : upload.subresources) {
-    if (subresource.width <= 0 || subresource.height <= 0 ||
-        subresource.offset > upload.bytes.size() ||
-        subresource.size > upload.bytes.size() - subresource.offset) {
-      return false;
-    }
+    std::vector<std::uint8_t> expanded_rgba;
     Diligent::TextureSubResData subres{};
-    subres.pData = upload.bytes.data() + subresource.offset;
-    subres.Stride = static_cast<Diligent::Uint64>(
-        subresource.row_stride != 0u
-            ? subresource.row_stride
-            : defaultRowStride(upload.format, subresource.width));
+    if (upload.format == rendering::TextureFormat::RGB8) {
+      const std::size_t source_min_stride =
+          rendering::textureUploadMinimumRowStride(upload.format, subresource.width);
+      const std::size_t source_stride =
+          subresource.row_stride == 0u ? source_min_stride : subresource.row_stride;
+      const std::size_t output_stride =
+          static_cast<std::size_t>(subresource.width) * 4u;
+      expanded_rgba.resize(output_stride * static_cast<std::size_t>(subresource.height));
+      const std::uint8_t* source = upload.bytes.data() + subresource.offset;
+      for (int row = 0; row < subresource.height; ++row) {
+        const std::uint8_t* source_row = source + static_cast<std::size_t>(row) * source_stride;
+        std::uint8_t* output_row =
+            expanded_rgba.data() + static_cast<std::size_t>(row) * output_stride;
+        for (int column = 0; column < subresource.width; ++column) {
+          const std::size_t source_index = static_cast<std::size_t>(column) * 3u;
+          const std::size_t output_index = static_cast<std::size_t>(column) * 4u;
+          output_row[output_index + 0u] = source_row[source_index + 0u];
+          output_row[output_index + 1u] = source_row[source_index + 1u];
+          output_row[output_index + 2u] = source_row[source_index + 2u];
+          output_row[output_index + 3u] = 255u;
+        }
+      }
+      subres.pData = expanded_rgba.data();
+      subres.Stride = static_cast<Diligent::Uint64>(output_stride);
+    } else {
+      subres.pData = upload.bytes.data() + subresource.offset;
+      subres.Stride = static_cast<Diligent::Uint64>(
+          subresource.row_stride != 0u
+              ? subresource.row_stride
+              : rendering::textureUploadMinimumRowStride(upload.format,
+                                                          subresource.width));
+    }
 
     Diligent::Box box{};
     box.MinX = 0;
@@ -178,6 +193,7 @@ void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
     record.desc.format = rendering::TextureFormat::RGBA8;
     record.desc.srgb = false;
     record.desc.generate_mips = false;
+    record.desc.mip_levels = 1u;
 
     Diligent::TextureDesc tex_desc{};
     tex_desc.Name = "Karma UI Texture";

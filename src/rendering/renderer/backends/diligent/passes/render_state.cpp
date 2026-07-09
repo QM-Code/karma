@@ -444,13 +444,22 @@ void DiligentBackend::setShadowSettings(float bias,
                                         float raster_slope_bias,
                                         float receiver_bias_scale,
                                         float normal_bias_scale) {
-  shadow_bias_ = std::max(0.0f, bias);
-  shadow_pcf_radius_ = std::clamp(pcf_radius, 0, 4);
-  shadow_receiver_bias_scale_ = std::clamp(receiver_bias_scale, 0.0f, 16.0f);
-  shadow_normal_bias_scale_ = std::clamp(normal_bias_scale, 0.0f, 16.0f);
+  const rendering::ShadowSettings settings = rendering::clampShadowSettings({
+      .bias = bias,
+      .map_size = map_size,
+      .pcf_radius = pcf_radius,
+      .raster_depth_bias = raster_depth_bias,
+      .raster_slope_bias = raster_slope_bias,
+      .receiver_bias_scale = receiver_bias_scale,
+      .normal_bias_scale = normal_bias_scale,
+  });
+  shadow_bias_ = settings.bias;
+  shadow_pcf_radius_ = settings.pcf_radius;
+  shadow_receiver_bias_scale_ = settings.receiver_bias_scale;
+  shadow_normal_bias_scale_ = settings.normal_bias_scale;
 
-  const int clamped_depth_bias = std::clamp(raster_depth_bias, -65536, 65536);
-  const float clamped_slope_bias = std::clamp(raster_slope_bias, -64.0f, 64.0f);
+  const int clamped_depth_bias = settings.raster_depth_bias;
+  const float clamped_slope_bias = settings.raster_slope_bias;
   const bool raster_bias_changed = clamped_depth_bias != shadow_raster_depth_bias_ ||
                                    clamped_slope_bias != shadow_raster_slope_bias_;
   if (raster_bias_changed) {
@@ -463,7 +472,7 @@ void DiligentBackend::setShadowSettings(float bias,
     point_shadow_face_dirty_.fill(1u);
   }
 
-  const int clamped_size = std::max(256, map_size);
+  const int clamped_size = settings.map_size;
   if (clamped_size != shadow_map_size_) {
     shadow_map_size_ = clamped_size;
     point_shadow_map_size_ = std::max(256, shadow_map_size_ / 2);
@@ -476,10 +485,17 @@ void DiligentBackend::setPointShadowSettings(float constant_bias,
                                              float slope_bias_scale,
                                              float normal_bias_scale,
                                              float receiver_bias_scale) {
-  point_shadow_constant_bias_ = std::clamp(constant_bias, 0.0f, 0.05f);
-  point_shadow_slope_bias_scale_ = std::clamp(slope_bias_scale, 0.0f, 16.0f);
-  point_shadow_normal_bias_scale_ = std::clamp(normal_bias_scale, 0.0f, 16.0f);
-  point_shadow_receiver_bias_scale_ = std::clamp(receiver_bias_scale, 0.0f, 8.0f);
+  const rendering::PointShadowSettings settings =
+      rendering::clampPointShadowSettings({
+          .constant_bias = constant_bias,
+          .slope_bias_scale = slope_bias_scale,
+          .normal_bias_scale = normal_bias_scale,
+          .receiver_bias_scale = receiver_bias_scale,
+      });
+  point_shadow_constant_bias_ = settings.constant_bias;
+  point_shadow_slope_bias_scale_ = settings.slope_bias_scale;
+  point_shadow_normal_bias_scale_ = settings.normal_bias_scale;
+  point_shadow_receiver_bias_scale_ = settings.receiver_bias_scale;
 }
 
 void DiligentBackend::setPointShadowLightLimit(int max_lights) {
@@ -496,37 +512,28 @@ void DiligentBackend::setLocalLightingSettings(float distance_damping,
                                                float range_falloff_exponent,
                                                bool ao_affects_local_lights,
                                                float directional_shadow_lift_strength) {
-  local_light_distance_damping_ = std::clamp(distance_damping, 0.0f, 4.0f);
-  local_light_range_exponent_ = std::clamp(range_falloff_exponent, 0.1f, 8.0f);
-  ao_affects_local_lights_ = ao_affects_local_lights;
+  const rendering::LocalLightingSettings settings =
+      rendering::clampLocalLightingSettings({
+          .distance_damping = distance_damping,
+          .range_falloff_exponent = range_falloff_exponent,
+          .ao_affects_local_lights = ao_affects_local_lights,
+          .directional_shadow_lift_strength = directional_shadow_lift_strength,
+      });
+  local_light_distance_damping_ = settings.distance_damping;
+  local_light_range_exponent_ = settings.range_falloff_exponent;
+  ao_affects_local_lights_ = settings.ao_affects_local_lights;
   local_light_directional_shadow_lift_ =
-      std::clamp(directional_shadow_lift_strength, 0.0f, 8.0f);
+      settings.directional_shadow_lift_strength;
 }
 
 void DiligentBackend::setExposure(float exposure) {
-  lighting_exposure_ = std::clamp(exposure, 0.01f, 32.0f);
+  lighting_exposure_ = rendering::clampLightingExposure(exposure);
 }
 
 void DiligentBackend::applyPostProcessSettingsForPass(
     const rendering::PostProcessSettings& settings) {
-  rendering::PostProcessSettings clamped = settings;
-  clamped.bloom_threshold = std::clamp(clamped.bloom_threshold, 0.0f, 16.0f);
-  clamped.bloom_intensity = std::clamp(clamped.bloom_intensity, 0.0f, 8.0f);
-  clamped.bloom_radius = std::clamp(clamped.bloom_radius, 0.25f, 8.0f);
-  clamped.tone_exposure = std::clamp(clamped.tone_exposure, 0.01f, 16.0f);
-  clamped.tone_contrast = std::clamp(clamped.tone_contrast, 0.25f, 4.0f);
-  clamped.tone_saturation = std::clamp(clamped.tone_saturation, 0.0f, 4.0f);
-  clamped.ssao_radius = std::clamp(clamped.ssao_radius, 0.1f, 16.0f);
-  clamped.ssao_intensity = std::clamp(clamped.ssao_intensity, 0.0f, 4.0f);
-  clamped.ssao_power = std::clamp(clamped.ssao_power, 0.25f, 8.0f);
-  clamped.ssr_intensity = std::clamp(clamped.ssr_intensity, 0.0f, 2.0f);
-  clamped.ssr_max_roughness = std::clamp(clamped.ssr_max_roughness, 0.0f, 1.0f);
-  clamped.ssr_thickness = std::clamp(clamped.ssr_thickness, 0.001f, 1.0f);
-  clamped.taa_feedback = std::clamp(clamped.taa_feedback, 0.0f, 0.98f);
-  clamped.taa_sharpening = std::clamp(clamped.taa_sharpening, 0.0f, 1.0f);
-  clamped.dof_focus_depth = std::clamp(clamped.dof_focus_depth, 0.01f, 100000.0f);
-  clamped.dof_focus_range = std::clamp(clamped.dof_focus_range, 0.01f, 100000.0f);
-  clamped.dof_intensity = std::clamp(clamped.dof_intensity, 0.0f, 8.0f);
+  const rendering::PostProcessSettings clamped =
+      rendering::clampPostProcessSettings(settings);
   if (!clamped.temporal_antialiasing_enabled ||
       !post_process_settings_.temporal_antialiasing_enabled) {
     post_process_history_valid_ = false;

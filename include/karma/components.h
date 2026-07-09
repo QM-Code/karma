@@ -375,10 +375,12 @@ namespace karma::components {
 /// \ingroup karma_components
 /// Audio emitter bound to a clip key loaded by `AudioSystem`.
 ///
-/// `play_on_start` is consumed once by the audio system. Calling `play()`
-/// records a transient request that is consumed on the next audio update.
+/// `play_on_start` is consumed once by the audio system. Playback and stop
+/// requests are consumed on the next audio update.
 class AudioSourceComponent : public world::ComponentTag {
  public:
+  static constexpr uint32_t kMaxPendingPlayRequests = 256u;
+
   std::string clip_key;
   float gain = 1.0f;
   float pitch = 1.0f;
@@ -389,20 +391,35 @@ class AudioSourceComponent : public world::ComponentTag {
   bool spatialized = true;
   int max_instances = 5;
 
-  /// Requests one playback instance on the next audio-system update.
-  void play() { play_requested_ = true; }
-
-  /// Returns and clears a pending playback request.
-  bool consumePlayRequest() {
-    if (!play_requested_) {
-      return false;
+  /// Requests playback instances on the next audio-system update.
+  void play(uint32_t instance_count = 1u) {
+    if (instance_count >= kMaxPendingPlayRequests - pending_play_requests_) {
+      pending_play_requests_ = kMaxPendingPlayRequests;
+    } else {
+      pending_play_requests_ += instance_count;
     }
-    play_requested_ = false;
-    return true;
+  }
+
+  /// Returns and clears all pending playback requests.
+  uint32_t consumePlayRequests() {
+    const uint32_t result = pending_play_requests_;
+    pending_play_requests_ = 0u;
+    return result;
+  }
+
+  /// Requests that active voices belonging to this source stop.
+  void stop() { stop_requested_ = true; }
+
+  /// Returns and clears the pending stop request.
+  bool consumeStopRequest() {
+    const bool result = stop_requested_;
+    stop_requested_ = false;
+    return result;
   }
 
  private:
-  bool play_requested_ = false;
+  uint32_t pending_play_requests_ = 0u;
+  bool stop_requested_ = false;
 };
 
 }  // namespace karma::components
@@ -427,9 +444,12 @@ namespace karma::components {
 struct CameraComponent : world::ComponentTag {
   bool perspective = true;
   bool render_shadows = true;
+  /// Perspective vertical field of view in the inclusive range [1, 179].
   float fov_y_degrees = 60.0f;
+  /// Positive near clip distance. Must be smaller than `far_clip`.
   float near_clip = 0.1f;
   float far_clip = 1000.0f;
+  /// Orthographic bounds; horizontal and vertical spans must be non-zero.
   float ortho_left = -1.0f;
   float ortho_right = 1.0f;
   float ortho_top = 1.0f;
@@ -982,6 +1002,7 @@ namespace karma::components {
 /// Environment map and skybox settings extracted by `RenderSystem`.
 struct EnvironmentComponent : world::ComponentTag {
   std::string environment_map_asset_key;
+  /// Non-negative environment lighting multiplier.
   float intensity = 1.0f;
   bool draw_skybox = true;
   bool enabled = true;
@@ -1139,11 +1160,15 @@ struct LightComponent : world::ComponentTag {
 
   Type type = Type::Point;
   math::Color color{1.0f, 1.0f, 1.0f, 1.0f};
+  /// Non-negative radiant intensity multiplier.
   float intensity = 1.0f;
+  /// Non-negative point/spot influence distance.
   float range = 10.0f;
+  /// Spot cones satisfy `0 <= inner <= outer <= 179` degrees.
   float inner_cone_degrees = 15.0f;
   float outer_cone_degrees = 30.0f;
   bool casts_shadows = false;
+  /// Non-negative directional shadow extent; zero selects the renderer default.
   float shadow_extent = 0.0f;
 };
 
@@ -2416,13 +2441,15 @@ struct OverlapHit {
 struct OverlapFilter {
   bool only_triggers = false;
   uint32_t collision_layer_mask = 0xFFFFFFFFu;
+  /// Excludes `query_entity` from overlap search results when true.
   bool skip_self = true;
 };
 
 /// Returns true when `world_point` lies inside `entity`'s collider.
 bool containsPoint(const world::World& world, world::Entity entity, const math::Vec3& world_point);
 
-/// Returns true when two entities' colliders overlap.
+/// Returns true when two entities' supported analytic colliders overlap.
+/// Passing the same entity for both arguments returns true for a valid collider.
 bool overlaps(const world::World& world, world::Entity a, world::Entity b);
 
 /// Finds the first collider containing `world_point`.

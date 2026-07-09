@@ -2,15 +2,15 @@
 
 namespace karma::platform {
 
-std::unique_ptr<Window> CreateWindow(const WindowConfig &config) {
+std::unique_ptr<Window> createWindow(const WindowConfig& config) {
 #if defined(KARMA_HEADLESS)
-    (void)config;
-    return nullptr;
+  (void)config;
+  return nullptr;
 #elif defined(KARMA_WINDOW_BACKEND_SDL)
-    return CreateSdlWindow(config);
+  return createSdlWindow(config);
 #else
-    return CreateGlfwWindow(config);
+  return createGlfwWindow(config);
 #endif
 }
 
-} // namespace karma::platform
+}  // namespace karma::platform

@@ -28,7 +28,56 @@ void drawCircle(GraphicsDevice& device,
   }
 }
 
+void drawArc(GraphicsDevice& device,
+             const glm::vec3& center,
+             const glm::vec3& axis_x,
+             const glm::vec3& axis_y,
+             float radius,
+             float start_angle,
+             float end_angle,
+             const math::Color& color,
+             int segments = 12) {
+  const float step = (end_angle - start_angle) / static_cast<float>(segments);
+  glm::vec3 prev = center + radius *
+      (std::cos(start_angle) * axis_x + std::sin(start_angle) * axis_y);
+  for (int i = 1; i <= segments; ++i) {
+    const float angle = start_angle + step * static_cast<float>(i);
+    const glm::vec3 next = center + radius *
+        (std::cos(angle) * axis_x + std::sin(angle) * axis_y);
+    device.drawLine({prev.x, prev.y, prev.z}, {next.x, next.y, next.z}, color, true, 1.0f);
+    prev = next;
+  }
+}
+
+float finiteAbs(float value) {
+  return std::isfinite(value) ? std::abs(value) : 0.0f;
+}
+
+float finiteProduct(float a, float b) {
+  const float product = a * b;
+  return std::isfinite(product) ? product : 0.0f;
+}
+
 }  // namespace
+
+float scaledSphereWireRadius(float radius, const math::Vec3& scale) {
+  const float max_scale = std::max({finiteAbs(scale.x), finiteAbs(scale.y),
+                                    finiteAbs(scale.z)});
+  return finiteProduct(finiteAbs(radius), max_scale);
+}
+
+CapsuleWireDimensions scaledCapsuleWireDimensions(float radius,
+                                                  float total_height,
+                                                  const math::Vec3& scale) {
+  CapsuleWireDimensions dimensions{};
+  dimensions.radius = finiteProduct(
+      finiteAbs(radius), std::max(finiteAbs(scale.x), finiteAbs(scale.z)));
+  const float total_half_height =
+      finiteProduct(finiteAbs(total_height), finiteAbs(scale.y)) * 0.5f;
+  dimensions.cylinder_half_length =
+      std::max(total_half_height - dimensions.radius, 0.0f);
+  return dimensions;
+}
 
 void drawBoxWire(GraphicsDevice& device,
                  const components::TransformComponent& transform,
@@ -74,9 +123,10 @@ void drawSphereWire(GraphicsDevice& device,
                     const math::Color& color,
                     float interpolation_alpha) {
   const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
-  const glm::vec3 scale = ::karma::rendering::render_system::toGlm(transform.getScale());
-  const float max_scale = std::max(scale.x, std::max(scale.y, scale.z));
-  const float r = radius * max_scale;
+  const float r = scaledSphereWireRadius(radius, transform.getScale());
+  if (r <= 0.0f) {
+    return;
+  }
   drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, r, color);
   drawCircle(device, world_center, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, r, color);
   drawCircle(device, world_center, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, r, color);
@@ -89,20 +139,37 @@ void drawCapsuleWire(GraphicsDevice& device,
                      float height,
                      const math::Color& color,
                      float interpolation_alpha) {
-  const glm::vec3 scale = ::karma::rendering::render_system::toGlm(transform.getScale());
-  const float r = radius * std::max(scale.x, scale.z);
-  const float half_height = (height * 0.5f) * scale.y;
+  constexpr float kPi = 3.14159265358979323846f;
+  const CapsuleWireDimensions dimensions =
+      scaledCapsuleWireDimensions(radius, height, transform.getScale());
+  const float r = dimensions.radius;
+  const float half_length = dimensions.cylinder_half_length;
+  if (r <= 0.0f) {
+    return;
+  }
   const glm::quat rot = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
   const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
   const glm::vec3 forward = basis * glm::vec3(0.0f, 0.0f, 1.0f);
   const glm::vec3 world_center = transformPoint(transform, center, interpolation_alpha);
-  const glm::vec3 top = world_center + up * half_height;
-  const glm::vec3 bottom = world_center - up * half_height;
+  const glm::vec3 top = world_center + up * half_length;
+  const glm::vec3 bottom = world_center - up * half_length;
+
+  if (half_length <= 1.0e-6f) {
+    drawCircle(device, world_center, right, forward, r, color);
+    drawCircle(device, world_center, right, up, r, color);
+    drawCircle(device, world_center, forward, up, r, color);
+    return;
+  }
 
   drawCircle(device, top, right, forward, r, color);
   drawCircle(device, bottom, right, forward, r, color);
+
+  drawArc(device, top, right, up, r, 0.0f, kPi, color);
+  drawArc(device, bottom, right, up, r, kPi, 2.0f * kPi, color);
+  drawArc(device, top, forward, up, r, 0.0f, kPi, color);
+  drawArc(device, bottom, forward, up, r, kPi, 2.0f * kPi, color);
 
   const glm::vec3 offsets[4] = {right * r, -right * r, forward * r, -forward * r};
   for (const auto& offset : offsets) {

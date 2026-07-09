@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <variant>
@@ -97,6 +98,16 @@ void testChunkCountMath() {
   const auto coords = karma::visual::terrain::terrainChunkCoordsAround(
       TerrainTileCoord{.x = 0, .z = 0}, 4000.0f, 1000.0f);
   assert(coords.size() == 81u);
+  assert(coords.front() == TerrainTileCoord{});
+  uint64_t previous_distance = 0u;
+  for (const TerrainTileCoord coord : coords) {
+    const int64_t x = coord.x;
+    const int64_t z = coord.z;
+    const uint64_t distance = static_cast<uint64_t>(x * x + z * z);
+    assert(distance >= previous_distance);
+    previous_distance = distance;
+  }
+  assert(karma::visual::terrain::kMaxTerrainOutstandingTileRequests == 64u);
 }
 
 void testChunkRecenterDelta() {
@@ -123,6 +134,42 @@ void testChunkRecenterDelta() {
   }
   assert(evicted == 3);
   assert(requested == 3);
+}
+
+void testTerrainStreamingMathIsBounded() {
+  assert(karma::visual::terrain::terrainTileRadius(
+             std::numeric_limits<float>::quiet_NaN(), 1000.0f) == 0);
+  assert(karma::visual::terrain::terrainTileRadius(1000.0f, 0.0f) == 0);
+  assert(karma::visual::terrain::terrainTileRadius(1.0e30f, 0.001f) ==
+         karma::visual::terrain::kMaxTerrainStreamingTileRadius);
+
+  const auto edge_coords = karma::visual::terrain::terrainChunkCoordsAround(
+      TerrainTileCoord{.x = std::numeric_limits<int32_t>::max(), .z = 0},
+      1000.0f,
+      1000.0f);
+  assert(edge_coords.size() == 6u);
+  for (const TerrainTileCoord coord : edge_coords) {
+    assert(coord.x <= std::numeric_limits<int32_t>::max());
+  }
+
+  karma::components::TerrainComponent terrain{};
+  terrain.origin_tile_x = 7;
+  terrain.origin_tile_z = -4;
+  const TerrainTileCoord invalid_position =
+      karma::visual::terrain::terrainTileCoordForWorldPosition(
+          {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
+          {},
+          terrain);
+  assert(invalid_position.x == 7);
+  assert(invalid_position.z == -4);
+
+  terrain.tile_resolution = std::numeric_limits<uint32_t>::max();
+  terrain.height_scale = std::numeric_limits<float>::quiet_NaN();
+  terrain.tessellation_factor = std::numeric_limits<float>::infinity();
+  const auto desc = karma::visual::terrain::terrainDescFromComponent(terrain);
+  assert(desc.tile_resolution == karma::visual::terrain::kMaxTerrainTileResolution);
+  assert(nearly(desc.height_scale, 0.0f));
+  assert(nearly(desc.max_tessellation_factor, 1.0f));
 }
 
 void testProceduralDeterminismAndBorders() {
@@ -508,6 +555,22 @@ void testTerrainTilePatternFormatting() {
       TerrainTileCoord{.x = 0, .z = 4},
       1);
   assert(gaea_path == "tile_1_5_1_5.png");
+
+  const std::string positive_boundary =
+      karma::visual::terrain::formatTerrainTilePattern(
+          "tile_{x}_{z}.png",
+          TerrainTileCoord{.x = std::numeric_limits<int32_t>::max(),
+                           .z = std::numeric_limits<int32_t>::max()},
+          std::numeric_limits<int32_t>::max());
+  assert(positive_boundary == "tile_4294967294_4294967294.png");
+
+  const std::string negative_boundary =
+      karma::visual::terrain::formatTerrainTilePattern(
+          "tile_{x}_{z}.png",
+          TerrainTileCoord{.x = std::numeric_limits<int32_t>::min(),
+                           .z = std::numeric_limits<int32_t>::min()},
+          std::numeric_limits<int32_t>::min());
+  assert(negative_boundary == "tile_-4294967296_-4294967296.png");
 }
 
 void testGaeaSingleImageImportDetectsOutputs() {
@@ -663,6 +726,7 @@ void testGaeaImportRejectsUnsupportedHeightFormats() {
 int main() {
   testChunkCountMath();
   testChunkRecenterDelta();
+  testTerrainStreamingMathIsBounded();
   testProceduralDeterminismAndBorders();
   testImageHeightConversion();
   testRaw16ScalarHeightLoading();

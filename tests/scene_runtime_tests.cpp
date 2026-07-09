@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -187,6 +188,106 @@ karma::world::MeshData staticBoundsMesh() {
   return mesh;
 }
 
+void testStaticBoundsRejectFiniteInputOverflow() {
+  karma::world::MeshData mesh{};
+  mesh.vertices = {{2.0f, 0.0f, 0.0f}};
+  karma::assets::AssetRegistry assets;
+  KARMA_REQUIRE(assets.registerMeshAsset("tests/static_bounds/overflow", std::move(mesh)));
+
+  karma::scenes::SceneDocument document{};
+  document.entities.push_back(karma::scenes::SceneEntity{
+      .id = "overflow",
+      .transform = karma::scenes::SceneTransform{
+          .scale = {std::numeric_limits<float>::max(), 1.0f, 1.0f},
+      },
+  });
+  document.static_components.push_back(karma::scenes::SceneStaticComponent{
+      .id = "overflow_static",
+      .entity_id = "overflow",
+      .mesh_asset_key = "tests/static_bounds/overflow",
+  });
+
+  karma::world::World world;
+  karma::world::Scene scene;
+  karma::scenes::SceneInstantiateDesc instantiate_desc{};
+  instantiate_desc.instantiate_gltf_scenes = false;
+  instantiate_desc.instantiate_prefabs = false;
+  karma::scenes::SceneInstantiateResult instance =
+      karma::scenes::instantiateScene(world, scene, assets, document, instantiate_desc);
+  KARMA_REQUIRE(instance.success);
+
+  const karma::scenes::SceneStaticBuildResult metadata =
+      karma::scenes::buildSceneStaticMetadata(document, instance, world, scene, assets);
+  KARMA_REQUIRE(!metadata.success);
+  KARMA_REQUIRE(metadata.bounds.empty());
+  KARMA_REQUIRE(!metadata.diagnostics.empty());
+  KARMA_REQUIRE(karma::scenes::destroyScene(world, scene, instance));
+}
+
+void testInMemorySceneValidationPreventsPartialInstantiation() {
+  karma::scenes::SceneDocument document{};
+  document.entities.push_back(karma::scenes::SceneEntity{
+      .id = "a",
+      .parent_id = "b",
+  });
+  document.entities.push_back(karma::scenes::SceneEntity{
+      .id = "b",
+      .parent_id = "a",
+  });
+
+  const karma::scenes::SceneValidationResult validation =
+      karma::scenes::validateSceneDocument(document);
+  KARMA_REQUIRE(!validation.success());
+  KARMA_REQUIRE(!validation.diagnostics.empty());
+
+  karma::assets::AssetRegistry assets;
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::scenes::SceneInstantiateResult instance =
+      karma::scenes::instantiateScene(world, scene, assets, document);
+  KARMA_REQUIRE(!instance.success);
+  KARMA_REQUIRE(!instance.diagnostics.empty());
+  KARMA_REQUIRE(world.entities().empty());
+  KARMA_REQUIRE(scene.nodes().empty());
+
+  karma::scenes::SceneDocument invalid_values{};
+  invalid_values.entities.push_back(karma::scenes::SceneEntity{
+      .id = "root",
+      .transform = karma::scenes::SceneTransform{
+          .position = {std::numeric_limits<float>::infinity(), 0.0f, 0.0f},
+      },
+  });
+  invalid_values.cameras.push_back(karma::scenes::SceneCamera{
+      .id = "root",
+      .entity_id = "root",
+  });
+  const karma::scenes::SceneValidationResult invalid_validation =
+      karma::scenes::validateSceneDocument(invalid_values);
+  KARMA_REQUIRE(!invalid_validation.success());
+  KARMA_REQUIRE(invalid_validation.diagnostics.size() >= 2u);
+
+  karma::scenes::SceneDocument invalid_ranges{};
+  invalid_ranges.entities.push_back(karma::scenes::SceneEntity{.id = "camera_entity"});
+  karma::components::CameraComponent camera{};
+  camera.near_clip = 10.0f;
+  camera.far_clip = 1.0f;
+  invalid_ranges.cameras.push_back(karma::scenes::SceneCamera{
+      .id = "camera",
+      .entity_id = "camera_entity",
+      .component = camera,
+  });
+  karma::components::LightComponent light{};
+  light.type = karma::components::LightComponent::Type::Spot;
+  light.inner_cone_degrees = 70.0f;
+  light.outer_cone_degrees = 20.0f;
+  invalid_ranges.lights.push_back(karma::scenes::SceneLight{
+      .id = "light",
+      .entity_id = "camera_entity",
+      .component = light,
+  });
+  KARMA_REQUIRE(!karma::scenes::validateSceneDocument(invalid_ranges).success());
+}
+
 void testStaticMetadataBuildCapturesTransformsAndBoundsWithoutFreezingRuntime() {
   karma::assets::AssetRegistry assets;
   KARMA_REQUIRE(assets.registerMeshAsset("tests/static_bounds/mesh", staticBoundsMesh()));
@@ -235,6 +336,11 @@ void testStaticMetadataBuildCapturesTransformsAndBoundsWithoutFreezingRuntime() 
       .mesh_asset_key = "tests/static_bounds/mesh",
       .transform = true,
       .render = true,
+  });
+  document.gltf_scenes.push_back(karma::scenes::SceneAssetRef{
+      .id = "tests/static_bounds/gltf",
+      .path = "unused.glb",
+      .type = "gltf_scene",
   });
 
   karma::world::World world;
@@ -361,6 +467,7 @@ void testInstantiateAndDestroyRuntimeScene() {
   KARMA_REQUIRE(scene.get(scene.findNode(prefab_root)).parent == scene.findNode(root));
 
   std::vector<karma::world::Entity> created_entities = result.entities;
+  world.destroyEntity(prefab_root);
   KARMA_REQUIRE(karma::scenes::destroyScene(world, scene, result));
   KARMA_REQUIRE(!result.success);
   KARMA_REQUIRE(result.entities.empty());
@@ -491,6 +598,8 @@ void testEngineConfigStartupSceneAssetLoadsBeforeGameStart() {
 }  // namespace
 
 int main() {
+  testInMemorySceneValidationPreventsPartialInstantiation();
+  testStaticBoundsRejectFiniteInputOverflow();
   testStaticMetadataBuildCapturesTransformsAndBoundsWithoutFreezingRuntime();
   testInstantiateAndDestroyRuntimeScene();
   testSceneAssetPackageLoadsFromBakedCacheAndReleases();

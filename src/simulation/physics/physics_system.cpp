@@ -31,12 +31,14 @@ const MeshColliderGeometry* PhysicsSystem::resolveMeshColliderGeometry(std::stri
 void PhysicsSystem::update(world::World& world, float dt) {
   // Keep backend object lifecycle, input commands, simulation stepping,
   // state publication, and event publication as separate ownership phases.
+  // Retire removed or disabled objects before the backend advances so they
+  // cannot participate in one extra simulation step.
+  cleanupStale(world);
   syncSimulationObjects(world);
   applySimulationInputs(world, dt);
   stepSimulation(dt);
   publishSimulationResults(world);
   publishSimulationEvents(world);
-  cleanupStale(world);
 }
 void PhysicsSystem::syncSimulationObjects(world::World& world) {
   syncRigidBodies(world);

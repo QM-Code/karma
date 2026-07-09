@@ -1,5 +1,30 @@
 if (BUILD_TESTING AND KARMA_BUILD_TESTS)
   if (TARGET karma::headless)
+    add_executable(karma_core_runtime_tests
+      tests/core_runtime_tests.cpp
+    )
+    target_link_libraries(karma_core_runtime_tests PRIVATE karma::headless)
+    add_test(NAME karma_core_runtime_tests COMMAND karma_core_runtime_tests)
+
+    add_executable(karma_audio_tests
+      tests/audio_tests.cpp
+    )
+    target_include_directories(karma_audio_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(karma_audio_tests PRIVATE karma::headless)
+    add_test(NAME karma_audio_tests COMMAND karma_audio_tests)
+
+    add_executable(karma_collider_geometry_tests
+      tests/collider_geometry_tests.cpp
+    )
+    target_link_libraries(karma_collider_geometry_tests PRIVATE karma::headless)
+    add_test(NAME karma_collider_geometry_tests COMMAND karma_collider_geometry_tests)
+
+    add_executable(karma_asset_cache_tests
+      tests/asset_cache_tests.cpp
+    )
+    target_link_libraries(karma_asset_cache_tests PRIVATE karma_content)
+    add_test(NAME karma_asset_cache_tests COMMAND karma_asset_cache_tests)
+
     add_executable(karma_prefab_tests
       tests/prefab_tests.cpp
     )
@@ -68,6 +93,27 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     )
     target_link_libraries(karma_terrain_tests PRIVATE karma::headless)
     add_test(NAME karma_terrain_tests COMMAND karma_terrain_tests)
+  endif()
+
+  if (TARGET karma_media_graphical AND KARMA_AUDIO_BACKEND_SDL)
+    add_executable(karma_audio_sdl_tests
+      tests/audio_sdl_tests.cpp
+    )
+    target_include_directories(karma_audio_sdl_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(karma_audio_sdl_tests PRIVATE karma_media_graphical)
+    add_test(NAME karma_audio_sdl_tests COMMAND karma_audio_sdl_tests)
+    set_tests_properties(karma_audio_sdl_tests PROPERTIES
+      ENVIRONMENT "SDL_AUDIODRIVER=dummy"
+    )
+  endif()
+
+  if (TARGET karma_platform_window_graphical AND KARMA_WINDOW_BACKEND_SDL)
+    add_executable(karma_window_sdl_tests
+      tests/window_sdl_tests.cpp
+    )
+    target_link_libraries(karma_window_sdl_tests PRIVATE karma_platform_window_graphical)
+    add_test(NAME karma_window_sdl_tests COMMAND karma_window_sdl_tests)
+    set_tests_properties(karma_window_sdl_tests PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 
   set(KARMA_NETWORK_TEST_PROFILE "")

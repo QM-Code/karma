@@ -33,7 +33,9 @@
 #include <memory>
 #include <vector>
 
-#if !defined(KARMA_WINDOW_BACKEND_SDL)
+#if defined(KARMA_WINDOW_BACKEND_SDL)
+  #include <SDL3/SDL.h>
+#else
   #include <GLFW/glfw3.h>
   #include <GLFW/glfw3native.h>
 #endif
@@ -1541,8 +1543,12 @@ void DiligentBackend::initializeDevice() {
   mark_stage("factory and adapter selection");
 
   if (window_) {
-#if !defined(KARMA_WINDOW_BACKEND_SDL)
+#if defined(KARMA_WINDOW_BACKEND_SDL)
+    Diligent::NativeWindow native =
+        toNativeWindow(static_cast<SDL_Window*>(window_->nativeHandle()));
+#else
     Diligent::NativeWindow native = toNativeWindow(static_cast<GLFWwindow*>(window_->nativeHandle()));
+#endif
     Diligent::SwapChainDesc sc_desc{};
     sc_desc.ColorBufferFormat = Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
     sc_desc.DepthBufferFormat = Diligent::TEX_FORMAT_D24_UNORM_S8_UINT;
@@ -1558,18 +1564,19 @@ void DiligentBackend::initializeDevice() {
     if (device_) {
       factory->CreateSwapChainVk(device_, context_, sc_desc, native, &swap_chain_);
     }
-#else
-    factory->CreateDeviceAndContextsVk(engine_ci, &device_, &context_);
-#endif
   } else {
     factory->CreateDeviceAndContextsVk(engine_ci, &device_, &context_);
   }
 
-  if (!device_ || !context_) {
+  if (!device_ || !context_ || (window_ != nullptr && !swap_chain_)) {
+    spdlog::error("Diligent Vulkan initialization failed: device={} context={} swapchain={}",
+                  device_ ? "ready" : "missing",
+                  context_ ? "ready" : "missing",
+                  swap_chain_ ? "ready" : "missing");
   }
   mark_stage("device and swapchain create");
 
-  if (!device_) {
+  if (!device_ || !context_ || (window_ != nullptr && !swap_chain_)) {
     logStartupDiag("diligent_device", "total", init_start, core::SteadyClock::now());
     return;
   }

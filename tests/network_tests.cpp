@@ -1,11 +1,12 @@
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <atomic>
-#include <algorithm>
-#include <chrono>
 #include <deque>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -16,13 +17,6 @@
 #include <vector>
 
 #include "karma/network.h"
-#include "karma/network.h"
-#include "karma/network.h"
-#include "karma/network.h"
-#include "karma/network.h"
-#include "karma/network.h"
-#include "karma/components.h"
-#include "karma/components.h"
 #include "karma/components.h"
 #include "karma/world.h"
 
@@ -393,9 +387,16 @@ void handshake(SessionHarness& harness,
   expect(client_events.front().type == karma::network::SessionEventType::PeerConnected,
          "client should report session connected");
   expect(harness.client.isConnected(), "client session should be connected");
+  const auto* peer = harness.server.peer(harness.link.client_peer);
+  expect(peer != nullptr && peer->name == "test-client",
+         "server should retain the validated handshake peer name");
 }
 
 void testProtocolRoundTrip() {
+  static_assert(karma::network::isPacketSequenceNewer(1u, 0xFFFFFFFFu));
+  static_assert(!karma::network::isPacketSequenceNewer(0xFFFFFFFFu, 1u));
+  static_assert(karma::network::nextPacketSequence(0xFFFFFFFFu) == 1u);
+
   const std::string payload_text = "payload";
   karma::network::PacketHeader header;
   header.app_id = kAppId;
@@ -426,6 +427,21 @@ void testProtocolRoundTrip() {
   expect(karma::network::decodePacket(encoded, kAppId).status ==
              karma::network::DecodeStatus::PayloadLengthMismatch,
          "truncated payload should be rejected");
+
+  std::vector<std::byte> oversized(karma::network::kMaxPacketPayloadSize + 1u);
+  expect(karma::network::encodePacket(header, oversized).empty(),
+         "oversized outbound payload should be rejected");
+
+  encoded = karma::network::encodePacket(header, bytesOf(payload_text));
+  const uint32_t oversized_length =
+      static_cast<uint32_t>(karma::network::kMaxPacketPayloadSize + 1u);
+  encoded[24] = static_cast<std::byte>(oversized_length & 0xFFu);
+  encoded[25] = static_cast<std::byte>((oversized_length >> 8u) & 0xFFu);
+  encoded[26] = static_cast<std::byte>((oversized_length >> 16u) & 0xFFu);
+  encoded[27] = static_cast<std::byte>((oversized_length >> 24u) & 0xFFu);
+  expect(karma::network::decodePacket(encoded, kAppId).status ==
+             karma::network::DecodeStatus::PayloadTooLarge,
+         "oversized inbound payload should be rejected before allocation");
 }
 
 void testNetworkRoleHelpers() {
@@ -1052,6 +1068,146 @@ void testSessionHandshakeCustomAndFilters() {
          "targeted message should dispatch as custom");
 }
 
+void testSessionSequenceWrap() {
+  FakeLink link;
+  link.connected = true;
+  karma::network::ServerSession server(std::make_unique<FakeServerTransport>(link), kAppId);
+  link.server_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Connect,
+      .peer = link.client_peer,
+      .endpoint = link.endpoint,
+  });
+
+  karma::network::BinaryWriter handshake_payload;
+  handshake_payload.writeString("wrap-client");
+  karma::network::PacketHeader handshake_header;
+  handshake_header.app_id = kAppId;
+  handshake_header.message_type = karma::network::MessageType::HandshakeRequest;
+  handshake_header.sequence = 0xFFFFFFFFu;
+  link.server_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Receive,
+      .peer = link.client_peer,
+      .channel = 0,
+      .payload = karma::network::encodePacket(handshake_header, handshake_payload.bytes()),
+      .endpoint = link.endpoint,
+  });
+
+  std::vector<karma::network::SessionEvent> events;
+  server.poll(events);
+  expect(events.size() == 1 &&
+             events.front().type == karma::network::SessionEventType::PeerConnected,
+         "near-wrap handshake should connect");
+  const auto* peer = server.peer(link.client_peer);
+  expect(peer != nullptr && peer->last_received_sequence == 0xFFFFFFFFu,
+         "near-wrap sequence should be retained");
+
+  const std::string payload = "after-wrap";
+  karma::network::PacketHeader wrapped_header;
+  wrapped_header.app_id = kAppId;
+  wrapped_header.message_type = karma::network::MessageType::CustomReliable;
+  wrapped_header.sequence = 1u;
+  link.server_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Receive,
+      .peer = link.client_peer,
+      .channel = 0,
+      .payload = karma::network::encodePacket(wrapped_header, bytesOf(payload)),
+      .endpoint = link.endpoint,
+  });
+  events.clear();
+  server.poll(events);
+  expect(events.size() == 1 && !events.front().stale_sequence,
+         "sequence one should be newer after uint32 rollover");
+  peer = server.peer(link.client_peer);
+  expect(peer != nullptr && peer->last_received_sequence == 1u,
+         "wrapped sequence should advance session state");
+
+  karma::network::PacketHeader stale_disconnect;
+  stale_disconnect.app_id = kAppId;
+  stale_disconnect.message_type = karma::network::MessageType::Disconnect;
+  stale_disconnect.sequence = 0xFFFFFFFFu;
+  link.server_events.push_back(karma::network::TransportEvent{
+      .type = karma::network::TransportEvent::Type::Receive,
+      .peer = link.client_peer,
+      .channel = 0,
+      .payload = karma::network::encodePacket(stale_disconnect, {}),
+      .endpoint = link.endpoint,
+  });
+  events.clear();
+  server.poll(events);
+  expect(events.empty() && server.peer(link.client_peer) != nullptr,
+         "stale control packets should not disconnect a live peer");
+
+  bool long_name_threw = false;
+  try {
+    karma::network::ClientSession invalid_name(
+        std::make_unique<FakeClientTransport>(link),
+        kAppId,
+        std::string(karma::network::kMaxPeerNameLength + 1u, 'x'));
+  } catch (const std::invalid_argument&) {
+    long_name_threw = true;
+  }
+  expect(long_name_threw, "oversized peer names should be rejected before connect");
+}
+
+void testSessionRejectsOutOfStateAndUnknownMessages() {
+  {
+    FakeLink link;
+    link.connected = true;
+    karma::network::ClientSession client(
+        std::make_unique<FakeClientTransport>(link), kAppId, "state-client");
+    karma::network::PacketHeader premature_header;
+    premature_header.app_id = kAppId;
+    premature_header.message_type = karma::network::MessageType::CustomReliable;
+    premature_header.sequence = 1u;
+    link.client_events.push_back(karma::network::TransportEvent{
+        .type = karma::network::TransportEvent::Type::Receive,
+        .peer = link.server_peer,
+        .channel = 0,
+        .payload = karma::network::encodePacket(premature_header, {}),
+        .endpoint = link.endpoint,
+    });
+
+    std::vector<karma::network::SessionEvent> events;
+    client.poll(events);
+    expect(events.size() == 1u &&
+               events.front().type == karma::network::SessionEventType::ProtocolError &&
+               events.front().decode_status ==
+                   karma::network::DecodeStatus::UnexpectedMessage,
+           "client should reject application traffic before handshake acceptance");
+    expect(!link.connected, "out-of-state client traffic should close the transport");
+  }
+
+  {
+    SessionHarness harness;
+    std::vector<karma::network::SessionEvent> server_events;
+    std::vector<karma::network::SessionEvent> client_events;
+    handshake(harness, server_events, client_events);
+    server_events.clear();
+
+    karma::network::PacketHeader unknown_header;
+    unknown_header.app_id = kAppId;
+    unknown_header.message_type = static_cast<karma::network::MessageType>(0x7fffu);
+    unknown_header.sequence = 2u;
+    harness.link.server_events.push_back(karma::network::TransportEvent{
+        .type = karma::network::TransportEvent::Type::Receive,
+        .peer = harness.link.client_peer,
+        .channel = 0,
+        .payload = karma::network::encodePacket(unknown_header, {}),
+        .endpoint = harness.link.endpoint,
+    });
+
+    harness.server.poll(server_events);
+    expect(server_events.size() == 1u &&
+               server_events.front().type ==
+                   karma::network::SessionEventType::ProtocolError &&
+               server_events.front().decode_status ==
+                   karma::network::DecodeStatus::UnexpectedMessage,
+           "server should reject unknown session message ids");
+    expect(harness.server.peer(harness.link.client_peer) == nullptr,
+           "unknown session messages should remove the peer");
+  }
+}
+
 karma::world::Entity makeReplicatedEntity(karma::world::World& world) {
   auto entity = world.createEntity();
   world.add(entity,
@@ -1077,20 +1233,26 @@ karma::world::Entity makeReplicatedEntity(karma::world::World& world) {
   return entity;
 }
 
-std::vector<std::byte> encodeTransformUpdatePayload(karma::components::NetworkEntityId id,
-                                                    const karma::math::Vec3& position) {
+std::vector<std::byte> encodeTransformComponentBytes(
+    const karma::math::Vec3& position,
+    const karma::math::Quat& rotation = {}) {
   karma::network::BinaryWriter component;
   component.writeFloat32(position.x);
   component.writeFloat32(position.y);
   component.writeFloat32(position.z);
-  component.writeFloat32(0.0f);
-  component.writeFloat32(0.0f);
-  component.writeFloat32(0.0f);
+  component.writeFloat32(rotation.x);
+  component.writeFloat32(rotation.y);
+  component.writeFloat32(rotation.z);
+  component.writeFloat32(rotation.w);
   component.writeFloat32(1.0f);
   component.writeFloat32(1.0f);
   component.writeFloat32(1.0f);
-  component.writeFloat32(1.0f);
-  const std::vector<std::byte> component_bytes = component.takeBytes();
+  return component.takeBytes();
+}
+
+std::vector<std::byte> encodeTransformUpdatePayload(karma::components::NetworkEntityId id,
+                                                    const karma::math::Vec3& position) {
+  const std::vector<std::byte> component_bytes = encodeTransformComponentBytes(position);
 
   karma::network::BinaryWriter payload;
   payload.writeUInt64(id);
@@ -1111,18 +1273,7 @@ std::vector<std::byte> encodeSpawnPayload(karma::components::NetworkEntityId id,
                                           karma::components::AuthorityMode mode =
                                               karma::components::AuthorityMode::Server,
                                           uint32_t owner_peer = 0) {
-  karma::network::BinaryWriter component;
-  component.writeFloat32(position.x);
-  component.writeFloat32(position.y);
-  component.writeFloat32(position.z);
-  component.writeFloat32(0.0f);
-  component.writeFloat32(0.0f);
-  component.writeFloat32(0.0f);
-  component.writeFloat32(1.0f);
-  component.writeFloat32(1.0f);
-  component.writeFloat32(1.0f);
-  component.writeFloat32(1.0f);
-  const std::vector<std::byte> component_bytes = component.takeBytes();
+  const std::vector<std::byte> component_bytes = encodeTransformComponentBytes(position);
 
   karma::network::BinaryWriter payload;
   payload.writeUInt64(id);
@@ -1151,6 +1302,201 @@ karma::network::SessionEvent makeReplicationEvent(
       .sequence = sequence,
       .payload = std::move(payload),
   };
+}
+
+void testReplicationPayloadValidation() {
+  karma::network::ComponentReplicationRegistry duplicate_registry;
+  auto make_replicator = [] {
+    return karma::network::ComponentReplicator{
+        .component_type = 99u,
+        .name = "test",
+        .encode_full = [](const karma::world::World&,
+                          karma::world::Entity,
+                          karma::network::BinaryWriter&) { return true; },
+        .decode_apply = [](karma::world::World&,
+                           karma::world::Entity,
+                           karma::network::BinaryReader&,
+                           bool) { return true; },
+    };
+  };
+  expect(duplicate_registry.registerReplicator(make_replicator()),
+         "first component replicator registration should succeed");
+  expect(!duplicate_registry.registerReplicator(make_replicator()),
+         "duplicate component wire ids should be rejected");
+
+  karma::network::ComponentReplicationRegistry registry;
+  karma::network::registerBuiltinReplicators(registry);
+  karma::network::ClientReplicationState replication;
+  karma::world::World world;
+
+  karma::network::BinaryWriter invalid_authority;
+  invalid_authority.writeUInt64(901u);
+  invalid_authority.writeUInt8(0xFFu);
+  invalid_authority.writeUInt32(0u);
+  invalid_authority.writeUInt8(1u);
+  invalid_authority.writeUInt16(0u);
+  expect(!replication.applyEvent(
+             world,
+             registry,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
+                                  invalid_authority.takeBytes(),
+                                  1u,
+                                  1u)),
+         "spawn should reject invalid authority modes");
+  expect(world.entities().empty() && !replication.entityFor(901u).has_value(),
+         "invalid authority should not create an entity");
+
+  std::vector<std::byte> trailing_spawn = encodeSpawnPayload(902u, {1.0f, 2.0f, 3.0f});
+  trailing_spawn.push_back(std::byte{0x7F});
+  expect(!replication.applyEvent(
+             world,
+             registry,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
+                                  std::move(trailing_spawn),
+                                  2u,
+                                  2u)),
+         "spawn should reject trailing payload bytes");
+  expect(world.entities().empty() && !replication.entityFor(902u).has_value(),
+         "trailing bytes should be rejected before world mutation");
+
+  karma::network::BinaryWriter invalid_policy;
+  invalid_policy.writeUInt64(905u);
+  invalid_policy.writeUInt8(
+      static_cast<uint8_t>(karma::components::AuthorityMode::Server));
+  invalid_policy.writeUInt32(0u);
+  invalid_policy.writeUInt8(1u);
+  invalid_policy.writeUInt16(1u);
+  invalid_policy.writeUInt32(karma::network::kTransformComponentWireId);
+  invalid_policy.writeUInt8(0xFFu);
+  invalid_policy.writeUInt32(0u);
+  expect(!replication.applyEvent(
+             world,
+             registry,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
+                                  invalid_policy.takeBytes(),
+                                  2u,
+                                  3u)),
+         "spawn should reject invalid component policies");
+  expect(world.entities().empty() && !replication.entityFor(905u).has_value(),
+         "invalid policies should be rejected before world mutation");
+
+  const std::vector<std::byte> transform_bytes =
+      encodeTransformComponentBytes({4.0f, 5.0f, 6.0f});
+  karma::network::BinaryWriter oversized_tag;
+  oversized_tag.writeString(std::string(4097u, 'x'));
+  const std::vector<std::byte> oversized_tag_bytes = oversized_tag.takeBytes();
+  karma::network::BinaryWriter partial_spawn;
+  partial_spawn.writeUInt64(903u);
+  partial_spawn.writeUInt8(
+      static_cast<uint8_t>(karma::components::AuthorityMode::Server));
+  partial_spawn.writeUInt32(0u);
+  partial_spawn.writeUInt8(1u);
+  partial_spawn.writeUInt16(2u);
+  partial_spawn.writeUInt32(karma::network::kTransformComponentWireId);
+  partial_spawn.writeUInt8(
+      static_cast<uint8_t>(karma::components::ReplicationPolicy::Snapshot));
+  partial_spawn.writeUInt32(static_cast<uint32_t>(transform_bytes.size()));
+  partial_spawn.writeBytes(transform_bytes);
+  partial_spawn.writeUInt32(karma::network::kTagComponentWireId);
+  partial_spawn.writeUInt8(
+      static_cast<uint8_t>(karma::components::ReplicationPolicy::Snapshot));
+  partial_spawn.writeUInt32(static_cast<uint32_t>(oversized_tag_bytes.size()));
+  partial_spawn.writeBytes(oversized_tag_bytes);
+  expect(!replication.applyEvent(
+             world,
+             registry,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
+                                  partial_spawn.takeBytes(),
+                                  3u,
+                                  3u)),
+         "spawn should reject bounded component decoder failures");
+  expect(world.entities().empty() && !replication.entityFor(903u).has_value(),
+         "failed new spawns should clean up partially applied components");
+
+  expect(replication.applyEvent(
+             world,
+             registry,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
+                                  encodeSpawnPayload(904u, {7.0f, 8.0f, 9.0f}),
+                                  4u,
+                                  4u)),
+         "valid control spawn should apply");
+  const auto entity = replication.entityFor(904u);
+  expect(entity.has_value(), "valid control spawn should create an entity");
+
+  karma::network::BinaryWriter failed_replacement;
+  failed_replacement.writeUInt64(904u);
+  failed_replacement.writeUInt8(
+      static_cast<uint8_t>(karma::components::AuthorityMode::Server));
+  failed_replacement.writeUInt32(0u);
+  failed_replacement.writeUInt8(1u);
+  failed_replacement.writeUInt16(2u);
+  failed_replacement.writeUInt32(karma::network::kTransformComponentWireId);
+  failed_replacement.writeUInt8(
+      static_cast<uint8_t>(karma::components::ReplicationPolicy::Snapshot));
+  failed_replacement.writeUInt32(static_cast<uint32_t>(transform_bytes.size()));
+  failed_replacement.writeBytes(transform_bytes);
+  failed_replacement.writeUInt32(karma::network::kTagComponentWireId);
+  failed_replacement.writeUInt8(
+      static_cast<uint8_t>(karma::components::ReplicationPolicy::Snapshot));
+  failed_replacement.writeUInt32(static_cast<uint32_t>(oversized_tag_bytes.size()));
+  failed_replacement.writeBytes(oversized_tag_bytes);
+  expect(!replication.applyEvent(
+             world,
+             registry,
+             makeReplicationEvent(karma::network::MessageType::EntitySpawn,
+                                  failed_replacement.takeBytes(),
+                                  5u,
+                                  5u)),
+         "failed replacement spawns should be rejected");
+  expect(replication.entityFor(904u) == entity && world.isAlive(*entity),
+         "failed replacement spawns should preserve the mapped entity");
+  const auto replacement_position =
+      world.get<karma::components::TransformComponent>(*entity).getPosition();
+  expect(replacement_position.x == 7.0f && replacement_position.y == 8.0f &&
+             replacement_position.z == 9.0f,
+         "failed replacement spawns should not partially mutate components");
+
+  expect(!replication.applyEvent(
+             world,
+             registry,
+             makeReplicationEvent(
+                 karma::network::MessageType::ComponentSnapshot,
+                 encodeTransformUpdatePayload(
+                     904u,
+                     {std::numeric_limits<float>::infinity(), 1.0f, 1.0f}),
+                 5u,
+                 5u)),
+         "non-finite replicated transforms should be rejected");
+  const auto position =
+      world.get<karma::components::TransformComponent>(*entity).getPosition();
+  expect(position.x == 7.0f && position.y == 8.0f && position.z == 9.0f,
+         "rejected transforms should not mutate the previous component value");
+
+  karma::world::World id_world;
+  const auto max_id_entity = id_world.createEntity();
+  const auto duplicate_id_entity = id_world.createEntity();
+  const auto unassigned_entity = id_world.createEntity();
+  constexpr auto max_id = std::numeric_limits<karma::components::NetworkEntityId>::max();
+  id_world.add(max_id_entity, karma::components::NetworkIdentityComponent{.id = max_id});
+  id_world.add(duplicate_id_entity,
+               karma::components::NetworkIdentityComponent{.id = max_id});
+  id_world.add(unassigned_entity, karma::components::NetworkIdentityComponent{});
+  karma::network::ServerReplicationState server_replication;
+  server_replication.ensureNetworkIds(id_world);
+  const auto assigned_max =
+      id_world.get<karma::components::NetworkIdentityComponent>(max_id_entity).id;
+  const auto assigned_duplicate =
+      id_world.get<karma::components::NetworkIdentityComponent>(duplicate_id_entity).id;
+  const auto assigned_new =
+      id_world.get<karma::components::NetworkIdentityComponent>(unassigned_entity).id;
+  expect(assigned_max != karma::components::kInvalidNetworkEntityId &&
+             assigned_duplicate != karma::components::kInvalidNetworkEntityId &&
+             assigned_new != karma::components::kInvalidNetworkEntityId,
+         "network id assignment must reserve zero across integer wrap");
+  expect(assigned_max != assigned_duplicate && assigned_max != assigned_new &&
+             assigned_duplicate != assigned_new,
+         "network id assignment should repair duplicate authored ids");
 }
 
 void pumpClientReplication(karma::network::ClientSession& client,
@@ -1659,6 +2005,9 @@ int main() {
   testEnetLoopbackTransport();
 #endif
   testSessionHandshakeCustomAndFilters();
+  testSessionSequenceWrap();
+  testSessionRejectsOutOfStateAndUnknownMessages();
+  testReplicationPayloadValidation();
   testReplicationSpawnUpdateDespawn();
   testReplicationPeerCleanupAndReconnect();
   testReplicationVisibilityTransitions();

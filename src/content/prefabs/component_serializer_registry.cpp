@@ -113,7 +113,12 @@ bool readFloatValue(const Json& value, float& out) {
   if (!value.is_number()) {
     return false;
   }
-  out = value.get<float>();
+  const double scalar = value.get<double>();
+  if (!std::isfinite(scalar) ||
+      std::abs(scalar) > static_cast<double>(std::numeric_limits<float>::max())) {
+    return false;
+  }
+  out = static_cast<float>(scalar);
   return true;
 }
 
@@ -180,8 +185,17 @@ bool readUint32(const Json& object, std::string_view key, uint32_t& out) {
   if (!it->is_number_unsigned() && !it->is_number_integer()) {
     return false;
   }
-  const int64_t value = it->get<int64_t>();
-  if (value < 0 || value > static_cast<int64_t>(UINT32_MAX)) {
+  uint64_t value = 0u;
+  if (it->is_number_unsigned()) {
+    value = it->get<uint64_t>();
+  } else {
+    const int64_t signed_value = it->get<int64_t>();
+    if (signed_value < 0) {
+      return false;
+    }
+    value = static_cast<uint64_t>(signed_value);
+  }
+  if (value > static_cast<uint64_t>(UINT32_MAX)) {
     return false;
   }
   out = static_cast<uint32_t>(value);
@@ -195,6 +209,10 @@ bool readUint64(const Json& object, std::string_view key, uint64_t& out) {
   }
   if (!it->is_number_unsigned() && !it->is_number_integer()) {
     return false;
+  }
+  if (it->is_number_unsigned()) {
+    out = it->get<uint64_t>();
+    return true;
   }
   const int64_t value = it->get<int64_t>();
   if (value < 0) {
@@ -211,6 +229,14 @@ bool readInt32(const Json& object, std::string_view key, int32_t& out) {
   }
   if (!it->is_number_integer()) {
     return false;
+  }
+  if (it->is_number_unsigned()) {
+    const uint64_t value = it->get<uint64_t>();
+    if (value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+      return false;
+    }
+    out = static_cast<int32_t>(value);
+    return true;
   }
   const int64_t value = it->get<int64_t>();
   if (value < static_cast<int64_t>(std::numeric_limits<int32_t>::min()) ||
@@ -1254,6 +1280,16 @@ std::optional<components::LightComponent> deserializeLight(const Json& json) {
       !readFloat(json, "outer_cone_degrees", component.outer_cone_degrees) ||
       !readBool(json, "casts_shadows", component.casts_shadows) ||
       !readFloat(json, "shadow_extent", component.shadow_extent)) {
+    return std::nullopt;
+  }
+  if (component.intensity < 0.0f || component.range < 0.0f ||
+      component.shadow_extent < 0.0f) {
+    return std::nullopt;
+  }
+  if (component.type == components::LightComponent::Type::Spot &&
+      (component.inner_cone_degrees < 0.0f ||
+       component.outer_cone_degrees > 179.0f ||
+       component.inner_cone_degrees > component.outer_cone_degrees)) {
     return std::nullopt;
   }
   return component;
@@ -2606,10 +2642,16 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
 
 void ensureBuiltinComponentSerializers() {
   ComponentSerializerRegistry& registry = componentSerializerRegistry();
-  if (registry.find("TransformComponent") != nullptr) {
-    return;
+  static const ComponentSerializerRegistry builtins = [] {
+    ComponentSerializerRegistry value;
+    registerBuiltinComponentSerializers(value);
+    return value;
+  }();
+  for (const ComponentSerializer& serializer : builtins.serializers()) {
+    if (registry.find(serializer.type_name) == nullptr) {
+      registry.registerSerializer(serializer);
+    }
   }
-  registerBuiltinComponentSerializers(registry);
 }
 
 }  // namespace karma::prefabs

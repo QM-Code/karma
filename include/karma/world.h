@@ -143,12 +143,16 @@ class EntityRegistry {
       const uint32_t index = free_list_.back();
       free_list_.pop_back();
       Entity entity{index, generations_[index]};
+      occupied_[index] = true;
+      alive_positions_[index] = alive_.size();
       alive_.push_back(entity);
       ++version_;
       return entity;
     }
     const uint32_t index = static_cast<uint32_t>(generations_.size());
     generations_.push_back(0);
+    occupied_.push_back(true);
+    alive_positions_.push_back(alive_.size());
     Entity entity{index, 0};
     alive_.push_back(entity);
     ++version_;
@@ -160,21 +164,25 @@ class EntityRegistry {
     if (!isAlive(entity)) {
       return;
     }
-    generations_[entity.index]++;
-    free_list_.push_back(entity.index);
-    for (size_t i = 0; i < alive_.size(); ++i) {
-      if (alive_[i] == entity) {
-        alive_[i] = alive_.back();
-        alive_.pop_back();
-        break;
-      }
+    const std::size_t alive_index = alive_positions_[entity.index];
+    const std::size_t last_index = alive_.size() - 1;
+    if (alive_index != last_index) {
+      const Entity last_entity = alive_[last_index];
+      alive_[alive_index] = last_entity;
+      alive_positions_[last_entity.index] = alive_index;
     }
+    alive_.pop_back();
+    alive_positions_[entity.index] = kInvalidAliveIndex;
+    occupied_[entity.index] = false;
+    ++generations_[entity.index];
+    free_list_.push_back(entity.index);
     ++version_;
   }
 
-  /// Returns true if the handle matches the current slot generation.
+  /// Returns true if the handle identifies an occupied slot at its current generation.
   bool isAlive(Entity entity) const {
     return entity.index < generations_.size() &&
+           occupied_[entity.index] &&
            generations_[entity.index] == entity.generation;
   }
 
@@ -184,9 +192,14 @@ class EntityRegistry {
   uint64_t version() const { return version_; }
 
  private:
+  static constexpr std::size_t kInvalidAliveIndex =
+      std::numeric_limits<std::size_t>::max();
+
   std::vector<uint32_t> generations_;
+  std::vector<bool> occupied_;
   std::vector<uint32_t> free_list_;
   std::vector<Entity> alive_;
+  std::vector<std::size_t> alive_positions_;
   uint64_t version_ = 0;
 };
 
@@ -208,6 +221,7 @@ struct TagComponent : world::ComponentTag {
 
 
 #include <cstdint>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -229,6 +243,29 @@ namespace karma::world {
 /// code decides update order. Component storage is allocated lazily per type.
 class World {
  public:
+  World() : instance_id_(allocateInstanceId()) {}
+  World(const World&) = delete;
+  World& operator=(const World&) = delete;
+
+  /// Moves ECS state while preserving its stable world identity.
+  ///
+  /// The moved-from world remains usable with a newly allocated identity.
+  World(World&& other) noexcept
+      : registry_(std::move(other.registry_)),
+        storages_(std::move(other.storages_)),
+        instance_id_(std::exchange(other.instance_id_, allocateInstanceId())) {}
+
+  /// Move assignment is disabled because replacing a live world's identity
+  /// would invalidate external ownership records associated with it.
+  World& operator=(World&&) = delete;
+
+  /// Process-unique identity for the lifetime of this ECS state.
+  ///
+  /// The identity survives move construction and is never based on the
+  /// `World` object's address. It is suitable for ownership/cache keys that
+  /// also include an entity generation.
+  uint64_t instanceId() const { return instance_id_; }
+
   /// Creates a live entity.
   Entity createEntity() { return registry_.create(); }
 
@@ -280,25 +317,65 @@ class World {
   /// Returns true when `entity` has component `T`.
   template <typename T>
   bool has(Entity entity) const {
-    return getStorage<T>().data.has(entity);
+    return tryGet<T>(entity) != nullptr;
   }
 
-  /// Returns mutable component `T`; caller must ensure it exists.
+  /// Returns mutable component `T`.
+  ///
+  /// Throws `std::out_of_range` when the entity is dead or does not own `T`.
   template <typename T>
   T& get(Entity entity) {
-    return getStorage<T>().data.get(entity);
+    T* component = tryGet<T>(entity);
+    if (component == nullptr) {
+      throw std::out_of_range("Entity does not own the requested component.");
+    }
+    return *component;
   }
 
-  /// Returns component `T`; caller must ensure it exists.
+  /// Returns component `T`.
+  ///
+  /// Throws `std::out_of_range` when the entity is dead or does not own `T`.
   template <typename T>
   const T& get(Entity entity) const {
-    return getStorage<T>().data.get(entity);
+    const T* component = tryGet<T>(entity);
+    if (component == nullptr) {
+      throw std::out_of_range("Entity does not own the requested component.");
+    }
+    return *component;
+  }
+
+  /// Returns mutable component `T`, or null when it is absent.
+  template <typename T>
+  T* tryGet(Entity entity) {
+    if (!isAlive(entity)) {
+      return nullptr;
+    }
+    Storage<T>* storage = findStorage<T>();
+    if (storage == nullptr || !storage->data.has(entity)) {
+      return nullptr;
+    }
+    return &storage->data.get(entity);
+  }
+
+  /// Returns component `T`, or null when it is absent.
+  template <typename T>
+  const T* tryGet(Entity entity) const {
+    if (!isAlive(entity)) {
+      return nullptr;
+    }
+    const Storage<T>* storage = findStorage<T>();
+    if (storage == nullptr || !storage->data.has(entity)) {
+      return nullptr;
+    }
+    return &storage->data.get(entity);
   }
 
   /// Removes component `T` if present.
   template <typename T>
   void remove(Entity entity) {
-    getStorage<T>().data.remove(entity);
+    if (Storage<T>* storage = findStorage<T>()) {
+      storage->data.remove(entity);
+    }
   }
 
   /// Returns storage for component `T`, creating it if needed.
@@ -307,22 +384,37 @@ class World {
     return getStorage<T>().data;
   }
 
-  /// Returns storage for component `T`, creating it if needed.
+  /// Returns existing storage for component `T`, or an immutable empty storage.
   template <typename T>
   const ComponentStorage<T>& storage() const {
-    return getStorage<T>().data;
+    if (const Storage<T>* storage = findStorage<T>()) {
+      return storage->data;
+    }
+    static const ComponentStorage<T> empty;
+    return empty;
   }
 
   /// Returns entities that have all requested component types.
   template <typename T0, typename... Ts>
   std::vector<Entity> view() const {
     std::vector<Entity> entities;
-    const auto& base = storage<T0>();
-    for (const Entity entity : base.denseEntities()) {
+    const std::vector<Entity>* candidates = &storage<T0>().denseEntities();
+    bool candidates_are_t0 = true;
+    auto choose_smaller_storage = [&]<typename T>() {
+      const auto& dense = storage<T>().denseEntities();
+      if (dense.size() < candidates->size()) {
+        candidates = &dense;
+        candidates_are_t0 = false;
+      }
+    };
+    (choose_smaller_storage.template operator()<Ts>(), ...);
+    entities.reserve(candidates->size());
+    for (const Entity entity : *candidates) {
       if (!isAlive(entity)) {
         continue;
       }
-      if (!(has<Ts>(entity) && ...)) {
+      if ((!candidates_are_t0 && !has<T0>(entity)) ||
+          !(has<Ts>(entity) && ...)) {
         continue;
       }
       entities.push_back(entity);
@@ -333,14 +425,26 @@ class World {
   /// Invokes `fn(entity)` for entities with all requested component types.
   ///
   /// If the callback returns `bool`, iteration stops when it returns false.
+  /// The callback must not add or remove any queried component type because
+  /// structural mutation invalidates the selected dense storage iteration.
   template <typename T0, typename... Ts, typename Fn>
   void forEach(Fn&& fn) const {
-    const auto& base = storage<T0>();
-    for (const Entity entity : base.denseEntities()) {
+    const std::vector<Entity>* candidates = &storage<T0>().denseEntities();
+    bool candidates_are_t0 = true;
+    auto choose_smaller_storage = [&]<typename T>() {
+      const auto& dense = storage<T>().denseEntities();
+      if (dense.size() < candidates->size()) {
+        candidates = &dense;
+        candidates_are_t0 = false;
+      }
+    };
+    (choose_smaller_storage.template operator()<Ts>(), ...);
+    for (const Entity entity : *candidates) {
       if (!isAlive(entity)) {
         continue;
       }
-      if (!(has<Ts>(entity) && ...)) {
+      if ((!candidates_are_t0 && !has<T0>(entity)) ||
+          !(has<Ts>(entity) && ...)) {
         continue;
       }
       if constexpr (std::is_same_v<std::invoke_result_t<Fn, Entity>, bool>) {
@@ -354,6 +458,15 @@ class World {
   }
 
  private:
+  static uint64_t allocateInstanceId() {
+    static std::atomic<uint64_t> next_id{1u};
+    uint64_t id = next_id.fetch_add(1u, std::memory_order_relaxed);
+    if (id == 0u) {
+      id = next_id.fetch_add(1u, std::memory_order_relaxed);
+    }
+    return id;
+  }
+
   template <typename T, typename = void>
   struct HasValidate : std::false_type {};
 
@@ -375,7 +488,7 @@ class World {
   };
 
   template <typename T>
-  Storage<T>& getStorage() const {
+  Storage<T>& getStorage() {
     const core::TypeId id = core::typeId<T>();
     auto it = storages_.find(id);
     if (it == storages_.end()) {
@@ -387,8 +500,25 @@ class World {
     return *static_cast<Storage<T>*>(it->second.get());
   }
 
+  template <typename T>
+  Storage<T>* findStorage() {
+    const core::TypeId id = core::typeId<T>();
+    const auto it = storages_.find(id);
+    return it == storages_.end() ? nullptr
+                                 : static_cast<Storage<T>*>(it->second.get());
+  }
+
+  template <typename T>
+  const Storage<T>* findStorage() const {
+    const core::TypeId id = core::typeId<T>();
+    const auto it = storages_.find(id);
+    return it == storages_.end() ? nullptr
+                                 : static_cast<const Storage<T>*>(it->second.get());
+  }
+
   EntityRegistry registry_;
-  mutable std::unordered_map<core::TypeId, std::unique_ptr<IStorage>> storages_;
+  std::unordered_map<core::TypeId, std::unique_ptr<IStorage>> storages_;
+  uint64_t instance_id_ = 0u;
 };
 
 }  // namespace karma::world
@@ -592,15 +722,41 @@ class Scene {
   }
 
   /// Reparents `child` under `new_parent`.
-  void reparent(NodeId child, NodeId new_parent) {
+  ///
+  /// Pass `Node::kInvalidId` to detach the child. Returns false for dead nodes,
+  /// self-parenting, or relationships that would create a hierarchy cycle.
+  bool reparent(NodeId child, NodeId new_parent) {
     if (!isAlive(child)) {
-      return;
+      return false;
     }
+    if (new_parent != Node::kInvalidId && !isAlive(new_parent)) {
+      return false;
+    }
+    if (child == new_parent) {
+      return false;
+    }
+
+    NodeId ancestor = new_parent;
+    std::size_t remaining = nodes_.size();
+    while (isAlive(ancestor) && remaining-- > 0) {
+      if (ancestor == child) {
+        return false;
+      }
+      ancestor = nodes_[ancestor].parent;
+    }
+    if (isAlive(ancestor)) {
+      return false;
+    }
+    if (nodes_[child].parent == new_parent) {
+      return true;
+    }
+
     detachFromParent(child);
     nodes_[child].parent = new_parent;
     if (isAlive(new_parent)) {
       nodes_[new_parent].children.push_back(child);
     }
+    return true;
   }
 
   /// Returns true when a node id is alive.
@@ -698,6 +854,7 @@ class ISystem {
 #include <queue>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -707,12 +864,14 @@ namespace karma::world {
 /// \ingroup karma_systems
 /// Opaque id assigned to systems registered in a `SystemGraph`.
 using SystemId = uint32_t;
+/// Sentinel returned or accepted when no system is present.
+inline constexpr SystemId kInvalidSystemId = 0;
 
 /// \ingroup karma_systems
 /// Runtime-owned collection of ECS systems with dependency ordering.
 ///
-/// Dependencies are topologically sorted before update. If a cycle is detected,
-/// insertion order is used as a safe fallback rather than failing at runtime.
+/// Dependencies are topologically sorted before update. Invalid dependency ids,
+/// duplicate edges, and dependency cycles are rejected when the edge is added.
 class SystemGraph {
  public:
   /// Introspection record for debug UI and diagnostics.
@@ -724,6 +883,9 @@ class SystemGraph {
 
   /// Adds a system and returns its graph id.
   SystemId addSystem(std::unique_ptr<ISystem> system) {
+    if (!system) {
+      throw std::invalid_argument("Cannot add a null system to SystemGraph.");
+    }
     const SystemId id = next_id_++;
     nodes_[id] = Node{.id = id, .system = std::move(system), .depends_on = {}};
     insertion_order_.push_back(id);
@@ -731,10 +893,29 @@ class SystemGraph {
     return id;
   }
 
+  /// Returns true when `system` is registered.
+  bool contains(SystemId system) const {
+    return nodes_.find(system) != nodes_.end();
+  }
+
   /// Declares that `system` must run after `depends_on`.
-  void addDependency(SystemId system, SystemId depends_on) {
-    nodes_[system].depends_on.push_back(depends_on);
+  ///
+  /// Returns false when either id is unknown, the edge already exists, or the
+  /// edge would create a dependency cycle.
+  bool addDependency(SystemId system, SystemId depends_on) {
+    auto system_it = nodes_.find(system);
+    if (system_it == nodes_.end() || !contains(depends_on) ||
+        wouldCreateCycle(system, depends_on)) {
+      return false;
+    }
+    auto& dependencies = system_it->second.depends_on;
+    if (std::find(dependencies.begin(), dependencies.end(), depends_on) !=
+        dependencies.end()) {
+      return false;
+    }
+    dependencies.push_back(depends_on);
     order_dirty_ = true;
+    return true;
   }
 
   /// Updates all registered systems in dependency order.
@@ -745,8 +926,9 @@ class SystemGraph {
     }
     const auto& order = cached_order_;
     for (SystemId id : order) {
-      if (nodes_[id].system) {
-        nodes_[id].system->update(world, dt);
+      const auto it = nodes_.find(id);
+      if (it != nodes_.end() && it->second.system) {
+        it->second.system->update(world, dt);
       }
     }
   }
@@ -755,7 +937,12 @@ class SystemGraph {
   std::vector<SystemInfo> systems() const {
     std::vector<SystemInfo> out;
     out.reserve(nodes_.size());
-    for (const auto& [id, node] : nodes_) {
+    for (const SystemId id : insertion_order_) {
+      const auto it = nodes_.find(id);
+      if (it == nodes_.end()) {
+        continue;
+      }
+      const Node& node = it->second;
       SystemInfo info{};
       info.id = id;
       if (node.system) {
@@ -770,10 +957,12 @@ class SystemGraph {
   /// Finds the first registered system with runtime type `T`.
   template <typename T>
   T* findSystem() {
-    for (auto& [id, node] : nodes_) {
-      (void)id;
-      if (auto* system = dynamic_cast<T*>(node.system.get())) {
-        return system;
+    for (const SystemId id : insertion_order_) {
+      auto it = nodes_.find(id);
+      if (it != nodes_.end()) {
+        if (auto* system = dynamic_cast<T*>(it->second.system.get())) {
+          return system;
+        }
       }
     }
     return nullptr;
@@ -782,10 +971,12 @@ class SystemGraph {
   /// Finds the first registered system with runtime type `T`.
   template <typename T>
   const T* findSystem() const {
-    for (const auto& [id, node] : nodes_) {
-      (void)id;
-      if (const auto* system = dynamic_cast<const T*>(node.system.get())) {
-        return system;
+    for (const SystemId id : insertion_order_) {
+      const auto it = nodes_.find(id);
+      if (it != nodes_.end()) {
+        if (const auto* system = dynamic_cast<const T*>(it->second.system.get())) {
+          return system;
+        }
       }
     }
     return nullptr;
@@ -798,22 +989,56 @@ class SystemGraph {
     std::vector<SystemId> depends_on;
   };
 
+  bool wouldCreateCycle(SystemId system, SystemId depends_on) const {
+    if (system == depends_on) {
+      return true;
+    }
+
+    std::vector<SystemId> pending{depends_on};
+    std::unordered_set<SystemId> visited;
+    while (!pending.empty()) {
+      const SystemId current = pending.back();
+      pending.pop_back();
+      if (!visited.insert(current).second) {
+        continue;
+      }
+      if (current == system) {
+        return true;
+      }
+      const auto it = nodes_.find(current);
+      if (it == nodes_.end()) {
+        continue;
+      }
+      pending.insert(pending.end(),
+                     it->second.depends_on.begin(),
+                     it->second.depends_on.end());
+    }
+    return false;
+  }
+
   std::vector<SystemId> buildOrder() const {
     std::unordered_map<SystemId, uint32_t> indegree;
-    for (const auto& [id, node] : nodes_) {
+    std::unordered_map<SystemId, std::vector<SystemId>> dependents;
+    for (const SystemId id : insertion_order_) {
       indegree[id] = 0;
     }
-    for (const auto& [id, node] : nodes_) {
+    for (const SystemId id : insertion_order_) {
+      const auto node_it = nodes_.find(id);
+      if (node_it == nodes_.end()) {
+        continue;
+      }
+      const Node& node = node_it->second;
       for (SystemId dep : node.depends_on) {
-        if (nodes_.find(dep) != nodes_.end()) {
+        if (contains(dep)) {
           indegree[id]++;
+          dependents[dep].push_back(id);
         }
       }
     }
 
     std::queue<SystemId> ready;
-    for (const auto& [id, count] : indegree) {
-      if (count == 0) {
+    for (const SystemId id : insertion_order_) {
+      if (indegree[id] == 0) {
         ready.push(id);
       }
     }
@@ -824,9 +1049,12 @@ class SystemGraph {
       const SystemId id = ready.front();
       ready.pop();
       order.push_back(id);
-      for (SystemId dependent : dependentsOf(id)) {
-        if (--indegree[dependent] == 0) {
-          ready.push(dependent);
+      const auto dependents_it = dependents.find(id);
+      if (dependents_it != dependents.end()) {
+        for (SystemId dependent : dependents_it->second) {
+          if (--indegree[dependent] == 0) {
+            ready.push(dependent);
+          }
         }
       }
     }
@@ -835,18 +1063,6 @@ class SystemGraph {
       return insertion_order_;
     }
     return order;
-  }
-
-  std::vector<SystemId> dependentsOf(SystemId id) const {
-    std::vector<SystemId> dependents;
-    for (const auto& [node_id, node] : nodes_) {
-      for (SystemId dep : node.depends_on) {
-        if (dep == id) {
-          dependents.push_back(node_id);
-        }
-      }
-    }
-    return dependents;
   }
 
   SystemId next_id_ = 1;

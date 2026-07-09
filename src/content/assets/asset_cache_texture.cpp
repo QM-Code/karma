@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <optional>
 #include <string>
@@ -115,7 +116,9 @@ std::vector<uint8_t> serializeTextureBlob(const TextureAsset& texture) {
   return out;
 }
 
-bool parseTextureDesc(const std::vector<uint8_t>& payload, TextureAsset& texture) {
+bool parseTextureDesc(const std::vector<uint8_t>& payload,
+                      TextureAsset& texture,
+                      uint32_t& out_subresource_count) {
   std::size_t offset = 0u;
   uint32_t width = 0u;
   uint32_t height = 0u;
@@ -134,11 +137,17 @@ bool parseTextureDesc(const std::vector<uint8_t>& payload, TextureAsset& texture
       !readU32(payload, offset, mip_levels) ||
       !readU32(payload, offset, payload_format) ||
       !readU32(payload, offset, semantic) ||
-      !readU32(payload, offset, subresource_count)) {
+      !readU32(payload, offset, subresource_count) ||
+      offset != payload.size()) {
     return false;
   }
-  if (width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
-      height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+  if (width == 0u || height == 0u ||
+      width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+      height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+      format > static_cast<uint32_t>(rendering::TextureFormat::KTX2_BASIS_UASTC) ||
+      srgb > 1u || generate_mips > 1u || mip_levels == 0u ||
+      payload_format > static_cast<uint32_t>(TextureAsset::PayloadFormat::PreparedUpload) ||
+      semantic > static_cast<uint32_t>(TextureAsset::Semantic::Data)) {
     return false;
   }
   texture.desc.width = static_cast<int>(width);
@@ -146,15 +155,20 @@ bool parseTextureDesc(const std::vector<uint8_t>& payload, TextureAsset& texture
   texture.desc.format = static_cast<rendering::TextureFormat>(format);
   texture.desc.srgb = srgb != 0u;
   texture.desc.generate_mips = generate_mips != 0u;
-  texture.desc.mip_levels = std::max(1u, mip_levels);
+  texture.desc.mip_levels = mip_levels;
   texture.payload_format = static_cast<TextureAsset::PayloadFormat>(payload_format);
   texture.semantic = static_cast<TextureAsset::Semantic>(semantic);
-  texture.subresources.reserve(subresource_count);
+  out_subresource_count = subresource_count;
   return true;
 }
 
 bool parseSubresources(const std::vector<uint8_t>& payload, TextureAsset& texture) {
+  constexpr std::size_t kSerializedSubresourceSize = 40u;
+  if (payload.size() % kSerializedSubresourceSize != 0u) {
+    return false;
+  }
   std::size_t offset = 0u;
+  texture.subresources.reserve(payload.size() / kSerializedSubresourceSize);
   while (offset < payload.size()) {
     uint32_t mip = 0u;
     uint32_t layer = 0u;
@@ -170,6 +184,14 @@ bool parseSubresources(const std::vector<uint8_t>& payload, TextureAsset& textur
         !readU64(payload, offset, byte_offset) ||
         !readU64(payload, offset, size) ||
         !readU64(payload, offset, row_stride)) {
+      return false;
+    }
+    if (width == 0u || height == 0u || size == 0u || row_stride == 0u ||
+        width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+        height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+        byte_offset > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max()) ||
+        size > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max()) ||
+        row_stride > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
       return false;
     }
     texture.subresources.push_back(rendering::TextureUploadSubresource{
@@ -208,7 +230,10 @@ std::optional<TextureAsset> deserializeTextureBlob(const std::vector<uint8_t>& b
 
   TextureAsset texture{};
   bool saw_desc = false;
+  bool saw_subresources = false;
   bool saw_bytes = false;
+  bool saw_fallback = false;
+  uint32_t expected_subresource_count = 0u;
   while (offset < bytes.size()) {
     uint32_t chunk_id = 0u;
     uint64_t chunk_size = 0u;
@@ -221,26 +246,44 @@ std::optional<TextureAsset> deserializeTextureBlob(const std::vector<uint8_t>& b
     offset += static_cast<std::size_t>(chunk_size);
     switch (chunk_id) {
       case kChunkDesc:
-        saw_desc = parseTextureDesc(payload, texture);
-        break;
-      case kChunkSubresources:
-        if (!parseSubresources(payload, texture)) {
+        if (saw_desc || !parseTextureDesc(payload, texture, expected_subresource_count)) {
           return std::nullopt;
         }
+        saw_desc = true;
+        break;
+      case kChunkSubresources:
+        if (saw_subresources || !parseSubresources(payload, texture)) {
+          return std::nullopt;
+        }
+        saw_subresources = true;
         break;
       case kChunkBytes:
+        if (saw_bytes) {
+          return std::nullopt;
+        }
         texture.bytes = std::move(payload);
         saw_bytes = true;
         break;
       case kChunkFallback:
+        if (saw_fallback) {
+          return std::nullopt;
+        }
         texture.fallback_rgba8 = std::move(payload);
+        saw_fallback = true;
         break;
       default:
         break;
     }
   }
-  if (!saw_desc || !saw_bytes) {
+  if (!saw_desc || !saw_subresources || !saw_bytes ||
+      texture.subresources.size() != expected_subresource_count) {
     return std::nullopt;
+  }
+  for (const rendering::TextureUploadSubresource& subresource : texture.subresources) {
+    if (subresource.offset > texture.bytes.size() ||
+        subresource.size > texture.bytes.size() - subresource.offset) {
+      return std::nullopt;
+    }
   }
   return texture;
 }
@@ -253,7 +296,14 @@ std::vector<uint8_t> serializeTexture(const TextureAsset& texture) {
 
 std::optional<TextureAsset> deserializeTexture(const std::vector<uint8_t>& bytes,
                                                std::string* diagnostic) {
-  return deserializeTextureBlob(bytes, diagnostic);
+  try {
+    return deserializeTextureBlob(bytes, diagnostic);
+  } catch (const std::exception& e) {
+    if (diagnostic != nullptr) {
+      *diagnostic = e.what();
+    }
+    return std::nullopt;
+  }
 }
 
 }  // namespace karma::assets::detail

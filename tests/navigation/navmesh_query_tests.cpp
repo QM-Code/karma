@@ -1,6 +1,7 @@
 #include "navmesh_test_utils.h"
 
 #include <algorithm>
+#include <atomic>
 
 namespace karma::tests::navigation {
 namespace {
@@ -102,6 +103,31 @@ void testAdvancedQueryHelpers() {
   karma::math::Vec3 random_point;
   assert(query.findRandomPoint(random_point));
   assert(query.findRandomPointAroundCircle({0.0f, 0.1f, 0.0f}, 2.0f, random_point));
+
+  const std::shared_ptr<const karma::navigation::NavMeshSnapshot> snapshot =
+      nav_mesh.snapshot();
+  assert(snapshot && snapshot->valid());
+  std::atomic<bool> parallel_random_queries_succeeded{true};
+  std::vector<std::thread> query_threads;
+  for (int thread_index = 0; thread_index < 8; ++thread_index) {
+    query_threads.emplace_back([&] {
+      karma::navigation::NavQuery thread_query(*snapshot);
+      for (int query_index = 0; query_index < 64; ++query_index) {
+        karma::math::Vec3 point{};
+        if (!thread_query.findRandomPoint(point) ||
+            !std::isfinite(point.x) ||
+            !std::isfinite(point.y) ||
+            !std::isfinite(point.z)) {
+          parallel_random_queries_succeeded.store(false, std::memory_order_relaxed);
+          return;
+        }
+      }
+    });
+  }
+  for (std::thread& thread : query_threads) {
+    thread.join();
+  }
+  assert(parallel_random_queries_succeeded.load(std::memory_order_relaxed));
 
   const karma::navigation::NavPolyQueryResult circle =
       query.findPolysAroundCircle({0.0f, 0.1f, 0.0f}, 2.0f);

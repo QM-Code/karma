@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iterator>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -32,6 +33,7 @@
 #include "karma/world.h"
 
 #include "../src/rendering/renderer/render_system/extractors.h"
+#include "../src/rendering/renderer/render_system/debug_draw.h"
 
 namespace {
 
@@ -75,6 +77,7 @@ class DummyWindow final : public karma::platform::Window {
 void testTerrainHeadlessNoopApi() {
   DummyWindow window;
   karma::rendering::GraphicsDevice device(window);
+  assert(!device.isValid());
 
   karma::rendering::TerrainDesc desc{};
   const karma::rendering::TerrainId terrain = device.createTerrain(desc);
@@ -116,6 +119,204 @@ void testTerrainHeadlessNoopApi() {
 
 bool nearly(float a, float b) {
   return std::abs(a - b) < 0.0001f;
+}
+
+void testSkyboxShaderPreservesGeneratedCubemapOrientation() {
+  const std::filesystem::path source_path =
+      std::filesystem::path(__FILE__).parent_path() /
+      "../src/rendering/renderer/backends/diligent/passes/environment.cpp";
+  std::ifstream stream(source_path);
+  assert(stream);
+  const std::string source((std::istreambuf_iterator<char>(stream)),
+                           std::istreambuf_iterator<char>());
+
+  const size_t skybox_begin = source.find("kSkyboxPS");
+  const size_t skybox_end = source.find("kIrradiancePS", skybox_begin);
+  assert(skybox_begin != std::string::npos);
+  assert(skybox_end != std::string::npos);
+  const std::string_view shader(source.data() + skybox_begin,
+                                skybox_end - skybox_begin);
+  assert(shader.find("normalize(input.local_pos)") != std::string_view::npos);
+  assert(shader.find("-input.local_pos.y") == std::string_view::npos);
+}
+
+void testTextureUploadValidation() {
+  karma::rendering::TextureDesc desc{
+      .width = 4,
+      .height = 2,
+      .format = karma::rendering::TextureFormat::RGBA8,
+      .mip_levels = 2u,
+  };
+  assert(desc.valid());
+
+  karma::rendering::TextureUploadData upload{};
+  upload.format = desc.format;
+  upload.bytes.resize(36u);
+  upload.subresources.push_back(karma::rendering::TextureUploadSubresource{
+      .mip_level = 0u,
+      .width = 4,
+      .height = 2,
+      .offset = 0u,
+      .size = 36u,
+      .row_stride = 20u,
+  });
+  assert(karma::rendering::validateTextureUpload(desc, upload));
+
+  upload.subresources.front().size = 35u;
+  assert(!karma::rendering::validateTextureUpload(desc, upload));
+  upload.subresources.front().size = 36u;
+  upload.subresources.front().row_stride = 15u;
+  assert(!karma::rendering::validateTextureUpload(desc, upload));
+  upload.subresources.front().row_stride = 20u;
+  upload.subresources.front().width = 3;
+  assert(!karma::rendering::validateTextureUpload(desc, upload));
+  upload.subresources.front().width = 4;
+  upload.subresources.push_back(upload.subresources.front());
+  assert(!karma::rendering::validateTextureUpload(desc, upload));
+
+  karma::rendering::TextureDesc rgb_desc{
+      .width = 2,
+      .height = 2,
+      .format = karma::rendering::TextureFormat::RGB8,
+  };
+  karma::rendering::TextureUploadData rgb_upload{};
+  rgb_upload.format = rgb_desc.format;
+  rgb_upload.bytes.resize(14u);
+  rgb_upload.subresources.push_back(karma::rendering::TextureUploadSubresource{
+      .width = 2,
+      .height = 2,
+      .size = 14u,
+      .row_stride = 8u,
+  });
+  assert(karma::rendering::validateTextureUpload(rgb_desc, rgb_upload));
+  assert(karma::rendering::textureUploadMinimumRowStride(rgb_desc.format, 2) == 6u);
+
+  karma::rendering::TextureDesc r8_desc{
+      .width = 3,
+      .height = 2,
+      .format = karma::rendering::TextureFormat::R8,
+  };
+  karma::rendering::TextureUploadData r8_upload{};
+  r8_upload.format = r8_desc.format;
+  r8_upload.bytes.resize(6u);
+  r8_upload.subresources.push_back(karma::rendering::TextureUploadSubresource{
+      .width = 3,
+      .height = 2,
+      .size = 6u,
+  });
+  assert(karma::rendering::validateTextureUpload(r8_desc, r8_upload));
+
+  karma::rendering::TextureDesc bc7_desc{
+      .width = 7,
+      .height = 5,
+      .format = karma::rendering::TextureFormat::BC7_RGBA_UNORM,
+  };
+  karma::rendering::TextureUploadData bc7_upload{};
+  bc7_upload.format = bc7_desc.format;
+  bc7_upload.bytes.resize(64u);
+  bc7_upload.subresources.push_back(karma::rendering::TextureUploadSubresource{
+      .width = 7,
+      .height = 5,
+      .size = 64u,
+  });
+  assert(karma::rendering::validateTextureUpload(bc7_desc, bc7_upload));
+  assert(karma::rendering::textureUploadMinimumRowStride(bc7_desc.format, 7) == 32u);
+  assert(karma::rendering::textureUploadRowCount(bc7_desc.format, 5) == 2u);
+  bc7_desc.generate_mips = true;
+  assert(!bc7_desc.valid());
+  assert(!karma::rendering::validateTextureUpload(bc7_desc, bc7_upload));
+
+  karma::rendering::TextureDesc generated_mip_desc{
+      .width = 4,
+      .height = 2,
+      .format = karma::rendering::TextureFormat::RGBA8,
+      .generate_mips = true,
+  };
+  karma::rendering::TextureUploadData generated_mip_upload{};
+  generated_mip_upload.format = generated_mip_desc.format;
+  generated_mip_upload.bytes.resize(8u);
+  generated_mip_upload.subresources.push_back(
+      karma::rendering::TextureUploadSubresource{
+          .mip_level = 1u,
+          .width = 2,
+          .height = 1,
+          .size = 8u,
+      });
+  assert(!karma::rendering::validateTextureUpload(generated_mip_desc,
+                                                   generated_mip_upload));
+  generated_mip_upload.bytes.resize(32u);
+  generated_mip_upload.subresources.front() =
+      karma::rendering::TextureUploadSubresource{
+          .width = 4,
+          .height = 2,
+          .size = 32u,
+      };
+  assert(karma::rendering::validateTextureUpload(generated_mip_desc,
+                                                  generated_mip_upload));
+
+  auto invalid_format_desc = desc;
+  invalid_format_desc.format = static_cast<karma::rendering::TextureFormat>(255);
+  assert(!invalid_format_desc.valid());
+
+  desc.mip_levels = 4u;
+  assert(!desc.valid());
+}
+
+void testScreenPointToWorldRayValidation() {
+  karma::rendering::ScreenRay ray{};
+  assert(karma::rendering::screenPointToWorldRay(
+      50.0, 25.0, 100, 50, {}, {0.0f, 0.0f, 0.0f, 2.0f}, 60.0f, ray));
+  assert(nearly(ray.origin.x, 0.0f));
+  assert(nearly(ray.direction.x, 0.0f));
+  assert(nearly(ray.direction.y, 0.0f));
+  assert(nearly(ray.direction.z, -1.0f));
+
+  const karma::rendering::ScreenRay sentinel{
+      .origin = {3.0f, 4.0f, 5.0f},
+      .direction = {1.0f, 0.0f, 0.0f},
+  };
+  ray = sentinel;
+  assert(!karma::rendering::screenPointToWorldRay(
+      50.0, 25.0, 100, 50, {}, {}, 180.0f, ray));
+  assert(nearly(ray.origin.x, sentinel.origin.x));
+  assert(nearly(ray.direction.x, sentinel.direction.x));
+
+  assert(!karma::rendering::screenPointToWorldRay(
+      std::numeric_limits<double>::quiet_NaN(),
+      25.0,
+      100,
+      50,
+      {},
+      {},
+      60.0f,
+      ray));
+}
+
+void testDebugWireScaleAndCapsuleDimensions() {
+  assert(nearly(karma::rendering::render_system::scaledSphereWireRadius(
+                    0.5f, {-2.0f, -3.0f, -1.0f}),
+                1.5f));
+  const auto capsule =
+      karma::rendering::render_system::scaledCapsuleWireDimensions(
+          0.5f, 4.0f, {-2.0f, -3.0f, -1.0f});
+  assert(nearly(capsule.radius, 1.0f));
+  assert(nearly(capsule.cylinder_half_length, 5.0f));
+
+  const auto sphere_capsule =
+      karma::rendering::render_system::scaledCapsuleWireDimensions(
+          1.0f, 1.0f, {1.0f, 1.0f, 1.0f});
+  assert(nearly(sphere_capsule.radius, 1.0f));
+  assert(nearly(sphere_capsule.cylinder_half_length, 0.0f));
+
+  const float maximum = std::numeric_limits<float>::max();
+  assert(nearly(karma::rendering::render_system::scaledSphereWireRadius(
+                    maximum, {2.0f, 1.0f, 1.0f}),
+                0.0f));
+  const auto overflow_capsule =
+      karma::rendering::render_system::scaledCapsuleWireDimensions(
+          maximum, maximum, {2.0f, 2.0f, 2.0f});
+  assert(nearly(overflow_capsule.radius, 0.0f));
+  assert(nearly(overflow_capsule.cylinder_half_length, 0.0f));
 }
 
 void testEngineConfigFramePacingDefaultAndOptOut() {
@@ -161,6 +362,121 @@ void testAntiAliasingSettingsDefaultsAndClamp() {
   assert(ssaa.mode == karma::rendering::AntiAliasingMode::None);
   assert(ssaa.msaa_samples == 1u);
   assert(nearly(ssaa.ssaa_scale, 1.0f));
+
+  ssaa.mode = karma::rendering::AntiAliasingMode::SSAA;
+  ssaa.ssaa_scale = std::numeric_limits<float>::quiet_NaN();
+  ssaa = karma::rendering::clampAntiAliasingSettings(ssaa);
+  assert(ssaa.mode == karma::rendering::AntiAliasingMode::None);
+  assert(nearly(ssaa.ssaa_scale, 1.0f));
+}
+
+void testRendererSettingsClampNonFiniteValues() {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  karma::rendering::PostProcessSettings post_process{};
+  post_process.bloom_threshold = nan;
+  post_process.bloom_intensity = nan;
+  post_process.bloom_radius = nan;
+  post_process.tone_exposure = nan;
+  post_process.tone_contrast = nan;
+  post_process.tone_saturation = nan;
+  post_process.ssao_radius = nan;
+  post_process.ssao_intensity = nan;
+  post_process.ssao_power = nan;
+  post_process.ssr_intensity = nan;
+  post_process.ssr_max_roughness = nan;
+  post_process.ssr_thickness = nan;
+  post_process.taa_feedback = nan;
+  post_process.taa_sharpening = nan;
+  post_process.dof_focus_depth = nan;
+  post_process.dof_focus_range = nan;
+  post_process.dof_intensity = nan;
+  const auto clamped_post_process =
+      karma::rendering::clampPostProcessSettings(post_process);
+  assert(nearly(clamped_post_process.bloom_threshold, 1.0f));
+  assert(nearly(clamped_post_process.tone_exposure, 1.0f));
+  assert(nearly(clamped_post_process.ssao_radius, 1.5f));
+  assert(nearly(clamped_post_process.ssr_thickness, 0.08f));
+  assert(nearly(clamped_post_process.taa_feedback, 0.92f));
+  assert(nearly(clamped_post_process.dof_focus_depth, 8.0f));
+
+  const auto graph = karma::rendering::frameGraphFromPostProcessSettings(post_process);
+  const auto post_pass = std::find_if(
+      graph.passes.begin(), graph.passes.end(), [](const auto& pass) {
+        return pass.builtin_pass == "post_process";
+      });
+  assert(post_pass != graph.passes.end());
+  assert(nearly(std::get<float>(post_pass->params.at("bloom_threshold")), 1.0f));
+
+  const auto shadow = karma::rendering::clampShadowSettings({
+      .bias = nan,
+      .map_size = std::numeric_limits<int>::max(),
+      .pcf_radius = -5,
+      .raster_depth_bias = std::numeric_limits<int>::min(),
+      .raster_slope_bias = nan,
+      .receiver_bias_scale = nan,
+      .normal_bias_scale = nan,
+  });
+  assert(nearly(shadow.bias, 0.0006f));
+  assert(shadow.map_size == 16384);
+  assert(shadow.pcf_radius == 0);
+  assert(shadow.raster_depth_bias == -65536);
+  assert(std::isfinite(shadow.raster_slope_bias));
+  assert(std::isfinite(shadow.receiver_bias_scale));
+  assert(std::isfinite(shadow.normal_bias_scale));
+
+  const auto point_shadow = karma::rendering::clampPointShadowSettings({
+      .constant_bias = nan,
+      .slope_bias_scale = nan,
+      .normal_bias_scale = nan,
+      .receiver_bias_scale = nan,
+  });
+  assert(nearly(point_shadow.constant_bias, 0.0012f));
+  assert(nearly(point_shadow.slope_bias_scale, 2.0f));
+  assert(nearly(point_shadow.normal_bias_scale, 1.5f));
+  assert(nearly(point_shadow.receiver_bias_scale, 0.35f));
+
+  const auto local_lighting = karma::rendering::clampLocalLightingSettings({
+      .distance_damping = nan,
+      .range_falloff_exponent = nan,
+      .ao_affects_local_lights = true,
+      .directional_shadow_lift_strength = nan,
+  });
+  assert(nearly(local_lighting.distance_damping, 0.02f));
+  assert(nearly(local_lighting.range_falloff_exponent, 1.1f));
+  assert(local_lighting.ao_affects_local_lights);
+  assert(nearly(local_lighting.directional_shadow_lift_strength, 0.0f));
+  assert(nearly(karma::rendering::clampLightingExposure(nan), 1.0f));
+}
+
+void testUIDrawDataValidation() {
+  karma::rendering::UIDrawData draw_data{};
+  draw_data.vertices = {
+      {.x = 0.0f, .y = 0.0f},
+      {.x = 1.0f, .y = 0.0f},
+      {.x = 0.0f, .y = 1.0f},
+  };
+  draw_data.indices = {0u, 1u, 2u};
+  draw_data.commands.push_back({.index_count = 3u});
+  assert(karma::rendering::validateUIDrawData(draw_data));
+
+  draw_data.vertices.front().x = std::numeric_limits<float>::quiet_NaN();
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+  draw_data.vertices.front().x = 0.0f;
+  draw_data.indices.back() = 3u;
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+  draw_data.indices.back() = 2u;
+  draw_data.commands.front().index_offset = 2u;
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+  draw_data.commands.front().index_offset = 0u;
+  draw_data.commands.front().scissor_enabled = true;
+  draw_data.commands.front().scissor_w = -1;
+  draw_data.commands.front().scissor_h = 10;
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+
+  assert(!karma::rendering::validateUIDrawCounts(
+      karma::rendering::kMaxUIVertices + 1u, 3u, 1u));
+  assert(!karma::rendering::validateUIDrawCounts(
+      3u, karma::rendering::kMaxUIIndices + 1u, 1u));
 }
 
 void testCameraDataCarriesAntiAliasingSettings() {
@@ -182,6 +498,44 @@ void testCameraDataCarriesAntiAliasingSettings() {
   assert(default_data.anti_aliasing.mode == karma::rendering::AntiAliasingMode::None);
   assert(default_data.anti_aliasing.msaa_samples == 1u);
   assert(nearly(default_data.anti_aliasing.ssaa_scale, 1.0f));
+}
+
+void testCameraAndLightExtractionSanitizesRuntimeData() {
+  karma::components::CameraComponent camera{};
+  camera.fov_y_degrees = std::numeric_limits<float>::quiet_NaN();
+  camera.near_clip = -10.0f;
+  camera.far_clip = -20.0f;
+  camera.ortho_left = 2.0f;
+  camera.ortho_right = 2.0f;
+  camera.shader_user_params["z_param"] = {
+      std::numeric_limits<float>::quiet_NaN(), 2.0f, 3.0f, 4.0f};
+  camera.shader_user_params["a_param"] = {1.0f, 2.0f, 3.0f, 4.0f};
+
+  karma::components::TransformComponent transform{};
+  transform.setRotation({0.0f, 0.0f, 0.0f, 2.0f});
+  const auto data = karma::rendering::render_system::toCameraData(camera, transform, 1.0f);
+  assert(nearly(data.fov_y_degrees, 60.0f));
+  assert(data.near_clip >= 0.0001f);
+  assert(data.far_clip > data.near_clip);
+  assert(!nearly(data.ortho_left, data.ortho_right));
+  assert(nearly(glm::dot(data.rotation, data.rotation), 1.0f));
+  assert(data.shader_user_param_count == 2u);
+  assert(data.shader_user_params[0].key_hash ==
+         karma::rendering::cameraShaderParamKeyHash("a_param"));
+  assert(data.shader_user_params[1].key_hash ==
+         karma::rendering::cameraShaderParamKeyHash("z_param"));
+  assert(std::isfinite(data.shader_user_params[1].value.r));
+
+  karma::components::LightComponent light{};
+  light.intensity = std::numeric_limits<float>::quiet_NaN();
+  light.range = -1.0f;
+  light.inner_cone_degrees = std::numeric_limits<float>::infinity();
+  const auto light_data =
+      karma::rendering::render_system::toLightData(light, transform, 1.0f);
+  assert(nearly(light_data.intensity, 0.0f));
+  assert(nearly(light_data.range, 0.0f));
+  assert(std::isfinite(light_data.inner_cone_cos));
+  assert(std::isfinite(light_data.outer_cone_cos));
 }
 
 void testFrameGraphCopyAndSceneMaskContractsForAaCameras() {
@@ -1143,6 +1497,14 @@ void testFrameGraphValidationAndRegistryFallback() {
   karma::rendering::FrameGraphDesc missing_resource = graph;
   missing_resource.passes.front().inputs["missing"] = "does_not_exist";
   assert(!karma::rendering::validateFrameGraphDesc(missing_resource).valid());
+
+  karma::rendering::FrameGraphDesc non_finite_scale = graph;
+  non_finite_scale.resources.front().width_scale =
+      std::numeric_limits<float>::quiet_NaN();
+  const auto non_finite_scale_result =
+      karma::rendering::validateFrameGraphDesc(non_finite_scale);
+  assert(!non_finite_scale_result.valid());
+  assert(diagnosticsContain(non_finite_scale_result, "must have positive scale"));
 
   karma::rendering::FrameGraphDesc cyclic{};
   cyclic.frame_graph_key = "graphs/cycle";
@@ -2132,8 +2494,15 @@ void testDeformationHeadlessNoopApi() {
 
 int main() {
   testEngineConfigFramePacingDefaultAndOptOut();
+  testSkyboxShaderPreservesGeneratedCubemapOrientation();
+  testTextureUploadValidation();
+  testScreenPointToWorldRayValidation();
+  testDebugWireScaleAndCapsuleDimensions();
   testAntiAliasingSettingsDefaultsAndClamp();
+  testRendererSettingsClampNonFiniteValues();
+  testUIDrawDataValidation();
   testCameraDataCarriesAntiAliasingSettings();
+  testCameraAndLightExtractionSanitizesRuntimeData();
   testFrameGraphCopyAndSceneMaskContractsForAaCameras();
   testPrimitiveMeshAndDiffuseMaterialHelpers();
   testAssetRegistryMaterialInheritance();

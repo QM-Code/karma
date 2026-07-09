@@ -211,9 +211,11 @@ template <typename T, typename Reader>
 bool readBinaryVector(const std::vector<uint8_t>& bytes,
                       std::size_t& offset,
                       std::vector<T>& out,
+                      std::size_t encoded_element_size,
                       Reader reader) {
   std::size_t count = 0u;
-  if (!readCount(bytes, offset, count)) {
+  if (!readCount(bytes, offset, count) || encoded_element_size == 0u ||
+      count > (bytes.size() - offset) / encoded_element_size) {
     return false;
   }
   std::vector<T> parsed;
@@ -1459,6 +1461,7 @@ bool readFloatVectorBinary(const std::vector<uint8_t>& bytes,
   return readBinaryVector(bytes,
                           offset,
                           values,
+                          4u,
                           [](const std::vector<uint8_t>& payload,
                              std::size_t& payload_offset,
                              float& value) {
@@ -1522,9 +1525,9 @@ bool readAnimationChannelBinary(const std::vector<uint8_t>& bytes,
          readInterpolationBinary(bytes, offset, channel.position_interpolation) &&
          readInterpolationBinary(bytes, offset, channel.rotation_interpolation) &&
          readInterpolationBinary(bytes, offset, channel.scale_interpolation) &&
-         readBinaryVector(bytes, offset, channel.position_keys, readVec3KeyframeBinary) &&
-         readBinaryVector(bytes, offset, channel.rotation_keys, readQuatKeyframeBinary) &&
-         readBinaryVector(bytes, offset, channel.scale_keys, readVec3KeyframeBinary);
+         readBinaryVector(bytes, offset, channel.position_keys, 40u, readVec3KeyframeBinary) &&
+         readBinaryVector(bytes, offset, channel.rotation_keys, 52u, readQuatKeyframeBinary) &&
+         readBinaryVector(bytes, offset, channel.scale_keys, 40u, readVec3KeyframeBinary);
 }
 
 void appendMorphTargetTrackBinary(std::vector<uint8_t>& out,
@@ -1541,7 +1544,7 @@ bool readMorphTargetTrackBinary(const std::vector<uint8_t>& bytes,
   return readU32(bytes, offset, track.target_node_index) &&
          readU32(bytes, offset, track.target_mesh_index) &&
          readInterpolationBinary(bytes, offset, track.interpolation) &&
-         readBinaryVector(bytes, offset, track.weight_keys, readMorphWeightKeyframeBinary);
+         readBinaryVector(bytes, offset, track.weight_keys, 28u, readMorphWeightKeyframeBinary);
 }
 
 void appendAnimationEventBinary(std::vector<uint8_t>& out,
@@ -1574,8 +1577,8 @@ bool readRootMotionTrackBinary(const std::vector<uint8_t>& bytes,
   return readU32(bytes, offset, track.target_node_index) &&
          readInterpolationBinary(bytes, offset, track.position_interpolation) &&
          readInterpolationBinary(bytes, offset, track.rotation_interpolation) &&
-         readBinaryVector(bytes, offset, track.position_keys, readVec3KeyframeBinary) &&
-         readBinaryVector(bytes, offset, track.rotation_keys, readQuatKeyframeBinary);
+         readBinaryVector(bytes, offset, track.position_keys, 40u, readVec3KeyframeBinary) &&
+         readBinaryVector(bytes, offset, track.rotation_keys, 52u, readQuatKeyframeBinary);
 }
 
 std::vector<uint8_t> serializeAnimationClipPayload(const world::AnimationClip& clip) {
@@ -1603,12 +1606,13 @@ bool parseAnimationClipPayload(const std::vector<uint8_t>& payload,
       !readF32(payload, offset, parsed.duration_seconds) ||
       !readF32(payload, offset, parsed.ticks_per_second) ||
       !readU32(payload, offset, parsed.source_index) ||
-      !readBinaryVector(payload, offset, parsed.channels, readAnimationChannelBinary) ||
+      !readBinaryVector(payload, offset, parsed.channels, 39u, readAnimationChannelBinary) ||
       !readBinaryVector(payload,
                         offset,
                         parsed.morph_target_tracks,
+                        17u,
                         readMorphTargetTrackBinary) ||
-      !readBinaryVector(payload, offset, parsed.events, readAnimationEventBinary) ||
+      !readBinaryVector(payload, offset, parsed.events, 20u, readAnimationEventBinary) ||
       !readU8(payload, offset, has_root_motion) ||
       has_root_motion > 1u) {
     return false;

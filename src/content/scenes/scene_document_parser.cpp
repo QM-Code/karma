@@ -1,7 +1,11 @@
 #include "scene_document_parser.h"
 
+#include <array>
 #include <cctype>
+#include <cmath>
 #include <initializer_list>
+#include <iterator>
+#include <limits>
 #include <string_view>
 #include <unordered_set>
 
@@ -85,6 +89,9 @@ bool readStringAliasField(const Json& object,
       return fail(result, "scene field '" + std::string(field) + "' must be a string");
     }
     const std::string value = it->get<std::string>();
+    if (!value.empty() && !out.empty() && value != out) {
+      return fail(result, "scene alias fields contain conflicting values");
+    }
     if (!value.empty() || out.empty()) {
       out = value;
     }
@@ -119,7 +126,13 @@ bool readFloatField(const Json& object,
   if (!it->is_number()) {
     return fail(result, "scene field '" + std::string(field) + "' must be a number");
   }
-  out = it->get<float>();
+  const double value = it->get<double>();
+  if (!std::isfinite(value) ||
+      value < -static_cast<double>(std::numeric_limits<float>::max()) ||
+      value > static_cast<double>(std::numeric_limits<float>::max())) {
+    return fail(result, "scene field '" + std::string(field) + "' must be finite");
+  }
+  out = static_cast<float>(value);
   return true;
 }
 
@@ -192,12 +205,19 @@ bool readVec3Value(const Json& value, math::Vec3& out) {
   if (!value.is_array() || value.size() != 3) {
     return false;
   }
-  for (const Json& item : value) {
-    if (!item.is_number()) {
+  std::array<float, 3> values{};
+  for (size_t index = 0; index < values.size(); ++index) {
+    if (!value[index].is_number()) {
       return false;
     }
+    const double scalar = value[index].get<double>();
+    if (!std::isfinite(scalar) ||
+        std::abs(scalar) > static_cast<double>(std::numeric_limits<float>::max())) {
+      return false;
+    }
+    values[index] = static_cast<float>(scalar);
   }
-  out = math::Vec3{value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
+  out = math::Vec3{values[0], values[1], values[2]};
   return true;
 }
 
@@ -205,15 +225,19 @@ bool readQuatValue(const Json& value, math::Quat& out) {
   if (!value.is_array() || value.size() != 4) {
     return false;
   }
-  for (const Json& item : value) {
-    if (!item.is_number()) {
+  std::array<float, 4> values{};
+  for (size_t index = 0; index < values.size(); ++index) {
+    if (!value[index].is_number()) {
       return false;
     }
+    const double scalar = value[index].get<double>();
+    if (!std::isfinite(scalar) ||
+        std::abs(scalar) > static_cast<double>(std::numeric_limits<float>::max())) {
+      return false;
+    }
+    values[index] = static_cast<float>(scalar);
   }
-  out = math::Quat{value[0].get<float>(),
-                   value[1].get<float>(),
-                   value[2].get<float>(),
-                   value[3].get<float>()};
+  out = math::Quat{values[0], values[1], values[2], values[3]};
   return true;
 }
 
@@ -221,15 +245,19 @@ bool readColorValue(const Json& value, math::Color& out) {
   if (!value.is_array() || (value.size() != 3 && value.size() != 4)) {
     return false;
   }
-  for (const Json& item : value) {
-    if (!item.is_number()) {
+  std::array<float, 4> values{0.0f, 0.0f, 0.0f, 1.0f};
+  for (size_t index = 0; index < value.size(); ++index) {
+    if (!value[index].is_number()) {
       return false;
     }
+    const double scalar = value[index].get<double>();
+    if (!std::isfinite(scalar) ||
+        std::abs(scalar) > static_cast<double>(std::numeric_limits<float>::max())) {
+      return false;
+    }
+    values[index] = static_cast<float>(scalar);
   }
-  out = math::Color{value[0].get<float>(),
-                    value[1].get<float>(),
-                    value[2].get<float>(),
-                    value.size() == 4 ? value[3].get<float>() : 1.0f};
+  out = math::Color{values[0], values[1], values[2], values[3]};
   return true;
 }
 
@@ -492,6 +520,10 @@ bool readCameras(const Json& root,
         !readFloatField(camera_json, "fov_y_degrees", camera.component.fov_y_degrees, result) ||
         !readFloatField(camera_json, "near_clip", camera.component.near_clip, result) ||
         !readFloatField(camera_json, "far_clip", camera.component.far_clip, result) ||
+        !readFloatField(camera_json, "ortho_left", camera.component.ortho_left, result) ||
+        !readFloatField(camera_json, "ortho_right", camera.component.ortho_right, result) ||
+        !readFloatField(camera_json, "ortho_top", camera.component.ortho_top, result) ||
+        !readFloatField(camera_json, "ortho_bottom", camera.component.ortho_bottom, result) ||
         !readBoolField(camera_json, "primary", camera.component.is_primary, result) ||
         !readBoolField(camera_json, "is_primary", camera.component.is_primary, result) ||
         !readStringField(camera_json,
@@ -804,13 +836,23 @@ bool parseSceneDocument(const Json& root,
       (!version_it->is_number_integer() && !version_it->is_number_unsigned())) {
     return fail(result, "scene document version must be integer 1");
   }
-  const int64_t version = version_it->get<int64_t>();
-  if (version != static_cast<int64_t>(kSceneDocumentVersion)) {
-    return fail(result, "unsupported scene document version: " + std::to_string(version));
+  bool version_matches = false;
+  std::string version_text;
+  if (version_it->is_number_unsigned()) {
+    const uint64_t version = version_it->get<uint64_t>();
+    version_matches = version == static_cast<uint64_t>(kSceneDocumentVersion);
+    version_text = std::to_string(version);
+  } else {
+    const int64_t version = version_it->get<int64_t>();
+    version_matches = version == static_cast<int64_t>(kSceneDocumentVersion);
+    version_text = std::to_string(version);
+  }
+  if (!version_matches) {
+    return fail(result, "unsupported scene document version: " + version_text);
   }
 
   SceneDocument document{};
-  document.version = static_cast<uint32_t>(version);
+  document.version = kSceneDocumentVersion;
   document.source_path = source_path;
 
   std::unordered_set<std::string> all_ids;
@@ -847,6 +889,15 @@ bool parseSceneDocument(const Json& root,
                           entity_ids,
                           static_ids,
                           result)) {
+    return false;
+  }
+
+  SceneValidationResult validation = validateSceneDocument(document);
+  if (!validation.success()) {
+    result.diagnostics.insert(result.diagnostics.end(),
+                              std::make_move_iterator(validation.diagnostics.begin()),
+                              std::make_move_iterator(validation.diagnostics.end()));
+    result.document.reset();
     return false;
   }
 

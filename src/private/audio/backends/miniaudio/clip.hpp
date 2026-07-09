@@ -3,29 +3,36 @@
 #include "private/audio/backend.hpp"
 
 #include <miniaudio.h>
+#include <cstdint>
+#include <mutex>
 #include <vector>
 
 namespace karma::audio::backend {
 
 /// \ingroup karma_media
-/// miniaudio clip with a stem sound and instance pool.
+/// miniaudio clip with a reusable instance pool.
 class MiniaudioClip final : public Clip {
  public:
-  MiniaudioClip(ma_sound* stem, std::vector<ma_sound*> instances);
+  explicit MiniaudioClip(std::vector<ma_sound*> instances);
   ~MiniaudioClip() override;
 
-  void play(const glm::vec3& position, float volume) override;
-  void setSpatialization(bool enabled) override;
-  void setDistanceRange(float min_distance, float max_distance) override;
+  uint64_t play(const AudioPlaybackOptions& options) override;
+  bool isPlaying(uint64_t voice_id) const override;
+  bool stop(uint64_t voice_id) override;
+  bool setPosition(uint64_t voice_id, const glm::vec3& position) override;
 
  private:
-  void release();
+  struct Instance {
+    ma_sound* sound = nullptr;
+    uint64_t voice_id = 0;
+  };
 
-  bool spatialized_ = true;
-  float min_distance_ = 1.0f;
-  float max_distance_ = 20.0f;
-  ma_sound* stem_ = nullptr;
-  std::vector<ma_sound*> instances_;
+  void release();
+  uint64_t nextVoiceId();
+
+  mutable std::mutex mutex_;
+  std::vector<Instance> instances_;
+  uint64_t next_voice_id_ = 1;
   bool released_ = false;
 };
 

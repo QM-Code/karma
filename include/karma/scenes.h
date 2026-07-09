@@ -145,6 +145,7 @@ struct BakedLightingComponent {
   std::string entity_id;
   std::string lightmap_asset_key;
   std::filesystem::path lightmap_path;
+  /// Non-negative baked-light contribution multiplier.
   float intensity = 1.0f;
   bool enabled = true;
 };
@@ -190,6 +191,20 @@ struct SceneDocument {
   std::vector<SceneStaticComponent> static_components;
   std::vector<SceneBakeDesc> bakes;
 };
+
+/// Result of validating an in-memory scene document.
+struct SceneValidationResult {
+  std::vector<std::string> diagnostics;
+
+  bool success() const { return diagnostics.empty(); }
+  explicit operator bool() const { return success(); }
+};
+
+/// Validates ids, references, hierarchy, and finite runtime values.
+///
+/// Callers that construct `SceneDocument` directly receive the same structural
+/// guarantees as documents loaded from JSON.
+SceneValidationResult validateSceneDocument(const SceneDocument& document);
 
 }  // namespace karma::scenes
 

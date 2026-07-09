@@ -3,8 +3,6 @@
 #include <cmath>
 
 #include "karma/math.h"
-#include "karma/math.h"
-#include "karma/math.h"
 
 namespace karma::components {
 
@@ -32,13 +30,14 @@ TransformComponent::TransformComponent() = default;
 TransformComponent::TransformComponent(const math::Vec3& position, const math::Quat& rotation,
                                        const math::Vec3& scale)
     : local_position_(position),
-      local_rotation_(rotation),
       local_scale_(scale),
       world_position_(position),
-      world_rotation_(rotation),
       world_scale_(scale),
-      previous_position_(position),
-      previous_rotation_(rotation) {}
+      previous_position_(position) {
+  local_rotation_ = math::normalize(rotation);
+  world_rotation_ = local_rotation_;
+  previous_rotation_ = local_rotation_;
+}
 
 void TransformComponent::setLocalPosition(const math::Vec3& position) {
   local_position_ = position;
@@ -47,8 +46,10 @@ void TransformComponent::setLocalPosition(const math::Vec3& position) {
 }
 
 void TransformComponent::setLocalRotation(const math::Quat& rotation) {
-  local_rotation_ = rotation;
-  setWorldRotation(rotation);
+  local_rotation_ = math::normalize(rotation);
+  world_rotation_ = local_rotation_;
+  previous_rotation_ = local_rotation_;
+  rotation_dirty_ = true;
   hierarchy_initialized_ = false;
 }
 
@@ -65,8 +66,8 @@ void TransformComponent::setWorldPosition(const math::Vec3& position) {
 }
 
 void TransformComponent::setWorldRotation(const math::Quat& rotation) {
-  world_rotation_ = rotation;
-  previous_rotation_ = rotation;
+  world_rotation_ = math::normalize(rotation);
+  previous_rotation_ = world_rotation_;
   rotation_dirty_ = true;
 }
 
@@ -83,9 +84,10 @@ void TransformComponent::setPositionFromPhysics(const math::Vec3& position) {
 }
 
 void TransformComponent::setRotationFromPhysics(const math::Quat& rotation) {
+  const math::Quat normalized = math::normalize(rotation);
   previous_rotation_ = world_rotation_;
-  world_rotation_ = rotation;
-  local_rotation_ = rotation;
+  world_rotation_ = normalized;
+  local_rotation_ = normalized;
   rotation_dirty_ = false;
   hierarchy_initialized_ = true;
 }
@@ -94,12 +96,13 @@ void TransformComponent::setWorldFromHierarchy(const math::Vec3& position,
                                                const math::Quat& rotation,
                                                const math::Vec3& scale,
                                                bool reset_history) {
+  const math::Quat normalized_rotation = math::normalize(rotation);
   if (reset_history || !hierarchy_initialized_) {
     world_position_ = position;
-    world_rotation_ = rotation;
+    world_rotation_ = normalized_rotation;
     world_scale_ = scale;
     previous_position_ = position;
-    previous_rotation_ = rotation;
+    previous_rotation_ = normalized_rotation;
     position_dirty_ = false;
     rotation_dirty_ = false;
     hierarchy_initialized_ = true;
@@ -110,9 +113,9 @@ void TransformComponent::setWorldFromHierarchy(const math::Vec3& position,
     previous_position_ = world_position_;
     world_position_ = position;
   }
-  if (!nearlyEqual(rotation, world_rotation_)) {
+  if (!nearlyEqual(normalized_rotation, world_rotation_)) {
     previous_rotation_ = world_rotation_;
-    world_rotation_ = rotation;
+    world_rotation_ = normalized_rotation;
   }
   if (!nearlyEqual(scale, world_scale_)) {
     world_scale_ = scale;

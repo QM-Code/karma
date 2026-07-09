@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <string>
@@ -101,6 +102,20 @@ enum class TextureFormat {
   KTX2_BASIS_UASTC
 };
 
+/// Returns true when `format` names a supported API enum value.
+inline constexpr bool isTextureFormatValid(TextureFormat format) {
+  switch (format) {
+    case TextureFormat::RGBA8:
+    case TextureFormat::RGB8:
+    case TextureFormat::R8:
+    case TextureFormat::BC7_RGBA_UNORM:
+    case TextureFormat::BC7_RGBA_UNORM_SRGB:
+    case TextureFormat::KTX2_BASIS_UASTC:
+      return true;
+  }
+  return false;
+}
+
 /// \ingroup karma_rendering
 /// Texture creation descriptor.
 struct TextureDesc {
@@ -110,6 +125,25 @@ struct TextureDesc {
   bool srgb = false;
   bool generate_mips = false;
   uint32_t mip_levels = 1u;
+
+  [[nodiscard]] bool valid() const {
+    const bool block_compressed = format == TextureFormat::BC7_RGBA_UNORM ||
+                                  format == TextureFormat::BC7_RGBA_UNORM_SRGB;
+    if (!isTextureFormatValid(format) || width <= 0 || height <= 0 ||
+        mip_levels == 0u ||
+        (block_compressed && generate_mips)) {
+      return false;
+    }
+    uint32_t level_count = 1u;
+    uint32_t mip_width = static_cast<uint32_t>(width);
+    uint32_t mip_height = static_cast<uint32_t>(height);
+    while (mip_width > 1u || mip_height > 1u) {
+      mip_width = std::max(mip_width / 2u, 1u);
+      mip_height = std::max(mip_height / 2u, 1u);
+      ++level_count;
+    }
+    return generate_mips || mip_levels <= level_count;
+  }
 };
 
 /// \ingroup karma_rendering
@@ -131,6 +165,112 @@ struct TextureUploadData {
   std::vector<TextureUploadSubresource> subresources;
   std::vector<std::uint8_t> bytes;
 };
+
+/// Returns true for GPU block-compressed upload formats.
+inline constexpr bool isBlockCompressedTextureFormat(TextureFormat format) {
+  return format == TextureFormat::BC7_RGBA_UNORM ||
+         format == TextureFormat::BC7_RGBA_UNORM_SRGB;
+}
+
+/// Returns the minimum byte stride for one upload row, or zero for container formats.
+inline std::size_t textureUploadMinimumRowStride(TextureFormat format, int width) {
+  if (width <= 0) {
+    return 0u;
+  }
+  const std::size_t pixel_width = static_cast<std::size_t>(width);
+  switch (format) {
+    case TextureFormat::RGBA8:
+      return pixel_width * 4u;
+    case TextureFormat::RGB8:
+      return pixel_width * 3u;
+    case TextureFormat::R8:
+      return pixel_width;
+    case TextureFormat::BC7_RGBA_UNORM:
+    case TextureFormat::BC7_RGBA_UNORM_SRGB:
+      return ((pixel_width + 3u) / 4u) * 16u;
+    case TextureFormat::KTX2_BASIS_UASTC:
+      return 0u;
+  }
+  return 0u;
+}
+
+/// Returns the number of stored rows for an upload subresource.
+inline std::size_t textureUploadRowCount(TextureFormat format, int height) {
+  if (height <= 0 || format == TextureFormat::KTX2_BASIS_UASTC) {
+    return 0u;
+  }
+  const std::size_t pixel_height = static_cast<std::size_t>(height);
+  return isBlockCompressedTextureFormat(format) ? (pixel_height + 3u) / 4u
+                                                 : pixel_height;
+}
+
+/// Validates a prepared upload against its destination texture descriptor.
+///
+/// The upload API accepts padded rows, but every subresource must contain enough
+/// bytes for the addressed mip and 2D textures only accept array layer zero.
+inline bool validateTextureUpload(const TextureDesc& desc,
+                                  const TextureUploadData& upload) {
+  if (!desc.valid() || upload.format != desc.format || upload.bytes.empty() ||
+      upload.subresources.empty() ||
+      upload.format == TextureFormat::KTX2_BASIS_UASTC) {
+    return false;
+  }
+
+  uint32_t full_mip_count = 1u;
+  uint32_t mip_width = static_cast<uint32_t>(desc.width);
+  uint32_t mip_height = static_cast<uint32_t>(desc.height);
+  while (mip_width > 1u || mip_height > 1u) {
+    mip_width = std::max(mip_width / 2u, 1u);
+    mip_height = std::max(mip_height / 2u, 1u);
+    ++full_mip_count;
+  }
+  const uint32_t available_mips = desc.generate_mips ? full_mip_count : desc.mip_levels;
+
+  std::unordered_set<uint64_t> addressed_subresources;
+  bool has_base_mip = false;
+  for (const TextureUploadSubresource& subresource : upload.subresources) {
+    if (subresource.array_layer != 0u || subresource.mip_level >= available_mips) {
+      return false;
+    }
+    const uint64_t address =
+        (static_cast<uint64_t>(subresource.array_layer) << 32u) | subresource.mip_level;
+    if (!addressed_subresources.insert(address).second) {
+      return false;
+    }
+    has_base_mip = has_base_mip || subresource.mip_level == 0u;
+
+    uint32_t expected_width = static_cast<uint32_t>(desc.width);
+    uint32_t expected_height = static_cast<uint32_t>(desc.height);
+    for (uint32_t level = 0u; level < subresource.mip_level; ++level) {
+      expected_width = std::max(expected_width / 2u, 1u);
+      expected_height = std::max(expected_height / 2u, 1u);
+    }
+    if (subresource.width != static_cast<int>(expected_width) ||
+        subresource.height != static_cast<int>(expected_height)) {
+      return false;
+    }
+
+    const std::size_t minimum_stride =
+        textureUploadMinimumRowStride(upload.format, subresource.width);
+    const std::size_t row_count = textureUploadRowCount(upload.format, subresource.height);
+    const std::size_t row_stride =
+        subresource.row_stride == 0u ? minimum_stride : subresource.row_stride;
+    if (minimum_stride == 0u || row_count == 0u || row_stride < minimum_stride) {
+      return false;
+    }
+    if (row_count > 1u &&
+        row_stride > (std::numeric_limits<std::size_t>::max() - minimum_stride) /
+                         (row_count - 1u)) {
+      return false;
+    }
+    const std::size_t required_size = (row_count - 1u) * row_stride + minimum_stride;
+    if (subresource.size < required_size || subresource.offset > upload.bytes.size() ||
+        subresource.size > upload.bytes.size() - subresource.offset) {
+      return false;
+    }
+  }
+  return !desc.generate_mips || has_base_mip;
+}
 
 /// Texture creation plus prepared upload payload for batched renderer uploads.
 struct TextureUploadBatchRequest {
@@ -201,6 +341,135 @@ struct PostProcessSettings {
   float dof_intensity = 1.0f;
 };
 
+/// Directional-shadow quality and bias controls.
+struct ShadowSettings {
+  float bias = 0.0006f;
+  int map_size = 2048;
+  int pcf_radius = 0;
+  int raster_depth_bias = 0;
+  float raster_slope_bias = 0.0f;
+  float receiver_bias_scale = 0.75f;
+  float normal_bias_scale = 1.0f;
+};
+
+/// Point-shadow sampling bias controls.
+struct PointShadowSettings {
+  float constant_bias = 0.0012f;
+  float slope_bias_scale = 2.0f;
+  float normal_bias_scale = 1.5f;
+  float receiver_bias_scale = 0.35f;
+};
+
+/// Local-light attenuation and directional-shadow interaction controls.
+struct LocalLightingSettings {
+  float distance_damping = 0.02f;
+  float range_falloff_exponent = 1.1f;
+  bool ao_affects_local_lights = false;
+  float directional_shadow_lift_strength = 0.0f;
+};
+
+namespace detail {
+
+inline float clampFiniteRendererSetting(float value,
+                                        float minimum,
+                                        float maximum,
+                                        float fallback) {
+  return std::isfinite(value) ? std::clamp(value, minimum, maximum) : fallback;
+}
+
+}  // namespace detail
+
+/// Clamps post-process values and replaces non-finite input with stable defaults.
+inline PostProcessSettings clampPostProcessSettings(PostProcessSettings settings) {
+  const PostProcessSettings defaults{};
+  settings.bloom_threshold = detail::clampFiniteRendererSetting(
+      settings.bloom_threshold, 0.0f, 16.0f, defaults.bloom_threshold);
+  settings.bloom_intensity = detail::clampFiniteRendererSetting(
+      settings.bloom_intensity, 0.0f, 8.0f, defaults.bloom_intensity);
+  settings.bloom_radius = detail::clampFiniteRendererSetting(
+      settings.bloom_radius, 0.25f, 8.0f, defaults.bloom_radius);
+  settings.tone_exposure = detail::clampFiniteRendererSetting(
+      settings.tone_exposure, 0.01f, 16.0f, defaults.tone_exposure);
+  settings.tone_contrast = detail::clampFiniteRendererSetting(
+      settings.tone_contrast, 0.25f, 4.0f, defaults.tone_contrast);
+  settings.tone_saturation = detail::clampFiniteRendererSetting(
+      settings.tone_saturation, 0.0f, 4.0f, defaults.tone_saturation);
+  settings.ssao_radius = detail::clampFiniteRendererSetting(
+      settings.ssao_radius, 0.1f, 16.0f, defaults.ssao_radius);
+  settings.ssao_intensity = detail::clampFiniteRendererSetting(
+      settings.ssao_intensity, 0.0f, 4.0f, defaults.ssao_intensity);
+  settings.ssao_power = detail::clampFiniteRendererSetting(
+      settings.ssao_power, 0.25f, 8.0f, defaults.ssao_power);
+  settings.ssr_intensity = detail::clampFiniteRendererSetting(
+      settings.ssr_intensity, 0.0f, 2.0f, defaults.ssr_intensity);
+  settings.ssr_max_roughness = detail::clampFiniteRendererSetting(
+      settings.ssr_max_roughness, 0.0f, 1.0f, defaults.ssr_max_roughness);
+  settings.ssr_thickness = detail::clampFiniteRendererSetting(
+      settings.ssr_thickness, 0.001f, 1.0f, defaults.ssr_thickness);
+  settings.taa_feedback = detail::clampFiniteRendererSetting(
+      settings.taa_feedback, 0.0f, 0.98f, defaults.taa_feedback);
+  settings.taa_sharpening = detail::clampFiniteRendererSetting(
+      settings.taa_sharpening, 0.0f, 1.0f, defaults.taa_sharpening);
+  settings.dof_focus_depth = detail::clampFiniteRendererSetting(
+      settings.dof_focus_depth, 0.01f, 100000.0f, defaults.dof_focus_depth);
+  settings.dof_focus_range = detail::clampFiniteRendererSetting(
+      settings.dof_focus_range, 0.01f, 100000.0f, defaults.dof_focus_range);
+  settings.dof_intensity = detail::clampFiniteRendererSetting(
+      settings.dof_intensity, 0.0f, 8.0f, defaults.dof_intensity);
+  return settings;
+}
+
+/// Clamps directional-shadow values to renderer-supported limits.
+inline ShadowSettings clampShadowSettings(ShadowSettings settings) {
+  const ShadowSettings defaults{};
+  settings.bias = detail::clampFiniteRendererSetting(
+      settings.bias, 0.0f, 1.0f, defaults.bias);
+  settings.map_size = std::clamp(settings.map_size, 256, 16384);
+  settings.pcf_radius = std::clamp(settings.pcf_radius, 0, 4);
+  settings.raster_depth_bias = std::clamp(settings.raster_depth_bias, -65536, 65536);
+  settings.raster_slope_bias = detail::clampFiniteRendererSetting(
+      settings.raster_slope_bias, -64.0f, 64.0f, defaults.raster_slope_bias);
+  settings.receiver_bias_scale = detail::clampFiniteRendererSetting(
+      settings.receiver_bias_scale, 0.0f, 16.0f, defaults.receiver_bias_scale);
+  settings.normal_bias_scale = detail::clampFiniteRendererSetting(
+      settings.normal_bias_scale, 0.0f, 16.0f, defaults.normal_bias_scale);
+  return settings;
+}
+
+/// Clamps point-shadow values to renderer-supported limits.
+inline PointShadowSettings clampPointShadowSettings(PointShadowSettings settings) {
+  const PointShadowSettings defaults{};
+  settings.constant_bias = detail::clampFiniteRendererSetting(
+      settings.constant_bias, 0.0f, 0.05f, defaults.constant_bias);
+  settings.slope_bias_scale = detail::clampFiniteRendererSetting(
+      settings.slope_bias_scale, 0.0f, 16.0f, defaults.slope_bias_scale);
+  settings.normal_bias_scale = detail::clampFiniteRendererSetting(
+      settings.normal_bias_scale, 0.0f, 16.0f, defaults.normal_bias_scale);
+  settings.receiver_bias_scale = detail::clampFiniteRendererSetting(
+      settings.receiver_bias_scale, 0.0f, 8.0f, defaults.receiver_bias_scale);
+  return settings;
+}
+
+/// Clamps local-light values to renderer-supported limits.
+inline LocalLightingSettings clampLocalLightingSettings(LocalLightingSettings settings) {
+  const LocalLightingSettings defaults{};
+  settings.distance_damping = detail::clampFiniteRendererSetting(
+      settings.distance_damping, 0.0f, 4.0f, defaults.distance_damping);
+  settings.range_falloff_exponent = detail::clampFiniteRendererSetting(
+      settings.range_falloff_exponent, 0.1f, 8.0f, defaults.range_falloff_exponent);
+  settings.directional_shadow_lift_strength = detail::clampFiniteRendererSetting(
+      settings.directional_shadow_lift_strength,
+      0.0f,
+      8.0f,
+      defaults.directional_shadow_lift_strength);
+  return settings;
+}
+
+/// Clamps lighting exposure and replaces non-finite input with neutral exposure.
+inline float clampLightingExposure(float exposure) {
+  return detail::clampFiniteRendererSetting(exposure, 0.01f, 32.0f, 1.0f);
+}
+
 /// \ingroup karma_rendering
 /// Camera anti-aliasing strategy selected before post-processing and frame graph passes.
 enum class AntiAliasingMode : uint32_t {
@@ -235,6 +504,11 @@ inline AntiAliasingSettings clampAntiAliasingSettings(AntiAliasingSettings setti
       return settings;
     case AntiAliasingMode::SSAA:
       settings.msaa_samples = 1u;
+      if (!std::isfinite(settings.ssaa_scale)) {
+        settings.mode = AntiAliasingMode::None;
+        settings.ssaa_scale = 1.0f;
+        return settings;
+      }
       settings.ssaa_scale = std::clamp(settings.ssaa_scale, 1.0f, 4.0f);
       if (settings.ssaa_scale <= 1.0f) {
         settings.mode = AntiAliasingMode::None;
@@ -1121,7 +1395,9 @@ inline FrameGraphValidationResult validateFrameGraphDesc(
                                       "duplicate frame graph resource: " + resource.name);
     }
     if (resource.size_mode == FrameGraphResourceSizeMode::CameraRelative) {
-      if (resource.width_scale <= 0.0f || resource.height_scale <= 0.0f) {
+      if (!std::isfinite(resource.width_scale) ||
+          !std::isfinite(resource.height_scale) ||
+          resource.width_scale <= 0.0f || resource.height_scale <= 0.0f) {
         detail::addFrameGraphDiagnostic(result,
                                         "camera-relative resource '" + resource.name +
                                             "' must have positive scale");
@@ -2346,6 +2622,7 @@ struct UIDrawData {
   std::vector<UIVertex> vertices;
   std::vector<uint32_t> indices;
   std::vector<UIDrawCmd> commands;
+  /// True when vertex colors and sampled textures already store RGB multiplied by alpha.
   bool premultiplied_alpha = false;
 
   /// Clears vertices, indices, commands, and alpha mode for a new frame.
@@ -2356,6 +2633,52 @@ struct UIDrawData {
     premultiplied_alpha = false;
   }
 };
+
+inline constexpr std::size_t kMaxUIVertices = 1u << 20u;
+inline constexpr std::size_t kMaxUIIndices = 3u << 20u;
+inline constexpr std::size_t kMaxUIDrawCommands = 1u << 18u;
+
+/// Validates UI batch sizes before the draw data is copied to the render queue.
+inline bool validateUIDrawCounts(std::size_t vertex_count,
+                                 std::size_t index_count,
+                                 std::size_t command_count) {
+  return vertex_count > 0u && vertex_count <= kMaxUIVertices &&
+         index_count > 0u && index_count <= kMaxUIIndices &&
+         command_count > 0u && command_count <= kMaxUIDrawCommands;
+}
+
+/// Validates finite vertices and every command/index range in a UI draw list.
+inline bool validateUIDrawData(const UIDrawData& draw_data) {
+  if (!validateUIDrawCounts(draw_data.vertices.size(),
+                            draw_data.indices.size(),
+                            draw_data.commands.size())) {
+    return false;
+  }
+  for (const UIVertex& vertex : draw_data.vertices) {
+    if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y) ||
+        !std::isfinite(vertex.u) || !std::isfinite(vertex.v)) {
+      return false;
+    }
+  }
+  for (uint32_t index : draw_data.indices) {
+    if (static_cast<std::size_t>(index) >= draw_data.vertices.size()) {
+      return false;
+    }
+  }
+  for (const UIDrawCmd& command : draw_data.commands) {
+    const std::size_t offset = command.index_offset;
+    const std::size_t count = command.index_count;
+    if (count == 0u || offset > draw_data.indices.size() ||
+        count > draw_data.indices.size() - offset) {
+      return false;
+    }
+    if (command.scissor_enabled &&
+        (command.scissor_w <= 0 || command.scissor_h <= 0)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 }  // namespace karma::rendering
 
@@ -2429,6 +2752,8 @@ class GraphicsDevice {
                           const GraphicsDeviceCreateInfo& create_info = {});
   ~GraphicsDevice();
 
+  /// Returns whether the backend initialized and can accept rendering commands.
+  [[nodiscard]] bool isValid() const;
   /// Begins a frame with viewport/timing data.
   void beginFrame(const FrameInfo& frame);
   /// Ends and presents the current frame.
@@ -2578,6 +2903,8 @@ class GraphicsDevice {
   /// Returns renderer backend frame timings for the most recently completed frame.
   RendererFrameTimingStats getRendererFrameTimingStats() const;
   /// Configures directional shadow bias/map settings.
+  void setShadowSettings(const ShadowSettings& settings);
+  /// Configures directional shadow bias/map settings from scalar values.
   void setShadowSettings(float bias,
                          int map_size,
                          int pcf_radius,
@@ -2586,6 +2913,8 @@ class GraphicsDevice {
                          float receiver_bias_scale,
                          float normal_bias_scale);
   /// Configures point-shadow bias settings.
+  void setPointShadowSettings(const PointShadowSettings& settings);
+  /// Configures point-shadow bias settings from scalar values.
   void setPointShadowSettings(float constant_bias,
                               float slope_bias_scale,
                               float normal_bias_scale,
@@ -2593,6 +2922,8 @@ class GraphicsDevice {
   /// Sets the runtime point-shadow light budget.
   void setPointShadowLightLimit(int max_lights);
   /// Configures local-light attenuation and shadow interaction.
+  void setLocalLightingSettings(const LocalLightingSettings& settings);
+  /// Configures local-light attenuation and shadow interaction from scalar values.
   void setLocalLightingSettings(float distance_damping,
                                 float range_falloff_exponent,
                                 bool ao_affects_local_lights,

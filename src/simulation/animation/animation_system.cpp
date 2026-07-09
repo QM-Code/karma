@@ -648,6 +648,82 @@ SampledTransform sampleRootMotion(const AnimationClip& clip, uint32_t node_index
   return out;
 }
 
+int64_t animationCycle(float time, float duration) {
+  const double cycle = std::floor(static_cast<double>(time) /
+                                  static_cast<double>(duration));
+  if (cycle >= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+    return std::numeric_limits<int64_t>::max();
+  }
+  if (cycle <= static_cast<double>(std::numeric_limits<int64_t>::min())) {
+    return std::numeric_limits<int64_t>::min();
+  }
+  return static_cast<int64_t>(cycle);
+}
+
+uint64_t unsignedMagnitude(int64_t value) {
+  return value < 0
+             ? static_cast<uint64_t>(-(value + 1)) + 1u
+             : static_cast<uint64_t>(value);
+}
+
+math::Quat quaternionPower(math::Quat base, int64_t exponent) {
+  if (exponent < 0) {
+    base = math::inverse(base);
+  }
+
+  math::Quat result{};
+  uint64_t remaining = unsignedMagnitude(exponent);
+  while (remaining != 0u) {
+    if ((remaining & 1u) != 0u) {
+      result = math::normalize(math::mul(base, result));
+    }
+    remaining >>= 1u;
+    if (remaining != 0u) {
+      base = math::normalize(math::mul(base, base));
+    }
+  }
+  return result;
+}
+
+SampledTransform sampleUnwrappedRootMotion(const AnimationClip& clip,
+                                           uint32_t node_index,
+                                           float time) {
+  if (clip.duration_seconds <= 0.0f ||
+      !std::isfinite(clip.duration_seconds) ||
+      !std::isfinite(time)) {
+    return sampleRootMotion(clip, node_index, time, false);
+  }
+
+  const float duration = clip.duration_seconds;
+  float phase = std::fmod(time, duration);
+  if (phase < 0.0f) {
+    phase += duration;
+  }
+  const int64_t cycle = animationCycle(time, duration);
+
+  const SampledTransform start = sampleRootMotion(clip, node_index, 0.0f, false);
+  const SampledTransform end = sampleRootMotion(clip, node_index, duration, false);
+  const SampledTransform sampled = sampleRootMotion(clip, node_index, phase, false);
+  SampledTransform out{};
+
+  if (start.position && end.position && sampled.position) {
+    const math::Vec3 cycle_delta = math::subtract(*end.position, *start.position);
+    out.position = math::add(
+        math::subtract(*sampled.position, *start.position),
+        math::scale(cycle_delta, static_cast<float>(cycle)));
+  }
+  if (start.rotation && end.rotation && sampled.rotation) {
+    const math::Quat inverse_start = math::inverse(*start.rotation);
+    const math::Quat phase_delta =
+        math::normalize(math::mul(*sampled.rotation, inverse_start));
+    const math::Quat cycle_delta =
+        math::normalize(math::mul(*end.rotation, inverse_start));
+    out.rotation = math::normalize(
+        math::mul(phase_delta, quaternionPower(cycle_delta, cycle)));
+  }
+  return out;
+}
+
 void updateRootMotion(world::World& world,
                       world::Entity owner,
                       components::AnimatorComponent& animator,
@@ -668,8 +744,12 @@ void updateRootMotion(world::World& world,
     return;
   }
 
-  const SampledTransform previous = sampleRootMotion(clip, source_node, previous_time, loop);
-  const SampledTransform current = sampleRootMotion(clip, source_node, current_time, loop);
+  const SampledTransform previous = loop
+      ? sampleUnwrappedRootMotion(clip, source_node, previous_time)
+      : sampleRootMotion(clip, source_node, previous_time, false);
+  const SampledTransform current = loop
+      ? sampleUnwrappedRootMotion(clip, source_node, current_time)
+      : sampleRootMotion(clip, source_node, current_time, false);
   if (previous.position && current.position) {
     animator.root_motion_delta.position = math::subtract(*current.position, *previous.position);
     animator.root_motion_accumulated.position =

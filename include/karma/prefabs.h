@@ -31,6 +31,7 @@ struct ComponentSerializer {
 ///
 /// The current global registry is process-wide. Prefer scoped ownership if
 /// future tools need multiple independent engine instances in one process.
+/// Registry mutation and use must be externally serialized.
 class ComponentSerializerRegistry {
  public:
   /// Registers a serializer by type name.
@@ -136,6 +137,13 @@ struct PrefabInstance {
   }
 };
 
+/// \par Thread safety
+/// Prefab operations mutate `World`, `Scene`, serializer, and asset state.
+/// Callers must provide exclusive access to those objects for the duration of
+/// each operation. An `AssetRegistry` must outlive every prefab instance and
+/// cached package that references it. Process-global registry binding and cache
+/// clearing must not overlap any other prefab operation.
+
 /// Saves an entity subtree to a JSON prefab file.
 bool savePrefab(const world::World& world,
                 const world::Scene& scene,
@@ -150,13 +158,19 @@ std::optional<PrefabInstance> instantiatePrefab(
     const std::filesystem::path& path,
     const PrefabInstantiateDesc& desc = {});
 
-/// Destroys a prefab instance rooted at `root`.
+/// Destroys the prefab-owned entities identified by `root`.
+///
+/// Scene nodes attached beneath the prefab after instantiation are detached but
+/// remain alive because they are not owned by the prefab instance.
 bool destroyPrefab(world::World& world, world::Scene& scene, world::Entity root);
 
 /// Binds the default registry used when `PrefabInstantiateDesc::assets` is null.
 void bindPrefabAssetRegistry(assets::AssetRegistry* assets);
 
-/// Releases all globally cached prefab asset packages.
+/// Releases cached packages and clears global prefab ownership bookkeeping.
+///
+/// This is a process-wide teardown operation. Call it only after instances no
+/// longer need to be passed to `destroyPrefab`.
 void clearPrefabAssetPackages();
 
 }  // namespace karma::prefabs

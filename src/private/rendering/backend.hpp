@@ -40,6 +40,9 @@ class Backend {
  public:
   virtual ~Backend() = default;
 
+  /// Returns whether device/context and presentation resources initialized successfully.
+  virtual bool isValid() const { return true; }
+
   virtual void beginFrame(const rendering::FrameInfo& frame) = 0;
   virtual void endFrame() = 0;
   virtual void resize(int width, int height) = 0;

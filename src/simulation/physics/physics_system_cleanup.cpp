@@ -11,7 +11,8 @@ void PhysicsSystem::cleanupStale(world::World& world) {
     const bool remove = !world.isAlive(entity) ||
                         !world.has<components::PhysicsVehicleComponent>(entity) ||
                         !world.has<components::RigidbodyComponent>(entity) ||
-                        !hasPhysicsCollider(world, entity);
+                        !hasPhysicsCollider(world, entity) ||
+                        !collisionEnabled(world, entity);
     if (remove) {
       it->second.destroy();
       vehicle_signatures_.erase(it->first);
@@ -29,7 +30,9 @@ void PhysicsSystem::cleanupStale(world::World& world) {
       const auto& component = world.get<components::PhysicsConstraintComponent>(entity);
       remove = !world.isAlive(component.body_a) || !world.isAlive(component.body_b) ||
                !hasPhysicsCollider(world, component.body_a) ||
-               !hasPhysicsCollider(world, component.body_b);
+               !hasPhysicsCollider(world, component.body_b) ||
+               !collisionEnabled(world, component.body_a) ||
+               !collisionEnabled(world, component.body_b);
     }
     if (remove) {
       it->second.destroy();
@@ -56,7 +59,8 @@ void PhysicsSystem::cleanupStale(world::World& world) {
     world::Entity entity = entityFromKey(it->first);
     if (!world.isAlive(entity) ||
         !world.has<components::RigidbodyComponent>(entity) ||
-        !hasPhysicsCollider(world, entity)) {
+        !hasPhysicsCollider(world, entity) ||
+        !collisionEnabled(world, entity)) {
       physics_entities_by_handle_.erase(it->second.nativeHandle());
       it->second.destroy();
       it = rigid_bodies_.erase(it);
@@ -71,7 +75,8 @@ void PhysicsSystem::cleanupStale(world::World& world) {
     if (!world.isAlive(entity) ||
         world.has<components::RigidbodyComponent>(entity) ||
         world.has<components::CharacterControllerComponent>(entity) ||
-        !hasPhysicsCollider(world, entity)) {
+        !hasPhysicsCollider(world, entity) ||
+        !collisionEnabled(world, entity)) {
       physics_entities_by_handle_.erase(it->second.nativeHandle());
       it->second.destroy();
       it = static_bodies_.erase(it);
@@ -86,7 +91,8 @@ void PhysicsSystem::cleanupStale(world::World& world) {
     const bool remove = !world.isAlive(entity) ||
                         !world.has<components::CharacterControllerComponent>(entity) ||
                         !world.has<components::TransformComponent>(entity) ||
-                        !hasPhysicsCollider(world, entity);
+                        !hasPhysicsCollider(world, entity) ||
+                        !collisionEnabled(world, entity);
     if (remove) {
       if (it->second.native_handle != 0) {
         physics_entities_by_handle_.erase(it->second.native_handle);

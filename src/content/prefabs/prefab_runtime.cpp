@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -18,8 +19,6 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
-#include "karma/prefabs.h"
-#include "karma/math.h"
 #include "karma/math.h"
 #include "karma/components.h"
 #include "karma/world.h"
@@ -62,8 +61,18 @@ bool readRequiredUint32(const Json& object,
     spdlog::error("Prefab '{}' is missing numeric '{}' field", path.string(), key);
     return false;
   }
-  const int64_t value = it->get<int64_t>();
-  if (value < 0 || value > static_cast<int64_t>(UINT32_MAX)) {
+  uint64_t value = 0;
+  if (it->is_number_unsigned()) {
+    value = it->get<uint64_t>();
+  } else {
+    const int64_t signed_value = it->get<int64_t>();
+    if (signed_value < 0) {
+      spdlog::error("Prefab '{}' has out-of-range '{}' field", path.string(), key);
+      return false;
+    }
+    value = static_cast<uint64_t>(signed_value);
+  }
+  if (value > static_cast<uint64_t>(UINT32_MAX)) {
     spdlog::error("Prefab '{}' has out-of-range '{}' field", path.string(), key);
     return false;
   }
@@ -80,9 +89,19 @@ bool readRequiredSize(const Json& object,
     spdlog::error("Prefab '{}' is missing numeric '{}' field", path.string(), key);
     return false;
   }
-  const int64_t value = it->get<int64_t>();
-  if (value < 0) {
-    spdlog::error("Prefab '{}' has negative '{}' field", path.string(), key);
+  uint64_t value = 0;
+  if (it->is_number_unsigned()) {
+    value = it->get<uint64_t>();
+  } else {
+    const int64_t signed_value = it->get<int64_t>();
+    if (signed_value < 0) {
+      spdlog::error("Prefab '{}' has negative '{}' field", path.string(), key);
+      return false;
+    }
+    value = static_cast<uint64_t>(signed_value);
+  }
+  if (value > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    spdlog::error("Prefab '{}' has out-of-range '{}' field", path.string(), key);
     return false;
   }
   out_value = static_cast<size_t>(value);
@@ -677,8 +696,10 @@ bool validateParents(const PrefabDocument& document,
     return false;
   }
 
+  std::vector<uint8_t> visit_state(document.nodes.size(), 0u);
+  visit_state[document.root] = 2u;
   for (size_t index = 0; index < document.nodes.size(); ++index) {
-    const auto parent = document.nodes[index].parent;
+    const std::optional<size_t> parent = document.nodes[index].parent;
     if (parent.has_value() && *parent >= document.nodes.size()) {
       spdlog::error("Prefab '{}' node {} parent index is out of range",
                     path.string(),
@@ -686,17 +707,30 @@ bool validateParents(const PrefabDocument& document,
       return false;
     }
 
-    std::vector<bool> visited(document.nodes.size(), false);
+    std::vector<size_t> path_nodes;
     size_t cursor = index;
-    while (document.nodes[cursor].parent.has_value()) {
-      if (visited[cursor]) {
+    while (cursor != document.root) {
+      if (visit_state[cursor] == 2u) {
+        break;
+      }
+      if (visit_state[cursor] == 1u) {
         spdlog::error("Prefab '{}' contains a parent cycle at node {}",
                       path.string(),
                       index);
         return false;
       }
-      visited[cursor] = true;
+      visit_state[cursor] = 1u;
+      path_nodes.push_back(cursor);
+      if (!document.nodes[cursor].parent.has_value()) {
+        spdlog::error("Prefab '{}' node {} is outside the declared root subtree",
+                      path.string(),
+                      index);
+        return false;
+      }
       cursor = *document.nodes[cursor].parent;
+    }
+    for (const size_t node : path_nodes) {
+      visit_state[node] = 2u;
     }
   }
 
@@ -763,9 +797,21 @@ std::optional<PrefabDocument> parseDocument(const Json& json,
     if (parent_it->is_null()) {
       node.parent.reset();
     } else if (parent_it->is_number_unsigned() || parent_it->is_number_integer()) {
-      const int64_t parent = parent_it->get<int64_t>();
-      if (parent < 0) {
-        spdlog::error("Prefab '{}' node {} has negative parent index",
+      uint64_t parent = 0;
+      if (parent_it->is_number_unsigned()) {
+        parent = parent_it->get<uint64_t>();
+      } else {
+        const int64_t signed_parent = parent_it->get<int64_t>();
+        if (signed_parent < 0) {
+          spdlog::error("Prefab '{}' node {} has negative parent index",
+                        path.string(),
+                        index);
+          return std::nullopt;
+        }
+        parent = static_cast<uint64_t>(signed_parent);
+      }
+      if (parent > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+        spdlog::error("Prefab '{}' node {} has out-of-range parent index",
                       path.string(),
                       index);
         return std::nullopt;
@@ -846,9 +892,32 @@ struct CachedPrefabPackage {
   uint32_t ref_count = 0u;
 };
 
+struct PrefabRootKey {
+  uint64_t world = 0u;
+  uint64_t entity = 0u;
+
+  bool operator==(const PrefabRootKey&) const = default;
+};
+
+struct PrefabRootKeyHash {
+  size_t operator()(const PrefabRootKey& key) const {
+    const size_t world_hash = std::hash<uint64_t>{}(key.world);
+    const size_t entity_hash = std::hash<uint64_t>{}(key.entity);
+    return world_hash ^ (entity_hash + 0x9e3779b9u + (world_hash << 6u) +
+                         (world_hash >> 2u));
+  }
+};
+
+struct TrackedPrefabInstance {
+  std::string package_key;
+  std::vector<world::Entity> entities;
+};
+
 std::unordered_map<std::string, CachedPrefabPackage> g_cached_prefab_packages;
-std::unordered_map<uint64_t, std::string> g_package_by_root_entity;
+std::unordered_map<PrefabRootKey, TrackedPrefabInstance, PrefabRootKeyHash>
+    g_instances_by_root;
 assets::AssetRegistry* g_default_prefab_assets = nullptr;
+std::mutex g_prefab_state_mutex;
 
 std::string packageCacheKey(assets::AssetRegistry* assets,
                             const std::filesystem::path& manifest_path) {
@@ -863,6 +932,7 @@ std::string packageCacheKey(assets::AssetRegistry* assets,
 
 struct PackageAcquireResult {
   bool success = true;
+  assets::AssetRegistry* assets = nullptr;
   std::string cache_key;
   std::optional<assets::AssetPackageHandle> handle;
 };
@@ -871,8 +941,10 @@ PackageAcquireResult acquirePrefabPackage(assets::AssetRegistry* assets,
                                           const std::filesystem::path& prefab_path) {
   PackageAcquireResult result{};
   if (assets == nullptr) {
+    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
     assets = g_default_prefab_assets;
   }
+  result.assets = assets;
   const std::filesystem::path manifest_path =
       assets::resolveAssetPackagePath(prefab_path.parent_path());
   std::error_code ec;
@@ -894,11 +966,14 @@ PackageAcquireResult acquirePrefabPackage(assets::AssetRegistry* assets,
   }
 
   result.cache_key = packageCacheKey(assets, manifest_path);
-  auto cached_it = g_cached_prefab_packages.find(result.cache_key);
-  if (cached_it != g_cached_prefab_packages.end()) {
-    cached_it->second.ref_count += 1u;
-    result.handle = cached_it->second.handle;
-    return result;
+  {
+    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
+    auto cached_it = g_cached_prefab_packages.find(result.cache_key);
+    if (cached_it != g_cached_prefab_packages.end()) {
+      cached_it->second.ref_count += 1u;
+      result.handle = cached_it->second.handle;
+      return result;
+    }
   }
 
   std::string diagnostic;
@@ -916,7 +991,10 @@ PackageAcquireResult acquirePrefabPackage(assets::AssetRegistry* assets,
   cached.assets = assets;
   cached.handle = *package;
   cached.ref_count = 1u;
-  g_cached_prefab_packages[result.cache_key] = cached;
+  {
+    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
+    g_cached_prefab_packages[result.cache_key] = cached;
+  }
   result.handle = std::move(package);
   return result;
 }
@@ -925,18 +1003,23 @@ void releasePrefabPackageByKey(const std::string& cache_key) {
   if (cache_key.empty()) {
     return;
   }
-  auto cached_it = g_cached_prefab_packages.find(cache_key);
-  if (cached_it == g_cached_prefab_packages.end()) {
-    return;
-  }
-  if (cached_it->second.ref_count > 0u) {
-    cached_it->second.ref_count -= 1u;
-  }
-  if (cached_it->second.ref_count == 0u) {
-    if (cached_it->second.assets != nullptr) {
-      assets::unloadAssetPackage(*cached_it->second.assets, cached_it->second.handle);
+  std::optional<CachedPrefabPackage> released;
+  {
+    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
+    auto cached_it = g_cached_prefab_packages.find(cache_key);
+    if (cached_it == g_cached_prefab_packages.end()) {
+      return;
     }
-    g_cached_prefab_packages.erase(cached_it);
+    if (cached_it->second.ref_count > 0u) {
+      cached_it->second.ref_count -= 1u;
+    }
+    if (cached_it->second.ref_count == 0u) {
+      released = std::move(cached_it->second);
+      g_cached_prefab_packages.erase(cached_it);
+    }
+  }
+  if (released.has_value() && released->assets != nullptr) {
+    assets::unloadAssetPackage(*released->assets, released->handle);
   }
 }
 
@@ -1042,6 +1125,42 @@ void destroyCreated(world::World& world,
     }
   }
 }
+
+class PrefabInstantiationRollback {
+ public:
+  PrefabInstantiationRollback(world::World& world,
+                              world::Scene& scene,
+                              const std::vector<world::Entity>& entities,
+                              const std::vector<world::NodeId>& nodes,
+                              std::string package_key)
+      : world_(world),
+        scene_(scene),
+        entities_(entities),
+        nodes_(nodes),
+        package_key_(std::move(package_key)) {}
+
+  ~PrefabInstantiationRollback() {
+    if (!active_) {
+      return;
+    }
+    try {
+      destroyCreated(world_, scene_, entities_, nodes_);
+      releasePrefabPackageByKey(package_key_);
+    } catch (...) {
+      // Rollback is best effort during exception unwinding.
+    }
+  }
+
+  void dismiss() { active_ = false; }
+
+ private:
+  world::World& world_;
+  world::Scene& scene_;
+  const std::vector<world::Entity>& entities_;
+  const std::vector<world::NodeId>& nodes_;
+  std::string package_key_;
+  bool active_ = true;
+};
 
 bool deserializeComponents(world::World& world,
                            world::Entity entity,
@@ -1151,19 +1270,6 @@ bool validateVolumetricMaterials(const world::World& world,
   return true;
 }
 
-void collectSubtreeNodes(const world::Scene& scene,
-                         world::NodeId root,
-                         std::vector<world::NodeId>& out_nodes) {
-  if (!scene.isAlive(root)) {
-    return;
-  }
-  out_nodes.push_back(root);
-  const world::Node& node = scene.get(root);
-  for (const world::NodeId child : node.children) {
-    collectSubtreeNodes(scene, child, out_nodes);
-  }
-}
-
 }  // namespace
 
 bool savePrefab(const world::World& world,
@@ -1218,138 +1324,171 @@ std::optional<PrefabInstance> instantiatePrefab(
   if (!document.has_value()) {
     return std::nullopt;
   }
+  if (!math::isFinite(desc.root_transform.localPosition()) ||
+      !math::isFinite(desc.root_transform.localRotation()) ||
+      !math::isFinite(desc.root_transform.localScale()) ||
+      math::lengthSquared(desc.root_transform.localRotation()) <= 1.0e-12f) {
+    spdlog::error("Prefab '{}' received an invalid root transform", path.string());
+    return std::nullopt;
+  }
   PackageAcquireResult package = acquirePrefabPackage(desc.assets, path);
   if (!package.success) {
     return std::nullopt;
   }
-  const assets::AssetRegistry* active_assets =
-      desc.assets != nullptr ? desc.assets : g_default_prefab_assets;
+  assets::AssetRegistry* active_assets = package.assets;
 
   PrefabInstance instance{};
   std::vector<world::Entity> created_entities;
   std::vector<world::NodeId> created_nodes;
-  created_entities.reserve(document->nodes.size());
-  created_nodes.reserve(document->nodes.size());
+  PrefabInstantiationRollback rollback(
+      world, scene, created_entities, created_nodes, package.cache_key);
 
-  for (size_t index = 0; index < document->nodes.size(); ++index) {
-    world::Entity entity = world.createEntity();
-    world::NodeId scene_node = scene.createNode(entity);
-    created_entities.push_back(entity);
-    created_nodes.push_back(scene_node);
-    instance.entities.push_back(entity);
-    instance.entities_by_id[document->nodes[index].id] = entity;
-    if (!document->nodes[index].name.empty()) {
-      instance.named_entities[document->nodes[index].name] = entity;
-    }
-  }
+  try {
+    created_entities.reserve(document->nodes.size());
+    created_nodes.reserve(document->nodes.size());
+    instance.entities.reserve(document->nodes.size());
+    instance.entities_by_id.reserve(document->nodes.size());
+    instance.named_entities.reserve(document->nodes.size());
 
-  for (size_t index = 0; index < document->nodes.size(); ++index) {
-    if (!deserializeComponents(world, created_entities[index], document->nodes[index], path)) {
-      destroyCreated(world, scene, created_entities, created_nodes);
-      releasePrefabPackageByKey(package.cache_key);
-      return std::nullopt;
-    }
-    ensureTransformsForHierarchy(world, created_entities[index]);
-  }
-
-  if (!validateVolumetricMaterials(world, created_entities, active_assets, path)) {
-    destroyCreated(world, scene, created_entities, created_nodes);
-    releasePrefabPackageByKey(package.cache_key);
-    return std::nullopt;
-  }
-
-  for (size_t index = 0; index < document->nodes.size(); ++index) {
-    const PrefabNode& node = document->nodes[index];
-    const bool is_root = index == document->root;
-    const std::string final_name =
-        is_root && !desc.name_override.empty() ? desc.name_override : node.name;
-    if (!final_name.empty()) {
-      world.setName(created_entities[index], final_name);
-      if (is_root && final_name != node.name) {
-        instance.named_entities[final_name] = created_entities[index];
+    for (size_t index = 0; index < document->nodes.size(); ++index) {
+      world::Entity entity = world.createEntity();
+      created_entities.push_back(entity);
+      world::NodeId scene_node = scene.createNode(entity);
+      created_nodes.push_back(scene_node);
+      instance.entities.push_back(entity);
+      instance.entities_by_id[document->nodes[index].id] = entity;
+      if (!document->nodes[index].name.empty()) {
+        instance.named_entities[document->nodes[index].name] = entity;
       }
     }
-  }
 
-  for (size_t index = 0; index < document->nodes.size(); ++index) {
-    const auto parent = document->nodes[index].parent;
-    if (!parent.has_value()) {
-      continue;
+    for (size_t index = 0; index < document->nodes.size(); ++index) {
+      if (!deserializeComponents(world, created_entities[index], document->nodes[index], path)) {
+        return std::nullopt;
+      }
+      ensureTransformsForHierarchy(world, created_entities[index]);
     }
-    scene.reparent(created_nodes[index], created_nodes[*parent]);
-  }
 
-  instance.root = created_entities[document->root];
-  instance.root_scene_node = created_nodes[document->root];
-  instance.asset_registry = desc.assets;
-  instance.asset_package = package.handle;
-  if (!package.cache_key.empty()) {
-    g_package_by_root_entity[entityKey(instance.root)] = package.cache_key;
+    if (!validateVolumetricMaterials(world, created_entities, active_assets, path)) {
+      return std::nullopt;
+    }
+
+    for (size_t index = 0; index < document->nodes.size(); ++index) {
+      const PrefabNode& node = document->nodes[index];
+      const bool is_root = index == document->root;
+      const std::string final_name =
+          is_root && !desc.name_override.empty() ? desc.name_override : node.name;
+      if (!final_name.empty()) {
+        world.setName(created_entities[index], final_name);
+        if (is_root && final_name != node.name) {
+          instance.named_entities[final_name] = created_entities[index];
+        }
+      }
+    }
+
+    for (size_t index = 0; index < document->nodes.size(); ++index) {
+      const auto parent = document->nodes[index].parent;
+      if (!parent.has_value()) {
+        continue;
+      }
+      if (!scene.reparent(created_nodes[index], created_nodes[*parent])) {
+        spdlog::error("Prefab '{}' failed to apply node {} hierarchy",
+                      path.string(),
+                      index);
+        return std::nullopt;
+      }
+    }
+
+    instance.root = created_entities[document->root];
+    instance.root_scene_node = created_nodes[document->root];
+    instance.asset_registry = active_assets;
+    instance.asset_package = package.handle;
+    applyRootTransform(world, instance.root, desc.root_transform);
+    world::updateWorldTransforms(world, scene);
+    const PrefabRootKey root_key{
+        .world = world.instanceId(),
+        .entity = entityKey(instance.root),
+    };
+    TrackedPrefabInstance tracked_instance{
+        .package_key = package.cache_key,
+        .entities = instance.entities,
+    };
+    std::string stale_package_key;
+    {
+      std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
+      const auto [tracked_it, inserted] =
+          g_instances_by_root.try_emplace(root_key, std::move(tracked_instance));
+      if (!inserted) {
+        stale_package_key = tracked_it->second.package_key;
+        tracked_it->second = std::move(tracked_instance);
+      }
+    }
+    releasePrefabPackageByKey(stale_package_key);
+  } catch (const std::exception& error) {
+    spdlog::error("Prefab '{}' instantiation failed: {}", path.string(), error.what());
+    return std::nullopt;
+  } catch (...) {
+    spdlog::error("Prefab '{}' instantiation failed with an unknown exception",
+                  path.string());
+    return std::nullopt;
   }
-  applyRootTransform(world, instance.root, desc.root_transform);
-  world::updateWorldTransforms(world, scene);
-  return instance;
+  rollback.dismiss();
+  return std::optional<PrefabInstance>(std::move(instance));
 }
 
 bool destroyPrefab(world::World& world, world::Scene& scene, world::Entity root) {
-  if (!world.isAlive(root)) {
-    return false;
+  const PrefabRootKey root_key{
+      .world = world.instanceId(),
+      .entity = entityKey(root),
+  };
+  std::optional<TrackedPrefabInstance> tracked;
+  {
+    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
+    if (const auto tracked_it = g_instances_by_root.find(root_key);
+        tracked_it != g_instances_by_root.end()) {
+      tracked = std::move(tracked_it->second);
+      g_instances_by_root.erase(tracked_it);
+    }
   }
-
-  const uint64_t root_key = entityKey(root);
-  std::string package_key;
-  if (const auto package_it = g_package_by_root_entity.find(root_key);
-      package_it != g_package_by_root_entity.end()) {
-    package_key = package_it->second;
-    g_package_by_root_entity.erase(package_it);
-  }
-
-  const world::NodeId root_node = scene.findNode(root);
-  if (!scene.isAlive(root_node)) {
-    world.destroyEntity(root);
-    releasePrefabPackageByKey(package_key);
+  if (tracked.has_value()) {
+    for (auto it = tracked->entities.rbegin(); it != tracked->entities.rend(); ++it) {
+      const world::NodeId node = scene.findNode(*it);
+      if (scene.isAlive(node)) {
+        scene.destroyNode(node);
+      }
+      if (world.isAlive(*it)) {
+        world.destroyEntity(*it);
+      }
+    }
+    releasePrefabPackageByKey(tracked->package_key);
     return true;
   }
 
-  std::vector<world::NodeId> nodes;
-  collectSubtreeNodes(scene, root_node, nodes);
-
-  std::vector<world::Entity> entities;
-  entities.reserve(nodes.size());
-  for (const world::NodeId node_id : nodes) {
-    const world::Node& node = scene.get(node_id);
-    if (node.entity.isValid()) {
-      entities.push_back(node.entity);
-    }
-  }
-
-  for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
-    if (scene.isAlive(*it)) {
-      scene.destroyNode(*it);
-    }
-  }
-  for (const world::Entity entity : entities) {
-    if (world.isAlive(entity)) {
-      world.destroyEntity(entity);
-    }
-  }
-  releasePrefabPackageByKey(package_key);
-  return true;
+  return false;
 }
 
 void clearPrefabAssetPackages() {
-  for (auto& [key, cached] : g_cached_prefab_packages) {
-    (void)key;
+  std::vector<CachedPrefabPackage> released;
+  {
+    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
+    released.reserve(g_cached_prefab_packages.size());
+    for (auto& [key, cached] : g_cached_prefab_packages) {
+      (void)key;
+      released.push_back(std::move(cached));
+    }
+    g_cached_prefab_packages.clear();
+    g_instances_by_root.clear();
+    g_default_prefab_assets = nullptr;
+  }
+  for (CachedPrefabPackage& cached : released) {
     if (cached.assets != nullptr) {
       assets::unloadAssetPackage(*cached.assets, cached.handle);
     }
   }
-  g_cached_prefab_packages.clear();
-  g_package_by_root_entity.clear();
-  g_default_prefab_assets = nullptr;
 }
 
 void bindPrefabAssetRegistry(assets::AssetRegistry* assets) {
+  std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
   g_default_prefab_assets = assets;
 }
 

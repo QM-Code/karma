@@ -1,7 +1,12 @@
 #include "karma/ui.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <exception>
+#include <limits>
+#include <stdexcept>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -12,6 +17,30 @@
 namespace karma::ui::rmlui {
 
 namespace {
+
+constexpr size_t kMaxGeneratedTextureBytes = 256u * 1024u * 1024u;
+
+bool validCodepoint(uint32_t codepoint) {
+  return codepoint <= 0x10ffffu &&
+         !(codepoint >= 0xd800u && codepoint <= 0xdfffu);
+}
+
+int toRmlCoordinate(double value) {
+  if (!std::isfinite(value)) {
+    return 0;
+  }
+  return static_cast<int>(std::clamp(
+      value,
+      static_cast<double>(std::numeric_limits<int>::min()),
+      static_cast<double>(std::numeric_limits<int>::max())));
+}
+
+float toRmlScroll(double value) {
+  return static_cast<float>(std::clamp(
+      value,
+      -static_cast<double>(std::numeric_limits<float>::max()),
+      static_cast<double>(std::numeric_limits<float>::max())));
+}
 
 Rml::Input::KeyIdentifier toRmlKey(platform::Key key) {
   switch (key) {
@@ -108,11 +137,21 @@ class RmlUiLayer final : public app::UiLayer,
  public:
   RmlUiLayer(RmlUiLayerCallbacks callbacks, RmlUiLayerConfig config)
       : callbacks_(std::move(callbacks)), config_(std::move(config)) {
-    Rml::SetSystemInterface(this);
-    Rml::SetRenderInterface(this);
-    Rml::SetFileInterface(this);
+    if (config_.initialize_rmlui != config_.shutdown_rmlui) {
+      throw std::invalid_argument(
+          "RmlUi lifecycle must be either fully owned or fully borrowed.");
+    }
     if (config_.initialize_rmlui) {
-      Rml::Initialise();
+      previous_system_interface_ = Rml::GetSystemInterface();
+      previous_render_interface_ = Rml::GetRenderInterface();
+      previous_file_interface_ = Rml::GetFileInterface();
+      Rml::SetSystemInterface(this);
+      Rml::SetRenderInterface(this);
+      Rml::SetFileInterface(this);
+      if (!Rml::Initialise()) {
+        restoreInterfaces();
+        throw std::runtime_error("Failed to initialize RmlUi.");
+      }
       initialized_rmlui_ = true;
     }
 #ifndef RMLUI_SVG_PLUGIN
@@ -121,7 +160,13 @@ class RmlUiLayer final : public app::UiLayer,
   }
 
   ~RmlUiLayer() override {
-    onShutdown();
+    try {
+      onShutdown();
+    } catch (const std::exception& e) {
+      spdlog::error("RmlUi shutdown failed: {}", e.what());
+    } catch (...) {
+      spdlog::error("RmlUi shutdown failed with an unknown exception.");
+    }
   }
 
   void onEvent(const platform::Event& event) override {
@@ -131,18 +176,26 @@ class RmlUiLayer final : public app::UiLayer,
     const int mods = toRmlModifiers(event.mods);
     switch (event.type) {
       case platform::EventType::KeyDown:
-        context_->ProcessKeyDown(toRmlKey(event.key), mods);
+        if (const auto key = toRmlKey(event.key); key != Rml::Input::KI_UNKNOWN) {
+          context_->ProcessKeyDown(key, mods);
+        }
         break;
       case platform::EventType::KeyUp:
-        context_->ProcessKeyUp(toRmlKey(event.key), mods);
+        if (const auto key = toRmlKey(event.key); key != Rml::Input::KI_UNKNOWN) {
+          context_->ProcessKeyUp(key, mods);
+        }
         break;
       case platform::EventType::TextInput:
-        if (event.codepoint != 0) {
+        if (event.codepoint != 0 && validCodepoint(event.codepoint)) {
           context_->ProcessTextInput(static_cast<Rml::Character>(event.codepoint));
         }
         break;
       case platform::EventType::MouseMove:
-        context_->ProcessMouseMove(static_cast<int>(event.x), static_cast<int>(event.y), mods);
+        if (std::isfinite(event.x) && std::isfinite(event.y)) {
+          context_->ProcessMouseMove(toRmlCoordinate(event.x),
+                                     toRmlCoordinate(event.y),
+                                     mods);
+        }
         break;
       case platform::EventType::MouseButtonDown: {
         const int button = toRmlMouseButton(event.mouseButton);
@@ -159,7 +212,17 @@ class RmlUiLayer final : public app::UiLayer,
         break;
       }
       case platform::EventType::MouseScroll:
-        context_->ProcessMouseWheel(static_cast<float>(event.scrollY), mods);
+        if (std::isfinite(event.scrollX) && std::isfinite(event.scrollY)) {
+          context_->ProcessMouseWheel(
+              Rml::Vector2f(-toRmlScroll(event.scrollX),
+                            -toRmlScroll(event.scrollY)),
+              mods);
+        }
+        break;
+      case platform::EventType::WindowFocus:
+        if (!event.focused) {
+          context_->ProcessMouseLeave();
+        }
         break;
       default:
         break;
@@ -167,18 +230,26 @@ class RmlUiLayer final : public app::UiLayer,
   }
 
   void onFrame(app::UIContext& ctx) override {
-    ctx_ = &ctx;
     rendering::UIDrawData& out = ctx.drawData();
     out.clear();
-    out.premultiplied_alpha = false;
+    if (shutdown_) {
+      return;
+    }
+    ctx_ = &ctx;
+    out.premultiplied_alpha = true;
 
     const app::UIFrameInfo frame = ctx.frame();
-    width_ = frame.viewport_w;
-    height_ = frame.viewport_h;
-    time_ += frame.dt;
+    width_ = std::max(frame.viewport_w, 0);
+    height_ = std::max(frame.viewport_h, 0);
+    if (std::isfinite(frame.dt) && frame.dt > 0.0f &&
+        time_ <= std::numeric_limits<double>::max() - frame.dt) {
+      time_ += frame.dt;
+    }
 
     if (!context_) {
-      context_ = Rml::CreateContext(config_.context_name, Rml::Vector2i(width_, height_));
+      context_ = Rml::CreateContext(config_.context_name,
+                                    Rml::Vector2i(width_, height_),
+                                    this);
       if (context_ && callbacks_.on_context_ready) {
         callbacks_.on_context_ready(*context_);
       }
@@ -198,13 +269,20 @@ class RmlUiLayer final : public app::UiLayer,
       return;
     }
     shutdown_ = true;
+    std::exception_ptr callback_error;
     if (context_ && callbacks_.on_shutdown) {
-      callbacks_.on_shutdown(*context_);
+      try {
+        callbacks_.on_shutdown(*context_);
+      } catch (...) {
+        callback_error = std::current_exception();
+      }
     }
     if (context_) {
       Rml::RemoveContext(context_->GetName());
       context_ = nullptr;
     }
+    Rml::ReleaseTextures(this);
+    Rml::ReleaseCompiledGeometry(this);
     for (auto& entry : textures_) {
       if (ctx_) {
         ctx_->destroyTexture(entry.second);
@@ -215,6 +293,11 @@ class RmlUiLayer final : public app::UiLayer,
     if (initialized_rmlui_ && config_.shutdown_rmlui) {
       Rml::Shutdown();
       initialized_rmlui_ = false;
+      restoreInterfaces();
+    }
+    ctx_ = nullptr;
+    if (callback_error) {
+      std::rethrow_exception(callback_error);
     }
   }
 
@@ -239,14 +322,22 @@ class RmlUiLayer final : public app::UiLayer,
 
   Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices,
                                               Rml::Span<const int> indices) override {
-    if (vertices.empty() || indices.empty()) {
+    if (vertices.empty() || indices.empty() ||
+        vertices.size() > rendering::kMaxUIVertices ||
+        indices.size() > rendering::kMaxUIIndices ||
+        std::any_of(indices.begin(), indices.end(), [&](int index) {
+          return index < 0 || static_cast<size_t>(index) >= vertices.size();
+        })) {
       return 0;
     }
     Geometry geom{};
     geom.vertices.assign(vertices.begin(), vertices.end());
     geom.indices.assign(indices.begin(), indices.end());
+    if (next_geometry_handle_ == 0) {
+      return 0;
+    }
     const auto handle = next_geometry_handle_++;
-    geometries_[handle] = std::move(geom);
+    geometries_.emplace(handle, std::move(geom));
     return handle;
   }
 
@@ -254,16 +345,41 @@ class RmlUiLayer final : public app::UiLayer,
                       Rml::Vector2f translation,
                       Rml::TextureHandle texture) override {
     auto it = geometries_.find(geometry);
-    if (it == geometries_.end() || !ctx_) {
+    if (it == geometries_.end() || !ctx_ ||
+        !std::isfinite(translation.x) || !std::isfinite(translation.y)) {
       return;
     }
 
     rendering::UIDrawData& out = ctx_->drawData();
     const size_t base_vertex = out.vertices.size();
     const size_t base_index = out.indices.size();
+    if (base_vertex > rendering::kMaxUIVertices ||
+        it->second.vertices.size() > rendering::kMaxUIVertices - base_vertex ||
+        base_index > rendering::kMaxUIIndices ||
+        it->second.indices.size() > rendering::kMaxUIIndices - base_index ||
+        out.commands.size() >= rendering::kMaxUIDrawCommands) {
+      return;
+    }
+
+    rendering::UIDrawCmd cmd{};
+    cmd.scissor_enabled = scissor_enabled_;
+    if (scissor_enabled_) {
+      const int64_t left = std::max<int64_t>(scissor_.Left(), 0);
+      const int64_t top = std::max<int64_t>(scissor_.Top(), 0);
+      const int64_t right = std::min<int64_t>(scissor_.Right(), width_);
+      const int64_t bottom = std::min<int64_t>(scissor_.Bottom(), height_);
+      if (right <= left || bottom <= top) {
+        return;
+      }
+      cmd.scissor_x = static_cast<int>(left);
+      cmd.scissor_y = static_cast<int>(top);
+      cmd.scissor_w = static_cast<int>(right - left);
+      cmd.scissor_h = static_cast<int>(bottom - top);
+    }
 
     out.vertices.reserve(base_vertex + it->second.vertices.size());
     out.indices.reserve(base_index + it->second.indices.size());
+    out.commands.reserve(out.commands.size() + 1u);
 
     for (const auto& v : it->second.vertices) {
       Rml::Vector2f pos = v.position + translation;
@@ -274,6 +390,11 @@ class RmlUiLayer final : public app::UiLayer,
         const float ty = transform_[0][1] * x + transform_[1][1] * y + transform_[3][1];
         pos.x = tx;
         pos.y = ty;
+      }
+      if (!std::isfinite(pos.x) || !std::isfinite(pos.y) ||
+          !std::isfinite(v.tex_coord.x) || !std::isfinite(v.tex_coord.y)) {
+        out.vertices.resize(base_vertex);
+        return;
       }
 
       rendering::UIVertex out_v{};
@@ -289,16 +410,8 @@ class RmlUiLayer final : public app::UiLayer,
       out.indices.push_back(static_cast<uint32_t>(idx) + static_cast<uint32_t>(base_vertex));
     }
 
-    rendering::UIDrawCmd cmd{};
     cmd.index_offset = static_cast<uint32_t>(base_index);
     cmd.index_count = static_cast<uint32_t>(it->second.indices.size());
-    cmd.scissor_enabled = scissor_enabled_;
-    if (scissor_enabled_) {
-      cmd.scissor_x = scissor_.Left();
-      cmd.scissor_y = scissor_.Top();
-      cmd.scissor_w = scissor_.Width();
-      cmd.scissor_h = scissor_.Height();
-    }
     cmd.texture = resolveTexture(texture);
     out.commands.push_back(cmd);
   }
@@ -329,12 +442,17 @@ class RmlUiLayer final : public app::UiLayer,
       return 0;
     }
 
-    app::UITexture tex = ctx_->loadTextureRGBA8FromPng(path);
+    app::UITexture tex = ctx_->loadTextureRGBA8FromPng(path, true);
     if (!tex) {
       texture_dimensions = Rml::Vector2i(0, 0);
       return 0;
     }
 
+    if (next_texture_handle_ == 0) {
+      ctx_->destroyTexture(tex.handle);
+      texture_dimensions = Rml::Vector2i(0, 0);
+      return 0;
+    }
     const auto handle = next_texture_handle_++;
     textures_[handle] = tex.handle;
     texture_dimensions = Rml::Vector2i(tex.width, tex.height);
@@ -343,13 +461,20 @@ class RmlUiLayer final : public app::UiLayer,
 
   Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte> source,
                                      Rml::Vector2i source_dimensions) override {
-    if (!ctx_ || source.empty()) {
+    if (!ctx_ || source.empty() || source_dimensions.x <= 0 ||
+        source_dimensions.y <= 0) {
       return 0;
     }
-    const size_t expected_rgba = static_cast<size_t>(source_dimensions.x) *
-                                 static_cast<size_t>(source_dimensions.y) * 4;
-    const size_t expected_a8 = static_cast<size_t>(source_dimensions.x) *
-                               static_cast<size_t>(source_dimensions.y);
+    const size_t width = static_cast<size_t>(source_dimensions.x);
+    const size_t height = static_cast<size_t>(source_dimensions.y);
+    if (height > kMaxGeneratedTextureBytes / 4u / width) {
+      return 0;
+    }
+    const size_t expected_a8 = width * height;
+    const size_t expected_rgba = expected_a8 * 4u;
+    if (expected_rgba > kMaxGeneratedTextureBytes) {
+      return 0;
+    }
     const Rml::byte* data = source.data();
     std::vector<Rml::byte> expanded;
     if (source.size() == expected_a8) {
@@ -357,9 +482,9 @@ class RmlUiLayer final : public app::UiLayer,
       for (size_t i = 0; i < expected_a8; ++i) {
         const Rml::byte a = source[i];
         const size_t o = i * 4;
-        expanded[o + 0] = 255;
-        expanded[o + 1] = 255;
-        expanded[o + 2] = 255;
+        expanded[o + 0] = a;
+        expanded[o + 1] = a;
+        expanded[o + 2] = a;
         expanded[o + 3] = a;
       }
       data = expanded.data();
@@ -367,6 +492,9 @@ class RmlUiLayer final : public app::UiLayer,
       return 0;
     }
 
+    if (next_texture_handle_ == 0) {
+      return 0;
+    }
     const auto handle = next_texture_handle_++;
     const app::UITextureHandle tex =
         ctx_->createTextureRGBA8(source_dimensions.x, source_dimensions.y, data);
@@ -517,10 +645,19 @@ class RmlUiLayer final : public app::UiLayer,
     return it->second;
   }
 
+  void restoreInterfaces() {
+    Rml::SetSystemInterface(previous_system_interface_);
+    Rml::SetRenderInterface(previous_render_interface_);
+    Rml::SetFileInterface(previous_file_interface_);
+  }
+
   RmlUiLayerCallbacks callbacks_{};
   RmlUiLayerConfig config_{};
   app::UIContext* ctx_ = nullptr;
   Rml::Context* context_ = nullptr;
+  Rml::SystemInterface* previous_system_interface_ = nullptr;
+  Rml::RenderInterface* previous_render_interface_ = nullptr;
+  Rml::FileInterface* previous_file_interface_ = nullptr;
   int width_ = 0;
   int height_ = 0;
   double time_ = 0.0;

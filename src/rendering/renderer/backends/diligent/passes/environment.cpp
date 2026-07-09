@@ -203,9 +203,9 @@ struct PSInput
 
 float4 main(PSInput input) : SV_TARGET
 {
-    // KTX cubemap face data is authored with the opposite vertical convention from
-    // the skybox cube's local lookup direction. Mirror Y for display sampling only.
-    float3 dir = normalize(float3(input.local_pos.x, -input.local_pos.y, input.local_pos.z));
+    // Equirectangular conversion stores each world direction under the matching
+    // cubemap direction. Keep display sampling in that same coordinate system.
+    float3 dir = normalize(input.local_pos);
     return g_Skybox.Sample(g_Sampler, dir);
 }
 )";

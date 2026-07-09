@@ -10,7 +10,7 @@
 
 namespace karma::audio::backend {
 
-std::unique_ptr<Backend> CreateAudioBackend() {
+std::unique_ptr<Backend> createAudioBackend() {
 #if defined(KARMA_AUDIO_BACKEND_MINIAUDIO)
   return std::make_unique<MiniaudioBackend>();
 #elif defined(KARMA_AUDIO_BACKEND_SDL)

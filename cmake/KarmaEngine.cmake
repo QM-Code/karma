@@ -444,7 +444,11 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       ${IMGUI_SOURCES}
     )
     if (imgui_SOURCE_DIR)
-      target_include_directories(karma_imgui_vendor PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
+      target_include_directories(karma_imgui_vendor
+        PUBLIC
+          $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>
+          $<INSTALL_INTERFACE:include/karma/vendor/imgui>
+      )
     endif()
     set_target_properties(karma_imgui_vendor PROPERTIES EXPORT_NAME imgui_vendor)
     list(APPEND KARMA_INSTALL_TARGETS karma_imgui_vendor)
@@ -526,6 +530,13 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
         ${KARMA_RMLUI_BUILD_LINK}
         $<INSTALL_INTERFACE:$<1:RmlUi::Core>>
     )
+    if (KARMA_IMGUI_LINK_TARGET)
+      target_link_libraries(karma_features_ui_rmlui PUBLIC ${KARMA_IMGUI_LINK_TARGET})
+    endif()
+    if (imgui_SOURCE_DIR)
+      target_include_directories(karma_features_ui_rmlui
+        PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
+    endif()
     target_compile_definitions(karma_features_ui_rmlui PUBLIC KARMA_ENABLE_RMLUI)
     list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_rmlui)
   endif()

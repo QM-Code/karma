@@ -197,9 +197,13 @@ components::ColliderComponent terrainTileToHeightFieldCollider(
   shape.samples = tile.heights;
   shape.sample_count = tile.resolution;
   shape.offset = {
-      static_cast<float>(tile.coord.x - terrain.origin_tile_x) * tile_size,
+      static_cast<float>(static_cast<int64_t>(tile.coord.x) -
+                         static_cast<int64_t>(terrain.origin_tile_x)) *
+          tile_size,
       desc.height_offset,
-      static_cast<float>(tile.coord.z - terrain.origin_tile_z) * tile_size,
+      static_cast<float>(static_cast<int64_t>(tile.coord.z) -
+                         static_cast<int64_t>(terrain.origin_tile_z)) *
+          tile_size,
   };
   shape.scale = {sample_step, desc.height_scale, sample_step};
   shape.block_size = 2u;
@@ -808,6 +812,20 @@ void loadTerrainDataMaps(const components::TerrainComponent& terrain,
   }
 }
 
+std::size_t terrainTileRequestLimit(uint32_t resolution) {
+  constexpr std::size_t kTargetQueuedTileBytes = 64u * 1024u * 1024u;
+  const std::size_t sample_count =
+      static_cast<std::size_t>(resolution) * static_cast<std::size_t>(resolution);
+  const std::size_t estimated_tile_bytes =
+      sample_count * (sizeof(float) + sizeof(uint32_t));
+  if (estimated_tile_bytes == 0u) {
+    return 1u;
+  }
+  return std::clamp(kTargetQueuedTileBytes / estimated_tile_bytes,
+                    std::size_t{1u},
+                    kMaxTerrainOutstandingTileRequests);
+}
+
 }  // namespace
 
 std::size_t TileCoordHash::operator()(const TileCoord& coord) const noexcept {
@@ -818,10 +836,14 @@ std::size_t TileCoordHash::operator()(const TileCoord& coord) const noexcept {
 }
 
 int terrainTileRadius(float view_distance, float tile_size) {
-  if (tile_size <= 0.0f || view_distance <= 0.0f) {
+  if (!std::isfinite(tile_size) || !std::isfinite(view_distance) ||
+      tile_size <= 0.0f || view_distance <= 0.0f) {
     return 0;
   }
-  return static_cast<int>(std::ceil(view_distance / tile_size));
+  const double radius = std::ceil(static_cast<double>(view_distance) /
+                                  static_cast<double>(tile_size));
+  return static_cast<int>(std::clamp(
+      radius, 0.0, static_cast<double>(kMaxTerrainStreamingTileRadius)));
 }
 
 std::vector<TileCoord> terrainChunkCoordsAround(TileCoord center,
@@ -829,13 +851,38 @@ std::vector<TileCoord> terrainChunkCoordsAround(TileCoord center,
                                                 float tile_size) {
   const int radius = terrainTileRadius(view_distance, tile_size);
   std::vector<TileCoord> coords;
-  const int diameter = radius * 2 + 1;
-  coords.reserve(static_cast<std::size_t>(diameter) * static_cast<std::size_t>(diameter));
-  for (int z = center.z - radius; z <= center.z + radius; ++z) {
-    for (int x = center.x - radius; x <= center.x + radius; ++x) {
-      coords.push_back(TileCoord{.x = x, .z = z});
+  const int64_t min_x = std::max<int64_t>(
+      static_cast<int64_t>(center.x) - radius, std::numeric_limits<int32_t>::min());
+  const int64_t max_x = std::min<int64_t>(
+      static_cast<int64_t>(center.x) + radius, std::numeric_limits<int32_t>::max());
+  const int64_t min_z = std::max<int64_t>(
+      static_cast<int64_t>(center.z) - radius, std::numeric_limits<int32_t>::min());
+  const int64_t max_z = std::min<int64_t>(
+      static_cast<int64_t>(center.z) + radius, std::numeric_limits<int32_t>::max());
+  const std::size_t width = static_cast<std::size_t>(max_x - min_x + 1);
+  const std::size_t height = static_cast<std::size_t>(max_z - min_z + 1);
+  coords.reserve(width * height);
+  for (int64_t z = min_z; z <= max_z; ++z) {
+    for (int64_t x = min_x; x <= max_x; ++x) {
+      coords.push_back(TileCoord{.x = static_cast<int32_t>(x),
+                                 .z = static_cast<int32_t>(z)});
     }
   }
+  std::sort(coords.begin(), coords.end(), [center](TileCoord lhs, TileCoord rhs) {
+    const int64_t lhs_x = static_cast<int64_t>(lhs.x) - center.x;
+    const int64_t lhs_z = static_cast<int64_t>(lhs.z) - center.z;
+    const int64_t rhs_x = static_cast<int64_t>(rhs.x) - center.x;
+    const int64_t rhs_z = static_cast<int64_t>(rhs.z) - center.z;
+    const uint64_t lhs_distance = static_cast<uint64_t>(lhs_x * lhs_x + lhs_z * lhs_z);
+    const uint64_t rhs_distance = static_cast<uint64_t>(rhs_x * rhs_x + rhs_z * rhs_z);
+    if (lhs_distance != rhs_distance) {
+      return lhs_distance < rhs_distance;
+    }
+    if (lhs.z != rhs.z) {
+      return lhs.z < rhs.z;
+    }
+    return lhs.x < rhs.x;
+  });
   return coords;
 }
 
@@ -843,27 +890,47 @@ TileCoord terrainTileCoordForWorldPosition(
     const glm::vec3& world_position,
     const glm::vec3& terrain_origin,
     const components::TerrainComponent& terrain) {
-  const float tile_size = std::max(terrain.tile_size, 0.001f);
+  if (!std::isfinite(world_position.x) || !std::isfinite(world_position.z) ||
+      !std::isfinite(terrain_origin.x) || !std::isfinite(terrain_origin.z)) {
+    return {.x = terrain.origin_tile_x, .z = terrain.origin_tile_z};
+  }
+  const float tile_size =
+      std::isfinite(terrain.tile_size) ? std::max(terrain.tile_size, 0.001f) : 0.001f;
+  const auto tile_axis = [&](float position, float origin, int32_t tile_origin) {
+    const double offset = std::floor(
+        (static_cast<double>(position) - static_cast<double>(origin)) /
+        static_cast<double>(tile_size));
+    return static_cast<int32_t>(std::clamp(
+        offset + static_cast<double>(tile_origin),
+        static_cast<double>(std::numeric_limits<int32_t>::min()),
+        static_cast<double>(std::numeric_limits<int32_t>::max())));
+  };
   return TileCoord{
-      .x = terrain.origin_tile_x +
-           static_cast<int32_t>(std::floor((world_position.x - terrain_origin.x) / tile_size)),
-      .z = terrain.origin_tile_z +
-           static_cast<int32_t>(std::floor((world_position.z - terrain_origin.z) / tile_size)),
+      .x = tile_axis(world_position.x, terrain_origin.x, terrain.origin_tile_x),
+      .z = tile_axis(world_position.z, terrain_origin.z, terrain.origin_tile_z),
   };
 }
 
 rendering::TerrainDesc terrainDescFromComponent(const components::TerrainComponent& terrain) {
   rendering::TerrainDesc desc{};
-  desc.tile_size = std::max(authoredTileSize(terrain), 0.001f);
-  desc.tile_resolution = std::max(terrain.tile_resolution, 2u);
+  const float authored_tile_size = authoredTileSize(terrain);
+  desc.tile_size = std::isfinite(authored_tile_size)
+                       ? std::max(authored_tile_size, 0.001f)
+                       : 0.001f;
+  desc.tile_resolution =
+      std::clamp(terrain.tile_resolution, 2u, kMaxTerrainTileResolution);
   desc.origin_tile_x = terrain.origin_tile_x;
   desc.origin_tile_z = terrain.origin_tile_z;
-  desc.height_scale = terrain.height_scale;
-  desc.height_offset = terrain.height_offset;
+  desc.height_scale = std::isfinite(terrain.height_scale) ? terrain.height_scale : 0.0f;
+  desc.height_offset = std::isfinite(terrain.height_offset) ? terrain.height_offset : 0.0f;
   desc.base_patch_size = std::max(terrain.base_patch_size, 1u);
-  desc.max_tessellation_factor = std::clamp(terrain.tessellation_factor, 1.0f, 64.0f);
+  desc.max_tessellation_factor = std::isfinite(terrain.tessellation_factor)
+                                     ? std::clamp(terrain.tessellation_factor, 1.0f, 64.0f)
+                                     : 1.0f;
   desc.target_tessellated_edge_size =
-      std::max(terrain.target_tessellated_edge_size, 1.0f);
+      std::isfinite(terrain.target_tessellated_edge_size)
+          ? std::max(terrain.target_tessellated_edge_size, 1.0f)
+          : 1.0f;
   desc.cpu_fallback_enabled = terrain.cpu_fallback_enabled;
   return desc;
 }
@@ -871,8 +938,10 @@ rendering::TerrainDesc terrainDescFromComponent(const components::TerrainCompone
 std::string formatTerrainTilePattern(std::string pattern,
                                      TileCoord coord,
                                      int32_t index_base) {
-  const int32_t x = coord.x + index_base;
-  const int32_t z = coord.z + index_base;
+  const int64_t x =
+      static_cast<int64_t>(coord.x) + static_cast<int64_t>(index_base);
+  const int64_t z =
+      static_cast<int64_t>(coord.z) + static_cast<int64_t>(index_base);
   auto replace_all = [&](std::string_view key, const std::string& value) {
     std::size_t pos = 0u;
     while ((pos = pattern.find(key, pos)) != std::string::npos) {
@@ -895,7 +964,7 @@ std::string formatTerrainTilePattern(std::string pattern,
 std::vector<float> convertHeightImageToNormalizedHeights(
     const assets::Rgba8Image& image,
     uint32_t output_resolution) {
-  output_resolution = std::max(output_resolution, 2u);
+  output_resolution = std::clamp(output_resolution, 2u, kMaxTerrainTileResolution);
   std::vector<float> heights(static_cast<std::size_t>(output_resolution) *
                                  static_cast<std::size_t>(output_resolution),
                              0.0f);
@@ -917,7 +986,7 @@ std::vector<float> convertHeightImageToNormalizedHeights(
 std::vector<float> convertScalarImageToNormalizedHeights(
     const assets::ScalarImage& image,
     uint32_t output_resolution) {
-  output_resolution = std::max(output_resolution, 2u);
+  output_resolution = std::clamp(output_resolution, 2u, kMaxTerrainTileResolution);
   std::vector<float> heights(static_cast<std::size_t>(output_resolution) *
                                  static_cast<std::size_t>(output_resolution),
                              0.0f);
@@ -939,8 +1008,11 @@ std::vector<float> convertScalarImageToNormalizedHeights(
 rendering::TerrainTileData generateProceduralTerrainTile(
     const components::TerrainComponent& terrain,
     TileCoord coord) {
-  const uint32_t resolution = std::max(terrain.tile_resolution, 2u);
-  const float tile_size = std::max(terrain.tile_size, 0.001f);
+  const uint32_t resolution =
+      std::clamp(terrain.tile_resolution, 2u, kMaxTerrainTileResolution);
+  const float tile_size = std::isfinite(terrain.tile_size)
+                              ? std::max(terrain.tile_size, 0.001f)
+                              : 0.001f;
   rendering::TerrainTileData tile{};
   tile.coord = coord;
   tile.resolution = resolution;
@@ -952,9 +1024,13 @@ rendering::TerrainTileData generateProceduralTerrainTile(
 
   const float inv = 1.0f / static_cast<float>(resolution - 1u);
   const float origin_x =
-      static_cast<float>(coord.x - terrain.origin_tile_x) * tile_size;
+      static_cast<float>(static_cast<int64_t>(coord.x) -
+                         static_cast<int64_t>(terrain.origin_tile_x)) *
+      tile_size;
   const float origin_z =
-      static_cast<float>(coord.z - terrain.origin_tile_z) * tile_size;
+      static_cast<float>(static_cast<int64_t>(coord.z) -
+                         static_cast<int64_t>(terrain.origin_tile_z)) *
+      tile_size;
   for (uint32_t z = 0u; z < resolution; ++z) {
     for (uint32_t x = 0u; x < resolution; ++x) {
       const float u = static_cast<float>(x) * inv;
@@ -1329,7 +1405,8 @@ std::optional<rendering::TerrainTileData> loadSingleImageTerrainTile(
 
   rendering::TerrainTileData tile{};
   tile.coord = TileCoord{.x = terrain.origin_tile_x, .z = terrain.origin_tile_z};
-  tile.resolution = std::max(terrain.tile_resolution, 2u);
+  tile.resolution =
+      std::clamp(terrain.tile_resolution, 2u, kMaxTerrainTileResolution);
   tile.heights = convertScalarImageToNormalizedHeights(*height, tile.resolution);
   if (color && color->valid()) {
     tile.color_width = static_cast<uint32_t>(color->width);
@@ -1377,7 +1454,8 @@ std::optional<rendering::TerrainTileData> loadImageTerrainTile(
 
   rendering::TerrainTileData tile{};
   tile.coord = coord;
-  tile.resolution = std::max(terrain.tile_resolution, 2u);
+  tile.resolution =
+      std::clamp(terrain.tile_resolution, 2u, kMaxTerrainTileResolution);
   tile.heights = convertScalarImageToNormalizedHeights(*height, tile.resolution);
   if (color && color->valid()) {
     tile.color_width = static_cast<uint32_t>(color->width);
@@ -1508,6 +1586,8 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
     destroyState(state);
     state.desc = desc;
     state.source_settings = source_settings;
+    state.terrain_snapshot =
+        std::make_shared<const components::TerrainComponent>(terrain);
     state.terrain = device_ != nullptr ? device_->createTerrain(desc)
                                        : rendering::kInvalidTerrain;
     if (device_ != nullptr && state.terrain != rendering::kInvalidTerrain) {
@@ -1538,12 +1618,23 @@ void TerrainSystem::destroyState(TerrainState& state) {
   state.desired.clear();
   state.loaded.clear();
   state.queued.clear();
+  state.terrain_snapshot.reset();
 }
 
 void TerrainSystem::cleanupStaleStates(world::World& world) {
   for (auto it = states_.begin(); it != states_.end();) {
     const world::Entity entity = entityFromKey(it->first);
     if (!world.isAlive(entity) || !world.has<components::TerrainComponent>(entity)) {
+      {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        for (auto request = requests_.begin(); request != requests_.end();) {
+          if (request->entity_key == it->first) {
+            request = requests_.erase(request);
+          } else {
+            ++request;
+          }
+        }
+      }
       destroyState(it->second);
       it = states_.erase(it);
       continue;
@@ -1554,9 +1645,10 @@ void TerrainSystem::cleanupStaleStates(world::World& world) {
 
 void TerrainSystem::queueTile(uint64_t key,
                               TerrainState& state,
-                              const components::TerrainComponent& terrain,
                               TileCoord coord) {
-  if (state.loaded.contains(coord) || state.queued.contains(coord)) {
+  if (state.loaded.contains(coord) || state.queued.contains(coord) ||
+      state.queued.size() >= terrainTileRequestLimit(state.desc.tile_resolution) ||
+      state.terrain_snapshot == nullptr) {
     return;
   }
   state.queued.insert(coord);
@@ -1565,7 +1657,7 @@ void TerrainSystem::queueTile(uint64_t key,
     requests_.push_back(TileRequest{
         .entity_key = key,
         .generation = state.generation,
-        .terrain = terrain,
+        .terrain = state.terrain_snapshot,
         .coord = coord,
     });
   }
@@ -1584,9 +1676,11 @@ void TerrainSystem::drainCompleted() {
       continue;
     }
     TerrainState& state = state_it->second;
+    if (state.generation != tile.generation) {
+      continue;
+    }
     state.queued.erase(tile.coord);
-    if (state.generation != tile.generation ||
-        state.terrain == rendering::kInvalidTerrain ||
+    if (state.terrain == rendering::kInvalidTerrain ||
         !tile.data.has_value() ||
         !tile.data->valid() ||
         !state.desired.contains(tile.coord)) {
@@ -1655,6 +1749,23 @@ void TerrainSystem::update(world::World& world, float, float interpolation_alpha
     }
     state.desired = std::move(desired);
 
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      for (auto request = requests_.begin(); request != requests_.end();) {
+        if (request->entity_key != key) {
+          ++request;
+          continue;
+        }
+        if (request->generation != state.generation ||
+            !state.desired.contains(request->coord)) {
+          state.queued.erase(request->coord);
+          request = requests_.erase(request);
+        } else {
+          ++request;
+        }
+      }
+    }
+
     for (auto it = state.loaded.begin(); it != state.loaded.end();) {
       if (!state.desired.contains(*it)) {
         device_->evictTerrainTile(state.terrain, *it);
@@ -1665,7 +1776,10 @@ void TerrainSystem::update(world::World& world, float, float interpolation_alpha
     }
 
     for (TileCoord coord : coords) {
-      queueTile(key, state, terrain, coord);
+      if (state.queued.size() >= terrainTileRequestLimit(state.desc.tile_resolution)) {
+        break;
+      }
+      queueTile(key, state, coord);
     }
 
     glm::mat4 model(1.0f);
@@ -1703,15 +1817,18 @@ void TerrainSystem::workerLoop() {
     }
 
     std::optional<rendering::TerrainTileData> data;
-    switch (request.terrain.source) {
+    if (request.terrain == nullptr) {
+      continue;
+    }
+    switch (request.terrain->source) {
       case components::TerrainSourceType::Procedural:
-        data = generateProceduralTerrainTile(request.terrain, request.coord);
+        data = generateProceduralTerrainTile(*request.terrain, request.coord);
         break;
       case components::TerrainSourceType::ImageTileDirectory:
-        data = loadImageTerrainTile(request.terrain, request.coord);
+        data = loadImageTerrainTile(*request.terrain, request.coord);
         break;
       case components::TerrainSourceType::SingleImage:
-        data = loadSingleImageTerrainTile(request.terrain);
+        data = loadSingleImageTerrainTile(*request.terrain);
         break;
     }
 

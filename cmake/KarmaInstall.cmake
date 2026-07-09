@@ -38,6 +38,14 @@ install(FILES
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/karma
 )
 
+if (TARGET karma_imgui_vendor AND imgui_SOURCE_DIR)
+  install(FILES
+    ${imgui_SOURCE_DIR}/imgui.h
+    ${imgui_SOURCE_DIR}/imconfig.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/karma/vendor/imgui
+  )
+endif()
+
 if (EXISTS "${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders")
   install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/karma/shaders/diligent

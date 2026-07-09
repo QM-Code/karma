@@ -8,6 +8,31 @@
 
 namespace karma::rendering::render_system {
 
+namespace {
+
+bool finiteVec3(const glm::vec3& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+bool finiteQuat(const glm::quat& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) &&
+         std::isfinite(value.z) && std::isfinite(value.w);
+}
+
+float finiteOr(float value, float fallback) {
+  return std::isfinite(value) ? value : fallback;
+}
+
+math::Color finiteColor(math::Color value, const math::Color& fallback) {
+  value.r = finiteOr(value.r, fallback.r);
+  value.g = finiteOr(value.g, fallback.g);
+  value.b = finiteOr(value.b, fallback.b);
+  value.a = finiteOr(value.a, fallback.a);
+  return value;
+}
+
+}  // namespace
+
 glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
 }
@@ -44,27 +69,56 @@ CameraData toCameraData(const components::CameraComponent& camera,
   CameraData out{};
   out.position = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
   out.rotation = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
+  if (!finiteVec3(out.position)) {
+    out.position = glm::vec3(0.0f);
+  }
+  const float rotation_length_squared = glm::dot(out.rotation, out.rotation);
+  if (!finiteQuat(out.rotation) || !std::isfinite(rotation_length_squared) ||
+      rotation_length_squared <= 1.0e-12f) {
+    out.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+  } else {
+    out.rotation = glm::normalize(out.rotation);
+  }
   out.perspective = camera.perspective;
   out.render_shadows = camera.render_shadows;
-  out.fov_y_degrees = camera.fov_y_degrees;
+  out.fov_y_degrees = std::clamp(finiteOr(camera.fov_y_degrees, 60.0f), 1.0f, 179.0f);
   out.aspect = 16.0f / 9.0f;
-  out.near_clip = camera.near_clip;
-  out.far_clip = camera.far_clip;
-  out.ortho_left = camera.ortho_left;
-  out.ortho_right = camera.ortho_right;
-  out.ortho_top = camera.ortho_top;
-  out.ortho_bottom = camera.ortho_bottom;
+  out.near_clip = std::max(finiteOr(camera.near_clip, 0.1f), 1.0e-4f);
+  out.far_clip = finiteOr(camera.far_clip, 1000.0f);
+  if (out.far_clip <= out.near_clip) {
+    out.far_clip = out.near_clip + 1.0f;
+  }
+  out.ortho_left = finiteOr(camera.ortho_left, -1.0f);
+  out.ortho_right = finiteOr(camera.ortho_right, 1.0f);
+  out.ortho_top = finiteOr(camera.ortho_top, 1.0f);
+  out.ortho_bottom = finiteOr(camera.ortho_bottom, -1.0f);
+  if (std::abs(out.ortho_right - out.ortho_left) <= 1.0e-5f) {
+    out.ortho_left = -1.0f;
+    out.ortho_right = 1.0f;
+  }
+  if (std::abs(out.ortho_top - out.ortho_bottom) <= 1.0e-5f) {
+    out.ortho_top = 1.0f;
+    out.ortho_bottom = -1.0f;
+  }
   out.shader_override_vertex_path = camera.shader_override_vertex_path;
   out.shader_override_fragment_path = camera.shader_override_fragment_path;
   out.anti_aliasing = rendering::clampAntiAliasingSettings(camera.anti_aliasing);
   out.shader_user_param_count = 0u;
+  std::vector<std::pair<std::string_view, const math::Color*>> sorted_params;
+  sorted_params.reserve(camera.shader_user_params.size());
   for (const auto& [key, value] : camera.shader_user_params) {
+    sorted_params.emplace_back(key, &value);
+  }
+  std::sort(sorted_params.begin(), sorted_params.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.first < rhs.first;
+  });
+  for (const auto& [key, value] : sorted_params) {
     if (out.shader_user_param_count >= kCameraShaderUserParamCapacity) {
       break;
     }
     auto& dst = out.shader_user_params[out.shader_user_param_count++];
     dst.key_hash = cameraShaderParamKeyHash(key);
-    dst.value = value;
+    dst.value = finiteColor(*value, math::Color{});
   }
   return out;
 }
@@ -73,13 +127,21 @@ DirectionalLightData toDirectionalLight(const components::LightComponent& light,
                                         const components::TransformComponent& transform,
                                         float interpolation_alpha) {
   DirectionalLightData out{};
-  out.color = light.color;
-  out.intensity = light.intensity;
+  out.color = finiteColor(light.color, math::Color{});
+  out.intensity = std::max(finiteOr(light.intensity, 0.0f), 0.0f);
   const glm::quat rot = ::karma::rendering::render_system::toGlm(transform.getInterpolatedRotation(interpolation_alpha));
   const glm::mat3 basis = glm::mat3_cast(rot);
   out.direction = basis * glm::vec3(0.0f, 0.0f, -1.0f);
+  if (!finiteVec3(out.direction) || glm::dot(out.direction, out.direction) <= 1.0e-12f) {
+    out.direction = glm::vec3(0.0f, -1.0f, 0.0f);
+  } else {
+    out.direction = glm::normalize(out.direction);
+  }
   out.position = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
-  out.shadow_extent = light.shadow_extent;
+  if (!finiteVec3(out.position)) {
+    out.position = glm::vec3(0.0f);
+  }
+  out.shadow_extent = std::max(finiteOr(light.shadow_extent, 0.0f), 0.0f);
   out.casts_shadows = light.casts_shadows;
   return out;
 }
@@ -97,14 +159,19 @@ LightData toLightData(const components::LightComponent& light,
     dir = glm::normalize(dir);
   }
   out.position = ::karma::rendering::render_system::toGlm(transform.getInterpolatedPosition(interpolation_alpha));
+  if (!finiteVec3(out.position)) {
+    out.position = glm::vec3(0.0f);
+  }
   out.direction = dir;
-  out.color = light.color;
-  out.intensity = light.intensity;
-  out.range = std::max(light.range, 0.0f);
+  out.color = finiteColor(light.color, math::Color{});
+  out.intensity = std::max(finiteOr(light.intensity, 0.0f), 0.0f);
+  out.range = std::max(finiteOr(light.range, 0.0f), 0.0f);
   out.casts_shadows = light.casts_shadows;
 
-  const float inner_rad = glm::radians(light.inner_cone_degrees);
-  const float outer_rad = glm::radians(light.outer_cone_degrees);
+  const float inner_rad = glm::radians(
+      std::clamp(finiteOr(light.inner_cone_degrees, 15.0f), 0.0f, 179.0f));
+  const float outer_rad = glm::radians(
+      std::clamp(finiteOr(light.outer_cone_degrees, 30.0f), 0.0f, 179.0f));
   float inner_cos = std::cos(inner_rad);
   float outer_cos = std::cos(outer_rad);
   if (inner_cos < outer_cos) {

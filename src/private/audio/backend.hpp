@@ -2,8 +2,13 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <cstdint>
 #include <memory>
 #include <string>
+
+namespace karma::audio {
+struct AudioPlaybackOptions;
+}
 
 namespace karma::audio::backend {
 
@@ -18,9 +23,10 @@ struct ClipOptions {
 class Clip {
  public:
   virtual ~Clip() = default;
-  virtual void play(const glm::vec3& position, float volume) = 0;
-  virtual void setSpatialization(bool enabled) = 0;
-  virtual void setDistanceRange(float min_distance, float max_distance) = 0;
+  virtual uint64_t play(const AudioPlaybackOptions& options) = 0;
+  virtual bool isPlaying(uint64_t voice_id) const = 0;
+  virtual bool stop(uint64_t voice_id) = 0;
+  virtual bool setPosition(uint64_t voice_id, const glm::vec3& position) = 0;
 };
 
 /// \ingroup karma_media
@@ -35,6 +41,6 @@ class Backend {
 };
 
 /// Creates the configured audio backend.
-std::unique_ptr<Backend> CreateAudioBackend();
+std::unique_ptr<Backend> createAudioBackend();
 
 }  // namespace karma::audio::backend

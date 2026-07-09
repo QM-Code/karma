@@ -754,6 +754,65 @@ void testAnimatorBlendTreeAndRootMotion() {
   assert(!root_motion.delta.position);
 }
 
+void testLoopingRootMotionUsesUnwrappedTime() {
+  karma::world::World world;
+  karma::world::Scene scene;
+  const auto root = world.createEntity();
+  world.add(root, karma::components::TransformComponent{});
+  scene.createNode(root);
+
+  karma::world::AnimationClip clip{};
+  clip.duration_seconds = 1.0f;
+  clip.root_motion = karma::world::RootMotionTrack{
+      .target_node_index = 0u,
+      .position_keys = {
+          {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f}},
+          {.time_seconds = 1.0f, .value = {4.0f, 0.0f, 0.0f}},
+      },
+  };
+
+  world.add(root, karma::components::RootMotionComponent{
+                      .mode = karma::components::RootMotionMode::ExposeDelta,
+                      .root_motion_node_index = 0u,
+                  });
+  world.add(root, karma::components::AnimatorComponent{
+                      .clips = {clip},
+                      .node_entities_by_index = {root},
+                      .time_seconds = 0.75f,
+                      .speed = 1.0f,
+                      .loop = true,
+                      .playing = true,
+                  });
+
+  karma::world::AnimationSystem animation_system;
+  auto& animator = world.get<karma::components::AnimatorComponent>(root);
+  auto& root_motion = world.get<karma::components::RootMotionComponent>(root);
+
+  animation_system.update(world, scene, 0.5f);
+  assert(near(animator.time_seconds, 0.25f));
+  assert(animator.root_motion_delta.position);
+  assert(near(animator.root_motion_delta.position->x, 2.0f));
+  assert(root_motion.delta.position && near(root_motion.delta.position->x, 2.0f));
+  karma::components::consumeRootMotionDelta(root_motion);
+
+  animator.time_seconds = 0.25f;
+  animator.speed = -1.0f;
+  animation_system.update(world, scene, 0.5f);
+  assert(near(animator.time_seconds, 0.75f));
+  assert(animator.root_motion_delta.position);
+  assert(near(animator.root_motion_delta.position->x, -2.0f));
+  assert(root_motion.delta.position && near(root_motion.delta.position->x, -2.0f));
+  karma::components::consumeRootMotionDelta(root_motion);
+
+  animator.time_seconds = 0.25f;
+  animator.speed = 1.0f;
+  animation_system.update(world, scene, 2.5f);
+  assert(near(animator.time_seconds, 0.75f));
+  assert(animator.root_motion_delta.position);
+  assert(near(animator.root_motion_delta.position->x, 10.0f));
+  assert(root_motion.delta.position && near(root_motion.delta.position->x, 10.0f));
+}
+
 void testCpuSkinning() {
   karma::world::MeshData bind_mesh{};
   bind_mesh.vertices.push_back({1.0f, 0.0f, 0.0f});
@@ -1582,6 +1641,7 @@ int main() {
   testAnimatorStateMachineAndEvents();
   testAnimatorTransitionInterruption();
   testAnimatorBlendTreeAndRootMotion();
+  testLoopingRootMotionUsesUnwrappedTime();
   testCpuSkinning();
   testMorphTargets();
   testAnimationSystemUpdatesMorphWeights();

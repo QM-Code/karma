@@ -1,7 +1,10 @@
 #include "karma/world.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -12,9 +15,28 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kMinExtent = 0.0f;
+constexpr float kMaxExtent = std::numeric_limits<float>::max() * 0.25f;
+constexpr size_t kMaxGeneratedVertices = 1u << 20u;
+constexpr size_t kMaxGeneratedIndices = 6u << 20u;
+
+struct SurfaceLayout {
+  uint32_t row_count = 0u;
+  uint32_t stride = 0u;
+  size_t vertex_count = 0u;
+  size_t index_count = 0u;
+};
 
 float sanitizedLength(float value) {
-  return std::max(value, kMinExtent);
+  if (!std::isfinite(value)) {
+    return kMinExtent;
+  }
+  return std::clamp(value, kMinExtent, kMaxExtent);
+}
+
+float sanitizedAbsoluteLength(float value) {
+  return std::isfinite(value)
+             ? std::min(std::abs(value), kMaxExtent)
+             : kMinExtent;
 }
 
 uint32_t sanitizedSegments(uint32_t segments) {
@@ -25,13 +47,30 @@ uint32_t sanitizedRings(uint32_t rings) {
   return std::max(rings, 2u);
 }
 
-glm::vec3 toPrimitiveGlm(const math::Vec3& value) {
-  return {value.x, value.y, value.z};
+SurfaceLayout checkedSurfaceLayout(uint64_t row_count, uint64_t segments) {
+  if (row_count < 2u || row_count > std::numeric_limits<uint32_t>::max() ||
+      segments > std::numeric_limits<uint32_t>::max() - 1u) {
+    throw std::length_error("Primitive mesh tessellation exceeds the supported limit.");
+  }
+  const uint64_t stride = segments + 1u;
+  const uint64_t indices_per_row = segments * 6u;
+  if (row_count > kMaxGeneratedVertices / stride ||
+      row_count - 1u > kMaxGeneratedIndices / indices_per_row) {
+    throw std::length_error("Primitive mesh tessellation exceeds the supported limit.");
+  }
+  const uint64_t vertex_count = row_count * stride;
+  const uint64_t index_count = (row_count - 1u) * indices_per_row;
+  return SurfaceLayout{
+      .row_count = static_cast<uint32_t>(row_count),
+      .stride = static_cast<uint32_t>(stride),
+      .vertex_count = static_cast<size_t>(vertex_count),
+      .index_count = static_cast<size_t>(index_count),
+  };
 }
 
 glm::vec3 safeNormalize(const glm::vec3& value, const glm::vec3& fallback) {
   const float len_sq = glm::dot(value, value);
-  if (len_sq <= 1.0e-10f) {
+  if (!std::isfinite(len_sq) || len_sq <= 1.0e-10f) {
     return fallback;
   }
   return value * glm::inversesqrt(len_sq);
@@ -111,7 +150,11 @@ MeshData createPlaneMesh(float width, float depth, std::string material_key) {
 }
 
 MeshData createBoxMesh(const math::Vec3& half_extents, std::string material_key) {
-  const glm::vec3 half = glm::abs(toPrimitiveGlm(half_extents));
+  const glm::vec3 half{
+      sanitizedAbsoluteLength(half_extents.x),
+      sanitizedAbsoluteLength(half_extents.y),
+      sanitizedAbsoluteLength(half_extents.z),
+  };
   const glm::vec3 min = -half;
   const glm::vec3 max = half;
   MeshData mesh{};
@@ -142,12 +185,14 @@ MeshData createSphereMesh(const SphereMeshDesc& desc) {
   const float radius = sanitizedLength(desc.radius);
   const uint32_t segments = sanitizedSegments(desc.segments);
   const uint32_t rings = sanitizedRings(desc.rings);
-  const uint32_t stride = segments + 1u;
+  const SurfaceLayout layout = checkedSurfaceLayout(
+      static_cast<uint64_t>(rings) + 1u, segments);
   MeshData mesh{};
-  mesh.vertices.reserve(static_cast<size_t>(rings + 1u) * stride);
+  mesh.vertices.reserve(layout.vertex_count);
   mesh.normals.reserve(mesh.vertices.capacity());
   mesh.uvs.reserve(mesh.vertices.capacity());
   mesh.tangents.reserve(mesh.vertices.capacity());
+  mesh.indices.reserve(layout.index_count);
 
   for (uint32_t ring = 0u; ring <= rings; ++ring) {
     const float v = static_cast<float>(ring) / static_cast<float>(rings);
@@ -185,16 +230,22 @@ MeshData createSphereMesh(float radius,
 MeshData createCapsuleMesh(const CapsuleMeshDesc& desc) {
   const float radius = sanitizedLength(desc.radius);
   const float cylinder_height = sanitizedLength(desc.cylinder_height);
+  const uint32_t segments = sanitizedSegments(desc.segments);
+  const uint32_t hemisphere_rings = sanitizedRings(desc.hemisphere_rings);
   if (cylinder_height <= 1.0e-6f) {
+    checkedSurfaceLayout(
+        static_cast<uint64_t>(hemisphere_rings) * 2u + 1u,
+        segments);
     return createSphereMesh(radius,
-                            desc.segments,
-                            desc.hemisphere_rings * 2u,
+                            segments,
+                            hemisphere_rings * 2u,
                             desc.material_key);
   }
 
-  const uint32_t segments = sanitizedSegments(desc.segments);
-  const uint32_t hemisphere_rings = sanitizedRings(desc.hemisphere_rings);
-  const uint32_t stride = segments + 1u;
+  const SurfaceLayout layout = checkedSurfaceLayout(
+      static_cast<uint64_t>(hemisphere_rings) * 2u + 2u,
+      segments);
+  const uint32_t stride = layout.stride;
   const float half_cylinder = cylinder_height * 0.5f;
 
   struct Row {
@@ -204,7 +255,7 @@ MeshData createCapsuleMesh(const CapsuleMeshDesc& desc) {
   };
 
   std::vector<Row> rows;
-  rows.reserve(static_cast<size_t>(hemisphere_rings) * 2u + 2u);
+  rows.reserve(layout.row_count);
   for (uint32_t ring = 0u; ring <= hemisphere_rings; ++ring) {
     const float t = static_cast<float>(ring) / static_cast<float>(hemisphere_rings);
     const float theta = t * kPi * 0.5f;
@@ -230,10 +281,11 @@ MeshData createCapsuleMesh(const CapsuleMeshDesc& desc) {
   }
 
   MeshData mesh{};
-  mesh.vertices.reserve(rows.size() * stride);
+  mesh.vertices.reserve(layout.vertex_count);
   mesh.normals.reserve(mesh.vertices.capacity());
   mesh.uvs.reserve(mesh.vertices.capacity());
   mesh.tangents.reserve(mesh.vertices.capacity());
+  mesh.indices.reserve(layout.index_count);
 
   const float row_denominator = static_cast<float>(std::max<size_t>(rows.size() - 1u, 1u));
   for (size_t row_index = 0u; row_index < rows.size(); ++row_index) {

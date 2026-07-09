@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -11,10 +12,13 @@
 #include <filesystem>
 #include <limits>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 #include <spdlog/spdlog.h>
 
@@ -22,18 +26,13 @@
 #include "karma/prefabs.h"
 #include "karma/scenes.h"
 #include "karma/math.h"
-#include "karma/math.h"
 #include "karma/core.h"
-#include "karma/app.h"
 #include "karma/physics.h"
 #if defined(KARMA_ENABLE_NAVIGATION)
 #include "karma/navigation.h"
 #endif
 #include "karma/visual.h"
-#include "karma/visual.h"
 #include "karma/components.h"
-#include "karma/components.h"
-#include "karma/world.h"
 #include "karma/world.h"
 
 #include "../../../third_party/stb_image.h"
@@ -216,7 +215,170 @@ void addUiTexturedQuad(rendering::UIDrawData& out,
   out.indices.push_back(base + 3u);
 }
 
+template <typename Callback>
+class ScopeExit {
+ public:
+  explicit ScopeExit(Callback callback) : callback_(std::move(callback)) {}
+  ScopeExit(const ScopeExit&) = delete;
+  ScopeExit& operator=(const ScopeExit&) = delete;
+
+  ~ScopeExit() {
+    if (!active_) {
+      return;
+    }
+    try {
+      callback_();
+    } catch (const std::exception& error) {
+      spdlog::error("Engine startup rollback failed: {}", error.what());
+    } catch (...) {
+      spdlog::error("Engine startup rollback failed with an unknown exception");
+    }
+  }
+
+  void release() noexcept { active_ = false; }
+
+ private:
+  Callback callback_;
+  bool active_ = true;
+};
+
+bool hasCustomDefaultFrameGraph(const rendering::FrameGraphDesc& graph) {
+  return !graph.frame_graph_key.empty() || !graph.resources.empty() ||
+         !graph.passes.empty() || !graph.shader_pass_assets.empty() ||
+         graph.output_resource != rendering::kFrameGraphCameraColor || !graph.enabled;
+}
+
+template <typename Callback>
+void forEachRuntimeModule(
+    std::vector<std::unique_ptr<RuntimeModule>>& modules,
+    Callback&& callback) {
+  const std::size_t count = modules.size();
+  for (std::size_t index = 0; index < count; ++index) {
+    RuntimeModule* module = modules[index].get();
+    if (module != nullptr) {
+      callback(*module);
+    }
+  }
+}
+
+std::vector<RuntimeModule*> snapshotRuntimeModules(
+    const std::vector<std::unique_ptr<RuntimeModule>>& modules) {
+  std::vector<RuntimeModule*> snapshot;
+  snapshot.reserve(modules.size());
+  for (const auto& module : modules) {
+    if (module != nullptr) {
+      snapshot.push_back(module.get());
+    }
+  }
+  return snapshot;
+}
+
+template <typename Callback>
+void forEachRuntimeModule(
+    const std::vector<RuntimeModule*>& modules,
+    Callback&& callback) {
+  for (RuntimeModule* module : modules) {
+    callback(*module);
+  }
+}
+
 }  // namespace
+
+EngineConfigValidation validateEngineConfig(const EngineConfig& config) {
+  EngineConfigValidation result;
+  auto require_finite_positive = [&](float value, const char* name) {
+    if (!std::isfinite(value) || value <= 0.0f) {
+      result.errors.emplace_back(std::string(name) + " must be finite and greater than zero");
+    }
+  };
+  auto require_finite_non_negative = [&](float value, const char* name) {
+    if (!std::isfinite(value) || value < 0.0f) {
+      result.errors.emplace_back(std::string(name) + " must be finite and non-negative");
+    }
+  };
+  auto require_finite_color = [&](const math::Color& color, const char* name) {
+    if (!math::isFinite(color)) {
+      result.errors.emplace_back(std::string(name) + " must contain only finite channels");
+    }
+  };
+
+  if (config.window.width <= 0 || config.window.height <= 0) {
+    result.errors.emplace_back("window dimensions must be greater than zero");
+  }
+  if (config.window.gl_major <= 0 || config.window.gl_minor < 0) {
+    result.errors.emplace_back("OpenGL version components must be non-negative and major positive");
+  }
+  if (config.window.samples < 0) {
+    result.errors.emplace_back("window samples must be non-negative");
+  }
+  require_finite_positive(config.fixed_dt, "fixed_dt");
+  require_finite_positive(config.max_frame_dt, "max_frame_dt");
+  if (std::isfinite(config.fixed_dt) && std::isfinite(config.max_frame_dt) &&
+      config.fixed_dt > 0.0f && config.max_frame_dt > 0.0f &&
+      config.max_frame_dt < config.fixed_dt) {
+    result.errors.emplace_back("max_frame_dt must be greater than or equal to fixed_dt");
+  }
+  if (!std::isfinite(config.frame_pacing_fps) || config.frame_pacing_fps < 0.0f) {
+    result.errors.emplace_back("frame_pacing_fps must be finite and non-negative");
+  }
+  if (config.loading_splash.enabled && config.loading_splash.target_fps <= 0) {
+    result.errors.emplace_back("loading splash target_fps must be greater than zero when enabled");
+  }
+  if (config.loading_splash.show_after_ms < 0) {
+    result.errors.emplace_back("loading splash show_after_ms must be non-negative");
+  }
+  require_finite_color(config.loading_splash.background, "loading splash background");
+  require_finite_color(config.loading_splash.accent, "loading splash accent");
+  require_finite_color(config.loading_splash.foreground, "loading splash foreground");
+  require_finite_color(config.background_color, "background_color");
+  require_finite_non_negative(config.environment_intensity, "environment_intensity");
+  if (config.anisotropy_level < 1 || config.anisotropy_level > 16) {
+    result.errors.emplace_back("anisotropy_level must be between 1 and 16");
+  }
+  if (config.forward_plus_tile_size <= 0 ||
+      config.forward_plus_max_lights_per_tile <= 0 ||
+      config.forward_plus_max_local_lights <= 0) {
+    result.errors.emplace_back("Forward+ dimensions and light limits must be greater than zero");
+  }
+  if (config.shadow_map_size <= 0 || config.point_shadow_max_lights <= 0) {
+    result.errors.emplace_back("shadow map size and point light limit must be positive");
+  }
+  if (config.shadow_pcf_radius < 0 || config.shadow_pcf_radius > 4) {
+    result.errors.emplace_back("shadow_pcf_radius must be between 0 and 4");
+  }
+  require_finite_non_negative(config.shadow_bias, "shadow_bias");
+  if (!std::isfinite(config.shadow_raster_slope_bias)) {
+    result.errors.emplace_back("shadow_raster_slope_bias must be finite");
+  }
+  require_finite_non_negative(config.shadow_receiver_bias_scale,
+                              "shadow_receiver_bias_scale");
+  require_finite_non_negative(config.shadow_normal_bias_scale,
+                              "shadow_normal_bias_scale");
+  require_finite_non_negative(config.point_shadow_constant_bias,
+                              "point_shadow_constant_bias");
+  require_finite_non_negative(config.point_shadow_slope_bias_scale,
+                              "point_shadow_slope_bias_scale");
+  require_finite_non_negative(config.point_shadow_normal_bias_scale,
+                              "point_shadow_normal_bias_scale");
+  require_finite_non_negative(config.point_shadow_receiver_bias_scale,
+                              "point_shadow_receiver_bias_scale");
+  require_finite_non_negative(config.local_light_distance_damping,
+                              "local_light_distance_damping");
+  require_finite_positive(config.local_light_range_falloff_exponent,
+                          "local_light_range_falloff_exponent");
+  require_finite_non_negative(config.local_light_directional_shadow_lift_strength,
+                              "local_light_directional_shadow_lift_strength");
+  require_finite_positive(config.lighting_exposure, "lighting_exposure");
+
+  if (hasCustomDefaultFrameGraph(config.default_frame_graph)) {
+    const rendering::FrameGraphValidationResult graph_validation =
+        rendering::validateFrameGraphDesc(config.default_frame_graph);
+    for (const std::string& diagnostic : graph_validation.diagnostics) {
+      result.errors.emplace_back("default_frame_graph: " + diagnostic);
+    }
+  }
+  return result;
+}
 
 EngineApp::EngineApp()
     : light_pulse_system_(std::make_unique<visual::LightPulseSystem>()) {}
@@ -252,10 +414,17 @@ std::unique_ptr<UiLayer> EngineApp::createDebugOverlayUi() {
 #endif
 
 EngineApp::~EngineApp() {
-  if (game_ && running_) {
-    game_->onShutdown();
+  try {
+    if (game_) {
+      shutdownRunningGame();
+    } else {
+      shutdownSubsystems();
+    }
+  } catch (const std::exception& error) {
+    spdlog::error("Engine shutdown callback failed: {}", error.what());
+  } catch (...) {
+    spdlog::error("Engine shutdown callback failed with an unknown exception");
   }
-  shutdownSubsystems();
 }
 
 RuntimeModuleContext EngineApp::makeRuntimeModuleContext() {
@@ -268,12 +437,39 @@ RuntimeModuleContext EngineApp::makeRuntimeModuleContext() {
 
 void EngineApp::addRuntimeModule(std::unique_ptr<RuntimeModule> module) {
   if (!module) {
+    throw std::invalid_argument("Cannot add a null runtime module.");
+  }
+  RuntimeModule* module_ptr = module.get();
+  runtime_modules_.push_back(std::move(module));
+  auto erase_module = [this, module_ptr] {
+    const auto it = std::find_if(
+        runtime_modules_.begin(), runtime_modules_.end(),
+        [module_ptr](const auto& candidate) { return candidate.get() == module_ptr; });
+    if (it != runtime_modules_.end()) {
+      runtime_modules_.erase(it);
+    }
+  };
+  if (!running_) {
     return;
   }
-  if (running_) {
-    module->onAttach(makeRuntimeModuleContext());
+
+  try {
+    module_ptr->onAttach(makeRuntimeModuleContext());
+  } catch (...) {
+    erase_module();
+    throw;
   }
-  runtime_modules_.push_back(std::move(module));
+  try {
+    attached_runtime_modules_.insert(module_ptr);
+  } catch (...) {
+    try {
+      module_ptr->onDetach();
+    } catch (...) {
+      spdlog::error("Runtime module detach failed during add rollback");
+    }
+    erase_module();
+    throw;
+  }
 }
 
 void EngineApp::initSubsystems() {
@@ -290,8 +486,13 @@ void EngineApp::initSubsystems() {
     stage_start = end;
   };
 
-  window_ = platform::CreateWindow(config_.window);
+  window_ = platform::createWindow(config_.window);
   log_init_stage("window create", core::SteadyClock::now());
+#if !defined(KARMA_HEADLESS)
+  if (!window_) {
+    throw std::runtime_error("Engine failed to create a platform window.");
+  }
+#endif
 
   if (window_) {
     window_->setVsync(config_.vsync);
@@ -312,6 +513,10 @@ void EngineApp::initSubsystems() {
     graphics_create_info.present_mode = config_.present_mode;
     graphics_create_info.execution_mode = config_.renderer_execution_mode;
     graphics_ = std::make_unique<rendering::GraphicsDevice>(*window_, graphics_create_info);
+    if (!graphics_->isValid()) {
+      graphics_.reset();
+      throw std::runtime_error("Engine failed to initialize the graphics backend.");
+    }
     log_init_stage("graphics device create", core::SteadyClock::now());
 
     render_system_ = std::make_unique<rendering::RenderSystem>(*graphics_, assets_);
@@ -446,11 +651,8 @@ void EngineApp::warmUpRenderer() {
 
     if (run_module_warmup) {
       section_start = section_end;
-      for (auto& module : runtime_modules_) {
-        if (module) {
-          module->onWarmUp(world_);
-        }
-      }
+      forEachRuntimeModule(runtime_modules_,
+                           [&](RuntimeModule& module) { module.onWarmUp(world_); });
       section_end = core::SteadyClock::now();
       log_pass_stage(pass, "runtime modules", section_start, section_end);
     }
@@ -559,18 +761,47 @@ void EngineApp::warmUpRenderer() {
 }
 
 void EngineApp::shutdownSubsystems() {
+  running_ = false;
   if (user_ui_) {
-    user_ui_->onShutdown();
+    try {
+      user_ui_->onShutdown();
+    } catch (const std::exception& error) {
+      spdlog::error("User UI shutdown failed: {}", error.what());
+    } catch (...) {
+      spdlog::error("User UI shutdown failed with an unknown exception");
+    }
     user_ui_.reset();
   }
   user_ui_context_.reset();
 #if defined(KARMA_DEBUG_UI)
   if (debug_ui_) {
-    debug_ui_->onShutdown();
+    try {
+      debug_ui_->onShutdown();
+    } catch (const std::exception& error) {
+      spdlog::error("Debug UI shutdown failed: {}", error.what());
+    } catch (...) {
+      spdlog::error("Debug UI shutdown failed with an unknown exception");
+    }
     debug_ui_.reset();
   }
   debug_ui_context_.reset();
 #endif
+  if (!attached_runtime_modules_.empty()) {
+    const std::size_t module_count = runtime_modules_.size();
+    for (std::size_t offset = 0; offset < module_count; ++offset) {
+      RuntimeModule* module = runtime_modules_[module_count - offset - 1u].get();
+      if (module && attached_runtime_modules_.contains(module)) {
+        try {
+          module->onDetach();
+        } catch (const std::exception& error) {
+          spdlog::error("Runtime module detach failed: {}", error.what());
+        } catch (...) {
+          spdlog::error("Runtime module detach failed with an unknown exception");
+        }
+      }
+    }
+    attached_runtime_modules_.clear();
+  }
   if (render_system_ && startup_prewarm_handle_.valid()) {
     render_system_->releasePrewarm(startup_prewarm_handle_);
     startup_prewarm_handle_ = {};
@@ -590,23 +821,29 @@ void EngineApp::shutdownSubsystems() {
   render_system_.reset();
   prefabs::clearPrefabAssetPackages();
   particle_system_.reset();
-  for (auto& module : runtime_modules_) {
-    if (module) {
-      module->onDetach();
-    }
-  }
   releaseLoadingSplashTexture();
   graphics_.reset();
+  input_.setWindow(nullptr);
   window_.reset();
   running_ = false;
 }
 
 void EngineApp::shutdownRunningGame() {
-  if (game_) {
-    game_->onShutdown();
+  GameInterface* game = game_;
+  game_ = nullptr;
+  std::exception_ptr shutdown_exception;
+  if (game) {
+    try {
+      game->onShutdown();
+    } catch (...) {
+      shutdown_exception = std::current_exception();
+    }
+    game->unbindContext();
   }
   shutdownSubsystems();
-  game_ = nullptr;
+  if (shutdown_exception) {
+    std::rethrow_exception(shutdown_exception);
+  }
 }
 
 void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
@@ -876,15 +1113,29 @@ bool EngineApp::presentInitialLoadingSplash(
 }
 
 void EngineApp::start(GameInterface& game, const EngineConfig& config) {
-  if (running_) {
-    return;
+  if (game_ != nullptr || running_ || has_started_) {
+    throw std::logic_error("EngineApp instances support one start lifecycle.");
   }
-  spdlog::set_level(spdlog::level::trace);
+  const EngineConfigValidation validation = validateEngineConfig(config);
+  if (!validation) {
+    std::ostringstream message;
+    message << "Invalid EngineConfig";
+    for (const std::string& error : validation.errors) {
+      message << "; " << error;
+    }
+    throw std::invalid_argument(message.str());
+  }
+  has_started_ = true;
+  ScopeExit rollback_startup([this] {
+    if (game_ != nullptr) {
+      shutdownRunningGame();
+    } else {
+      shutdownSubsystems();
+    }
+  });
   config_ = config;
   const bool has_custom_default_graph =
-      !config_.default_frame_graph.resources.empty() ||
-      !config_.default_frame_graph.passes.empty() ||
-      !config_.default_frame_graph.frame_graph_key.empty();
+      hasCustomDefaultFrameGraph(config_.default_frame_graph);
   assets_.registerFrameGraph(
       std::string(rendering::kDefaultFrameGraphKey),
       has_custom_default_graph ? config_.default_frame_graph
@@ -1031,11 +1282,9 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     std::string diagnostic;
     auto package = assets::importAssetPackage(assets_, resolved_package_path, &diagnostic);
     if (!package.has_value()) {
-      spdlog::error("Failed to import startup asset package '{}': {}",
-                    resolved_package_path.string(),
-                    diagnostic);
-      shutdownSubsystems();
-      return;
+      throw std::runtime_error(
+          "Failed to import startup asset package '" + resolved_package_path.string() +
+          "': " + diagnostic);
     }
     startup_asset_package_handles_.push_back(std::move(*package));
   }
@@ -1045,21 +1294,17 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   for (const std::string& scene_key : config_.startup_scene_assets) {
     const assets::SceneAsset* scene_asset = assets_.findSceneAsset(scene_key);
     if (scene_asset == nullptr) {
-      spdlog::error("Failed to find startup scene asset '{}'", scene_key);
-      shutdownSubsystems();
-      return;
+      throw std::runtime_error("Failed to find startup scene asset '" + scene_key + "'.");
     }
     scenes::SceneInstantiateResult scene_result =
         scenes::instantiateScene(world_, scene_, assets_, scene_asset->document);
     if (!scene_result.success) {
+      std::ostringstream message;
+      message << "Startup scene asset '" << scene_key << "' failed";
       for (const std::string& diagnostic : scene_result.diagnostics) {
-        spdlog::error("Startup scene asset '{}' failed: {}", scene_key, diagnostic);
+        message << "; " << diagnostic;
       }
-      if (scene_result.diagnostics.empty()) {
-        spdlog::error("Startup scene asset '{}' failed", scene_key);
-      }
-      shutdownSubsystems();
-      return;
+      throw std::runtime_error(message.str());
     }
     startup_scene_results_.push_back(std::move(scene_result));
   }
@@ -1084,10 +1329,16 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
 
   prefabs::bindPrefabAssetRegistry(&assets_);
 
-  for (auto& module : runtime_modules_) {
-    if (module) {
-      module->onAttach(makeRuntimeModuleContext());
-    }
+  try {
+    forEachRuntimeModule(runtime_modules_, [&](RuntimeModule& module) {
+      module.onAttach(makeRuntimeModuleContext());
+      attached_runtime_modules_.insert(&module);
+    });
+  } catch (...) {
+    game_->unbindContext();
+    game_ = nullptr;
+    shutdownSubsystems();
+    throw;
   }
   finish_startup_stage("runtime module attach");
 
@@ -1107,7 +1358,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   double startup_wait_poll_ms = 0.0;
   double startup_wait_sleep_ms = 0.0;
   double startup_wait_splash_ms = 0.0;
-  if (config_.loading_splash.enabled) {
+  if (config_.loading_splash.enabled && window_ && graphics_) {
     std::atomic<bool> startup_done{false};
     std::thread startup_thread([&]() {
       game_on_start_body_start = core::SteadyClock::now();
@@ -1170,7 +1421,11 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     game_on_start_wait_end = core::SteadyClock::now();
   } else {
     game_on_start_body_start = core::SteadyClock::now();
-    game_->onStart();
+    try {
+      game_->onStart();
+    } catch (...) {
+      startup_exception = std::current_exception();
+    }
     game_on_start_body_end = core::SteadyClock::now();
     game_on_start_wait_start = game_on_start_body_start;
     game_on_start_wait_end = game_on_start_body_end;
@@ -1191,8 +1446,13 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   }
 
   if (startup_exception) {
-    shutdownSubsystems();
-    game_ = nullptr;
+    try {
+      shutdown_started_game();
+    } catch (const std::exception& error) {
+      spdlog::error("Engine cleanup after failed onStart also failed: {}", error.what());
+    } catch (...) {
+      spdlog::error("Engine cleanup after failed onStart also failed");
+    }
     std::rethrow_exception(startup_exception);
   }
 
@@ -1288,6 +1548,7 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   accumulator_ = 0.0f;
   last_time_ = core::SteadyClock::now();
   next_frame_pace_time_ = {};
+  rollback_startup.release();
 }
 
 void EngineApp::requestStop() {
@@ -1355,10 +1616,16 @@ double EngineApp::applyFramePacing() {
 }
 
 void EngineApp::tick() {
-  if (!running_ || !game_) {
+  if (!game_) {
+    return;
+  }
+  if (!running_) {
+    shutdownRunningGame();
     return;
   }
   const uint64_t frame_tick = frame_tick_++;
+  const std::vector<RuntimeModule*> frame_runtime_modules =
+      snapshotRuntimeModules(runtime_modules_);
 
   if (!frame_diag_initialized_) {
     frame_diag_initialized_ = true;
@@ -1487,32 +1754,40 @@ void EngineApp::tick() {
 
   int fixed_steps = 0;
   section_start = section_end;
-  for (auto& module : runtime_modules_) {
-    if (module) {
-      module->onFrameBegin(world_, frame_dt);
-    }
+  forEachRuntimeModule(frame_runtime_modules, [&](RuntimeModule& module) {
+    module.onFrameBegin(world_, frame_dt);
+  });
+  if (!running_) {
+    shutdownRunningGame();
+    return;
   }
   while (accumulator_ >= fixed_dt_) {
-    for (auto& module : runtime_modules_) {
-      if (module) {
-        module->onBeforeFixedUpdate(world_, fixed_dt_, fixed_tick_);
-      }
+    forEachRuntimeModule(frame_runtime_modules, [&](RuntimeModule& module) {
+      module.onBeforeFixedUpdate(world_, fixed_dt_, fixed_tick_);
+    });
+    if (!running_) {
+      break;
     }
     game_->onFixedUpdate(fixed_dt_);
     // Physics runs via SystemGraph.
     systems_.update(world_, fixed_dt_);
     game_->onPostFixedUpdate(fixed_dt_);
-    for (auto& module : runtime_modules_) {
-      if (module) {
-        module->onAfterFixedUpdate(world_, fixed_dt_, fixed_tick_);
-      }
-    }
+    forEachRuntimeModule(frame_runtime_modules, [&](RuntimeModule& module) {
+      module.onAfterFixedUpdate(world_, fixed_dt_, fixed_tick_);
+    });
     accumulator_ -= fixed_dt_;
     ++fixed_steps;
     ++fixed_tick_;
+    if (!running_) {
+      break;
+    }
   }
   section_end = core::SteadyClock::now();
   const double fixed_ms = core::elapsedMilliseconds(section_start, section_end);
+  if (!running_) {
+    shutdownRunningGame();
+    return;
+  }
 
   float render_alpha = 1.0f;
   if (fixed_dt_ > 0.0f) {
@@ -1630,11 +1905,9 @@ void EngineApp::tick() {
     particles_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
-    for (auto& module : runtime_modules_) {
-      if (module) {
-        module->onUpdate(world_, frame_dt, render_alpha);
-      }
-    }
+    forEachRuntimeModule(frame_runtime_modules, [&](RuntimeModule& module) {
+      module.onUpdate(world_, frame_dt, render_alpha);
+    });
     section_end = core::SteadyClock::now();
     runtime_modules_ms = core::elapsedMilliseconds(section_start, section_end);
 
@@ -1668,13 +1941,17 @@ void EngineApp::tick() {
     }
     section_end = core::SteadyClock::now();
     swap_buffers_ms = core::elapsedMilliseconds(section_start, section_end);
+  } else {
+    section_start = section_end;
+    forEachRuntimeModule(frame_runtime_modules, [&](RuntimeModule& module) {
+      module.onUpdate(world_, frame_dt, render_alpha);
+    });
+    section_end = core::SteadyClock::now();
+    runtime_modules_ms = core::elapsedMilliseconds(section_start, section_end);
   }
 
-  for (auto& module : runtime_modules_) {
-    if (module) {
-      module->onFrameEnd(world_);
-    }
-  }
+  forEachRuntimeModule(frame_runtime_modules,
+                       [&](RuntimeModule& module) { module.onFrameEnd(world_); });
 
   const auto tick_end = core::SteadyClock::now();
   const double tick_total_ms = core::elapsedMilliseconds(tick_start, tick_end);

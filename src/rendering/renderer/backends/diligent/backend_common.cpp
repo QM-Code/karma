@@ -41,7 +41,9 @@
 #include <spdlog/spdlog.h>
 
 #include "../../../../../third_party/stb_image.h"
-#if !defined(KARMA_WINDOW_BACKEND_SDL)
+#if defined(KARMA_WINDOW_BACKEND_SDL)
+  #include <SDL3/SDL.h>
+#else
   #if defined(PLATFORM_WIN32)
     #define GLFW_EXPOSE_NATIVE_WIN32
     #define GLFW_EXPOSE_NATIVE_WGL
@@ -456,7 +458,30 @@ LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path) {
   return image;
 }
 
-#if !defined(KARMA_WINDOW_BACKEND_SDL)
+#if defined(KARMA_WINDOW_BACKEND_SDL)
+Diligent::NativeWindow toNativeWindow(SDL_Window* window) {
+  if (window == nullptr) {
+    return {};
+  }
+  const SDL_PropertiesID properties = SDL_GetWindowProperties(window);
+#if defined(PLATFORM_WIN32)
+  return Diligent::Win32NativeWindow{
+      SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)};
+#elif defined(PLATFORM_LINUX)
+  Diligent::LinuxNativeWindow native_window{};
+  native_window.pDisplay =
+      SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+  native_window.WindowId = static_cast<Diligent::Uint32>(
+      SDL_GetNumberProperty(properties, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+  return native_window;
+#elif defined(PLATFORM_MACOS)
+  return Diligent::MacOSNativeWindow{
+      SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr)};
+#else
+  return {};
+#endif
+}
+#else
 Diligent::NativeWindow toNativeWindow(GLFWwindow* window) {
 #if defined(PLATFORM_WIN32)
   return Diligent::Win32NativeWindow{glfwGetWin32Window(window)};

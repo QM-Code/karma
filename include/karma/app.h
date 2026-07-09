@@ -47,9 +47,8 @@ struct Binding {
 /// \ingroup karma_runtime
 /// Per-frame action and mouse input state.
 ///
-/// Bind actions once, call `update()` with platform events each frame, query
-/// actions during gameplay/UI, then let `EngineApp` clear transient state after
-/// systems and UI have consumed it.
+/// Bind actions once, call `update()` with platform events each frame, then
+/// query actions during gameplay and UI. Each update replaces transient state.
 class InputSystem {
  public:
   /// Sets the platform window used for current key/mouse state.
@@ -135,7 +134,7 @@ struct UIFrameInfo {
 
 
 #include <filesystem>
-#include <vector>
+#include <unordered_set>
 
 
 namespace karma::app {
@@ -165,16 +164,21 @@ class UIContext {
   UIFrameInfo frame() const { return frame_; }
 
   /// Creates a renderer texture from RGBA8 pixels and tracks it as UI-owned.
-  UITextureHandle createTextureRGBA8(int w, int h, const void* pixels);
-  /// Loads a PNG file into a UI-owned RGBA8 texture.
-  UITexture loadTextureRGBA8FromPng(const std::filesystem::path& path);
+  UITextureHandle createTextureRGBA8(int width, int height, const void* pixels);
+  /// Loads a PNG file into a UI-owned RGBA8 texture. Premultiplication is
+  /// available for providers such as RmlUi that require that alpha mode.
+  UITexture loadTextureRGBA8FromPng(const std::filesystem::path& path,
+                                    bool premultiply_alpha = false);
   /// Updates an existing RGBA8 UI texture.
-  void updateTextureRGBA8(UITextureHandle tex, int w, int h, const void* pixels);
+  void updateTextureRGBA8(UITextureHandle texture,
+                          int width,
+                          int height,
+                          const void* pixels);
   /// Destroys a UI texture.
-  void destroyTexture(UITextureHandle tex);
+  void destroyTexture(UITextureHandle texture);
   /// Destroys all textures owned by this context.
   void destroyOwnedTextures();
-  /// Clears draw data for a new frame.
+  /// Releases owned textures, clears draw data, and detaches frame services.
   void reset();
 
   /// Mutable draw list consumed by the renderer.
@@ -187,7 +191,7 @@ class UIContext {
   friend class EngineApp;
   UIFrameInfo frame_{};
   rendering::UIDrawData draw_data_{};
-  std::vector<UITextureHandle> owned_textures_;
+  std::unordered_set<UITextureHandle> owned_textures_;
   app::InputSystem* input_ = nullptr;
   rendering::GraphicsDevice* device_ = nullptr;
 };
@@ -338,6 +342,18 @@ class GameInterface {
     this->renderer = renderer;
     this->assets = &assets;
     this->systems = &systems;
+  }
+
+  void unbindContext() {
+    world = nullptr;
+    scene = nullptr;
+    input = nullptr;
+    physics = nullptr;
+    graphics = nullptr;
+    renderer = nullptr;
+    assets = nullptr;
+    systems = nullptr;
+    render_interpolation_alpha_ = 1.0f;
   }
 
   float render_interpolation_alpha_ = 1.0f;
@@ -574,12 +590,27 @@ struct EngineConfig {
 };
 
 /// \ingroup karma_runtime
+/// Result of validating engine startup configuration before resources are created.
+struct EngineConfigValidation {
+  std::vector<std::string> errors;
+
+  bool valid() const { return errors.empty(); }
+  explicit operator bool() const { return valid(); }
+};
+
+/// Validates startup values that would otherwise cause invalid resources or
+/// non-terminating fixed-step updates.
+[[nodiscard]] EngineConfigValidation validateEngineConfig(const EngineConfig& config);
+
+/// \ingroup karma_runtime
 /// Application shell that owns and wires core engine subsystems.
 ///
 /// `EngineApp` creates the window, graphics device, render system, particles,
 /// animation, physics/collision, audio, input, UI contexts, and optional runtime
 /// modules. Game code usually subclasses `GameInterface`, optionally registers
 /// feature modules, then calls `start()` and repeatedly calls `tick()`.
+/// Each `EngineApp` owns one start/shutdown lifecycle; create a new instance to
+/// run another game session.
 ///
 /// \lifetime `EngineApp` must outlive the bound `GameInterface` and any UI or
 /// runtime modules registered into it.
@@ -606,7 +637,8 @@ class EngineApp {
   /// Registers an optional runtime feature module.
   ///
   /// Modules registered before `start()` participate in attach and warmup.
-  /// Modules registered after startup are attached immediately.
+  /// Modules registered after startup are attached immediately and begin frame
+  /// callbacks on the next tick.
   void addRuntimeModule(std::unique_ptr<RuntimeModule> module);
 
  private:
@@ -653,6 +685,7 @@ class EngineApp {
   bool loading_splash_presented_ = false;
   world::SystemGraph systems_;
   std::vector<std::unique_ptr<RuntimeModule>> runtime_modules_;
+  std::unordered_set<RuntimeModule*> attached_runtime_modules_;
   EngineConfig config_{};
   std::unique_ptr<UiLayer> user_ui_;
 #if defined(KARMA_DEBUG_UI)
@@ -664,6 +697,7 @@ class EngineApp {
   uint64_t last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
 
   bool running_ = false;
+  bool has_started_ = false;
   bool frame_diag_initialized_ = false;
   bool frame_diag_enabled_ = false;
   float frame_diag_threshold_ms_ = 25.0f;

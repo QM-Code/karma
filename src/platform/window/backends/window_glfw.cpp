@@ -3,10 +3,45 @@
 #include <GLFW/glfw3.h>
 #include <spdlog/spdlog.h>
 
+#include <cstddef>
+#include <mutex>
 #include <unordered_map>
 
 namespace karma::platform {
 namespace {
+
+struct GlfwRuntime {
+    std::mutex mutex;
+    std::size_t users = 0u;
+};
+
+GlfwRuntime& glfwRuntime() {
+    static GlfwRuntime runtime;
+    return runtime;
+}
+
+bool acquireGlfw() {
+    auto& runtime = glfwRuntime();
+    std::lock_guard<std::mutex> lock(runtime.mutex);
+    if (runtime.users == 0u && glfwInit() != GLFW_TRUE) {
+        spdlog::error("GLFW failed to initialize");
+        return false;
+    }
+    ++runtime.users;
+    return true;
+}
+
+void releaseGlfw() {
+    auto& runtime = glfwRuntime();
+    std::lock_guard<std::mutex> lock(runtime.mutex);
+    if (runtime.users == 0u) {
+        return;
+    }
+    --runtime.users;
+    if (runtime.users == 0u) {
+        glfwTerminate();
+    }
+}
 
 Key toKey(int glfwKey) {
     switch (glfwKey) {
@@ -252,24 +287,23 @@ Modifiers toModifiers(int mods) {
 class WindowGlfw final : public Window {
 public:
     explicit WindowGlfw(const WindowConfig &config) {
-        if (!glfwInit()) {
-            spdlog::error("GLFW failed to initialize");
+        glfwAcquired = acquireGlfw();
+        if (!glfwAcquired) {
             return;
         }
 
 #if defined(KARMA_RENDER_BACKEND_DILIGENT)
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 #else
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, config.glMajor);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, config.glMinor);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, config.glCoreProfile ? GLFW_OPENGL_CORE_PROFILE : GLFW_OPENGL_ANY_PROFILE);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, config.gl_major);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, config.gl_minor);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, config.gl_core_profile ? GLFW_OPENGL_CORE_PROFILE : GLFW_OPENGL_ANY_PROFILE);
         glfwWindowHint(GLFW_SAMPLES, config.samples);
 #endif
 
         window = glfwCreateWindow(config.width, config.height, config.title.c_str(), nullptr, nullptr);
         if (!window) {
             spdlog::error("GLFW window failed to create");
-            glfwTerminate();
             return;
         }
 
@@ -287,7 +321,10 @@ public:
             glfwDestroyWindow(window);
             window = nullptr;
         }
-        glfwTerminate();
+        if (glfwAcquired) {
+            releaseGlfw();
+            glfwAcquired = false;
+        }
     }
 
     void pollEvents() override {
@@ -432,6 +469,7 @@ private:
     GLFWwindow *window = nullptr;
     std::vector<Event> eventsBuffer;
     bool fullscreen = false;
+    bool glfwAcquired = false;
     int windowedX = 0;
     int windowedY = 0;
     int windowedW = 1280;
@@ -482,6 +520,7 @@ private:
             Event ev;
             ev.key = toKey(key);
             ev.mods = toModifiers(mods);
+            ev.repeat = action == GLFW_REPEAT;
             if (action == GLFW_PRESS || action == GLFW_REPEAT) {
                 ev.type = EventType::KeyDown;
             } else if (action == GLFW_RELEASE) {
@@ -599,8 +638,12 @@ private:
 
 } // namespace
 
-std::unique_ptr<Window> CreateGlfwWindow(const WindowConfig &config) {
-    return std::make_unique<WindowGlfw>(config);
+std::unique_ptr<Window> createGlfwWindow(const WindowConfig& config) {
+    auto window = std::make_unique<WindowGlfw>(config);
+    if (window->nativeHandle() == nullptr) {
+        return nullptr;
+    }
+    return window;
 }
 
 } // namespace karma::platform

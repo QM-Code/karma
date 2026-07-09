@@ -13,6 +13,19 @@ bool isMouseDown(const platform::Window& window, platform::MouseButton button) {
   return window.isMouseDown(button);
 }
 
+platform::Modifiers currentModifiers(const platform::Window& window) {
+  return {
+      .shift = window.isKeyDown(platform::Key::LeftShift) ||
+               window.isKeyDown(platform::Key::RightShift),
+      .control = window.isKeyDown(platform::Key::LeftControl) ||
+                 window.isKeyDown(platform::Key::RightControl),
+      .alt = window.isKeyDown(platform::Key::LeftAlt) ||
+             window.isKeyDown(platform::Key::RightAlt),
+      .super = window.isKeyDown(platform::Key::LeftSuper) ||
+               window.isKeyDown(platform::Key::RightSuper),
+  };
+}
+
 bool isKeyEvent(const platform::Event& event, platform::Key key, platform::EventType type) {
   return event.type == type && event.key == key;
 }
@@ -63,9 +76,11 @@ void InputSystem::update(const std::vector<platform::Event>& events) {
   mouse_delta_y_ = 0.0f;
 
   if (window_) {
+    const platform::Modifiers modifiers = currentModifiers(*window_);
     for (const auto& [action, bindings] : bindings_) {
       for (const auto& binding : bindings) {
-        if (binding.trigger == Trigger::Down) {
+        if (binding.trigger == Trigger::Down &&
+            matchesModifiers(modifiers, binding.mods)) {
           if (binding.use_key && isKeyDown(*window_, binding.key)) {
             down_this_frame_.insert(action);
           } else if (!binding.use_key && isMouseDown(*window_, binding.mouse)) {
@@ -77,6 +92,9 @@ void InputSystem::update(const std::vector<platform::Event>& events) {
   }
 
   for (const auto& event : events) {
+    if (event.type == platform::EventType::WindowFocus && !event.focused) {
+      has_mouse_pos_ = false;
+    }
     if (event.type == platform::EventType::MouseMove ||
         event.type == platform::EventType::MouseButtonDown ||
         event.type == platform::EventType::MouseButtonUp) {
@@ -92,7 +110,7 @@ void InputSystem::update(const std::vector<platform::Event>& events) {
     }
     for (const auto& [action, bindings] : bindings_) {
       for (const auto& binding : bindings) {
-        if (binding.trigger != Trigger::Pressed) {
+        if (binding.trigger != Trigger::Pressed || event.repeat) {
           continue;
         }
         if (!matchesModifiers(event.mods, binding.mods)) {

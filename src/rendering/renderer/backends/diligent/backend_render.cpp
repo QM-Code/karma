@@ -774,10 +774,13 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   const float aspect = (render_height > 0)
                            ? static_cast<float>(render_width) / static_cast<float>(render_height)
                            : camera_.aspect;
+  // Particle and shadow passes run after target selection and consume camera_.aspect.
+  // Keep it aligned with this pass, including portrait and offscreen targets.
+  camera_.aspect = std::isfinite(aspect) && aspect > 0.0f ? aspect : 1.0f;
   glm::mat4 projection(1.0f);
   if (camera_.perspective) {
     projection = glm::perspective(glm::radians(camera_.fov_y_degrees),
-                                  aspect,
+                                  camera_.aspect,
                                   camera_.near_clip,
                                   camera_.far_clip);
   } else {

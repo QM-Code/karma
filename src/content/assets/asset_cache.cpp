@@ -2,13 +2,16 @@
 
 #include "asset_cache_serializers.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <system_error>
+#include <unordered_set>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -23,6 +26,62 @@ namespace karma::assets {
 namespace {
 
 using Json = nlohmann::json;
+
+constexpr std::size_t kMaxCacheKeyLength = 128u;
+
+std::mutex& cacheIndexMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::atomic<uint64_t>& cacheTempSequence() {
+  static std::atomic<uint64_t> sequence{0u};
+  return sequence;
+}
+
+std::filesystem::path normalizedRoot(const std::filesystem::path& root) {
+  std::error_code ec;
+  std::filesystem::path normalized = std::filesystem::weakly_canonical(root, ec);
+  if (ec) {
+    ec.clear();
+    normalized = std::filesystem::absolute(root, ec);
+  }
+  if (ec) {
+    normalized = root;
+  }
+  return normalized.lexically_normal();
+}
+
+bool isFilesystemRoot(const std::filesystem::path& root) {
+  if (root.empty()) {
+    return false;
+  }
+  const std::filesystem::path normalized = normalizedRoot(root);
+  return !normalized.empty() && normalized == normalized.root_path();
+}
+
+std::string normalizedRootKey(const std::filesystem::path& root) {
+  return normalizedRoot(root).generic_string();
+}
+
+bool claimProcessFlush(const std::filesystem::path& root) {
+  static std::mutex mutex;
+  static std::unordered_set<std::string> flushed_roots;
+  const std::string key = normalizedRootKey(root);
+  std::scoped_lock lock(mutex);
+  return flushed_roots.insert(key).second;
+}
+
+bool validateCacheKey(std::string_view key, std::string* diagnostic) {
+  const std::string error = AssetCache::cacheKeyValidationError(key);
+  if (error.empty()) {
+    return true;
+  }
+  if (diagnostic != nullptr) {
+    *diagnostic = error;
+  }
+  return false;
+}
 
 bool envFlagOff(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -115,8 +174,11 @@ bool writeAtomic(const std::filesystem::path& path,
   }
 
   const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+  const uint64_t sequence = cacheTempSequence().fetch_add(1u, std::memory_order_relaxed);
   const std::filesystem::path temp =
-      path.parent_path() / (path.filename().string() + ".tmp." + std::to_string(stamp));
+      path.parent_path() /
+      (path.filename().string() + ".tmp." + std::to_string(stamp) + "." +
+       std::to_string(sequence));
   {
     std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
     if (!stream) {
@@ -198,10 +260,11 @@ AssetCacheConfig AssetCacheConfig::fromEnvironment() {
 }
 
 AssetCache::AssetCache(AssetCacheConfig config) : config_(std::move(config)) {
+  if (isFilesystemRoot(config_.root)) {
+    config_.enabled = false;
+  }
   if (enabled()) {
-    static bool flushed_once = false;
-    if (config_.flush && !flushed_once) {
-      flushed_once = true;
+    if (config_.flush && claimProcessFlush(config_.root)) {
       flush();
     }
     if (config_.ensure_layout) {
@@ -210,12 +273,48 @@ AssetCache::AssetCache(AssetCacheConfig config) : config_(std::move(config)) {
   }
 }
 
+bool AssetCache::isValidCacheKey(std::string_view key) {
+  return cacheKeyValidationError(key).empty();
+}
+
+std::string AssetCache::cacheKeyValidationError(std::string_view key) {
+  if (key.empty()) {
+    return "cache key must not be empty";
+  }
+  if (key.size() > kMaxCacheKeyLength) {
+    return "cache key exceeds 128 characters";
+  }
+  if (key == "." || key == "..") {
+    return "cache key must be a logical identifier";
+  }
+  for (const unsigned char byte : key) {
+    const bool ascii_alphanumeric =
+        (byte >= 'a' && byte <= 'z') ||
+        (byte >= 'A' && byte <= 'Z') ||
+        (byte >= '0' && byte <= '9');
+    if (ascii_alphanumeric || byte == '-' || byte == '_' || byte == '.') {
+      continue;
+    }
+    return "cache key may contain only ASCII letters, digits, '.', '-', and '_'";
+  }
+  return {};
+}
+
 void AssetCache::flush() {
   if (config_.root.empty()) {
     return;
   }
+  if (isFilesystemRoot(config_.root)) {
+    return;
+  }
+  const std::filesystem::path root = config_.root.lexically_normal();
+  std::scoped_lock lock(cacheIndexMutex());
   std::error_code ec;
-  std::filesystem::remove_all(config_.root, ec);
+  std::filesystem::remove_all(root / "blobs", ec);
+  ec.clear();
+  std::filesystem::remove_all(root / "packages", ec);
+  ec.clear();
+  std::filesystem::remove(root / "index.json", ec);
 }
 
 std::string AssetCache::makeSourceKey(const std::filesystem::path& source,
@@ -247,7 +346,7 @@ std::string AssetCache::makeSourceKey(const std::filesystem::path& source,
 
 std::optional<TextureAsset> AssetCache::readTexture(std::string_view cache_key,
                                                     std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -264,7 +363,7 @@ std::optional<TextureAsset> AssetCache::readTexture(std::string_view cache_key,
 bool AssetCache::writeTexture(std::string_view cache_key,
                               const TextureAsset& texture,
                               std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key), detail::serializeTexture(texture), diagnostic);
@@ -277,7 +376,7 @@ bool AssetCache::writeTexture(std::string_view cache_key,
 bool AssetCache::writeTextureNoIndex(std::string_view cache_key,
                                      const TextureAsset& texture,
                                      std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   return writeAtomic(blobPath(cache_key), detail::serializeTexture(texture), diagnostic);
@@ -285,7 +384,7 @@ bool AssetCache::writeTextureNoIndex(std::string_view cache_key,
 
 std::optional<world::MeshData> AssetCache::readMesh(std::string_view cache_key,
                                                        std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -298,7 +397,7 @@ std::optional<world::MeshData> AssetCache::readMesh(std::string_view cache_key,
 bool AssetCache::writeMesh(std::string_view cache_key,
                            const world::MeshData& mesh,
                            std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key), detail::serializeMesh(mesh), diagnostic);
@@ -311,7 +410,7 @@ bool AssetCache::writeMesh(std::string_view cache_key,
 std::optional<rendering::MaterialAssetDesc> AssetCache::readMaterialAsset(
     std::string_view cache_key,
     std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -324,7 +423,7 @@ std::optional<rendering::MaterialAssetDesc> AssetCache::readMaterialAsset(
 bool AssetCache::writeMaterialAsset(std::string_view cache_key,
                                     const rendering::MaterialAssetDesc& material,
                                     std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key),
@@ -339,7 +438,7 @@ bool AssetCache::writeMaterialAsset(std::string_view cache_key,
 std::optional<rendering::MaterialVariantDesc> AssetCache::readMaterialVariant(
     std::string_view cache_key,
     std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -352,7 +451,7 @@ std::optional<rendering::MaterialVariantDesc> AssetCache::readMaterialVariant(
 bool AssetCache::writeMaterialVariant(std::string_view cache_key,
                                       const rendering::MaterialVariantDesc& material,
                                       std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key),
@@ -367,7 +466,7 @@ bool AssetCache::writeMaterialVariant(std::string_view cache_key,
 std::optional<visual::particles::ParticleEffectAsset> AssetCache::readParticleEffect(
     std::string_view cache_key,
     std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -380,7 +479,7 @@ std::optional<visual::particles::ParticleEffectAsset> AssetCache::readParticleEf
 bool AssetCache::writeParticleEffect(std::string_view cache_key,
                                      const visual::particles::ParticleEffectAsset& effect,
                                      std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key),
@@ -394,7 +493,7 @@ bool AssetCache::writeParticleEffect(std::string_view cache_key,
 
 std::optional<GltfSceneAsset> AssetCache::readGltfScene(std::string_view cache_key,
                                                         std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -407,7 +506,7 @@ std::optional<GltfSceneAsset> AssetCache::readGltfScene(std::string_view cache_k
 bool AssetCache::writeGltfScene(std::string_view cache_key,
                                 const GltfSceneAsset& scene,
                                 std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key),
@@ -422,7 +521,7 @@ bool AssetCache::writeGltfScene(std::string_view cache_key,
 std::optional<world::AnimationClip> AssetCache::readAnimationClip(
     std::string_view cache_key,
     std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -435,7 +534,7 @@ std::optional<world::AnimationClip> AssetCache::readAnimationClip(
 bool AssetCache::writeAnimationClip(std::string_view cache_key,
                                     const world::AnimationClip& clip,
                                     std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key),
@@ -449,7 +548,7 @@ bool AssetCache::writeAnimationClip(std::string_view cache_key,
 
 std::optional<world::Skeleton> AssetCache::readSkeleton(std::string_view cache_key,
                                                             std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -462,7 +561,7 @@ std::optional<world::Skeleton> AssetCache::readSkeleton(std::string_view cache_k
 bool AssetCache::writeSkeleton(std::string_view cache_key,
                                const world::Skeleton& skeleton,
                                std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key),
@@ -476,7 +575,7 @@ bool AssetCache::writeSkeleton(std::string_view cache_key,
 
 std::optional<world::Skin> AssetCache::readSkin(std::string_view cache_key,
                                                     std::string* diagnostic) {
-  if (!enabled()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return std::nullopt;
   }
   auto bytes = readBinaryFile(blobPath(cache_key));
@@ -489,7 +588,7 @@ std::optional<world::Skin> AssetCache::readSkin(std::string_view cache_key,
 bool AssetCache::writeSkin(std::string_view cache_key,
                            const world::Skin& skin,
                            std::string* diagnostic) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
     return false;
   }
   const bool ok = writeAtomic(blobPath(cache_key),
@@ -503,7 +602,7 @@ bool AssetCache::writeSkin(std::string_view cache_key,
 
 std::optional<Json> AssetCache::readPackageManifest(std::string_view manifest_hash,
                                                     std::string* diagnostic) {
-  if (!enabled() || manifest_hash.empty()) {
+  if (!enabled() || !validateCacheKey(manifest_hash, diagnostic)) {
     return std::nullopt;
   }
   std::ifstream stream(packageManifestPath(manifest_hash));
@@ -533,7 +632,7 @@ std::optional<Json> AssetCache::readPackageManifest(std::string_view manifest_ha
 bool AssetCache::writePackageManifest(std::string_view manifest_hash,
                                       const Json& manifest,
                                       std::string* diagnostic) {
-  if (!enabled() || manifest_hash.empty()) {
+  if (!enabled() || !validateCacheKey(manifest_hash, diagnostic)) {
     return false;
   }
   Json copy = manifest;
@@ -557,6 +656,7 @@ std::filesystem::path AssetCache::packageManifestPath(std::string_view manifest_
 }
 
 void AssetCache::ensureLayout() {
+  std::scoped_lock lock(cacheIndexMutex());
   std::error_code ec;
   std::filesystem::create_directories(config_.root / "blobs", ec);
   std::filesystem::create_directories(config_.root / "packages", ec);
@@ -573,9 +673,10 @@ void AssetCache::ensureLayout() {
 }
 
 void AssetCache::touchIndex(std::string_view cache_key, std::string_view kind) {
-  if (!enabled() || cache_key.empty()) {
+  if (!enabled() || !isValidCacheKey(cache_key)) {
     return;
   }
+  std::scoped_lock lock(cacheIndexMutex());
   const std::filesystem::path index_path = config_.root / "index.json";
   Json root;
   {

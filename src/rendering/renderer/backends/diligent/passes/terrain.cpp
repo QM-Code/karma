@@ -1241,9 +1241,13 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
     TerrainTileRecord& tile = tile_it->second;
 
     const float tile_origin_x =
-        static_cast<float>(item.coord.x - terrain.desc.origin_tile_x) * terrain.desc.tile_size;
+        static_cast<float>(static_cast<int64_t>(item.coord.x) -
+                           static_cast<int64_t>(terrain.desc.origin_tile_x)) *
+        terrain.desc.tile_size;
     const float tile_origin_z =
-        static_cast<float>(item.coord.z - terrain.desc.origin_tile_z) * terrain.desc.tile_size;
+        static_cast<float>(static_cast<int64_t>(item.coord.z) -
+                           static_cast<int64_t>(terrain.desc.origin_tile_z)) *
+        terrain.desc.tile_size;
     glm::mat4 model = item.transform;
     model = glm::translate(model, glm::vec3(tile_origin_x, 0.0f, tile_origin_z));
 

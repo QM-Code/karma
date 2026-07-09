@@ -121,7 +121,7 @@ cmake --build --preset headless --target network_server
 
 This profile is build-supported for non-visual programs such as network/server
 targets, simulation or gameplay tests, and tools that do not need a GPU. In this
-mode `platform::CreateWindow` returns `nullptr`, and `EngineApp` skips
+mode `platform::createWindow` returns `nullptr`, and `EngineApp` skips
 `GraphicsDevice`, `RenderSystem`, and renderer-backed particle-system creation.
 Game code and runtime modules should treat `GameInterface::graphics` and
 `RuntimeModuleContext::graphics` as optional.

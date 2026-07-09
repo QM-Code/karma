@@ -152,6 +152,37 @@ std::size_t overlappingContactCount(bool allow_contact) {
 #endif
 }
 
+void collisionDisabledBodiesLeaveTheBackendWorld() {
+#if defined(KARMA_PHYSICS_BACKEND_JOLT)
+  karma::world::World world;
+  karma::physics::World physics_world;
+  physics_world.setGravity(0.0f);
+  karma::physics::PhysicsSystem physics_system(physics_world);
+
+  const karma::world::Entity entity = world.createEntity();
+  world.add(entity, karma::components::TransformComponent{});
+  world.add(entity, karma::components::ColliderComponent::box());
+  world.add(entity, karma::components::VisibilityComponent{});
+
+  karma::physics::PhysicsRaycastDesc ray;
+  ray.from = {-2.0f, 0.0f, 0.0f};
+  ray.to = {2.0f, 0.0f, 0.0f};
+  karma::physics::PhysicsQueryHit hit{};
+
+  physics_system.update(world, 1.0f / 60.0f);
+  assert(physics_world.castRay(ray, hit));
+
+  auto& visibility = world.get<karma::components::VisibilityComponent>(entity);
+  visibility.collision_layer_mask = 0u;
+  physics_system.update(world, 1.0f / 60.0f);
+  assert(!physics_world.castRay(ray, hit));
+
+  visibility.collision_layer_mask = 0xFFFFFFFFu;
+  physics_system.update(world, 1.0f / 60.0f);
+  assert(physics_world.castRay(ray, hit));
+#endif
+}
+
 void queryApiFindsFilteredBodies() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
   karma::physics::World physics_world;
@@ -568,6 +599,7 @@ int main() {
 #if defined(KARMA_PHYSICS_BACKEND_JOLT)
   assert(overlappingContactCount(true) > 0);
   assert(overlappingContactCount(false) == 0);
+  collisionDisabledBodiesLeaveTheBackendWorld();
   queryApiFindsFilteredBodies();
   meshColliderGeometryProviderBuildsExternalMeshCollider();
   characterControllerStaysStableOnMeshColliderGround();

@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -93,28 +94,54 @@ bool computeMeshBounds(const world::MeshData& mesh,
   }
 
   math::Vec3 local_min = math::fromGlm(mesh.vertices.front());
+  if (!math::isFinite(local_min) || !math::isFinite(world_transform.position) ||
+      !math::isFinite(world_transform.rotation) ||
+      !math::isFinite(world_transform.scale) ||
+      math::lengthSquared(world_transform.rotation) <= 1.0e-12f) {
+    return false;
+  }
   math::Vec3 local_max = local_min;
   for (const glm::vec3& vertex : mesh.vertices) {
     const math::Vec3 point = math::fromGlm(vertex);
+    if (!math::isFinite(point)) {
+      return false;
+    }
     local_min = minVec(local_min, point);
     local_max = maxVec(local_max, point);
   }
 
   const std::array<math::Vec3, 8> corners = boundsCorners(local_min, local_max);
-  math::Vec3 world_min = transformPoint(world_transform, corners.front());
+  std::array<math::Vec3, 8> world_corners{};
+  for (size_t index = 0; index < corners.size(); ++index) {
+    world_corners[index] = transformPoint(world_transform, corners[index]);
+    if (!math::isFinite(world_corners[index])) {
+      return false;
+    }
+  }
+
+  math::Vec3 world_min = world_corners.front();
   math::Vec3 world_max = world_min;
-  for (const math::Vec3& corner : corners) {
-    const math::Vec3 point = transformPoint(world_transform, corner);
+  for (const math::Vec3& point : world_corners) {
     world_min = minVec(world_min, point);
     world_max = maxVec(world_max, point);
   }
 
   const math::Vec3 center = math::scale(math::add(world_min, world_max), 0.5f);
+  if (!math::isFinite(center)) {
+    return false;
+  }
   float radius_squared = 0.0f;
-  for (const math::Vec3& corner : corners) {
-    const math::Vec3 point = transformPoint(world_transform, corner);
-    radius_squared = std::max(radius_squared,
-                              math::lengthSquared(math::subtract(point, center)));
+  for (const math::Vec3& point : world_corners) {
+    const float distance_squared =
+        math::lengthSquared(math::subtract(point, center));
+    if (!std::isfinite(distance_squared)) {
+      return false;
+    }
+    radius_squared = std::max(radius_squared, distance_squared);
+  }
+  const float radius = std::sqrt(radius_squared);
+  if (!std::isfinite(radius)) {
+    return false;
   }
 
   out_bounds.local_min = local_min;
@@ -122,7 +149,7 @@ bool computeMeshBounds(const world::MeshData& mesh,
   out_bounds.world_min = world_min;
   out_bounds.world_max = world_max;
   out_bounds.world_center = center;
-  out_bounds.world_radius = std::sqrt(radius_squared);
+  out_bounds.world_radius = radius;
   return true;
 }
 
@@ -158,7 +185,257 @@ void addStaticMeshComponents(world::World& world,
   }
 }
 
+bool finiteTransform(const SceneTransform& transform) {
+  return math::isFinite(transform.position) && math::isFinite(transform.rotation) &&
+         math::isFinite(transform.scale) &&
+         math::lengthSquared(transform.rotation) > 1.0e-12f;
+}
+
+bool finiteCamera(const components::CameraComponent& camera) {
+  return std::isfinite(camera.fov_y_degrees) && std::isfinite(camera.near_clip) &&
+         std::isfinite(camera.far_clip) && std::isfinite(camera.ortho_left) &&
+         std::isfinite(camera.ortho_right) && std::isfinite(camera.ortho_top) &&
+         std::isfinite(camera.ortho_bottom);
+}
+
+bool finiteLight(const components::LightComponent& light) {
+  return math::isFinite(light.color) && std::isfinite(light.intensity) &&
+         std::isfinite(light.range) && std::isfinite(light.inner_cone_degrees) &&
+         std::isfinite(light.outer_cone_degrees) &&
+         std::isfinite(light.shadow_extent);
+}
+
 }  // namespace
+
+SceneValidationResult validateSceneDocument(const SceneDocument& document) {
+  SceneValidationResult result{};
+  auto diagnose = [&](std::string message) {
+    result.diagnostics.push_back(std::move(message));
+  };
+
+  if (document.version != kSceneDocumentVersion) {
+    diagnose("unsupported scene document version: " +
+             std::to_string(document.version));
+  }
+
+  std::unordered_set<std::string> all_ids;
+  std::unordered_set<std::string> asset_package_ids;
+  std::unordered_set<std::string> gltf_scene_ids;
+  std::unordered_set<std::string> entity_ids;
+  std::unordered_set<std::string> static_ids;
+
+  auto register_id = [&](std::string_view kind,
+                         const std::string& id,
+                         std::unordered_set<std::string>* typed_ids,
+                         bool required = true) {
+    if (id.empty()) {
+      if (required) {
+        diagnose(std::string(kind) + " id must not be empty");
+      }
+      return;
+    }
+    if (!all_ids.insert(id).second) {
+      diagnose("duplicate scene id: " + id);
+      return;
+    }
+    if (typed_ids != nullptr) {
+      typed_ids->insert(id);
+    }
+  };
+
+  for (const SceneAssetRef& package : document.asset_packages) {
+    register_id("asset package", package.id, &asset_package_ids);
+  }
+  for (const SceneAssetRef& gltf_scene : document.gltf_scenes) {
+    register_id("glTF scene", gltf_scene.id, &gltf_scene_ids);
+  }
+  for (const ScenePrefabInstance& prefab : document.prefab_instances) {
+    register_id("prefab instance", prefab.id, nullptr);
+    if (prefab.prefab_path.empty()) {
+      diagnose("prefab instance '" + prefab.id + "' path must not be empty");
+    }
+    if (!prefab.variables.is_object()) {
+      diagnose("prefab instance '" + prefab.id + "' variables must be an object");
+    }
+    if (!finiteTransform(prefab.transform)) {
+      diagnose("prefab instance '" + prefab.id + "' has an invalid transform");
+    }
+  }
+  for (const SceneEntity& entity : document.entities) {
+    register_id("entity", entity.id, &entity_ids);
+    if (!entity.components.is_object()) {
+      diagnose("scene entity '" + entity.id + "' components must be an object");
+    }
+    if (!finiteTransform(entity.transform)) {
+      diagnose("scene entity '" + entity.id + "' has an invalid transform");
+    }
+  }
+  if (document.environment.has_value()) {
+    register_id("environment", document.environment->id, nullptr, false);
+    if (!std::isfinite(document.environment->component.intensity) ||
+        document.environment->component.intensity < 0.0f) {
+      diagnose("scene environment intensity must be finite and non-negative");
+    }
+  }
+  for (const SceneCamera& camera : document.cameras) {
+    register_id("camera", camera.id, nullptr);
+    if (!finiteCamera(camera.component)) {
+      diagnose("scene camera '" + camera.id + "' has non-finite parameters");
+    }
+    if (camera.component.near_clip <= 0.0f ||
+        camera.component.far_clip <= camera.component.near_clip) {
+      diagnose("scene camera '" + camera.id +
+               "' requires 0 < near_clip < far_clip");
+    }
+    if (camera.component.perspective &&
+        (camera.component.fov_y_degrees < 1.0f ||
+         camera.component.fov_y_degrees > 179.0f)) {
+      diagnose("scene camera '" + camera.id +
+               "' perspective FOV must be in [1, 179] degrees");
+    }
+    if (!camera.component.perspective &&
+        (std::abs(camera.component.ortho_right - camera.component.ortho_left) <=
+             1.0e-5f ||
+         std::abs(camera.component.ortho_top - camera.component.ortho_bottom) <=
+             1.0e-5f)) {
+      diagnose("scene camera '" + camera.id +
+               "' orthographic bounds must have non-zero area");
+    }
+    for (const auto& [name, color] : camera.component.shader_user_params) {
+      if (!math::isFinite(color)) {
+        diagnose("scene camera '" + camera.id + "' shader parameter '" + name +
+                 "' is non-finite");
+      }
+    }
+  }
+  for (const SceneLight& light : document.lights) {
+    register_id("light", light.id, nullptr);
+    if (!finiteLight(light.component)) {
+      diagnose("scene light '" + light.id + "' has non-finite parameters");
+    }
+    if (light.component.intensity < 0.0f || light.component.range < 0.0f ||
+        light.component.shadow_extent < 0.0f) {
+      diagnose("scene light '" + light.id +
+               "' intensity, range, and shadow extent must be non-negative");
+    }
+    if (light.component.type == components::LightComponent::Type::Spot &&
+        (light.component.inner_cone_degrees < 0.0f ||
+         light.component.outer_cone_degrees > 179.0f ||
+         light.component.inner_cone_degrees >
+             light.component.outer_cone_degrees)) {
+      diagnose("scene spot light '" + light.id +
+               "' requires 0 <= inner cone <= outer cone <= 179 degrees");
+    }
+    switch (light.component.type) {
+      case components::LightComponent::Type::Directional:
+      case components::LightComponent::Type::Point:
+      case components::LightComponent::Type::Spot:
+        break;
+      default:
+        diagnose("scene light '" + light.id + "' has an invalid type");
+        break;
+    }
+  }
+  for (const SceneStaticComponent& component : document.static_components) {
+    register_id("static component", component.id, &static_ids);
+  }
+  for (const SceneBakeDesc& bake : document.bakes) {
+    register_id("bake", bake.id, nullptr);
+    if (!std::isfinite(bake.baked_lighting.intensity) ||
+        bake.baked_lighting.intensity < 0.0f) {
+      diagnose("scene bake '" + bake.id +
+               "' lighting intensity must be finite and non-negative");
+    }
+  }
+
+  auto require_reference = [&](const std::unordered_set<std::string>& ids,
+                               std::string_view kind,
+                               const std::string& id) {
+    if (!id.empty() && ids.find(id) == ids.end()) {
+      diagnose("missing " + std::string(kind) + " reference: " + id);
+    }
+  };
+
+  for (const SceneAssetRef& gltf_scene : document.gltf_scenes) {
+    require_reference(asset_package_ids, "asset package", gltf_scene.asset_package_id);
+  }
+  for (const SceneEntity& entity : document.entities) {
+    require_reference(entity_ids, "entity", entity.parent_id);
+  }
+  for (const ScenePrefabInstance& prefab : document.prefab_instances) {
+    require_reference(asset_package_ids, "asset package", prefab.asset_package_id);
+    require_reference(entity_ids, "entity", prefab.parent_entity_id);
+  }
+  if (document.environment.has_value()) {
+    require_reference(entity_ids, "entity", document.environment->entity_id);
+  }
+  for (const SceneCamera& camera : document.cameras) {
+    if (camera.entity_id.empty()) {
+      diagnose("scene camera '" + camera.id + "' entity reference must not be empty");
+    }
+    require_reference(entity_ids, "entity", camera.entity_id);
+  }
+  for (const SceneLight& light : document.lights) {
+    if (light.entity_id.empty()) {
+      diagnose("scene light '" + light.id + "' entity reference must not be empty");
+    }
+    require_reference(entity_ids, "entity", light.entity_id);
+  }
+  for (const SceneStaticComponent& component : document.static_components) {
+    if (component.entity_id.empty()) {
+      diagnose("static component '" + component.id +
+               "' entity reference must not be empty");
+    }
+    require_reference(entity_ids, "entity", component.entity_id);
+    require_reference(gltf_scene_ids, "glTF scene", component.gltf_scene_id);
+  }
+  for (const SceneBakeDesc& bake : document.bakes) {
+    for (const std::string& static_id : bake.static_component_ids) {
+      require_reference(static_ids, "static component", static_id);
+    }
+    require_reference(entity_ids, "entity", bake.baked_lighting.entity_id);
+  }
+
+  std::unordered_map<std::string, std::string_view> parents;
+  parents.reserve(document.entities.size());
+  for (const SceneEntity& entity : document.entities) {
+    if (!entity.id.empty()) {
+      parents.emplace(entity.id, entity.parent_id);
+    }
+  }
+  std::unordered_map<std::string, uint8_t> visit_state;
+  visit_state.reserve(parents.size());
+  for (const auto& [start, parent] : parents) {
+    (void)parent;
+    if (visit_state[start] == 2u) {
+      continue;
+    }
+    std::vector<std::string> path;
+    std::string current = start;
+    while (!current.empty()) {
+      const auto parent_it = parents.find(current);
+      if (parent_it == parents.end()) {
+        break;
+      }
+      const uint8_t state = visit_state[current];
+      if (state == 2u) {
+        break;
+      }
+      if (state == 1u) {
+        diagnose("scene entity hierarchy contains a cycle at: " + current);
+        break;
+      }
+      visit_state[current] = 1u;
+      path.push_back(current);
+      current = std::string(parent_it->second);
+    }
+    for (const std::string& id : path) {
+      visit_state[id] = 2u;
+    }
+  }
+
+  return result;
+}
 
 world::Entity SceneInstantiateResult::find(std::string_view scene_id) const {
   const std::string key(scene_id);
@@ -187,6 +464,12 @@ SceneInstantiateResult instantiateScene(world::World& world,
                                         const SceneInstantiateDesc& desc) {
   SceneInstantiateResult result{};
   result.asset_registry = &assets;
+
+  SceneValidationResult validation = validateSceneDocument(document);
+  if (!validation.success()) {
+    result.diagnostics = std::move(validation.diagnostics);
+    return result;
+  }
 
   std::unordered_set<uint64_t> recorded_entities;
   auto record_entity = [&](world::Entity entity) {
@@ -260,8 +543,10 @@ SceneInstantiateResult instantiateScene(world::World& world,
             parent_it == result.entities_by_id.end()) {
           return fail_and_rollback("missing authored entity hierarchy reference");
         }
-        scene.reparent(scene.ensureNode(child_it->second),
-                       scene.ensureNode(parent_it->second));
+        if (!scene.reparent(scene.ensureNode(child_it->second),
+                            scene.ensureNode(parent_it->second))) {
+          return fail_and_rollback("invalid authored entity hierarchy relationship");
+        }
       }
 
       if (desc.attach_authored_components) {
@@ -335,8 +620,11 @@ SceneInstantiateResult instantiateScene(world::World& world,
             return fail_and_rollback("missing prefab parent entity: " +
                                      prefab.parent_entity_id);
           }
-          scene.reparent(scene.ensureNode(instance->root),
-                         scene.ensureNode(parent_it->second));
+          if (!scene.reparent(scene.ensureNode(instance->root),
+                              scene.ensureNode(parent_it->second))) {
+            return fail_and_rollback("invalid prefab parent relationship: " +
+                                     prefab.parent_entity_id);
+          }
         }
       }
     }
@@ -453,6 +741,7 @@ SceneStaticBuildResult buildSceneStaticMetadata(
 
     const world::MeshData* mesh = assets.findMeshAsset(static_component.mesh_asset_key);
     if (mesh == nullptr) {
+      result.success = false;
       result.diagnostics.push_back("static component '" + static_component.id +
                                    "' references missing mesh asset '" +
                                    static_component.mesh_asset_key + "'");
@@ -468,6 +757,7 @@ SceneStaticBuildResult buildSceneStaticMetadata(
     if (computeMeshBounds(*mesh, world_transform, bounds)) {
       result.bounds.push_back(bounds);
     } else {
+      result.success = false;
       result.diagnostics.push_back("static component '" + static_component.id +
                                    "' references mesh asset without vertices '" +
                                    static_component.mesh_asset_key + "'");
@@ -483,9 +773,9 @@ bool destroyScene(world::World& world,
   bool ok = true;
 
   for (auto it = result.prefab_roots.rbegin(); it != result.prefab_roots.rend(); ++it) {
-    if (world.isAlive(*it)) {
-      ok = prefabs::destroyPrefab(world, scene, *it) && ok;
-    }
+    const bool root_was_alive = world.isAlive(*it);
+    const bool destroyed = prefabs::destroyPrefab(world, scene, *it);
+    ok = (destroyed || !root_was_alive) && ok;
   }
 
   for (auto it = result.entities.rbegin(); it != result.entities.rend(); ++it) {

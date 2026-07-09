@@ -8,6 +8,8 @@
 
 
 
+#include <algorithm>
+#include <cmath>
 #include <string_view>
 
 
@@ -21,6 +23,22 @@ class LightPulseSystem final : public world::ISystem {
   void update(world::World& world, float dt) override;
 };
 
+/// Restarts an authored light pulse and makes its entity visible when possible.
+inline bool restartLightPulse(world::World& world, world::Entity entity) {
+  if (!world.isAlive(entity) ||
+      !world.has<components::LightPulseComponent>(entity) ||
+      !world.has<components::LightComponent>(entity)) {
+    return false;
+  }
+  auto& pulse = world.get<components::LightPulseComponent>(entity);
+  pulse.active = true;
+  pulse.elapsed = 0.0f;
+  if (world.has<components::VisibilityComponent>(entity)) {
+    world.get<components::VisibilityComponent>(entity).visible = true;
+  }
+  return true;
+}
+
 }  // namespace karma::visual
 
 
@@ -32,6 +50,15 @@ class LightPulseSystem final : public world::ISystem {
 
 
 namespace karma::visual::particles {
+
+inline bool isFiniteParticlePoint(const math::Vec3& point) {
+  return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
+}
+
+inline bool isValidParticlePath(const std::vector<math::Vec3>& points) {
+  return points.size() >= 2u &&
+         std::all_of(points.begin(), points.end(), isFiniteParticlePoint);
+}
 
 /// \ingroup karma_particles
 /// Binding options for attaching a named particle effect to an entity.
@@ -81,6 +108,22 @@ struct ParticleBeamEntityDesc {
   float uv_repeat = 1.0f;
   float uv_scroll_speed = 0.0f;
   float time_scale = 1.0f;
+
+  [[nodiscard]] bool valid() const {
+    const auto finite_color = [](const math::Color& color) {
+      return std::isfinite(color.r) && std::isfinite(color.g) &&
+             std::isfinite(color.b) && std::isfinite(color.a);
+    };
+    return isValidParticlePath(local_path_points) &&
+           blend_mode != components::ParticleBlendMode::Distortion &&
+           std::isfinite(start_width) && start_width > 0.0f &&
+           std::isfinite(end_width) && end_width > 0.0f &&
+           std::isfinite(edge_softness) && edge_softness >= 0.0f &&
+           std::isfinite(uv_repeat) && uv_repeat >= 0.0f &&
+           std::isfinite(uv_scroll_speed) &&
+           std::isfinite(time_scale) && time_scale >= 0.0f &&
+           finite_color(start_color) && finite_color(end_color);
+  }
 };
 
 /// Binds an existing entity to a named particle effect.
@@ -110,6 +153,8 @@ inline bool bindEffect(world::World& world,
                     });
   if (desc.effect_override.has_value()) {
     world.add(entity, *desc.effect_override);
+  } else if (world.has<components::ParticleEffectOverrideComponent>(entity)) {
+    world.remove<components::ParticleEffectOverrideComponent>(entity);
   }
   return true;
 }
@@ -117,6 +162,9 @@ inline bool bindEffect(world::World& world,
 /// Creates a transform entity and binds it to a named particle effect.
 inline world::Entity createEffectEntity(world::World& world,
                                       const ParticleEffectEntityDesc& desc) {
+  if (desc.effect_key.empty()) {
+    return {};
+  }
   world::Entity entity = world.createEntity();
   if (!desc.name.empty()) {
     world.setName(entity, std::string(desc.name));
@@ -140,6 +188,9 @@ inline world::Entity createEffectEntity(world::World& world,
 /// Creates a transform entity with a particle beam component.
 inline world::Entity createBeamEntity(world::World& world,
                                       const ParticleBeamEntityDesc& desc) {
+  if (!desc.valid()) {
+    return {};
+  }
   world::Entity entity = world.createEntity();
   if (!desc.name.empty()) {
     world.setName(entity, std::string(desc.name));
@@ -169,7 +220,8 @@ inline world::Entity createBeamEntity(world::World& world,
 inline bool setBeamPath(world::World& world,
                         world::Entity entity,
                         std::vector<math::Vec3> local_path_points) {
-  if (!world.isAlive(entity) || !world.has<components::ParticleBeamComponent>(entity)) {
+  if (!world.isAlive(entity) || !world.has<components::ParticleBeamComponent>(entity) ||
+      !isValidParticlePath(local_path_points)) {
     return false;
   }
   world.get<components::ParticleBeamComponent>(entity).local_path_points =
@@ -210,7 +262,7 @@ inline bool restartBeam(world::World& world, world::Entity entity) {
 inline bool setEffectOverrides(world::World& world,
                                world::Entity entity,
                                components::ParticleEffectOverrideComponent effect_override) {
-  if (!world.isAlive(entity)) {
+  if (!world.isAlive(entity) || !world.has<components::ParticleEffectComponent>(entity)) {
     return false;
   }
   world.add(entity, std::move(effect_override));
@@ -222,7 +274,8 @@ inline bool setEffectSourcePath(world::World& world,
                                 world::Entity entity,
                                 std::vector<math::Vec3> points,
                                 bool closed_loop = false) {
-  if (!world.isAlive(entity)) {
+  if (!world.isAlive(entity) || !world.has<components::ParticleEffectComponent>(entity) ||
+      !isValidParticlePath(points)) {
     return false;
   }
   components::ParticleEffectOverrideComponent effect_override =
@@ -240,7 +293,9 @@ inline bool setEffectSourcePath(world::World& world,
 inline bool setEffectSourceBoxExtents(world::World& world,
                                       world::Entity entity,
                                       const math::Vec3& extents) {
-  if (!world.isAlive(entity)) {
+  if (!world.isAlive(entity) || !world.has<components::ParticleEffectComponent>(entity) ||
+      !isFiniteParticlePoint(extents) || extents.x < 0.0f || extents.y < 0.0f ||
+      extents.z < 0.0f) {
     return false;
   }
   components::ParticleEffectOverrideComponent effect_override =
@@ -380,6 +435,7 @@ class ParticleSystem {
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -402,6 +458,11 @@ class AssetRegistry;
 namespace karma::visual::terrain {
 
 using TileCoord = rendering::TerrainTileCoord;
+
+/// Hard limits that keep code-authored terrain settings from causing unbounded allocations.
+inline constexpr int kMaxTerrainStreamingTileRadius = 64;
+inline constexpr uint32_t kMaxTerrainTileResolution = 4097u;
+inline constexpr std::size_t kMaxTerrainOutstandingTileRequests = 64u;
 
 struct TileCoordHash {
   std::size_t operator()(const TileCoord& coord) const noexcept;
@@ -501,7 +562,7 @@ class TerrainSystem {
   struct TileRequest {
     uint64_t entity_key = 0u;
     uint64_t generation = 0u;
-    components::TerrainComponent terrain{};
+    std::shared_ptr<const components::TerrainComponent> terrain;
     TileCoord coord{};
   };
 
@@ -542,6 +603,7 @@ class TerrainSystem {
     rendering::TerrainId terrain = rendering::kInvalidTerrain;
     rendering::TerrainDesc desc{};
     TerrainSourceSettings source_settings{};
+    std::shared_ptr<const components::TerrainComponent> terrain_snapshot;
     uint64_t generation = 1u;
     std::unordered_set<TileCoord, TileCoordHash> desired;
     std::unordered_set<TileCoord, TileCoordHash> loaded;
@@ -564,7 +626,6 @@ class TerrainSystem {
   void cleanupStaleStates(world::World& world);
   void queueTile(uint64_t key,
                  TerrainState& state,
-                 const components::TerrainComponent& terrain,
                  TileCoord coord);
   void drainCompleted();
   void workerLoop();

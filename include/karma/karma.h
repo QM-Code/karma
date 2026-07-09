@@ -1,7 +1,8 @@
 #pragma once
 
 /// \file
-/// Convenience umbrella header for the common Karma public API.
+/// Convenience umbrella header for the profile-neutral Karma public API.
+/// Optional UI adapters are available through `karma/ui.h`.
 
 #include "karma/version.h"
 #include "karma/core.h"
@@ -17,6 +18,5 @@
 #include "karma/app.h"
 #include "karma/visual.h"
 #include "karma/network.h"
-#include "karma/ui.h"
 #include "karma/prefabs.h"
 #include "karma/scenes.h"

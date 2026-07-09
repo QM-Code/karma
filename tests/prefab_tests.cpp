@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -671,6 +672,40 @@ void testUnknownComponentFails(const std::filesystem::path& dir) {
   KARMA_REQUIRE(!instance.has_value());
 }
 
+void testBuiltinRegistryRepairPreservesOverrides() {
+  auto& registry = karma::prefabs::componentSerializerRegistry();
+  registry.clear();
+
+  bool custom_transform_queried = false;
+  KARMA_REQUIRE(registry.registerSerializer(karma::prefabs::ComponentSerializer{
+      .type_name = "TransformComponent",
+      .has =
+          [&](const karma::world::World&, karma::world::Entity) {
+            custom_transform_queried = true;
+            return false;
+          },
+      .serialize =
+          [](const karma::world::World&, karma::world::Entity) {
+            return Json::object();
+          },
+      .deserialize =
+          [](karma::world::World&, karma::world::Entity, const Json&) {
+            return true;
+          },
+  }));
+
+  karma::prefabs::ensureBuiltinComponentSerializers();
+  KARMA_REQUIRE(registry.find("MeshComponent") != nullptr);
+  const auto* transform = registry.find("TransformComponent");
+  KARMA_REQUIRE(transform != nullptr);
+  karma::world::World world;
+  transform->has(world, {});
+  KARMA_REQUIRE(custom_transform_queried);
+
+  registry.clear();
+  karma::prefabs::ensureBuiltinComponentSerializers();
+}
+
 void testMalformedAndInvalidPayloads(const std::filesystem::path& dir) {
   const std::filesystem::path malformed = dir / "malformed.json";
   writeText(malformed, "{ invalid json");
@@ -699,6 +734,59 @@ void testMalformedAndInvalidPayloads(const std::filesystem::path& dir) {
   karma::world::Scene scene_b;
   KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(world_b, scene_b, invalid).has_value());
   KARMA_REQUIRE(world_b.entities().empty());
+
+  const std::filesystem::path disconnected = dir / "disconnected.json";
+  writeText(disconnected,
+            R"({
+  "version": 2,
+  "root": 0,
+  "nodes": [
+    { "id": 0, "name": "Root", "parent": null, "components": {} },
+    { "id": 1, "name": "Orphan", "parent": null, "components": {} }
+  ]
+})");
+  karma::world::World disconnected_world;
+  karma::world::Scene disconnected_scene;
+  KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(disconnected_world,
+                                                   disconnected_scene,
+                                                   disconnected)
+                     .has_value());
+  KARMA_REQUIRE(disconnected_world.entities().empty());
+
+  const std::filesystem::path overflow = dir / "overflow.json";
+  writeText(overflow,
+            R"({
+  "version": 18446744073709551615,
+  "root": 0,
+  "nodes": []
+})");
+  karma::world::World overflow_world;
+  karma::world::Scene overflow_scene;
+  KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(overflow_world, overflow_scene, overflow)
+                     .has_value());
+  KARMA_REQUIRE(overflow_world.entities().empty());
+
+  const std::filesystem::path non_finite = dir / "non_finite.json";
+  writeText(non_finite,
+            R"({
+  "version": 2,
+  "root": 0,
+  "nodes": [{
+    "id": 0,
+    "name": "BrokenFloat",
+    "parent": null,
+    "components": {
+      "LightComponent": { "intensity": 1e100 }
+    }
+  }]
+})");
+  karma::world::World non_finite_world;
+  karma::world::Scene non_finite_scene;
+  KARMA_REQUIRE(!karma::prefabs::instantiatePrefab(non_finite_world,
+                                                   non_finite_scene,
+                                                   non_finite)
+                     .has_value());
+  KARMA_REQUIRE(non_finite_world.entities().empty());
 }
 
 Json variableFeaturePrefabJson() {
@@ -1352,6 +1440,10 @@ void testDestroyPrefab(const std::filesystem::path& dir) {
   KARMA_REQUIRE(instance.has_value());
   const karma::world::Entity root = instance->root;
   const karma::world::Entity child = instance->find("Child");
+  const karma::world::Entity external = world.createEntity();
+  world.add(external, karma::components::TransformComponent{});
+  const karma::world::NodeId external_node = scene.createNode(external);
+  KARMA_REQUIRE(scene.reparent(external_node, scene.findNode(child)));
   KARMA_REQUIRE(world.isAlive(root));
   KARMA_REQUIRE(world.isAlive(child));
   KARMA_REQUIRE(karma::prefabs::destroyPrefab(world, scene, root));
@@ -1359,6 +1451,60 @@ void testDestroyPrefab(const std::filesystem::path& dir) {
   KARMA_REQUIRE(!world.isAlive(child));
   KARMA_REQUIRE(scene.findNode(root) == karma::world::Node::kInvalidId);
   KARMA_REQUIRE(scene.findNode(child) == karma::world::Node::kInvalidId);
+  KARMA_REQUIRE(world.isAlive(external));
+  KARMA_REQUIRE(scene.isAlive(scene.findNode(external)));
+  KARMA_REQUIRE(scene.get(scene.findNode(external)).parent ==
+                karma::world::Node::kInvalidId);
+
+  const auto dead_root_instance = karma::prefabs::instantiatePrefab(world, scene, path);
+  KARMA_REQUIRE(dead_root_instance.has_value());
+  const karma::world::Entity dead_root = dead_root_instance->root;
+  const karma::world::Entity owned_child = dead_root_instance->find("Child");
+  const karma::world::NodeId dead_root_node = scene.findNode(dead_root);
+  world.destroyEntity(dead_root);
+  KARMA_REQUIRE(!world.isAlive(dead_root));
+  KARMA_REQUIRE(scene.isAlive(dead_root_node));
+  KARMA_REQUIRE(karma::prefabs::destroyPrefab(world, scene, dead_root));
+  KARMA_REQUIRE(!world.isAlive(owned_child));
+  KARMA_REQUIRE(!scene.isAlive(dead_root_node));
+}
+
+void testWorldIdentityAndCrossWorldPrefabOwnership(const std::filesystem::path& dir) {
+  const std::filesystem::path path = dir / "cross_world.json";
+  writeText(path, simplePrefabJson());
+
+  karma::world::World first_world;
+  karma::world::World second_world;
+  karma::world::Scene first_scene;
+  karma::world::Scene second_scene;
+  KARMA_REQUIRE(first_world.instanceId() != second_world.instanceId());
+
+  const auto first = karma::prefabs::instantiatePrefab(first_world, first_scene, path);
+  const auto second = karma::prefabs::instantiatePrefab(second_world, second_scene, path);
+  KARMA_REQUIRE(first.has_value());
+  KARMA_REQUIRE(second.has_value());
+  KARMA_REQUIRE(first->root == second->root);
+
+  KARMA_REQUIRE(karma::prefabs::destroyPrefab(first_world, first_scene, first->root));
+  KARMA_REQUIRE(!first_world.isAlive(first->root));
+  KARMA_REQUIRE(second_world.isAlive(second->root));
+
+  const uint64_t transferred_id = second_world.instanceId();
+  karma::world::World moved_world(std::move(second_world));
+  KARMA_REQUIRE(moved_world.instanceId() == transferred_id);
+  KARMA_REQUIRE(second_world.instanceId() != transferred_id);
+  KARMA_REQUIRE(karma::prefabs::destroyPrefab(moved_world, second_scene, second->root));
+
+  alignas(karma::world::World)
+      std::array<std::byte, sizeof(karma::world::World)> storage{};
+  auto* reused = std::construct_at(
+      reinterpret_cast<karma::world::World*>(storage.data()));
+  const uint64_t first_address_id = reused->instanceId();
+  std::destroy_at(reused);
+  reused = std::construct_at(
+      reinterpret_cast<karma::world::World*>(storage.data()));
+  KARMA_REQUIRE(reused->instanceId() != first_address_id);
+  std::destroy_at(reused);
 }
 
 void testMissingAssetPackageKeepsPrefabLoad(const std::filesystem::path& dir) {
@@ -1899,6 +2045,7 @@ void testParticleSystemEffectLifecycleReapply() {
   karma::components::ParticleEffectOverrideComponent effect_override{};
   effect_override.emission_scale = 0.5f;
   effect_override.size_scale = 2.0f;
+  effect_override.radius_scale = 2.0f;
   effect_override.alpha_scale = 0.5f;
   effect_override.texture_key = "spark/override_texture";
   effect_override.source_shape = karma::components::ParticleSourceShape::Line;
@@ -1925,7 +2072,8 @@ void testParticleSystemEffectLifecycleReapply() {
   KARMA_REQUIRE(nearly(applied.start_color.a, 0.4f));
   KARMA_REQUIRE(applied.source_shape == karma::components::ParticleSourceShape::Line);
   KARMA_REQUIRE(applied.source_path_points.size() == 2u);
-  KARMA_REQUIRE(nearly(applied.source_jitter_radius, 0.25f));
+  KARMA_REQUIRE(nearly(applied.source_path_points[1].x, 4.0f));
+  KARMA_REQUIRE(nearly(applied.source_jitter_radius, 0.5f));
 
   auto& override_component =
       world.get<karma::components::ParticleEffectOverrideComponent>(entity);
@@ -1954,6 +2102,53 @@ void testParticleSystemEffectLifecycleReapply() {
   KARMA_REQUIRE(!reapplied.enabled);
   KARMA_REQUIRE(!reapplied.playing);
   KARMA_REQUIRE(nearly(reapplied.start_delay, 0.75f));
+}
+
+void testParticleAuthoringHelpersRejectInvalidState() {
+  karma::world::World world;
+  const karma::world::Entity unbound = world.createEntity();
+  KARMA_REQUIRE(!karma::visual::particles::setEffectOverrides(
+      world, unbound, karma::components::ParticleEffectOverrideComponent{}));
+
+  const karma::world::Entity invalid_effect =
+      karma::visual::particles::createEffectEntity(
+          world, karma::visual::particles::ParticleEffectEntityDesc{});
+  KARMA_REQUIRE(!invalid_effect.isValid());
+
+  const karma::world::Entity effect = karma::visual::particles::createEffectEntity(
+      world,
+      karma::visual::particles::ParticleEffectEntityDesc{
+          .effect_key = "effects/test",
+          .effect_override = karma::components::ParticleEffectOverrideComponent{},
+      });
+  KARMA_REQUIRE(effect.isValid());
+  KARMA_REQUIRE(world.has<karma::components::ParticleEffectOverrideComponent>(effect));
+  KARMA_REQUIRE(karma::visual::particles::bindEffect(
+      world,
+      effect,
+      karma::visual::particles::ParticleEffectBindingDesc{
+          .effect_key = "effects/rebound",
+      }));
+  KARMA_REQUIRE(!world.has<karma::components::ParticleEffectOverrideComponent>(effect));
+  KARMA_REQUIRE(!karma::visual::particles::setEffectSourcePath(
+      world, effect, {{0.0f, 0.0f, 0.0f}}));
+  KARMA_REQUIRE(!karma::visual::particles::setEffectSourceBoxExtents(
+      world, effect, {-1.0f, 1.0f, 1.0f}));
+
+  const karma::world::Entity invalid_beam = karma::visual::particles::createBeamEntity(
+      world, karma::visual::particles::ParticleBeamEntityDesc{});
+  KARMA_REQUIRE(!invalid_beam.isValid());
+
+  const karma::world::Entity beam = karma::visual::particles::createBeamEntity(
+      world,
+      karma::visual::particles::ParticleBeamEntityDesc{
+          .local_path_points = {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+      });
+  KARMA_REQUIRE(beam.isValid());
+  KARMA_REQUIRE(!karma::visual::particles::setBeamPath(
+      world, beam, {{0.0f, 0.0f, 0.0f}}));
+  KARMA_REQUIRE(
+      world.get<karma::components::ParticleBeamComponent>(beam).local_path_points.size() == 2u);
 }
 
 void testLightPulseSystem() {
@@ -1992,6 +2187,13 @@ void testLightPulseSystem() {
   KARMA_REQUIRE(nearly(light.intensity, 0.0f));
   KARMA_REQUIRE(nearly(light.range, 0.1f));
   KARMA_REQUIRE(!visibility.visible);
+
+  KARMA_REQUIRE(karma::visual::restartLightPulse(world, entity));
+  KARMA_REQUIRE(world.get<karma::components::LightPulseComponent>(entity).active);
+  KARMA_REQUIRE(nearly(world.get<karma::components::LightPulseComponent>(entity).elapsed, 0.0f));
+  KARMA_REQUIRE(visibility.visible);
+  system.update(world, 0.0f);
+  KARMA_REQUIRE(nearly(light.intensity, 10.0f));
 }
 
 void testExplosionPrefabDirectLoad() {
@@ -2423,6 +2625,7 @@ void testParticleStatsReportFormatting() {
 
 int main() {
   const std::filesystem::path dir = makeTempDir();
+  testBuiltinRegistryRepairPreservesOverrides();
   testSaveLoadSingleEntity(dir);
   testInstancedMeshLodPrefabRoundTrip(dir);
   testColliderComponentPrefabRoundTrips(dir);
@@ -2437,6 +2640,7 @@ int main() {
   testSingleImageTerrainComponentPrefabRoundTrip(dir);
   testMigratedPrefabAssetsDoNotUseLegacyComponentNames();
   testDestroyPrefab(dir);
+  testWorldIdentityAndCrossWorldPrefabOwnership(dir);
   testMissingAssetPackageKeepsPrefabLoad(dir);
   testAssetPackageParsingSuccessAndFailure(dir);
   testAssetPackageMissingRegistryAndResourceFailure(dir);
@@ -2448,6 +2652,7 @@ int main() {
   testParticleBeamComponentPrefabRoundTrip(dir);
   testParticleBeamComponentValidation(dir);
   testParticleSystemEffectLifecycleReapply();
+  testParticleAuthoringHelpersRejectInvalidState();
   testParticleStatsReportFormatting();
   testLightPulseSystem();
   testExplosionPrefabDirectLoad();

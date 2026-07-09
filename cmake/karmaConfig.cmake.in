@@ -76,6 +76,21 @@ if (NOT TARGET glm::glm AND KARMA_CONFIG_FETCH_DEPS)
 endif()
 _karma_require_target(glm::glm glm)
 
+find_package(meshoptimizer QUIET CONFIG)
+_karma_alias_target(meshoptimizer::meshoptimizer meshoptimizer)
+if (NOT TARGET meshoptimizer::meshoptimizer AND KARMA_CONFIG_FETCH_DEPS)
+  set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(MESHOPT_BUILD_GLTFPACK OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    meshoptimizer
+    GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+    GIT_TAG v1.0.1
+  )
+  FetchContent_MakeAvailable(meshoptimizer)
+  _karma_alias_target(meshoptimizer::meshoptimizer meshoptimizer)
+endif()
+_karma_require_target(meshoptimizer::meshoptimizer meshoptimizer)
+
 find_package(spdlog QUIET CONFIG)
 _karma_alias_target(spdlog::spdlog spdlog)
 if (NOT TARGET spdlog::spdlog AND KARMA_CONFIG_FETCH_DEPS)
@@ -194,7 +209,7 @@ if (@KARMA_WINDOW_BACKEND_SDL@ OR @KARMA_AUDIO_BACKEND_SDL@)
     FetchContent_Declare(
       SDL3
       GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-      GIT_TAG release-3.1.8
+      GIT_TAG release-3.2.0
     )
     FetchContent_MakeAvailable(SDL3)
   endif()
@@ -216,6 +231,7 @@ if (@KARMA_RENDER_BACKEND_DILIGENT@)
     set(DILIGENT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
     set(DILIGENT_BUILD_FX OFF CACHE BOOL "" FORCE)
     set(DILIGENT_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(DILIGENT_INSTALL_CORE OFF CACHE BOOL "" FORCE)
     set(DILIGENT_NO_FORMAT_VALIDATION ON CACHE BOOL "" FORCE)
     set(DILIGENT_MSVC_COMPILE_OPTIONS "" CACHE STRING "" FORCE)
     set(DILIGENT_CLANG_COMPILE_OPTIONS "" CACHE STRING "" FORCE)
@@ -282,6 +298,12 @@ if (@KARMA_ENABLE_RMLUI@)
   endif()
   _karma_alias_target(RmlUi::Core rmlui_core)
   if (NOT TARGET RmlUi::Core AND KARMA_CONFIG_FETCH_DEPS)
+    find_package(Freetype 2.6 QUIET)
+    if (NOT TARGET Freetype::Freetype)
+      message(FATAL_ERROR
+        "Fetched RmlUi 6.0 requires FreeType 2.6 or newer. Install a current "
+        "FreeType development package or correct stale FREETYPE_* cache paths.")
+    endif()
     set(RMLUI_SVG_PLUGIN ON CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)

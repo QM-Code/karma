@@ -1,8 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cmath>
 
 #include <DetourNavMeshQuery.h>
@@ -32,7 +32,20 @@ inline bool failed(dtStatus status) {
 }
 
 inline float randomUnit() {
-  return static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
+  static std::atomic<uint64_t> next_seed{0x9e3779b97f4a7c15ull};
+  thread_local uint64_t state = [] {
+    uint64_t seed = next_seed.fetch_add(0x9e3779b97f4a7c15ull,
+                                        std::memory_order_relaxed);
+    return seed != 0 ? seed : 0xd1b54a32d192ed03ull;
+  }();
+
+  // xorshift64*: each query thread owns its state; the top 24 bits map exactly
+  // into the mantissa range required by Detour's [0, 1) callback.
+  state ^= state >> 12u;
+  state ^= state << 25u;
+  state ^= state >> 27u;
+  const uint64_t value = state * 0x2545f4914f6cdd1dull;
+  return static_cast<float>(value >> 40u) * (1.0f / 16777216.0f);
 }
 
 inline void applyDetourFilter(dtQueryFilter& out, const NavQueryFilter& filter) {

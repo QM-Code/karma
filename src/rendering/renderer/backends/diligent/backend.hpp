@@ -107,6 +107,8 @@ class DiligentBackend final : public Backend {
 	                           const rendering::GraphicsDeviceCreateInfo& create_info = {});
   ~DiligentBackend() override;
 
+  bool isValid() const override { return device_ && context_ && swap_chain_; }
+
   void beginFrame(const rendering::FrameInfo& frame) override;
   void endFrame() override;
   void resize(int width, int height) override;
@@ -1074,12 +1076,22 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_scissor_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_scissor_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_premultiplied_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_scissor_premultiplied_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_premultiplied_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_scissor_premultiplied_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_scissor_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_scissor_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_premultiplied_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_scissor_premultiplied_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_premultiplied_;
+  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_scissor_premultiplied_;
   Diligent::IShaderResourceVariable* ui_texture_var_ = nullptr;
   Diligent::IShaderResourceVariable* ui_texture_scissor_var_ = nullptr;
+  Diligent::IShaderResourceVariable* ui_texture_premultiplied_var_ = nullptr;
+  Diligent::IShaderResourceVariable* ui_texture_scissor_premultiplied_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_ib_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_cb_;

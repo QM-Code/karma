@@ -157,24 +157,37 @@ uint32_t scaleParticleCount(uint32_t count, float scale) {
   return static_cast<uint32_t>(scaled);
 }
 
+float nonNegativeFinite(float value) {
+  return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f;
+}
+
+float finiteOrZero(float value) {
+  return std::isfinite(value) ? value : 0.0f;
+}
+
+void sanitizeColor(math::Color& color) {
+  color.r = finiteOrZero(color.r);
+  color.g = finiteOrZero(color.g);
+  color.b = finiteOrZero(color.b);
+  color.a = finiteOrZero(color.a);
+}
+
 void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideComponent& effect_override,
                                   components::ParticleEmitterComponent& emitter) {
   if (!effect_override.active) {
     return;
   }
 
-  const float time_scale = std::max(effect_override.time_scale, 0.0f);
-  const float emission_scale =
-      std::isfinite(effect_override.emission_scale)
-          ? std::max(effect_override.emission_scale, 0.0f)
-          : 0.0f;
-  const float spawn_rate_scale = std::max(effect_override.spawn_rate_scale, 0.0f);
-  const float lifetime_scale = std::max(effect_override.lifetime_scale, 0.0f);
-  const float size_scale = std::max(effect_override.size_scale, 0.0f);
-  const float radius_scale = std::max(effect_override.radius_scale, 0.0f);
-  const float velocity_scale = std::max(effect_override.velocity_scale, 0.0f);
-  const float angular_velocity_scale = std::max(effect_override.angular_velocity_scale, 0.0f);
-  const float alpha_scale = std::max(effect_override.alpha_scale, 0.0f);
+  const float time_scale = nonNegativeFinite(effect_override.time_scale);
+  const float emission_scale = nonNegativeFinite(effect_override.emission_scale);
+  const float spawn_rate_scale = nonNegativeFinite(effect_override.spawn_rate_scale);
+  const float lifetime_scale = nonNegativeFinite(effect_override.lifetime_scale);
+  const float size_scale = nonNegativeFinite(effect_override.size_scale);
+  const float radius_scale = nonNegativeFinite(effect_override.radius_scale);
+  const float velocity_scale = nonNegativeFinite(effect_override.velocity_scale);
+  const float angular_velocity_scale =
+      nonNegativeFinite(effect_override.angular_velocity_scale);
+  const float alpha_scale = nonNegativeFinite(effect_override.alpha_scale);
 
   emitter.time_scale *= time_scale;
   emitter.max_particles = scaleParticleCount(emitter.max_particles, emission_scale);
@@ -186,18 +199,6 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   emitter.start_size_max *= size_scale;
   emitter.end_size_min *= size_scale;
   emitter.end_size_max *= size_scale;
-  emitter.source_box_extents.x *= radius_scale;
-  emitter.source_box_extents.y *= radius_scale;
-  emitter.source_box_extents.z *= radius_scale;
-  emitter.source_dimensions.x *= radius_scale;
-  emitter.source_dimensions.y *= radius_scale;
-  emitter.source_dimensions.z *= radius_scale;
-  emitter.source_radius_min *= radius_scale;
-  emitter.source_radius_max *= radius_scale;
-  emitter.source_inner_radius *= radius_scale;
-  emitter.source_outer_radius *= radius_scale;
-  emitter.source_height *= radius_scale;
-  emitter.source_jitter_radius *= radius_scale;
   emitter.radial_speed_min *= velocity_scale;
   emitter.radial_speed_max *= velocity_scale;
   emitter.velocity_min.x *= velocity_scale;
@@ -218,6 +219,8 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   if (effect_override.end_color.has_value()) {
     emitter.end_color = *effect_override.end_color;
   }
+  sanitizeColor(emitter.start_color);
+  sanitizeColor(emitter.end_color);
   emitter.start_color.a *= alpha_scale;
   emitter.end_color.a *= alpha_scale;
 
@@ -268,6 +271,48 @@ void applyEffectOverrideToEmitter(const components::ParticleEffectOverrideCompon
   }
   if (effect_override.source_distribution.has_value()) {
     emitter.source_distribution = *effect_override.source_distribution;
+  }
+
+  emitter.source_box_extents.x =
+      nonNegativeFinite(emitter.source_box_extents.x) * radius_scale;
+  emitter.source_box_extents.y =
+      nonNegativeFinite(emitter.source_box_extents.y) * radius_scale;
+  emitter.source_box_extents.z =
+      nonNegativeFinite(emitter.source_box_extents.z) * radius_scale;
+  emitter.source_dimensions.x =
+      nonNegativeFinite(emitter.source_dimensions.x) * radius_scale;
+  emitter.source_dimensions.y =
+      nonNegativeFinite(emitter.source_dimensions.y) * radius_scale;
+  emitter.source_dimensions.z =
+      nonNegativeFinite(emitter.source_dimensions.z) * radius_scale;
+  emitter.source_radius_min = nonNegativeFinite(emitter.source_radius_min) * radius_scale;
+  emitter.source_radius_max = nonNegativeFinite(emitter.source_radius_max) * radius_scale;
+  emitter.source_inner_radius = nonNegativeFinite(emitter.source_inner_radius) * radius_scale;
+  emitter.source_outer_radius = nonNegativeFinite(emitter.source_outer_radius) * radius_scale;
+  emitter.source_height = nonNegativeFinite(emitter.source_height) * radius_scale;
+  emitter.source_jitter_radius =
+      nonNegativeFinite(emitter.source_jitter_radius) * radius_scale;
+  emitter.source_angle = finiteOrZero(emitter.source_angle);
+  for (math::Vec3& point : emitter.source_path_points) {
+    point.x = finiteOrZero(point.x) * radius_scale;
+    point.y = finiteOrZero(point.y) * radius_scale;
+    point.z = finiteOrZero(point.z) * radius_scale;
+  }
+
+  if (emitter.particle_lifetime_min > emitter.particle_lifetime_max) {
+    std::swap(emitter.particle_lifetime_min, emitter.particle_lifetime_max);
+  }
+  if (emitter.start_size_min > emitter.start_size_max) {
+    std::swap(emitter.start_size_min, emitter.start_size_max);
+  }
+  if (emitter.end_size_min > emitter.end_size_max) {
+    std::swap(emitter.end_size_min, emitter.end_size_max);
+  }
+  if (emitter.source_radius_min > emitter.source_radius_max) {
+    std::swap(emitter.source_radius_min, emitter.source_radius_max);
+  }
+  if (emitter.source_inner_radius > emitter.source_outer_radius) {
+    std::swap(emitter.source_inner_radius, emitter.source_outer_radius);
   }
 }
 
@@ -378,7 +423,7 @@ rendering::ParticleEmitterGpuDesc makeRendererEmitterDesc(
     desc.instance_id = 1u;
   }
   desc.restart_count = restart_count;
-  desc.delta_seconds = std::max(dt, 0.0f);
+  desc.delta_seconds = std::isfinite(dt) ? std::max(dt, 0.0f) : 0.0f;
   desc.visible = visible;
   desc.position = transform.getInterpolatedPosition(interpolation_alpha);
   desc.rotation = transform.getInterpolatedRotation(interpolation_alpha);
@@ -481,7 +526,7 @@ rendering::ParticleBeamGpuDesc makeRendererBeamDesc(
     desc.instance_id = 1u;
   }
   desc.restart_count = beam.restart_count;
-  desc.delta_seconds = std::max(dt, 0.0f);
+  desc.delta_seconds = std::isfinite(dt) ? std::max(dt, 0.0f) : 0.0f;
   desc.visible = visible;
   desc.position = transform.getInterpolatedPosition(interpolation_alpha);
   desc.rotation = transform.getInterpolatedRotation(interpolation_alpha);

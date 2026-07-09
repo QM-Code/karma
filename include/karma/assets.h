@@ -395,6 +395,12 @@ class AssetCache {
   const std::filesystem::path& root() const { return config_.root; }
   bool enabled() const { return config_.enabled && !config_.root.empty(); }
 
+  /// Returns true when `key` is a portable cache identifier.
+  static bool isValidCacheKey(std::string_view key);
+  /// Describes why `key` is not a portable cache identifier, or returns empty.
+  static std::string cacheKeyValidationError(std::string_view key);
+
+  /// Removes Karma-managed cache entries while preserving unrelated root files.
   void flush();
 
   std::string makeSourceKey(const std::filesystem::path& source,

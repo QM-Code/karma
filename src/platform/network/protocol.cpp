@@ -57,7 +57,7 @@ void BinaryWriter::writeBytes(std::span<const std::byte> bytes) {
   bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
 }
 
-void BinaryWriter::writeString(const std::string& value) {
+void BinaryWriter::writeString(std::string_view value) {
   const auto size = static_cast<uint32_t>(
       std::min<std::size_t>(value.size(), std::numeric_limits<uint32_t>::max()));
   writeUInt32(size);
@@ -120,12 +120,12 @@ bool BinaryReader::readBytes(uint32_t size, std::vector<std::byte>& value) {
   return true;
 }
 
-bool BinaryReader::readString(std::string& value) {
+bool BinaryReader::readString(std::string& value, std::size_t max_size) {
   uint32_t size = 0;
   if (!readUInt32(size)) {
     return false;
   }
-  if (offset_ > bytes_.size() || size > bytes_.size() - offset_) {
+  if (size > max_size || offset_ > bytes_.size() || size > bytes_.size() - offset_) {
     return false;
   }
   const auto* data = reinterpret_cast<const char*>(bytes_.data() + offset_);
@@ -149,6 +149,9 @@ bool BinaryReader::readRaw(std::byte* out, std::size_t size) {
 
 std::vector<std::byte> encodePacket(PacketHeader header,
                                     std::span<const std::byte> payload) {
+  if (payload.size() > kMaxPacketPayloadSize) {
+    return {};
+  }
   header.magic = kPacketMagic;
   header.version = kProtocolVersion;
   header.header_size = kPacketHeaderSize;
@@ -203,6 +206,11 @@ DecodeResult decodePacket(std::span<const std::byte> bytes,
   }
   if (expected_app_id != 0 && header.app_id != expected_app_id) {
     return {.status = DecodeStatus::AppIdMismatch};
+  }
+  if (header.payload_length > kMaxPacketPayloadSize ||
+      bytes.size() > static_cast<std::size_t>(kPacketHeaderSize) +
+                         kMaxPacketPayloadSize) {
+    return {.status = DecodeStatus::PayloadTooLarge};
   }
   if (header.payload_length > bytes.size()) {
     return {.status = DecodeStatus::PayloadTooLarge};

@@ -1,18 +1,42 @@
 #include "karma/network.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <limits>
+#include <unordered_set>
 #include <utility>
 
-#include "karma/components.h"
 #include "karma/components.h"
 
 namespace karma::network {
 namespace {
 
+constexpr std::size_t kMaxReplicatedTagLength = 4096u;
+
 bool bytesDirty(std::span<const std::byte> previous, std::span<const std::byte> current) {
-  return previous.size() != current.size() ||
+  if (previous.size() != current.size()) {
+    return true;
+  }
+  return !current.empty() &&
          std::memcmp(previous.data(), current.data(), current.size()) != 0;
+}
+
+bool finiteVec3(const math::Vec3& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+bool finiteQuat(const math::Quat& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) &&
+         std::isfinite(value.z) && std::isfinite(value.w);
+}
+
+bool validAuthorityMode(uint8_t value) {
+  return value <= static_cast<uint8_t>(components::AuthorityMode::Custom);
+}
+
+bool validReplicationPolicy(uint8_t value) {
+  return value <= static_cast<uint8_t>(components::ReplicationPolicy::OwnerInput);
 }
 
 void writeVec3(network::BinaryWriter& writer, const math::Vec3& value) {
@@ -48,9 +72,17 @@ bool encodeTransform(const world::World& world,
     return false;
   }
   const auto& transform = world.get<components::TransformComponent>(entity);
-  writeVec3(writer, transform.getPosition());
-  writeQuat(writer, transform.getRotation());
-  writeVec3(writer, transform.getScale());
+  const math::Vec3 position = transform.getPosition();
+  const math::Quat rotation = transform.getRotation();
+  const math::Vec3 scale = transform.getScale();
+  const float rotation_length_squared = math::lengthSquared(rotation);
+  if (!finiteVec3(position) || !finiteVec3(scale) || !finiteQuat(rotation) ||
+      !std::isfinite(rotation_length_squared) || rotation_length_squared <= 1.0e-12f) {
+    return false;
+  }
+  writeVec3(writer, position);
+  writeQuat(writer, math::normalize(rotation));
+  writeVec3(writer, scale);
   return true;
 }
 
@@ -59,10 +91,19 @@ bool applyTransform(world::World& world,
                     network::BinaryReader& reader,
                     bool server_override) {
   (void)server_override;
+  constexpr std::size_t kEncodedTransformSize = 10u * sizeof(float);
+  if (reader.remaining() != kEncodedTransformSize) {
+    return false;
+  }
   math::Vec3 position{};
   math::Quat rotation{};
   math::Vec3 scale{1.0f, 1.0f, 1.0f};
   if (!readVec3(reader, position) || !readQuat(reader, rotation) || !readVec3(reader, scale)) {
+    return false;
+  }
+  const float rotation_length_squared = math::lengthSquared(rotation);
+  if (!finiteVec3(position) || !finiteVec3(scale) || !finiteQuat(rotation) ||
+      !std::isfinite(rotation_length_squared) || rotation_length_squared <= 1.0e-12f) {
     return false;
   }
   if (!world.has<components::TransformComponent>(entity)) {
@@ -70,7 +111,7 @@ bool applyTransform(world::World& world,
   }
   auto& transform = world.get<components::TransformComponent>(entity);
   transform.setPosition(position);
-  transform.setRotation(rotation);
+  transform.setRotation(math::normalize(rotation));
   transform.setScale(scale);
   return true;
 }
@@ -81,7 +122,11 @@ bool encodeTag(const world::World& world,
   if (!world.has<components::TagComponent>(entity)) {
     return false;
   }
-  writer.writeString(world.get<components::TagComponent>(entity).name);
+  const std::string& name = world.get<components::TagComponent>(entity).name;
+  if (name.size() > kMaxReplicatedTagLength) {
+    return false;
+  }
+  writer.writeString(name);
   return true;
 }
 
@@ -91,7 +136,7 @@ bool applyTag(world::World& world,
               bool server_override) {
   (void)server_override;
   std::string name;
-  if (!reader.readString(name)) {
+  if (!reader.readString(name, kMaxReplicatedTagLength) || !reader.exhausted()) {
     return false;
   }
   world.add(entity, components::TagComponent{.name = std::move(name)});
@@ -140,6 +185,9 @@ bool readAuthority(network::BinaryReader& reader,
       !reader.readUInt8(server_can_override)) {
     return false;
   }
+  if (!validAuthorityMode(mode) || server_can_override > 1u) {
+    return false;
+  }
   authority.mode = static_cast<components::AuthorityMode>(mode);
   authority.owner_peer = owner;
   authority.server_can_override = server_can_override != 0;
@@ -179,9 +227,10 @@ struct EventStamp {
 
 bool stampOlder(EventStamp candidate, EventStamp latest) {
   if (candidate.tick != latest.tick) {
-    return candidate.tick < latest.tick;
+    return network::isPacketSequenceNewer(latest.tick, candidate.tick);
   }
-  return candidate.sequence < latest.sequence;
+  return candidate.sequence != latest.sequence &&
+         network::isPacketSequenceNewer(latest.sequence, candidate.sequence);
 }
 
 void accumulateEventStats(NetworkRuntimeStats& stats, const network::SessionEvent& event) {
@@ -225,8 +274,7 @@ bool ComponentReplicationRegistry::registerReplicator(ComponentReplicator replic
   if (!replicator.is_dirty) {
     replicator.is_dirty = bytesDirty;
   }
-  replicators_[replicator.component_type] = std::move(replicator);
-  return true;
+  return replicators_.emplace(replicator.component_type, std::move(replicator)).second;
 }
 
 const ComponentReplicator* ComponentReplicationRegistry::find(uint32_t component_type) const {
@@ -264,13 +312,33 @@ void ServerReplicationState::reset() {
 }
 
 void ServerReplicationState::ensureNetworkIds(world::World& world) {
+  std::unordered_set<components::NetworkEntityId> used_ids;
   for (const world::Entity entity : world.view<components::NetworkIdentityComponent>()) {
     auto& identity = world.get<components::NetworkIdentityComponent>(entity);
-    if (identity.id == components::kInvalidNetworkEntityId) {
-      identity.id = next_id_++;
-    } else if (identity.id >= next_id_) {
-      next_id_ = identity.id + 1;
+    if (identity.id != components::kInvalidNetworkEntityId &&
+        used_ids.insert(identity.id).second) {
+      continue;
     }
+    identity.id = components::kInvalidNetworkEntityId;
+  }
+
+  const auto advance_id = [](components::NetworkEntityId id) {
+    return id == std::numeric_limits<components::NetworkEntityId>::max() ? 1u : id + 1u;
+  };
+  for (const world::Entity entity : world.view<components::NetworkIdentityComponent>()) {
+    auto& identity = world.get<components::NetworkIdentityComponent>(entity);
+    if (identity.id != components::kInvalidNetworkEntityId) {
+      continue;
+    }
+    if (next_id_ == components::kInvalidNetworkEntityId) {
+      next_id_ = 1u;
+    }
+    while (used_ids.contains(next_id_)) {
+      next_id_ = advance_id(next_id_);
+    }
+    identity.id = next_id_;
+    used_ids.insert(identity.id);
+    next_id_ = advance_id(next_id_);
   }
 }
 
@@ -352,7 +420,13 @@ network::MultiSendResult ServerReplicationState::replicate(
         continue;
       }
 
+      std::unordered_set<uint32_t> processed_components;
       for (const auto& entry : replicated.components) {
+        if (entry.component_type == 0u ||
+            !validReplicationPolicy(static_cast<uint8_t>(entry.policy)) ||
+            !processed_components.insert(entry.component_type).second) {
+          continue;
+        }
         const ComponentReplicator* replicator = registry.find(entry.component_type);
         if (!replicator) {
           continue;
@@ -436,7 +510,8 @@ bool ServerReplicationState::applyClientComponentEvent(
     bool server_override) {
   if (event.type != network::SessionEventType::ReplicationMessage ||
       (event.message_type != network::MessageType::ComponentSnapshot &&
-       event.message_type != network::MessageType::ComponentDelta)) {
+       event.message_type != network::MessageType::ComponentDelta) ||
+      event.stale_sequence || (!server_override && !event.peer.isValid())) {
     return false;
   }
 
@@ -448,7 +523,9 @@ bool ServerReplicationState::applyClientComponentEvent(
   if (!reader.readUInt64(network_id) ||
       !reader.readUInt32(component_type) ||
       !reader.readUInt32(component_size) ||
-      !reader.readBytes(component_size, component_bytes)) {
+      !reader.readBytes(component_size, component_bytes) ||
+      !reader.exhausted() ||
+      network_id == components::kInvalidNetworkEntityId || component_type == 0u) {
     return false;
   }
 
@@ -479,7 +556,8 @@ bool ServerReplicationState::applyClientComponentEvent(
     return false;
   }
   network::BinaryReader component_reader(component_bytes);
-  return replicator->decode_apply(world, entity, component_reader, server_override);
+  return replicator->decode_apply(world, entity, component_reader, server_override) &&
+         component_reader.exhausted();
 }
 
 std::size_t ServerReplicationState::SentComponentKeyHash::operator()(
@@ -526,7 +604,14 @@ std::vector<std::byte> ServerReplicationState::encodeSpawn(
   }
 
   std::vector<EncodedComponent> encoded_components;
+  std::unordered_set<uint32_t> encoded_types;
   for (const auto& entry : replicated.components) {
+    if (entry.component_type == 0u ||
+        !validReplicationPolicy(static_cast<uint8_t>(entry.policy)) ||
+        !encoded_types.insert(entry.component_type).second ||
+        encoded_components.size() == std::numeric_limits<uint16_t>::max()) {
+      continue;
+    }
     const ComponentReplicator* replicator = registry.find(entry.component_type);
     if (!replicator) {
       continue;
@@ -642,48 +727,88 @@ bool ClientReplicationState::applySpawn(world::World& world,
     return false;
   }
 
-  world::Entity entity{};
-  auto it = entities_.find(network_id);
-  if (it == entities_.end() || !world.isAlive(it->second)) {
-    entity = world.createEntity();
-    entities_[network_id] = entity;
-  } else {
-    entity = it->second;
+  std::vector<EncodedComponent> encoded_components;
+  encoded_components.reserve(component_count);
+  std::unordered_set<uint32_t> component_types;
+  for (uint16_t i = 0; i < component_count; ++i) {
+    EncodedComponent component;
+    uint8_t policy = 0;
+    uint32_t component_size = 0;
+    if (!reader.readUInt32(component.component_type) ||
+        !reader.readUInt8(policy) ||
+        !reader.readUInt32(component_size) ||
+        !reader.readBytes(component_size, component.bytes) ||
+        component.component_type == 0u || !validReplicationPolicy(policy) ||
+        !component_types.insert(component.component_type).second) {
+      return false;
+    }
+    component.policy = static_cast<components::ReplicationPolicy>(policy);
+    encoded_components.push_back(std::move(component));
+  }
+  if (!reader.exhausted()) {
+    return false;
   }
 
-  world.add(entity, components::NetworkIdentityComponent{.id = network_id});
-  world.add(entity, authority);
+  auto existing_it = entities_.find(network_id);
+  world::Entity existing_entity{};
+  if (existing_it != entities_.end()) {
+    if (world.isAlive(existing_it->second)) {
+      existing_entity = existing_it->second;
+    } else {
+      entities_.erase(existing_it);
+    }
+  }
+  const auto stamp_it = entity_stamps_.find(network_id);
+  const bool duplicate_stamp =
+      stamp_it != entity_stamps_.end() && stamp_it->second.tick == stamp.tick &&
+      stamp_it->second.sequence == stamp.sequence;
+  if (duplicate_stamp && existing_entity.isValid()) {
+    return true;
+  }
+
+  // Decode a full spawn into a staging entity. This keeps the currently mapped
+  // entity untouched if any later component rejects the payload.
+  const world::Entity entity = world.createEntity();
 
   components::NetworkReplicatedComponent replicated{};
   std::vector<uint32_t> applied_components;
-  for (uint16_t i = 0; i < component_count; ++i) {
-    uint32_t component_type = 0;
-    uint8_t policy = 0;
-    uint32_t component_size = 0;
-    std::vector<std::byte> component_bytes;
-    if (!reader.readUInt32(component_type) ||
-        !reader.readUInt8(policy) ||
-        !reader.readUInt32(component_size) ||
-        !reader.readBytes(component_size, component_bytes)) {
-      return false;
-    }
+  try {
+    for (const EncodedComponent& component : encoded_components) {
+      replicated.components.push_back(components::ReplicatedComponentEntry{
+          .component_type = component.component_type,
+          .policy = component.policy,
+      });
 
-    replicated.components.push_back(components::ReplicatedComponentEntry{
-        .component_type = component_type,
-        .policy = static_cast<components::ReplicationPolicy>(policy),
-    });
-
-    const ComponentReplicator* replicator = registry.find(component_type);
-    if (!replicator) {
-      continue;
+      const ComponentReplicator* replicator = registry.find(component.component_type);
+      if (!replicator) {
+        continue;
+      }
+      network::BinaryReader component_reader(component.bytes);
+      if (!replicator->decode_apply(world, entity, component_reader, true) ||
+          !component_reader.exhausted()) {
+        world.destroyEntity(entity);
+        return false;
+      }
+      applied_components.push_back(component.component_type);
     }
-    network::BinaryReader component_reader(component_bytes);
-    if (!replicator->decode_apply(world, entity, component_reader, true)) {
-      return false;
-    }
-    applied_components.push_back(component_type);
+    world.add(entity, components::NetworkIdentityComponent{.id = network_id});
+    world.add(entity, authority);
+    world.add(entity, std::move(replicated));
+  } catch (...) {
+    world.destroyEntity(entity);
+    throw;
   }
-  world.add(entity, std::move(replicated));
+
+  try {
+    entities_.insert_or_assign(network_id, entity);
+  } catch (...) {
+    world.destroyEntity(entity);
+    throw;
+  }
+  if (existing_entity.isValid()) {
+    world.destroyEntity(existing_entity);
+  }
+  forgetComponentStamps(network_id);
   rememberEntityStamp(network_id, stamp);
   for (const uint32_t component_type : applied_components) {
     rememberComponentStamp(network_id, component_type, stamp);
@@ -696,7 +821,8 @@ bool ClientReplicationState::applyDespawn(world::World& world,
                                           ReplicationStamp stamp) {
   network::BinaryReader reader(payload);
   uint64_t network_id = 0;
-  if (!reader.readUInt64(network_id)) {
+  if (!reader.readUInt64(network_id) || !reader.exhausted() ||
+      network_id == components::kInvalidNetworkEntityId) {
     return false;
   }
   if (isEntityEventStale(network_id, stamp)) {
@@ -729,7 +855,9 @@ bool ClientReplicationState::applyComponentUpdate(
   if (!reader.readUInt64(network_id) ||
       !reader.readUInt32(component_type) ||
       !reader.readUInt32(component_size) ||
-      !reader.readBytes(component_size, component_bytes)) {
+      !reader.readBytes(component_size, component_bytes) ||
+      !reader.exhausted() ||
+      network_id == components::kInvalidNetworkEntityId || component_type == 0u) {
     return false;
   }
   if (isComponentEventStale(network_id, component_type, stamp)) {
@@ -746,7 +874,8 @@ bool ClientReplicationState::applyComponentUpdate(
     return false;
   }
   network::BinaryReader component_reader(component_bytes);
-  if (!replicator->decode_apply(world, it->second, component_reader, true)) {
+  if (!replicator->decode_apply(world, it->second, component_reader, true) ||
+      !component_reader.exhausted()) {
     return false;
   }
 
@@ -770,7 +899,8 @@ bool ClientReplicationState::applyAuthorityTransfer(world::World& world,
   network::BinaryReader reader(payload);
   uint64_t network_id = 0;
   components::NetworkAuthorityComponent authority{};
-  if (!reader.readUInt64(network_id) || !readAuthority(reader, authority)) {
+  if (!reader.readUInt64(network_id) || !readAuthority(reader, authority) ||
+      !reader.exhausted() || network_id == components::kInvalidNetworkEntityId) {
     return false;
   }
   if (isEntityEventStale(network_id, stamp)) {

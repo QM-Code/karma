@@ -171,9 +171,11 @@ template <typename T, typename Reader>
 bool readBinaryVector(const std::vector<uint8_t>& bytes,
                       std::size_t& offset,
                       std::vector<T>& out,
+                      std::size_t encoded_element_size,
                       Reader reader) {
   std::size_t count = 0u;
-  if (!readCount(bytes, offset, count)) {
+  if (!readCount(bytes, offset, count) || encoded_element_size == 0u ||
+      count > (bytes.size() - offset) / encoded_element_size) {
     return false;
   }
   std::vector<T> parsed;
@@ -228,38 +230,41 @@ std::vector<uint8_t> serializeMeshPayload(const world::MeshData& mesh) {
 bool parseMeshPayload(const std::vector<uint8_t>& payload, world::MeshData& mesh) {
   std::size_t offset = 0u;
   world::MeshData parsed{};
-  if (!readBinaryVector(payload, offset, parsed.vertices, readVec3Binary) ||
-      !readBinaryVector(payload, offset, parsed.normals, readVec3Binary) ||
-      !readBinaryVector(payload, offset, parsed.uvs, readVec2Binary) ||
-      !readBinaryVector(payload, offset, parsed.uvs1, readVec2Binary) ||
-      !readBinaryVector(payload, offset, parsed.tangents, readVec4Binary) ||
-      !readBinaryVector(payload, offset, parsed.joint_indices, readUvec4Binary) ||
-      !readBinaryVector(payload, offset, parsed.joint_weights, readVec4Binary) ||
-      !readBinaryVector(payload, offset, parsed.indices, [](const std::vector<uint8_t>& bytes,
-                                                           std::size_t& read_offset,
-                                                           uint32_t& value) {
+  if (!readBinaryVector(payload, offset, parsed.vertices, 12u, readVec3Binary) ||
+      !readBinaryVector(payload, offset, parsed.normals, 12u, readVec3Binary) ||
+      !readBinaryVector(payload, offset, parsed.uvs, 8u, readVec2Binary) ||
+      !readBinaryVector(payload, offset, parsed.uvs1, 8u, readVec2Binary) ||
+      !readBinaryVector(payload, offset, parsed.tangents, 16u, readVec4Binary) ||
+      !readBinaryVector(payload, offset, parsed.joint_indices, 16u, readUvec4Binary) ||
+      !readBinaryVector(payload, offset, parsed.joint_weights, 16u, readVec4Binary) ||
+      !readBinaryVector(payload, offset, parsed.indices, 4u,
+                        [](const std::vector<uint8_t>& bytes,
+                           std::size_t& read_offset,
+                           uint32_t& value) {
         return readU32(bytes, read_offset, value);
       })) {
     return false;
   }
 
   std::size_t morph_target_count = 0u;
-  if (!readCount(payload, offset, morph_target_count)) {
+  if (!readCount(payload, offset, morph_target_count) ||
+      morph_target_count > (payload.size() - offset) / 24u) {
     return false;
   }
   parsed.morph_targets.reserve(morph_target_count);
   for (std::size_t i = 0u; i < morph_target_count; ++i) {
     world::MeshData::MorphTarget target{};
-    if (!readBinaryVector(payload, offset, target.position_deltas, readVec3Binary) ||
-        !readBinaryVector(payload, offset, target.normal_deltas, readVec3Binary) ||
-        !readBinaryVector(payload, offset, target.tangent_deltas, readVec3Binary)) {
+    if (!readBinaryVector(payload, offset, target.position_deltas, 12u, readVec3Binary) ||
+        !readBinaryVector(payload, offset, target.normal_deltas, 12u, readVec3Binary) ||
+        !readBinaryVector(payload, offset, target.tangent_deltas, 12u, readVec3Binary)) {
       return false;
     }
     parsed.morph_targets.push_back(std::move(target));
   }
 
   std::size_t submesh_count = 0u;
-  if (!readCount(payload, offset, submesh_count)) {
+  if (!readCount(payload, offset, submesh_count) ||
+      submesh_count > (payload.size() - offset) / 12u) {
     return false;
   }
   parsed.submeshes.reserve(submesh_count);
@@ -274,7 +279,8 @@ bool parseMeshPayload(const std::vector<uint8_t>& payload, world::MeshData& mesh
   }
 
   std::size_t material_slot_count = 0u;
-  if (!readCount(payload, offset, material_slot_count)) {
+  if (!readCount(payload, offset, material_slot_count) ||
+      material_slot_count > (payload.size() - offset) / 16u) {
     return false;
   }
   parsed.material_slots.reserve(material_slot_count);

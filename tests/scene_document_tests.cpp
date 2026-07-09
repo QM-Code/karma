@@ -1,10 +1,12 @@
 #include "karma/assets.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -230,6 +232,68 @@ void testMissingRefsRejected() {
   }
 }
 
+void testHierarchyAndNumericValidation() {
+  {
+    Json json = validSceneJson();
+    json["entities"][1]["parent"] = "sun_entity";
+    json["entities"][2]["parent"] = "camera_entity";
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["cameras"][0]["entity_id"] = "root";
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["environment"]["intensity"] = 1e100;
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["environment"]["intensity"] = -0.1f;
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["bakes"][0]["baked_lighting"]["intensity"] = -0.1f;
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["version"] = std::numeric_limits<uint64_t>::max();
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["entities"][0]["transform"]["rotation"] = Json::array({0, 0, 0, 0});
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["cameras"][0]["near_clip"] = 10.0f;
+    json["cameras"][0]["far_clip"] = 1.0f;
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["lights"][0]["intensity"] = -1.0f;
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["cameras"][0]["perspective"] = false;
+    json["cameras"][0]["ortho_left"] = -20.0f;
+    json["cameras"][0]["ortho_right"] = 20.0f;
+    json["cameras"][0]["ortho_top"] = 10.0f;
+    json["cameras"][0]["ortho_bottom"] = -10.0f;
+    const karma::scenes::SceneLoadResult result = loadTempScene(json);
+    KARMA_REQUIRE(result.success());
+    KARMA_REQUIRE(result.document->cameras[0].component.ortho_left == -20.0f);
+    KARMA_REQUIRE(result.document->cameras[0].component.ortho_right == 20.0f);
+  }
+}
+
 void testSceneAssetPackageImportRegistersAndUnloadsScene() {
   const std::filesystem::path dir = makeTempDir();
   writeJson(dir / "level.kscene.json",
@@ -273,6 +337,7 @@ int main() {
   testBadPathsRejected();
   testDuplicateIdsRejected();
   testMissingRefsRejected();
+  testHierarchyAndNumericValidation();
   testSceneAssetPackageImportRegistersAndUnloadsScene();
   return 0;
 }

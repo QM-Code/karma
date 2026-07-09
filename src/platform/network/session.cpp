@@ -1,6 +1,7 @@
 #include "karma/network.h"
 
 #include <algorithm>
+#include <stdexcept>
 #include <utility>
 
 namespace karma::network {
@@ -54,6 +55,11 @@ MultiSendResult accumulate(MultiSendResult result, SendResult send_result) {
     result.first_error = send_result.status;
   }
   return result;
+}
+
+bool sequenceIsStale(uint32_t candidate, uint32_t latest) {
+  return candidate != 0u && latest != 0u &&
+         !isPacketSequenceNewer(candidate, latest);
 }
 
 }  // namespace
@@ -245,24 +251,46 @@ void ServerSession::handlePacket(SessionPeer& peer,
                                  Packet packet,
                                  std::vector<SessionEvent>& out_events) {
   const bool stale_sequence =
-      packet.header.sequence != 0 &&
-      peer.last_received_sequence != 0 &&
-      packet.header.sequence <= peer.last_received_sequence;
-  if (!stale_sequence && packet.header.sequence > peer.last_received_sequence) {
+      sequenceIsStale(packet.header.sequence, peer.last_received_sequence);
+  if (packet.header.sequence != 0u &&
+      (peer.last_received_sequence == 0u ||
+       isPacketSequenceNewer(packet.header.sequence, peer.last_received_sequence))) {
     peer.last_received_sequence = packet.header.sequence;
   }
 
   if (packet.header.message_type == MessageType::HandshakeRequest) {
+    if (stale_sequence) {
+      return;
+    }
+    if (peer.state != SessionPeerState::TransportConnected) {
+      emitProtocolError(peer.id, peer.endpoint, DecodeStatus::UnexpectedMessage, out_events);
+      disconnect(peer.id, DisconnectReason::ProtocolError);
+      return;
+    }
+    BinaryReader request_reader(packet.payload);
+    std::string client_name;
+    if (!request_reader.readString(client_name, kMaxPeerNameLength) ||
+        !request_reader.exhausted()) {
+      emitProtocolError(peer.id, peer.endpoint, DecodeStatus::MalformedPayload, out_events);
+      disconnect(peer.id, DisconnectReason::ProtocolError);
+      return;
+    }
+    peer.name = std::move(client_name);
     BinaryWriter payload;
     payload.writeUInt32(peer.id.value);
     payload.writeUInt32(packet.header.tick);
+    const SendResult handshake_send =
+        sendPacket(peer,
+                   MessageType::HandshakeAccept,
+                   payload.bytes(),
+                   Delivery::Reliable,
+                   0,
+                   packet.header.tick);
+    if (!handshake_send.ok()) {
+      disconnect(peer.id, DisconnectReason::TransportError);
+      return;
+    }
     peer.state = SessionPeerState::Connected;
-    sendPacket(peer,
-               MessageType::HandshakeAccept,
-               payload.bytes(),
-               Delivery::Reliable,
-               0,
-               packet.header.tick);
     out_events.push_back(SessionEvent{
         .type = SessionEventType::PeerConnected,
         .peer = peer.id,
@@ -278,13 +306,16 @@ void ServerSession::handlePacket(SessionPeer& peer,
   }
 
   if (peer.state != SessionPeerState::Connected) {
-    emitProtocolError(peer.id, peer.endpoint, DecodeStatus::Ok, out_events);
+    emitProtocolError(peer.id, peer.endpoint, DecodeStatus::UnexpectedMessage, out_events);
     disconnect(peer.id, DisconnectReason::ProtocolError);
     return;
   }
 
   switch (packet.header.message_type) {
     case MessageType::Disconnect:
+      if (stale_sequence) {
+        break;
+      }
       out_events.push_back(SessionEvent{
           .type = SessionEventType::PeerDisconnected,
           .peer = peer.id,
@@ -300,6 +331,9 @@ void ServerSession::handlePacket(SessionPeer& peer,
       disconnect(peer.id, DisconnectReason::Remote);
       break;
     case MessageType::Ping:
+      if (stale_sequence) {
+        break;
+      }
       sendPacket(peer,
                  MessageType::Pong,
                  packet.payload,
@@ -323,6 +357,9 @@ void ServerSession::handlePacket(SessionPeer& peer,
                                             stale_sequence));
       break;
     case MessageType::InputCommand:
+      if (stale_sequence) {
+        break;
+      }
       out_events.push_back(makePayloadEvent(SessionEventType::InputCommand,
                                             peer.id,
                                             event,
@@ -336,6 +373,12 @@ void ServerSession::handlePacket(SessionPeer& peer,
                                               event,
                                               packet,
                                               stale_sequence));
+      } else {
+        emitProtocolError(peer.id,
+                          peer.endpoint,
+                          DecodeStatus::UnexpectedMessage,
+                          out_events);
+        disconnect(peer.id, DisconnectReason::ProtocolError);
       }
       break;
   }
@@ -350,12 +393,16 @@ SendResult ServerSession::sendPacket(SessionPeer& peer,
   if (!transport_) {
     return {.status = SendStatus::NotConnected};
   }
+  if (payload.size() > kMaxPacketPayloadSize) {
+    return {.status = SendStatus::InvalidPayload};
+  }
   PacketHeader header{};
   header.app_id = app_id_;
   header.message_type = type;
   header.flags = packetFlagsFor(delivery);
   header.tick = tick;
-  header.sequence = ++peer.last_sent_sequence;
+  peer.last_sent_sequence = nextPacketSequence(peer.last_sent_sequence);
+  header.sequence = peer.last_sent_sequence;
   std::vector<std::byte> bytes = encodePacket(header, payload);
   return transport_->send(peer.id, channel, bytes.data(), bytes.size(), delivery, false);
 }
@@ -378,7 +425,11 @@ ClientSession::ClientSession(std::unique_ptr<IClientTransport> transport,
                              std::string client_name)
     : transport_(std::move(transport)),
       app_id_(app_id),
-      client_name_(std::move(client_name)) {}
+      client_name_(std::move(client_name)) {
+  if (client_name_.size() > kMaxPeerNameLength) {
+    throw std::invalid_argument("Client session name exceeds kMaxPeerNameLength.");
+  }
+}
 
 ConnectResult ClientSession::connect(const std::string& host,
                                      uint16_t port,
@@ -391,7 +442,11 @@ ConnectResult ClientSession::connect(const std::string& host,
   }
   ConnectResult result = transport_->connect(host, port, timeout_ms);
   if (result.connected()) {
-    sendHandshake();
+    const SendResult handshake = sendHandshake();
+    if (!handshake.ok()) {
+      transport_->disconnect(DisconnectReason::TransportError);
+      return {.status = ConnectStatus::BackendError};
+    }
     transport_->flush();
   }
   return result;
@@ -462,10 +517,14 @@ SendResult ClientSession::sendInputCommand(std::span<const std::byte> payload,
   return send(MessageType::InputCommand, payload, Delivery::Unreliable, channel, tick);
 }
 
-void ClientSession::sendHandshake(uint32_t tick) {
+SendResult ClientSession::sendHandshake(uint32_t tick) {
   BinaryWriter payload;
   payload.writeString(client_name_);
-  sendPacket(MessageType::HandshakeRequest, payload.bytes(), Delivery::Reliable, 0, tick);
+  return sendPacket(MessageType::HandshakeRequest,
+                    payload.bytes(),
+                    Delivery::Reliable,
+                    0,
+                    tick);
 }
 
 void ClientSession::handleTransportEvent(const TransportEvent& event,
@@ -499,20 +558,41 @@ void ClientSession::handlePacket(const TransportEvent& event,
                                  Packet packet,
                                  std::vector<SessionEvent>& out_events) {
   const bool stale_sequence =
-      packet.header.sequence != 0 &&
-      last_received_sequence_ != 0 &&
-      packet.header.sequence <= last_received_sequence_;
-  if (!stale_sequence && packet.header.sequence > last_received_sequence_) {
+      sequenceIsStale(packet.header.sequence, last_received_sequence_);
+  if (packet.header.sequence != 0u &&
+      (last_received_sequence_ == 0u ||
+       isPacketSequenceNewer(packet.header.sequence, last_received_sequence_))) {
     last_received_sequence_ = packet.header.sequence;
+  }
+
+  if (!connected_ && packet.header.message_type != MessageType::HandshakeAccept) {
+    emitProtocolError(event.peer,
+                      event.endpoint,
+                      DecodeStatus::UnexpectedMessage,
+                      out_events);
+    disconnect(DisconnectReason::ProtocolError);
+    return;
   }
 
   switch (packet.header.message_type) {
     case MessageType::HandshakeAccept: {
+      if (stale_sequence) {
+        break;
+      }
+      if (connected_) {
+        emitProtocolError(event.peer,
+                          event.endpoint,
+                          DecodeStatus::UnexpectedMessage,
+                          out_events);
+        disconnect(DisconnectReason::ProtocolError);
+        return;
+      }
       BinaryReader reader(packet.payload);
       uint32_t peer_id = 0;
       uint32_t server_tick = 0;
-      if (!reader.readUInt32(peer_id) || !reader.readUInt32(server_tick)) {
-        emitProtocolError(event.peer, event.endpoint, DecodeStatus::PayloadLengthMismatch, out_events);
+      if (!reader.readUInt32(peer_id) || !reader.readUInt32(server_tick) ||
+          !reader.exhausted() || peer_id == 0u) {
+        emitProtocolError(event.peer, event.endpoint, DecodeStatus::MalformedPayload, out_events);
         disconnect(DisconnectReason::ProtocolError);
         return;
       }
@@ -531,6 +611,9 @@ void ClientSession::handlePacket(const TransportEvent& event,
       break;
     }
     case MessageType::Disconnect:
+      if (stale_sequence) {
+        break;
+      }
       connected_ = false;
       out_events.push_back(SessionEvent{
           .type = SessionEventType::PeerDisconnected,
@@ -546,6 +629,9 @@ void ClientSession::handlePacket(const TransportEvent& event,
       });
       break;
     case MessageType::Ping:
+      if (stale_sequence) {
+        break;
+      }
       sendPacket(MessageType::Pong,
                  packet.payload,
                  Delivery::Unreliable,
@@ -568,6 +654,9 @@ void ClientSession::handlePacket(const TransportEvent& event,
                                             stale_sequence));
       break;
     case MessageType::InputCommand:
+      if (stale_sequence) {
+        break;
+      }
       out_events.push_back(makePayloadEvent(SessionEventType::InputCommand,
                                             event.peer,
                                             event,
@@ -581,6 +670,12 @@ void ClientSession::handlePacket(const TransportEvent& event,
                                               event,
                                               packet,
                                               stale_sequence));
+      } else {
+        emitProtocolError(event.peer,
+                          event.endpoint,
+                          DecodeStatus::UnexpectedMessage,
+                          out_events);
+        disconnect(DisconnectReason::ProtocolError);
       }
       break;
   }
@@ -594,12 +689,16 @@ SendResult ClientSession::sendPacket(MessageType type,
   if (!transport_ || !transport_->isConnected()) {
     return {.status = SendStatus::NotConnected};
   }
+  if (payload.size() > kMaxPacketPayloadSize) {
+    return {.status = SendStatus::InvalidPayload};
+  }
   PacketHeader header{};
   header.app_id = app_id_;
   header.message_type = type;
   header.flags = packetFlagsFor(delivery);
   header.tick = tick;
-  header.sequence = ++last_sent_sequence_;
+  last_sent_sequence_ = nextPacketSequence(last_sent_sequence_);
+  header.sequence = last_sent_sequence_;
   std::vector<std::byte> bytes = encodePacket(header, payload);
   return transport_->send(channel, bytes.data(), bytes.size(), delivery, false);
 }

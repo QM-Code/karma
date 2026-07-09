@@ -86,19 +86,28 @@ world::MeshData buildOverlayQuadMesh() {
 }
 
 float maxAbsScale(const math::Vec3& scale) {
-  return std::max({std::abs(scale.x), std::abs(scale.y), std::abs(scale.z), 1.0f});
+  const auto finite_abs = [](float value) {
+    return std::isfinite(value) ? std::abs(value) : 0.0f;
+  };
+  return std::max({finite_abs(scale.x), finite_abs(scale.y), finite_abs(scale.z)});
 }
 
 float maxAbsPerpendicularScale(float a, float b) {
-  return std::max({std::abs(a), std::abs(b), 1.0f});
+  const float abs_a = std::isfinite(a) ? std::abs(a) : 0.0f;
+  const float abs_b = std::isfinite(b) ? std::abs(b) : 0.0f;
+  return std::max(abs_a, abs_b);
 }
 
 glm::vec3 safeNormalize(const glm::vec3& value, const glm::vec3& fallback) {
   const float len_sq = glm::dot(value, value);
-  if (len_sq <= 1.0e-8f) {
+  if (!std::isfinite(len_sq) || len_sq <= 1.0e-8f) {
     return fallback;
   }
   return value * glm::inversesqrt(len_sq);
+}
+
+float finiteNonNegative(float value) {
+  return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f;
 }
 
 glm::vec3 toVolumeGlm(const math::Vec3& v) {
@@ -121,6 +130,10 @@ ResolvedVolume resolveVolume(const components::VolumetricComponent& volume,
                              const components::TransformComponent& transform) {
   ResolvedVolume resolved{};
   resolved.center = toVolumeGlm(transform.getPosition());
+  if (!std::isfinite(resolved.center.x) || !std::isfinite(resolved.center.y) ||
+      !std::isfinite(resolved.center.z)) {
+    resolved.center = glm::vec3(0.0f);
+  }
   resolved.axis_x =
       safeNormalize(toVolumeGlm(math::rotateVec(transform.getRotation(), {1.0f, 0.0f, 0.0f})),
                     {1.0f, 0.0f, 0.0f});
@@ -136,15 +149,17 @@ ResolvedVolume resolveVolume(const components::VolumetricComponent& volume,
     const float radius_scale = volume.scale_with_transform
                                    ? maxAbsPerpendicularScale(scale.y, scale.z)
                                    : 1.0f;
-    const float length_scale = volume.scale_with_transform ? std::max(std::abs(scale.x), 1.0f)
+    const float length_scale = volume.scale_with_transform ? finiteNonNegative(std::abs(scale.x))
                                                            : 1.0f;
-    resolved.radius = std::max(volume.radius * radius_scale, kMinVolumeRadius);
+    resolved.radius = std::max(finiteNonNegative(volume.radius) * radius_scale,
+                               kMinVolumeRadius);
     resolved.capsule_half_length =
-        std::max(volume.capsule_half_length * length_scale, 0.0f);
+        finiteNonNegative(volume.capsule_half_length) * length_scale;
     resolved.bounds_radius = resolved.capsule_half_length + resolved.radius;
   } else {
     const float radius_scale = volume.scale_with_transform ? maxAbsScale(scale) : 1.0f;
-    resolved.radius = std::max(volume.radius * radius_scale, kMinVolumeRadius);
+    resolved.radius = std::max(finiteNonNegative(volume.radius) * radius_scale,
+                               kMinVolumeRadius);
     resolved.capsule_half_length = 0.0f;
     resolved.bounds_radius = resolved.radius;
   }
@@ -153,30 +168,54 @@ ResolvedVolume resolveVolume(const components::VolumetricComponent& volume,
 
 components::TransformComponent makeScreenOverlayTransform(
     const components::TransformComponent& camera_transform,
-    float fov_y_degrees,
+    const components::CameraComponent& camera,
     float aspect,
     float depth,
     const OverlayRectNdc& rect) {
-  const float half_height = std::tan(glm::radians(fov_y_degrees) * 0.5f) * depth;
-  const float half_width = half_height * std::max(aspect, 1.0f);
+  float half_width = 1.0f;
+  float half_height = 1.0f;
+  float view_center_x = 0.0f;
+  float view_center_y = 0.0f;
+  if (camera.perspective) {
+    const float fov = std::clamp(
+        std::isfinite(camera.fov_y_degrees) ? camera.fov_y_degrees : 60.0f,
+        1.0f,
+        179.0f);
+    half_height = std::tan(glm::radians(fov) * 0.5f) * depth;
+    half_width = half_height * std::max(aspect, 1.0e-4f);
+  } else {
+    const float left = std::isfinite(camera.ortho_left) ? camera.ortho_left : -1.0f;
+    const float right = std::isfinite(camera.ortho_right) ? camera.ortho_right : 1.0f;
+    const float bottom = std::isfinite(camera.ortho_bottom) ? camera.ortho_bottom : -1.0f;
+    const float top = std::isfinite(camera.ortho_top) ? camera.ortho_top : 1.0f;
+    half_width = std::max(std::abs(right - left) * 0.5f, 1.0e-4f);
+    half_height = std::max(std::abs(top - bottom) * 0.5f, 1.0e-4f);
+    view_center_x = (left + right) * 0.5f;
+    view_center_y = (bottom + top) * 0.5f;
+  }
   const float center_x = (rect.min_x + rect.max_x) * 0.5f;
   const float center_y = (rect.min_y + rect.max_y) * 0.5f;
   const float extent_x = std::max(rect.max_x - rect.min_x, 1.0e-4f) * 0.5f;
   const float extent_y = std::max(rect.max_y - rect.min_y, 1.0e-4f) * 0.5f;
-  const math::Quat rotation = camera_transform.getRotation();
-  const math::Vec3 camera_position = camera_transform.getPosition();
+  const math::Quat rotation = math::normalize(camera_transform.getRotation());
+  const math::Vec3 camera_position =
+      math::isFinite(camera_transform.getPosition()) ? camera_transform.getPosition()
+                                                     : math::Vec3{};
   const math::Vec3 forward = math::normalize(math::rotateVec(rotation, {0.0f, 0.0f, -1.0f}));
   const math::Vec3 right = math::normalize(math::rotateVec(rotation, {1.0f, 0.0f, 0.0f}));
   const math::Vec3 up = math::normalize(math::rotateVec(rotation, {0.0f, 1.0f, 0.0f}));
 
   components::TransformComponent transform{};
   transform.setPosition(
-      {camera_position.x + forward.x * depth + right.x * (center_x * half_width) +
-           up.x * (center_y * half_height),
-       camera_position.y + forward.y * depth + right.y * (center_x * half_width) +
-           up.y * (center_y * half_height),
-       camera_position.z + forward.z * depth + right.z * (center_x * half_width) +
-           up.z * (center_y * half_height)});
+      {camera_position.x + forward.x * depth +
+           right.x * (view_center_x + center_x * half_width) +
+           up.x * (view_center_y + center_y * half_height),
+       camera_position.y + forward.y * depth +
+           right.y * (view_center_x + center_x * half_width) +
+           up.y * (view_center_y + center_y * half_height),
+       camera_position.z + forward.z * depth +
+           right.z * (view_center_x + center_x * half_width) +
+           up.z * (view_center_y + center_y * half_height)});
   transform.setRotation(rotation);
   transform.setScale({half_width * extent_x, half_height * extent_y, 1.0f});
   return transform;
@@ -185,9 +224,13 @@ components::TransformComponent makeScreenOverlayTransform(
 CameraFrame makeCameraFrame(const components::TransformComponent& camera_transform,
                             const components::CameraComponent& camera,
                             float aspect) {
-  const math::Quat camera_rotation = camera_transform.getRotation();
+  const math::Quat camera_rotation = math::normalize(camera_transform.getRotation());
   CameraFrame frame{};
   frame.position = toVolumeGlm(camera_transform.getPosition());
+  if (!std::isfinite(frame.position.x) || !std::isfinite(frame.position.y) ||
+      !std::isfinite(frame.position.z)) {
+    frame.position = glm::vec3(0.0f);
+  }
   frame.forward =
       safeNormalize(toVolumeGlm(math::rotateVec(camera_rotation, {0.0f, 0.0f, -1.0f})),
                     {0.0f, 0.0f, -1.0f});
@@ -197,9 +240,14 @@ CameraFrame makeCameraFrame(const components::TransformComponent& camera_transfo
   frame.up =
       safeNormalize(toVolumeGlm(math::rotateVec(camera_rotation, {0.0f, 1.0f, 0.0f})),
                     {0.0f, 1.0f, 0.0f});
-  frame.tan_half_y = std::tan(glm::radians(camera.fov_y_degrees) * 0.5f);
+  const float fov = std::clamp(
+      std::isfinite(camera.fov_y_degrees) ? camera.fov_y_degrees : 60.0f,
+      1.0f,
+      179.0f);
+  frame.tan_half_y = std::tan(glm::radians(fov) * 0.5f);
   frame.tan_half_x = frame.tan_half_y * std::max(aspect, 1.0e-4f);
-  frame.near_clip = std::max(camera.near_clip, 1.0e-3f);
+  frame.near_clip = std::max(
+      std::isfinite(camera.near_clip) ? camera.near_clip : 0.1f, 1.0e-3f);
   frame.perspective = camera.perspective && frame.tan_half_x > 1.0e-5f &&
                       frame.tan_half_y > 1.0e-5f;
   return frame;
@@ -332,7 +380,10 @@ uint32_t volumeShapeId(components::VolumetricShape shape) {
 }
 
 rendering::InstanceId volumeSlotInstance(uint64_t key, uint32_t slot_id) {
-  return (key << 1u) | static_cast<uint64_t>(slot_id & 1u);
+  uint64_t instance = key ^ 0x9e3779b97f4a7c15ull;
+  instance ^= static_cast<uint64_t>(slot_id) + 0x9e3779b97f4a7c15ull +
+              (instance << 6u) + (instance >> 2u);
+  return instance == rendering::kInvalidInstance ? instance - 1u : instance;
 }
 
 rendering::VolumeDrawParams buildVolumeDrawParams(
@@ -348,7 +399,7 @@ rendering::VolumeDrawParams buildVolumeDrawParams(
   params.capsule_half_length = resolved.capsule_half_length;
   params.shape = volumeShapeId(volume.shape);
   params.slot = slot_id;
-  params.overlay_depth = volume.overlay_depth;
+  params.overlay_depth = finiteNonNegative(volume.overlay_depth);
   params.surface_double_sided = volume.surface_double_sided;
   return params;
 }
@@ -424,6 +475,25 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
 
   ensureSharedResources();
 
+  const std::vector<world::Entity> entities =
+      world.view<components::VolumetricComponent, components::TransformComponent>();
+  std::unordered_set<uint64_t> active_keys;
+  active_keys.reserve(entities.size());
+  for (const world::Entity entity : entities) {
+    active_keys.insert(entityKey(entity));
+  }
+  auto cleanup_stale_states = [&] {
+    for (auto it = runtime_.begin(); it != runtime_.end();) {
+      if (active_keys.contains(it->first)) {
+        ++it;
+        continue;
+      }
+      destroyRuntimeState(it->second);
+      retireVolumeSlotInstances(device_, it->first);
+      it = runtime_.erase(it);
+    }
+  };
+
   world::Entity primary_camera{};
   const components::CameraComponent* camera_component = nullptr;
   const components::TransformComponent* camera_transform = nullptr;
@@ -434,11 +504,13 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
           primary_camera = entity;
           camera_component = &camera;
           camera_transform = &world.get<components::TransformComponent>(entity);
+          return false;
         }
         return true;
       });
 
   if (!primary_camera.isValid() || camera_component == nullptr || camera_transform == nullptr) {
+    cleanup_stale_states();
     return;
   }
 
@@ -458,15 +530,10 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
   const CameraFrame camera_frame =
       makeCameraFrame(interpolated_camera_transform, *camera_component, aspect);
 
-  std::unordered_set<uint64_t> active_keys;
-  const std::vector<world::Entity> entities =
-      world.view<components::VolumetricComponent, components::TransformComponent>();
   for (const world::Entity entity : entities) {
     auto& volume = world.get<components::VolumetricComponent>(entity);
     auto& source_transform = world.get<components::TransformComponent>(entity);
     const uint64_t key = entityKey(entity);
-    active_keys.insert(key);
-
     RuntimeState& state = ensureRuntimeState(entity);
 
     const components::TransformComponent world_transform{
@@ -482,9 +549,10 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
                                  framebuffer_height);
     components::TransformComponent overlay_transform =
         makeScreenOverlayTransform(interpolated_camera_transform,
-                                   camera_component->fov_y_degrees,
+                                   *camera_component,
                                    aspect,
-                                   volume.overlay_depth,
+                                   std::max(finiteNonNegative(volume.overlay_depth),
+                                            camera_frame.near_clip + 1.0e-3f),
                                    overlay_rect);
     auto sync_material_slot = [&](const std::string& key,
                                   uint32_t slot_id,
@@ -540,7 +608,8 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
     state.material_registry_version = assets_ != nullptr ? assets_->version() : 0u;
 
     auto submit_volume_slot = [&](rendering::MaterialId material, uint32_t slot_id) {
-      if (device_ == nullptr || material == rendering::kInvalidMaterial) {
+      if (device_ == nullptr || overlay_mesh_ == rendering::kInvalidMesh ||
+          material == rendering::kInvalidMaterial) {
         return;
       }
       rendering::DrawItem item{};
@@ -560,15 +629,7 @@ void VolumeSystem::update(world::World& world, float dt, float interpolation_alp
     submit_volume_slot(state.surface_material, 1u);
   }
 
-  for (auto it = runtime_.begin(); it != runtime_.end();) {
-    if (active_keys.find(it->first) != active_keys.end()) {
-      ++it;
-      continue;
-    }
-    destroyRuntimeState(it->second);
-    retireVolumeSlotInstances(device_, it->first);
-    it = runtime_.erase(it);
-  }
+  cleanup_stale_states();
 }
 
 }  // namespace karma::visual::volumes

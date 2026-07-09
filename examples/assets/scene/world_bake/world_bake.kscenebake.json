@@ -1,0 +1,51 @@
+{
+  "bake": {
+    "id": "skybox_world",
+    "path": "bakes/world_bake.kbake.json"
+  },
+  "baked_lighting": [],
+  "dependency_hashes": [
+    {
+      "exists": true,
+      "hash": "2cb3cd107760c86b",
+      "id": "world_bake_assets",
+      "kind": "asset_package",
+      "path": "examples/assets/scene/world_bake/assets.package.json"
+    },
+    {
+      "exists": false,
+      "hash": null,
+      "id": "skybox_world",
+      "kind": "bake",
+      "path": "examples/assets/scene/world_bake/bakes/world_bake.kbake.json"
+    },
+    {
+      "exists": true,
+      "hash": "217f7a456fa725c4",
+      "id": "examples/scene/world_bake/world",
+      "kind": "gltf_scene",
+      "path": "examples/assets/scene/world_bake/world.glb"
+    },
+    {
+      "exists": true,
+      "hash": "3f9c35a1b73b4e02",
+      "id": "",
+      "kind": "scene_document",
+      "path": "examples/assets/scene/world_bake/world_bake.kscene.json"
+    }
+  ],
+  "nav_cache_files": [],
+  "scene_fingerprint": "a3c9b4717231ce14",
+  "schema": "karma.scene_bake",
+  "source_scene": "examples/assets/scene/world_bake/world_bake.kscene.json",
+  "static_ids": [
+    "world_scene_static"
+  ],
+  "static_metadata": {
+    "bounds": [],
+    "diagnostics": [],
+    "skipped_static_components": 1,
+    "transforms": []
+  },
+  "version": 1
+}

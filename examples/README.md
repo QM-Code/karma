@@ -40,7 +40,7 @@ Shared example helpers live in `examples/common/`.
 
 - `rendering/gltf_viewer.cpp`: target `rendering_gltf_viewer`, output
   `examples/rendering/gltf_viewer`. Karma-native GLTFViewer-style inspection
-  sample using local copied assets and imported materials.
+  sample using a baked startup scene asset for the DamagedHelmet package.
 - `rendering/postprocess.cpp`: target `rendering_postprocess`, output
   `examples/rendering/postprocess`. Bloom, tone/color controls, SSAO,
   screen-space reflections, TAA, and depth of field.
@@ -71,6 +71,9 @@ Shared example helpers live in `examples/common/`.
 
 - `scene/gltf_import.cpp`: target `scene_gltf_import`, output
   `examples/scene/gltf_import`. Minimal authored glTF/GLB scene import example.
+- `scene/world_bake.cpp`: target `scene_world_bake`, output
+  `examples/scene/world_bake`. Loads the baked world scene document, prefers
+  baked package blobs for the packaged GLB, and renders it with a skybox.
 - `animation/gltf.cpp`: target `animation_gltf`, output `examples/animation/gltf`.
   Rigged glTF/GLB animation showcase using
   `animation_model/source/dustbound_wayfarer_merged_animations.glb` by default,

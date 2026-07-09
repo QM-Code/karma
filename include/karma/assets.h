@@ -141,6 +141,7 @@ struct TextureAsset {
   enum class PayloadFormat : uint32_t {
     RGBA8 = 0u,
     KTX2_BASIS_UASTC = 1u,
+    PreparedUpload = 2u,
   };
 
   enum class Semantic : uint32_t {
@@ -180,6 +181,12 @@ std::optional<PreparedTextureUpload> prepareTextureUpload(
     const TextureAsset& texture,
     TextureRuntimeCapabilities capabilities = {});
 
+/// Stable asset-cache key for a backend-ready texture upload derived from a
+/// source texture and runtime format capabilities.
+std::string preparedTextureUploadCacheKey(
+    const TextureAsset& texture,
+    TextureRuntimeCapabilities capabilities = {});
+
 /// Options used when importing an image file into a CPU texture asset.
 struct TextureImportOptions {
   bool srgb = false;
@@ -208,6 +215,7 @@ struct GltfSceneAssetPrimitive {
   std::string name;
   std::string mesh_key;
   std::string material_key;
+  bool casts_shadows = true;
   uint32_t skin_index = world::kInvalidAnimationIndex;
   std::vector<float> morph_weights;
   std::vector<uint32_t> joint_node_indices;
@@ -245,6 +253,8 @@ struct GltfSceneAsset {
     return root_node < nodes.size();
   }
 };
+
+struct SceneAsset;
 
 /// \ingroup karma_content
 /// Explicit registry for normalized runtime assets.
@@ -329,6 +339,10 @@ class AssetRegistry {
   bool unregisterGltfSceneAsset(const std::string& key);
   const GltfSceneAsset* findGltfSceneAsset(std::string_view key) const;
 
+  bool registerSceneAsset(const std::string& key, SceneAsset scene);
+  bool unregisterSceneAsset(const std::string& key);
+  const SceneAsset* findSceneAsset(std::string_view key) const;
+
   uint64_t version() const;
   uint64_t meshVersion() const;
   uint64_t textureVersion() const;
@@ -363,6 +377,7 @@ struct AssetCacheConfig {
   std::filesystem::path root;
   bool enabled = true;
   bool flush = false;
+  bool ensure_layout = true;
 
   static AssetCacheConfig fromEnvironment();
 };
@@ -393,6 +408,11 @@ class AssetCache {
   bool writeTexture(std::string_view cache_key,
                     const TextureAsset& texture,
                     std::string* diagnostic = nullptr);
+  /// Writes a texture blob without updating the best-effort cache index.
+  /// Useful for derived runtime caches where the deterministic key is enough.
+  bool writeTextureNoIndex(std::string_view cache_key,
+                           const TextureAsset& texture,
+                           std::string* diagnostic = nullptr);
   std::optional<world::MeshData> readMesh(std::string_view cache_key,
                                              std::string* diagnostic = nullptr);
   bool writeMesh(std::string_view cache_key,
@@ -492,6 +512,13 @@ struct AssetPackageOptions {
   AssetCacheConfig cache = AssetCacheConfig::fromEnvironment();
 };
 
+/// Options for writing a portable baked asset package.
+struct AssetPackageBakeOptions {
+  std::string package_id;
+  std::string scene_fingerprint;
+  AssetPackageOptions import_options{};
+};
+
 /// Background asset package import job. `commitAssetPackageJob` is the only API
 /// that mutates a live registry.
 class AssetPackageJob {
@@ -531,6 +558,24 @@ std::optional<AssetPackageHandle> importAssetPackage(AssetRegistry& assets,
                                                      const AssetPackageOptions& options,
                                                      std::string* diagnostic = nullptr);
 
+/// Imports a source package once and writes portable baked blobs into `output_dir`.
+bool bakeAssetPackage(const std::filesystem::path& source_package_path,
+                      const std::filesystem::path& output_dir,
+                      const AssetPackageBakeOptions& options,
+                      std::string* diagnostic = nullptr);
+
+/// Restores a portable baked package from `baked.package.json` and local blobs.
+std::optional<AssetPackageHandle> importBakedAssetPackage(
+    AssetRegistry& assets,
+    const std::filesystem::path& baked_cache_path,
+    std::string* diagnostic = nullptr);
+
+/// Validates that a baked package descriptor, blobs, and source fingerprint are fresh.
+bool checkBakedAssetPackage(const std::filesystem::path& source_package_path,
+                            const std::filesystem::path& baked_cache_path,
+                            const AssetPackageBakeOptions& options,
+                            std::string* diagnostic = nullptr);
+
 /// Imports an asset package on a worker thread without mutating a live registry.
 AssetPackageJob loadAssetPackageAsync(const std::filesystem::path& path,
                                       const AssetPackageOptions& options = {});
@@ -552,6 +597,9 @@ class AssetPackageStore {
 
   std::optional<AssetPackageHandle> acquirePackage(
       const std::filesystem::path& path,
+      std::string* diagnostic = nullptr);
+  std::optional<AssetPackageHandle> acquireBakedPackage(
+      const std::filesystem::path& baked_cache_path,
       std::string* diagnostic = nullptr);
   bool releasePackage(const AssetPackageHandle& package);
   void clear();
@@ -678,3 +726,5 @@ GltfSceneImportResult instantiateGltfSceneAsset(
     const GltfSceneInstantiateOptions& options = {});
 
 }  // namespace karma::world
+
+#include "karma/scenes.h"

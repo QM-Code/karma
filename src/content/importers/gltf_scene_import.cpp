@@ -7,23 +7,30 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+#include <meshoptimizer.h>
 #include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
 #include "karma/core.h"
+#include "../assets/asset_texture_internal.h"
 #include "gltf_document.h"
 #include "gltf_scene_animation_import.h"
 #include "gltf_scene_mesh_import.h"
@@ -53,6 +60,309 @@ bool envFlagEnabled(const char* value) {
 bool startupDiagnosticsEnabled() {
   static const bool enabled = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
   return enabled;
+}
+
+constexpr std::uint32_t kGlbMagic = 0x46546C67u;
+constexpr std::uint32_t kGlbJsonChunk = 0x4E4F534Au;
+constexpr std::uint32_t kGlbBinChunk = 0x004E4942u;
+
+size_t align4(size_t value) {
+  return (value + 3u) & ~size_t{3u};
+}
+
+void writeU32LE(std::ostream& stream, std::uint32_t value) {
+  const unsigned char bytes[] = {
+      static_cast<unsigned char>(value & 0xFFu),
+      static_cast<unsigned char>((value >> 8u) & 0xFFu),
+      static_cast<unsigned char>((value >> 16u) & 0xFFu),
+      static_cast<unsigned char>((value >> 24u) & 0xFFu),
+  };
+  stream.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+}
+
+void removeJsonString(Json& array, std::string_view value) {
+  if (!array.is_array()) {
+    return;
+  }
+  for (auto it = array.begin(); it != array.end();) {
+    if (it->is_string() && it->get<std::string>() == value) {
+      it = array.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+const std::vector<std::uint8_t>* documentBuffer(const GltfDocument& doc,
+                                                std::uint32_t index) {
+  if (index < doc.buffers.size()) {
+    return &doc.buffers[index];
+  }
+  if (index == 0u && !doc.bin.empty()) {
+    return &doc.bin;
+  }
+  return nullptr;
+}
+
+std::string sanitizedStem(const std::filesystem::path& path) {
+  std::string stem = path.stem().string();
+  for (char& c : stem) {
+    const unsigned char value = static_cast<unsigned char>(c);
+    if (std::isalnum(value) == 0 && c != '_' && c != '-') {
+      c = '_';
+    }
+  }
+  return stem.empty() ? "scene" : stem;
+}
+
+std::filesystem::path meshoptDecodedTempPath(const std::filesystem::path& source) {
+  std::error_code ec;
+  std::filesystem::path temp_root = std::filesystem::temp_directory_path(ec);
+  if (ec || temp_root.empty()) {
+    temp_root = std::filesystem::current_path(ec);
+  }
+  const std::filesystem::path dir = temp_root / "karma_gltf_meshopt_decode";
+  std::filesystem::create_directories(dir, ec);
+
+  std::string key = source.lexically_normal().string();
+  if (const auto size = std::filesystem::file_size(source, ec); !ec) {
+    key += ":" + std::to_string(size);
+  }
+  if (const auto stamp = std::filesystem::last_write_time(source, ec); !ec) {
+    key += ":" + std::to_string(stamp.time_since_epoch().count());
+  }
+  return dir / (sanitizedStem(source) + "_" +
+                std::to_string(std::hash<std::string>{}(key)) + ".glb");
+}
+
+bool applyMeshoptFilter(std::string_view filter,
+                        std::vector<std::uint8_t>& data,
+                        size_t count,
+                        size_t stride) {
+  if (filter.empty()) {
+    return true;
+  }
+  if (filter == "OCTAHEDRAL") {
+    meshopt_decodeFilterOct(data.data(), count, stride);
+    return true;
+  }
+  if (filter == "QUATERNION") {
+    meshopt_decodeFilterQuat(data.data(), count, stride);
+    return true;
+  }
+  if (filter == "EXPONENTIAL") {
+    meshopt_decodeFilterExp(data.data(), count, stride);
+    return true;
+  }
+  if (filter == "COLOR") {
+    meshopt_decodeFilterColor(data.data(), count, stride);
+    return true;
+  }
+  return false;
+}
+
+bool decodeMeshoptBufferView(const GltfDocument& doc,
+                             const Json& view,
+                             const Json& extension,
+                             std::vector<std::uint8_t>& out) {
+  const std::uint32_t source_buffer_index = extension.value("buffer", 0u);
+  const std::vector<std::uint8_t>* source_buffer =
+      documentBuffer(doc, source_buffer_index);
+  if (source_buffer == nullptr) {
+    return false;
+  }
+
+  const size_t source_offset = extension.value("byteOffset", size_t{0});
+  const size_t source_length = extension.value("byteLength", size_t{0});
+  if (source_offset > source_buffer->size() ||
+      source_length > source_buffer->size() - source_offset) {
+    return false;
+  }
+
+  const size_t count = extension.value("count", size_t{0});
+  const size_t stride =
+      extension.value("byteStride", view.value("byteStride", size_t{0}));
+  size_t decoded_size = view.value("byteLength", size_t{0});
+  if (decoded_size == 0 && count > 0 && stride > 0 &&
+      count <= std::numeric_limits<size_t>::max() / stride) {
+    decoded_size = count * stride;
+  }
+  if (count == 0 || stride == 0 || decoded_size == 0 ||
+      count > std::numeric_limits<size_t>::max() / stride ||
+      count * stride > decoded_size) {
+    return false;
+  }
+
+  out.assign(decoded_size, 0u);
+  const unsigned char* encoded =
+      reinterpret_cast<const unsigned char*>(source_buffer->data() + source_offset);
+  const std::string mode = extension.value("mode", std::string{});
+  int result = -1;
+  if (mode == "ATTRIBUTES") {
+    result = meshopt_decodeVertexBuffer(out.data(),
+                                        count,
+                                        stride,
+                                        encoded,
+                                        source_length);
+    if (result == 0 &&
+        !applyMeshoptFilter(extension.value("filter", std::string{}),
+                            out,
+                            count,
+                            stride)) {
+      return false;
+    }
+  } else if (mode == "TRIANGLES") {
+    result = meshopt_decodeIndexBuffer(out.data(),
+                                       count,
+                                       stride,
+                                       encoded,
+                                       source_length);
+  } else if (mode == "INDICES") {
+    result = meshopt_decodeIndexSequence(out.data(),
+                                         count,
+                                         stride,
+                                         encoded,
+                                         source_length);
+  } else {
+    return false;
+  }
+  return result == 0;
+}
+
+bool copyPlainBufferView(const GltfDocument& doc,
+                         const Json& view,
+                         std::vector<std::uint8_t>& out) {
+  const std::uint32_t buffer_index = view.value("buffer", 0u);
+  const std::vector<std::uint8_t>* source_buffer =
+      documentBuffer(doc, buffer_index);
+  if (source_buffer == nullptr) {
+    return false;
+  }
+
+  const size_t source_offset = view.value("byteOffset", size_t{0});
+  const size_t source_length = view.value("byteLength", size_t{0});
+  if (source_offset > source_buffer->size() ||
+      source_length > source_buffer->size() - source_offset) {
+    return false;
+  }
+
+  out.assign(source_buffer->begin() + static_cast<std::ptrdiff_t>(source_offset),
+             source_buffer->begin() +
+                 static_cast<std::ptrdiff_t>(source_offset + source_length));
+  return true;
+}
+
+bool writeGlb(const std::filesystem::path& path,
+              const Json& json,
+              const std::vector<std::uint8_t>& bin) {
+  std::string json_text = json.dump();
+  const size_t json_padded_size = align4(json_text.size());
+  const size_t bin_padded_size = align4(bin.size());
+  const size_t total_size =
+      12u + 8u + json_padded_size + 8u + bin_padded_size;
+  if (total_size > std::numeric_limits<std::uint32_t>::max()) {
+    return false;
+  }
+
+  std::ofstream output(path, std::ios::binary);
+  if (!output) {
+    return false;
+  }
+  writeU32LE(output, kGlbMagic);
+  writeU32LE(output, 2u);
+  writeU32LE(output, static_cast<std::uint32_t>(total_size));
+  writeU32LE(output, static_cast<std::uint32_t>(json_padded_size));
+  writeU32LE(output, kGlbJsonChunk);
+  output.write(json_text.data(), static_cast<std::streamsize>(json_text.size()));
+  for (size_t i = json_text.size(); i < json_padded_size; ++i) {
+    output.put(' ');
+  }
+  writeU32LE(output, static_cast<std::uint32_t>(bin_padded_size));
+  writeU32LE(output, kGlbBinChunk);
+  if (!bin.empty()) {
+    output.write(reinterpret_cast<const char*>(bin.data()),
+                 static_cast<std::streamsize>(bin.size()));
+  }
+  for (size_t i = bin.size(); i < bin_padded_size; ++i) {
+    output.put('\0');
+  }
+  return output.good();
+}
+
+std::optional<std::filesystem::path> writeMeshoptDecodedGltf(
+    const std::filesystem::path& source_path) {
+  GltfDocument doc = loadGltfDocument(source_path);
+  if (!doc.valid() || doc.bin.empty() ||
+      !doc.json.contains("bufferViews") ||
+      !doc.json["bufferViews"].is_array()) {
+    return std::nullopt;
+  }
+
+  Json decoded_json = doc.json;
+  Json& buffer_views = decoded_json["bufferViews"];
+  std::vector<std::uint8_t> decoded_bin;
+  bool decoded_any = false;
+
+  for (Json& view : buffer_views) {
+    if (!view.is_object()) {
+      return std::nullopt;
+    }
+
+    const Json* meshopt_extension = nullptr;
+    if (view.contains("extensions") && view["extensions"].is_object() &&
+        view["extensions"].contains("EXT_meshopt_compression") &&
+        view["extensions"]["EXT_meshopt_compression"].is_object()) {
+      meshopt_extension = &view["extensions"]["EXT_meshopt_compression"];
+    }
+
+    std::vector<std::uint8_t> view_bytes;
+    if (meshopt_extension != nullptr) {
+      if (!decodeMeshoptBufferView(doc, view, *meshopt_extension, view_bytes)) {
+        spdlog::warn("Failed to decode EXT_meshopt_compression bufferView in {}",
+                     source_path.string());
+        return std::nullopt;
+      }
+      view["extensions"].erase("EXT_meshopt_compression");
+      if (view["extensions"].empty()) {
+        view.erase("extensions");
+      }
+      decoded_any = true;
+    } else if (!copyPlainBufferView(doc, view, view_bytes)) {
+      return std::nullopt;
+    }
+
+    decoded_bin.resize(align4(decoded_bin.size()), 0u);
+    view["buffer"] = 0u;
+    view["byteOffset"] = decoded_bin.size();
+    view["byteLength"] = view_bytes.size();
+    decoded_bin.insert(decoded_bin.end(), view_bytes.begin(), view_bytes.end());
+  }
+
+  if (!decoded_any) {
+    return std::nullopt;
+  }
+
+  decoded_json["buffers"] =
+      Json::array({Json{{"byteLength", decoded_bin.size()}}});
+  if (decoded_json.contains("extensionsRequired")) {
+    removeJsonString(decoded_json["extensionsRequired"],
+                     "EXT_meshopt_compression");
+    if (decoded_json["extensionsRequired"].empty()) {
+      decoded_json.erase("extensionsRequired");
+    }
+  }
+  if (decoded_json.contains("extensionsUsed")) {
+    removeJsonString(decoded_json["extensionsUsed"], "EXT_meshopt_compression");
+    if (decoded_json["extensionsUsed"].empty()) {
+      decoded_json.erase("extensionsUsed");
+    }
+  }
+
+  const std::filesystem::path decoded_path = meshoptDecodedTempPath(source_path);
+  if (!writeGlb(decoded_path, decoded_json, decoded_bin)) {
+    return std::nullopt;
+  }
+  return decoded_path;
 }
 
 void logGltfStartupDiag(const std::filesystem::path& path,
@@ -181,9 +491,28 @@ rendering::MaterialDesc buildMaterialDesc(const aiMaterial& material) {
     desc.double_sided = two_sided != 0;
   }
 
-  desc.transparent = desc.base_color.a < 0.999f;
-  if (desc.transparent) {
+  if (float alpha_cutoff = desc.alpha_cutoff;
+      material.Get(AI_MATKEY_GLTF_ALPHACUTOFF, alpha_cutoff) == AI_SUCCESS) {
+    desc.alpha_cutoff = alpha_cutoff;
+  }
+
+  aiString alpha_mode;
+  const bool has_gltf_alpha_mode =
+      material.Get(AI_MATKEY_GLTF_ALPHAMODE, alpha_mode) == AI_SUCCESS;
+  const std::string alpha_mode_value = has_gltf_alpha_mode ? alpha_mode.C_Str() : "";
+  if (alpha_mode_value == "MASK" || alpha_mode_value == "mask") {
+    desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Masked;
+    desc.transparent = false;
+  } else if (alpha_mode_value == "BLEND" || alpha_mode_value == "blend") {
     desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
+    desc.transparent = true;
+    desc.depth_write = false;
+  } else {
+    desc.transparent = desc.base_color.a < 0.999f;
+    if (desc.transparent) {
+      desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
+      desc.depth_write = false;
+    }
   }
   return desc;
 }
@@ -255,6 +584,43 @@ void setImportedTextureCoordTransform(rendering::ImportedMaterialData& data,
       glm::vec4(s * sx, c * sy, -0.5f * s - 0.5f * c + 0.5f + ty, 0.0f);
 }
 
+std::filesystem::path resolveImportedTexturePath(
+    const std::filesystem::path& asset_path,
+    const std::string& raw_key) {
+  const std::filesystem::path raw_path = raw_key;
+  std::error_code ec;
+  if (raw_path.is_absolute() && std::filesystem::exists(raw_path, ec)) {
+    return raw_path;
+  }
+
+  const std::filesystem::path base_dir = asset_path.parent_path();
+  const std::filesystem::path direct = base_dir / raw_path;
+  if (std::filesystem::exists(direct, ec)) {
+    return direct;
+  }
+
+  const std::filesystem::path filename = raw_path.filename();
+  if (!filename.empty()) {
+    const std::filesystem::path texture_dir = base_dir / "textures" / filename;
+    if (std::filesystem::exists(texture_dir, ec)) {
+      return texture_dir;
+    }
+
+    const std::filesystem::path sibling = base_dir / filename;
+    if (std::filesystem::exists(sibling, ec)) {
+      return sibling;
+    }
+
+    const std::filesystem::path fbx_media_dir =
+        base_dir / (asset_path.stem().string() + ".fbm") / filename;
+    if (std::filesystem::exists(fbx_media_dir, ec)) {
+      return fbx_media_dir;
+    }
+  }
+
+  return direct;
+}
+
 bool appendImportedTexture(rendering::ImportedMaterialData& data,
                            const aiScene& scene,
                            const aiMaterial& material,
@@ -319,13 +685,148 @@ bool appendImportedTexture(rendering::ImportedMaterialData& data,
       }
     }
   } else {
-    texture.resolved_path = asset_path.parent_path() / raw_key;
+    texture.resolved_path = resolveImportedTexturePath(asset_path, raw_key);
     texture.source_key = texture.resolved_path.string();
   }
 
   setImportedTextureCoordTransform(data, material, type, texture_index, uv_index, texcoord_slot);
   data.textures.push_back(std::move(texture));
   return true;
+}
+
+struct AlphaTextureStats {
+  uint64_t sample_count = 0u;
+  uint64_t near_zero_count = 0u;
+  uint64_t mid_alpha_count = 0u;
+  uint64_t near_opaque_count = 0u;
+  uint8_t min_alpha = 255u;
+  uint8_t max_alpha = 0u;
+  double mean_alpha = 255.0;
+};
+
+std::optional<AlphaTextureStats> alphaTextureStats(
+    const rendering::ImportedMaterialData& data) {
+  const rendering::ImportedMaterialTexture* base_color_texture = nullptr;
+  for (const auto& texture : data.textures) {
+    if (texture.semantic == rendering::ImportedMaterialTextureSemantic::BaseColor) {
+      base_color_texture = &texture;
+      break;
+    }
+  }
+  if (base_color_texture == nullptr) {
+    return std::nullopt;
+  }
+
+  std::optional<assets::Rgba8Image> image =
+      assets::detail::decodeImportedTexture(*base_color_texture);
+  if (!image.has_value() || !image->valid()) {
+    return std::nullopt;
+  }
+
+  AlphaTextureStats stats{};
+  uint64_t alpha_sum = 0u;
+  stats.sample_count = image->pixels.size() / 4u;
+  for (size_t i = 3u; i < image->pixels.size(); i += 4u) {
+    const uint8_t alpha = image->pixels[i];
+    stats.min_alpha = std::min(stats.min_alpha, alpha);
+    stats.max_alpha = std::max(stats.max_alpha, alpha);
+    alpha_sum += alpha;
+    if (alpha < 8u) {
+      stats.near_zero_count += 1u;
+    } else if (alpha < 240u) {
+      stats.mid_alpha_count += 1u;
+    } else {
+      stats.near_opaque_count += 1u;
+    }
+  }
+  if (stats.sample_count == 0u) {
+    return std::nullopt;
+  }
+  stats.mean_alpha = static_cast<double>(alpha_sum) /
+                     static_cast<double>(stats.sample_count);
+  return stats;
+}
+
+void applyAlphaModePolicy(rendering::ImportedMaterialData& data,
+                          const GltfSceneLoadOptions& options) {
+  if (options.alpha_mode_policy != GltfSceneLoadOptions::AlphaModePolicy::AutoCutout ||
+      data.material.alpha_mode != rendering::MaterialDesc::AlphaMode::Blend ||
+      data.material.base_color.a < 0.999f) {
+    return;
+  }
+
+  const std::optional<AlphaTextureStats> stats = alphaTextureStats(data);
+  if (!stats.has_value()) {
+    return;
+  }
+
+  const double sample_count = static_cast<double>(stats->sample_count);
+  const double near_zero_fraction =
+      static_cast<double>(stats->near_zero_count) / sample_count;
+  const double near_opaque_fraction =
+      static_cast<double>(stats->near_opaque_count) / sample_count;
+  const double mid_alpha_fraction =
+      static_cast<double>(stats->mid_alpha_count) / sample_count;
+
+  if (stats->min_alpha >= 180u &&
+      stats->mean_alpha >= 248.0 &&
+      mid_alpha_fraction <= 0.10) {
+    data.material.alpha_mode = rendering::MaterialDesc::AlphaMode::Opaque;
+    data.material.transparent = false;
+    data.material.depth_write = true;
+    return;
+  }
+
+  if (stats->min_alpha <= 8u &&
+      stats->max_alpha >= 240u &&
+      near_zero_fraction >= 0.05 &&
+      near_opaque_fraction >= 0.02) {
+    data.material.alpha_mode = rendering::MaterialDesc::AlphaMode::Masked;
+    data.material.transparent = false;
+    data.material.depth_write = true;
+    data.material.alpha_cutoff = 0.5f;
+    data.material.alpha_dither = mid_alpha_fraction > 0.02;
+  }
+}
+
+bool isBlackEmissiveTexture(const rendering::ImportedMaterialTexture& texture) {
+  std::optional<assets::Rgba8Image> image =
+      assets::detail::decodeImportedTexture(texture);
+  if (!image.has_value() || !image->valid()) {
+    return false;
+  }
+
+  for (size_t i = 0u; i + 2u < image->pixels.size(); i += 4u) {
+    if (image->pixels[i] > 1u ||
+        image->pixels[i + 1u] > 1u ||
+        image->pixels[i + 2u] > 1u) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void pruneBlackEmissiveTextures(rendering::ImportedMaterialData& data) {
+  bool removed_emissive = false;
+  data.textures.erase(
+      std::remove_if(data.textures.begin(),
+                     data.textures.end(),
+                     [&removed_emissive](const rendering::ImportedMaterialTexture& texture) {
+                       if (texture.semantic !=
+                           rendering::ImportedMaterialTextureSemantic::Emissive) {
+                         return false;
+                       }
+                       if (!isBlackEmissiveTexture(texture)) {
+                         return false;
+                       }
+                       removed_emissive = true;
+                       return true;
+                     }),
+      data.textures.end());
+  if (removed_emissive) {
+    data.material.emissive_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    data.material.emissive_strength = 0.0f;
+  }
 }
 
 rendering::ImportedMaterialData buildImportedMaterialData(const aiScene& scene,
@@ -444,7 +945,116 @@ rendering::ImportedMaterialData buildImportedMaterialData(const aiScene& scene,
                         Semantic::Transmission, false, "transmission", kTexCoordTransmission);
   appendImportedTexture(data, scene, material, asset_path, aiTextureType_TRANSMISSION, 1,
                         Semantic::Thickness, false, "thickness", kTexCoordThickness);
+  pruneBlackEmissiveTextures(data);
   return data;
+}
+
+std::string materialName(const aiMaterial& material) {
+  aiString name;
+  if (material.Get(AI_MATKEY_NAME, name) == AI_SUCCESS && name.length > 0) {
+    return name.C_Str();
+  }
+  return {};
+}
+
+bool materialOverrideMatches(const GltfSceneLoadOptions::MaterialOverride& override,
+                             uint32_t material_index,
+                             std::string_view material_name) {
+  if (override.all_materials) {
+    return true;
+  }
+  const bool index_matches =
+      override.material_index != kInvalidGltfSceneMaterial &&
+      override.material_index == material_index;
+  const bool name_matches =
+      !override.material_name.empty() && override.material_name == material_name;
+  return index_matches || name_matches;
+}
+
+void forceDiffuseOnly(rendering::ImportedMaterialData& data, bool keep_normal_maps) {
+  auto& material = data.material;
+  material.metallic = 0.0f;
+  material.roughness = 1.0f;
+  if (!keep_normal_maps) {
+    material.normal_scale = 0.0f;
+  }
+  material.occlusion_strength = 1.0f;
+  material.emissive_color = {0.0f, 0.0f, 0.0f, 1.0f};
+  material.emissive_strength = 0.0f;
+  material.clearcoat = 0.0f;
+  material.clearcoat_roughness = 1.0f;
+  material.sheen_color = {0.0f, 0.0f, 0.0f, 1.0f};
+  material.sheen_roughness = 1.0f;
+  material.anisotropy = 0.0f;
+  material.transmission = 0.0f;
+  material.ior = 1.5f;
+  material.thickness = 0.0f;
+  material.attenuation_distance = std::numeric_limits<float>::infinity();
+  material.attenuation_color = {1.0f, 1.0f, 1.0f, 1.0f};
+  material.analytic_sphere_normals = false;
+  material.unlit = false;
+
+  data.textures.erase(
+      std::remove_if(data.textures.begin(),
+                     data.textures.end(),
+                     [keep_normal_maps](const rendering::ImportedMaterialTexture& texture) {
+                       if (texture.semantic ==
+                           rendering::ImportedMaterialTextureSemantic::BaseColor) {
+                         return false;
+                       }
+                       return !keep_normal_maps ||
+                              texture.semantic !=
+                                  rendering::ImportedMaterialTextureSemantic::Normal;
+                     }),
+      data.textures.end());
+}
+
+void disableMetallicRoughness(rendering::ImportedMaterialData& data) {
+  data.material.metallic = 0.0f;
+  data.material.roughness = 1.0f;
+  data.textures.erase(
+      std::remove_if(data.textures.begin(),
+                     data.textures.end(),
+                     [](const rendering::ImportedMaterialTexture& texture) {
+                       return texture.semantic ==
+                              rendering::ImportedMaterialTextureSemantic::MetallicRoughness;
+                     }),
+      data.textures.end());
+}
+
+void applyMaterialOverrides(rendering::ImportedMaterialData& data,
+                            uint32_t material_index,
+                            std::string_view material_name,
+                            const GltfSceneLoadOptions& options) {
+  for (const GltfSceneLoadOptions::MaterialOverride& override : options.material_overrides) {
+    if (!materialOverrideMatches(override, material_index, material_name)) {
+      continue;
+    }
+
+    if (override.has_normal_scale) {
+      data.material.normal_scale = std::clamp(override.normal_scale, 0.0f, 8.0f);
+    }
+    if (override.has_diffuse_only && override.diffuse_only) {
+      forceDiffuseOnly(data, override.keep_normal_maps);
+    }
+    if (override.has_disable_metallic_roughness &&
+        override.disable_metallic_roughness) {
+      disableMetallicRoughness(data);
+    }
+  }
+}
+
+bool materialCastsShadows(uint32_t material_index,
+                          std::string_view material_name,
+                          const GltfSceneLoadOptions& options) {
+  bool casts_shadows = true;
+  for (const GltfSceneLoadOptions::MaterialOverride& override : options.material_overrides) {
+    if (override.has_casts_shadows &&
+        materialOverrideMatches(override, material_index, material_name)) {
+      casts_shadows = override.casts_shadows;
+    }
+  }
+  return casts_shadows;
 }
 
 float estimateLightRange(const aiLight& light) {
@@ -565,6 +1175,13 @@ uint32_t loadNodePrefab(const aiScene& scene,
       primitive.mesh = buildMeshData(mesh);
       primitive.source_material_index =
           mesh.mMaterialIndex < scene.mNumMaterials ? mesh.mMaterialIndex : kInvalidGltfSceneMaterial;
+      const std::string primitive_material_name =
+          primitive.source_material_index < scene.mNumMaterials &&
+                  scene.mMaterials[primitive.source_material_index] != nullptr
+              ? materialName(*scene.mMaterials[primitive.source_material_index])
+              : std::string{};
+      primitive.casts_shadows =
+          materialCastsShadows(primitive.source_material_index, primitive_material_name, options);
       if (primitive.source_material_index < prefab.imported_materials.size() &&
           prefab.imported_materials[primitive.source_material_index]) {
         primitive.material = prefab.imported_materials[primitive.source_material_index]->material;
@@ -829,12 +1446,50 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
   prefab.source_path = path;
 
   Assimp::Importer importer;
+  constexpr unsigned int kAssimpPostprocess =
+      aiProcess_Triangulate | aiProcess_GenNormals |
+      aiProcess_CalcTangentSpace;
+  std::filesystem::path load_path = path;
   auto stage_start = total_start;
-  const aiScene* scene = importer.ReadFile(path.string(),
-                                           aiProcess_Triangulate |
-                                           aiProcess_GenNormals |
-                                           aiProcess_CalcTangentSpace);
+  const aiScene* scene = importer.ReadFile(load_path.string(),
+                                           kAssimpPostprocess);
   logGltfStartupDiag(path, "assimp read file", stage_start, core::SteadyClock::now());
+  std::string original_assimp_error;
+  if (scene == nullptr || scene->mRootNode == nullptr) {
+    if (const char* error = importer.GetErrorString();
+        error != nullptr && error[0] != '\0') {
+      original_assimp_error = error;
+    }
+
+    stage_start = core::SteadyClock::now();
+    const std::optional<std::filesystem::path> decoded_path =
+        writeMeshoptDecodedGltf(path);
+    logGltfStartupDiag(path,
+                       "meshopt decode fallback",
+                       stage_start,
+                       core::SteadyClock::now());
+    if (decoded_path.has_value()) {
+      load_path = *decoded_path;
+      stage_start = core::SteadyClock::now();
+      scene = importer.ReadFile(load_path.string(), kAssimpPostprocess);
+      logGltfStartupDiag(path,
+                         "assimp read meshopt-decoded file",
+                         stage_start,
+                         core::SteadyClock::now());
+      if (scene == nullptr || scene->mRootNode == nullptr) {
+        if (const char* error = importer.GetErrorString();
+            error != nullptr && error[0] != '\0') {
+          spdlog::warn("Assimp failed to import meshopt-decoded glTF scene {}: {}",
+                       load_path.string(),
+                       error);
+        }
+      }
+    } else if (!original_assimp_error.empty()) {
+      spdlog::warn("Assimp failed to import glTF scene {}: {}",
+                   path.string(),
+                   original_assimp_error);
+    }
+  }
   if (scene == nullptr || scene->mRootNode == nullptr) {
     logGltfStartupDiag(path, "total failed", total_start, core::SteadyClock::now());
     return prefab;
@@ -847,8 +1502,15 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
       prefab.imported_materials.push_back({});
       continue;
     }
-    prefab.imported_materials.push_back(std::make_shared<rendering::ImportedMaterialData>(
-        buildImportedMaterialData(*scene, *scene->mMaterials[i], path)));
+    rendering::ImportedMaterialData material =
+        buildImportedMaterialData(*scene, *scene->mMaterials[i], load_path);
+    applyAlphaModePolicy(material, options);
+    applyMaterialOverrides(material,
+                           i,
+                           materialName(*scene->mMaterials[i]),
+                           options);
+    prefab.imported_materials.push_back(
+        std::make_shared<rendering::ImportedMaterialData>(std::move(material)));
   }
   logGltfStartupDiag(path,
                      "imported material metadata",
@@ -888,7 +1550,7 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
                      core::SteadyClock::now(),
                      prefab.nodes.size());
   stage_start = core::SteadyClock::now();
-  const GltfDocument gltf = loadGltfDocument(path);
+  const GltfDocument gltf = loadGltfDocument(load_path);
   logGltfStartupDiag(path, "gltf document", stage_start, core::SteadyClock::now());
   stage_start = core::SteadyClock::now();
   populateGltfMeshData(gltf, node_indices_by_name, prefab);
@@ -1070,7 +1732,8 @@ GltfSceneImportResult instantiateGltfScenePrefab(
       }
       world.add(primitive_entity, components::MeshComponent{
                                      .mesh_asset_key = mesh_key,
-                                     .visible = true});
+                                     .visible = true,
+                                     .shadow_visible = primitive.casts_shadows});
       if (primitive.morphable()) {
         if (prefab_node_index < result.morph_entities_by_node_index.size()) {
           result.morph_entities_by_node_index[prefab_node_index].push_back(primitive_entity);
@@ -1087,6 +1750,12 @@ GltfSceneImportResult instantiateGltfScenePrefab(
     }
 
     if (!combined_primitive_indices.empty()) {
+      bool combined_casts_shadows = false;
+      for (const size_t primitive_index : combined_primitive_indices) {
+        combined_casts_shadows =
+            combined_casts_shadows || prefab_node.primitives[primitive_index].casts_shadows;
+      }
+
       const world::Entity mesh_entity = world.createEntity();
       world.setName(mesh_entity, nodeDisplayName(prefab_node, prefab_node_index) + " Mesh");
       world.add(mesh_entity, components::TransformComponent{
@@ -1107,7 +1776,8 @@ GltfSceneImportResult instantiateGltfScenePrefab(
       }
       world.add(mesh_entity, components::MeshComponent{
                                  .mesh_asset_key = mesh_key,
-                                 .visible = true});
+                                 .visible = true,
+                                 .shadow_visible = combined_casts_shadows});
 
       const world::NodeId mesh_node = scene.createNode(mesh_entity);
       scene.reparent(mesh_node, node_id);
@@ -1295,6 +1965,7 @@ GltfSceneImportResult instantiateGltfSceneAsset(
       world.add(primitive_entity, components::MeshComponent{
                                       .mesh_asset_key = primitive.mesh_key,
                                       .visible = true,
+                                      .shadow_visible = primitive.casts_shadows,
                                   });
 
       const world::MeshData* mesh = assets.findMeshAsset(primitive.mesh_key);

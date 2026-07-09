@@ -24,8 +24,31 @@ constexpr uint32_t kInvalidGltfSceneMaterial = std::numeric_limits<uint32_t>::ma
 
 /// Controls which glTF scene data is loaded by the package importer.
 struct GltfSceneLoadOptions {
+  enum class AlphaModePolicy : uint32_t {
+    Authored = 0,
+    AutoCutout = 1,
+  };
+
+  struct MaterialOverride {
+    uint32_t material_index = kInvalidGltfSceneMaterial;
+    std::string material_name;
+    bool all_materials = false;
+    float normal_scale = 1.0f;
+    bool has_normal_scale = false;
+    bool casts_shadows = true;
+    bool has_casts_shadows = false;
+    bool diffuse_only = false;
+    bool has_diffuse_only = false;
+    bool keep_normal_maps = false;
+    bool has_keep_normal_maps = false;
+    bool disable_metallic_roughness = false;
+    bool has_disable_metallic_roughness = false;
+  };
+
   bool import_meshes = true;
   bool import_lights = true;
+  AlphaModePolicy alpha_mode_policy = AlphaModePolicy::Authored;
+  std::vector<MaterialOverride> material_overrides;
 };
 
 /// Controls how an in-memory glTF prefab is instantiated during source import.
@@ -51,6 +74,7 @@ struct GltfScenePrefabPrimitive {
   /// Raw glTF primitive material index before backend/importer material remapping.
   uint32_t source_gltf_material_index = kInvalidGltfSceneMaterial;
   uint32_t source_mesh_index = kInvalidGltfSceneNode;
+  bool casts_shadows = true;
   uint32_t skin_index = world::kInvalidAnimationIndex;
   /// Default morph target weights authored on the source glTF mesh.
   std::vector<float> morph_weights;

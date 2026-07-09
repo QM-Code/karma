@@ -39,6 +39,8 @@ option(KARMA_BUILD_RMLUI_DEMO "Build RmlUi UI demo" OFF)
 option(KARMA_ENABLE_RMLUI "Build RmlUi UI adapter" OFF)
 option(KARMA_DILIGENT_REPACK_XXHASH
   "Repack Diligent's bundled xxHash archive on affected Unix toolchains" OFF)
+option(KARMA_DILIGENT_STRIP_RELEASE_O1
+  "Remove Diligent's GCC Release -O1 interface option so CMAKE_*_RELEASE optimization flags apply" OFF)
 set(KARMA_DILIGENT_TAG "v2.5.5" CACHE STRING "DiligentCore git tag/branch to fetch")
 set(KARMA_JOLT_TAG "v5.5.0" CACHE STRING "JoltPhysics git tag/branch to fetch")
 set(KARMA_KTX_SOFTWARE_TAG "v4.4.2" CACHE STRING "KTX-Software git tag/branch to fetch")

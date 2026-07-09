@@ -8,6 +8,7 @@
 #include "karma/physics.h"
 #include "karma/platform.h"
 #include "karma/rendering.h"
+#include "karma/scenes.h"
 #include "karma/world.h"
 
 namespace karma::visual { class LightPulseSystem; namespace particles { class ParticleSystem; } }
@@ -566,6 +567,8 @@ struct EngineConfig {
   rendering::FrameGraphDesc default_frame_graph{};
   /// Asset packages imported before `GameInterface::onStart`.
   std::vector<std::filesystem::path> startup_asset_packages;
+  /// Scene asset keys instantiated after startup packages and before `GameInterface::onStart`.
+  std::vector<std::string> startup_scene_assets;
   /// Prewarm startup packages after initial content and systems are committed.
   bool prewarm_startup_packages = true;
 };
@@ -641,6 +644,7 @@ class EngineApp {
   world::Scene scene_;
   assets::AssetRegistry assets_;
   std::vector<assets::AssetPackageHandle> startup_asset_package_handles_;
+  std::vector<scenes::SceneInstantiateResult> startup_scene_results_;
   rendering::RenderPrewarmHandle startup_prewarm_handle_{};
   rendering::TextureId loading_splash_texture_ = rendering::kInvalidTexture;
   int loading_splash_texture_width_ = 0;

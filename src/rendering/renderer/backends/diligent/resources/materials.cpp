@@ -2,6 +2,7 @@
 
 #include "../backend_internal.h"
 
+#include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/scene.h>
@@ -68,9 +69,28 @@ rendering::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
     desc.double_sided = two_sided != 0;
   }
 
-  desc.transparent = desc.base_color.a < 0.999f;
-  if (desc.transparent) {
+  if (float alpha_cutoff = desc.alpha_cutoff;
+      material.Get(AI_MATKEY_GLTF_ALPHACUTOFF, alpha_cutoff) == AI_SUCCESS) {
+    desc.alpha_cutoff = alpha_cutoff;
+  }
+
+  aiString alpha_mode;
+  const bool has_gltf_alpha_mode =
+      material.Get(AI_MATKEY_GLTF_ALPHAMODE, alpha_mode) == AI_SUCCESS;
+  const std::string alpha_mode_value = has_gltf_alpha_mode ? alpha_mode.C_Str() : "";
+  if (alpha_mode_value == "MASK" || alpha_mode_value == "mask") {
+    desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Masked;
+    desc.transparent = false;
+  } else if (alpha_mode_value == "BLEND" || alpha_mode_value == "blend") {
     desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
+    desc.transparent = true;
+    desc.depth_write = false;
+  } else {
+    desc.transparent = desc.base_color.a < 0.999f;
+    if (desc.transparent) {
+      desc.alpha_mode = rendering::MaterialDesc::AlphaMode::Blend;
+      desc.depth_write = false;
+    }
   }
   return desc;
 }
@@ -450,7 +470,9 @@ void DiligentBackend::initializeMaterialBindingForPipeline(
     var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
   }
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-    var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+    if (Diligent::ITextureView* srv = brdfLutSrv()) {
+      var->Set(srv);
+    }
   }
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneColor")) {
     var->Set(default_base_color_);
@@ -551,6 +573,7 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   record.custom_transparent_double_sided_srb.Release();
   record.custom_additive_srb.Release();
   record.custom_additive_double_sided_srb.Release();
+  record.shadow_alpha_srb.Release();
   for (auto& srb : record.layout_srbs) {
     srb.Release();
   }
@@ -645,6 +668,19 @@ Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
   return target->RawPtr();
 }
 
+Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialShadowAlphaSrb(
+    MaterialRecord& material) {
+  if (!shadow_alpha_pipeline_state_) {
+    return nullptr;
+  }
+  if (!material.shadow_alpha_srb) {
+    initializeMaterialBindingForPipeline(material,
+                                         shadow_alpha_pipeline_state_.RawPtr(),
+                                         material.shadow_alpha_srb);
+  }
+  return material.shadow_alpha_srb.RawPtr();
+}
+
 void DiligentBackend::initializeDefaultMaterialBinding(
     Diligent::IPipelineState* pso,
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& out_srb) {
@@ -718,7 +754,9 @@ void DiligentBackend::initializeDefaultMaterialBinding(
     var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
   }
   if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-    var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+    if (Diligent::ITextureView* srv = brdfLutSrv()) {
+      var->Set(srv);
+    }
   }
   if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SceneColor")) {
     var->Set(default_base_color_);
@@ -1940,9 +1978,7 @@ rendering::MaterialId DiligentBackend::createMaterialFromAsset(const std::filesy
   stage_start = stage_end;
   const rendering::MaterialId id = nextMaterialId_++;
   MaterialRecord record = templates->materials[material_index];
-  if (!record.srb) {
-    initializeMaterialBindings(record);
-  }
+  initializeMaterialBindings(record);
   stage_end = core::SteadyClock::now();
   logRenderResourceDiag("material_from_asset", "clone", stage_start, stage_end);
   materials_[id] = std::move(record);
@@ -2001,9 +2037,7 @@ rendering::MaterialId DiligentBackend::createMaterialFromImportedPayload(
   stage_start = core::SteadyClock::now();
   const rendering::MaterialId id = nextMaterialId_++;
   MaterialRecord record = template_it->second;
-  if (!record.srb) {
-    initializeMaterialBindings(record);
-  }
+  initializeMaterialBindings(record);
   materials_[id] = std::move(record);
   stage_end = core::SteadyClock::now();
   logRenderResourceDiag("material_from_imported_payload", "clone", stage_start, stage_end);
@@ -2056,6 +2090,8 @@ void DiligentBackend::updateMaterial(rendering::MaterialId material,
   it->second.blend_mode = it->second.desc.blend_mode;
   it->second.base_color_srv = {};
   initializeMaterialBindings(it->second);
+  directional_shadow_scene_dirty_ = true;
+  point_shadow_scene_dirty_ = true;
 }
 
 void DiligentBackend::destroyMaterial(rendering::MaterialId material) {

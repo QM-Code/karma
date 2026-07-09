@@ -751,6 +751,42 @@ bool GraphicsDevice::uploadTexture(TextureId texture, const TextureUploadData& u
   }) : false;
 }
 
+std::vector<TextureUploadBatchResult> GraphicsDevice::createAndUploadTextures(
+    std::vector<TextureUploadBatchRequest> requests) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (!scheduler_ || requests.empty()) {
+    return {};
+  }
+  return scheduler_->invoke([requests = std::move(requests)](
+                                RenderScheduler::Backend* backend) mutable {
+    std::vector<TextureUploadBatchResult> results;
+    results.reserve(requests.size());
+    if (backend == nullptr) {
+      results.resize(requests.size());
+      return results;
+    }
+    for (TextureUploadBatchRequest& request : requests) {
+      TextureUploadBatchResult result{};
+      const auto create_start = core::SteadyClock::now();
+      result.texture = backend->createTexture(request.desc);
+      result.create_ms =
+          static_cast<float>(core::elapsedMillisecondsSince(create_start));
+      if (result.texture != kInvalidTexture) {
+        const auto upload_start = core::SteadyClock::now();
+        result.uploaded = backend->uploadTexture(result.texture, request.upload);
+        result.upload_ms =
+            static_cast<float>(core::elapsedMillisecondsSince(upload_start));
+        if (!result.uploaded) {
+          backend->destroyTexture(result.texture);
+          result.texture = kInvalidTexture;
+        }
+      }
+      results.push_back(result);
+    }
+    return results;
+  });
+}
+
 void GraphicsDevice::destroyTexture(TextureId texture) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {

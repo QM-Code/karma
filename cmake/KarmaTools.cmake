@@ -27,6 +27,11 @@ if (KARMA_BUILD_TOOLS)
   )
   target_link_libraries(karma_particle_effect_generate PRIVATE karma_particle_effect_tools_lib)
 
+  add_executable(karma_scene_bake
+    tools/scenes/scene_bake_main.cpp
+  )
+  target_link_libraries(karma_scene_bake PRIVATE karma_content)
+
   if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     file(GLOB_RECURSE KARMA_COMMITTED_PARTICLE_EFFECTS
       CONFIGURE_DEPENDS

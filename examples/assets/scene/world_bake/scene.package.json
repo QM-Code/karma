@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "scene",
+      "key": "examples/scene/world_bake",
+      "path": "world_bake.kscene.json"
+    }
+  ]
+}

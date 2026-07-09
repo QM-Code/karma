@@ -147,6 +147,8 @@ bool DiligentBackend::uploadTexture(rendering::TextureId texture,
   if (it->second.srv && it->second.desc.generate_mips) {
     context_->GenerateMips(it->second.srv);
   }
+  directional_shadow_scene_dirty_ = true;
+  point_shadow_scene_dirty_ = true;
   return true;
 }
 
@@ -204,6 +206,8 @@ void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
         record.srv = view;
       }
     }
+    directional_shadow_scene_dirty_ = true;
+    point_shadow_scene_dirty_ = true;
     return;
   }
 
@@ -229,6 +233,8 @@ void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
   if (record.desc.generate_mips && record.srv) {
     context_->GenerateMips(record.srv);
   }
+  directional_shadow_scene_dirty_ = true;
+  point_shadow_scene_dirty_ = true;
 }
 
 }  // namespace karma::rendering::backend

@@ -1,0 +1,42 @@
+{
+  "bake": {
+    "id": "damaged_helmet_viewer",
+    "path": ""
+  },
+  "baked_lighting": [],
+  "dependency_hashes": [
+    {
+      "exists": true,
+      "hash": "f71b18890d4b74e4",
+      "id": "damaged_helmet_assets",
+      "kind": "asset_package",
+      "path": "examples/assets/rendering/damaged_helmet/assets.package.json"
+    },
+    {
+      "exists": true,
+      "hash": "9a17539390075945",
+      "id": "examples/rendering/damaged_helmet",
+      "kind": "gltf_scene",
+      "path": "examples/assets/diligent_gltf_viewer/models/DamagedHelmet/DamagedHelmet.gltf"
+    },
+    {
+      "exists": true,
+      "hash": "54013b744fdf0d61",
+      "id": "",
+      "kind": "scene_document",
+      "path": "examples/assets/damaged_helmet_viewer.kscene.json"
+    }
+  ],
+  "nav_cache_files": [],
+  "scene_fingerprint": "3bc7764f62250144",
+  "schema": "karma.scene_bake",
+  "source_scene": "examples/assets/damaged_helmet_viewer.kscene.json",
+  "static_ids": [],
+  "static_metadata": {
+    "bounds": [],
+    "diagnostics": [],
+    "skipped_static_components": 0,
+    "transforms": []
+  },
+  "version": 1
+}

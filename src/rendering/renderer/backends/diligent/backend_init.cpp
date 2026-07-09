@@ -297,6 +297,9 @@ struct MorphTargetDelta
 StructuredBuffer<float4x4> g_DeformationMatrices;
 StructuredBuffer<float> g_MorphWeights;
 StructuredBuffer<MorphTargetDelta> g_MorphTargetDeltas;
+Texture2D g_BaseColorTex;
+SamplerState g_SamplerColor;
+SamplerState g_SamplerClamp;
 
 struct VSInput
 {
@@ -318,6 +321,8 @@ struct VSInput
 struct VSOutput
 {
     float4 Pos : SV_POSITION;
+    float2 UV : TEXCOORD0;
+    float2 UV1 : TEXCOORD1;
 };
 
 VSOutput main(VSInput input)
@@ -389,7 +394,41 @@ VSOutput main(VSInput input)
                     input.ModelCol3;
     }
     output.Pos = mul(g_MVP, world_pos);
+    output.UV = input.UV;
+    output.UV1 = input.UV1;
     return output;
+}
+
+float2 MaterialUV(float2 uv0, float2 uv1, uint slot)
+{
+    slot = min(slot, 11u);
+    float2 uv = g_TexCoordRow0[slot].w > 0.5 ? uv1 : uv0;
+    return float2(dot(float3(uv, 1.0), g_TexCoordRow0[slot].xyz),
+                  dot(float3(uv, 1.0), g_TexCoordRow1[slot].xyz));
+}
+
+void alpha_main(VSOutput input)
+{
+    float2 base_uv = MaterialUV(input.UV, input.UV1, 0u);
+    bool foliage_material = (uint)round(g_MaterialParams0.x) == 7u;
+    if (foliage_material)
+    {
+        uint base_width = 1u;
+        uint base_height = 1u;
+        g_BaseColorTex.GetDimensions(base_width, base_height);
+        float2 base_texel = 0.5 / max(float2((float)base_width, (float)base_height),
+                                      float2(1.0, 1.0));
+        base_uv = clamp(base_uv, base_texel, float2(1.0, 1.0) - base_texel);
+    }
+    float alpha_tex = foliage_material
+        ? g_BaseColorTex.Sample(g_SamplerClamp, base_uv).a
+        : g_BaseColorTex.Sample(g_SamplerColor, base_uv).a;
+    float base_alpha = saturate(g_BaseColorFactor.a * alpha_tex);
+    float cutoff = g_MaterialParams2.w >= 0.0 ? saturate(g_MaterialParams2.w) : 0.5;
+    if (base_alpha < cutoff)
+    {
+        discard;
+    }
 }
 )";
 }  // namespace
@@ -584,7 +623,11 @@ void DiligentBackend::recreatePointShadowMap() {
 
 void DiligentBackend::recreateShadowPipeline() {
   shadow_pipeline_state_.Release();
+  shadow_alpha_pipeline_state_.Release();
   shadow_srb_.Release();
+  for (auto& entry : materials_) {
+    entry.second.shadow_alpha_srb.Release();
+  }
   if (!device_) {
     return;
   }
@@ -599,6 +642,12 @@ void DiligentBackend::recreateShadowPipeline() {
   if (!shadow_vs) {
     return;
   }
+  shader_ci.Desc.Name = "Karma Shadow Alpha PS";
+  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+  shader_ci.EntryPoint = "alpha_main";
+  shader_ci.Source = kShadowVertexShader;
+  Diligent::RefCntAutoPtr<Diligent::IShader> shadow_alpha_ps =
+      device_with_cache_.CreateShader(shader_ci);
 
   Diligent::GraphicsPipelineStateCreateInfo shadow_pso{};
   shadow_pso.PSODesc.Name = "Karma Shadow Pipeline";
@@ -614,6 +663,7 @@ void DiligentBackend::recreateShadowPipeline() {
   // the shadow pass so casters still contribute.
   shadow_graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
   shadow_graphics.RasterizerDesc.FrontCounterClockwise = true;
+  shadow_graphics.RasterizerDesc.DepthClipEnable = false;
   shadow_graphics.RasterizerDesc.DepthBias = shadow_raster_depth_bias_;
   shadow_graphics.RasterizerDesc.SlopeScaledDepthBias = shadow_raster_slope_bias_;
   shadow_graphics.DepthStencilDesc.DepthEnable = true;
@@ -688,24 +738,81 @@ void DiligentBackend::recreateShadowPipeline() {
     return;
   }
 
-  if (constants_) {
-    if (auto* variable =
-            shadow_pipeline_state_->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
-      variable->Set(constants_);
+  auto bind_shadow_static_resources = [&](Diligent::IPipelineState* pso) {
+    if (!pso) {
+      return;
     }
-  }
-  if (deformation_constants_) {
-    if (auto* variable = shadow_pipeline_state_->GetStaticVariableByName(
-            Diligent::SHADER_TYPE_VERTEX, "DeformationConstants")) {
-      variable->Set(deformation_constants_);
+    if (constants_) {
+      if (auto* variable =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
+        variable->Set(constants_);
+      }
+      if (auto* variable =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
+        variable->Set(constants_);
+      }
     }
-  }
+    if (deformation_constants_) {
+      if (auto* variable = pso->GetStaticVariableByName(
+              Diligent::SHADER_TYPE_VERTEX, "DeformationConstants")) {
+        variable->Set(deformation_constants_);
+      }
+    }
+  };
+
+  bind_shadow_static_resources(shadow_pipeline_state_.RawPtr());
   const auto shadow_srb_start = core::SteadyClock::now();
   shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
   recordResourceCreation("shadow",
                          "Karma Shadow Pipeline SRB",
                          shadow_srb_start,
                          core::SteadyClock::now());
+
+  if (shadow_alpha_ps) {
+    Diligent::ShaderResourceVariableDesc shadow_alpha_vars[] = {
+        {Diligent::SHADER_TYPE_VERTEX,
+         "Constants",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+        {Diligent::SHADER_TYPE_VERTEX,
+         "DeformationConstants",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+        {Diligent::SHADER_TYPE_VERTEX,
+         "g_DeformationMatrices",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+        {Diligent::SHADER_TYPE_VERTEX,
+         "g_MorphWeights",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+        {Diligent::SHADER_TYPE_VERTEX,
+         "g_MorphTargetDeltas",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
+        {Diligent::SHADER_TYPE_PIXEL,
+         "Constants",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+        {Diligent::SHADER_TYPE_PIXEL,
+         "g_BaseColorTex",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+        {Diligent::SHADER_TYPE_PIXEL,
+         "g_SamplerColor",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+        {Diligent::SHADER_TYPE_PIXEL,
+         "g_SamplerClamp",
+         Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE}
+    };
+    Diligent::GraphicsPipelineStateCreateInfo shadow_alpha_pso = shadow_pso;
+    shadow_alpha_pso.PSODesc.Name = "Karma Alpha Shadow Pipeline";
+    shadow_alpha_pso.pPS = shadow_alpha_ps;
+    shadow_alpha_pso.PSODesc.ResourceLayout.Variables = shadow_alpha_vars;
+    shadow_alpha_pso.PSODesc.ResourceLayout.NumVariables =
+        static_cast<Diligent::Uint32>(sizeof(shadow_alpha_vars) / sizeof(shadow_alpha_vars[0]));
+
+    const auto shadow_alpha_pso_start = core::SteadyClock::now();
+    shadow_alpha_pipeline_state_ = createGraphicsPipelineState(shadow_alpha_pso);
+    recordPipelineCreation("shadow",
+                           "Karma Alpha Shadow Pipeline",
+                           shadow_alpha_pso_start,
+                           core::SteadyClock::now());
+    bind_shadow_static_resources(shadow_alpha_pipeline_state_.RawPtr());
+  }
 }
 
 void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const {
@@ -1692,6 +1799,7 @@ VSOutput main(VSInput input)
         float3 safe_scale = max(abs(scale), float3(1.0e-5, 1.0e-5, 1.0e-5));
         float3 scaled = local_pos * scale;
         float3 normal_scaled = local_normal / safe_scale;
+        float3 tangent_scaled = local_tangent * scale;
         if (g_InstanceParams.y > 0.5)
         {
             float3 center = input.ModelCol0.xyz;
@@ -1722,9 +1830,9 @@ VSOutput main(VSInput input)
             world_normal = right_axis * normal_scaled.x +
                            up_axis * normal_scaled.y +
                            forward_axis * normal_scaled.z;
-            world_tangent = right_axis * local_tangent.x +
-                            up_axis * local_tangent.y +
-                            forward_axis * local_tangent.z;
+            world_tangent = right_axis * tangent_scaled.x +
+                            up_axis * tangent_scaled.y +
+                            forward_axis * tangent_scaled.z;
         }
         else
         {
@@ -1738,9 +1846,9 @@ VSOutput main(VSInput input)
             world_normal = float3(normal_scaled.x * c + normal_scaled.z * s,
                                   normal_scaled.y,
                                   -normal_scaled.x * s + normal_scaled.z * c);
-            world_tangent = float3(local_tangent.x * c + local_tangent.z * s,
-                                   local_tangent.y,
-                                   -local_tangent.x * s + local_tangent.z * c);
+            world_tangent = float3(tangent_scaled.x * c + tangent_scaled.z * s,
+                                   tangent_scaled.y,
+                                   -tangent_scaled.x * s + tangent_scaled.z * c);
         }
     }
     else
@@ -1752,7 +1860,9 @@ VSOutput main(VSInput input)
         world_normal = input.ModelCol0.xyz * local_normal.x +
                        input.ModelCol1.xyz * local_normal.y +
                        input.ModelCol2.xyz * local_normal.z;
-        world_tangent = local_tangent;
+        world_tangent = input.ModelCol0.xyz * local_tangent.x +
+                        input.ModelCol1.xyz * local_tangent.y +
+                        input.ModelCol2.xyz * local_tangent.z;
     }
     output.Pos = mul(g_MVP, world_pos);
     output.WorldPos = world_pos.xyz;
@@ -2213,6 +2323,11 @@ float3 FresnelSchlick(float cos_theta, float3 f0)
     return f0 + (1.0 - f0) * pow(saturate(1.0 - cos_theta), 5.0);
 }
 
+bool DebugGlossyOff()
+{
+    return g_CameraClipParams.w > 0.5;
+}
+
 float3 EvaluatePbrLight(float3 n,
                         float3 v,
                         float3 l,
@@ -2231,10 +2346,14 @@ float3 EvaluatePbrLight(float3 n,
 
     float3 h = normalize(v + l);
     float3 f0 = lerp(float3(0.04, 0.04, 0.04), base_color, metallic);
-    float3 fresnel = FresnelSchlick(max(dot(h, v), 0.0), f0);
+    bool glossy_off = DebugGlossyOff();
+    float3 fresnel = glossy_off ? float3(0.0, 0.0, 0.0)
+                                : FresnelSchlick(max(dot(h, v), 0.0), f0);
     float distribution = DistributionGGX(n, h, perceptual_roughness);
     float geometry = GeometrySmithDirect(n, v, l, perceptual_roughness);
-    float3 specular = distribution * geometry * fresnel / max(4.0 * n_dot_v * n_dot_l, 1.0e-4);
+    float3 specular = glossy_off ? float3(0.0, 0.0, 0.0)
+                                 : distribution * geometry * fresnel /
+                                       max(4.0 * n_dot_v * n_dot_l, 1.0e-4);
     float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base_color / PI;
     return (diffuse + specular) * radiance * n_dot_l;
 }
@@ -2260,12 +2379,16 @@ float3 EvaluatePbrLightAnisotropic(float3 n,
 
     float3 h = normalize(v + l);
     float3 f0 = lerp(float3(0.04, 0.04, 0.04), base_color, metallic);
-    float3 fresnel = FresnelSchlick(max(dot(h, v), 0.0), f0);
+    bool glossy_off = DebugGlossyOff();
+    float3 fresnel = glossy_off ? float3(0.0, 0.0, 0.0)
+                                : FresnelSchlick(max(dot(h, v), 0.0), f0);
     float distribution = abs(anisotropy) > 0.001
         ? DistributionGGXAnisotropic(n, h, tangent, bitangent, perceptual_roughness, anisotropy)
         : DistributionGGX(n, h, perceptual_roughness);
     float geometry = GeometrySmithDirect(n, v, l, perceptual_roughness);
-    float3 specular = distribution * geometry * fresnel / max(4.0 * n_dot_v * n_dot_l, 1.0e-4);
+    float3 specular = glossy_off ? float3(0.0, 0.0, 0.0)
+                                 : distribution * geometry * fresnel /
+                                       max(4.0 * n_dot_v * n_dot_l, 1.0e-4);
     float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base_color / PI;
     return (diffuse + specular) * radiance * n_dot_l;
 }
@@ -2689,7 +2812,8 @@ float4 main(PSInput input) : SV_TARGET
         geom_n = -geom_n;
     }
     float3 n = geom_n;
-    float3 t = normalize(input.Tangent.xyz);
+    float3 t = SafeNormalize(input.Tangent.xyz - geom_n * dot(geom_n, input.Tangent.xyz),
+                             float3(1.0, 0.0, 0.0));
     float3 b = normalize(cross(geom_n, t) * input.Tangent.w);
     float2 base_uv = MaterialUV(input.UV, input.UV1, 0u);
     float2 normal_uv = MaterialUV(input.UV, input.UV1, 1u);
@@ -2739,6 +2863,12 @@ float4 main(PSInput input) : SV_TARGET
     float2 mr = g_MetallicRoughnessTex.Sample(g_SamplerData, metallic_roughness_uv).bg;
     float metallic = saturate(mr.x * g_PbrParams.x);
     float roughness = saturate(mr.y * g_PbrParams.y);
+    bool glossy_debug_off = DebugGlossyOff();
+    if (glossy_debug_off)
+    {
+        metallic = 0.0;
+        roughness = 1.0;
+    }
 
     float3 base_color = g_BaseColorFactor.rgb * base_tex.rgb;
     float3 emissive = g_EmissiveFactor.rgb * emissive_tex;
@@ -2782,6 +2912,16 @@ float4 main(PSInput input) : SV_TARGET
                                 g_ThicknessTex.Sample(g_SamplerData, thickness_uv).g,
                                 0.0)
                           : 0.0;
+    if (glossy_debug_off)
+    {
+        clearcoat_factor = 0.0;
+        clearcoat_roughness = 1.0;
+        sheen_color = float3(0.0, 0.0, 0.0);
+        sheen_roughness = 1.0;
+        anisotropy = 0.0;
+        transmission = 0.0;
+        spec_color = float3(0.0, 0.0, 0.0);
+    }
 
     float shadow = 1.0;
     if (g_ShadowParams.x > 0.5)
@@ -2944,35 +3084,41 @@ float4 main(PSInput input) : SV_TARGET
     if (g_EnvParams.x > 0.0 || env_debug)
     {
         env_diffuse = g_IrradianceTex.Sample(g_SamplerColor, n).rgb * g_EnvParams.x;
-        float3 r = reflect(-v, n);
-        float mip = saturate(perceptual_roughness) * g_EnvParams.y;
-        float3 prefiltered = g_PrefilterTex.SampleLevel(g_SamplerColor, r, mip).rgb;
-        float2 brdf = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, perceptual_roughness)).rg;
-        env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
-        float clearcoat_ndotv = max(dot(clearcoat_n, v), 0.0);
-        float clearcoat_ibl_fresnel =
-            FresnelSchlick(clearcoat_ndotv, float3(0.04, 0.04, 0.04)).r * clearcoat_factor;
-        float base_layer_ibl_weight = 1.0 - clearcoat_ibl_fresnel;
+        float base_layer_ibl_weight = 1.0;
+        float3 prefiltered = float3(0.0, 0.0, 0.0);
+        float2 brdf = float2(0.0, 0.0);
+        if (!glossy_debug_off)
+        {
+            float3 r = reflect(-v, n);
+            float mip = saturate(perceptual_roughness) * g_EnvParams.y;
+            prefiltered = g_PrefilterTex.SampleLevel(g_SamplerColor, r, mip).rgb;
+            brdf = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, perceptual_roughness)).rg;
+            env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
+            float clearcoat_ndotv = max(dot(clearcoat_n, v), 0.0);
+            float clearcoat_ibl_fresnel =
+                FresnelSchlick(clearcoat_ndotv, float3(0.04, 0.04, 0.04)).r * clearcoat_factor;
+            base_layer_ibl_weight = 1.0 - clearcoat_ibl_fresnel;
+            lit += env_spec * g_EnvParams.x * base_layer_ibl_weight;
+            if (clearcoat_factor > 0.0)
+            {
+                float clearcoat_mip = saturate(clearcoat_roughness) * g_EnvParams.y;
+                float3 clearcoat_r = reflect(-v, clearcoat_n);
+                float3 clearcoat_prefiltered =
+                    g_PrefilterTex.SampleLevel(g_SamplerColor, clearcoat_r, clearcoat_mip).rgb;
+                float2 clearcoat_brdf =
+                    g_BRDFLUT.Sample(g_SamplerColor, float2(clearcoat_ndotv, clearcoat_roughness)).rg;
+                float3 clearcoat_spec =
+                    clearcoat_prefiltered * (float3(0.04, 0.04, 0.04) * clearcoat_brdf.x +
+                                             clearcoat_brdf.y);
+                lit += clearcoat_spec * g_EnvParams.x * clearcoat_factor;
+            }
+            if (max(max(sheen_color.r, sheen_color.g), sheen_color.b) > 0.0)
+            {
+                float sheen_facing = 0.25 + 0.75 * pow(saturate(1.0 - ndotv), 5.0);
+                lit += env_diffuse * sheen_color * sheen_facing * (1.0 - metallic) * occlusion;
+            }
+        }
         lit += env_diffuse * base_color * (1.0 - metallic) * occlusion * base_layer_ibl_weight;
-        lit += env_spec * g_EnvParams.x * base_layer_ibl_weight;
-        if (clearcoat_factor > 0.0)
-        {
-            float clearcoat_mip = saturate(clearcoat_roughness) * g_EnvParams.y;
-            float3 clearcoat_r = reflect(-v, clearcoat_n);
-            float3 clearcoat_prefiltered =
-                g_PrefilterTex.SampleLevel(g_SamplerColor, clearcoat_r, clearcoat_mip).rgb;
-            float2 clearcoat_brdf =
-                g_BRDFLUT.Sample(g_SamplerColor, float2(clearcoat_ndotv, clearcoat_roughness)).rg;
-            float3 clearcoat_spec =
-                clearcoat_prefiltered * (float3(0.04, 0.04, 0.04) * clearcoat_brdf.x +
-                                         clearcoat_brdf.y);
-            lit += clearcoat_spec * g_EnvParams.x * clearcoat_factor;
-        }
-        if (max(max(sheen_color.r, sheen_color.g), sheen_color.b) > 0.0)
-        {
-            float sheen_facing = 0.25 + 0.75 * pow(saturate(1.0 - ndotv), 5.0);
-            lit += env_diffuse * sheen_color * sheen_facing * (1.0 - metallic) * occlusion;
-        }
         if (env_debug)
         {
             if (g_EnvParams.z < 1.5)
@@ -3012,6 +3158,13 @@ float4 main(PSInput input) : SV_TARGET
                 return float4(normal_tex.xyz * 0.5 + 0.5, 1.0);
             }
         }
+    }
+    if (glossy_debug_off && !foliage_material && !surface_unlit)
+    {
+        float direct_matte = max(dot(n, l_dir), 0.0);
+        float3 matte_env = env_diffuse * occlusion;
+        float3 matte_direct = g_LightColor.rgb * lifted_shadow * direct_matte;
+        lit = base_color * (matte_env + matte_direct) + lit_local * local_ao_factor + emissive;
     }
     float alpha_tex = base_tex.a;
     float base_alpha = saturate(g_BaseColorFactor.a * alpha_tex);
@@ -3068,7 +3221,7 @@ float4 main(PSInput input) : SV_TARGET
     {
         lit = base_color + emissive;
     }
-    else if (standard_material && g_MaterialParams6.w > 0.5)
+    else if (!glossy_debug_off && standard_material && g_MaterialParams6.w > 0.5)
     {
         float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
         float clearcoat_reflection_strength =
@@ -3090,7 +3243,7 @@ float4 main(PSInput input) : SV_TARGET
             saturate(reflection_strength * (0.08 + 0.40 * fresnel) *
                      (1.0 - roughness * 0.70));
     }
-    else if (shading_mode == 1u)
+    else if (!glossy_debug_off && shading_mode == 1u)
     {
         float fresnel_power = max(g_MaterialParams0.y, 0.001);
         float fresnel_strength = max(g_MaterialParams0.z, 0.0);
@@ -3609,7 +3762,7 @@ float4 main(PSInput input) : SV_TARGET
     }
     else
     {
-        if (standard_material && transmission > 0.001)
+        if (!glossy_debug_off && standard_material && transmission > 0.001)
         {
             float2 screen_uv = clamp(input.Pos.xy * g_ScreenParams.zw, 0.001, 0.999);
             float ior = max(g_MaterialParams5.x, 1.0);
@@ -3643,7 +3796,7 @@ float4 main(PSInput input) : SV_TARGET
                                       0.14 + transmission * 0.38));
         }
         float transparency = saturate(1.0 - base_alpha);
-        if (transparency > 0.001)
+        if (!glossy_debug_off && transparency > 0.001)
         {
             float fresnel = pow(1.0 - ndotv, 4.0);
             lit += base_color * (0.10 + 0.30 * fresnel) * transparency;
@@ -3916,8 +4069,10 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                               default_base_color_tex_);
   default_normal_ = createSolidTextureSRV(128, 128, 255, 255, false, "DefaultNormal",
                                           default_normal_tex_);
-  default_metallic_roughness_ = createSolidTextureSRV(0, 255, 255, 255, false, "DefaultMetalRough",
+  default_metallic_roughness_ = createSolidTextureSRV(255, 255, 0, 255, false, "DefaultMetalRough",
                                                       default_metallic_roughness_tex_);
+  default_brdf_lut_ = createSolidTextureSRV(0, 0, 0, 255, false, "DefaultBRDFLUT",
+                                            default_brdf_lut_tex_);
   default_occlusion_ = createSolidTextureSRV(255, 255, 255, 255, false, "DefaultOcclusion",
                                              default_occlusion_tex_);
   default_emissive_ = createSolidTextureSRV(255, 255, 255, 255, true, "DefaultEmissive",
@@ -3978,7 +4133,9 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         var->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_);
       }
       if (auto* var = shader_resources_->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT")) {
-        var->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_);
+        if (Diligent::ITextureView* srv = brdfLutSrv()) {
+          var->Set(srv);
+        }
       }
     }
   }

@@ -17,7 +17,17 @@ first visible frame.
 Build the viewer:
 
 ```bash
-cmake --build build --target rendering_gltf_viewer --parallel $(nproc)
+cmake --build build --target karma_scene_bake rendering_gltf_viewer --parallel $(nproc)
+```
+
+Bake the default DamagedHelmet startup scene package:
+
+```bash
+./build/karma_scene_bake \
+  --bake-packages \
+  --asset-cache-root examples/assets/rendering/damaged_helmet/bakes/asset_cache \
+  --output examples/assets/damaged_helmet_viewer.kscenebake.json \
+  examples/assets/damaged_helmet_viewer.kscene.json
 ```
 
 Run with startup, render-system, and render-resource timing:
@@ -390,6 +400,34 @@ The glTF viewer benchmark remained on the intended no-particle path after this
 change. A follow-up diagnostic run reported startup through warm-up at
 1953.24 ms, renderer warm-up at 375.96 ms, and particle resources skipped by the
 scene-demand gate.
+
+## July 2026 World Bake Pass
+
+The next optimization pass moved to the `scene_world_bake` benchmark, which
+loads `examples/assets/scene/world_bake/world.glb` through a package-backed
+scene document and renders it with a KTX skybox. It also added the offline
+`karma_scene_bake` tool and `.kscenebake.json` metadata for deterministic scene
+bake fingerprints.
+
+The major runtime change was moving texture work out of material prewarm:
+`RenderSystem` now prewarms package meshes, batches unique texture
+prepare/upload work, then prewarms materials after renderer texture handles are
+already cached. Prepared texture upload blobs can also be stored in the asset
+cache so KTX2 transcode work is skipped on later runs.
+
+Best measured world-bake warm startup improved from 3906.64 ms on the compact
+KTX package cache to 1657.84 ms on a prepared-upload cache hit. Texture batch
+acquire dropped from 2537.83 ms to 530.59 ms.
+
+The latest stall diagnosis is still open: the user's default cache was about
+26 GB with 25,524 blob files and no prepared blobs, so the next run was a first
+prepared-cache population run rather than a prepared-cache hit. A mitigation was
+staged so prepared upload blobs use `AssetCache::writeTextureNoIndex(...)`
+instead of repeatedly updating the large cache index, but that change was not
+fully reverified before the build was stopped.
+
+See [WORLD_BAKE_STARTUP_OPTIMIZATION.md](WORLD_BAKE_STARTUP_OPTIMIZATION.md)
+for the complete record, measurements, commands, and open items.
 
 ## Visual Correctness Guard
 

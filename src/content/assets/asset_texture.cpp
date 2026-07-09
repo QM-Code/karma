@@ -1,12 +1,15 @@
 #include "asset_texture_internal.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -24,7 +27,12 @@
 
 #include "karma/assets.h"
 
+#include <spdlog/spdlog.h>
+
 namespace karma::assets::detail {
+
+uint32_t fullMipLevelCount(int width, int height);
+Rgba8Image downsampleAlphaWeighted(const Rgba8Image& source);
 
 std::string textureContentHash(const TextureAsset& texture) {
   if (!texture.content_hash.empty()) {
@@ -63,7 +71,7 @@ constexpr ktx_uint32_t kKtxVkFormatRgba8Srgb = 43u;
 
 std::string_view textureImporterVersion() {
 #if defined(KARMA_ENABLE_KTX2)
-  return "texture-ktx2-uastc-v5";
+  return "texture-ktx2-uastc-v6";
 #else
   return "texture-rgba8-v6";
 #endif
@@ -93,16 +101,147 @@ bool envFlagOn(const char* value) {
   return !envFlagOff(value);
 }
 
-bool runtimeBc7Enabled() {
-  return envFlagOn(std::getenv("KARMA_TEXTURE_BC7"));
+uint32_t envUint(const char* value, uint32_t fallback) {
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || parsed == 0ul) {
+    return fallback;
+  }
+  return static_cast<uint32_t>(std::min<unsigned long>(parsed, 1024ul));
 }
 
-std::optional<std::vector<uint8_t>> encodeKtx2Uastc(const Rgba8Image& image,
-                                                    bool srgb,
-                                                    bool generate_mips,
-                                                    bool normal_map) {
+bool textureImportDiagnosticsEnabled() {
+  static const bool enabled =
+      envFlagOn(std::getenv("KARMA_TEXTURE_IMPORT_DIAG")) ||
+      envFlagOn(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
+  return enabled;
+}
+
+double elapsedMs(std::chrono::steady_clock::time_point start,
+                 std::chrono::steady_clock::time_point end) {
+  return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+uint32_t ktxEncodeThreadCount() {
+  uint32_t fallback = std::thread::hardware_concurrency();
+  if (fallback == 0u) {
+    fallback = 16u;
+  }
+  fallback = std::clamp(fallback, 1u, 16u);
+  return envUint(std::getenv("KARMA_TEXTURE_KTX2_THREADS"), fallback);
+}
+
 #if defined(KARMA_ENABLE_KTX2)
+uint32_t ktxUastcLevel() {
+  return std::min(envUint(std::getenv("KARMA_TEXTURE_KTX2_UASTC_LEVEL"),
+                          static_cast<uint32_t>(KTX_PACK_UASTC_LEVEL_FASTEST)),
+                  static_cast<uint32_t>(KTX_PACK_UASTC_MAX_LEVEL));
+}
+#endif
+
+bool keepKtx2Fallback() {
+  static const bool enabled = envFlagOn(std::getenv("KARMA_TEXTURE_KTX2_KEEP_FALLBACK"));
+  return enabled;
+}
+
+bool runtimeBc7Enabled(const TextureAsset& texture) {
+  const char* override_value = std::getenv("KARMA_TEXTURE_BC7");
+  if (override_value != nullptr && override_value[0] != '\0') {
+    return !envFlagOff(override_value);
+  }
+  return texture.fallback_rgba8.empty();
+}
+
+rendering::TextureFormat preparedUploadFormatForTexture(
+    const TextureAsset& texture,
+    TextureRuntimeCapabilities capabilities) {
+  if (texture.payload_format == TextureAsset::PayloadFormat::PreparedUpload) {
+    return texture.desc.format;
+  }
+  if (texture.payload_format == TextureAsset::PayloadFormat::KTX2_BASIS_UASTC) {
+    const bool supports_bc7 = runtimeBc7Enabled(texture) &&
+                              (texture.desc.srgb ? capabilities.bc7_srgb
+                                                 : capabilities.bc7_unorm);
+    if (supports_bc7) {
+      return texture.desc.srgb ? rendering::TextureFormat::BC7_RGBA_UNORM_SRGB
+                               : rendering::TextureFormat::BC7_RGBA_UNORM;
+    }
+  }
+  return rendering::TextureFormat::RGBA8;
+}
+
+std::string textureProfileVersion() {
+#if defined(KARMA_ENABLE_KTX2)
+  return "ktx2_basis_uastc_explicit_mips:fallback=" +
+         std::string(keepKtx2Fallback() ? "1" : "0") +
+         ":uastc_level=" + std::to_string(ktxUastcLevel()) +
+         ":normal_rgb=1";
+#else
+  return "rgba8";
+#endif
+}
+
+struct Ktx2EncodeResult {
+  std::vector<uint8_t> bytes;
+  uint32_t mip_levels = 1u;
+};
+
+void logKtx2EncodeDiag(const char* stage,
+                       const Rgba8Image& image,
+                       bool srgb,
+                       bool generate_mips,
+                       bool normal_map,
+                       uint32_t mip_levels,
+                       uint32_t level,
+                       uint32_t threads,
+                       int result,
+                       std::size_t bytes,
+                       std::chrono::steady_clock::time_point start) {
+  if (!textureImportDiagnosticsEnabled()) {
+    return;
+  }
+  spdlog::info(
+      "Texture import diag: area=ktx2_encode stage={} width={} height={} srgb={} "
+      "generate_mips={} normal={} mip_levels={} level={} threads={} result={} bytes={} ms={:.2f}",
+      stage ? stage : "unknown",
+      image.width,
+      image.height,
+      srgb,
+      generate_mips,
+      normal_map,
+      mip_levels,
+      level,
+      threads,
+      result,
+      bytes,
+      elapsedMs(start, std::chrono::steady_clock::now()));
+}
+
+std::optional<Ktx2EncodeResult> encodeKtx2Uastc(const Rgba8Image& image,
+                                                bool srgb,
+                                                bool generate_mips,
+                                                bool normal_map) {
+#if defined(KARMA_ENABLE_KTX2)
+  const auto encode_start = std::chrono::steady_clock::now();
+  const uint32_t mip_levels =
+      generate_mips ? fullMipLevelCount(image.width, image.height) : 1u;
+  const uint32_t threads = ktxEncodeThreadCount();
   if (!image.valid()) {
+    logKtx2EncodeDiag("invalid_image",
+                      image,
+                      srgb,
+                      generate_mips,
+                      normal_map,
+                      mip_levels,
+                      0u,
+                      threads,
+                      -1,
+                      0u,
+                      encode_start);
     return std::nullopt;
   }
 
@@ -113,56 +252,172 @@ std::optional<std::vector<uint8_t>> encodeKtx2Uastc(const Rgba8Image& image,
   create_info.baseHeight = static_cast<ktx_uint32_t>(image.height);
   create_info.baseDepth = 1u;
   create_info.numDimensions = 2u;
-  create_info.numLevels = 1u;
+  create_info.numLevels = mip_levels;
   create_info.numLayers = 1u;
   create_info.numFaces = 1u;
   create_info.isArray = KTX_FALSE;
-  create_info.generateMipmaps = generate_mips ? KTX_TRUE : KTX_FALSE;
+  create_info.generateMipmaps = KTX_FALSE;
 
   ktxTexture2* raw_texture = nullptr;
-  if (ktxTexture2_Create(&create_info,
-                         KTX_TEXTURE_CREATE_ALLOC_STORAGE,
-                         &raw_texture) != KTX_SUCCESS ||
-      raw_texture == nullptr) {
+  const KTX_error_code create_result =
+      ktxTexture2_Create(&create_info, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &raw_texture);
+  if (create_result != KTX_SUCCESS || raw_texture == nullptr) {
+    logKtx2EncodeDiag("create_failed",
+                      image,
+                      srgb,
+                      generate_mips,
+                      normal_map,
+                      mip_levels,
+                      0u,
+                      threads,
+                      static_cast<int>(create_result),
+                      0u,
+                      encode_start);
     return std::nullopt;
   }
   std::unique_ptr<ktxTexture2, KtxTexture2Deleter> texture(raw_texture);
 
-  if (ktxTexture_SetImageFromMemory(ktxTexture(texture.get()),
-                                    0u,
-                                    0u,
-                                    0u,
-                                    image.pixels.data(),
-                                    image.pixels.size()) != KTX_SUCCESS) {
+  auto set_image = [&](uint32_t level, const Rgba8Image& mip) {
+    return ktxTexture_SetImageFromMemory(ktxTexture(texture.get()),
+                                         level,
+                                         0u,
+                                         0u,
+                                         mip.pixels.data(),
+                                         mip.pixels.size());
+  };
+
+  KTX_error_code set_result = set_image(0u, image);
+  if (set_result != KTX_SUCCESS) {
+    logKtx2EncodeDiag("set_image_failed",
+                      image,
+                      srgb,
+                      generate_mips,
+                      normal_map,
+                      mip_levels,
+                      0u,
+                      threads,
+                      static_cast<int>(set_result),
+                      0u,
+                      encode_start);
     return std::nullopt;
+  }
+
+  if (mip_levels > 1u) {
+    Rgba8Image current = image;
+    for (uint32_t level = 1u; level < mip_levels; ++level) {
+      current = downsampleAlphaWeighted(current);
+      if (!current.valid()) {
+        logKtx2EncodeDiag("mip_generation_failed",
+                          image,
+                          srgb,
+                          generate_mips,
+                          normal_map,
+                          mip_levels,
+                          level,
+                          threads,
+                          -1,
+                          0u,
+                          encode_start);
+        return std::nullopt;
+      }
+      set_result = set_image(level, current);
+      if (set_result != KTX_SUCCESS) {
+        logKtx2EncodeDiag("set_image_failed",
+                          image,
+                          srgb,
+                          generate_mips,
+                          normal_map,
+                          mip_levels,
+                          level,
+                          threads,
+                          static_cast<int>(set_result),
+                          0u,
+                          encode_start);
+        return std::nullopt;
+      }
+    }
   }
 
   ktxBasisParams params{};
   params.structSize = sizeof(params);
   params.uastc = KTX_TRUE;
   params.compressionLevel = KTX_ETC1S_DEFAULT_COMPRESSION_LEVEL;
-  params.threadCount = std::max(1u, std::thread::hardware_concurrency());
-  params.normalMap = normal_map && !srgb ? KTX_TRUE : KTX_FALSE;
-  params.uastcFlags = KTX_PACK_UASTC_LEVEL_DEFAULT;
-  if (ktxTexture2_CompressBasisEx(texture.get(), &params) != KTX_SUCCESS) {
+  params.threadCount = threads;
+  // libktx normal-map mode repacks XY into R/A on transcode. The renderer's
+  // material shader currently samples normal maps as full RGB XYZ, so keep
+  // normals in the ordinary RGBA path until the shader has an explicit RA
+  // decode path.
+  params.normalMap = KTX_FALSE;
+  params.uastcFlags = static_cast<ktx_pack_uastc_flags>(ktxUastcLevel());
+  const KTX_error_code compress_result = ktxTexture2_CompressBasisEx(texture.get(), &params);
+  if (compress_result != KTX_SUCCESS) {
+    logKtx2EncodeDiag("compress_failed",
+                      image,
+                      srgb,
+                      generate_mips,
+                      normal_map,
+                      mip_levels,
+                      0u,
+                      threads,
+                      static_cast<int>(compress_result),
+                      0u,
+                      encode_start);
     return std::nullopt;
   }
 
-  (void)ktxTexture2_DeflateZstd(texture.get(), 5u);
+  const KTX_error_code deflate_result = ktxTexture2_DeflateZstd(texture.get(), 5u);
+  if (deflate_result != KTX_SUCCESS && textureImportDiagnosticsEnabled()) {
+    logKtx2EncodeDiag("deflate_failed",
+                      image,
+                      srgb,
+                      generate_mips,
+                      normal_map,
+                      mip_levels,
+                      0u,
+                      threads,
+                      static_cast<int>(deflate_result),
+                      0u,
+                      encode_start);
+  }
 
   ktx_uint8_t* out_bytes = nullptr;
   ktx_size_t out_size = 0u;
-  if (ktxTexture2_WriteToMemory(texture.get(), &out_bytes, &out_size) != KTX_SUCCESS ||
-      out_bytes == nullptr || out_size == 0u) {
+  const KTX_error_code write_result =
+      ktxTexture2_WriteToMemory(texture.get(), &out_bytes, &out_size);
+  if (write_result != KTX_SUCCESS || out_bytes == nullptr || out_size == 0u) {
     if (out_bytes != nullptr) {
       std::free(out_bytes);
     }
+    logKtx2EncodeDiag("write_failed",
+                      image,
+                      srgb,
+                      generate_mips,
+                      normal_map,
+                      mip_levels,
+                      0u,
+                      threads,
+                      static_cast<int>(write_result),
+                      static_cast<std::size_t>(out_size),
+                      encode_start);
     return std::nullopt;
   }
 
-  std::vector<uint8_t> bytes(out_bytes, out_bytes + out_size);
+  Ktx2EncodeResult result{};
+  result.bytes.assign(out_bytes, out_bytes + out_size);
+  result.mip_levels = std::max(1u, static_cast<uint32_t>(texture->numLevels));
   std::free(out_bytes);
-  return bytes;
+  logKtx2EncodeDiag("success",
+                    image,
+                    srgb,
+                    generate_mips,
+                    normal_map,
+                    result.mip_levels,
+                    0u,
+                    threads,
+                    static_cast<int>(KTX_SUCCESS),
+                    result.bytes.size(),
+                    encode_start);
+  return result;
 #else
   (void)image;
   (void)srgb;
@@ -208,6 +463,34 @@ std::optional<PreparedTextureUpload> prepareRgba8Upload(const TextureAsset& text
       .row_stride = static_cast<std::size_t>(prepared.desc.width) * 4u,
   });
   return prepared;
+}
+
+std::optional<PreparedTextureUpload> prepareCachedUpload(const TextureAsset& texture) {
+  if (texture.payload_format != TextureAsset::PayloadFormat::PreparedUpload ||
+      texture.desc.width <= 0 ||
+      texture.desc.height <= 0 ||
+      texture.bytes.empty() ||
+      texture.subresources.empty()) {
+    return std::nullopt;
+  }
+
+  for (const rendering::TextureUploadSubresource& subresource : texture.subresources) {
+    if (subresource.width <= 0 ||
+        subresource.height <= 0 ||
+        subresource.size == 0u ||
+        subresource.offset > texture.bytes.size() ||
+        subresource.size > texture.bytes.size() - subresource.offset) {
+      return std::nullopt;
+    }
+  }
+
+  PreparedTextureUpload prepared{};
+  prepared.desc = texture.desc;
+  prepared.upload.format = texture.desc.format;
+  prepared.upload.subresources = texture.subresources;
+  prepared.upload.bytes = texture.bytes;
+  return prepared.valid() ? std::optional<PreparedTextureUpload>{std::move(prepared)}
+                          : std::nullopt;
 }
 
 #if defined(KARMA_ENABLE_KTX2)
@@ -562,8 +845,11 @@ TextureAsset makeTextureAssetFromImage(Rgba8Image image,
                                 semantic == TextureAsset::Semantic::Normal);
     if (ktx2.has_value()) {
       texture.payload_format = TextureAsset::PayloadFormat::KTX2_BASIS_UASTC;
-      texture.bytes = std::move(*ktx2);
-      texture.fallback_rgba8 = std::move(image.pixels);
+      texture.desc.mip_levels = std::max(1u, ktx2->mip_levels);
+      texture.bytes = std::move(ktx2->bytes);
+      if (keepKtx2Fallback()) {
+        texture.fallback_rgba8 = std::move(image.pixels);
+      }
       texture.content_hash = textureContentHash(texture);
       return texture;
     }
@@ -704,9 +990,13 @@ std::optional<PreparedTextureUpload> prepareTextureUpload(
     return std::nullopt;
   }
 
+  if (texture.payload_format == TextureAsset::PayloadFormat::PreparedUpload) {
+    return detail::prepareCachedUpload(texture);
+  }
+
   if (texture.payload_format == TextureAsset::PayloadFormat::KTX2_BASIS_UASTC) {
 #if defined(KARMA_ENABLE_KTX2)
-    const bool supports_bc7 = detail::runtimeBc7Enabled() &&
+    const bool supports_bc7 = detail::runtimeBc7Enabled(texture) &&
                               (texture.desc.srgb ? capabilities.bc7_srgb
                                                  : capabilities.bc7_unorm);
     if (supports_bc7) {
@@ -739,6 +1029,31 @@ std::optional<PreparedTextureUpload> prepareTextureUpload(
   }
 
   return detail::prepareRgba8Upload(texture);
+}
+
+std::string preparedTextureUploadCacheKey(
+    const TextureAsset& texture,
+    TextureRuntimeCapabilities capabilities) {
+  if (texture.desc.width <= 0 || texture.desc.height <= 0) {
+    return {};
+  }
+  const rendering::TextureFormat target_format =
+      detail::preparedUploadFormatForTexture(texture, capabilities);
+  std::ostringstream key;
+  key << "prepared-texture-upload-v2"
+      << "|content=" << detail::textureContentHash(texture)
+      << "|payload=" << static_cast<uint32_t>(texture.payload_format)
+      << "|semantic=" << static_cast<uint32_t>(texture.semantic)
+      << "|width=" << texture.desc.width
+      << "|height=" << texture.desc.height
+      << "|srgb=" << (texture.desc.srgb ? 1 : 0)
+      << "|mips=" << texture.desc.mip_levels
+      << "|generate_mips=" << (texture.desc.generate_mips ? 1 : 0)
+      << "|fallback=" << (texture.fallback_rgba8.empty() ? 0 : 1)
+      << "|target=" << static_cast<uint32_t>(target_format)
+      << "|bc7_unorm=" << (capabilities.bc7_unorm ? 1 : 0)
+      << "|bc7_srgb=" << (capabilities.bc7_srgb ? 1 : 0);
+  return "prepared-texture-" + hashString(key.str());
 }
 
 }  // namespace karma::assets

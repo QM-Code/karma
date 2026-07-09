@@ -13,6 +13,62 @@
 
 namespace karma::rendering::backend {
 
+Diligent::ITextureView* DiligentBackend::defaultBrdfLutSrv() const {
+  return default_brdf_lut_ ? default_brdf_lut_.RawPtr() : default_base_color_.RawPtr();
+}
+
+Diligent::ITextureView* DiligentBackend::brdfLutSrv() const {
+  return env_brdf_lut_srv_ ? env_brdf_lut_srv_.RawPtr() : defaultBrdfLutSrv();
+}
+
+void DiligentBackend::bindEnvironmentResources() {
+  auto bind_env_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
+    if (!srb) {
+      return;
+    }
+    auto* irr = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex");
+    auto* pre = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex");
+    auto* brdf = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT");
+    if (irr) {
+      irr->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_,
+               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+    }
+    if (pre) {
+      pre->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_,
+               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+    }
+    if (brdf) {
+      if (Diligent::ITextureView* srv = brdfLutSrv()) {
+        brdf->Set(srv, Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
+      }
+    }
+  };
+
+  bind_env_to_srb(shader_resources_);
+  bind_env_to_srb(default_material_srb_);
+  bind_env_to_srb(opaque_double_sided_default_material_srb_);
+  bind_env_to_srb(transparent_default_material_srb_);
+  bind_env_to_srb(transparent_double_sided_default_material_srb_);
+  bind_env_to_srb(additive_default_material_srb_);
+  bind_env_to_srb(additive_double_sided_default_material_srb_);
+  for (auto& srb : compact_default_material_srbs_) {
+    bind_env_to_srb(srb);
+  }
+  for (auto& entry : materials_) {
+    bind_env_to_srb(entry.second.srb);
+    bind_env_to_srb(entry.second.transparent_srb);
+    bind_env_to_srb(entry.second.transparent_double_sided_srb);
+    bind_env_to_srb(entry.second.additive_srb);
+    bind_env_to_srb(entry.second.additive_double_sided_srb);
+    for (auto& srb : entry.second.layout_srbs) {
+      bind_env_to_srb(srb);
+    }
+    for (auto& srb : entry.second.layout_custom_srbs) {
+      bind_env_to_srb(srb);
+    }
+  }
+}
+
 void DiligentBackend::setCamera(const rendering::CameraData& camera) {
   camera_ = camera;
 }
@@ -69,7 +125,8 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
       environment_intensity_ == intensity &&
       draw_skybox_ == draw_skybox &&
       !env_dirty_ &&
-      (path.empty() || env_cubemap_srv_)) {
+      (path.empty() || (env_cubemap_srv_ && env_irradiance_srv_ && env_prefilter_srv_ &&
+                        env_brdf_lut_srv_))) {
     return;
   }
   environment_intensity_ = intensity;
@@ -90,62 +147,13 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
     env_cubemap_srv_ = default_env_;
     env_irradiance_srv_ = default_env_;
     env_prefilter_srv_ = default_env_;
-    env_brdf_lut_srv_ = default_base_color_;
+    env_brdf_lut_srv_ = defaultBrdfLutSrv();
     env_dirty_ = false;
   } else {
     ensureEnvironmentResources();
   }
 
-  auto bind_env_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
-    if (!srb) {
-      return;
-    }
-    auto* irr = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex");
-    auto* pre = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex");
-    auto* brdf = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT");
-    if (!irr) {
-    }
-    if (!pre) {
-    }
-    if (!brdf) {
-    }
-    if (irr) {
-      irr->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_,
-               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-    }
-    if (pre) {
-      pre->Set(env_prefilter_srv_ ? env_prefilter_srv_ : default_env_,
-               Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-    }
-    if (brdf) {
-      brdf->Set(env_brdf_lut_srv_ ? env_brdf_lut_srv_ : default_base_color_,
-                Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-    }
-  };
-
-  bind_env_to_srb(shader_resources_);
-  bind_env_to_srb(default_material_srb_);
-  bind_env_to_srb(opaque_double_sided_default_material_srb_);
-  bind_env_to_srb(transparent_default_material_srb_);
-  bind_env_to_srb(transparent_double_sided_default_material_srb_);
-  bind_env_to_srb(additive_default_material_srb_);
-  bind_env_to_srb(additive_double_sided_default_material_srb_);
-  for (auto& srb : compact_default_material_srbs_) {
-    bind_env_to_srb(srb);
-  }
-  for (auto& entry : materials_) {
-    bind_env_to_srb(entry.second.srb);
-    bind_env_to_srb(entry.second.transparent_srb);
-    bind_env_to_srb(entry.second.transparent_double_sided_srb);
-    bind_env_to_srb(entry.second.additive_srb);
-    bind_env_to_srb(entry.second.additive_double_sided_srb);
-    for (auto& srb : entry.second.layout_srbs) {
-      bind_env_to_srb(srb);
-    }
-    for (auto& srb : entry.second.layout_custom_srbs) {
-      bind_env_to_srb(srb);
-    }
-  }
+  bindEnvironmentResources();
 }
 
 void DiligentBackend::setClearColor(const math::Color& color) {
@@ -197,13 +205,9 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
   Diligent::RefCntAutoPtr<Diligent::ISampler> next_sampler_color_clamp;
   device_->CreateSampler(sampler_color_clamp, &next_sampler_color_clamp);
 
-  Diligent::SamplerDesc sampler_data{};
-  sampler_data.MinFilter = Diligent::FILTER_TYPE_LINEAR;
-  sampler_data.MagFilter = Diligent::FILTER_TYPE_LINEAR;
-  sampler_data.MipFilter = Diligent::FILTER_TYPE_LINEAR;
-  sampler_data.AddressU = Diligent::TEXTURE_ADDRESS_WRAP;
-  sampler_data.AddressV = Diligent::TEXTURE_ADDRESS_WRAP;
-  sampler_data.AddressW = Diligent::TEXTURE_ADDRESS_WRAP;
+  // Normal, roughness, metallic, and occlusion textures need the same
+  // minification quality as color textures, especially at grazing angles.
+  Diligent::SamplerDesc sampler_data = sampler_color;
   Diligent::RefCntAutoPtr<Diligent::ISampler> next_sampler_data;
   device_->CreateSampler(sampler_data, &next_sampler_data);
 
@@ -216,7 +220,8 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
                       entry.second.transparent_srb.RawPtr(),
                       entry.second.transparent_double_sided_srb.RawPtr(),
                       entry.second.additive_srb.RawPtr(),
-                      entry.second.additive_double_sided_srb.RawPtr()}) {
+                      entry.second.additive_double_sided_srb.RawPtr(),
+                      entry.second.shadow_alpha_srb.RawPtr()}) {
       if (!srb) {
         continue;
       }

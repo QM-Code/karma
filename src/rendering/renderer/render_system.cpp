@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -56,6 +57,17 @@ bool envFlagEnabled(const char* value) {
          std::strcmp(value, "OFF") != 0;
 }
 
+bool envFlagDisabled(const char* value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(value, "0") == 0 ||
+         std::strcmp(value, "false") == 0 ||
+         std::strcmp(value, "FALSE") == 0 ||
+         std::strcmp(value, "off") == 0 ||
+         std::strcmp(value, "OFF") == 0;
+}
+
 bool renderSystemDiagEnabled() {
   static const bool enabled = envFlagEnabled(std::getenv("KARMA_RENDER_SYSTEM_DIAG")) ||
                               envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
@@ -66,6 +78,18 @@ bool renderSystemDiagEveryFrameEnabled() {
   static const bool enabled =
       envFlagEnabled(std::getenv("KARMA_RENDER_SYSTEM_DIAG_EVERY_FRAME"));
   return enabled;
+}
+
+assets::TextureAsset makePreparedTextureAsset(
+    const assets::TextureAsset& source,
+    const assets::PreparedTextureUpload& prepared) {
+  assets::TextureAsset texture{};
+  texture.desc = prepared.desc;
+  texture.payload_format = assets::TextureAsset::PayloadFormat::PreparedUpload;
+  texture.semantic = source.semantic;
+  texture.subresources = prepared.upload.subresources;
+  texture.bytes = prepared.upload.bytes;
+  return texture;
 }
 
 void logRenderSystemStage(const bool enabled,
@@ -436,6 +460,8 @@ struct RenderSystem::Impl {
   rendering::MaterialId acquireSharedMaterial(const std::string& material_key);
   void releaseSharedMaterial(const std::string& material_key);
   rendering::TextureId acquireSharedTexture(const std::string& texture_key);
+  std::size_t acquireSharedTexturesBatched(const std::vector<std::string>& texture_keys,
+                                           std::vector<std::string>& acquired_texture_keys);
   void releaseSharedTexture(const std::string& texture_key);
   rendering::FrameGraphDesc resolveFrameGraphDesc(
       const std::string& key,
@@ -780,41 +806,396 @@ rendering::TextureId RenderSystem::Impl::acquireSharedTexture(const std::string&
     return rendering::kInvalidTexture;
   }
 
+  const bool diag_enabled = renderSystemDiagEnabled();
+  const auto cache_start = core::SteadyClock::now();
   auto shared_it = shared_textures_.find(texture_key);
   if (shared_it != shared_textures_.end()) {
     shared_it->second.ref_count += 1u;
+    if (diag_enabled) {
+      spdlog::info("RenderSystem texture cache hit texture='{}' took {:.2f} ms",
+                   texture_key,
+                   core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
     return shared_it->second.texture;
   }
 
+  const auto lookup_start = core::SteadyClock::now();
   const assets::TextureAsset* texture_asset = assets_->findTextureAsset(texture_key);
+  const auto lookup_end = core::SteadyClock::now();
   if (texture_asset == nullptr ||
       texture_asset->desc.width <= 0 ||
       texture_asset->desc.height <= 0) {
+    if (diag_enabled) {
+      spdlog::info(
+          "RenderSystem texture cache miss texture='{}' failed lookup_ms={:.2f} total_ms={:.2f}",
+          texture_key,
+          core::elapsedMilliseconds(lookup_start, lookup_end),
+          core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
     return rendering::kInvalidTexture;
   }
 
+  const auto capabilities_start = core::SteadyClock::now();
   const assets::TextureRuntimeCapabilities capabilities{
       .bc7_unorm = device_.supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM),
       .bc7_srgb = device_.supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM_SRGB),
   };
+  const auto capabilities_end = core::SteadyClock::now();
+  const auto prepare_start = core::SteadyClock::now();
   auto prepared = assets::prepareTextureUpload(*texture_asset, capabilities);
+  const auto prepare_end = core::SteadyClock::now();
   if (!prepared.has_value()) {
+    if (diag_enabled) {
+      spdlog::info(
+          "RenderSystem texture cache miss texture='{}' failed lookup_ms={:.2f} "
+          "capabilities_ms={:.2f} prepare_ms={:.2f} total_ms={:.2f}",
+          texture_key,
+          core::elapsedMilliseconds(lookup_start, lookup_end),
+          core::elapsedMilliseconds(capabilities_start, capabilities_end),
+          core::elapsedMilliseconds(prepare_start, prepare_end),
+          core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
     return rendering::kInvalidTexture;
   }
 
   SharedTextureResource shared{};
+  const auto create_start = core::SteadyClock::now();
   shared.texture = device_.createTexture(prepared->desc);
+  const auto create_end = core::SteadyClock::now();
   if (shared.texture == rendering::kInvalidTexture) {
+    if (diag_enabled) {
+      spdlog::info(
+          "RenderSystem texture cache miss texture='{}' failed lookup_ms={:.2f} "
+          "capabilities_ms={:.2f} prepare_ms={:.2f} create_ms={:.2f} total_ms={:.2f}",
+          texture_key,
+          core::elapsedMilliseconds(lookup_start, lookup_end),
+          core::elapsedMilliseconds(capabilities_start, capabilities_end),
+          core::elapsedMilliseconds(prepare_start, prepare_end),
+          core::elapsedMilliseconds(create_start, create_end),
+          core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
     return rendering::kInvalidTexture;
   }
+  const auto upload_start = core::SteadyClock::now();
   const bool uploaded = device_.uploadTexture(shared.texture, prepared->upload);
+  const auto upload_end = core::SteadyClock::now();
   if (!uploaded) {
     device_.destroyTexture(shared.texture);
+    if (diag_enabled) {
+      spdlog::info(
+          "RenderSystem texture cache miss texture='{}' failed lookup_ms={:.2f} "
+          "capabilities_ms={:.2f} prepare_ms={:.2f} create_ms={:.2f} upload_ms={:.2f} "
+          "total_ms={:.2f}",
+          texture_key,
+          core::elapsedMilliseconds(lookup_start, lookup_end),
+          core::elapsedMilliseconds(capabilities_start, capabilities_end),
+          core::elapsedMilliseconds(prepare_start, prepare_end),
+          core::elapsedMilliseconds(create_start, create_end),
+          core::elapsedMilliseconds(upload_start, upload_end),
+          core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
     return rendering::kInvalidTexture;
   }
   shared.ref_count = 1u;
   shared_it = shared_textures_.emplace(texture_key, std::move(shared)).first;
+  if (diag_enabled) {
+    spdlog::info(
+        "RenderSystem texture cache miss texture='{}' lookup_ms={:.2f} "
+        "capabilities_ms={:.2f} prepare_ms={:.2f} create_ms={:.2f} upload_ms={:.2f} "
+        "total_ms={:.2f}",
+        texture_key,
+        core::elapsedMilliseconds(lookup_start, lookup_end),
+        core::elapsedMilliseconds(capabilities_start, capabilities_end),
+        core::elapsedMilliseconds(prepare_start, prepare_end),
+        core::elapsedMilliseconds(create_start, create_end),
+        core::elapsedMilliseconds(upload_start, upload_end),
+        core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+  }
   return shared_it->second.texture;
+}
+
+std::size_t RenderSystem::Impl::acquireSharedTexturesBatched(
+    const std::vector<std::string>& texture_keys,
+    std::vector<std::string>& acquired_texture_keys) {
+  if (texture_keys.empty() || assets_ == nullptr) {
+    return 0u;
+  }
+
+  constexpr std::size_t kTextureBatchSize = 16u;
+  const bool diag_enabled = renderSystemDiagEnabled();
+  const auto total_start = core::SteadyClock::now();
+  const auto capabilities_start = core::SteadyClock::now();
+  const assets::TextureRuntimeCapabilities capabilities{
+      .bc7_unorm = device_.supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM),
+      .bc7_srgb = device_.supportsTextureFormat(rendering::TextureFormat::BC7_RGBA_UNORM_SRGB),
+  };
+  const auto capabilities_end = core::SteadyClock::now();
+  assets::AssetCacheConfig prepared_cache_config = assets::AssetCacheConfig::fromEnvironment();
+  prepared_cache_config.flush = false;
+  const bool prepared_cache_enabled =
+      prepared_cache_config.enabled &&
+      !prepared_cache_config.root.empty() &&
+      !envFlagDisabled(std::getenv("KARMA_RENDER_TEXTURE_PREPARED_CACHE"));
+  if (diag_enabled) {
+    spdlog::info(
+        "RenderSystem texture batch capabilities requested={} bc7_unorm={} bc7_srgb={} "
+        "prepared_cache={} took {:.2f} ms",
+        texture_keys.size(),
+        capabilities.bc7_unorm ? "true" : "false",
+        capabilities.bc7_srgb ? "true" : "false",
+        prepared_cache_enabled ? "on" : "off",
+        core::elapsedMilliseconds(capabilities_start, capabilities_end));
+  }
+
+  struct PreparedTextureResult {
+    std::optional<assets::PreparedTextureUpload> prepared;
+    double cache_read_ms = 0.0;
+    double prepare_ms = 0.0;
+    double cache_write_ms = 0.0;
+    bool prepared_cache_hit = false;
+    bool prepared_cache_write = false;
+  };
+
+  struct PendingTexture {
+    std::string key;
+    double lookup_ms = 0.0;
+    std::future<PreparedTextureResult> prepare;
+  };
+
+  struct ReadyTexture {
+    std::string key;
+    double lookup_ms = 0.0;
+    double cache_read_ms = 0.0;
+    double prepare_ms = 0.0;
+    double cache_write_ms = 0.0;
+    bool prepared_cache_hit = false;
+    bool prepared_cache_write = false;
+  };
+
+  auto prepare_texture =
+      [capabilities,
+       prepared_cache_config,
+       prepared_cache_enabled](const assets::TextureAsset* texture_asset) {
+    PreparedTextureResult result{};
+    if (texture_asset == nullptr) {
+      return result;
+    }
+
+    const std::string prepared_cache_key =
+        prepared_cache_enabled
+            ? assets::preparedTextureUploadCacheKey(*texture_asset, capabilities)
+            : std::string{};
+    if (prepared_cache_enabled && !prepared_cache_key.empty()) {
+      const auto read_start = core::SteadyClock::now();
+      assets::AssetCache cache(prepared_cache_config);
+      std::string diagnostic;
+      std::optional<assets::TextureAsset> cached =
+          cache.readTexture(prepared_cache_key, &diagnostic);
+      const auto read_end = core::SteadyClock::now();
+      result.cache_read_ms = core::elapsedMilliseconds(read_start, read_end);
+      if (cached.has_value()) {
+        const auto prepare_start = core::SteadyClock::now();
+        result.prepared = assets::prepareTextureUpload(*cached, capabilities);
+        const auto prepare_end = core::SteadyClock::now();
+        result.prepare_ms = core::elapsedMilliseconds(prepare_start, prepare_end);
+        if (result.prepared.has_value()) {
+          result.prepared_cache_hit = true;
+          return result;
+        }
+      }
+    }
+
+    const auto prepare_start = core::SteadyClock::now();
+    result.prepared = assets::prepareTextureUpload(*texture_asset, capabilities);
+    const auto prepare_end = core::SteadyClock::now();
+    result.prepare_ms = core::elapsedMilliseconds(prepare_start, prepare_end);
+
+    if (prepared_cache_enabled &&
+        !prepared_cache_key.empty() &&
+        result.prepared.has_value()) {
+      assets::TextureAsset cached_texture =
+          makePreparedTextureAsset(*texture_asset, *result.prepared);
+      cached_texture.content_hash = "prepared:" + prepared_cache_key;
+      const auto write_start = core::SteadyClock::now();
+      assets::AssetCache cache(prepared_cache_config);
+      result.prepared_cache_write =
+          cache.writeTextureNoIndex(prepared_cache_key, cached_texture);
+      const auto write_end = core::SteadyClock::now();
+      result.cache_write_ms = core::elapsedMilliseconds(write_start, write_end);
+    }
+    return result;
+  };
+
+  std::size_t acquired_count = 0u;
+  std::vector<PendingTexture> pending;
+  std::vector<rendering::TextureUploadBatchRequest> requests;
+  pending.reserve(kTextureBatchSize);
+  requests.reserve(kTextureBatchSize);
+
+  auto flush_pending = [&]() {
+    if (pending.empty()) {
+      return;
+    }
+
+    std::vector<ReadyTexture> ready;
+    ready.reserve(pending.size());
+    requests.clear();
+    requests.reserve(pending.size());
+    for (PendingTexture& texture : pending) {
+      PreparedTextureResult prepared = texture.prepare.get();
+      if (!prepared.prepared.has_value()) {
+        if (diag_enabled) {
+          spdlog::info(
+              "RenderSystem texture cache miss texture='{}' failed lookup_ms={:.2f} "
+              "prepared_cache={} cache_read_ms={:.2f} prepare_ms={:.2f} "
+              "cache_write_ms={:.2f} total_ms={:.2f} mode=batch",
+              texture.key,
+              texture.lookup_ms,
+              prepared.prepared_cache_hit ? "hit" : "miss",
+              prepared.cache_read_ms,
+              prepared.prepare_ms,
+              prepared.cache_write_ms,
+              texture.lookup_ms + prepared.cache_read_ms + prepared.prepare_ms +
+                  prepared.cache_write_ms);
+        }
+        continue;
+      }
+
+      ready.push_back(ReadyTexture{
+          .key = texture.key,
+          .lookup_ms = texture.lookup_ms,
+          .cache_read_ms = prepared.cache_read_ms,
+          .prepare_ms = prepared.prepare_ms,
+          .cache_write_ms = prepared.cache_write_ms,
+          .prepared_cache_hit = prepared.prepared_cache_hit,
+          .prepared_cache_write = prepared.prepared_cache_write,
+      });
+      requests.push_back(rendering::TextureUploadBatchRequest{
+          .desc = prepared.prepared->desc,
+          .upload = std::move(prepared.prepared->upload),
+      });
+    }
+    if (requests.empty()) {
+      pending.clear();
+      return;
+    }
+
+    const auto batch_start = core::SteadyClock::now();
+    std::vector<rendering::TextureUploadBatchResult> results =
+        device_.createAndUploadTextures(std::move(requests));
+    const auto batch_end = core::SteadyClock::now();
+    if (diag_enabled) {
+      spdlog::info("RenderSystem texture batch upload count={} took {:.2f} ms",
+                   ready.size(),
+                   core::elapsedMilliseconds(batch_start, batch_end));
+    }
+
+    const std::size_t result_count = std::min(results.size(), ready.size());
+    for (std::size_t index = 0u; index < result_count; ++index) {
+      const ReadyTexture& texture = ready[index];
+      const rendering::TextureUploadBatchResult& result = results[index];
+      if (result.uploaded && result.texture != rendering::kInvalidTexture) {
+        SharedTextureResource shared{};
+        shared.texture = result.texture;
+        shared.ref_count = 1u;
+        shared_textures_.emplace(texture.key, std::move(shared));
+        acquired_texture_keys.push_back(texture.key);
+        ++acquired_count;
+      }
+      if (diag_enabled) {
+        spdlog::info(
+            "RenderSystem texture cache miss texture='{}' lookup_ms={:.2f} "
+            "capabilities_ms=0.00 prepared_cache={} cache_read_ms={:.2f} "
+            "prepare_ms={:.2f} cache_write_ms={:.2f} create_ms={:.2f} "
+            "upload_ms={:.2f} total_ms={:.2f} mode=batch",
+            texture.key,
+            texture.lookup_ms,
+            texture.prepared_cache_hit ? "hit" : "miss",
+            texture.cache_read_ms,
+            texture.prepare_ms,
+            texture.cache_write_ms,
+            result.create_ms,
+            result.upload_ms,
+            texture.lookup_ms + texture.cache_read_ms + texture.prepare_ms +
+                texture.cache_write_ms + result.create_ms + result.upload_ms);
+      }
+    }
+
+    for (std::size_t index = result_count; index < ready.size(); ++index) {
+      if (diag_enabled) {
+        const ReadyTexture& texture = ready[index];
+        spdlog::info(
+            "RenderSystem texture cache miss texture='{}' failed lookup_ms={:.2f} "
+            "capabilities_ms=0.00 prepared_cache={} cache_read_ms={:.2f} "
+            "prepare_ms={:.2f} cache_write_ms={:.2f} total_ms={:.2f} mode=batch",
+            texture.key,
+            texture.lookup_ms,
+            texture.prepared_cache_hit ? "hit" : "miss",
+            texture.cache_read_ms,
+            texture.prepare_ms,
+            texture.cache_write_ms,
+            texture.lookup_ms + texture.cache_read_ms + texture.prepare_ms +
+                texture.cache_write_ms);
+      }
+    }
+
+    pending.clear();
+    requests.clear();
+    requests.reserve(kTextureBatchSize);
+  };
+
+  for (const std::string& texture_key : texture_keys) {
+    if (texture_key.empty()) {
+      continue;
+    }
+    const auto cache_start = core::SteadyClock::now();
+    auto shared_it = shared_textures_.find(texture_key);
+    if (shared_it != shared_textures_.end()) {
+      shared_it->second.ref_count += 1u;
+      acquired_texture_keys.push_back(texture_key);
+      ++acquired_count;
+      if (diag_enabled) {
+        spdlog::info("RenderSystem texture cache hit texture='{}' took {:.2f} ms",
+                     texture_key,
+                     core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+      }
+      continue;
+    }
+
+    const auto lookup_start = core::SteadyClock::now();
+    const assets::TextureAsset* texture_asset = assets_->findTextureAsset(texture_key);
+    const auto lookup_end = core::SteadyClock::now();
+    if (texture_asset == nullptr ||
+        texture_asset->desc.width <= 0 ||
+        texture_asset->desc.height <= 0) {
+      if (diag_enabled) {
+        spdlog::info(
+            "RenderSystem texture cache miss texture='{}' failed lookup_ms={:.2f} total_ms={:.2f}",
+            texture_key,
+            core::elapsedMilliseconds(lookup_start, lookup_end),
+            core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+      }
+      continue;
+    }
+
+    pending.push_back(PendingTexture{
+        .key = texture_key,
+        .lookup_ms = core::elapsedMilliseconds(lookup_start, lookup_end),
+        .prepare = std::async(std::launch::async, prepare_texture, texture_asset),
+    });
+    if (pending.size() >= kTextureBatchSize) {
+      flush_pending();
+    }
+  }
+
+  flush_pending();
+  if (diag_enabled) {
+    spdlog::info("RenderSystem texture batch acquire requested={} acquired={} took {:.2f} ms",
+                 texture_keys.size(),
+                 acquired_count,
+                 core::elapsedMilliseconds(total_start, core::SteadyClock::now()));
+  }
+  return acquired_count;
 }
 
 void RenderSystem::Impl::releaseSharedTexture(const std::string& texture_key) {
@@ -921,25 +1302,38 @@ rendering::MaterialId RenderSystem::Impl::acquireSharedMaterial(const std::strin
     shared_material_aliases_.erase(alias_it);
   }
 
+  const auto resolve_start = core::SteadyClock::now();
   std::optional<rendering::ResolvedMaterialDesc> resolved;
   if (assets_ != nullptr) {
     resolved = assets_->resolveMaterial(material_key);
   }
+  const auto resolve_end = core::SteadyClock::now();
   if (!resolved.has_value()) {
     if (!warned_missing_material_keys_.contains(material_key)) {
       spdlog::warn("Karma: material key '{}' was not registered; using mesh slot default",
                    material_key);
       warned_missing_material_keys_.emplace(material_key, true);
     }
+    if (diag_enabled) {
+      spdlog::info(
+          "RenderSystem material cache miss material='{}' failed resolve_ms={:.2f} "
+          "total_ms={:.2f}",
+          material_key,
+          core::elapsedMilliseconds(resolve_start, resolve_end),
+          core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+    }
     return rendering::kInvalidMaterial;
   }
 
+  const auto fingerprint_start = core::SteadyClock::now();
   const std::string fingerprint = materialFingerprint(*resolved);
+  const auto fingerprint_end = core::SteadyClock::now();
   auto shared_it = shared_materials_.find(fingerprint);
   if (shared_it == shared_materials_.end()) {
 
     std::vector<std::string> acquired_texture_keys;
     acquired_texture_keys.reserve(resolved->textures.size());
+    const auto texture_acquire_start = core::SteadyClock::now();
     for (const auto& [alias, texture_key] : resolved->textures) {
       const rendering::TextureId texture = acquireSharedTexture(texture_key);
       if (texture == rendering::kInvalidTexture) {
@@ -948,17 +1342,29 @@ rendering::MaterialId RenderSystem::Impl::acquireSharedMaterial(const std::strin
       resolved->texture_handles[alias] = texture;
       acquired_texture_keys.push_back(texture_key);
     }
+    const auto texture_acquire_end = core::SteadyClock::now();
 
     SharedMaterialResource shared{};
+    const auto create_start = core::SteadyClock::now();
     shared.material = device_.createMaterial(*resolved);
+    const auto create_end = core::SteadyClock::now();
     if (shared.material == rendering::kInvalidMaterial) {
       for (const std::string& texture_key : acquired_texture_keys) {
         releaseSharedTexture(texture_key);
       }
       if (diag_enabled) {
-        spdlog::info("RenderSystem material cache miss material='{}' failed in {:.2f} ms",
-                     material_key,
-                     core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
+        spdlog::info(
+            "RenderSystem material cache miss material='{}' failed resolve_ms={:.2f} "
+            "fingerprint_ms={:.2f} texture_acquire_ms={:.2f} textures_requested={} "
+            "textures_acquired={} create_ms={:.2f} total_ms={:.2f}",
+            material_key,
+            core::elapsedMilliseconds(resolve_start, resolve_end),
+            core::elapsedMilliseconds(fingerprint_start, fingerprint_end),
+            core::elapsedMilliseconds(texture_acquire_start, texture_acquire_end),
+            resolved->textures.size(),
+            acquired_texture_keys.size(),
+            core::elapsedMilliseconds(create_start, create_end),
+            core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
       }
       return rendering::kInvalidMaterial;
     }
@@ -966,6 +1372,18 @@ rendering::MaterialId RenderSystem::Impl::acquireSharedMaterial(const std::strin
     shared.texture_asset_keys = std::move(acquired_texture_keys);
     shared_it = shared_materials_.emplace(fingerprint, std::move(shared)).first;
     if (diag_enabled) {
+      spdlog::info(
+          "RenderSystem material cache miss detail material='{}' resolve_ms={:.2f} "
+          "fingerprint_ms={:.2f} texture_acquire_ms={:.2f} textures_requested={} "
+          "textures_acquired={} create_ms={:.2f} total_ms={:.2f}",
+          material_key,
+          core::elapsedMilliseconds(resolve_start, resolve_end),
+          core::elapsedMilliseconds(fingerprint_start, fingerprint_end),
+          core::elapsedMilliseconds(texture_acquire_start, texture_acquire_end),
+          resolved->textures.size(),
+          shared_it->second.texture_asset_keys.size(),
+          core::elapsedMilliseconds(create_start, create_end),
+          core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
       spdlog::info("RenderSystem material cache miss material='{}' took {:.2f} ms",
                    material_key,
                    core::elapsedMilliseconds(cache_start, core::SteadyClock::now()));
@@ -1048,6 +1466,55 @@ RenderPrewarmHandle RenderSystem::Impl::prewarmAssets(
   }
 
   stage_start = core::SteadyClock::now();
+  std::vector<std::string> prewarm_texture_keys;
+  prewarm_texture_keys.reserve(texture_keys.size() + material_keys.size());
+  std::unordered_set<std::string> queued_texture_keys;
+  queued_texture_keys.reserve(texture_keys.size() + material_keys.size());
+  auto append_texture_key = [&](const std::string& texture_key) {
+    if (!texture_key.empty() && queued_texture_keys.insert(texture_key).second) {
+      prewarm_texture_keys.push_back(texture_key);
+    }
+  };
+  for (const std::string& texture_key : texture_keys) {
+    append_texture_key(texture_key);
+  }
+  if (assets_ != nullptr) {
+    for (const std::string& material_key : material_keys) {
+      if (material_key.empty()) {
+        continue;
+      }
+      std::optional<rendering::ResolvedMaterialDesc> resolved =
+          assets_->resolveMaterial(material_key);
+      if (!resolved.has_value()) {
+        continue;
+      }
+      for (const auto& [alias, texture_key] : resolved->textures) {
+        (void)alias;
+        append_texture_key(texture_key);
+      }
+    }
+  }
+  logRenderSystemStage(diag_enabled,
+                       "prewarm texture key collect",
+                       stage_start,
+                       core::SteadyClock::now());
+  if (diag_enabled) {
+    spdlog::info("RenderSystem prewarm texture key collect package_textures={} material_keys={} unique_textures={}",
+                 texture_keys.size(),
+                 material_keys.size(),
+                 prewarm_texture_keys.size());
+  }
+
+  stage_start = core::SteadyClock::now();
+  acquireSharedTexturesBatched(prewarm_texture_keys, record.texture_keys);
+  logRenderSystemStage(diag_enabled, "prewarm texture acquire", stage_start, core::SteadyClock::now());
+  if (diag_enabled) {
+    spdlog::info("RenderSystem prewarm texture acquire requested={} acquired={}",
+                 prewarm_texture_keys.size(),
+                 record.texture_keys.size());
+  }
+
+  stage_start = core::SteadyClock::now();
   for (const std::string& material_key : material_keys) {
     if (acquireSharedMaterial(material_key) != rendering::kInvalidMaterial) {
       record.material_keys.push_back(material_key);
@@ -1058,19 +1525,6 @@ RenderPrewarmHandle RenderSystem::Impl::prewarmAssets(
     spdlog::info("RenderSystem prewarm material acquire requested={} acquired={}",
                  material_keys.size(),
                  record.material_keys.size());
-  }
-
-  stage_start = core::SteadyClock::now();
-  for (const std::string& texture_key : texture_keys) {
-    if (acquireSharedTexture(texture_key) != rendering::kInvalidTexture) {
-      record.texture_keys.push_back(texture_key);
-    }
-  }
-  logRenderSystemStage(diag_enabled, "prewarm texture acquire", stage_start, core::SteadyClock::now());
-  if (diag_enabled) {
-    spdlog::info("RenderSystem prewarm texture acquire requested={} acquired={}",
-                 texture_keys.size(),
-                 record.texture_keys.size());
   }
 
   if (record.mesh_asset_keys.empty() &&
@@ -1270,6 +1724,7 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
   device_.setCameraActive(true);
 
   rendering::DirectionalLightData light{};
+  light.intensity = 0.0f;
   std::vector<rendering::LightData> lights;
   lights.reserve(16);
   bool has_light = false;
@@ -1306,11 +1761,6 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
     }
     return true;
   });
-  if (!has_light) {
-    light.direction = glm::vec3(0.3f, -1.0f, 0.2f);
-    light.color = math::Color{1.0f, 1.0f, 1.0f, 1.0f};
-    light.intensity = 1.0f;
-  }
   device_.setDirectionalLight(light);
   device_.setLights(lights);
   section_end = core::SteadyClock::now();

@@ -322,6 +322,7 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_transparent_double_sided_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_additive_srb;
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> custom_additive_double_sided_srb;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shadow_alpha_srb;
     std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>, kForwardSrbSlotCount>
         layout_srbs;
     std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>, kForwardSrbSlotCount>
@@ -769,6 +770,7 @@ class DiligentBackend final : public Backend {
                                                              rendering::InstanceGpuLayout layout =
                                                                  rendering::InstanceGpuLayout::
                                                                      Matrix4x4Params);
+  Diligent::IShaderResourceBinding* ensureMaterialShadowAlphaSrb(MaterialRecord& material);
   bool ensureInstancedRecordBuffer(InstancedRecord& record);
   bool instancedGpuCullingEnabled() const;
   bool ensureInstancedGpuCullingResources();
@@ -903,6 +905,9 @@ class DiligentBackend final : public Backend {
                                 unsigned int uv_index,
                                 size_t slot) const;
   void bindShadowResourcesToSrb(Diligent::IShaderResourceBinding* srb) const;
+  Diligent::ITextureView* defaultBrdfLutSrv() const;
+  Diligent::ITextureView* brdfLutSrv() const;
+  void bindEnvironmentResources();
   void preloadAssimpTextures(const aiScene& scene, const std::filesystem::path& asset_path);
   void preloadImportedMaterialTextures(const rendering::ImportedMaterialData& material);
   const ImportedMaterialTemplateCacheEntry* getImportedMaterialTemplates(
@@ -954,6 +959,7 @@ class DiligentBackend final : public Backend {
   std::filesystem::path camera_override_vertex_path_;
   std::filesystem::path camera_override_fragment_path_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> shadow_pipeline_state_;
+  Diligent::RefCntAutoPtr<Diligent::IPipelineState> shadow_alpha_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shader_resources_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> depth_prepass_srb_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> default_material_srb_;
@@ -1325,12 +1331,14 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_base_color_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_normal_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_metallic_roughness_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> default_brdf_lut_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_occlusion_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_emissive_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_env_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_base_color_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_normal_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_metallic_roughness_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> default_brdf_lut_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_occlusion_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_emissive_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_env_;
@@ -1398,6 +1406,7 @@ class DiligentBackend final : public Backend {
 	  bool vsync_enabled_ = true;
 	  rendering::PresentMode present_mode_ = rendering::PresentMode::Auto;
 	  int env_debug_mode_ = 0;
+  bool debug_glossy_off_ = false;
   bool warned_env_debug_ = false;
   bool warned_env_bind_missing_ = false;
   bool anisotropy_enabled_ = false;

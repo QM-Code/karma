@@ -5,9 +5,11 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -489,6 +491,109 @@ void writeSolidRowsTga(const std::filesystem::path& path) {
   }
 }
 
+template <typename T>
+void appendPod(std::vector<uint8_t>& bytes, const T& value) {
+  const auto* raw = reinterpret_cast<const uint8_t*>(&value);
+  bytes.insert(bytes.end(), raw, raw + sizeof(T));
+}
+
+void alignBytes4(std::vector<uint8_t>& bytes) {
+  while ((bytes.size() % 4u) != 0u) {
+    bytes.push_back(0u);
+  }
+}
+
+void appendFloatVector(std::vector<uint8_t>& bytes,
+                       std::initializer_list<float> values) {
+  for (float value : values) {
+    appendPod(bytes, value);
+  }
+}
+
+void appendU16Vector(std::vector<uint8_t>& bytes,
+                     std::initializer_list<uint16_t> values) {
+  for (uint16_t value : values) {
+    appendPod(bytes, value);
+  }
+}
+
+void writeBinary(const std::filesystem::path& path,
+                 const std::vector<uint8_t>& bytes) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream stream(path, std::ios::binary);
+  stream.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+}
+
+void writeAlphaBlendGltf(const std::filesystem::path& dir) {
+  std::vector<uint8_t> buffer;
+  const std::size_t position_offset = buffer.size();
+  appendFloatVector(buffer,
+                    {0.0f, 0.0f, 0.0f,
+                     1.0f, 0.0f, 0.0f,
+                     0.0f, 1.0f, 0.0f});
+  alignBytes4(buffer);
+  const std::size_t normal_offset = buffer.size();
+  appendFloatVector(buffer,
+                    {0.0f, 0.0f, 1.0f,
+                     0.0f, 0.0f, 1.0f,
+                     0.0f, 0.0f, 1.0f});
+  alignBytes4(buffer);
+  const std::size_t uv_offset = buffer.size();
+  appendFloatVector(buffer,
+                    {0.0f, 0.0f,
+                     1.0f, 0.0f,
+                     0.0f, 1.0f});
+  alignBytes4(buffer);
+  const std::size_t index_offset = buffer.size();
+  appendU16Vector(buffer, {0u, 1u, 2u});
+  alignBytes4(buffer);
+  writeBinary(dir / "alpha.bin", buffer);
+
+  const std::string alpha_png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGUlEQVR4nAXBAQ0AAAjAINwMbvMLgrSjCw8zjQWBzP8qVQAAAABJRU5ErkJggg==";
+  writeText(dir / "alpha.gltf",
+            std::string(R"({
+  "asset": { "version": "2.0" },
+  "scene": 0,
+  "scenes": [{ "nodes": [0] }],
+  "nodes": [{ "name": "AlphaTriangle", "mesh": 0 }],
+  "meshes": [{
+    "primitives": [{
+      "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+      "indices": 3,
+      "material": 0
+    }]
+  }],
+  "materials": [{
+    "name": "alpha-leaf",
+    "alphaMode": "BLEND",
+    "doubleSided": true,
+    "pbrMetallicRoughness": {
+      "baseColorTexture": { "index": 0 },
+      "metallicFactor": 0.0,
+      "roughnessFactor": 1.0
+    }
+  }],
+  "textures": [{ "source": 0 }],
+  "images": [{ "uri": "data:image/png;base64,)") + alpha_png + R"(" }],
+  "buffers": [{ "uri": "alpha.bin", "byteLength": )" +
+                std::to_string(buffer.size()) + R"( }],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": )" + std::to_string(position_offset) + R"(, "byteLength": 36, "target": 34962 },
+    { "buffer": 0, "byteOffset": )" + std::to_string(normal_offset) + R"(, "byteLength": 36, "target": 34962 },
+    { "buffer": 0, "byteOffset": )" + std::to_string(uv_offset) + R"(, "byteLength": 24, "target": 34962 },
+    { "buffer": 0, "byteOffset": )" + std::to_string(index_offset) + R"(, "byteLength": 6, "target": 34963 }
+  ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [1, 1, 0] },
+    { "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3" },
+    { "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2" },
+    { "bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR", "min": [0], "max": [2] }
+  ]
+})");
+}
+
 bool rgbaNear(const std::vector<uint8_t>& bytes,
               int width,
               int x,
@@ -509,6 +614,76 @@ bool rgbaNear(const std::vector<uint8_t>& bytes,
          near(bytes[index + 1u], g) &&
          near(bytes[index + 2u], b) &&
          bytes[index + 3u] >= 240u;
+}
+
+bool rgbaDominant(const std::vector<uint8_t>& bytes,
+                  int width,
+                  int x,
+                  int y,
+                  uint8_t channel) {
+  const std::size_t index =
+      (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+       static_cast<std::size_t>(x)) * 4u;
+  if (index + 3u >= bytes.size() || channel >= 3u) {
+    return false;
+  }
+  for (uint8_t i = 0u; i < 3u; ++i) {
+    if (i != channel && bytes[index + channel] <= bytes[index + i] + 64u) {
+      return false;
+    }
+  }
+  return bytes[index + channel] >= 128u && bytes[index + 3u] >= 220u;
+}
+
+bool rgbaDominantSubresource(const std::vector<uint8_t>& bytes,
+                             const karma::rendering::TextureUploadSubresource& subresource,
+                             int x,
+                             int y,
+                             uint8_t channel) {
+  const std::size_t index = subresource.offset +
+                            static_cast<std::size_t>(y) * subresource.row_stride +
+                            static_cast<std::size_t>(x) * 4u;
+  if (index + 3u >= bytes.size() || channel >= 3u) {
+    return false;
+  }
+  for (uint8_t i = 0u; i < 3u; ++i) {
+    if (i != channel && bytes[index + channel] <= bytes[index + i] + 64u) {
+      return false;
+    }
+  }
+  return bytes[index + channel] >= 128u && bytes[index + 3u] >= 220u;
+}
+
+bool subresourceHasAlphaBelow(const std::vector<uint8_t>& bytes,
+                              const karma::rendering::TextureUploadSubresource& subresource,
+                              uint8_t threshold) {
+  for (uint32_t y = 0u; y < subresource.height; ++y) {
+    for (uint32_t x = 0u; x < subresource.width; ++x) {
+      const std::size_t index =
+          subresource.offset + static_cast<std::size_t>(y) * subresource.row_stride +
+          static_cast<std::size_t>(x) * 4u + 3u;
+      if (index < bytes.size() && bytes[index] < threshold) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool subresourceHasAlphaAbove(const std::vector<uint8_t>& bytes,
+                              const karma::rendering::TextureUploadSubresource& subresource,
+                              uint8_t threshold) {
+  for (uint32_t y = 0u; y < subresource.height; ++y) {
+    for (uint32_t x = 0u; x < subresource.width; ++x) {
+      const std::size_t index =
+          subresource.offset + static_cast<std::size_t>(y) * subresource.row_stride +
+          static_cast<std::size_t>(x) * 4u + 3u;
+      if (index < bytes.size() && bytes[index] > threshold) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 void setEnvVar(const char* name, const char* value) {
@@ -702,6 +877,7 @@ void testAssetKeyValidationAndPackages() {
   const std::filesystem::path dir = makeTempDir("karma_asset_package_tests");
   std::filesystem::create_directories(dir / "textures");
   std::filesystem::create_directories(dir / "particles");
+  writeText(dir / "environment.hdr", "placeholder");
   std::filesystem::copy_file(repo_root / "examples/assets/prefabs/explosion/textures/spark_atlas.png",
                              dir / "textures/spark_atlas.png",
                              std::filesystem::copy_options::overwrite_existing);
@@ -746,8 +922,7 @@ void testAssetKeyValidationAndPackages() {
 #if defined(KARMA_ENABLE_KTX2)
   assert(texture->payload_format ==
          karma::assets::TextureAsset::PayloadFormat::KTX2_BASIS_UASTC);
-  assert(!texture->fallback_rgba8.empty());
-  assert(texture->fallback_rgba8.size() == 256u * 64u * 4u);
+  assert(texture->fallback_rgba8.empty());
   assert(texture->subresources.empty());
 #else
   assert(texture->payload_format == karma::assets::TextureAsset::PayloadFormat::RGBA8);
@@ -1232,6 +1407,7 @@ void testAssetCacheV2AndPackageWarmRestore() {
 
   std::filesystem::create_directories(dir / "textures");
   std::filesystem::create_directories(dir / "particles");
+  writeText(dir / "environment.hdr", "placeholder");
   std::filesystem::copy_file(repo_root / "examples/assets/prefabs/explosion/textures/spark_atlas.png",
                              dir / "textures/spark_atlas.png",
                              std::filesystem::copy_options::overwrite_existing);
@@ -1256,7 +1432,7 @@ void testAssetCacheV2AndPackageWarmRestore() {
                 {
                   "type": "environment_map",
                   "key": "cache/package/env",
-                  "path": "../environment.hdr"
+                  "path": "environment.hdr"
                 }
               ]
             })");
@@ -1283,17 +1459,45 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(rgba_upload->desc.format == karma::rendering::TextureFormat::RGBA8);
   assert(!rgba_upload->upload.bytes.empty());
 #if defined(KARMA_ENABLE_KTX2)
+  const karma::assets::TextureRuntimeCapabilities bc7_caps{
+      .bc7_unorm = true,
+      .bc7_srgb = true,
+  };
   auto default_compressed_upload = karma::assets::prepareTextureUpload(
       *cold_texture,
-      karma::assets::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
+      bc7_caps);
   assert(default_compressed_upload.has_value());
-  assert(default_compressed_upload->desc.format == karma::rendering::TextureFormat::RGBA8);
-  assert(default_compressed_upload->upload.bytes == cold_texture->fallback_rgba8);
+  assert(default_compressed_upload->desc.format ==
+         karma::rendering::TextureFormat::BC7_RGBA_UNORM);
+  assert(!default_compressed_upload->upload.subresources.empty());
+  assert(default_compressed_upload->upload.subresources.front().row_stride > 0u);
+
+  const std::string prepared_cache_key =
+      karma::assets::preparedTextureUploadCacheKey(*cold_texture, bc7_caps);
+  assert(!prepared_cache_key.empty());
+  karma::assets::TextureAsset prepared_texture{};
+  prepared_texture.desc = default_compressed_upload->desc;
+  prepared_texture.payload_format =
+      karma::assets::TextureAsset::PayloadFormat::PreparedUpload;
+  prepared_texture.semantic = cold_texture->semantic;
+  prepared_texture.subresources = default_compressed_upload->upload.subresources;
+  prepared_texture.bytes = default_compressed_upload->upload.bytes;
+  karma::assets::AssetCache prepared_cache(options.cache);
+  assert(prepared_cache.writeTexture(prepared_cache_key, prepared_texture));
+  auto cached_prepared_texture = prepared_cache.readTexture(prepared_cache_key);
+  assert(cached_prepared_texture.has_value());
+  auto cached_prepared_upload =
+      karma::assets::prepareTextureUpload(*cached_prepared_texture, bc7_caps);
+  assert(cached_prepared_upload.has_value());
+  assert(cached_prepared_upload->desc.format ==
+         karma::rendering::TextureFormat::BC7_RGBA_UNORM);
+  assert(cached_prepared_upload->upload.bytes.size() ==
+         default_compressed_upload->upload.bytes.size());
+  assert(cached_prepared_upload->upload.subresources.size() ==
+         default_compressed_upload->upload.subresources.size());
 
   setEnvVar("KARMA_TEXTURE_BC7", "1");
-  auto bc7_upload = karma::assets::prepareTextureUpload(
-      *cold_texture,
-      karma::assets::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
+  auto bc7_upload = karma::assets::prepareTextureUpload(*cold_texture, bc7_caps);
   assert(bc7_upload.has_value());
   assert(bc7_upload->desc.format == karma::rendering::TextureFormat::BC7_RGBA_UNORM);
   assert(!bc7_upload->upload.subresources.empty());
@@ -1303,10 +1507,11 @@ void testAssetCacheV2AndPackageWarmRestore() {
   setEnvVar("KARMA_TEXTURE_BC7", "0");
   auto bc7_disabled_upload = karma::assets::prepareTextureUpload(
       *cold_texture,
-      karma::assets::TextureRuntimeCapabilities{.bc7_unorm = true, .bc7_srgb = true});
+      bc7_caps);
   assert(bc7_disabled_upload.has_value());
   assert(bc7_disabled_upload->desc.format == karma::rendering::TextureFormat::RGBA8);
-  assert(bc7_disabled_upload->upload.bytes == cold_texture->fallback_rgba8);
+  assert(!bc7_disabled_upload->upload.subresources.empty());
+  assert(!bc7_disabled_upload->upload.bytes.empty());
   unsetEnvVar("KARMA_TEXTURE_BC7");
 #endif
 
@@ -1352,6 +1557,104 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(diagnostic.empty());
   assert(disabled_assets.findTextureAsset("cache/package/spark_atlas") != nullptr);
 
+  const std::filesystem::path baked_dir = dir / "bakes" / "asset_cache" / "small_package";
+  karma::assets::AssetPackageBakeOptions bake_options{};
+  bake_options.package_id = "small_package";
+  bake_options.scene_fingerprint = "test-scene-fingerprint";
+  bake_options.import_options = options;
+  diagnostic.clear();
+  assert(karma::assets::bakeAssetPackage(dir, baked_dir, bake_options, &diagnostic));
+  assert(diagnostic.empty());
+  assert(std::filesystem::exists(baked_dir / "baked.package.json"));
+  assert(!std::filesystem::exists(baked_dir / "index.json"));
+  assert(karma::assets::checkBakedAssetPackage(dir, baked_dir, bake_options, &diagnostic));
+
+  std::filesystem::remove(dir / "assets.package.json");
+  std::filesystem::remove(dir / "textures/spark_atlas.png");
+  std::filesystem::remove(dir / "particles/explosion_flash.kpeffect");
+
+  karma::assets::AssetRegistry baked_assets;
+  diagnostic.clear();
+  auto baked_package =
+      karma::assets::importBakedAssetPackage(baked_assets, baked_dir, &diagnostic);
+  assert(baked_package.has_value());
+  assert(diagnostic.empty());
+  assert(baked_assets.findTextureAsset("cache/package/spark_atlas") != nullptr);
+  assert(baked_assets.findParticleEffect("cache/package/flash") != nullptr);
+  assert(baked_assets.findEnvironmentMap("cache/package/env") != nullptr);
+  assert(karma::assets::unloadAssetPackage(baked_assets, *baked_package));
+  assert(baked_assets.findTextureAsset("cache/package/spark_atlas") == nullptr);
+
+  unsetEnvVar("KARMA_ASSET_CACHE_DIR");
+  unsetEnvVar("KARMA_ASSET_CACHE");
+  unsetEnvVar("KARMA_ASSET_CACHE_FLUSH");
+  std::filesystem::remove_all(dir);
+}
+
+void testPreparedTextureCachePreservesGeneratedMips() {
+  const std::filesystem::path dir =
+      makeTempDir("karma_prepared_texture_generated_mips_tests");
+  const std::filesystem::path cache_dir = dir / "cache";
+
+  setEnvVar("KARMA_ASSET_CACHE_DIR", cache_dir.string().c_str());
+  setEnvVar("KARMA_ASSET_CACHE", "1");
+  setEnvVar("KARMA_ASSET_CACHE_FLUSH", "0");
+  setEnvVar("KARMA_RENDER_TEXTURE_PREPARED_CACHE", "1");
+
+  karma::assets::TextureAsset source{};
+  source.desc.width = 4;
+  source.desc.height = 4;
+  source.desc.format = karma::rendering::TextureFormat::RGBA8;
+  source.desc.srgb = false;
+  source.desc.generate_mips = true;
+  source.desc.mip_levels = 1u;
+  source.payload_format = karma::assets::TextureAsset::PayloadFormat::RGBA8;
+  source.semantic = karma::assets::TextureAsset::Semantic::Normal;
+  source.content_hash = "prepared-generated-mips-regression";
+  source.bytes.reserve(4u * 4u * 4u);
+  for (std::size_t index = 0u; index < 16u; ++index) {
+    source.bytes.insert(source.bytes.end(), {128u, 128u, 255u, 255u});
+  }
+
+  karma::assets::TextureAsset without_generated_mips = source;
+  without_generated_mips.desc.generate_mips = false;
+  const std::string prepared_cache_key =
+      karma::assets::preparedTextureUploadCacheKey(source);
+  assert(!prepared_cache_key.empty());
+  assert(prepared_cache_key !=
+         karma::assets::preparedTextureUploadCacheKey(without_generated_mips));
+
+  karma::assets::AssetRegistry assets;
+  assert(assets.registerTextureAsset("tests/textures/generated_mips", std::move(source)));
+
+  {
+    DummyWindow window;
+    karma::rendering::GraphicsDevice device(window);
+    karma::rendering::RenderSystem renderer(device, assets);
+    renderer.prewarmAssets({}, {}, {"tests/textures/generated_mips"});
+  }
+
+  karma::assets::AssetCache cache({
+      .root = cache_dir,
+      .enabled = true,
+      .flush = false,
+  });
+  auto cached_texture = cache.readTexture(prepared_cache_key);
+  assert(cached_texture.has_value());
+  assert(cached_texture->payload_format ==
+         karma::assets::TextureAsset::PayloadFormat::PreparedUpload);
+  assert(cached_texture->semantic == karma::assets::TextureAsset::Semantic::Normal);
+  assert(cached_texture->desc.generate_mips);
+  assert(cached_texture->desc.mip_levels == 1u);
+  assert(cached_texture->subresources.size() == 1u);
+
+  auto warm_upload = karma::assets::prepareTextureUpload(*cached_texture);
+  assert(warm_upload.has_value());
+  assert(warm_upload->desc.generate_mips);
+  assert(warm_upload->desc.mip_levels == 1u);
+  assert(warm_upload->upload.subresources.size() == 1u);
+
+  unsetEnvVar("KARMA_RENDER_TEXTURE_PREPARED_CACHE");
   unsetEnvVar("KARMA_ASSET_CACHE_DIR");
   unsetEnvVar("KARMA_ASSET_CACHE");
   unsetEnvVar("KARMA_ASSET_CACHE_FLUSH");
@@ -1372,11 +1675,12 @@ void testTexturePreparedUploadPreservesRowOrder() {
               "version": 1,
               "assets": [
                 {
-                  "type": "texture_rgba8",
-                  "key": "tests/textures/rows",
-                  "path": "textures/rows.tga",
-                  "generate_mips": false
-                }
+	                  "type": "texture_rgba8",
+	                  "key": "tests/textures/rows",
+	                  "path": "textures/rows.tga",
+	                  "generate_mips": false,
+	                  "prefer_compressed": false
+	                }
               ]
             })");
 
@@ -1441,10 +1745,179 @@ void testImportedMaterialTextureMatchesRendererOrigin() {
   assert(prepared->desc.format == karma::rendering::TextureFormat::RGBA8);
   assert(prepared->desc.width == 4);
   assert(prepared->desc.height == 8);
-  assert(rgbaNear(prepared->upload.bytes, prepared->desc.width, 0, 0,
-                  0u, 255u, 0u));
-  assert(rgbaNear(prepared->upload.bytes, prepared->desc.width, 0,
-                  prepared->desc.height - 1, 255u, 0u, 0u));
+  assert(!prepared->upload.subresources.empty());
+  const auto& base_subresource = prepared->upload.subresources.front();
+  assert(base_subresource.mip_level == 0u);
+  assert(rgbaDominantSubresource(prepared->upload.bytes, base_subresource, 0, 0, 1u));
+  assert(rgbaDominantSubresource(prepared->upload.bytes,
+                                 base_subresource,
+                                 0,
+                                 prepared->desc.height - 1,
+                                 0u));
+
+  std::filesystem::remove_all(dir);
+}
+
+void testGltfSceneImportsTextureAlphaMode() {
+  const std::filesystem::path dir =
+      makeTempDir("karma_gltf_alpha_material_tests");
+  writeAlphaBlendGltf(dir);
+  writeText(dir / "assets.package.json",
+            R"({
+              "version": 1,
+              "assets": [
+                {
+                  "type": "gltf_scene",
+                  "key": "tests/gltf/alpha",
+                  "path": "alpha.gltf",
+                  "import_meshes": true,
+                  "import_lights": false
+                }
+              ]
+            })");
+
+  karma::assets::AssetRegistry assets;
+  std::string diagnostic;
+  auto package = karma::assets::importAssetPackage(assets, dir, &diagnostic);
+  assert(package.has_value());
+  assert(diagnostic.empty());
+  const karma::assets::GltfSceneAsset* scene =
+      assets.findGltfSceneAsset("tests/gltf/alpha");
+  assert(scene != nullptr);
+  assert(scene->material_keys.size() == 1u);
+
+  const auto resolved = assets.resolveMaterial(scene->material_keys.front());
+  assert(resolved.has_value());
+  assert(resolved->surface.alpha_mode ==
+         karma::rendering::MaterialDesc::AlphaMode::Blend);
+  assert(resolved->surface.transparent);
+  assert(!resolved->surface.depth_write);
+  assert(resolved->surface.double_sided);
+  const auto base_texture_it = resolved->textures.find("base_color");
+  assert(base_texture_it != resolved->textures.end());
+
+  const karma::assets::TextureAsset* texture =
+      assets.findTextureAsset(base_texture_it->second);
+  assert(texture != nullptr);
+  auto prepared = karma::assets::prepareTextureUpload(*texture, {});
+  assert(prepared.has_value());
+  assert(prepared->desc.format == karma::rendering::TextureFormat::RGBA8);
+  assert(!prepared->upload.subresources.empty());
+  const auto& base_subresource = prepared->upload.subresources.front();
+  assert(subresourceHasAlphaBelow(prepared->upload.bytes, base_subresource, 64u));
+  assert(subresourceHasAlphaAbove(prepared->upload.bytes, base_subresource, 220u));
+
+  writeText(dir / "auto_cutout.package.json",
+            R"({
+              "version": 1,
+              "assets": [
+                {
+                  "type": "gltf_scene",
+                  "key": "tests/gltf/alpha_auto",
+                  "path": "alpha.gltf",
+                  "import_meshes": true,
+                  "import_lights": false,
+                  "alpha_mode_policy": "auto_cutout"
+                }
+              ]
+            })");
+  karma::assets::AssetRegistry auto_assets;
+  diagnostic.clear();
+  auto auto_package =
+      karma::assets::importAssetPackage(auto_assets, dir / "auto_cutout.package.json", &diagnostic);
+  assert(auto_package.has_value());
+  assert(diagnostic.empty());
+  const karma::assets::GltfSceneAsset* auto_scene =
+      auto_assets.findGltfSceneAsset("tests/gltf/alpha_auto");
+  assert(auto_scene != nullptr);
+  assert(auto_scene->material_keys.size() == 1u);
+  const auto auto_resolved = auto_assets.resolveMaterial(auto_scene->material_keys.front());
+  assert(auto_resolved.has_value());
+  assert(auto_resolved->surface.alpha_mode ==
+         karma::rendering::MaterialDesc::AlphaMode::Masked);
+  assert(!auto_resolved->surface.transparent);
+  assert(auto_resolved->surface.depth_write);
+
+  std::filesystem::remove_all(dir);
+}
+
+void testGltfSceneMaterialOverrideCastsShadows() {
+  const std::filesystem::path dir =
+      makeTempDir("karma_gltf_shadow_override_tests");
+  writeAlphaBlendGltf(dir);
+  writeText(dir / "assets.package.json",
+            R"({
+              "version": 1,
+              "assets": [
+                {
+                  "type": "gltf_scene",
+                  "key": "tests/gltf/shadow_override",
+                  "path": "alpha.gltf",
+                  "import_meshes": true,
+                  "import_lights": false,
+                  "material_overrides": [
+                    {
+                      "material_name": "alpha-leaf",
+                      "casts_shadows": false
+                    }
+                  ]
+                }
+              ]
+            })");
+
+  karma::assets::AssetRegistry assets;
+  std::string diagnostic;
+  auto package = karma::assets::importAssetPackage(assets, dir, &diagnostic);
+  assert(package.has_value());
+  assert(diagnostic.empty());
+  const karma::assets::GltfSceneAsset* scene_asset =
+      assets.findGltfSceneAsset("tests/gltf/shadow_override");
+  assert(scene_asset != nullptr);
+  assert(scene_asset->valid());
+  assert(scene_asset->nodes.size() == 1u);
+  assert(scene_asset->nodes.front().primitives.size() == 1u);
+  assert(!scene_asset->nodes.front().primitives.front().casts_shadows);
+
+  const std::filesystem::path cache_dir =
+      makeTempDir("karma_gltf_shadow_override_cache_tests");
+  karma::assets::AssetCacheConfig cache_config{};
+  cache_config.root = cache_dir;
+  cache_config.enabled = true;
+  cache_config.flush = true;
+  karma::assets::AssetCache cache(cache_config);
+  assert(cache.writeGltfScene("shadow_override_blob", *scene_asset));
+  auto restored_scene = cache.readGltfScene("shadow_override_blob");
+  assert(restored_scene.has_value());
+  assert(restored_scene->valid());
+  assert(!restored_scene->nodes.front().primitives.front().casts_shadows);
+  std::filesystem::remove_all(cache_dir);
+
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::GltfSceneImportResult imported =
+      karma::world::instantiateGltfSceneAsset(
+          world,
+          scene,
+          assets,
+          *restored_scene,
+          karma::world::GltfSceneInstantiateOptions{
+              .create_synthetic_root = false,
+              .autoplay_animations = false,
+          });
+  assert(imported.valid());
+
+  bool saw_mesh = false;
+  for (const karma::world::Entity entity : imported.entities) {
+    if (!world.isAlive(entity) ||
+        !world.has<karma::components::MeshComponent>(entity)) {
+      continue;
+    }
+    saw_mesh = true;
+    const auto& mesh = world.get<karma::components::MeshComponent>(entity);
+    assert(mesh.visible);
+    assert(!mesh.shadow_visible);
+  }
+  assert(saw_mesh);
 
   std::filesystem::remove_all(dir);
 }
@@ -1669,8 +2142,11 @@ int main() {
   testFrameGraphValidationAndRegistryFallback();
   testFrameGraphAssetPackageLoadCacheAndUnload();
   testAssetCacheV2AndPackageWarmRestore();
+  testPreparedTextureCachePreservesGeneratedMips();
   testTexturePreparedUploadPreservesRowOrder();
   testImportedMaterialTextureMatchesRendererOrigin();
+  testGltfSceneImportsTextureAlphaMode();
+  testGltfSceneMaterialOverrideCastsShadows();
   testAssetPackageAsyncCommitAndStore();
   testGltfSceneInstantiationRegistersLogicalMeshKeys();
   testAssetRegistryRegisterResolveUnregister();

@@ -14,6 +14,38 @@ list(APPEND KARMA_INSTALL_LINK_LIBS Threads::Threads)
 
 include(FetchContent)
 
+function(_karma_strip_diligent_release_o1)
+  if (NOT KARMA_DILIGENT_STRIP_RELEASE_O1 OR NOT TARGET Diligent-BuildSettings)
+    return()
+  endif()
+
+  get_target_property(_karma_diligent_options
+    Diligent-BuildSettings
+    INTERFACE_COMPILE_OPTIONS)
+  if (NOT _karma_diligent_options)
+    return()
+  endif()
+
+  set(_karma_filtered_options "")
+  set(_karma_removed_o1 OFF)
+  foreach (_karma_option IN LISTS _karma_diligent_options)
+    if (_karma_option STREQUAL "-O1"
+        OR _karma_option STREQUAL "$<$<CONFIG:Release,RelWithDebInfo>:-O1>"
+        OR _karma_option STREQUAL "$<$<CONFIG:Release>:-O1>"
+        OR _karma_option STREQUAL "$<$<CONFIG:RelWithDebInfo>:-O1>")
+      set(_karma_removed_o1 ON)
+    else()
+      list(APPEND _karma_filtered_options "${_karma_option}")
+    endif()
+  endforeach()
+
+  if (_karma_removed_o1)
+    set_target_properties(Diligent-BuildSettings PROPERTIES
+      INTERFACE_COMPILE_OPTIONS "${_karma_filtered_options}")
+    message(STATUS "Karma: removed Diligent-BuildSettings Release -O1 override")
+  endif()
+endfunction()
+
 find_package(glm QUIET)
 if (NOT TARGET glm::glm AND KARMA_FETCH_DEPS)
   FetchContent_Declare(
@@ -25,6 +57,26 @@ if (NOT TARGET glm::glm AND KARMA_FETCH_DEPS)
 endif()
 if (NOT TARGET glm::glm)
   message(FATAL_ERROR "glm is required but not found. Provide glm or enable KARMA_FETCH_DEPS.")
+endif()
+
+find_package(meshoptimizer CONFIG QUIET)
+if (NOT TARGET meshoptimizer::meshoptimizer AND NOT TARGET meshoptimizer AND KARMA_FETCH_DEPS)
+  set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(MESHOPT_BUILD_GLTFPACK OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    meshoptimizer
+    GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+    GIT_TAG v1.0.1
+  )
+  FetchContent_MakeAvailable(meshoptimizer)
+endif()
+set(KARMA_MESHOPTIMIZER_TARGET "")
+if (TARGET meshoptimizer::meshoptimizer)
+  set(KARMA_MESHOPTIMIZER_TARGET meshoptimizer::meshoptimizer)
+elseif (TARGET meshoptimizer)
+  set(KARMA_MESHOPTIMIZER_TARGET meshoptimizer)
+else()
+  message(FATAL_ERROR "meshoptimizer is required for compressed glTF import. Provide meshoptimizer or enable KARMA_FETCH_DEPS.")
 endif()
 
 # Graphical examples and the built-in ImGui UI adapter need ImGui even when the
@@ -247,6 +299,7 @@ if (KARMA_RENDER_BACKEND_DILIGENT)
     )
     FetchContent_MakeAvailable(diligentcore)
   endif()
+  _karma_strip_diligent_release_o1()
   foreach (_karma_diligent_shared_target IN ITEMS
       Diligent-GraphicsEngineVk-shared
       Diligent-Archiver-shared)

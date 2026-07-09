@@ -1,5 +1,9 @@
 #include "karma/assets.h"
+#include "karma/scenes.h"
 
+#include "asset_cache_serializers.h"
+
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -14,6 +18,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -23,6 +28,7 @@
 
 #include "karma/assets.h"
 
+#include "asset_texture_internal.h"
 #include "asset_source_import.h"
 #include "../importers/gltf_scene_import_internal.h"
 
@@ -33,7 +39,7 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr std::string_view kPackageCacheContentVersion =
-    "package-cache-v5-render-graph-assets";
+    "package-cache-v6-scene-assets";
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -49,6 +55,30 @@ bool envFlagEnabled(const char* value) {
 bool startupDiagnosticsEnabled() {
   static const bool enabled = envFlagEnabled(std::getenv("KARMA_ENGINE_STARTUP_DIAG"));
   return enabled;
+}
+
+uint32_t envUint(const char* value, uint32_t fallback) {
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  if (end == value || parsed == 0ul) {
+    return fallback;
+  }
+  return static_cast<uint32_t>(std::min<unsigned long>(parsed, 1024ul));
+}
+
+uint32_t textureRestoreJobLimit() {
+  static const uint32_t limit = [] {
+    uint32_t fallback = std::thread::hardware_concurrency();
+    if (fallback == 0u) {
+      fallback = 4u;
+    }
+    fallback = std::clamp(fallback, 1u, 4u);
+    return std::max(1u, envUint(std::getenv("KARMA_ASSET_TEXTURE_RESTORE_JOBS"), fallback));
+  }();
+  return limit;
 }
 
 void logAssetPackageDiag(const std::filesystem::path& manifest_path,
@@ -232,6 +262,111 @@ bool fieldAllowed(const Json& object,
       return fail(diagnostic,
                   "unsupported " + std::string(section) + " field: " + name);
     }
+  }
+  return true;
+}
+
+bool readGltfSceneMaterialOverrides(const Json& entry,
+                                    world::GltfSceneLoadOptions& out,
+                                    std::string* diagnostic) {
+  const auto overrides_it = entry.find("material_overrides");
+  if (overrides_it == entry.end()) {
+    return true;
+  }
+  if (!overrides_it->is_array()) {
+    return fail(diagnostic, "gltf_scene material_overrides must be an array");
+  }
+
+  out.material_overrides.clear();
+  out.material_overrides.reserve(overrides_it->size());
+  for (const Json& override_json : *overrides_it) {
+    if (!override_json.is_object()) {
+      return fail(diagnostic, "gltf_scene material override must be an object");
+    }
+
+    world::GltfSceneLoadOptions::MaterialOverride override{};
+    bool has_selector = false;
+    if (const auto all_materials_it = override_json.find("all_materials");
+        all_materials_it != override_json.end()) {
+      if (!all_materials_it->is_boolean()) {
+        return fail(diagnostic, "gltf_scene material override all_materials must be boolean");
+      }
+      override.all_materials = all_materials_it->get<bool>();
+      has_selector = has_selector || override.all_materials;
+    }
+    if (const auto material_index_it = override_json.find("material_index");
+        material_index_it != override_json.end()) {
+      if (!material_index_it->is_number_unsigned()) {
+        return fail(diagnostic, "gltf_scene material override material_index must be unsigned");
+      }
+      override.material_index = material_index_it->get<uint32_t>();
+      has_selector = true;
+    }
+    if (const auto material_name_it = override_json.find("material_name");
+        material_name_it != override_json.end()) {
+      if (!material_name_it->is_string() || material_name_it->get<std::string>().empty()) {
+        return fail(diagnostic, "gltf_scene material override material_name must be non-empty");
+      }
+      override.material_name = material_name_it->get<std::string>();
+      has_selector = true;
+    }
+    if (!has_selector) {
+      return fail(diagnostic,
+                  "gltf_scene material override requires material_index, material_name, or all_materials");
+    }
+
+    if (const auto normal_scale_it = override_json.find("normal_scale");
+        normal_scale_it != override_json.end()) {
+      if (!normal_scale_it->is_number()) {
+        return fail(diagnostic, "gltf_scene material override normal_scale must be numeric");
+      }
+      override.normal_scale = normal_scale_it->get<float>();
+      override.has_normal_scale = true;
+    }
+    if (const auto casts_shadows_it = override_json.find("casts_shadows");
+        casts_shadows_it != override_json.end()) {
+      if (!casts_shadows_it->is_boolean()) {
+        return fail(diagnostic, "gltf_scene material override casts_shadows must be boolean");
+      }
+      override.casts_shadows = casts_shadows_it->get<bool>();
+      override.has_casts_shadows = true;
+    }
+    if (const auto diffuse_only_it = override_json.find("diffuse_only");
+        diffuse_only_it != override_json.end()) {
+      if (!diffuse_only_it->is_boolean()) {
+        return fail(diagnostic, "gltf_scene material override diffuse_only must be boolean");
+      }
+      override.diffuse_only = diffuse_only_it->get<bool>();
+      override.has_diffuse_only = true;
+    }
+    if (const auto keep_normal_maps_it = override_json.find("keep_normal_maps");
+        keep_normal_maps_it != override_json.end()) {
+      if (!keep_normal_maps_it->is_boolean()) {
+        return fail(diagnostic, "gltf_scene material override keep_normal_maps must be boolean");
+      }
+      override.keep_normal_maps = keep_normal_maps_it->get<bool>();
+      override.has_keep_normal_maps = true;
+    }
+    if (const auto disable_mr_it = override_json.find("disable_metallic_roughness");
+        disable_mr_it != override_json.end()) {
+      if (!disable_mr_it->is_boolean()) {
+        return fail(diagnostic,
+                    "gltf_scene material override disable_metallic_roughness must be boolean");
+      }
+      override.disable_metallic_roughness = disable_mr_it->get<bool>();
+      override.has_disable_metallic_roughness = true;
+    }
+    if (override.has_keep_normal_maps &&
+        (!override.has_diffuse_only || !override.diffuse_only)) {
+      return fail(diagnostic,
+                  "gltf_scene material override keep_normal_maps requires diffuse_only true");
+    }
+    if (!override.has_normal_scale && !override.has_casts_shadows &&
+        !override.has_diffuse_only && !override.has_disable_metallic_roughness) {
+      return fail(diagnostic, "gltf_scene material override has no supported fields");
+    }
+
+    out.material_overrides.push_back(std::move(override));
   }
   return true;
 }
@@ -981,6 +1116,28 @@ Json frameGraphToJson(const rendering::FrameGraphDesc& graph) {
   return root;
 }
 
+bool readGltfSceneAlphaModePolicy(const Json& entry,
+                                  world::GltfSceneLoadOptions& out,
+                                  std::string* diagnostic) {
+  const auto policy_it = entry.find("alpha_mode_policy");
+  if (policy_it == entry.end()) {
+    return true;
+  }
+  if (!policy_it->is_string()) {
+    return fail(diagnostic, "gltf_scene alpha_mode_policy must be a string");
+  }
+  const std::string policy = policy_it->get<std::string>();
+  if (policy == "authored") {
+    out.alpha_mode_policy = world::GltfSceneLoadOptions::AlphaModePolicy::Authored;
+    return true;
+  }
+  if (policy == "auto_cutout") {
+    out.alpha_mode_policy = world::GltfSceneLoadOptions::AlphaModePolicy::AutoCutout;
+    return true;
+  }
+  return fail(diagnostic, "unsupported gltf_scene alpha_mode_policy: " + policy);
+}
+
 bool readJson(const std::filesystem::path& path, Json& out, std::string* diagnostic) {
   std::ifstream stream(path);
   if (!stream) {
@@ -1034,6 +1191,9 @@ bool keyAlreadyExists(const AssetRegistry& assets,
   }
   if (type == "render_graph") {
     return assets.findFrameGraph(key) != nullptr;
+  }
+  if (type == "scene") {
+    return assets.findSceneAsset(key) != nullptr;
   }
   if (type == "animation_clip") {
     return assets.findAnimationClip(key) != nullptr;
@@ -1115,6 +1275,13 @@ bool copyAssetTo(AssetRegistry& target,
     }
     return true;
   }
+  if (asset.type == "scene") {
+    const SceneAsset* scene = source.findSceneAsset(asset.key);
+    if (scene == nullptr || !target.registerSceneAsset(asset.key, *scene)) {
+      return fail(diagnostic, "failed to commit scene asset: " + asset.key);
+    }
+    return true;
+  }
   if (asset.type == "animation_clip") {
     const world::AnimationClip* clip = source.findAnimationClip(asset.key);
     if (clip == nullptr || !target.registerAnimationClip(asset.key, *clip)) {
@@ -1156,6 +1323,17 @@ void addLoaded(AssetPackageHandle& handle,
       .key = std::move(key),
       .cache_blob_key = std::move(cache_blob_key),
   });
+}
+
+std::string sceneLoadDiagnostics(const scenes::SceneLoadResult& result) {
+  std::string message;
+  for (const std::string& diagnostic : result.diagnostics) {
+    if (!message.empty()) {
+      message += "; ";
+    }
+    message += diagnostic;
+  }
+  return message.empty() ? "unknown scene document load failure" : message;
 }
 
 bool importEntry(AssetRegistry& assets,
@@ -1200,6 +1378,12 @@ bool importEntry(AssetRegistry& assets,
         return fail(diagnostic, "texture_rgba8.generate_mips must be a boolean");
       }
       options.generate_mips = it->get<bool>();
+    }
+    if (const auto it = entry.find("prefer_compressed"); it != entry.end()) {
+      if (!it->is_boolean()) {
+        return fail(diagnostic, "texture_rgba8.prefer_compressed must be a boolean");
+      }
+      options.prefer_compressed = it->get<bool>();
     }
     if (const auto it = entry.find("alpha_bleed"); it != entry.end()) {
       if (!it->is_boolean()) {
@@ -1347,6 +1531,12 @@ bool importEntry(AssetRegistry& assets,
     world::GltfSceneLoadOptions load_options{};
     load_options.import_meshes = entry.value("import_meshes", true);
     load_options.import_lights = entry.value("import_lights", true);
+    if (!readGltfSceneAlphaModePolicy(entry, load_options, diagnostic)) {
+      return false;
+    }
+    if (!readGltfSceneMaterialOverrides(entry, load_options, diagnostic)) {
+      return false;
+    }
     GltfSceneAsset scene = detail::importGltfSceneAsset(assets, key, source_path, load_options);
     if (scene.scene_key.empty()) {
       return fail(diagnostic, "failed to import glTF scene: " + source_path.string());
@@ -1379,6 +1569,31 @@ bool importEntry(AssetRegistry& assets,
     return true;
   }
 
+  if (type == "scene") {
+    if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
+      return false;
+    }
+    scenes::SceneLoadResult result = scenes::loadSceneDocument(source_path);
+    if (!result.success()) {
+      return fail(diagnostic, "failed to import scene asset '" + source_path.string() +
+                                  "': " + sceneLoadDiagnostics(result));
+    }
+    SceneAsset scene{};
+    scene.source_path = source_path;
+    scene.document = std::move(*result.document);
+    if (!assets.registerSceneAsset(key, std::move(scene))) {
+      return fail(diagnostic, "failed to register scene asset: " + key);
+    }
+    addLoaded(handle, "scene", key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
+    return true;
+  }
+
   return fail(diagnostic, "unsupported asset package type: " + type);
 }
 
@@ -1401,14 +1616,10 @@ std::string ktxDependencyString() {
 
 std::string importerVersionForType(std::string_view type) {
   if (type == "texture_rgba8" || type == "texture") {
-#if defined(KARMA_ENABLE_KTX2)
-    return "texture-ktx2-uastc-v2";
-#else
-    return "texture-rgba8-v3";
-#endif
+    return std::string(detail::textureImporterVersion());
   }
   if (type == "mesh" || type == "gltf_scene") {
-    return "assimp-gltf-scene-v3:" + assimpVersionString();
+    return "assimp-gltf-scene-v12:" + assimpVersionString();
   }
   if (type == "material") {
     return "material-loader-v2";
@@ -1424,6 +1635,9 @@ std::string importerVersionForType(std::string_view type) {
   }
   if (type == "environment_map") {
     return "environment-path-v1";
+  }
+  if (type == "scene") {
+    return "scene-document-v1";
   }
   return "unknown";
 }
@@ -1511,7 +1725,7 @@ std::string packageCacheKey(const std::filesystem::path& manifest_path,
       {"manifest_hash", std::string(manifest_hash)},
       {"assimp_version", assimpVersionString()},
       {"ktx_dependency", ktxDependencyString()},
-      {"texture_profile", "ktx2_basis_uastc_zstd_rgba8_fallback"},
+      {"texture_profile", detail::textureProfileVersion()},
       {"package_options", Json::object()},
       {"assets", Json::array()},
   };
@@ -1537,7 +1751,8 @@ void assignPackageBlobKeys(AssetPackageHandle& handle, std::string_view package_
   for (auto& asset : handle.assets) {
     if (asset.type == "environment_map" ||
         asset.type == "shader_pass" ||
-        asset.type == "render_graph") {
+        asset.type == "render_graph" ||
+        asset.type == "scene") {
       asset.cache_blob_key.clear();
       continue;
     }
@@ -1556,6 +1771,146 @@ std::string blobTypeForAsset(const AssetRegistry& assets,
   return asset.type;
 }
 
+std::filesystem::path cacheBlobPath(const std::filesystem::path& root,
+                                    std::string_view cache_key) {
+  return root / "blobs" / (std::string(cache_key) + ".kasset");
+}
+
+bool writeBytesDirect(const std::filesystem::path& path,
+                      const std::vector<uint8_t>& bytes,
+                      std::string* diagnostic) {
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  if (ec) {
+    return fail(diagnostic, "failed to create baked asset blob directory: " + ec.message());
+  }
+
+  const std::filesystem::path temp = path.string() + ".tmp";
+  {
+    std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+      return fail(diagnostic, "failed to open baked asset blob: " + temp.string());
+    }
+    if (!bytes.empty()) {
+      stream.write(reinterpret_cast<const char*>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
+    }
+    stream.flush();
+    if (!stream) {
+      std::filesystem::remove(temp, ec);
+      return fail(diagnostic, "failed to write baked asset blob: " + temp.string());
+    }
+  }
+
+  std::filesystem::rename(temp, path, ec);
+  if (ec) {
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(temp, path, ec);
+  }
+  if (ec) {
+    std::filesystem::remove(temp, ec);
+    return fail(diagnostic, "failed to commit baked asset blob: " + ec.message());
+  }
+  return true;
+}
+
+std::optional<std::vector<uint8_t>> serializePackageAssetBlob(
+    const AssetRegistry& assets,
+    const AssetPackageLoadedAsset& asset,
+    std::string* diagnostic) {
+  if (asset.type == "environment_map" || asset.type == "scene") {
+    return std::vector<uint8_t>{};
+  }
+  if (asset.type == "texture_rgba8" || asset.type == "texture") {
+    const TextureAsset* texture = assets.findTextureAsset(asset.key);
+    if (texture == nullptr) {
+      fail(diagnostic, "missing texture asset for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeTexture(*texture);
+  }
+  if (asset.type == "mesh") {
+    const world::MeshData* mesh = assets.findMeshAsset(asset.key);
+    if (mesh == nullptr) {
+      fail(diagnostic, "missing mesh asset for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeMesh(*mesh);
+  }
+  if (asset.type == "material") {
+    if (const rendering::MaterialVariantDesc* variant = assets.findMaterialVariant(asset.key)) {
+      return detail::serializeMaterialVariant(*variant);
+    }
+    const rendering::MaterialAssetDesc* material = assets.findMaterialAsset(asset.key);
+    if (material == nullptr) {
+      fail(diagnostic, "missing material asset for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeMaterialAsset(*material);
+  }
+  if (asset.type == "particle_effect") {
+    const visual::particles::ParticleEffectAsset* effect = assets.findParticleEffect(asset.key);
+    if (effect == nullptr) {
+      fail(diagnostic, "missing particle effect for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeParticleEffect(*effect);
+  }
+  if (asset.type == "gltf_scene") {
+    const GltfSceneAsset* scene = assets.findGltfSceneAsset(asset.key);
+    if (scene == nullptr) {
+      fail(diagnostic, "missing glTF scene for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeGltfScene(*scene);
+  }
+  if (asset.type == "animation_clip") {
+    const world::AnimationClip* clip = assets.findAnimationClip(asset.key);
+    if (clip == nullptr) {
+      fail(diagnostic, "missing animation clip for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeAnimationClip(*clip);
+  }
+  if (asset.type == "skeleton") {
+    const world::Skeleton* skeleton = assets.findSkeleton(asset.key);
+    if (skeleton == nullptr) {
+      fail(diagnostic, "missing skeleton for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeSkeleton(*skeleton);
+  }
+  if (asset.type == "skin") {
+    const world::Skin* skin = assets.findSkin(asset.key);
+    if (skin == nullptr) {
+      fail(diagnostic, "missing skin for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeSkin(*skin);
+  }
+  fail(diagnostic, "unsupported baked asset type: " + asset.type);
+  return std::nullopt;
+}
+
+bool writePackageAssetBlobNoIndex(const std::filesystem::path& root,
+                                  const AssetRegistry& assets,
+                                  const AssetPackageLoadedAsset& asset,
+                                  std::string* diagnostic) {
+  if (asset.type == "environment_map" || asset.type == "scene") {
+    return true;
+  }
+  if (asset.cache_blob_key.empty()) {
+    return fail(diagnostic, "missing baked blob key for package asset: " + asset.key);
+  }
+  std::optional<std::vector<uint8_t>> bytes =
+      serializePackageAssetBlob(assets, asset, diagnostic);
+  if (!bytes.has_value()) {
+    return false;
+  }
+  return writeBytesDirect(cacheBlobPath(root, asset.cache_blob_key), *bytes, diagnostic);
+}
+
 bool writePackageAssetBlob(AssetCache& cache,
                            const AssetRegistry& assets,
                            const AssetPackageLoadedAsset& asset,
@@ -1563,7 +1918,9 @@ bool writePackageAssetBlob(AssetCache& cache,
   if (asset.type == "environment_map") {
     return true;
   }
-  if (asset.type == "shader_pass" || asset.type == "render_graph") {
+  if (asset.type == "shader_pass" ||
+      asset.type == "render_graph" ||
+      asset.type == "scene") {
     return true;
   }
   if (asset.cache_blob_key.empty()) {
@@ -1638,6 +1995,11 @@ Json packageCacheManifest(const AssetPackageHandle& handle,
     if (asset.type == "render_graph") {
       if (const rendering::FrameGraphDesc* graph = assets.findFrameGraph(asset.key)) {
         entry["asset"] = frameGraphToJson(*graph);
+      }
+    }
+    if (asset.type == "scene") {
+      if (const SceneAsset* scene = assets.findSceneAsset(asset.key)) {
+        entry["path"] = scene->source_path.lexically_normal().generic_string();
       }
     }
     if (asset.type == "gltf_scene") {
@@ -1782,6 +2144,28 @@ bool restoreCachedAsset(AssetCache& cache,
                                   core::SteadyClock::now());
     return true;
   }
+  if (record.type == "scene") {
+    const std::filesystem::path path = entry.value("path", std::string{});
+    scenes::SceneLoadResult result = scenes::loadSceneDocument(path);
+    if (!result.success()) {
+      return fail(diagnostic, "failed to restore cached scene asset '" + path.string() +
+                                  "': " + sceneLoadDiagnostics(result));
+    }
+    SceneAsset scene{};
+    scene.source_path = path;
+    scene.document = std::move(*result.document);
+    if (!staging.registerSceneAsset(record.key, std::move(scene))) {
+      return fail(diagnostic, "failed to restore cached scene asset: " + record.key);
+    }
+    addLoaded(handle, record.type, record.key);
+    logAssetPackageCacheAssetDiag(manifest_path,
+                                  record.type,
+                                  record.key,
+                                  record.blob_type,
+                                  restore_start,
+                                  core::SteadyClock::now());
+    return true;
+  }
   if (record.blob_key.empty()) {
     return fail(diagnostic, "package cache asset record is missing blob key: " + record.key);
   }
@@ -1871,6 +2255,10 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
     std::optional<TextureAsset> texture;
     std::string diagnostic;
   };
+  struct TextureRestoreRecord {
+    std::size_t entry_index = 0u;
+    CachedAssetRecord record;
+  };
   struct TextureRestoreJob {
     std::size_t entry_index = 0u;
     CachedAssetRecord record;
@@ -1879,6 +2267,8 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
   };
 
   const Json& entries = (*manifest)["assets"];
+  std::vector<TextureRestoreRecord> texture_records;
+  texture_records.reserve(entries.size());
   std::vector<TextureRestoreJob> texture_jobs;
   texture_jobs.reserve(entries.size());
   for (std::size_t index = 0u; index < entries.size(); ++index) {
@@ -1889,17 +2279,41 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
         !isTextureBlobType(record.blob_type)) {
       continue;
     }
+    texture_records.push_back(TextureRestoreRecord{
+        .entry_index = index,
+        .record = std::move(record),
+    });
+  }
+
+  const uint32_t max_texture_jobs = textureRestoreJobLimit();
+  if (startupDiagnosticsEnabled() && !texture_records.empty()) {
+    spdlog::info(
+        "Engine startup diag: area=asset_package package='{}' stage=cache texture restore schedule ms=0.00 count={} jobs={}",
+        manifest_path.string(),
+        texture_records.size(),
+        max_texture_jobs);
+  }
+
+  auto start_texture_job = [&](std::size_t texture_index) {
+    const TextureRestoreRecord& texture_record = texture_records[texture_index];
     const auto start = core::SteadyClock::now();
     texture_jobs.push_back(TextureRestoreJob{
-        .entry_index = index,
-        .record = record,
+        .entry_index = texture_record.entry_index,
+        .record = texture_record.record,
         .start = start,
-        .future = std::async(std::launch::async, [&cache, blob_key = record.blob_key]() {
+        .future = std::async(std::launch::async,
+                             [&cache, blob_key = texture_record.record.blob_key]() {
           TextureRestoreResult result;
           result.texture = cache.readTexture(blob_key, &result.diagnostic);
           return result;
         }),
     });
+  };
+
+  std::size_t next_texture_to_start = 0u;
+  while (next_texture_to_start < texture_records.size() &&
+         next_texture_to_start < max_texture_jobs) {
+    start_texture_job(next_texture_to_start++);
   }
 
   AssetPackageHandle handle{};
@@ -1910,14 +2324,19 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
         texture_jobs[texture_job_index].entry_index == entry_index) {
       TextureRestoreJob& job = texture_jobs[texture_job_index];
       TextureRestoreResult result = job.future.get();
+      const CachedAssetRecord record = job.record;
+      const core::SteadyClock::time_point start = job.start;
+      if (next_texture_to_start < texture_records.size()) {
+        start_texture_job(next_texture_to_start++);
+      }
       if (!result.texture.has_value() ||
           !restoreCachedTextureAsset(staging,
                                      manifest_path,
-                                     job.record,
+                                     record,
                                      std::move(*result.texture),
                                      handle,
                                      diagnostic,
-                                     job.start)) {
+                                     start)) {
         if (diagnostic != nullptr && !result.diagnostic.empty()) {
           *diagnostic = result.diagnostic;
         }
@@ -1971,6 +2390,114 @@ std::string normalizedPackageKey(const std::filesystem::path& manifest_path) {
     absolute = manifest_path;
   }
   return absolute.lexically_normal().generic_string();
+}
+
+std::filesystem::path bakedDescriptorPath(const std::filesystem::path& baked_cache_path) {
+  if (baked_cache_path.filename() == "baked.package.json") {
+    return baked_cache_path;
+  }
+  return baked_cache_path / "baked.package.json";
+}
+
+std::filesystem::path bakedRootPath(const std::filesystem::path& baked_cache_path) {
+  const std::filesystem::path descriptor = bakedDescriptorPath(baked_cache_path);
+  return descriptor.parent_path().empty() ? std::filesystem::path(".")
+                                          : descriptor.parent_path();
+}
+
+std::string bakedPackageId(const std::filesystem::path& output_dir,
+                           const AssetPackageBakeOptions& options) {
+  if (!options.package_id.empty()) {
+    return options.package_id;
+  }
+  const std::string filename = output_dir.filename().generic_string();
+  return filename.empty() ? "asset_package" : filename;
+}
+
+std::string bakedPackageKey(std::string_view package_id) {
+  return hashString(Json{
+      {"schema", "karma.baked_asset_package.blobs"},
+      {"version", 1},
+      {"package_id", std::string(package_id)},
+  }.dump());
+}
+
+bool readJsonObjectFile(const std::filesystem::path& path,
+                        Json& out,
+                        std::string* diagnostic) {
+  std::ifstream stream(path);
+  if (!stream) {
+    return fail(diagnostic, "failed to open JSON file: " + path.string());
+  }
+  try {
+    stream >> out;
+  } catch (const std::exception& e) {
+    return fail(diagnostic, std::string("failed to parse JSON file: ") + e.what());
+  }
+  if (!out.is_object()) {
+    return fail(diagnostic, "JSON file root must be an object: " + path.string());
+  }
+  return true;
+}
+
+bool writeJsonObjectFile(const std::filesystem::path& path,
+                         const Json& json,
+                         std::string* diagnostic) {
+  std::error_code ec;
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+      return fail(diagnostic, "failed to create baked package directory: " + ec.message());
+    }
+  }
+  std::ofstream stream(path, std::ios::trunc);
+  if (!stream) {
+    return fail(diagnostic, "failed to open baked package descriptor: " + path.string());
+  }
+  stream << json.dump(2) << '\n';
+  return static_cast<bool>(stream);
+}
+
+std::optional<std::string> packageSourceFingerprint(
+    const std::filesystem::path& source_package_path,
+    const Json& package_json,
+    std::string* diagnostic) {
+  const std::filesystem::path manifest_path = resolveAssetPackagePath(source_package_path);
+  const std::string manifest_hash =
+      hashFile(manifest_path).value_or(hashString(manifest_path.lexically_normal().generic_string()));
+  std::string fingerprint_diagnostic;
+  const std::string fingerprint =
+      packageCacheKey(manifest_path, package_json, manifest_hash, &fingerprint_diagnostic);
+  if (!fingerprint_diagnostic.empty()) {
+    fail(diagnostic, fingerprint_diagnostic);
+    return std::nullopt;
+  }
+  return fingerprint;
+}
+
+std::optional<AssetPackageHandle> restorePackageManifest(
+    AssetCache& cache,
+    const std::filesystem::path& manifest_path,
+    const Json& manifest,
+    AssetRegistry& staging,
+    std::string* diagnostic) {
+  if (!manifest.is_object() ||
+      manifest.value("version", 0u) != 2u ||
+      !manifest.contains("assets") ||
+      !manifest["assets"].is_array()) {
+    fail(diagnostic, "baked package manifest is malformed");
+    return std::nullopt;
+  }
+
+  AssetPackageHandle handle{};
+  handle.manifest_path = manifest_path;
+  for (const Json& entry : manifest["assets"]) {
+    if (!restoreCachedAsset(cache, staging, manifest_path, entry, handle, diagnostic)) {
+      staging.clear();
+      return std::nullopt;
+    }
+  }
+  return handle;
 }
 
 }  // namespace
@@ -2109,6 +2636,174 @@ std::optional<AssetPackageHandle> importAssetPackage(AssetRegistry& assets,
   return committed;
 }
 
+bool bakeAssetPackage(const std::filesystem::path& source_package_path,
+                      const std::filesystem::path& output_dir,
+                      const AssetPackageBakeOptions& options,
+                      std::string* diagnostic) {
+  const std::filesystem::path manifest_path = resolveAssetPackagePath(source_package_path);
+  Json root;
+  if (!readJson(manifest_path, root, diagnostic)) {
+    return false;
+  }
+  std::optional<std::string> source_fingerprint =
+      packageSourceFingerprint(manifest_path, root, diagnostic);
+  if (!source_fingerprint.has_value()) {
+    return false;
+  }
+
+  AssetRegistry staging;
+  std::optional<AssetPackageHandle> imported =
+      importAssetPackage(staging, manifest_path, options.import_options, diagnostic);
+  if (!imported.has_value()) {
+    return false;
+  }
+
+  const std::string package_id = bakedPackageId(output_dir, options);
+  AssetPackageHandle baked = *imported;
+  baked.manifest_path = manifest_path;
+  assignPackageBlobKeys(baked, bakedPackageKey(package_id));
+
+  const std::filesystem::path root_path = bakedRootPath(output_dir);
+  for (const AssetPackageLoadedAsset& asset : baked.assets) {
+    if (!writePackageAssetBlobNoIndex(root_path, staging, asset, diagnostic)) {
+      return false;
+    }
+  }
+
+  const Json package_manifest = packageCacheManifest(baked,
+                                                     staging,
+                                                     bakedPackageKey(package_id));
+  Json blob_keys = Json::array();
+  for (const AssetPackageLoadedAsset& asset : baked.assets) {
+    if (!asset.cache_blob_key.empty()) {
+      blob_keys.push_back(asset.cache_blob_key);
+    }
+  }
+  std::sort(blob_keys.begin(), blob_keys.end(), [](const Json& a, const Json& b) {
+    return a.get<std::string>() < b.get<std::string>();
+  });
+
+  Json descriptor{
+      {"schema", "karma.baked_asset_package"},
+      {"version", 1},
+      {"asset_cache_version", std::string(AssetCache::kAssetCacheVersion)},
+      {"package_cache_content_version", std::string(kPackageCacheContentVersion)},
+      {"package_id", package_id},
+      {"source_package_path", manifest_path.lexically_normal().generic_string()},
+      {"scene_fingerprint", options.scene_fingerprint},
+      {"source_fingerprint", *source_fingerprint},
+      {"manifest", root},
+      {"package_manifest", package_manifest},
+      {"blob_keys", blob_keys},
+  };
+  return writeJsonObjectFile(bakedDescriptorPath(output_dir), descriptor, diagnostic);
+}
+
+std::optional<AssetPackageHandle> importBakedAssetPackage(
+    AssetRegistry& assets,
+    const std::filesystem::path& baked_cache_path,
+    std::string* diagnostic) {
+  const std::filesystem::path descriptor_path = bakedDescriptorPath(baked_cache_path);
+  Json descriptor;
+  if (!readJsonObjectFile(descriptor_path, descriptor, diagnostic)) {
+    return std::nullopt;
+  }
+  if (descriptor.value("schema", std::string{}) != "karma.baked_asset_package" ||
+      descriptor.value("version", 0u) != 1u ||
+      !descriptor.contains("package_manifest") ||
+      !descriptor["package_manifest"].is_object()) {
+    fail(diagnostic, "baked asset package descriptor is malformed: " +
+                         descriptor_path.string());
+    return std::nullopt;
+  }
+
+  AssetCacheConfig cache_config{};
+  cache_config.root = bakedRootPath(baked_cache_path);
+  cache_config.enabled = true;
+  cache_config.flush = false;
+  cache_config.ensure_layout = false;
+  AssetCache cache(cache_config);
+  AssetRegistry staging;
+  std::optional<AssetPackageHandle> staged =
+      restorePackageManifest(cache,
+                             descriptor_path,
+                             descriptor["package_manifest"],
+                             staging,
+                             diagnostic);
+  if (!staged.has_value()) {
+    return std::nullopt;
+  }
+  std::optional<AssetPackageHandle> committed =
+      commitStagedPackage(assets, staging, *staged, diagnostic, true);
+  if (!committed.has_value()) {
+    return std::nullopt;
+  }
+  committed->manifest_path = descriptor_path;
+  return committed;
+}
+
+bool checkBakedAssetPackage(const std::filesystem::path& source_package_path,
+                            const std::filesystem::path& baked_cache_path,
+                            const AssetPackageBakeOptions& options,
+                            std::string* diagnostic) {
+  const std::filesystem::path descriptor_path = bakedDescriptorPath(baked_cache_path);
+  Json descriptor;
+  if (!readJsonObjectFile(descriptor_path, descriptor, diagnostic)) {
+    return false;
+  }
+  if (descriptor.value("schema", std::string{}) != "karma.baked_asset_package" ||
+      descriptor.value("version", 0u) != 1u ||
+      !descriptor.contains("package_manifest") ||
+      !descriptor["package_manifest"].is_object()) {
+    return fail(diagnostic, "baked asset package descriptor is malformed: " +
+                            descriptor_path.string());
+  }
+  if (!options.scene_fingerprint.empty() &&
+      descriptor.value("scene_fingerprint", std::string{}) != options.scene_fingerprint) {
+    return fail(diagnostic, "baked asset package scene fingerprint is stale: " +
+                            descriptor_path.string());
+  }
+  const std::string expected_package_id = bakedPackageId(baked_cache_path, options);
+  if (descriptor.value("package_id", std::string{}) != expected_package_id) {
+    return fail(diagnostic, "baked asset package id is stale: " + descriptor_path.string());
+  }
+
+  Json root;
+  if (!readJson(resolveAssetPackagePath(source_package_path), root, diagnostic)) {
+    return false;
+  }
+  std::optional<std::string> source_fingerprint =
+      packageSourceFingerprint(source_package_path, root, diagnostic);
+  if (!source_fingerprint.has_value()) {
+    return false;
+  }
+  if (descriptor.value("source_fingerprint", std::string{}) != *source_fingerprint) {
+    return fail(diagnostic, "baked asset package source fingerprint is stale: " +
+                            descriptor_path.string());
+  }
+
+  const Json& assets = descriptor["package_manifest"]["assets"];
+  if (!assets.is_array()) {
+    return fail(diagnostic, "baked asset package manifest assets are malformed: " +
+                            descriptor_path.string());
+  }
+  const std::filesystem::path root_path = bakedRootPath(baked_cache_path);
+  for (const Json& asset : assets) {
+    CachedAssetRecord record;
+    if (!readCachedAssetRecord(asset, record, diagnostic)) {
+      return false;
+    }
+    if (record.blob_key.empty()) {
+      continue;
+    }
+    std::error_code ec;
+    if (!std::filesystem::exists(cacheBlobPath(root_path, record.blob_key), ec)) {
+      return fail(diagnostic, "baked asset blob is missing: " + record.blob_key);
+    }
+  }
+  return true;
+}
+
 struct AssetPackageJob::State {
   std::filesystem::path path;
   AssetPackageOptions options;
@@ -2245,6 +2940,8 @@ bool unloadAssetPackage(AssetRegistry& assets, const AssetPackageHandle& package
       removed_any = assets.unregisterShaderPass(it->key) || removed_any;
     } else if (it->type == "render_graph") {
       removed_any = assets.unregisterFrameGraph(it->key) || removed_any;
+    } else if (it->type == "scene") {
+      removed_any = assets.unregisterSceneAsset(it->key) || removed_any;
     } else if (it->type == "animation_clip") {
       removed_any = assets.unregisterAnimationClip(it->key) || removed_any;
     } else if (it->type == "skeleton") {
@@ -2283,6 +2980,33 @@ std::optional<AssetPackageHandle> AssetPackageStore::acquirePackage(
   }
 
   auto imported = importAssetPackage(*assets_, manifest_path, options_, diagnostic);
+  if (!imported.has_value()) {
+    return std::nullopt;
+  }
+  imported->instance_id = next_instance_id_++;
+  Record record{};
+  record.handle = *imported;
+  record.ref_count = 1u;
+  records_[key] = record;
+  keys_by_instance_id_[record.handle.instance_id] = key;
+  return imported;
+}
+
+std::optional<AssetPackageHandle> AssetPackageStore::acquireBakedPackage(
+    const std::filesystem::path& baked_cache_path,
+    std::string* diagnostic) {
+  if (assets_ == nullptr) {
+    return std::nullopt;
+  }
+  const std::filesystem::path descriptor_path = bakedDescriptorPath(baked_cache_path);
+  const std::string key = packageKey(descriptor_path);
+  auto existing = records_.find(key);
+  if (existing != records_.end()) {
+    existing->second.ref_count += 1u;
+    return existing->second.handle;
+  }
+
+  auto imported = importBakedAssetPackage(*assets_, descriptor_path, diagnostic);
   if (!imported.has_value()) {
     return std::nullopt;
   }

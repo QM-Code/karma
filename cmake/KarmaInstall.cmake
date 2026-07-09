@@ -25,6 +25,7 @@ install(FILES
   ${PROJECT_SOURCE_DIR}/include/karma/platform.h
   ${PROJECT_SOURCE_DIR}/include/karma/prefabs.h
   ${PROJECT_SOURCE_DIR}/include/karma/rendering.h
+  ${PROJECT_SOURCE_DIR}/include/karma/scenes.h
   ${PROJECT_SOURCE_DIR}/include/karma/server.h
   ${PROJECT_SOURCE_DIR}/include/karma/ui.h
   ${PROJECT_SOURCE_DIR}/include/karma/visual.h

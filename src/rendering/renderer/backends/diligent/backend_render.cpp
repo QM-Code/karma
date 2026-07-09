@@ -1424,7 +1424,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   base_constants.camera_clip_params[1] =
       std::max(camera_.far_clip, base_constants.camera_clip_params[0] + 0.001f);
   base_constants.camera_clip_params[2] = camera_.perspective ? 1.0f : 0.0f;
-  base_constants.camera_clip_params[3] = 0.0f;
+  base_constants.camera_clip_params[3] = debug_glossy_off_ ? 1.0f : 0.0f;
   if (cpu_forward_plus_ready) {
     base_constants.forward_plus_params[0] = 1.0f;
     base_constants.forward_plus_params[1] = 1.0f;

@@ -6,6 +6,33 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     target_link_libraries(karma_prefab_tests PRIVATE karma::headless karma_features_visual)
     add_test(NAME karma_prefab_tests COMMAND karma_prefab_tests)
 
+    add_executable(karma_scene_document_tests
+      tests/scene_document_tests.cpp
+    )
+    target_link_libraries(karma_scene_document_tests PRIVATE karma::headless)
+    add_test(NAME karma_scene_document_tests COMMAND karma_scene_document_tests)
+
+    add_executable(karma_scene_runtime_tests
+      tests/scene_runtime_tests.cpp
+    )
+    target_link_libraries(karma_scene_runtime_tests PRIVATE karma::headless)
+    add_test(NAME karma_scene_runtime_tests COMMAND karma_scene_runtime_tests)
+
+    add_executable(karma_scene_bake_tests
+      tests/scene_bake_tests.cpp
+    )
+    target_link_libraries(karma_scene_bake_tests PRIVATE karma::headless)
+    add_test(NAME karma_scene_bake_tests COMMAND karma_scene_bake_tests)
+
+    if (TARGET karma_scene_bake)
+      add_test(NAME karma_scene_bake_cli_check
+        COMMAND ${CMAKE_COMMAND}
+          -DKARMA_SCENE_BAKE=$<TARGET_FILE:karma_scene_bake>
+          -DKARMA_SCENE_BAKE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/tests
+          -P ${PROJECT_SOURCE_DIR}/tests/scene_bake_cli_check.cmake
+      )
+    endif()
+
     add_executable(karma_animation_tests
       tests/animation_tests.cpp
     )

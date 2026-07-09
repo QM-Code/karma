@@ -97,7 +97,35 @@ to match the renderer's origin once, cached upload data preserves row order, and
 the warm package path restores the same bytes instead of re-decoding source
 images differently.
 
+## Prepared Upload Cache
+
+Runtime texture warm-up can now cache the final backend-ready upload payload as
+`TextureAsset::PayloadFormat::PreparedUpload`. This is a generated derivative
+of an imported texture asset, keyed by the source texture and runtime format
+capabilities through `preparedTextureUploadCacheKey(...)`.
+
+On a prepared-cache miss, `RenderSystem` prepares or transcodes the imported
+texture, uploads it, and writes the prepared blob for the next run. On a hit,
+the renderer skips KTX2 transcode work and uploads the cached prepared bytes.
+Set `KARMA_RENDER_TEXTURE_PREPARED_CACHE=0` to disable this layer.
+
+Prepared RGBA8 blobs may contain only mip 0 while retaining
+`TextureDesc::generate_mips`. The backend then allocates and generates the full
+mip chain after upload. The prepared-cache key revision is v2 and includes the
+generated-mip flag, so older blobs that accidentally cleared this intent are
+not reused.
+
+Prepared upload blobs are larger than compressed source blobs. In the
+world-bake benchmark, adding 91 prepared blobs grew the compact test cache from
+about 300 MB to about 749 MB, while reducing best warm startup from 3906.64 ms
+to 1657.84 ms.
+
+Prepared upload blobs are written without touching `index.json` so first
+population does not repeatedly parse and rewrite a very large cache index. That
+no-index write path and generated-mip round trip are covered by the rendering
+tests.
+
 ## Public API Cleanup
 
 The public glTF source-loading API was removed from
-`karma/assets.h
+`karma/assets.h`.

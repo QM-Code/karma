@@ -29,6 +29,38 @@ function(_karma_require_target target dependency)
   endif()
 endfunction()
 
+function(_karma_strip_diligent_release_o1)
+  if (NOT @KARMA_DILIGENT_STRIP_RELEASE_O1@ OR NOT TARGET Diligent-BuildSettings)
+    return()
+  endif()
+
+  get_target_property(_karma_diligent_options
+    Diligent-BuildSettings
+    INTERFACE_COMPILE_OPTIONS)
+  if (NOT _karma_diligent_options)
+    return()
+  endif()
+
+  set(_karma_filtered_options "")
+  set(_karma_removed_o1 OFF)
+  foreach (_karma_option IN LISTS _karma_diligent_options)
+    if (_karma_option STREQUAL "-O1"
+        OR _karma_option STREQUAL "$<$<CONFIG:Release,RelWithDebInfo>:-O1>"
+        OR _karma_option STREQUAL "$<$<CONFIG:Release>:-O1>"
+        OR _karma_option STREQUAL "$<$<CONFIG:RelWithDebInfo>:-O1>")
+      set(_karma_removed_o1 ON)
+    else()
+      list(APPEND _karma_filtered_options "${_karma_option}")
+    endif()
+  endforeach()
+
+  if (_karma_removed_o1)
+    set_target_properties(Diligent-BuildSettings PROPERTIES
+      INTERFACE_COMPILE_OPTIONS "${_karma_filtered_options}")
+    message(STATUS "Karma: removed Diligent-BuildSettings Release -O1 override")
+  endif()
+endfunction()
+
 find_dependency(Threads)
 
 find_package(glm QUIET CONFIG)
@@ -196,6 +228,7 @@ if (@KARMA_RENDER_BACKEND_DILIGENT@)
     )
     FetchContent_MakeAvailable(diligentcore)
   endif()
+  _karma_strip_diligent_release_o1()
   foreach (_karma_diligent_shared_target IN ITEMS
       Diligent-GraphicsEngineVk-shared
       Diligent-Archiver-shared)

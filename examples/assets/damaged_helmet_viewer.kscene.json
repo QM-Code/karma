@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "Damaged Helmet Viewer",
+  "asset_packages": [
+    {
+      "id": "damaged_helmet_assets",
+      "path": "rendering/damaged_helmet/assets.package.json",
+      "baked_cache": "rendering/damaged_helmet/bakes/asset_cache/damaged_helmet_assets"
+    }
+  ],
+  "gltf_scenes": [
+    {
+      "id": "examples/rendering/damaged_helmet",
+      "path": "diligent_gltf_viewer/models/DamagedHelmet/DamagedHelmet.gltf",
+      "asset_package": "damaged_helmet_assets"
+    }
+  ]
+}

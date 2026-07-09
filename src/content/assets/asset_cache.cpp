@@ -204,7 +204,9 @@ AssetCache::AssetCache(AssetCacheConfig config) : config_(std::move(config)) {
       flushed_once = true;
       flush();
     }
-    ensureLayout();
+    if (config_.ensure_layout) {
+      ensureLayout();
+    }
   }
 }
 
@@ -270,6 +272,15 @@ bool AssetCache::writeTexture(std::string_view cache_key,
     touchIndex(cache_key, "texture");
   }
   return ok;
+}
+
+bool AssetCache::writeTextureNoIndex(std::string_view cache_key,
+                                     const TextureAsset& texture,
+                                     std::string* diagnostic) {
+  if (!enabled() || cache_key.empty()) {
+    return false;
+  }
+  return writeAtomic(blobPath(cache_key), detail::serializeTexture(texture), diagnostic);
 }
 
 std::optional<world::MeshData> AssetCache::readMesh(std::string_view cache_key,

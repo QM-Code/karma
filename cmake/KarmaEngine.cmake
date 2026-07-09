@@ -304,6 +304,12 @@ karma_add_static(karma_content
   src/content/materials/material_loader.cpp
   src/content/prefabs/component_serializer_registry.cpp
   src/content/prefabs/prefab_runtime.cpp
+  src/content/scenes/scene_bake.cpp
+  src/content/scenes/scene_document.cpp
+  src/content/scenes/scene_document_parser.cpp
+  src/content/scenes/scene_runtime.cpp
+  src/content/scenes/scene_runtime_assets.cpp
+  src/content/scenes/scene_runtime_prefabs.cpp
   src/features/visual/particles/effect_library.cpp
 )
 target_link_libraries(karma_content
@@ -312,6 +318,9 @@ target_link_libraries(karma_content
     karma_world
     karma_simulation_animation
 )
+if (KARMA_MESHOPTIMIZER_TARGET)
+  target_link_libraries(karma_content PRIVATE ${KARMA_MESHOPTIMIZER_TARGET})
+endif()
 if (KARMA_ENABLE_KTX2)
   target_compile_definitions(karma_content PUBLIC KARMA_ENABLE_KTX2)
   target_compile_definitions(karma_content PRIVATE KARMA_KTX_SOFTWARE_TAG="${KARMA_KTX_SOFTWARE_TAG}")

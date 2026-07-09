@@ -630,6 +630,9 @@ DiligentBackend::DiligentBackend(karma::platform::Window& window,
   if (const char* env = std::getenv("KARMA_ENV_DEBUG")) {
     env_debug_mode_ = std::atoi(env);
   }
+  if (const char* env = std::getenv("DEBUG_GLOSSY_OFF")) {
+    debug_glossy_off_ = envFlagEnabled(env);
+  }
   if (const char* env = std::getenv("KARMA_SHADER_CACHE")) {
     shader_cache_enabled_ = envFlagEnabled(env);
   }

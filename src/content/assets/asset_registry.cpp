@@ -1,4 +1,5 @@
 #include "karma/assets.h"
+#include "karma/scenes.h"
 
 #include <algorithm>
 #include <array>
@@ -112,6 +113,7 @@ struct AssetRegistry::Impl {
   std::unordered_map<std::string, GltfSceneAsset> gltf_scenes;
   std::unordered_map<std::string, rendering::ShaderPassAssetDesc> shader_passes;
   std::unordered_map<std::string, rendering::FrameGraphDesc> frame_graphs;
+  std::unordered_map<std::string, SceneAsset> scenes;
   rendering::MaterialLibrary materials;
   uint64_t version = 0;
   uint64_t mesh_version = 0;
@@ -193,6 +195,7 @@ void AssetRegistry::clear() {
   impl_->gltf_scenes.clear();
   impl_->shader_passes.clear();
   impl_->frame_graphs.clear();
+  impl_->scenes.clear();
   impl_->materials.clear();
   bumpMeshVersion();
   bumpTextureVersion();
@@ -302,6 +305,20 @@ bool AssetRegistry::moveAssetFrom(AssetRegistry& source,
       return false;
     }
     impl_->frame_graphs.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "scene") {
+    if (impl_->scenes.find(key) != impl_->scenes.end()) {
+      return false;
+    }
+    auto node = source.impl_->scenes.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->scenes.insert(std::move(node));
     bumpVersion();
     source.bumpVersion();
     return true;
@@ -446,12 +463,19 @@ std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(
         texture_key = "gltf/textures/" + source_hash;
       }
 
-      TextureAsset texture = detail::makeTextureAssetFromImage(
-          std::move(*image),
-          imported.srgb,
-          true,
-          detail::importedTextureSemantic(imported.semantic, imported.srgb),
-          true);
+      const TextureAsset::Semantic texture_semantic =
+          detail::importedTextureSemantic(imported.semantic, imported.srgb);
+      const bool preserve_exact =
+          texture_semantic == TextureAsset::Semantic::Normal ||
+          texture_semantic == TextureAsset::Semantic::Data ||
+          imported.semantic == rendering::ImportedMaterialTextureSemantic::Emissive;
+      const bool prefer_compressed =
+          !preserve_exact;
+      TextureAsset texture = detail::makeTextureAssetFromImage(std::move(*image),
+                                                               imported.srgb,
+                                                               true,
+                                                               texture_semantic,
+                                                               prefer_compressed);
       if (!registerTextureAsset(texture_key, std::move(texture))) {
         continue;
       }
@@ -750,6 +774,27 @@ bool AssetRegistry::unregisterGltfSceneAsset(const std::string& key) {
 
 const GltfSceneAsset* AssetRegistry::findGltfSceneAsset(std::string_view key) const {
   return findInMap(impl_->gltf_scenes, key);
+}
+
+bool AssetRegistry::registerSceneAsset(const std::string& key, SceneAsset scene) {
+  if (!isValidAssetKey(key)) {
+    return false;
+  }
+  impl_->scenes[key] = std::move(scene);
+  bumpVersion();
+  return true;
+}
+
+bool AssetRegistry::unregisterSceneAsset(const std::string& key) {
+  if (impl_->scenes.erase(key) == 0) {
+    return false;
+  }
+  bumpVersion();
+  return true;
+}
+
+const SceneAsset* AssetRegistry::findSceneAsset(std::string_view key) const {
+  return findInMap(impl_->scenes, key);
 }
 
 }  // namespace karma::assets

@@ -203,7 +203,9 @@ struct PSInput
 
 float4 main(PSInput input) : SV_TARGET
 {
-    float3 dir = normalize(input.local_pos);
+    // KTX cubemap face data is authored with the opposite vertical convention from
+    // the skybox cube's local lookup direction. Mirror Y for display sampling only.
+    float3 dir = normalize(float3(input.local_pos.x, -input.local_pos.y, input.local_pos.z));
     return g_Skybox.Sample(g_Sampler, dir);
 }
 )";
@@ -489,7 +491,8 @@ void DiligentBackend::ensureEnvironmentResources() {
   if (!device_ || !context_) {
     return;
   }
-  if (!env_dirty_ && env_cubemap_srv_ && skybox_pso_) {
+  if (!env_dirty_ && env_cubemap_srv_ && env_irradiance_srv_ && env_prefilter_srv_ &&
+      env_brdf_lut_srv_ && skybox_pso_) {
     return;
   }
   const auto total_start = core::SteadyClock::now();
@@ -707,8 +710,9 @@ void DiligentBackend::ensureEnvironmentResources() {
     env_cubemap_srv_ = default_env_;
     env_irradiance_srv_ = default_env_;
     env_prefilter_srv_ = default_env_;
-    env_brdf_lut_srv_ = default_base_color_;
+    env_brdf_lut_srv_ = defaultBrdfLutSrv();
     env_dirty_ = false;
+    bindEnvironmentResources();
     mark_stage("default environment");
     logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
     return;
@@ -722,8 +726,9 @@ void DiligentBackend::ensureEnvironmentResources() {
       env_cubemap_srv_ = default_env_;
       env_irradiance_srv_ = default_env_;
       env_prefilter_srv_ = default_env_;
-      env_brdf_lut_srv_ = default_base_color_;
+      env_brdf_lut_srv_ = defaultBrdfLutSrv();
       env_dirty_ = false;
+      bindEnvironmentResources();
       mark_stage("ktx fallback");
       logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
       return;
@@ -760,8 +765,9 @@ void DiligentBackend::ensureEnvironmentResources() {
       env_cubemap_srv_ = default_env_;
       env_irradiance_srv_ = default_env_;
       env_prefilter_srv_ = default_env_;
-      env_brdf_lut_srv_ = default_base_color_;
+      env_brdf_lut_srv_ = defaultBrdfLutSrv();
       env_dirty_ = false;
+      bindEnvironmentResources();
       mark_stage("ktx fallback");
       logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
       return;
@@ -778,8 +784,9 @@ void DiligentBackend::ensureEnvironmentResources() {
       env_cubemap_srv_ = default_env_;
       env_irradiance_srv_ = default_env_;
       env_prefilter_srv_ = default_env_;
-      env_brdf_lut_srv_ = default_base_color_;
+      env_brdf_lut_srv_ = defaultBrdfLutSrv();
       env_dirty_ = false;
+      bindEnvironmentResources();
       mark_stage("hdr fallback");
       logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
       return;
@@ -1135,6 +1142,7 @@ void DiligentBackend::ensureEnvironmentResources() {
   }
 
   env_dirty_ = false;
+  bindEnvironmentResources();
   logStartupDiag("diligent_environment", "total", total_start, core::SteadyClock::now());
 }
 

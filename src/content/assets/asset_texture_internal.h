@@ -12,6 +12,7 @@ namespace karma::assets::detail {
 std::string textureContentHash(const TextureAsset& texture);
 std::string_view textureImporterVersion();
 std::string_view textureDependencyVersion();
+std::string textureProfileVersion();
 void bleedTransparentRgb(Rgba8Image& image);
 TextureAsset makeTextureAssetFromImage(Rgba8Image image,
                                        bool srgb,

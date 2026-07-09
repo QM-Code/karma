@@ -72,27 +72,33 @@ InstanceGpuData packInstanceTransform(const glm::mat4& transform,
 
 struct ShadowBatchKey {
   rendering::MeshId mesh = rendering::kInvalidMesh;
+  rendering::MaterialId material = rendering::kInvalidMaterial;
   Diligent::Uint32 index_offset = 0;
   Diligent::Uint32 index_count = 0;
   bool indexed = false;
   bool deformed = false;
+  bool alpha_tested = false;
 
   bool operator==(const ShadowBatchKey& other) const {
     return mesh == other.mesh &&
+           material == other.material &&
            index_offset == other.index_offset &&
            index_count == other.index_count &&
            indexed == other.indexed &&
-           deformed == other.deformed;
+           deformed == other.deformed &&
+           alpha_tested == other.alpha_tested;
   }
 };
 
 struct ShadowBatchKeyHash {
   size_t operator()(const ShadowBatchKey& key) const noexcept {
     size_t h = static_cast<size_t>(key.mesh);
+    h ^= static_cast<size_t>(key.material) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.index_offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.index_count) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.indexed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= static_cast<size_t>(key.deformed ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= static_cast<size_t>(key.alpha_tested ? 1u : 0u) + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
   }
 };
@@ -121,7 +127,7 @@ glm::mat4 buildLightView(const rendering::DirectionalLightData& light) {
   if (glm::length(dir) < 1e-4f) {
     dir = glm::vec3(0.3f, -1.0f, 0.2f);
   }
-  const glm::vec3 z = glm::normalize(-dir);
+  const glm::vec3 z = glm::normalize(dir);
   glm::vec3 x;
   const float min_cmp = std::min({std::abs(z.x), std::abs(z.y), std::abs(z.z)});
   if (min_cmp == std::abs(z.x)) {
@@ -496,19 +502,11 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
 
       const float scale_x = (extent.x > 0.0f) ? (2.0f / extent.x) : 1.0f;
       const float scale_y = (extent.y > 0.0f) ? (2.0f / extent.y) : 1.0f;
-      const float near_z = light_max.z;
-      const float far_z = light_min.z;
-      const float z_denom = far_z - near_z;
       float scale_z = 1.0f;
       float bias_z = 0.0f;
-      if (std::abs(z_denom) > 1e-6f) {
-        if (is_gl) {
-          scale_z = 2.0f / z_denom;
-          bias_z = -(far_z + near_z) / z_denom;
-        } else {
-          scale_z = 1.0f / z_denom;
-          bias_z = -near_z * scale_z;
-        }
+      if (extent.z > 1e-6f) {
+        scale_z = (is_gl ? 2.0f : 1.0f) / extent.z;
+        bias_z = -light_min.z * scale_z + (is_gl ? -1.0f : 0.0f);
       } else {
         scale_z = is_gl ? 2.0f : 1.0f;
         bias_z = is_gl ? -1.0f : 0.0f;
@@ -785,6 +783,58 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       shadow_batches[it->second].bounds_spheres.push_back(bounds_sphere);
     };
 
+    auto resolve_bound_material =
+        [&](const std::vector<rendering::DrawMaterialBinding>& materials,
+            rendering::MaterialId material,
+            uint32_t material_slot,
+            rendering::MaterialId fallback_material) -> rendering::MaterialId {
+      for (const auto& binding : materials) {
+        if (binding.slot == material_slot &&
+            binding.material != rendering::kInvalidMaterial) {
+          return binding.material;
+        }
+      }
+      if (material != rendering::kInvalidMaterial) {
+        return material;
+      }
+      return fallback_material;
+    };
+
+    auto lookup_material = [&](rendering::MaterialId material_id) -> const MaterialRecord* {
+      if (material_id == rendering::kInvalidMaterial) {
+        return nullptr;
+      }
+      auto mat_it = materials_.find(material_id);
+      return mat_it != materials_.end() ? &mat_it->second : nullptr;
+    };
+
+    auto material_casts_alpha_shadow = [&](const MaterialRecord* mat) {
+      if (!mat || !shadow_alpha_pipeline_state_) {
+        return false;
+      }
+      return mat->desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Masked ||
+             mat->desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Blend;
+    };
+
+    auto make_shadow_key = [&](rendering::MeshId mesh_id,
+                               rendering::MaterialId material_id,
+                               Diligent::Uint32 index_offset,
+                               Diligent::Uint32 index_count,
+                               bool indexed,
+                               bool deformed) {
+      const MaterialRecord* mat = lookup_material(material_id);
+      const bool alpha_tested = material_casts_alpha_shadow(mat);
+      return ShadowBatchKey{
+          .mesh = mesh_id,
+          .material = alpha_tested ? material_id : rendering::kInvalidMaterial,
+          .index_offset = index_offset,
+          .index_count = index_count,
+          .indexed = indexed,
+          .deformed = deformed,
+          .alpha_tested = alpha_tested,
+      };
+    };
+
     for (const auto& entry : instances_) {
       const auto& instance = entry.second;
       if (instance.layer != layer || !instance.shadow_visible) {
@@ -804,13 +854,18 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
       if (!mesh.submeshes.empty()) {
         for (const auto& submesh : mesh.submeshes) {
-          const ShadowBatchKey key{
-              .mesh = instance.mesh,
-              .index_offset = submesh.index_offset,
-              .index_count = submesh.index_count,
-              .indexed = indexed_mesh && submesh.index_count > 0,
-              .deformed = instance.deformation != rendering::kInvalidDeformation,
-          };
+          const rendering::MaterialId material_id =
+              resolve_bound_material(instance.materials,
+                                     instance.material,
+                                     submesh.material_slot,
+                                     submesh.material);
+          const ShadowBatchKey key =
+              make_shadow_key(instance.mesh,
+                              material_id,
+                              submesh.index_offset,
+                              submesh.index_count,
+                              indexed_mesh && submesh.index_count > 0,
+                              instance.deformation != rendering::kInvalidDeformation);
           append_shadow_batch(key,
                               instance.transform,
                               instance.params,
@@ -818,13 +873,18 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
                               instance.deformation);
         }
       } else {
-        const ShadowBatchKey key{
-            .mesh = instance.mesh,
-            .index_offset = 0,
-            .index_count = mesh.index_count,
-            .indexed = indexed_mesh,
-            .deformed = instance.deformation != rendering::kInvalidDeformation,
-        };
+        const rendering::MaterialId material_id =
+            resolve_bound_material(instance.materials,
+                                   instance.material,
+                                   0,
+                                   rendering::kInvalidMaterial);
+        const ShadowBatchKey key =
+            make_shadow_key(instance.mesh,
+                            material_id,
+                            0,
+                            mesh.index_count,
+                            indexed_mesh,
+                            instance.deformation != rendering::kInvalidDeformation);
         append_shadow_batch(key,
                             instance.transform,
                             instance.params,
@@ -851,13 +911,18 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
             transformBoundingSphere(transform, mesh.bounds_center, mesh.bounds_radius);
         if (!mesh.submeshes.empty()) {
           for (const auto& submesh : mesh.submeshes) {
-            const ShadowBatchKey key{
-                .mesh = record.mesh,
-                .index_offset = submesh.index_offset,
-                .index_count = submesh.index_count,
-                .indexed = indexed_mesh && submesh.index_count > 0,
-                .deformed = false,
-            };
+            const rendering::MaterialId material_id =
+                resolve_bound_material(record.materials,
+                                       record.material,
+                                       submesh.material_slot,
+                                       submesh.material);
+            const ShadowBatchKey key =
+                make_shadow_key(record.mesh,
+                                material_id,
+                                submesh.index_offset,
+                                submesh.index_count,
+                                indexed_mesh && submesh.index_count > 0,
+                                false);
             append_shadow_batch(key,
                                 transform,
                                 params,
@@ -865,13 +930,18 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
                                 rendering::kInvalidDeformation);
           }
         } else {
-          const ShadowBatchKey key{
-              .mesh = record.mesh,
-              .index_offset = 0,
-              .index_count = mesh.index_count,
-              .indexed = indexed_mesh,
-              .deformed = false,
-          };
+          const rendering::MaterialId material_id =
+              resolve_bound_material(record.materials,
+                                     record.material,
+                                     0,
+                                     rendering::kInvalidMaterial);
+          const ShadowBatchKey key =
+              make_shadow_key(record.mesh,
+                              material_id,
+                              0,
+                              mesh.index_count,
+                              indexed_mesh,
+                              false);
           append_shadow_batch(key,
                               transform,
                               params,
@@ -895,6 +965,34 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
                 if (a.key.mesh != b.key.mesh) {
                   return a.key.mesh < b.key.mesh;
                 }
+                if (a.key.alpha_tested != b.key.alpha_tested) {
+                  return static_cast<uint32_t>(a.key.alpha_tested) <
+                         static_cast<uint32_t>(b.key.alpha_tested);
+                }
+                if (a.key.material != b.key.material) {
+                  return a.key.material < b.key.material;
+                }
+                if (a.key.index_offset != b.key.index_offset) {
+                  return a.key.index_offset < b.key.index_offset;
+                }
+                if (a.key.index_count != b.key.index_count) {
+                  return a.key.index_count < b.key.index_count;
+                }
+                return static_cast<uint32_t>(a.key.indexed) < static_cast<uint32_t>(b.key.indexed);
+              });
+    std::sort(deformed_shadow_draws.begin(),
+              deformed_shadow_draws.end(),
+              [](const DeformedShadowDraw& a, const DeformedShadowDraw& b) {
+                if (a.key.mesh != b.key.mesh) {
+                  return a.key.mesh < b.key.mesh;
+                }
+                if (a.key.alpha_tested != b.key.alpha_tested) {
+                  return static_cast<uint32_t>(a.key.alpha_tested) <
+                         static_cast<uint32_t>(b.key.alpha_tested);
+                }
+                if (a.key.material != b.key.material) {
+                  return a.key.material < b.key.material;
+                }
                 if (a.key.index_offset != b.key.index_offset) {
                   return a.key.index_offset < b.key.index_offset;
                 }
@@ -911,15 +1009,112 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
     Diligent::IBuffer* bound_mesh_vb = nullptr;
     Diligent::IBuffer* bound_instance_vb = nullptr;
     Diligent::IBuffer* bound_index_buffer = nullptr;
-    {
+    Diligent::IPipelineState* bound_pipeline = nullptr;
+    bool constants_match_pass = false;
+
+    auto write_shadow_constants = [&](const DrawConstants& constants) {
       Diligent::MapHelper<DrawConstants> mapped(
           context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
       auto* mapped_constants = getMappedData(mapped);
       if (mapped_constants == nullptr) {
-        return;
+        return false;
       }
-      *mapped_constants = pass_constants;
+      *mapped_constants = constants;
+      return true;
+    };
+
+    auto lookup_material = [&](rendering::MaterialId material_id) -> MaterialRecord* {
+      if (material_id == rendering::kInvalidMaterial) {
+        return nullptr;
+      }
+      auto mat_it = materials_.find(material_id);
+      return mat_it != materials_.end() ? &mat_it->second : nullptr;
+    };
+
+    auto write_alpha_shadow_constants = [&](const MaterialRecord& mat) {
+      DrawConstants constants = pass_constants;
+      constants.base_color_factor[0] = mat.base_color_factor.r;
+      constants.base_color_factor[1] = mat.base_color_factor.g;
+      constants.base_color_factor[2] = mat.base_color_factor.b;
+      constants.base_color_factor[3] = mat.base_color_factor.a;
+      constants.material_params0[0] =
+          static_cast<float>(static_cast<uint32_t>(mat.shading_model));
+      constants.material_params0[1] = mat.shell_fresnel_power;
+      constants.material_params0[2] = mat.shell_fresnel_strength;
+      constants.material_params0[3] = mat.shell_refraction_strength;
+      constants.material_params1[0] = 0.0f;
+      constants.material_params1[1] = 0.0f;
+      constants.material_params1[2] = 0.0f;
+      constants.material_params1[3] = 0.0f;
+      constants.material_params2[0] = 0.0f;
+      constants.material_params2[1] = 0.0f;
+      constants.material_params2[2] = 0.0f;
+      constants.material_params2[3] =
+          mat.desc.alpha_mode == rendering::MaterialDesc::AlphaMode::Masked
+              ? mat.desc.alpha_cutoff
+              : 0.5f;
+      for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
+        constants.texcoord_row0[slot][0] = mat.texcoord_row0[slot].x;
+        constants.texcoord_row0[slot][1] = mat.texcoord_row0[slot].y;
+        constants.texcoord_row0[slot][2] = mat.texcoord_row0[slot].z;
+        constants.texcoord_row0[slot][3] = mat.texcoord_row0[slot].w;
+        constants.texcoord_row1[slot][0] = mat.texcoord_row1[slot].x;
+        constants.texcoord_row1[slot][1] = mat.texcoord_row1[slot].y;
+        constants.texcoord_row1[slot][2] = mat.texcoord_row1[slot].z;
+        constants.texcoord_row1[slot][3] = mat.texcoord_row1[slot].w;
+      }
+      return write_shadow_constants(constants);
+    };
+
+    auto prepare_shadow_draw = [&](const ShadowBatchKey& key,
+                                   const MeshRecord& mesh,
+                                   rendering::DeformationId deformation) {
+      const bool alpha_tested = key.alpha_tested && shadow_alpha_pipeline_state_;
+      MaterialRecord* material = alpha_tested ? lookup_material(key.material) : nullptr;
+      if (alpha_tested && material == nullptr) {
+        return false;
+      }
+
+      Diligent::IPipelineState* desired_pipeline =
+          alpha_tested ? shadow_alpha_pipeline_state_.RawPtr() : shadow_pipeline_state_.RawPtr();
+      if (!desired_pipeline) {
+        return false;
+      }
+      if (desired_pipeline != bound_pipeline) {
+        context_->SetPipelineState(desired_pipeline);
+        bound_pipeline = desired_pipeline;
+      }
+
+      if (alpha_tested) {
+        if (!write_alpha_shadow_constants(*material)) {
+          return false;
+        }
+        constants_match_pass = false;
+      } else if (!constants_match_pass) {
+        if (!write_shadow_constants(pass_constants)) {
+          return false;
+        }
+        constants_match_pass = true;
+      }
+
+      Diligent::IShaderResourceBinding* srb =
+          alpha_tested ? ensureMaterialShadowAlphaSrb(*material) : shadow_srb_.RawPtr();
+      if (srb) {
+        if (!bindDeformationResources(srb, mesh, deformation)) {
+          return false;
+        }
+        context_->CommitShaderResources(srb,
+                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+      } else if (!updateDeformationConstants(mesh, deformation)) {
+        return false;
+      }
+      return true;
+    };
+
+    if (!write_shadow_constants(pass_constants)) {
+      return;
     }
+    constants_match_pass = true;
     for (const auto& batch : shadow_batches) {
       if (batch.transforms.empty()) {
         continue;
@@ -944,15 +1139,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       if (!mesh.vertex_buffer) {
         continue;
       }
-      if (shadow_srb_) {
-        if (!bindDeformationResources(shadow_srb_,
-                                      mesh,
-                                      rendering::kInvalidDeformation)) {
-          continue;
-        }
-        context_->CommitShaderResources(shadow_srb_,
-                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-      } else if (!updateDeformationConstants(mesh, rendering::kInvalidDeformation)) {
+      if (!prepare_shadow_draw(batch.key, mesh, rendering::kInvalidDeformation)) {
         continue;
       }
       if (!ensure_instance_buffer(filtered_shadow_transforms.size())) {
@@ -1019,13 +1206,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       if (!mesh.vertex_buffer) {
         continue;
       }
-      if (shadow_srb_) {
-        if (!bindDeformationResources(shadow_srb_, mesh, draw.deformation)) {
-          continue;
-        }
-        context_->CommitShaderResources(shadow_srb_,
-                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-      } else if (!updateDeformationConstants(mesh, draw.deformation)) {
+      if (!prepare_shadow_draw(draw.key, mesh, draw.deformation)) {
         continue;
       }
       if (!ensure_instance_buffer(1)) {
@@ -1140,6 +1321,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       shadow_constants.local_light_params[1] = local_light_range_exponent_;
       shadow_constants.local_light_params[2] = ao_affects_local_lights_ ? 1.0f : 0.0f;
       shadow_constants.local_light_params[3] = local_light_directional_shadow_lift_;
+      shadow_constants.local_light_meta[3] = static_cast<float>(accumulated_time_seconds_);
       shadow_constants.point_shadow_tuning[0] = point_shadow_constant_bias_;
       shadow_constants.point_shadow_tuning[1] = point_shadow_slope_bias_scale_;
       shadow_constants.point_shadow_tuning[2] = point_shadow_normal_bias_scale_;
@@ -1275,6 +1457,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       shadow_constants.local_light_params[1] = local_light_range_exponent_;
       shadow_constants.local_light_params[2] = ao_affects_local_lights_ ? 1.0f : 0.0f;
       shadow_constants.local_light_params[3] = local_light_directional_shadow_lift_;
+      shadow_constants.local_light_meta[3] = static_cast<float>(accumulated_time_seconds_);
       shadow_constants.point_shadow_tuning[0] = point_shadow_constant_bias_;
       shadow_constants.point_shadow_tuning[1] = point_shadow_slope_bias_scale_;
       shadow_constants.point_shadow_tuning[2] = point_shadow_normal_bias_scale_;

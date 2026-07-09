@@ -1101,6 +1101,7 @@ Json gltfScenePrimitiveJson(const GltfSceneAssetPrimitive& primitive) {
       {"name", primitive.name},
       {"mesh_key", primitive.mesh_key},
       {"material_key", primitive.material_key},
+      {"casts_shadows", primitive.casts_shadows},
       {"skin_index", primitive.skin_index},
       {"morph_weights", floatVectorJson(primitive.morph_weights)},
       {"joint_node_indices", u32VectorJson(primitive.joint_node_indices)},
@@ -1116,6 +1117,7 @@ bool readGltfScenePrimitiveJson(const Json& json, GltfSceneAssetPrimitive& primi
   parsed.name = json.value("name", std::string{});
   parsed.mesh_key = json.value("mesh_key", std::string{});
   parsed.material_key = json.value("material_key", std::string{});
+  parsed.casts_shadows = json.value("casts_shadows", true);
   parsed.skin_index = json.value("skin_index", parsed.skin_index);
   if (!readFloatVectorJson(json.value("morph_weights", Json::array()), parsed.morph_weights) ||
       !readU32VectorJson(json.value("joint_node_indices", Json::array()),

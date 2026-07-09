@@ -132,6 +132,20 @@ struct TextureUploadData {
   std::vector<std::uint8_t> bytes;
 };
 
+/// Texture creation plus prepared upload payload for batched renderer uploads.
+struct TextureUploadBatchRequest {
+  TextureDesc desc{};
+  TextureUploadData upload{};
+};
+
+/// Per-texture result from a batched renderer upload.
+struct TextureUploadBatchResult {
+  TextureId texture = kInvalidTexture;
+  bool uploaded = false;
+  float create_ms = 0.0f;
+  float upload_ms = 0.0f;
+};
+
 }  // namespace karma::rendering
 
 
@@ -330,7 +344,7 @@ namespace karma::rendering {
 struct DirectionalLightData {
   glm::vec3 direction{0.0f, -1.0f, 0.0f};
   math::Color color{1.0f, 1.0f, 1.0f, 1.0f};
-  float intensity = 1.0f;
+  float intensity = 0.0f;
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   float shadow_extent = 0.0f;
   bool casts_shadows = false;
@@ -2460,6 +2474,9 @@ class GraphicsDevice {
   bool supportsTextureFormat(TextureFormat format) const;
   /// Uploads prepared texture subresources when the backend supports the format.
   bool uploadTexture(TextureId texture, const TextureUploadData& upload);
+  /// Creates and uploads textures in one render-thread invocation.
+  std::vector<TextureUploadBatchResult> createAndUploadTextures(
+      std::vector<TextureUploadBatchRequest> requests);
   /// Destroys a texture.
   void destroyTexture(TextureId texture);
 

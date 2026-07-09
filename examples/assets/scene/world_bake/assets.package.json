@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "environment_map",
+      "key": "examples/scene/world_bake/skybox",
+      "path": "golden_gate_hills_512_cubemap.ktx"
+    },
+    {
+      "type": "gltf_scene",
+      "key": "examples/scene/world_bake/world",
+      "path": "world.glb",
+      "import_meshes": true,
+      "import_lights": true,
+      "alpha_mode_policy": "auto_cutout",
+      "material_overrides": [
+        {
+          "all_materials": true,
+          "diffuse_only": true,
+          "keep_normal_maps": true
+        },
+        {
+          "material_name": "Material.001",
+          "normal_scale": 0.45,
+          "casts_shadows": false
+        }
+      ]
+    }
+  ]
+}

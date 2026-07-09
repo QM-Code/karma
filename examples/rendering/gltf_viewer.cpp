@@ -17,6 +17,8 @@ namespace karma::demo {
 namespace {
 
 constexpr const char* kDamagedHelmetSceneKey = "examples/rendering/damaged_helmet";
+constexpr const char* kDamagedHelmetViewerSceneKey =
+    "examples/rendering/damaged_helmet_viewer";
 
 glm::vec3 toGlm(const math::Vec3& v) {
   return {v.x, v.y, v.z};
@@ -75,9 +77,11 @@ float boundsRadius(const SceneBounds& bounds, float fallback_radius) {
 class DiligentGltfViewerExample final : public app::GameInterface {
  public:
   explicit DiligentGltfViewerExample(std::filesystem::path source_hint,
-                                     std::string scene_asset_key = {})
+                                     std::string scene_asset_key = {},
+                                     bool scene_preinstantiated = false)
       : source_hint_(std::move(source_hint)),
-        scene_asset_key_(std::move(scene_asset_key)) {}
+        scene_asset_key_(std::move(scene_asset_key)),
+        scene_preinstantiated_(scene_preinstantiated) {}
 
   void onStart() override {
     input->bindMouse("viewer_orbit", platform::MouseButton::Right);
@@ -101,16 +105,20 @@ class DiligentGltfViewerExample final : public app::GameInterface {
         bounds = SceneBounds{.min = asset_bounds.min,
                              .max = asset_bounds.max,
                              .valid = asset_bounds.valid};
-        const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
-            *world,
-            *scene,
-            *assets,
-            *cached_scene,
-            world::GltfSceneInstantiateOptions{
-                .create_synthetic_root = false,
-                .autoplay_animations = true,
-            });
-        spawned_scene = imported.valid();
+        if (scene_preinstantiated_) {
+          spawned_scene = true;
+        } else {
+          const world::GltfSceneImportResult imported = world::instantiateGltfSceneAsset(
+              *world,
+              *scene,
+              *assets,
+              *cached_scene,
+              world::GltfSceneInstantiateOptions{
+                  .create_synthetic_root = false,
+                  .autoplay_animations = true,
+              });
+          spawned_scene = imported.valid();
+        }
         if (spawned_scene) {
           logSceneSummary(*cached_scene, bounds);
         } else {
@@ -363,6 +371,7 @@ class DiligentGltfViewerExample final : public app::GameInterface {
 
   std::filesystem::path source_hint_;
   std::string scene_asset_key_;
+  bool scene_preinstantiated_ = false;
   world::Entity camera_entity_{};
   math::Vec3 orbit_center_{};
   math::Vec3 target_orbit_center_{};
@@ -384,10 +393,12 @@ class DiligentGltfViewerExample final : public app::GameInterface {
 
 int main(int argc, char** argv) {
   std::filesystem::path package_path =
-      karma::demo::resolveExampleAssetPath("rendering/damaged_helmet");
+      karma::demo::resolveExampleAssetPath("damaged_helmet_viewer.scene.package.json");
   std::string scene_asset_key = "examples/rendering/damaged_helmet";
+  std::string startup_scene_key = karma::demo::kDamagedHelmetViewerSceneKey;
   if (argc > 1 && argv[1] != nullptr && std::string(argv[1]).size() > 0u) {
     package_path = karma::demo::resolveExamplePath(argv[1]);
+    startup_scene_key.clear();
     if (argc > 2 && argv[2] != nullptr && std::string(argv[2]).size() > 0u) {
       scene_asset_key = argv[2];
     } else {
@@ -400,7 +411,8 @@ int main(int argc, char** argv) {
   karma::app::EngineApp engine;
   karma::demo::DiligentGltfViewerExample game(
       package_path,
-      scene_asset_key);
+      scene_asset_key,
+      !startup_scene_key.empty());
 
   karma::app::EngineConfig config;
   config.window.title = "Karma Diligent GLTF Viewer";
@@ -424,6 +436,9 @@ int main(int argc, char** argv) {
   config.environment_intensity = 1.0f;
   config.environment_draw_skybox = true;
   config.startup_asset_packages.push_back(package_path);
+  if (!startup_scene_key.empty()) {
+    config.startup_scene_assets.push_back(startup_scene_key);
+  }
 
   engine.start(game, config);
   while (engine.isRunning()) {

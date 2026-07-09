@@ -43,6 +43,11 @@ The log uses these high-level sections:
 - `KARMA_RENDER_PIPELINE_DIAG=1`: renderer pipeline/shader creation timings.
 - `KARMA_RENDER_LAYER_FRAME_DIAG=1`: first-frame render layer timings.
 - `KARMA_NAVMESH_DIAG=1`: navigation request and rebuild diagnostics.
+- `KARMA_RENDER_TEXTURE_PREPARED_CACHE=0`: disable prepared texture upload
+  cache reads/writes when isolating KTX2 transcode and upload cost.
+- `KARMA_ASSET_TEXTURE_RESTORE_JOBS=N`: cap package texture restore
+  parallelism.
+- `KARMA_TEXTURE_KTX2_THREADS=N`: cap KTX2 import compression workers.
 
 ## Reading A Slow Startup
 

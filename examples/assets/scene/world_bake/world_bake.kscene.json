@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "name": "World Bake Skybox",
+  "asset_packages": [
+    {
+      "id": "world_bake_assets",
+      "path": "assets.package.json",
+      "baked_cache": "bakes/asset_cache/world_bake_assets"
+    }
+  ],
+  "gltf_scenes": [
+    {
+      "id": "examples/scene/world_bake/world",
+      "path": "world.glb",
+      "asset_package": "world_bake_assets"
+    }
+  ],
+  "entities": [
+    {
+      "id": "world_anchor",
+      "name": "World Bake Anchor"
+    },
+    {
+      "id": "skybox_entity",
+      "name": "Skybox"
+    },
+    {
+      "id": "sun_entity",
+      "name": "Sun",
+      "rotation": [
+        -0.7382549,
+        -0.2214765,
+        0.0,
+        0.6371247
+      ]
+    }
+  ],
+  "lights": [
+    {
+      "id": "sun",
+      "entity": "sun_entity",
+      "type": "directional",
+      "color": [
+        1.0,
+        0.96,
+        0.88,
+        1.0
+      ],
+      "intensity": 2.8,
+      "casts_shadows": true,
+      "shadow_extent": 96.0
+    }
+  ],
+  "environment": {
+    "id": "skybox",
+    "entity": "skybox_entity",
+    "environment_map": "examples/scene/world_bake/skybox",
+    "intensity": 0.55,
+    "draw_skybox": true,
+    "enabled": true
+  },
+  "static": [
+    {
+      "id": "world_scene_static",
+      "entity": "world_anchor",
+      "gltf_scene": "examples/scene/world_bake/world",
+      "transform": true,
+      "render": true,
+      "lighting": true,
+      "collision": false,
+      "navigation": false,
+      "casts_shadows": true,
+      "receives_baked_lighting": true
+    }
+  ],
+  "bakes": [
+    {
+      "id": "skybox_world",
+      "path": "bakes/world_bake.kbake.json",
+      "static": [
+        "world_scene_static"
+      ]
+    }
+  ]
+}

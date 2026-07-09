@@ -20,6 +20,7 @@
 
 #include "karma/assets.h"
 #include "karma/prefabs.h"
+#include "karma/scenes.h"
 #include "karma/math.h"
 #include "karma/math.h"
 #include "karma/core.h"
@@ -574,6 +575,12 @@ void EngineApp::shutdownSubsystems() {
     render_system_->releasePrewarm(startup_prewarm_handle_);
     startup_prewarm_handle_ = {};
   }
+  for (auto it = startup_scene_results_.rbegin();
+       it != startup_scene_results_.rend();
+       ++it) {
+    scenes::destroyScene(world_, scene_, *it);
+  }
+  startup_scene_results_.clear();
   for (auto it = startup_asset_package_handles_.rbegin();
        it != startup_asset_package_handles_.rend();
        ++it) {
@@ -928,6 +935,12 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     spdlog::info("KARMA_RENDER_WARMUP_CAMERA_SWEEP_STEPS override: {}",
                  config_.renderer_warmup_camera_sweep_steps);
   }
+  if (const char* prewarm_env =
+          std::getenv("KARMA_ENGINE_PREWARM_STARTUP_PACKAGES")) {
+    config_.prewarm_startup_packages = envFlagEnabled(prewarm_env);
+    spdlog::info("KARMA_ENGINE_PREWARM_STARTUP_PACKAGES override: {}",
+                 config_.prewarm_startup_packages ? "on" : "off");
+  }
   config_.frame_pacing_fps = std::max(0.0f, config_.frame_pacing_fps);
   if (config_.skip_present_on_mouse_button) {
     spdlog::info("Engine will skip swapchain present for {} frame(s) after mouse-button events",
@@ -1027,6 +1040,30 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     startup_asset_package_handles_.push_back(std::move(*package));
   }
   finish_startup_stage("startup asset packages");
+
+  startup_scene_results_.clear();
+  for (const std::string& scene_key : config_.startup_scene_assets) {
+    const assets::SceneAsset* scene_asset = assets_.findSceneAsset(scene_key);
+    if (scene_asset == nullptr) {
+      spdlog::error("Failed to find startup scene asset '{}'", scene_key);
+      shutdownSubsystems();
+      return;
+    }
+    scenes::SceneInstantiateResult scene_result =
+        scenes::instantiateScene(world_, scene_, assets_, scene_asset->document);
+    if (!scene_result.success) {
+      for (const std::string& diagnostic : scene_result.diagnostics) {
+        spdlog::error("Startup scene asset '{}' failed: {}", scene_key, diagnostic);
+      }
+      if (scene_result.diagnostics.empty()) {
+        spdlog::error("Startup scene asset '{}' failed", scene_key);
+      }
+      shutdownSubsystems();
+      return;
+    }
+    startup_scene_results_.push_back(std::move(scene_result));
+  }
+  finish_startup_stage("startup scene assets");
 
   game_ = &game;
   running_ = true;
@@ -1200,11 +1237,12 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
     finish_startup_stage("engine environment setup");
   }
   if (render_system_ && config_.prewarm_startup_packages &&
-      !startup_asset_package_handles_.empty()) {
+      (!startup_asset_package_handles_.empty() ||
+       !startup_scene_results_.empty())) {
     std::vector<std::string> mesh_keys;
     std::vector<std::string> material_keys;
     std::vector<std::string> texture_keys;
-    for (const auto& package : startup_asset_package_handles_) {
+    auto append_package_keys = [&](const assets::AssetPackageHandle& package) {
       for (const auto& asset : package.assets) {
         if (asset.type == "mesh") {
           mesh_keys.push_back(asset.key);
@@ -1213,6 +1251,17 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
         } else if (asset.type == "texture" || asset.type == "texture_rgba8") {
           texture_keys.push_back(asset.key);
         }
+      }
+    };
+    for (const auto& package : startup_asset_package_handles_) {
+      append_package_keys(package);
+    }
+    for (const scenes::SceneInstantiateResult& scene_result : startup_scene_results_) {
+      for (const assets::AssetPackageHandle& package : scene_result.asset_packages) {
+        append_package_keys(package);
+      }
+      for (const assets::AssetPackageHandle& package : scene_result.prefab_asset_packages) {
+        append_package_keys(package);
       }
     }
     finish_startup_stage("startup asset prewarm collect keys");

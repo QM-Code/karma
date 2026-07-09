@@ -18,3 +18,4 @@
 #include "karma/visual.h"
 #include "karma/network.h"
 #include "karma/prefabs.h"
+#include "karma/scenes.h"

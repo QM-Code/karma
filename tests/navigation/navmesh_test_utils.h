@@ -89,6 +89,7 @@ void testReplacementRequestKeepsCurrentPathMoving();
 void testNavigationSystemFollowsPrecomputedPath();
 void testNavigationSystemFollowPathSkipsPassedPrefix();
 void testNavigationSystemFollowPathUsesSpeedMultipliers();
+void testNavigationSystemConsumesTimeThroughShortWaypoints();
 void testExampleWorldGlbCanBake();
 
 }  // namespace karma::tests::navigation

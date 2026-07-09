@@ -37,6 +37,7 @@ int main() {
   testNavigationSystemFollowsPrecomputedPath();
   testNavigationSystemFollowPathSkipsPassedPrefix();
   testNavigationSystemFollowPathUsesSpeedMultipliers();
+  testNavigationSystemConsumesTimeThroughShortWaypoints();
   testExampleWorldGlbCanBake();
   std::cout << "navmesh tests passed\n";
   return 0;

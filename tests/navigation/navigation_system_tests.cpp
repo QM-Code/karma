@@ -632,6 +632,7 @@ void testNavigationSystemFollowPathSkipsPassedPrefix() {
       {1.0f, 0.0f, 0.0f},
       {4.0f, 0.0f, 0.0f},
   };
+  path.point_speed_multipliers = {1.0f, 0.5f, 0.25f};
   assert(karma::navigation::NavigationSystem::requestFollowPath(
       world, agent_entity, path));
 
@@ -640,6 +641,11 @@ void testNavigationSystemFollowPathSkipsPassedPrefix() {
   assert(requested_agent.path.size() == 2u);
   assert(std::abs(requested_agent.path.front().x - 2.0f) < 0.001f);
   assert(std::abs(requested_agent.path.back().x - 4.0f) < 0.001f);
+  assert(requested_agent.path_point_speed_multipliers.size() == 2u);
+  assert(std::abs(requested_agent.path_point_speed_multipliers.front() - 0.25f) <
+         0.001f);
+  assert(std::abs(requested_agent.path_point_speed_multipliers.back() - 0.25f) <
+         0.001f);
   assert(requested_agent.next_waypoint == 1u);
 
   karma::navigation::NavigationSystem system;
@@ -680,6 +686,33 @@ void testNavigationSystemFollowPathUsesSpeedMultipliers() {
       world.get<karma::components::NavMeshAgentComponent>(agent_entity);
   assert(std::abs(transform.getPosition().x - 2.0f) < 0.05f);
   assert(moved_agent.status == karma::components::NavMeshAgentStatus::Moving);
+}
+
+void testNavigationSystemConsumesTimeThroughShortWaypoints() {
+  karma::world::World world;
+
+  const auto agent_entity = world.createEntity();
+  world.add(agent_entity,
+            karma::components::TransformComponent{{0.0f, 0.0f, 0.0f}});
+  karma::components::NavMeshAgentComponent agent;
+  agent.speed = 1.0f;
+  agent.stopping_distance = 0.15f;
+  world.add(agent_entity, std::move(agent));
+
+  karma::navigation::NavPath path;
+  path.status = karma::navigation::NavStatus::Success;
+  for (int index = 0; index <= 20; ++index) {
+    path.points.push_back({static_cast<float>(index) * 0.2f, 0.0f, 0.0f});
+  }
+  assert(karma::navigation::NavigationSystem::requestFollowPath(
+      world, agent_entity, path));
+
+  karma::navigation::NavigationSystem system;
+  system.update(world, 1.0f);
+
+  const auto& transform =
+      world.get<karma::components::TransformComponent>(agent_entity);
+  assert(transform.getPosition().x <= 1.05f);
 }
 
 void testExampleWorldGlbCanBake() {

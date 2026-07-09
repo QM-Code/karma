@@ -311,18 +311,30 @@ void moveAgents(world::World& world, float dt) {
           const math::Vec3 target = agent.path[agent.next_waypoint];
           const math::Vec3 delta = math::subtract(target, current);
           const float distance = math::length(delta);
-          if (distance <= agent.stopping_distance) {
-            current = target;
-            ++agent.next_waypoint;
-            continue;
-          }
-
           const float segment_speed =
               agent.speed *
               pathSpeedMultiplierForWaypoint(agent, agent.next_waypoint);
           if (segment_speed <= 0.0f) {
             break;
           }
+
+          if (distance <= agent.stopping_distance) {
+            if (distance > 0.0f) {
+              const float time_to_target = distance / segment_speed;
+              if (time_to_target > remaining_time) {
+                current = math::add(
+                    current,
+                    math::scale(delta, (segment_speed * remaining_time) / distance));
+                remaining_time = 0.0f;
+                break;
+              }
+              remaining_time -= time_to_target;
+            }
+            current = target;
+            ++agent.next_waypoint;
+            continue;
+          }
+
           const float step = std::min(segment_speed * remaining_time, distance);
           current = math::add(current, math::scale(delta, step / distance));
           remaining_time -= step / segment_speed;

@@ -470,6 +470,8 @@ struct NavPath {
   NavStatus status = NavStatus::QueryFailed;
   std::vector<math::Vec3> points;
   std::vector<uint8_t> point_flags;
+  /// Optional speed multiplier per point. When present, movement toward
+  /// `points[i]` uses `point_speed_multipliers[i]`.
   std::vector<float> point_speed_multipliers;
   bool partial = false;
 

@@ -288,6 +288,11 @@ void NavigationSystem::applyCompletedPaths(world::World& world) {
 
     agent.path = std::move(result.path.points);
     agent.path_point_flags = std::move(result.path.point_flags);
+    agent.path_point_speed_multipliers =
+        std::move(result.path.point_speed_multipliers);
+    if (agent.path_point_speed_multipliers.size() != agent.path.size()) {
+      agent.path_point_speed_multipliers.clear();
+    }
     if (world.has<components::TransformComponent>(result.agent_entity)) {
       const auto& transform =
           world.get<components::TransformComponent>(result.agent_entity);

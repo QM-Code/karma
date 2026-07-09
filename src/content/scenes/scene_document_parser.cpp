@@ -495,8 +495,8 @@ bool readCameras(const Json& root,
         !readBoolField(camera_json, "primary", camera.component.is_primary, result) ||
         !readBoolField(camera_json, "is_primary", camera.component.is_primary, result) ||
         !readStringField(camera_json,
-                         "post_process_profile_key",
-                         camera.component.post_process_profile_key,
+                         "frame_graph_key",
+                         camera.component.frame_graph_key,
                          result) ||
         !readRelativePathField(camera_json, "shader_override_vertex_path", vertex_path, result) ||
         !readRelativePathField(camera_json, "shader_override_fragment_path", fragment_path, result)) {

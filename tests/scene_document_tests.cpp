@@ -79,6 +79,7 @@ Json validSceneJson() {
        Json::array({Json{{"id", "main_camera"},
                          {"entity", "camera_entity"},
                          {"primary", true},
+                         {"frame_graph_key", "render_graph/cinematic"},
                          {"fov_y_degrees", 70.0f}}})},
       {"lights",
        Json::array({Json{{"id", "sun"},
@@ -150,6 +151,8 @@ void testValidSceneDocument() {
   KARMA_REQUIRE(document.environment->component.intensity == 1.5f);
   KARMA_REQUIRE(document.cameras.size() == 1);
   KARMA_REQUIRE(document.cameras[0].component.is_primary);
+  KARMA_REQUIRE(document.cameras[0].component.frame_graph_key ==
+                "render_graph/cinematic");
   KARMA_REQUIRE(document.lights.size() == 1);
   KARMA_REQUIRE(document.static_components.size() == 1);
   KARMA_REQUIRE(document.static_components[0].transform);

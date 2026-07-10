@@ -41,6 +41,136 @@
 
 namespace karma::world {
 
+namespace {
+
+std::string normalizedTextureStem(std::string_view name) {
+  const size_t separator = name.find_last_of("/\\");
+  if (separator != std::string_view::npos) {
+    name.remove_prefix(separator + 1u);
+  }
+  if (const size_t extension = name.find_last_of('.');
+      extension != std::string_view::npos) {
+    name = name.substr(0u, extension);
+  }
+
+  std::string normalized;
+  normalized.reserve(name.size());
+  bool pending_separator = false;
+  for (const char c : name) {
+    const unsigned char value = static_cast<unsigned char>(c);
+    if (std::isalnum(value) != 0) {
+      if (pending_separator && !normalized.empty()) {
+        normalized.push_back('_');
+      }
+      normalized.push_back(static_cast<char>(std::tolower(value)));
+      pending_separator = false;
+    } else {
+      pending_separator = true;
+    }
+  }
+  return normalized;
+}
+
+std::string compactTextureStem(std::string_view normalized) {
+  std::string compact;
+  compact.reserve(normalized.size());
+  for (const char c : normalized) {
+    if (c != '_') {
+      compact.push_back(c);
+    }
+  }
+  return compact;
+}
+
+bool endsWith(std::string_view value, std::string_view suffix) {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size()) == suffix;
+}
+
+int packedMetallicRoughnessNameScore(std::string_view name) {
+  const std::string normalized = normalizedTextureStem(name);
+  if (normalized.empty()) {
+    return 0;
+  }
+
+  int score = 0;
+  size_t token_begin = 0u;
+  while (token_begin < normalized.size()) {
+    const size_t token_end = normalized.find('_', token_begin);
+    const std::string_view token(
+        normalized.data() + token_begin,
+        (token_end == std::string::npos ? normalized.size() : token_end) - token_begin);
+    if (token == "orm" || token == "arm") {
+      score = std::max(score, 4);
+    } else if (token == "rm") {
+      score = std::max(score, 3);
+    }
+    if (token_end == std::string::npos) {
+      break;
+    }
+    token_begin = token_end + 1u;
+  }
+
+  const std::string compact = compactTextureStem(normalized);
+  if (endsWith(compact, "ambientocclusionroughnessmetallic") ||
+      endsWith(compact, "occlusionroughnessmetallic")) {
+    score = std::max(score, 6);
+  } else if (endsWith(compact, "metallicroughness") ||
+             endsWith(compact, "metalnessroughness")) {
+    score = std::max(score, 5);
+  }
+  return score;
+}
+
+std::string textureFamilyKey(std::string_view name) {
+  std::string normalized = normalizedTextureStem(name);
+  if (normalized.empty()) {
+    return {};
+  }
+
+  constexpr std::string_view kSemanticTokens[] = {
+      "basecolor", "basecolour", "diffusecolor", "albedo", "diffuse",
+      "normalmap", "normal", "normals", "nrm", "roughness", "rough",
+      "metallic", "metalness", "metal", "specular", "shininessexponent",
+      "shininess", "occlusion", "ambientocclusion", "ambient", "orm", "arm",
+      "rm", "ao",
+  };
+  while (!normalized.empty()) {
+    const size_t separator = normalized.find_last_of('_');
+    const std::string_view token =
+        separator == std::string::npos
+            ? std::string_view(normalized)
+            : std::string_view(normalized).substr(separator + 1u);
+    bool has_semantic_suffix = false;
+    for (const std::string_view semantic : kSemanticTokens) {
+      if (semantic == token) {
+        has_semantic_suffix = true;
+        break;
+      }
+    }
+    if (!has_semantic_suffix) {
+      break;
+    }
+    normalized.resize(separator == std::string::npos ? 0u : separator);
+  }
+
+  std::string compact = compactTextureStem(normalized);
+  constexpr std::string_view kCompoundSuffixes[] = {
+      "ambientocclusionroughnessmetallic", "occlusionroughnessmetallic",
+      "metallicroughness", "metalnessroughness", "shininessexponent",
+      "diffusecolor", "basecolour", "basecolor", "normalmap",
+  };
+  for (const std::string_view suffix : kCompoundSuffixes) {
+    if (compact.size() > suffix.size() && endsWith(compact, suffix)) {
+      compact.resize(compact.size() - suffix.size());
+      break;
+    }
+  }
+  return compact;
+}
+
+}  // namespace
+
 namespace detail {
 
 bool canonicalizeAssimpEmbeddedTexture(std::span<const uint8_t> bgra,
@@ -74,6 +204,10 @@ bool canonicalizeAssimpEmbeddedTexture(std::span<const uint8_t> bgra,
     }
   }
   return true;
+}
+
+bool isPackedMetallicRoughnessTextureName(std::string_view name) {
+  return packedMetallicRoughnessNameScore(name) > 0;
 }
 
 }  // namespace detail
@@ -655,6 +789,53 @@ std::filesystem::path resolveImportedTexturePath(
   return direct;
 }
 
+bool populateImportedTextureSource(rendering::ImportedMaterialTexture& texture,
+                                   const aiScene& scene,
+                                   const std::filesystem::path& asset_path,
+                                   const std::string& raw_key) {
+  texture.raw_name = raw_key;
+  texture.embedded = !raw_key.empty() && raw_key[0] == '*';
+  if (!texture.embedded) {
+    texture.resolved_path = resolveImportedTexturePath(asset_path, raw_key);
+    texture.source_key = texture.resolved_path.string();
+    return true;
+  }
+
+  const int texture_idx = embeddedTextureIndex(raw_key);
+  if (texture_idx < 0 || texture_idx >= static_cast<int>(scene.mNumTextures) ||
+      scene.mTextures[texture_idx] == nullptr) {
+    return false;
+  }
+
+  texture.source_key = asset_path.string() + ":" + raw_key;
+  const aiTexture& embedded_texture = *scene.mTextures[texture_idx];
+  if (embedded_texture.mHeight == 0) {
+    texture.compressed = true;
+    texture.source_bytes.resize(static_cast<size_t>(embedded_texture.mWidth));
+    if (!texture.source_bytes.empty()) {
+      std::memcpy(texture.source_bytes.data(),
+                  embedded_texture.pcData,
+                  texture.source_bytes.size());
+    }
+    return true;
+  }
+
+  texture.compressed = false;
+  texture.width = embedded_texture.mWidth;
+  texture.height = embedded_texture.mHeight;
+  const uint64_t byte_count = static_cast<uint64_t>(texture.width) *
+                              static_cast<uint64_t>(texture.height) * 4u;
+  if (byte_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return false;
+  }
+  const auto* raw_bytes = reinterpret_cast<const uint8_t*>(embedded_texture.pcData);
+  return detail::canonicalizeAssimpEmbeddedTexture(
+      std::span<const uint8_t>(raw_bytes, static_cast<size_t>(byte_count)),
+      texture.width,
+      texture.height,
+      texture.source_bytes);
+}
+
 bool appendImportedTexture(rendering::ImportedMaterialData& data,
                            const aiScene& scene,
                            const aiMaterial& material,
@@ -678,57 +859,241 @@ bool appendImportedTexture(rendering::ImportedMaterialData& data,
   }
 
   const std::string raw_key = tex_path.C_Str();
-  const bool embedded = !raw_key.empty() && raw_key[0] == '*';
   rendering::ImportedMaterialTexture texture{};
   texture.semantic = semantic;
-  texture.raw_name = raw_key;
   texture.label = label ? label : "importedTexture";
-  texture.embedded = embedded;
   texture.srgb = srgb;
-
-  if (embedded) {
-    const int texture_idx = embeddedTextureIndex(raw_key);
-    if (texture_idx < 0 || texture_idx >= static_cast<int>(scene.mNumTextures) ||
-        scene.mTextures[texture_idx] == nullptr) {
-      return false;
-    }
-    texture.source_key = asset_path.string() + ":" + raw_key;
-    const aiTexture& embedded_texture = *scene.mTextures[texture_idx];
-    if (embedded_texture.mHeight == 0) {
-      texture.compressed = true;
-      texture.source_bytes.resize(static_cast<size_t>(embedded_texture.mWidth));
-      if (!texture.source_bytes.empty()) {
-        std::memcpy(texture.source_bytes.data(),
-                    embedded_texture.pcData,
-                    texture.source_bytes.size());
-      }
-    } else {
-      texture.compressed = false;
-      texture.width = embedded_texture.mWidth;
-      texture.height = embedded_texture.mHeight;
-      const uint64_t byte_count = static_cast<uint64_t>(texture.width) *
-                                  static_cast<uint64_t>(texture.height) * 4u;
-      if (byte_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-        return false;
-      }
-      const auto* raw_bytes =
-          reinterpret_cast<const uint8_t*>(embedded_texture.pcData);
-      if (!detail::canonicalizeAssimpEmbeddedTexture(
-              std::span<const uint8_t>(raw_bytes, static_cast<size_t>(byte_count)),
-              texture.width,
-              texture.height,
-              texture.source_bytes)) {
-        return false;
-      }
-    }
-  } else {
-    texture.resolved_path = resolveImportedTexturePath(asset_path, raw_key);
-    texture.source_key = texture.resolved_path.string();
+  if (!populateImportedTextureSource(texture, scene, asset_path, raw_key)) {
+    return false;
   }
 
   setImportedTextureCoordTransform(data, material, type, texture_index, uv_index, texcoord_slot);
   data.textures.push_back(std::move(texture));
   return true;
+}
+
+std::optional<std::string> importedTextureRawKey(const aiMaterial& material,
+                                                 aiTextureType type,
+                                                 unsigned int texture_index = 0u) {
+  aiString path;
+  if (material.GetTexture(type, texture_index, &path) != AI_SUCCESS ||
+      path.length == 0u) {
+    return std::nullopt;
+  }
+  return std::string(path.C_Str());
+}
+
+std::string importedTextureReferenceName(const aiScene& scene,
+                                         const std::string& raw_key) {
+  const int embedded_index = embeddedTextureIndex(raw_key);
+  if (embedded_index >= 0 && embedded_index < static_cast<int>(scene.mNumTextures) &&
+      scene.mTextures[embedded_index] != nullptr &&
+      scene.mTextures[embedded_index]->mFilename.length > 0u) {
+    return scene.mTextures[embedded_index]->mFilename.C_Str();
+  }
+  return raw_key;
+}
+
+std::unordered_set<std::string> importedMaterialTextureFamilies(
+    const aiMaterial& material) {
+  std::unordered_set<std::string> families;
+  for (unsigned int value = static_cast<unsigned int>(aiTextureType_DIFFUSE);
+       value <= static_cast<unsigned int>(aiTextureType_UNKNOWN);
+       ++value) {
+    const auto type = static_cast<aiTextureType>(value);
+    const unsigned int texture_count = material.GetTextureCount(type);
+    for (unsigned int texture_index = 0u; texture_index < texture_count;
+         ++texture_index) {
+      const std::optional<std::string> raw_key =
+          importedTextureRawKey(material, type, texture_index);
+      if (!raw_key.has_value()) {
+        continue;
+      }
+      std::string family = textureFamilyKey(*raw_key);
+      if (!family.empty()) {
+        families.insert(std::move(family));
+      }
+    }
+  }
+  return families;
+}
+
+std::optional<unsigned int> findEmbeddedPackedMetallicRoughnessTexture(
+    const aiScene& scene,
+    const aiMaterial& material) {
+  const std::unordered_set<std::string> material_families =
+      importedMaterialTextureFamilies(material);
+  std::optional<unsigned int> best_match;
+  int best_score = 0;
+  std::optional<unsigned int> sole_candidate;
+  size_t candidate_count = 0u;
+
+  for (unsigned int texture_index = 0u; texture_index < scene.mNumTextures;
+       ++texture_index) {
+    const aiTexture* texture = scene.mTextures[texture_index];
+    if (texture == nullptr || texture->mFilename.length == 0u) {
+      continue;
+    }
+    const std::string_view name = texture->mFilename.C_Str();
+    const int name_score = packedMetallicRoughnessNameScore(name);
+    if (name_score == 0) {
+      continue;
+    }
+
+    sole_candidate = texture_index;
+    candidate_count += 1u;
+    const std::string family = textureFamilyKey(name);
+    if (family.empty() || !material_families.contains(family)) {
+      continue;
+    }
+    if (!best_match.has_value() || name_score > best_score) {
+      best_match = texture_index;
+      best_score = name_score;
+    }
+  }
+
+  if (best_match.has_value()) {
+    return best_match;
+  }
+  if (scene.mNumMaterials == 1u && candidate_count == 1u) {
+    return sole_candidate;
+  }
+  return std::nullopt;
+}
+
+void copyRecoveredMetallicRoughnessTransform(
+    rendering::ImportedMaterialData& data,
+    const aiMaterial& material,
+    std::string_view recovered_name) {
+  const std::string recovered_family = textureFamilyKey(recovered_name);
+  if (recovered_family.empty()) {
+    return;
+  }
+
+  constexpr aiTextureType kTransformSources[] = {
+      aiTextureType_DIFFUSE_ROUGHNESS,
+      aiTextureType_METALNESS,
+      aiTextureType_SPECULAR,
+      aiTextureType_SHININESS,
+      aiTextureType_BASE_COLOR,
+      aiTextureType_DIFFUSE,
+  };
+  for (const aiTextureType type : kTransformSources) {
+    const unsigned int texture_count = material.GetTextureCount(type);
+    for (unsigned int texture_index = 0u; texture_index < texture_count;
+         ++texture_index) {
+      aiString path;
+      unsigned int uv_index = 0u;
+      if (material.GetTexture(type, texture_index, &path, nullptr, &uv_index) !=
+              AI_SUCCESS ||
+          textureFamilyKey(path.C_Str()) != recovered_family) {
+        continue;
+      }
+      setImportedTextureCoordTransform(data,
+                                       material,
+                                       type,
+                                       texture_index,
+                                       uv_index,
+                                       kTexCoordMetallicRoughness);
+      return;
+    }
+  }
+}
+
+bool appendRecoveredMetallicRoughnessTexture(
+    rendering::ImportedMaterialData& data,
+    const aiScene& scene,
+    const aiMaterial& material,
+    const std::filesystem::path& asset_path) {
+  const std::optional<unsigned int> texture_index =
+      findEmbeddedPackedMetallicRoughnessTexture(scene, material);
+  if (!texture_index.has_value()) {
+    return false;
+  }
+
+  const aiTexture& embedded_texture = *scene.mTextures[*texture_index];
+  const std::string raw_key = "*" + std::to_string(*texture_index);
+  rendering::ImportedMaterialTexture texture{};
+  texture.semantic =
+      rendering::ImportedMaterialTextureSemantic::MetallicRoughness;
+  texture.label = "metallicRoughness";
+  texture.srgb = false;
+  if (!populateImportedTextureSource(texture, scene, asset_path, raw_key)) {
+    return false;
+  }
+  const std::string recovered_name = embedded_texture.mFilename.C_Str();
+  texture.raw_name = recovered_name.empty() ? raw_key : recovered_name;
+  copyRecoveredMetallicRoughnessTransform(data, material, texture.raw_name);
+  data.textures.push_back(std::move(texture));
+
+  if (startupDiagnosticsEnabled()) {
+    aiString material_name;
+    material.Get(AI_MATKEY_NAME, material_name);
+    spdlog::info("Recovered packed metallic-roughness texture '{}' for material '{}'",
+                 recovered_name,
+                 material_name.C_Str());
+  }
+  return true;
+}
+
+bool appendPackedMetallicRoughnessTexture(
+    rendering::ImportedMaterialData& data,
+    const aiScene& scene,
+    const aiMaterial& material,
+    const std::filesystem::path& asset_path) {
+  using Semantic = rendering::ImportedMaterialTextureSemantic;
+  const std::optional<std::string> metallic =
+      importedTextureRawKey(material, aiTextureType_METALNESS);
+  const std::optional<std::string> roughness =
+      importedTextureRawKey(material, aiTextureType_DIFFUSE_ROUGHNESS);
+
+  if (metallic.has_value() && roughness.has_value() && *metallic == *roughness &&
+      appendImportedTexture(data,
+                            scene,
+                            material,
+                            asset_path,
+                            aiTextureType_METALNESS,
+                            0u,
+                            Semantic::MetallicRoughness,
+                            false,
+                            "metallicRoughness",
+                            kTexCoordMetallicRoughness)) {
+    return true;
+  }
+
+  if (metallic.has_value() &&
+      detail::isPackedMetallicRoughnessTextureName(
+          importedTextureReferenceName(scene, *metallic)) &&
+      appendImportedTexture(data,
+                            scene,
+                            material,
+                            asset_path,
+                            aiTextureType_METALNESS,
+                            0u,
+                            Semantic::MetallicRoughness,
+                            false,
+                            "metallicRoughness",
+                            kTexCoordMetallicRoughness)) {
+    return true;
+  }
+
+  if (roughness.has_value() &&
+      detail::isPackedMetallicRoughnessTextureName(
+          importedTextureReferenceName(scene, *roughness)) &&
+      appendImportedTexture(data,
+                            scene,
+                            material,
+                            asset_path,
+                            aiTextureType_DIFFUSE_ROUGHNESS,
+                            0u,
+                            Semantic::MetallicRoughness,
+                            false,
+                            "metallicRoughness",
+                            kTexCoordMetallicRoughness)) {
+    return true;
+  }
+
+  return appendRecoveredMetallicRoughnessTexture(data, scene, material, asset_path);
 }
 
 struct AlphaTextureStats {
@@ -951,13 +1316,7 @@ rendering::ImportedMaterialData buildImportedMaterialData(const aiScene& scene,
   }
   appendImportedTexture(data, scene, material, asset_path, aiTextureType_NORMALS, 0,
                         Semantic::Normal, false, "normal", kTexCoordNormal);
-  if (!appendImportedTexture(data, scene, material, asset_path, aiTextureType_METALNESS, 0,
-                             Semantic::MetallicRoughness, false, "metallicRoughness",
-                             kTexCoordMetallicRoughness)) {
-    appendImportedTexture(data, scene, material, asset_path, aiTextureType_DIFFUSE_ROUGHNESS, 0,
-                          Semantic::MetallicRoughness, false, "metallicRoughness",
-                          kTexCoordMetallicRoughness);
-  }
+  appendPackedMetallicRoughnessTexture(data, scene, material, asset_path);
   if (!appendImportedTexture(data, scene, material, asset_path, aiTextureType_AMBIENT_OCCLUSION, 0,
                              Semantic::Occlusion, false, "occlusion", kTexCoordOcclusion)) {
     appendImportedTexture(data, scene, material, asset_path, aiTextureType_LIGHTMAP, 0,

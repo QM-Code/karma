@@ -72,7 +72,8 @@ Shared example helpers live in `examples/common/`.
 ## Scene And Animation
 
 - `scene/gltf_import.cpp`: target `scene_gltf_import`, output
-  `examples/scene/gltf_import`. Minimal authored glTF/GLB scene import example.
+  `examples/scene/gltf_import`. Static FBX and GLB package-import comparison,
+  normalized and displayed side by side without animation playback.
 - `scene/world_bake.cpp`: target `scene_world_bake`, output
   `examples/scene/world_bake`. Loads the baked world scene document, prefers
   baked package blobs for the packaged GLB, and renders it with a skybox.

@@ -26,6 +26,9 @@ bool canonicalizeAssimpEmbeddedTexture(std::span<const uint8_t> bgra,
                                        uint32_t height,
                                        std::vector<uint8_t>& rgba);
 
+/// Returns true for conventional glTF-channel packed roughness/metallic names.
+bool isPackedMetallicRoughnessTextureName(std::string_view name);
+
 }  // namespace detail
 
 /// Sentinel material index for imported glTF scene data.

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "examples/scene/gltf_import/human_glb",
+      "path": "human_character.glb",
+      "import_meshes": true,
+      "import_lights": false
+    },
+    {
+      "type": "gltf_scene",
+      "key": "examples/scene/gltf_import/human_fbx",
+      "path": "fbx/tripo_convert_5ccba954-31d1-4634-a323-10ab4c18840d.fbx",
+      "dependencies": [
+        "fbx/tripo_convert_5ccba954-31d1-4634-a323-10ab4c18840d.fbm/human_character_3d_model_basecolor.PNG",
+        "fbx/tripo_convert_5ccba954-31d1-4634-a323-10ab4c18840d.fbm/human_character_3d_model_metallic.PNG",
+        "fbx/tripo_convert_5ccba954-31d1-4634-a323-10ab4c18840d.fbm/human_character_3d_model_normal.PNG",
+        "fbx/tripo_convert_5ccba954-31d1-4634-a323-10ab4c18840d.fbm/human_character_3d_model_rm.PNG",
+        "fbx/tripo_convert_5ccba954-31d1-4634-a323-10ab4c18840d.fbm/human_character_3d_model_roughness.PNG"
+      ],
+      "import_meshes": true,
+      "import_lights": false
+    }
+  ]
+}

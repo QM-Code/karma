@@ -299,6 +299,24 @@ void testAssimpEmbeddedTextureCanonicalization() {
   assert(prepared->upload.bytes[top_left + 0u] == 255u);
 }
 
+void testPackedMetallicRoughnessTextureNames() {
+  using karma::world::detail::isPackedMetallicRoughnessTextureName;
+  assert(isPackedMetallicRoughnessTextureName(
+      "../../textures/Human_Character_RM.PNG"));
+  assert(isPackedMetallicRoughnessTextureName("skin_orm.png"));
+  assert(isPackedMetallicRoughnessTextureName("body-ARM.tga"));
+  assert(isPackedMetallicRoughnessTextureName("bodyMetallicRoughness.jpg"));
+  assert(isPackedMetallicRoughnessTextureName("body-metalness_roughness.ktx2"));
+
+  assert(!isPackedMetallicRoughnessTextureName("body_roughness.png"));
+  assert(!isPackedMetallicRoughnessTextureName("body_metallic.png"));
+  assert(!isPackedMetallicRoughnessTextureName("body_mr.png"));
+  assert(!isPackedMetallicRoughnessTextureName("bedroom.png"));
+  assert(!isPackedMetallicRoughnessTextureName("transform.png"));
+  assert(!isPackedMetallicRoughnessTextureName("body_rma.png"));
+  assert(!isPackedMetallicRoughnessTextureName("body_normal.png"));
+}
+
 void testTextureUploadValidation() {
   std::size_t texture_size = 99u;
   assert(karma::rendering::tryTextureDataSize(4, 3, 4u, texture_size));
@@ -3195,6 +3213,7 @@ int main() {
   testPointShadowAllocationPolicy();
   testKtxCubemapOrientationNormalization();
   testAssimpEmbeddedTextureCanonicalization();
+  testPackedMetallicRoughnessTextureNames();
   testTextureUploadValidation();
   testScreenPointToWorldRayValidation();
   testDebugWireScaleAndCapsuleDimensions();

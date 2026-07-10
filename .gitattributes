@@ -2,4 +2,6 @@
 *.glb filter=lfs diff=lfs merge=lfs -text
 *.ktx filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
+examples/assets/scene/gltf_import/fbx/*.fbx filter=lfs diff=lfs merge=lfs -text
+examples/assets/scene/gltf_import/fbx/**/*.PNG filter=lfs diff=lfs merge=lfs -text
 examples/assets/** export-ignore

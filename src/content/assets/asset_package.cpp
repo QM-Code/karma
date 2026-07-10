@@ -1737,7 +1737,7 @@ std::string importerVersionForType(std::string_view type) {
     return std::string(detail::textureImporterVersion());
   }
   if (type == "mesh" || type == "gltf_scene") {
-    return "assimp-gltf-scene-v13-full-pose-hierarchy:" + assimpVersionString();
+    return "assimp-gltf-scene-v14-packed-metallic-roughness:" + assimpVersionString();
   }
   if (type == "animation_clip") {
     return "assimp-animation-clip-v4-full-pose-hierarchy:" + assimpVersionString();

@@ -61,7 +61,9 @@ Shared example helpers live in `examples/common/`.
   plane, free camera, and transparent double-sided upright grass image plane.
 - `rendering/grass_field.cpp`: target `rendering_grass_field`, output
   `examples/rendering/grass_field`. Instanced grass field over a 100x80 ground
-  plane using masked alpha and per-instance transform/parameter payloads.
+  plane using masked alpha and per-instance transform/parameter payloads. Use
+  `--aa none|msaa|ssaa|taa`, `--msaa-samples`, `--ssaa-scale`, and `--instances`
+  to select startup quality and load.
 - `rendering/terrain.cpp`: target `rendering_terrain`, output
   `examples/rendering/terrain`. Fixed-size heightmap terrain renderer sample
   using `examples/assets/Heightmap.png`, with GPU tessellation when available

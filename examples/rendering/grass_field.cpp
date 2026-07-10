@@ -3,12 +3,15 @@
 #include "karma/karma.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -27,6 +30,8 @@ constexpr const char* kGrassMaterialKey = "examples/rendering/grass_field/grass_
 constexpr const char* kGrassBillboardMaterialKey =
     "examples/rendering/grass_field/grass_billboard_material";
 constexpr const char* kGrassTextureKey = "examples/rendering/grass_field/grass_texture";
+constexpr const char* kGrassFrameGraphKey =
+    "examples/rendering/grass_field/post_process";
 
 constexpr float kGroundWidth = 100.0f;
 constexpr float kGroundDepth = 80.0f;
@@ -46,6 +51,151 @@ constexpr float kCameraMoveSpeed = 10.0f;
 constexpr float kCameraBoostMultiplier = 3.0f;
 constexpr float kCameraSmoothing = 20.0f;
 constexpr float kDefaultGrassLodDistance = 28.0f;
+constexpr std::array<uint32_t, 3> kMsaaSamples = {2u, 4u, 8u};
+
+enum class GrassAaMode : int {
+  None = 0,
+  MSAA = 1,
+  SSAA = 2,
+  TAA = 3,
+};
+
+struct GrassFieldOptions {
+  uint32_t instance_count = kGrassInstanceCount;
+  GrassAaMode aa_mode = GrassAaMode::TAA;
+  uint32_t msaa_samples = 4u;
+  float ssaa_scale = 2.0f;
+  bool show_help = false;
+  bool valid = true;
+};
+
+const char* grassAaModeName(GrassAaMode mode) {
+  switch (mode) {
+    case GrassAaMode::MSAA: return "MSAA";
+    case GrassAaMode::SSAA: return "SSAA";
+    case GrassAaMode::TAA: return "TAA";
+    case GrassAaMode::None:
+    default: return "None";
+  }
+}
+
+const char* rasterAaModeName(rendering::AntiAliasingMode mode) {
+  switch (mode) {
+    case rendering::AntiAliasingMode::MSAA: return "MSAA";
+    case rendering::AntiAliasingMode::SSAA: return "SSAA";
+    case rendering::AntiAliasingMode::None:
+    default: return "None";
+  }
+}
+
+bool parseGrassAaMode(std::string_view value, GrassAaMode& mode) {
+  if (value == "none") {
+    mode = GrassAaMode::None;
+    return true;
+  }
+  if (value == "msaa") {
+    mode = GrassAaMode::MSAA;
+    return true;
+  }
+  if (value == "ssaa") {
+    mode = GrassAaMode::SSAA;
+    return true;
+  }
+  if (value == "taa") {
+    mode = GrassAaMode::TAA;
+    return true;
+  }
+  return false;
+}
+
+bool parseInstanceCount(std::string_view value, uint32_t& count) {
+  const std::string text(value);
+  char* end = nullptr;
+  const long parsed = std::strtol(text.c_str(), &end, 10);
+  if (end == text.c_str() || end == nullptr || *end != '\0') {
+    return false;
+  }
+  count = static_cast<uint32_t>(
+      std::clamp(parsed,
+                 static_cast<long>(kMinGrassInstances),
+                 static_cast<long>(kMaxGrassInstances)));
+  return true;
+}
+
+bool parseMsaaSamples(std::string_view value, uint32_t& samples) {
+  uint32_t parsed = 0u;
+  if (!parseInstanceCount(value, parsed) ||
+      std::find(kMsaaSamples.begin(), kMsaaSamples.end(), parsed) == kMsaaSamples.end()) {
+    return false;
+  }
+  samples = parsed;
+  return true;
+}
+
+bool parseSsaaScale(std::string_view value, float& scale) {
+  const std::string text(value);
+  char* end = nullptr;
+  const float parsed = std::strtof(text.c_str(), &end);
+  if (end == text.c_str() || end == nullptr || *end != '\0' ||
+      !std::isfinite(parsed) || parsed < 1.0f || parsed > 4.0f) {
+    return false;
+  }
+  scale = parsed;
+  return true;
+}
+
+int msaaSampleIndex(uint32_t samples) {
+  const auto it = std::find(kMsaaSamples.begin(), kMsaaSamples.end(), samples);
+  return it == kMsaaSamples.end()
+             ? 1
+             : static_cast<int>(it - kMsaaSamples.begin());
+}
+
+GrassFieldOptions parseGrassFieldOptions(int argc, char** argv) {
+  GrassFieldOptions options{};
+  bool positional_instance_count_seen = false;
+  for (int index = 1; index < argc; ++index) {
+    const std::string_view arg =
+        argv != nullptr && argv[index] != nullptr ? std::string_view(argv[index])
+                                                  : std::string_view{};
+    if (arg == "--help" || arg == "-h") {
+      options.show_help = true;
+      continue;
+    }
+    if ((arg == "--aa" || arg == "--mode") && index + 1 < argc) {
+      options.valid = parseGrassAaMode(argv[++index], options.aa_mode) && options.valid;
+      continue;
+    }
+    if (arg == "--msaa-samples" && index + 1 < argc) {
+      options.valid = parseMsaaSamples(argv[++index], options.msaa_samples) && options.valid;
+      continue;
+    }
+    if (arg == "--ssaa-scale" && index + 1 < argc) {
+      options.valid = parseSsaaScale(argv[++index], options.ssaa_scale) && options.valid;
+      continue;
+    }
+    if (arg == "--instances" && index + 1 < argc) {
+      options.valid = parseInstanceCount(argv[++index], options.instance_count) && options.valid;
+      positional_instance_count_seen = true;
+      continue;
+    }
+    if (!arg.empty() && arg.front() != '-' && !positional_instance_count_seen) {
+      options.valid = parseInstanceCount(arg, options.instance_count) && options.valid;
+      positional_instance_count_seen = true;
+      continue;
+    }
+    options.valid = false;
+  }
+  return options;
+}
+
+void printGrassFieldUsage(const char* executable) {
+  std::fprintf(
+      stderr,
+      "Usage: %s [--instances 0..50000] [--aa none|msaa|ssaa|taa] "
+      "[--msaa-samples 2|4|8] [--ssaa-scale 1.0..4.0]\n",
+      executable != nullptr ? executable : "grass_field");
+}
 
 bool demoEnvFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -255,29 +405,17 @@ world::Entity spawnMeshEntity(world::World& world,
   return entity;
 }
 
-uint32_t parseInitialGrassInstanceCount(int argc, char** argv) {
-  if (argc < 2 || argv == nullptr || argv[1] == nullptr) {
-    return kGrassInstanceCount;
-  }
-  char* end = nullptr;
-  const long value = std::strtol(argv[1], &end, 10);
-  if (end == argv[1] || (end != nullptr && *end != '\0')) {
-    spdlog::warn("Ignoring invalid grass instance count '{}'", argv[1]);
-    return kGrassInstanceCount;
-  }
-  return static_cast<uint32_t>(
-      std::clamp(value,
-                 static_cast<long>(kMinGrassInstances),
-                 static_cast<long>(kMaxGrassInstances)));
-}
-
 }  // namespace
 
 class GrassFieldExample final : public app::GameInterface {
  public:
-  explicit GrassFieldExample(uint32_t initial_grass_instance_count = kGrassInstanceCount)
-      : initial_grass_instance_count_(initial_grass_instance_count),
-        requested_grass_instances_(static_cast<int>(initial_grass_instance_count)),
+  explicit GrassFieldExample(const GrassFieldOptions& options = {})
+      : aa_mode_(static_cast<int>(options.aa_mode)),
+        msaa_sample_index_(msaaSampleIndex(options.msaa_samples)),
+        ssaa_scale_(options.ssaa_scale),
+        post_process_settings_(makeGrassPostProcessSettings(options.aa_mode == GrassAaMode::TAA)),
+        initial_grass_instance_count_(options.instance_count),
+        requested_grass_instances_(static_cast<int>(options.instance_count)),
         grass_lod_enabled_(!demoEnvFlagDisabled(std::getenv("KARMA_GRASS_LOD"))),
         grass_lod_distance_(std::max(1.0f,
                                      demoEnvFloat("KARMA_GRASS_LOD_DISTANCE",
@@ -286,11 +424,11 @@ class GrassFieldExample final : public app::GameInterface {
   void onStart() override {
     bindCameraControls();
     registerAssets();
-    applyPostProcessSettings();
     spawnScene();
     spawnEnvironment();
     spawnLighting();
     spawnCamera();
+    applyAntiAliasingSettings();
     configureAutoFly();
 
     spdlog::info(
@@ -298,6 +436,26 @@ class GrassFieldExample final : public app::GameInterface {
   }
 
   void onUpdate(float dt) override {
+    bool aa_changed = false;
+    if (input->actionPressed("aa_none")) {
+      aa_mode_ = static_cast<int>(GrassAaMode::None);
+      aa_changed = true;
+    }
+    if (input->actionPressed("aa_msaa")) {
+      aa_mode_ = static_cast<int>(GrassAaMode::MSAA);
+      aa_changed = true;
+    }
+    if (input->actionPressed("aa_ssaa")) {
+      aa_mode_ = static_cast<int>(GrassAaMode::SSAA);
+      aa_changed = true;
+    }
+    if (input->actionPressed("aa_taa")) {
+      aa_mode_ = static_cast<int>(GrassAaMode::TAA);
+      aa_changed = true;
+    }
+    if (aa_changed) {
+      applyAntiAliasingSettings();
+    }
     updateCamera(dt);
     logFrameDiagnostics(dt);
   }
@@ -327,27 +485,42 @@ class GrassFieldExample final : public app::GameInterface {
       applyGrassLodSettings();
     }
     ImGui::Separator();
-    bool post_process_changed = false;
-    post_process_changed |= ImGui::Checkbox(
-        "TAA",
-        &post_process_settings_.temporal_antialiasing_enabled);
-    if (post_process_settings_.temporal_antialiasing_enabled) {
-      post_process_changed |= ImGui::SliderFloat(
+    bool aa_changed = false;
+    const char* aa_modes[] = {"None", "MSAA", "SSAA", "TAA"};
+    aa_changed |= ImGui::Combo("Anti-aliasing", &aa_mode_, aa_modes, IM_ARRAYSIZE(aa_modes));
+    const GrassAaMode aa_mode = static_cast<GrassAaMode>(aa_mode_);
+    if (aa_mode == GrassAaMode::MSAA) {
+      const char* sample_counts[] = {"2x", "4x", "8x"};
+      aa_changed |= ImGui::Combo("MSAA Samples",
+                                 &msaa_sample_index_,
+                                 sample_counts,
+                                 IM_ARRAYSIZE(sample_counts));
+    } else if (aa_mode == GrassAaMode::SSAA) {
+      aa_changed |= ImGui::SliderFloat("SSAA Scale", &ssaa_scale_, 1.0f, 4.0f, "%.2f");
+    } else if (aa_mode == GrassAaMode::TAA) {
+      aa_changed |= ImGui::SliderFloat(
           "TAA Feedback",
           &post_process_settings_.taa_feedback,
           0.70f,
           0.96f,
           "%.2f");
-      post_process_changed |= ImGui::SliderFloat(
+      aa_changed |= ImGui::SliderFloat(
           "TAA Sharpen",
           &post_process_settings_.taa_sharpening,
           0.0f,
           0.20f,
           "%.2f");
     }
-    if (post_process_changed) {
-      applyPostProcessSettings();
+    if (aa_changed) {
+      applyAntiAliasingSettings();
     }
+    const rendering::RendererFrameTimingStats timing =
+        graphics ? graphics->getRendererFrameTimingStats()
+                 : rendering::RendererFrameTimingStats{};
+    ImGui::Text("Raster AA: %s", rasterAaModeName(timing.anti_aliasing_mode));
+    ImGui::Text("Raster: %ux%u",
+                static_cast<unsigned int>(timing.raster_width),
+                static_cast<unsigned int>(timing.raster_height));
     ImGui::End();
   }
 
@@ -360,6 +533,10 @@ class GrassFieldExample final : public app::GameInterface {
     input->bindKey("cam_up", platform::Key::E);
     input->bindKey("cam_down", platform::Key::Q);
     input->bindKey("cam_fast", platform::Key::LeftShift);
+    input->bindKey("aa_none", platform::Key::Num1, app::Trigger::Pressed);
+    input->bindKey("aa_msaa", platform::Key::Num2, app::Trigger::Pressed);
+    input->bindKey("aa_ssaa", platform::Key::Num3, app::Trigger::Pressed);
+    input->bindKey("aa_taa", platform::Key::Num4, app::Trigger::Pressed);
     input->bindMouse("cam_look", platform::MouseButton::Right);
   }
 
@@ -403,12 +580,39 @@ class GrassFieldExample final : public app::GameInterface {
                               makeGrassBillboardMesh(0.95f, 1.25f, kGrassBillboardMaterialKey));
   }
 
-  void applyPostProcessSettings() {
-    if (assets) {
+  void applyAntiAliasingSettings() {
+    aa_mode_ = std::clamp(aa_mode_, 0, 3);
+    msaa_sample_index_ = std::clamp(msaa_sample_index_, 0, 2);
+    ssaa_scale_ = std::clamp(ssaa_scale_, 1.0f, 4.0f);
+    const GrassAaMode mode = static_cast<GrassAaMode>(aa_mode_);
+    post_process_settings_.temporal_antialiasing_enabled = mode == GrassAaMode::TAA;
+
+    if (assets != nullptr) {
       assets->registerFrameGraph(
-          "",
-          rendering::frameGraphFromPostProcessSettings(post_process_settings_));
+          kGrassFrameGraphKey,
+          rendering::frameGraphFromPostProcessSettings(post_process_settings_,
+                                                       kGrassFrameGraphKey));
     }
+    if (!world->isAlive(camera_entity_) ||
+        !world->has<components::CameraComponent>(camera_entity_)) {
+      return;
+    }
+
+    rendering::AntiAliasingSettings raster_aa =
+        rendering::AntiAliasingSettings::none();
+    if (mode == GrassAaMode::MSAA) {
+      raster_aa = rendering::AntiAliasingSettings::msaa(
+          kMsaaSamples[static_cast<size_t>(msaa_sample_index_)]);
+    } else if (mode == GrassAaMode::SSAA) {
+      raster_aa = rendering::AntiAliasingSettings::ssaa(ssaa_scale_);
+    }
+    auto& camera = world->get<components::CameraComponent>(camera_entity_);
+    camera.anti_aliasing = raster_aa;
+    camera.frame_graph_key = kGrassFrameGraphKey;
+    spdlog::info("Grass field anti-aliasing: mode={} msaa={}x ssaa={:.2f}",
+                 grassAaModeName(mode),
+                 kMsaaSamples[static_cast<size_t>(msaa_sample_index_)],
+                 ssaa_scale_);
   }
 
   void spawnScene() {
@@ -671,7 +875,10 @@ class GrassFieldExample final : public app::GameInterface {
   std::vector<world::Entity> grass_entities_;
   std::vector<std::vector<components::PlanarMeshInstance>> grass_chunk_scratch_;
   std::string environment_map_;
-  rendering::PostProcessSettings post_process_settings_{makeGrassPostProcessSettings(true)};
+  int aa_mode_ = static_cast<int>(GrassAaMode::TAA);
+  int msaa_sample_index_ = 1;
+  float ssaa_scale_ = 2.0f;
+  rendering::PostProcessSettings post_process_settings_{};
   uint32_t initial_grass_instance_count_ = kGrassInstanceCount;
   uint32_t grass_instance_count_ = 0;
   int requested_grass_instances_ = static_cast<int>(kGrassInstanceCount);
@@ -693,10 +900,15 @@ class GrassFieldExample final : public app::GameInterface {
 }  // namespace karma::demo
 
 int main(int argc, char** argv) {
+  const karma::demo::GrassFieldOptions options =
+      karma::demo::parseGrassFieldOptions(argc, argv);
+  if (options.show_help || !options.valid) {
+    karma::demo::printGrassFieldUsage(argc > 0 && argv != nullptr ? argv[0] : nullptr);
+    return options.valid ? 0 : 2;
+  }
+
   karma::app::EngineApp engine;
-  const uint32_t initial_grass_count =
-      karma::demo::parseInitialGrassInstanceCount(argc, argv);
-  karma::demo::GrassFieldExample game(initial_grass_count);
+  karma::demo::GrassFieldExample game(options);
   engine.setUi(karma::ui::imgui::createUiLayer(
       [&game](karma::app::UIContext& ctx) { game.drawUi(ctx); }));
 
@@ -707,7 +919,7 @@ int main(int argc, char** argv) {
   config.skip_present_on_mouse_button = true;
   config.mouse_button_present_skip_frames = 2u;
   config.renderer_warmup_camera_sweep_steps = 8u;
-  if (initial_grass_count >= 50000u) {
+  if (options.instance_count >= 50000u) {
     config.frame_pacing_fps = 30.0f;
   }
   config.cursor_visible = true;
@@ -718,7 +930,9 @@ int main(int argc, char** argv) {
   config.shadow_pcf_radius = 1;
   config.lighting_exposure = 1.0f;
   config.default_frame_graph = karma::rendering::frameGraphFromPostProcessSettings(
-      karma::demo::makeGrassPostProcessSettings(true));
+      karma::demo::makeGrassPostProcessSettings(
+          options.aa_mode == karma::demo::GrassAaMode::TAA),
+      karma::demo::kGrassFrameGraphKey);
   config.startup_asset_packages.push_back(
       karma::demo::resolveExampleAssetPath("rendering/grass_field"));
 

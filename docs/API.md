@@ -59,7 +59,9 @@ Related durable animation guides:
 
 - `docs/ANIMATION_V2.md`: animation v2 architecture, asset boundaries,
   deformation resources, retargeting, and validation commands.
-- `docs/RIGGED_GLTF_AUTHORING.md`: rigged glTF/GLB authoring conventions.
+- `docs/ANIMATION_REFACTOR_STATUS.md`: completed FBX/retarget work, regression
+  coverage, and bounded follow-up work.
+- `docs/RIGGED_GLTF_AUTHORING.md`: rigged glTF/GLB and Mixamo FBX authoring.
 
 ## Publish To GitHub Pages
 

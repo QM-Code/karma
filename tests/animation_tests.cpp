@@ -3,27 +3,22 @@
 #endif
 #include <cassert>
 
-#include "karma/world.h"
-#include "karma/world.h"
-#include "karma/world.h"
-#include "karma/world.h"
-#include "karma/world.h"
-#include "karma/components.h"
-#include "karma/components.h"
+#include "karma/assets.h"
 #include "karma/components.h"
 #include "karma/world.h"
-#include "karma/world.h"
-#include "karma/world.h"
+#include "../src/content/assets/asset_source_import.h"
 #include "../src/content/importers/gltf_scene_animation_import.h"
 #include "../src/content/importers/gltf_scene_import_internal.h"
 #include "../src/content/importers/gltf_scene_mesh_import.h"
 
 #include <algorithm>
-#include <cstdint>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <string>
 #include <unordered_map>
 
@@ -966,14 +961,22 @@ void testSkeletonRetargeting() {
   karma::world::Skeleton source{};
   source.joints = {
       {.name = "Root", .node_index = 0u},
-      {.name = "Hand", .parent_joint_index = 0u, .node_index = 1u},
+      {.name = "Hand",
+       .parent_joint_index = 0u,
+       .node_index = 1u,
+       .rest_local_position = {1.0f, 0.0f, 0.0f},
+       .rest_local_scale = {2.0f, 2.0f, 2.0f}},
   };
   source.root_joint_indices = {0u};
 
   karma::world::Skeleton target{};
   target.joints = {
       {.name = "TargetRoot", .node_index = 10u},
-      {.name = "TargetHand", .parent_joint_index = 0u, .node_index = 11u},
+      {.name = "TargetHand",
+       .parent_joint_index = 0u,
+       .node_index = 11u,
+       .rest_local_position = {10.0f, 0.0f, 0.0f},
+       .rest_local_scale = {3.0f, 3.0f, 3.0f}},
   };
   target.root_joint_indices = {0u};
 
@@ -1000,8 +1003,15 @@ void testSkeletonRetargeting() {
   });
   clip.channels.push_back(karma::world::AnimationChannel{
       .target_node_index = 1u,
+      .target_joint_index = 0u,
+      .position_keys = {
+          {.time_seconds = 0.0f, .value = {2.0f, 0.0f, 0.0f}},
+      },
       .rotation_keys = {
           {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f, 1.0f}},
+      },
+      .scale_keys = {
+          {.time_seconds = 0.0f, .value = {4.0f, 4.0f, 4.0f}},
       },
   });
   clip.root_motion = karma::world::RootMotionTrack{
@@ -1027,13 +1037,387 @@ void testSkeletonRetargeting() {
   assert(near(retargeted.channels[0].position_keys[0].value.x, 2.0f));
   assert(near(retargeted.channels[0].position_keys[1].value.x, 4.0f));
   assert(retargeted.channels[1].target_node_index == 11u);
+  assert(near(retargeted.channels[1].position_keys[0].value.x, 11.0f));
+  assert(near(retargeted.channels[1].scale_keys[0].value.x, 6.0f));
   assert(retargeted.root_motion);
   assert(retargeted.root_motion->target_node_index == 10u);
   assert(near(retargeted.root_motion->position_keys[1].value.x, 2.0f));
 
+  karma::world::SkeletonMap rotated_root_map = map;
+  rotated_root_map.joints.front().rest_pose_correction = glm::mat4_cast(
+      glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)));
+  karma::world::AnimationClip root_motion_only = clip;
+  root_motion_only.channels.clear();
+  root_motion_only.root_motion->rotation_keys = {
+      {.value = {0.0f, 0.0f, 0.0f, 1.0f}},
+  };
+  const karma::world::AnimationClip rotated_root_motion =
+      karma::world::retargetClip(root_motion_only,
+                                 source,
+                                 target,
+                                 rotated_root_map);
+  assert(rotated_root_motion.root_motion.has_value());
+  assert(near(rotated_root_motion.root_motion->position_keys[1].value.x, 0.0f));
+  assert(near(rotated_root_motion.root_motion->position_keys[1].value.y, 1.0f));
+  assert(near(rotated_root_motion.root_motion->rotation_keys[0].value.z,
+              0.70710677f));
+
+  const karma::world::AnimationClip invalid_scale_joint =
+      karma::world::retargetClip(
+          clip,
+          source,
+          target,
+          map,
+          {.root_scale_policy = karma::world::RetargetRootScalePolicy::ExplicitScale,
+           .root_translation_scale = 2.0f,
+           .translation_scale_source_joint_index = 99u});
+  assert(invalid_scale_joint.channels.empty());
+  assert(!invalid_scale_joint.root_motion.has_value());
+
   map.joints.back().target_joint_index = 99u;
   assert(!karma::world::validateSkeletonMap(source, target, map, &diagnostic));
   assert(!diagnostic.empty());
+  const karma::world::AnimationClip invalid =
+      karma::world::retargetClip(clip, source, target, map);
+  assert(invalid.channels.empty());
+  assert(!invalid.root_motion.has_value());
+
+  map.joints = {
+      {.source_joint_index = 0u, .target_joint_index = 0u},
+      {.source_joint_index = 1u, .target_joint_index = 0u},
+  };
+  assert(!karma::world::validateSkeletonMap(source, target, map, &diagnostic));
+  assert(diagnostic == "target joint is mapped more than once");
+
+  map.joints = {
+      {.source_joint_index = 0u, .target_joint_index = 0u},
+      {.source_joint_index = 0u, .target_joint_index = 1u},
+  };
+  assert(!karma::world::validateSkeletonMap(source, target, map, &diagnostic));
+  assert(diagnostic == "source joint is mapped more than once");
+}
+
+karma::world::Skeleton makeMinimalMixamoSkeleton(std::string name, uint32_t node_offset) {
+  karma::world::Skeleton skeleton{};
+  skeleton.name = std::move(name);
+  const char* names[] = {
+      "mixamorig:Hips",
+      "mixamorig:Spine",
+      "mixamorig:Spine1",
+      "mixamorig:Neck",
+      "mixamorig:Head",
+      "mixamorig:LeftShoulder",
+      "mixamorig:LeftArm",
+      "mixamorig:LeftForeArm",
+      "mixamorig:LeftHand",
+      "mixamorig:RightShoulder",
+      "mixamorig:RightArm",
+      "mixamorig:RightForeArm",
+      "mixamorig:RightHand",
+      "mixamorig:LeftUpLeg",
+      "mixamorig:LeftLeg",
+      "mixamorig:LeftFoot",
+      "mixamorig:LeftToeBase",
+      "mixamorig:RightUpLeg",
+      "mixamorig:RightLeg",
+      "mixamorig:RightFoot",
+      "mixamorig:RightToeBase",
+  };
+  const uint32_t parents[] = {
+      karma::world::kInvalidAnimationIndex,
+      0u,
+      1u,
+      2u,
+      3u,
+      2u,
+      5u,
+      6u,
+      7u,
+      2u,
+      9u,
+      10u,
+      11u,
+      0u,
+      13u,
+      14u,
+      15u,
+      0u,
+      17u,
+      18u,
+      19u,
+  };
+  constexpr uint32_t kJointCount = sizeof(names) / sizeof(names[0]);
+  for (uint32_t index = 0u; index < kJointCount; ++index) {
+    karma::world::Joint joint{};
+    joint.name = names[index];
+    joint.parent_joint_index = parents[index];
+    joint.node_index = node_offset + index;
+    joint.rest_local_position = {0.0f, index == 0u ? 1.0f : 0.1f, 0.0f};
+    skeleton.joints.push_back(std::move(joint));
+  }
+  skeleton.root_joint_indices = {0u};
+  return skeleton;
+}
+
+void testHumanoidMixamoBindingAndRetargeting() {
+  const karma::world::Skeleton source = makeMinimalMixamoSkeleton("Source", 0u);
+  karma::world::Skeleton target = makeMinimalMixamoSkeleton("Target", 100u);
+  target.joints[0].rest_local_position = {0.0f, 3.0f, 0.0f};
+  target.joints[1].rest_local_rotation = {0.0f, 0.0f, 0.70710677f, 0.70710677f};
+  const karma::world::HumanoidProfile profile =
+      karma::world::builtinHumanoidProfile(karma::world::HumanoidProfileKind::Mixamo);
+
+  karma::world::Skeleton ambiguous = source;
+  ambiguous.joints.push_back(
+      {.name = "Head", .parent_joint_index = 0u, .node_index = 999u});
+  const karma::world::HumanoidRig ambiguous_rig =
+      karma::world::bindHumanoidRig(ambiguous, profile);
+  const auto ambiguous_head =
+      std::find_if(ambiguous_rig.bindings.begin(),
+                   ambiguous_rig.bindings.end(),
+                   [](const karma::world::HumanoidBoneBinding& binding) {
+                     return binding.bone == karma::world::HumanoidBone::Head;
+                   });
+  assert(ambiguous_head != ambiguous_rig.bindings.end());
+  assert(ambiguous_head->joint_name == "mixamorig:Head");
+
+  karma::world::HumanoidRetargetDiagnostic bind_diagnostic;
+  const karma::world::HumanoidRig source_rig =
+      karma::world::bindHumanoidRig(source, profile, 0u, "source/skeleton", &bind_diagnostic);
+  assert(bind_diagnostic.missing_required_bones.empty());
+  assert(!bind_diagnostic.optional_unmapped_bones.empty());
+  assert(!source_rig.bindings.empty());
+  bind_diagnostic.messages.push_back("stale diagnostic");
+  assert(karma::world::validateHumanoidRig(source_rig,
+                                           source,
+                                           profile,
+                                           &bind_diagnostic));
+  assert(bind_diagnostic.valid());
+
+  karma::world::Skeleton disconnected = source;
+  disconnected.joints[1].parent_joint_index =
+      karma::world::kInvalidAnimationIndex;
+  const karma::world::HumanoidRig disconnected_rig =
+      karma::world::bindHumanoidRig(disconnected,
+                                    profile,
+                                    0u,
+                                    "disconnected/skeleton",
+                                    &bind_diagnostic);
+  assert(!karma::world::validateHumanoidRig(disconnected_rig,
+                                            disconnected,
+                                            profile,
+                                            &bind_diagnostic));
+  assert(!bind_diagnostic.messages.empty());
+
+  const karma::world::HumanoidRig target_rig =
+      karma::world::bindHumanoidRig(target, profile, 0u, "target/skeleton");
+  karma::world::HumanoidRetargetDiagnostic retarget_diagnostic;
+  karma::world::SkeletonMap map =
+      karma::world::buildHumanoidSkeletonMap(source,
+                                             source_rig,
+                                             target,
+                                             target_rig,
+                                             &retarget_diagnostic);
+  assert(!map.joints.empty());
+  assert(retarget_diagnostic.missing_required_bones.empty());
+
+  karma::world::AnimationClip clip{};
+  clip.name = "Idle";
+  clip.duration_seconds = 1.0f;
+  clip.channels.push_back(karma::world::AnimationChannel{
+      .target_node_index = source.joints[1].node_index,
+      .rotation_keys = {
+          {.time_seconds = 0.0f, .value = {0.0f, 0.0f, 0.0f, 1.0f}},
+      },
+  });
+  clip.channels.push_back(karma::world::AnimationChannel{
+      .target_node_index = source.joints[0].node_index,
+      .position_keys = {
+          {.time_seconds = 0.0f, .value = source.joints[0].rest_local_position},
+          {.time_seconds = 1.0f, .value = {0.0f, 2.0f, 0.0f}},
+      },
+  });
+  const karma::world::AnimationClip retargeted =
+      karma::world::retargetHumanoidClip(clip,
+                                         source,
+                                         source_rig,
+                                         target,
+                                         target_rig,
+                                         karma::world::HumanoidRetargetOptions{
+                                             .derive_root_translation_scale_from_height = false,
+                                         },
+                                         &retarget_diagnostic);
+  assert(retargeted.channels.size() == 2u);
+  assert(retargeted.channels.front().target_joint_index !=
+         karma::world::kInvalidAnimationIndex);
+  assert(retargeted.channels.front().target_node_index >= 100u);
+  assert(near(retargeted.channels.front().rotation_keys.front().value.z,
+              0.70710677f));
+  const auto translated_it =
+      std::find_if(retargeted.channels.begin(),
+                   retargeted.channels.end(),
+                   [&](const karma::world::AnimationChannel& channel) {
+                     return channel.target_node_index == target.joints[0].node_index;
+                   });
+  assert(translated_it != retargeted.channels.end());
+  assert(translated_it->position_keys.size() == 2u);
+  assert(near(translated_it->position_keys[0].value.y, 3.0f));
+  assert(near(translated_it->position_keys[1].value.y, 4.0f));
+  assert(retarget_diagnostic.channels_skipped.empty());
+
+  karma::world::HumanoidRig invalid_source_rig = source_rig;
+  invalid_source_rig.bindings.front().joint_index =
+      karma::world::kInvalidAnimationIndex;
+  const karma::world::AnimationClip invalid_retarget =
+      karma::world::retargetHumanoidClip(clip,
+                                         source,
+                                         invalid_source_rig,
+                                         target,
+                                         target_rig,
+                                         {},
+                                         &retarget_diagnostic);
+  assert(invalid_retarget.channels.empty());
+  assert(!retarget_diagnostic.valid());
+  assert(!retarget_diagnostic.messages.empty());
+}
+
+void testCustomHumanoidProfileAndCopiedChannels() {
+  karma::world::HumanoidRetargetDiagnostic diagnostic;
+  assert(!karma::world::validateHumanoidRig({}, {}, {}, &diagnostic));
+  assert(!diagnostic.valid());
+
+  karma::world::Skeleton source{};
+  source.joints = {
+      {.name = "Root", .node_index = 4u},
+      {.name = "Hip", .parent_joint_index = 0u, .node_index = 5u},
+      {.name = "HeadNode", .parent_joint_index = 1u, .node_index = 6u},
+  };
+  source.root_joint_indices = {0u};
+  karma::world::Skeleton target{};
+  target.joints = {
+      {.name = "TargetRoot", .node_index = 49u},
+      {.name = "TargetHip", .parent_joint_index = 0u, .node_index = 50u},
+  };
+  target.root_joint_indices = {0u};
+
+  karma::world::HumanoidProfile profile{};
+  profile.name = "Minimal custom profile";
+  profile.bones = {
+      {.bone = karma::world::HumanoidBone::Root,
+       .aliases = {"Root", "TargetRoot"}},
+      {.bone = karma::world::HumanoidBone::Hips,
+       .required = true,
+       .aliases = {"Hip", "TargetHip"}},
+  };
+  const karma::world::HumanoidRig source_rig =
+      karma::world::bindHumanoidRig(source, profile);
+  const karma::world::HumanoidRig target_rig =
+      karma::world::bindHumanoidRig(target, profile);
+  assert(source_rig.profile.name == profile.name);
+  assert(target_rig.profile.bones.size() == 2u);
+
+  karma::world::AnimationClip clip{};
+  clip.channels = {
+      {.target_node_index = 5u,
+       .position_keys = {{.value = {1.0f, 0.0f, 0.0f}}}},
+      {.target_node_index = 6u,
+       .target_joint_index = 0u,
+       .position_keys = {{.value = {2.0f, 0.0f, 0.0f}}}},
+  };
+  clip.root_motion = karma::world::RootMotionTrack{
+      .target_node_index = 4u,
+      .rotation_keys = {{.value = {0.0f, 0.0f, 0.0f, 1.0f}}},
+  };
+  const karma::world::AnimationClip retargeted =
+      karma::world::retargetHumanoidClip(
+          clip,
+          source_rig,
+          target_rig,
+          {.root_scale_policy = karma::world::RetargetRootScalePolicy::ExplicitScale,
+           .root_translation_scale = 2.0f,
+           .derive_root_translation_scale_from_height = false,
+           .copy_unmapped_channels = true},
+          &diagnostic);
+  assert(diagnostic.valid());
+  assert(diagnostic.channels_skipped.empty());
+  assert(retargeted.channels.size() == 2u);
+  assert(retargeted.channels[0].target_node_index == 50u);
+  assert(near(retargeted.channels[0].position_keys[0].value.x, 2.0f));
+  assert(retargeted.channels[1].target_node_index == 6u);
+  assert(retargeted.channels[1].target_joint_index == 0u);
+  assert(retargeted.root_motion.has_value());
+  assert(retargeted.root_motion->target_node_index == 49u);
+
+  karma::world::HumanoidProfile incompatible_source_profile = profile;
+  incompatible_source_profile.bones.push_back(
+      {.bone = karma::world::HumanoidBone::Head,
+       .required = true,
+       .aliases = {"HeadNode"}});
+  const karma::world::HumanoidRig incompatible_source_rig =
+      karma::world::bindHumanoidRig(source, incompatible_source_profile);
+  const karma::world::AnimationClip incompatible =
+      karma::world::retargetHumanoidClip(
+          clip,
+          incompatible_source_rig,
+          target_rig,
+          {.derive_root_translation_scale_from_height = false,
+           .copy_unmapped_channels = true},
+          &diagnostic);
+  assert(incompatible.channels.empty());
+  assert(!diagnostic.valid());
+  assert(!diagnostic.missing_required_bones.empty());
+}
+
+void testAnimationSystemAppliesJointTargetedChannels() {
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
+  const karma::world::Entity joint_entity = world.createEntity();
+  world.add(root, karma::components::TransformComponent{});
+  world.add(joint_entity, karma::components::TransformComponent{});
+
+  karma::world::Skeleton skeleton{};
+  skeleton.joints = {
+      {.name = "Root", .node_index = 0u},
+      {.name = "Joint", .parent_joint_index = 0u, .node_index = 1u},
+      {.name = "OutOfRange",
+       .parent_joint_index = 0u,
+       .node_index = std::numeric_limits<uint32_t>::max() - 1u},
+  };
+  skeleton.root_joint_indices = {0u};
+
+  karma::world::AnimationClip clip{};
+  clip.name = "JointMove";
+  clip.duration_seconds = 1.0f;
+  clip.channels.push_back(karma::world::AnimationChannel{
+      .target_node_index = karma::world::kInvalidAnimationIndex,
+      .target_joint_index = 1u,
+      .position_keys = {
+          {.time_seconds = 0.0f, .value = {3.0f, 0.0f, 0.0f}},
+      },
+  });
+  clip.channels.push_back(karma::world::AnimationChannel{
+      .target_node_index = karma::world::kInvalidAnimationIndex,
+      .target_joint_index = 2u,
+      .position_keys = {
+          {.time_seconds = 0.0f, .value = {9.0f, 0.0f, 0.0f}},
+      },
+  });
+
+  world.add(root,
+            karma::components::AnimatorComponent{
+                .clips = {clip},
+                .node_entities_by_index = {root, joint_entity},
+                .skeletons = {skeleton},
+                .current_clip_index = 0u,
+                .loop = true,
+                .playing = false,
+            });
+  karma::world::AnimationSystem system;
+  system.update(world, scene, 0.0f);
+  const auto& transform =
+      world.get<karma::components::TransformComponent>(joint_entity);
+  assert(near(transform.localPosition().x, 3.0f));
 }
 
 void testSkinnedGlbImport() {
@@ -1047,7 +1431,7 @@ void testSkinnedGlbImport() {
   assert(!prefab.skins.empty());
   assert(!prefab.skeletons.empty());
   assert(prefab.skins.front().joint_node_indices.size() == 1);
-  assert(prefab.skeletons.front().joints.size() == 1);
+  assert(prefab.skeletons.front().joints.size() == prefab.nodes.size());
 
   bool found_skinned_primitive = false;
   for (const auto& node : prefab.nodes) {
@@ -1406,7 +1790,7 @@ void testWalkingGlbImportSmoke() {
   assert(prefab.skins.size() == 1);
   assert(prefab.skeletons.size() == 1);
   assert(prefab.skins.front().joint_node_indices.size() == 65);
-  assert(prefab.skeletons.front().joints.size() == 65);
+  assert(prefab.skeletons.front().joints.size() == prefab.nodes.size());
 
   const std::vector<glm::mat4> gltf_world_matrices = buildGltfWorldMatrices(gltf);
   const std::unordered_map<std::string, uint32_t> prefab_nodes_by_name =
@@ -1632,6 +2016,282 @@ void testWalkingGlbImportSmoke() {
   assert(found_skinned_primitive);
 }
 
+void testMixamoFbxRetargetingAndDeformation() {
+  const std::filesystem::path repo_root = findRepoRoot();
+  const std::filesystem::path model_package_path =
+      repo_root / "examples/assets/humanoid_rpg/tripo_human_character/assets.package.json";
+  const std::filesystem::path animation_package_path =
+      repo_root / "examples/assets/humanoid_rpg/character_animations/assets.package.json";
+  assert(std::filesystem::exists(model_package_path));
+  assert(std::filesystem::exists(animation_package_path));
+
+  karma::assets::AssetRegistry missing_clip_assets;
+  const auto missing_clip = karma::assets::detail::importAnimationClipAsset(
+      missing_clip_assets,
+      "tests/missing-clip",
+      animation_package_path.parent_path() / "stride.fbx",
+      "does-not-exist",
+      {},
+      {});
+  assert(missing_clip.clip_key.empty());
+  assert(missing_clip_assets.findAnimationClip("tests/missing-clip") == nullptr);
+
+  const std::filesystem::path cache_root =
+      std::filesystem::temp_directory_path() /
+      ("karma_mixamo_fbx_regression_cache_" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::remove_all(cache_root);
+  karma::assets::AssetPackageOptions package_options{};
+  package_options.cache.root = cache_root;
+  package_options.cache.enabled = true;
+  package_options.cache.flush = false;
+
+  karma::assets::AssetRegistry assets;
+  std::string diagnostic;
+  const auto model_package = karma::assets::importAssetPackage(
+      assets,
+      model_package_path,
+      package_options,
+      &diagnostic);
+  assert(model_package.has_value());
+  assert(diagnostic.empty());
+  assert(!model_package->restored_from_cache);
+  const auto animation_package = karma::assets::importAssetPackage(
+      assets,
+      animation_package_path,
+      package_options,
+      &diagnostic);
+  assert(animation_package.has_value());
+  assert(diagnostic.empty());
+  assert(!animation_package->restored_from_cache);
+
+  const auto* model =
+      assets.findGltfSceneAsset("pf2e/models/tripo_human_character");
+  const auto* target_rig =
+      assets.findHumanoidRig("pf2e/models/tripo_human_character/rig");
+  const auto* source_rig =
+      assets.findHumanoidRig("pf2e/animations/character/stride/rig");
+  const auto* source_clip =
+      assets.findAnimationClip("pf2e/animations/character/stride");
+  assert(model != nullptr);
+  assert(target_rig != nullptr);
+  assert(source_rig != nullptr);
+  assert(source_clip != nullptr);
+
+  karma::assets::AssetCache direct_cache(
+      karma::assets::AssetCacheConfig{
+          .root = cache_root / "direct",
+          .enabled = true,
+          .flush = false,
+      });
+  assert(direct_cache.writeSkeleton("target-skeleton", target_rig->skeleton, &diagnostic));
+  const auto cached_skeleton =
+      direct_cache.readSkeleton("target-skeleton", &diagnostic);
+  assert(cached_skeleton.has_value());
+  assert(cached_skeleton->joints.size() == target_rig->skeleton.joints.size());
+  for (size_t joint_index = 0u;
+       joint_index < cached_skeleton->joints.size();
+       ++joint_index) {
+    const auto& expected = target_rig->skeleton.joints[joint_index];
+    const auto& cached = cached_skeleton->joints[joint_index];
+    assert(nearVec3(karma::math::toGlm(cached.rest_local_position),
+                    karma::math::toGlm(expected.rest_local_position),
+                    0.000001f));
+    assert(near(cached.rest_local_rotation.x, expected.rest_local_rotation.x, 0.000001f));
+    assert(near(cached.rest_local_rotation.y, expected.rest_local_rotation.y, 0.000001f));
+    assert(near(cached.rest_local_rotation.z, expected.rest_local_rotation.z, 0.000001f));
+    assert(near(cached.rest_local_rotation.w, expected.rest_local_rotation.w, 0.000001f));
+    assert(nearVec3(karma::math::toGlm(cached.rest_local_scale),
+                    karma::math::toGlm(expected.rest_local_scale),
+                    0.000001f));
+  }
+  assert(direct_cache.writeHumanoidRig("target-rig", *target_rig, &diagnostic));
+  const auto cached_rig = direct_cache.readHumanoidRig("target-rig", &diagnostic);
+  assert(cached_rig.has_value());
+  assert(cached_rig->bindings.size() == target_rig->bindings.size());
+  assert(cached_rig->profile.name == target_rig->profile.name);
+  assert(cached_rig->profile.bones.size() == target_rig->profile.bones.size());
+  assert(cached_rig->skeleton.joints.size() == target_rig->skeleton.joints.size());
+  assert(near(karma::world::humanoidRigHeight(*cached_rig),
+              karma::world::humanoidRigHeight(*target_rig),
+              0.000001f));
+  assert(direct_cache.writeAnimationClip("stride", *source_clip, &diagnostic));
+  const auto cached_clip = direct_cache.readAnimationClip("stride", &diagnostic);
+  assert(cached_clip.has_value());
+  assert(cached_clip->channels.size() == source_clip->channels.size());
+
+  // Assimp's FBX pivot nodes must be evaluated during import. Preserving the
+  // helper chain turns almost every Mixamo bone into a disconnected skeleton
+  // root and makes local-space retargeting mathematically invalid.
+  assert(model->nodes.size() >= target_rig->skeleton.joints.size());
+  assert(std::none_of(model->nodes.begin(),
+                      model->nodes.end(),
+                      [](const karma::assets::GltfSceneAssetNode& node) {
+                        return node.name.find("_$AssimpFbx$_") != std::string::npos;
+                      }));
+  assert(target_rig->skeleton.joints.size() == model->nodes.size());
+  assert(target_rig->skeleton.root_joint_indices.size() == 1u);
+  for (uint32_t joint_index = 0u;
+       joint_index < target_rig->skeleton.joints.size();
+       ++joint_index) {
+    if (joint_index == target_rig->skeleton.root_joint_indices.front()) {
+      continue;
+    }
+    assert(target_rig->skeleton.joints[joint_index].parent_joint_index <
+           target_rig->skeleton.joints.size());
+  }
+  assert(!model->skin_keys.empty());
+  const auto* model_skin = assets.findSkin(model->skin_keys.front());
+  assert(model_skin != nullptr);
+  assert(model_skin->skeleton_index < model->skeleton_keys.size());
+  const auto* skin_skeleton = assets.findSkeleton(
+      model->skeleton_keys[model_skin->skeleton_index]);
+  assert(skin_skeleton != nullptr);
+  assert(model_skin->joint_node_indices.size() == 52u);
+  assert(skin_skeleton->joints.size() == model->nodes.size());
+  assert(skin_skeleton->root_joint_indices.size() == 1u);
+
+  karma::world::HumanoidRetargetDiagnostic retarget_diagnostic;
+  const karma::world::AnimationClip clip =
+      karma::world::retargetHumanoidClip(*source_clip,
+                                         *source_rig,
+                                         *target_rig,
+                                         {},
+                                         &retarget_diagnostic);
+  assert(retarget_diagnostic.valid());
+  assert(retarget_diagnostic.channels_skipped.empty());
+  assert(clip.channels.size() == source_clip->channels.size());
+
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::GltfSceneImportResult imported =
+      karma::world::instantiateGltfSceneAsset(
+          world,
+          scene,
+          assets,
+          *model,
+          {.create_synthetic_root = true, .autoplay_animations = false});
+  assert(imported.valid());
+  assert(world.has<karma::components::AnimatorComponent>(imported.root_entity));
+  auto& animator =
+      world.get<karma::components::AnimatorComponent>(imported.root_entity);
+  animator.clips = {clip};
+  animator.current_clip_index = 0u;
+  animator.time_seconds = 0.0f;
+  animator.speed = 1.0f;
+  animator.loop = false;
+  animator.playing = true;
+
+  const auto deformable_entities =
+      world.view<karma::components::DeformableMeshComponent>();
+  assert(deformable_entities.size() == 1u);
+  auto& deformation =
+      world.get<karma::components::DeformableMeshComponent>(deformable_entities.front());
+
+  const karma::world::SkinningPalette rest_palette =
+      karma::world::buildSkinningPaletteFromScene(
+          deformation,
+          world,
+          scene,
+          glm::mat4(1.0f));
+  assert(rest_palette.valid);
+  assert(rest_palette.joint_matrices.size() == 52u);
+  for (const glm::mat4& joint_matrix : rest_palette.joint_matrices) {
+    for (int column = 0; column < 4; ++column) {
+      for (int row = 0; row < 4; ++row) {
+        assert(std::isfinite(joint_matrix[column][row]));
+      }
+    }
+  }
+  const karma::world::MeshData bind_pose_mesh =
+      karma::world::skinMesh(deformation.bind_mesh,
+                             deformation.vertex_influences,
+                             rest_palette.joint_matrices);
+  Bounds bind_pose_bounds{};
+  for (const glm::vec3& vertex : bind_pose_mesh.vertices) {
+    expandBounds(bind_pose_bounds, vertex);
+  }
+  assert(bind_pose_bounds.valid);
+  assert(nearVec3(bind_pose_bounds.min,
+                  glm::vec3(-0.497166f, 0.0f, -0.096584f),
+                  0.01f));
+  assert(nearVec3(bind_pose_bounds.max,
+                  glm::vec3(0.489162f, 0.998047f, 0.104588f),
+                  0.01f));
+
+  karma::world::AnimationSystem animation_system;
+  animation_system.update(world, scene, clip.duration_seconds * 0.5f);
+  karma::world::updateWorldTransforms(world, scene);
+  const karma::world::SkinningPalette animated_palette =
+      karma::world::buildSkinningPaletteFromScene(
+          deformation,
+          world,
+          scene,
+          glm::mat4(1.0f));
+  assert(animated_palette.valid);
+  assert(animated_palette.joint_matrices.size() == 52u);
+  for (const glm::mat4& joint_matrix : animated_palette.joint_matrices) {
+    for (int column = 0; column < 4; ++column) {
+      for (int row = 0; row < 4; ++row) {
+        assert(std::isfinite(joint_matrix[column][row]));
+      }
+    }
+  }
+  const karma::world::MeshData skinned =
+      karma::world::skinMesh(deformation.bind_mesh,
+                             deformation.vertex_influences,
+                             animated_palette.joint_matrices);
+  Bounds bounds{};
+  for (const glm::vec3& vertex : skinned.vertices) {
+    expandBounds(bounds, vertex);
+  }
+  assert(bounds.valid);
+  assert(nearVec3(bounds.min,
+                  glm::vec3(-0.170168f, 0.004262f, -0.208585f),
+                  0.01f));
+  assert(nearVec3(bounds.max,
+                  glm::vec3(0.188364f, 0.947619f, 0.273024f),
+                  0.01f));
+
+  // The package's warm path must expose the same canonical skeleton and clip.
+  karma::assets::AssetRegistry warm_assets;
+  diagnostic.clear();
+  const auto warm_model_package = karma::assets::importAssetPackage(
+      warm_assets,
+      model_package_path,
+      package_options,
+      &diagnostic);
+  assert(warm_model_package.has_value());
+  assert(diagnostic.empty());
+  assert(warm_model_package->restored_from_cache);
+  const auto warm_animation_package = karma::assets::importAssetPackage(
+      warm_assets,
+      animation_package_path,
+      package_options,
+      &diagnostic);
+  assert(warm_animation_package.has_value());
+  assert(diagnostic.empty());
+  assert(warm_animation_package->restored_from_cache);
+  const auto* warm_model =
+      warm_assets.findGltfSceneAsset("pf2e/models/tripo_human_character");
+  const auto* warm_target_rig =
+      warm_assets.findHumanoidRig("pf2e/models/tripo_human_character/rig");
+  const auto* warm_stride =
+      warm_assets.findAnimationClip("pf2e/animations/character/stride");
+  assert(warm_model != nullptr && warm_model->nodes.size() == model->nodes.size());
+  assert(warm_target_rig != nullptr);
+  assert(warm_target_rig->bindings.size() == target_rig->bindings.size());
+  assert(warm_target_rig->skeleton.root_joint_indices.size() == 1u);
+  assert(near(karma::world::humanoidRigHeight(*warm_target_rig),
+              karma::world::humanoidRigHeight(*target_rig),
+              0.000001f));
+  assert(warm_stride != nullptr);
+  assert(warm_stride->channels.size() == source_clip->channels.size());
+  std::filesystem::remove_all(cache_root);
+}
+
 }  // namespace
 
 int main() {
@@ -1647,6 +2307,9 @@ int main() {
   testAnimationSystemUpdatesMorphWeights();
   testPoseCompositionAndPalette();
   testSkeletonRetargeting();
+  testHumanoidMixamoBindingAndRetargeting();
+  testCustomHumanoidProfileAndCopiedChannels();
+  testAnimationSystemAppliesJointTargetedChannels();
   testSkinnedGlbImport();
   testSplitWeightGlbImport();
   testGltfMeshReplacementImportsAllMeshNodes();
@@ -1654,5 +2317,6 @@ int main() {
   testGltfDocumentExternalAndDataBuffers();
   testGltfSparseAccessors();
   testWalkingGlbImportSmoke();
+  testMixamoFbxRetargetingAndDeformation();
   return 0;
 }

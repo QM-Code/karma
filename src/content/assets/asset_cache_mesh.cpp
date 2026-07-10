@@ -16,7 +16,7 @@ namespace karma::assets::detail {
 
 namespace {
 
-constexpr std::array<char, 8> kMagic{'K', 'A', 'S', 'S', 'E', 'T', '0', '2'};
+constexpr std::array<char, 8> kMagic{'K', 'A', 'S', 'S', 'E', 'T', '0', '3'};
 constexpr uint32_t kKindMesh = 2u;
 constexpr uint32_t kChunkMesh = 0x4853454du;      // MESH
 

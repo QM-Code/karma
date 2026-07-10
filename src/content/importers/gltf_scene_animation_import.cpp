@@ -63,6 +63,26 @@ world::AnimationChannel& findOrCreateChannel(world::AnimationClip& clip,
   return clip.channels.back();
 }
 
+void assignJointTargetFromPrefab(world::AnimationChannel& channel,
+                                 const GltfScenePrefab* prefab) {
+  if (prefab == nullptr) {
+    return;
+  }
+  for (size_t skin_index = 0u; skin_index < prefab->skins.size(); ++skin_index) {
+    const world::Skin& skin = prefab->skins[skin_index];
+    const auto joint_it = std::find(skin.joint_node_indices.begin(),
+                                    skin.joint_node_indices.end(),
+                                    channel.target_node_index);
+    if (joint_it == skin.joint_node_indices.end()) {
+      continue;
+    }
+    channel.target_skin_index = static_cast<uint32_t>(skin_index);
+    channel.target_joint_index =
+        static_cast<uint32_t>(std::distance(skin.joint_node_indices.begin(), joint_it));
+    return;
+  }
+}
+
 }  // namespace
 
 std::vector<world::AnimationClip> loadGltfAnimationClips(
@@ -246,7 +266,8 @@ std::vector<world::AnimationClip> loadGltfAnimationClips(
 
 std::vector<world::AnimationClip> loadAnimationClips(
     const aiScene& scene,
-    const std::unordered_map<std::string, uint32_t>& node_indices_by_name) {
+    const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
+    const GltfScenePrefab* prefab) {
   std::vector<world::AnimationClip> clips;
   clips.reserve(scene.mNumAnimations);
 
@@ -276,6 +297,7 @@ std::vector<world::AnimationClip> loadAnimationClips(
 
       world::AnimationChannel channel{};
       channel.target_node_index = node_it->second;
+      assignJointTargetFromPrefab(channel, prefab);
       channel.position_keys.reserve(source_channel->mNumPositionKeys);
       channel.rotation_keys.reserve(source_channel->mNumRotationKeys);
       channel.scale_keys.reserve(source_channel->mNumScalingKeys);

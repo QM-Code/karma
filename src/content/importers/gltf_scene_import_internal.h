@@ -5,16 +5,14 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <glm/mat4x4.hpp>
 
 #include "karma/assets.h"
+#include "karma/components.h"
 #include "karma/rendering.h"
-#include "karma/world.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/world.h"
 #include "karma/world.h"
 
 namespace karma::world {
@@ -114,6 +112,7 @@ struct GltfScenePrefab {
   std::vector<std::shared_ptr<const rendering::ImportedMaterialData>> imported_materials;
   std::vector<world::Skeleton> skeletons;
   std::vector<world::Skin> skins;
+  std::vector<world::HumanoidRig> humanoid_rigs;
   std::vector<world::AnimationClip> animations;
   std::vector<std::string> diagnostics;
 
@@ -121,6 +120,9 @@ struct GltfScenePrefab {
     return root_node != kInvalidGltfSceneNode && root_node < nodes.size();
   }
 };
+
+world::Skeleton makeNodeHierarchySkeleton(const GltfScenePrefab& prefab,
+                                          std::string_view name);
 
 GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
                                     const GltfSceneLoadOptions& options = {});

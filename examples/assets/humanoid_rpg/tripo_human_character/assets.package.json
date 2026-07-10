@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "pf2e/models/tripo_human_character",
+      "path": "Character.fbx",
+      "dependencies": [
+        "human+character+3d+model_basecolor.jpg",
+        "textures/human_character_3d_model_basecolor.JPEG",
+        "textures/human_character_3d_model_normal.JPEG",
+        "textures/human_character_3d_model_runtime_matte_rm.PNG"
+      ],
+      "import_meshes": true,
+      "import_lights": false,
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/models/tripo_human_character/rig"
+      }
+    }
+  ]
+}

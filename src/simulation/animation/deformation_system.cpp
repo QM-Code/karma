@@ -9,10 +9,8 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "karma/assets.h"
+#include "karma/components.h"
 #include "karma/math.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/world.h"
 
 namespace karma::world {
 

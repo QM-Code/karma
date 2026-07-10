@@ -247,6 +247,7 @@ struct GltfSceneAsset {
   std::vector<std::string> animation_clip_keys;
   std::vector<std::string> skeleton_keys;
   std::vector<std::string> skin_keys;
+  std::vector<std::string> humanoid_rig_keys;
   std::string scene_key;
 
   bool valid() const {
@@ -335,6 +336,10 @@ class AssetRegistry {
   bool unregisterSkin(const std::string& key);
   const world::Skin* findSkin(std::string_view key) const;
 
+  bool registerHumanoidRig(const std::string& key, world::HumanoidRig rig);
+  bool unregisterHumanoidRig(const std::string& key);
+  const world::HumanoidRig* findHumanoidRig(std::string_view key) const;
+
   bool registerGltfSceneAsset(const std::string& key, GltfSceneAsset scene);
   bool unregisterGltfSceneAsset(const std::string& key);
   const GltfSceneAsset* findGltfSceneAsset(std::string_view key) const;
@@ -386,8 +391,8 @@ struct AssetCacheConfig {
 /// User-cache backed store for serialized imported asset blobs.
 class AssetCache {
  public:
-  static constexpr uint32_t kSchemaVersion = 2u;
-  static constexpr std::string_view kAssetCacheVersion = "karma-asset-cache-v2";
+  static constexpr uint32_t kSchemaVersion = 3u;
+  static constexpr std::string_view kAssetCacheVersion = "karma-asset-cache-v3";
 
   explicit AssetCache(AssetCacheConfig config = AssetCacheConfig::fromEnvironment());
 
@@ -463,6 +468,11 @@ class AssetCache {
   bool writeSkin(std::string_view cache_key,
                  const world::Skin& skin,
                  std::string* diagnostic = nullptr);
+  std::optional<world::HumanoidRig> readHumanoidRig(std::string_view cache_key,
+                                                    std::string* diagnostic = nullptr);
+  bool writeHumanoidRig(std::string_view cache_key,
+                        const world::HumanoidRig& rig,
+                        std::string* diagnostic = nullptr);
 
   std::optional<nlohmann::json> readPackageManifest(std::string_view manifest_hash,
                                                     std::string* diagnostic = nullptr);
@@ -509,6 +519,7 @@ struct AssetPackageHandle {
   std::filesystem::path manifest_path;
   std::vector<AssetPackageLoadedAsset> assets;
   uint64_t instance_id = 0u;
+  bool restored_from_cache = false;
 
   bool valid() const { return !manifest_path.empty(); }
 };

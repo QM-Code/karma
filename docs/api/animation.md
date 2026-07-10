@@ -6,13 +6,20 @@ sampling, scene transform composition, and renderer upload/submission.
 For the durable architecture overview, asset-boundary explanation, showcase
 commands, and retargeting notes, see `docs/ANIMATION_V2.md`.
 
-## Imported glTF Flow
+## Imported Scene And Clip Flow
 
-Package `gltf_scene` entries import glTF nodes, transforms, skins, skeletons,
-animation clips, and mesh primitive data into a registered
+Package `gltf_scene` entries import glTF/GLB or FBX nodes, transforms, skins,
+skeletons, animation clips, and mesh primitive data into a registered
 `karma::assets::GltfSceneAsset` plus child assets. `instantiateGltfSceneAsset(...)`
 creates ECS entities for the node tree and separate child entities for renderable
 mesh primitives.
+
+Package `animation_clip` entries import a selected animation without
+instantiating its source scene. They support standalone FBX clips, optional
+`clip` source-name selection, an optional display `name`, and a `humanoid` block
+that registers the source skeleton and semantic rig. Both `gltf_scene` and
+`animation_clip` accept `{"humanoid":{"profile":"mixamo"}}`; `rig_key`
+optionally gives the registered `karma::world::HumanoidRig` a stable asset key.
 
 Renderable primitive entities may receive:
 
@@ -22,13 +29,15 @@ Renderable primitive entities may receive:
 
 Imported roots receive `karma::components::AnimatorComponent` when clips are
 available. The animator stores the imported clips, node entity map, and
-node-to-morph-primitive map needed for runtime sampling.
+node-to-morph-primitive map needed for runtime sampling, plus imported skeleton,
+skin, and humanoid rig metadata.
 
-Imported animation clips are plain `karma::world::AnimationClip` values.
-They are resolved from the registry keys stored on `GltfSceneAsset` and copied
-into `AnimatorComponent::clips`; they do not retain file handles, renderer
-handles, or mesh ownership. They remain authored in the imported node/skeleton
-index space until retargeted.
+Imported animation clips are plain `karma::world::AnimationClip` values. Scene
+clips are resolved from the registry keys stored on `GltfSceneAsset` and copied
+into `AnimatorComponent::clips`. Standalone `animation_clip` assets remain in
+the registry until gameplay copies or retargets them into an animator. Neither
+kind retains file handles, renderer handles, or mesh ownership, and both remain
+authored in the imported node/skeleton index space until retargeted.
 
 ## Runtime Update Order
 
@@ -78,17 +87,23 @@ Karma supports explicit skeleton retargeting through
 `validateSkeletonMap(...)`, and `retargetClip(...)`.
 
 Retargeting converts a source clip from the source skeleton's joint/node index
-space into the target skeleton's joint/node index space. The map is explicit:
-Karma does not infer humanoid semantics or profile names yet.
+space into the target skeleton's joint/node index space. The semantic layer adds
+`HumanoidRig`, `HumanoidProfile`, `bindHumanoidRig(...)`,
+`validateHumanoidRig(...)`, `buildHumanoidSkeletonMap(...)`, and
+`retargetHumanoidClip(...)`. `HumanoidProfileKind::Mixamo` is the current
+built-in profile and is the profile selected by package `humanoid` blocks.
 
-This keeps the runtime clean for future reusable humanoid animation libraries:
-clips, skeletons, node bindings, and mesh deformation are separate data
-contracts, but a higher-level humanoid profile/binding layer still needs to be
-authored above the current explicit maps.
+Semantic retargeting corrects rotation, position, and scale keys relative to the
+source and target rest-local transforms. It computes humanoid height from the
+complete composed rest hierarchy through `humanoidRigHeight(...)`. It scales
+only the translation-bearing semantic root (`Root` or, when Root is static,
+`Hips`) by the target/source height ratio. Authored profiles are retained on
+their rigs and work with the semantic path; explicit `SkeletonMap` values remain
+available for direct joint mapping.
 
 ## Current Limits
 
-- Humanoid semantic retarget profiles are not implemented; retargeting uses
-  explicit skeleton maps.
-- `MeshComponent::mesh_asset_key` asset-key mesh loading does not use the glTF scene
-  animation, skinning, or morph-target path.
+- Mixamo is the only built-in humanoid semantic profile; other rigs need an
+  authored profile or explicit skeleton map.
+- Flat `MeshComponent::mesh_asset_key` loading does not instantiate scene
+  animation, skinning, or morph-target data.

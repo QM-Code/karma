@@ -600,6 +600,56 @@ bool AssetCache::writeSkin(std::string_view cache_key,
   return ok;
 }
 
+std::optional<world::HumanoidRig> AssetCache::readHumanoidRig(
+    std::string_view cache_key,
+    std::string* diagnostic) {
+  if (!enabled()) {
+    return std::nullopt;
+  }
+  auto bytes = readBinaryFile(blobPath(cache_key));
+  if (!bytes.has_value()) {
+    return std::nullopt;
+  }
+  auto rig = detail::deserializeHumanoidRig(*bytes, diagnostic);
+  world::HumanoidRetargetDiagnostic validation;
+  if (!rig.has_value() ||
+      !world::validateHumanoidRig(*rig,
+                                  rig->skeleton,
+                                  rig->profile,
+                                  &validation)) {
+    if (diagnostic != nullptr && diagnostic->empty()) {
+      *diagnostic = "cached humanoid rig failed semantic validation";
+    }
+    return std::nullopt;
+  }
+  return rig;
+}
+
+bool AssetCache::writeHumanoidRig(std::string_view cache_key,
+                                  const world::HumanoidRig& rig,
+                                  std::string* diagnostic) {
+  if (!enabled() || cache_key.empty()) {
+    return false;
+  }
+  world::HumanoidRetargetDiagnostic validation;
+  if (!world::validateHumanoidRig(rig,
+                                  rig.skeleton,
+                                  rig.profile,
+                                  &validation)) {
+    if (diagnostic != nullptr) {
+      *diagnostic = "refusing to cache an invalid humanoid rig";
+    }
+    return false;
+  }
+  const bool ok = writeAtomic(blobPath(cache_key),
+                              detail::serializeHumanoidRig(rig),
+                              diagnostic);
+  if (ok) {
+    touchIndex(cache_key, "humanoid_rig");
+  }
+  return ok;
+}
+
 std::optional<Json> AssetCache::readPackageManifest(std::string_view manifest_hash,
                                                     std::string* diagnostic) {
   if (!enabled() || !validateCacheKey(manifest_hash, diagnostic)) {

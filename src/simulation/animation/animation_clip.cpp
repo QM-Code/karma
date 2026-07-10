@@ -4,8 +4,6 @@
 #include <cmath>
 
 #include "karma/math.h"
-#include "karma/math.h"
-#include "karma/math.h"
 
 namespace karma::world {
 

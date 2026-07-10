@@ -1331,9 +1331,13 @@ std::optional<PrefabInstance> instantiatePrefab(
     spdlog::error("Prefab '{}' received an invalid root transform", path.string());
     return std::nullopt;
   }
-  PackageAcquireResult package = acquirePrefabPackage(desc.assets, path);
-  if (!package.success) {
-    return std::nullopt;
+  PackageAcquireResult package{};
+  package.assets = desc.assets;
+  if (desc.auto_load_package) {
+    package = acquirePrefabPackage(desc.assets, path);
+    if (!package.success) {
+      return std::nullopt;
+    }
   }
   assets::AssetRegistry* active_assets = package.assets;
 

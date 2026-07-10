@@ -46,6 +46,35 @@
         "KARMA_PHYSICS_BACKEND_JOLT": "OFF",
         "KARMA_PHYSICS_BACKEND_BULLET": "OFF"
       }
+    },
+    {
+      "name": "sdk-debug",
+      "displayName": "Local debug SDK install",
+      "binaryDir": "${sourceDir}/build/sdk-debug",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "environment": {
+        "VCPKG_MAX_CONCURRENCY": "1",
+        "CMAKE_BUILD_PARALLEL_LEVEL": "1"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "/home/quinn/.local/karma",
+        "VCPKG_MANIFEST_FEATURES": "graphical",
+        "KARMA_FETCH_DEPS": "OFF",
+        "KARMA_INSTALL_VCPKG_DEPS": "ON",
+        "KARMA_BUILD_SERVER_PROFILE": "ON",
+        "KARMA_BUILD_HEADLESS_PROFILE": "ON",
+        "KARMA_BUILD_GRAPHICAL_PROFILE": "ON",
+        "KARMA_WINDOW_BACKEND_GLFW": "ON",
+        "KARMA_RENDER_BACKEND_DILIGENT": "ON",
+        "KARMA_NETWORK_BACKEND_ENET": "ON",
+        "KARMA_PHYSICS_BACKEND_JOLT": "ON",
+        "KARMA_ENABLE_NAVIGATION": "ON",
+        "KARMA_BUILD_EXAMPLES": "OFF",
+        "KARMA_BUILD_TESTS": "OFF",
+        "KARMA_BUILD_TOOLS": "OFF",
+        "BUILD_TESTING": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -60,6 +89,11 @@
     {
       "name": "minimal-headless",
       "configurePreset": "minimal-headless"
+    },
+    {
+      "name": "sdk-debug",
+      "configurePreset": "sdk-debug",
+      "jobs": 1
     }
   ],
   "testPresets": [

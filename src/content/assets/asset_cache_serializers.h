@@ -42,5 +42,9 @@ std::optional<world::Skeleton> deserializeSkeleton(const std::vector<uint8_t>& b
 std::vector<uint8_t> serializeSkin(const world::Skin& skin);
 std::optional<world::Skin> deserializeSkin(const std::vector<uint8_t>& bytes,
                                                std::string* diagnostic);
+std::vector<uint8_t> serializeHumanoidRig(const world::HumanoidRig& rig);
+std::optional<world::HumanoidRig> deserializeHumanoidRig(
+    const std::vector<uint8_t>& bytes,
+    std::string* diagnostic);
 
 }  // namespace karma::assets::detail

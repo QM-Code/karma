@@ -19,6 +19,7 @@ std::vector<world::AnimationClip> loadGltfAnimationClips(
 
 std::vector<world::AnimationClip> loadAnimationClips(
     const aiScene& scene,
-    const std::unordered_map<std::string, uint32_t>& node_indices_by_name);
+    const std::unordered_map<std::string, uint32_t>& node_indices_by_name,
+    const GltfScenePrefab* prefab = nullptr);
 
 }  // namespace karma::world

@@ -1,14 +1,16 @@
-# Asset Cache V2 And Runtime Textures
+# Asset Cache V3 And Runtime Textures
 
 ## Scope
 
-This pass replaced the partial texture-only cache with a v2 imported-asset
+This pass replaced the partial texture-only cache with a versioned imported-asset
 cache, moved examples onto package-backed assets, and made runtime texture
 uploads choose a backend-supported format instead of assuming decoded RGBA8 is
 always the final representation.
 
-The cache is intentionally v2-only. There is no v1 compatibility reader and no
-migration path; old cache files are ignored and rebuilt.
+The cache is intentionally v3-only. There is no compatibility reader or
+migration path; older cache files are ignored and rebuilt. Version 3 adds the
+rest transforms and semantic humanoid rigs required by correct animation
+retargeting.
 
 ## Runtime Controls
 
@@ -18,7 +20,7 @@ migration path; old cache files are ignored and rebuilt.
 - `KARMA_TEXTURE_BC7=1` enables BC7 runtime transcode when the backend reports
   BC7 support.
 
-The cache version marker is `karma-asset-cache-v2`.
+The cache version marker is `karma-asset-cache-v3`.
 
 ## Cache Layout
 
@@ -34,12 +36,13 @@ payloads. Supported blob types are:
 - animation clips
 - skeletons
 - skins
+- humanoid rigs
 
 Environment maps remain path registrations only. They are written into package
 manifests so packages can restore the logical key, but there is no persistent
 environment blob yet.
 
-Cache records include the v2 schema and blob kind. A mismatched schema, kind, or
+Cache records include the v3 schema and blob kind. A mismatched schema, kind, or
 malformed payload fails the read and lets the package path rebuild from source.
 
 ## Package Cache Flow
@@ -60,15 +63,30 @@ On each package import:
 5. If any blob is missing, corrupt, stale, or malformed, the package cold-imports
    from source, writes every persistent blob, then writes the package manifest.
 
+Every primary `path` is content-hashed. Entries with external files must list
+them in a `dependencies` array; those files are also path-, size-, time-, and
+content-hashed. This covers FBX textures and external glTF buffers/images without
+guessing dependencies from a source format:
+
+```json
+{
+  "type": "gltf_scene",
+  "key": "characters/hero",
+  "path": "hero.fbx",
+  "dependencies": ["textures/hero_basecolor.png"]
+}
+```
+
 Package manifest records store the logical asset type, logical key, cache blob
 key, and blob type. For `gltf_scene` records, the manifest also records the
 generated child mappings for meshes, textures, materials, animations,
-skeletons, and skins.
+skeletons, skins, and humanoid rigs.
 
 `AssetPackageLoadedAsset` carries the cache blob key used for each committed
 asset so package handles know which persistent payload produced the runtime
-asset. Ref-counted package acquire/release still unregisters assets only on the
-final release.
+asset. `AssetPackageHandle::restored_from_cache` reports whether the package was
+actually restored rather than cold-imported. Ref-counted package acquire/release
+still unregisters assets only on the final release.
 
 ## Texture Import And Upload
 
@@ -127,5 +145,5 @@ tests.
 
 ## Public API Cleanup
 
-The public glTF source-loading API was removed from
-`karma/assets.h`.
+The public glTF source-loading API was removed from `karma/assets.h`.
+Package-backed imports are the supported content path.

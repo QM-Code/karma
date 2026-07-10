@@ -32,6 +32,65 @@ The `graphical` manifest feature installs GLFW, ImGui, miniaudio, and the local
 backend and installs a `DiligentCoreConfig.cmake` wrapper that exposes the
 Diligent targets Karma expects.
 
+## Local SDK Install
+
+Downstream game repositories should consume Karma from an installed SDK instead
+of adding the Karma source tree or enabling `KARMA_CONFIG_FETCH_DEPS`. The SDK
+install contains Karma headers, static libraries, built-in runtime shaders,
+CMake package files, and the vcpkg dependency package trees needed by the
+selected profile.
+
+The default local SDK prefix is:
+
+```bash
+/home/quinn/.local/karma
+```
+
+One-time prerequisite: install vcpkg and set `VCPKG_ROOT` to that checkout.
+The preset uses the repo's `vcpkg-configuration.json`, so the local overlay
+ports in `ports/` are active automatically.
+
+Build and install the graphical/navigation debug SDK from this checkout:
+
+```bash
+cmake --preset sdk-debug
+cmake --build --preset sdk-debug --parallel 1
+cmake --install build/sdk-debug
+```
+
+The preset also sets `VCPKG_MAX_CONCURRENCY=1` and
+`CMAKE_BUILD_PARALLEL_LEVEL=1`, and its build preset uses one job. Keep those
+limits in place on memory-constrained machines.
+
+The `sdk-debug` preset builds the server, headless, and graphical profiles with
+GLFW, DiligentCore/Vulkan, ImGui, miniaudio, ENet, Jolt, Recast/Detour, Assimp,
+KTX, glm, spdlog, and nlohmann-json resolved through vcpkg. It sets
+`KARMA_FETCH_DEPS=OFF` and `KARMA_INSTALL_VCPKG_DEPS=ON`; the install step then
+copies the active vcpkg triplet into the same SDK prefix before installing
+Karma.
+
+Downstream CMake projects should use only the installed prefix:
+
+```bash
+cmake -S . -B build/installed-karma \
+  -DCMAKE_PREFIX_PATH=/home/quinn/.local/karma
+```
+
+```cmake
+find_package(karma CONFIG REQUIRED)
+target_link_libraries(my_server PRIVATE karma::server)
+target_link_libraries(my_app PRIVATE karma::graphical)
+```
+
+Do not set `KARMA_CONFIG_FETCH_DEPS=ON` in downstream builds. If
+`find_package(karma CONFIG REQUIRED)` cannot resolve a dependency target, rebuild
+and reinstall the SDK rather than letting each downstream repository fetch or
+rebuild Karma dependencies.
+
+Adding Karma with `add_subdirectory()` or building from this source tree remains
+supported for engine development and tests. RPG/game repositories should prefer
+the installed SDK path so all forks share the same locally built Karma install.
+
 ## vcpkg Overlay Port
 
 The `ports/karma` overlay port packages Karma itself from this checkout.

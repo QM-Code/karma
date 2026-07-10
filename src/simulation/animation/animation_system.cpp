@@ -3,16 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "karma/components.h"
 #include "karma/math.h"
-#include "karma/math.h"
-#include "karma/world.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
 
 namespace karma::world {
 
@@ -437,6 +434,36 @@ void applyMorphWeightsToEntities(
   }
 }
 
+uint32_t resolveChannelTargetNode(const AnimationChannel& channel,
+                                  const std::vector<Skeleton>& skeletons,
+                                  const std::vector<Skin>& skins,
+                                  size_t node_entity_count) {
+  auto valid_node = [node_entity_count](uint32_t node_index) {
+    return node_index < node_entity_count ? node_index : kInvalidAnimationIndex;
+  };
+  if (channel.target_node_index != kInvalidAnimationIndex) {
+    if (const uint32_t node = valid_node(channel.target_node_index);
+        node != kInvalidAnimationIndex) {
+      return node;
+    }
+  }
+  if (channel.target_skin_index < skins.size()) {
+    const Skin& skin = skins[channel.target_skin_index];
+    if (channel.target_joint_index < skin.joint_node_indices.size()) {
+      if (const uint32_t node =
+              valid_node(skin.joint_node_indices[channel.target_joint_index]);
+          node != kInvalidAnimationIndex) {
+        return node;
+      }
+    }
+  }
+  if (skeletons.size() == 1u &&
+      channel.target_joint_index < skeletons.front().joints.size()) {
+    return valid_node(skeletons.front().joints[channel.target_joint_index].node_index);
+  }
+  return kInvalidAnimationIndex;
+}
+
 std::vector<float> baseMorphWeightsForNode(world::World& world,
                                            const std::vector<world::Entity>& entities) {
   for (const world::Entity entity : entities) {
@@ -479,6 +506,8 @@ void applyWeightedClipSamples(world::World& world,
                               const std::vector<world::Entity>& node_entities_by_index,
                               const std::vector<std::vector<world::Entity>>&
                                   morph_entities_by_node_index,
+                              const std::vector<Skeleton>& skeletons,
+                              const std::vector<Skin>& skins,
                               const std::vector<WeightedClipSample>& samples) {
   std::unordered_map<uint32_t, AccumulatedTransform> accumulated;
   std::unordered_map<uint32_t, AccumulatedMorphWeights> accumulated_morphs;
@@ -488,17 +517,41 @@ void applyWeightedClipSamples(world::World& world,
     }
     const AnimationClip& clip = clips[sample.clip_index];
     std::unordered_set<uint32_t> sampled_morph_nodes;
-    sampleAnimationClip(
-        clip,
-        sample.time_seconds,
-        sample.loop,
-        [&](uint32_t target_node_index, const SampledTransform& sampled) {
-          accumulateTransform(accumulated[target_node_index], sampled, sample.weight);
-        },
-        [&](uint32_t target_node_index, const std::vector<float>& weights) {
-          sampled_morph_nodes.insert(target_node_index);
-          accumulateMorphWeights(accumulated_morphs[target_node_index], weights, sample.weight);
-        });
+    const float sample_time = normalizeAnimationTime(clip, sample.time_seconds, sample.loop);
+    for (const AnimationChannel& channel : clip.channels) {
+      SampledTransform sampled{};
+      sampled.position = sampleVec3Keyframes(channel.position_keys,
+                                             sample_time,
+                                             channel.position_interpolation);
+      sampled.rotation = sampleQuatKeyframes(channel.rotation_keys,
+                                             sample_time,
+                                             channel.rotation_interpolation);
+      sampled.scale = sampleVec3Keyframes(channel.scale_keys,
+                                          sample_time,
+                                          channel.scale_interpolation);
+      if (!(sampled.position || sampled.rotation || sampled.scale)) {
+        continue;
+      }
+      const uint32_t target_node_index =
+          resolveChannelTargetNode(channel,
+                                   skeletons,
+                                   skins,
+                                   node_entities_by_index.size());
+      if (target_node_index != kInvalidAnimationIndex) {
+        accumulateTransform(accumulated[target_node_index], sampled, sample.weight);
+      }
+    }
+    for (const MorphTargetTrack& track : clip.morph_target_tracks) {
+      const std::optional<std::vector<float>> weights =
+          sampleMorphWeightKeyframes(track.weight_keys, sample_time, track.interpolation);
+      if (!weights) {
+        continue;
+      }
+      sampled_morph_nodes.insert(track.target_node_index);
+      accumulateMorphWeights(accumulated_morphs[track.target_node_index],
+                             *weights,
+                             sample.weight);
+    }
     for (uint32_t node_index = 0;
          node_index < morph_entities_by_node_index.size();
          ++node_index) {
@@ -912,6 +965,8 @@ void updateSimpleAnimator(world::World& world,
                            animator.clips,
                            animator.node_entities_by_index,
                            animator.morph_entities_by_node_index,
+                           animator.skeletons,
+                           animator.skins,
                            samples);
 }
 
@@ -1044,6 +1099,8 @@ void updateStateMachineAnimator(world::World& world,
                            animator.clips,
                            animator.node_entities_by_index,
                            animator.morph_entities_by_node_index,
+                           animator.skeletons,
+                           animator.skins,
                            samples);
 }
 

@@ -203,6 +203,7 @@ struct AnimatorComponent : world::ComponentTag {
   std::vector<std::vector<world::Entity>> morph_entities_by_node_index;
   std::vector<world::Skeleton> skeletons;
   std::vector<world::Skin> skins;
+  std::vector<world::HumanoidRig> humanoid_rigs;
 
   size_t current_clip_index = 0;
   float time_seconds = 0.0f;

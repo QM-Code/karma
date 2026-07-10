@@ -39,7 +39,7 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr std::string_view kPackageCacheContentVersion =
-    "package-cache-v6-scene-assets";
+    "package-cache-v8-scene-assets-imported-texture-paths";
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -819,6 +819,54 @@ bool readStringArray(const Json& value,
   return true;
 }
 
+bool parseHumanoidProfile(std::string_view value, world::HumanoidProfileKind& out) {
+  if (value == "mixamo" || value == "Mixamo") {
+    out = world::HumanoidProfileKind::Mixamo;
+    return true;
+  }
+  return false;
+}
+
+bool readHumanoidImportOptions(const Json& entry,
+                               detail::HumanoidImportOptions& out,
+                               std::string* diagnostic) {
+  const auto humanoid_it = entry.find("humanoid");
+  if (humanoid_it == entry.end() || humanoid_it->is_null()) {
+    return true;
+  }
+  if (!humanoid_it->is_object()) {
+    return fail(diagnostic, "humanoid must be an object");
+  }
+  if (!fieldAllowed(*humanoid_it, {"profile", "rig_key"}, "humanoid", diagnostic)) {
+    return false;
+  }
+  out.enabled = true;
+  std::string profile = "mixamo";
+  if (const auto profile_it = humanoid_it->find("profile");
+      profile_it != humanoid_it->end()) {
+    if (!profile_it->is_string()) {
+      return fail(diagnostic, "humanoid.profile must be a string");
+    }
+    profile = profile_it->get<std::string>();
+  }
+  if (!parseHumanoidProfile(profile, out.profile)) {
+    return fail(diagnostic, "unknown humanoid profile: " + profile);
+  }
+  if (const auto rig_key_it = humanoid_it->find("rig_key");
+      rig_key_it != humanoid_it->end()) {
+    if (!rig_key_it->is_string()) {
+      return fail(diagnostic, "humanoid.rig_key must be a string");
+    }
+    out.rig_key = rig_key_it->get<std::string>();
+  }
+  if (!out.rig_key.empty() && !AssetRegistry::isValidAssetKey(out.rig_key)) {
+    return fail(diagnostic,
+                "invalid humanoid rig key '" + out.rig_key + "': " +
+                    AssetRegistry::assetKeyValidationError(out.rig_key));
+  }
+  return true;
+}
+
 std::optional<rendering::FrameGraphDesc> parseFrameGraphDesc(
     const Json& root,
     std::string* diagnostic) {
@@ -1204,6 +1252,9 @@ bool keyAlreadyExists(const AssetRegistry& assets,
   if (type == "skin") {
     return assets.findSkin(key) != nullptr;
   }
+  if (type == "humanoid_rig") {
+    return assets.findHumanoidRig(key) != nullptr;
+  }
   return false;
 }
 
@@ -1300,6 +1351,13 @@ bool copyAssetTo(AssetRegistry& target,
     const world::Skin* skin = source.findSkin(asset.key);
     if (skin == nullptr || !target.registerSkin(asset.key, *skin)) {
       return fail(diagnostic, "failed to commit skin: " + asset.key);
+    }
+    return true;
+  }
+  if (asset.type == "humanoid_rig") {
+    const world::HumanoidRig* rig = source.findHumanoidRig(asset.key);
+    if (rig == nullptr || !target.registerHumanoidRig(asset.key, *rig)) {
+      return fail(diagnostic, "failed to commit humanoid rig: " + asset.key);
     }
     return true;
   }
@@ -1537,7 +1595,12 @@ bool importEntry(AssetRegistry& assets,
     if (!readGltfSceneMaterialOverrides(entry, load_options, diagnostic)) {
       return false;
     }
-    GltfSceneAsset scene = detail::importGltfSceneAsset(assets, key, source_path, load_options);
+    detail::HumanoidImportOptions humanoid_options{};
+    if (!readHumanoidImportOptions(entry, humanoid_options, diagnostic)) {
+      return false;
+    }
+    GltfSceneAsset scene =
+        detail::importGltfSceneAsset(assets, key, source_path, load_options, humanoid_options);
     if (scene.scene_key.empty()) {
       return fail(diagnostic, "failed to import glTF scene: " + source_path.string());
     }
@@ -1559,6 +1622,57 @@ bool importEntry(AssetRegistry& assets,
     }
     for (const std::string& child_key : scene.skin_keys) {
       addLoaded(handle, "skin", child_key);
+    }
+    for (const std::string& child_key : scene.humanoid_rig_keys) {
+      addLoaded(handle, "humanoid_rig", child_key);
+    }
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
+    return true;
+  }
+
+  if (type == "animation_clip") {
+    if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
+      return false;
+    }
+    detail::HumanoidImportOptions humanoid_options{};
+    if (!readHumanoidImportOptions(entry, humanoid_options, diagnostic)) {
+      return false;
+    }
+    std::string source_clip;
+    if (const auto clip_it = entry.find("clip"); clip_it != entry.end()) {
+      if (!clip_it->is_string()) {
+        return fail(diagnostic, "animation_clip.clip must be a string");
+      }
+      source_clip = clip_it->get<std::string>();
+    }
+    std::string display_name;
+    if (const auto name_it = entry.find("name"); name_it != entry.end()) {
+      if (!name_it->is_string()) {
+        return fail(diagnostic, "animation_clip.name must be a string");
+      }
+      display_name = name_it->get<std::string>();
+    }
+    detail::AnimationClipImportResult imported =
+        detail::importAnimationClipAsset(assets,
+                                         key,
+                                         source_path,
+                                         source_clip,
+                                         display_name,
+                                         humanoid_options);
+    if (imported.clip_key.empty()) {
+      return fail(diagnostic, "failed to import animation clip: " + source_path.string());
+    }
+    addLoaded(handle, "animation_clip", imported.clip_key);
+    for (const std::string& child_key : imported.skeleton_keys) {
+      addLoaded(handle, "skeleton", child_key);
+    }
+    for (const std::string& child_key : imported.humanoid_rig_keys) {
+      addLoaded(handle, "humanoid_rig", child_key);
     }
     logAssetPackageEntryDiag(manifest_path,
                              type,
@@ -1619,7 +1733,10 @@ std::string importerVersionForType(std::string_view type) {
     return std::string(detail::textureImporterVersion());
   }
   if (type == "mesh" || type == "gltf_scene") {
-    return "assimp-gltf-scene-v12:" + assimpVersionString();
+    return "assimp-gltf-scene-v13-full-pose-hierarchy:" + assimpVersionString();
+  }
+  if (type == "animation_clip") {
+    return "assimp-animation-clip-v4-full-pose-hierarchy:" + assimpVersionString();
   }
   if (type == "material") {
     return "material-loader-v2";
@@ -1664,38 +1781,67 @@ Json packageEntryCacheRecord(const Json& entry,
       if (!ec) {
         record["source_mtime"] = mtime.time_since_epoch().count();
       }
+      if (auto hash = hashFile(source); hash.has_value()) {
+        record["source_hash"] = *hash;
+      } else if (diagnostic != nullptr) {
+        *diagnostic = "failed to hash package source: " + source.string();
+      }
     }
-    auto append_shader_dependency =
-        [&](const char* label, const std::filesystem::path& shader_path) {
-      if (shader_path.empty()) {
+    auto append_dependency =
+        [&](const char* label, const std::filesystem::path& dependency_path) {
+      if (dependency_path.empty()) {
         return;
       }
       Json dependency{{"label", label},
-                      {"path", shader_path.lexically_normal().generic_string()}};
-      std::error_code shader_ec;
-      if (std::filesystem::exists(shader_path, shader_ec)) {
+                      {"path", dependency_path.lexically_normal().generic_string()}};
+      std::error_code dependency_ec;
+      if (std::filesystem::exists(dependency_path, dependency_ec)) {
         dependency["size"] =
-            static_cast<uint64_t>(std::filesystem::file_size(shader_path, shader_ec));
-        const auto mtime = std::filesystem::last_write_time(shader_path, shader_ec);
-        if (!shader_ec) {
+            static_cast<uint64_t>(
+                std::filesystem::file_size(dependency_path, dependency_ec));
+        const auto mtime =
+            std::filesystem::last_write_time(dependency_path, dependency_ec);
+        if (!dependency_ec) {
           dependency["mtime"] = mtime.time_since_epoch().count();
         }
-        if (auto hash = hashFile(shader_path); hash.has_value()) {
+        if (auto hash = hashFile(dependency_path); hash.has_value()) {
           dependency["hash"] = *hash;
         } else if (diagnostic != nullptr) {
-          *diagnostic = "failed to hash shader dependency: " + shader_path.string();
+          *diagnostic = "failed to hash asset dependency: " +
+                        dependency_path.string();
         }
       } else if (diagnostic != nullptr) {
-        *diagnostic = "failed to stat shader dependency: " + shader_path.string();
+        *diagnostic = "failed to stat asset dependency: " +
+                      dependency_path.string();
       }
       record["dependencies"].push_back(std::move(dependency));
     };
+    if (const auto dependencies_it = entry.find("dependencies");
+        dependencies_it != entry.end()) {
+      if (!dependencies_it->is_array()) {
+        if (diagnostic != nullptr) {
+          *diagnostic = "asset dependencies must be an array";
+        }
+        return record;
+      }
+      for (const Json& dependency : *dependencies_it) {
+        if (!dependency.is_string() || dependency.get_ref<const std::string&>().empty()) {
+          if (diagnostic != nullptr) {
+            *diagnostic = "asset dependency paths must be non-empty strings";
+          }
+          return record;
+        }
+        append_dependency(
+            "source",
+            resolveEntryPath(base_dir, dependency.get_ref<const std::string&>()));
+      }
+    }
     if (type == "material") {
       std::string material_diagnostic;
       if (auto material = loadMaterialAssetDesc(source, &material_diagnostic);
           material.has_value()) {
-        append_shader_dependency("vertex", material->pipeline.vertex_shader_path);
-        append_shader_dependency("fragment", material->pipeline.fragment_shader_path);
+        append_dependency("vertex", material->pipeline.vertex_shader_path);
+        append_dependency("fragment", material->pipeline.fragment_shader_path);
       } else if (diagnostic != nullptr && !material_diagnostic.empty()) {
         *diagnostic = material_diagnostic;
       }
@@ -1703,8 +1849,8 @@ Json packageEntryCacheRecord(const Json& entry,
       std::string pass_diagnostic;
       if (auto pass = loadShaderPassAssetDesc(source, &pass_diagnostic);
           pass.has_value()) {
-        append_shader_dependency("vertex", pass->pipeline.vertex_shader_path);
-        append_shader_dependency("fragment", pass->pipeline.fragment_shader_path);
+        append_dependency("vertex", pass->pipeline.vertex_shader_path);
+        append_dependency("fragment", pass->pipeline.fragment_shader_path);
       } else if (diagnostic != nullptr && !pass_diagnostic.empty()) {
         *diagnostic = pass_diagnostic;
       }
@@ -1965,6 +2111,10 @@ bool writePackageAssetBlob(AssetCache& cache,
     const world::Skin* skin = assets.findSkin(asset.key);
     return skin != nullptr && cache.writeSkin(asset.cache_blob_key, *skin, diagnostic);
   }
+  if (asset.type == "humanoid_rig") {
+    const world::HumanoidRig* rig = assets.findHumanoidRig(asset.key);
+    return rig != nullptr && cache.writeHumanoidRig(asset.cache_blob_key, *rig, diagnostic);
+  }
   return fail(diagnostic, "unsupported cache asset type: " + asset.type);
 }
 
@@ -2011,6 +2161,7 @@ Json packageCacheManifest(const AssetPackageHandle& handle,
             {"animation_clip", scene->animation_clip_keys},
             {"skeleton", scene->skeleton_keys},
             {"skin", scene->skin_keys},
+            {"humanoid_rig", scene->humanoid_rig_keys},
         };
       }
     }
@@ -2221,6 +2372,11 @@ bool restoreCachedAsset(AssetCache& cache,
     if (!skin.has_value() || !staging.registerSkin(record.key, std::move(*skin))) {
       return fail(diagnostic, "failed to restore cached skin: " + record.key);
     }
+  } else if (record.blob_type == "humanoid_rig") {
+    auto rig = cache.readHumanoidRig(record.blob_key, diagnostic);
+    if (!rig.has_value() || !staging.registerHumanoidRig(record.key, std::move(*rig))) {
+      return fail(diagnostic, "failed to restore cached humanoid rig: " + record.key);
+    }
   } else {
     return fail(diagnostic, "unsupported cached blob type: " + record.blob_type);
   }
@@ -2318,6 +2474,7 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
 
   AssetPackageHandle handle{};
   handle.manifest_path = manifest_path;
+  handle.restored_from_cache = true;
   std::size_t texture_job_index = 0u;
   for (std::size_t entry_index = 0u; entry_index < entries.size(); ++entry_index) {
     if (texture_job_index < texture_jobs.size() &&
@@ -2369,6 +2526,7 @@ std::optional<AssetPackageHandle> commitStagedPackage(AssetRegistry& target,
 
   AssetPackageHandle committed{};
   committed.manifest_path = staged.manifest_path;
+  committed.restored_from_cache = staged.restored_from_cache;
   for (const auto& asset : staged.assets) {
     if (move_assets && target.moveAssetFrom(staging, asset.type, asset.key)) {
       committed.assets.push_back(asset);
@@ -2948,6 +3106,8 @@ bool unloadAssetPackage(AssetRegistry& assets, const AssetPackageHandle& package
       removed_any = assets.unregisterSkeleton(it->key) || removed_any;
     } else if (it->type == "skin") {
       removed_any = assets.unregisterSkin(it->key) || removed_any;
+    } else if (it->type == "humanoid_rig") {
+      removed_any = assets.unregisterHumanoidRig(it->key) || removed_any;
     }
   }
   return removed_any;

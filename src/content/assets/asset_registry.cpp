@@ -110,6 +110,7 @@ struct AssetRegistry::Impl {
   std::unordered_map<std::string, world::AnimationClip> animation_clips;
   std::unordered_map<std::string, world::Skeleton> skeletons;
   std::unordered_map<std::string, world::Skin> skins;
+  std::unordered_map<std::string, world::HumanoidRig> humanoid_rigs;
   std::unordered_map<std::string, GltfSceneAsset> gltf_scenes;
   std::unordered_map<std::string, rendering::ShaderPassAssetDesc> shader_passes;
   std::unordered_map<std::string, rendering::FrameGraphDesc> frame_graphs;
@@ -192,6 +193,7 @@ void AssetRegistry::clear() {
   impl_->animation_clips.clear();
   impl_->skeletons.clear();
   impl_->skins.clear();
+  impl_->humanoid_rigs.clear();
   impl_->gltf_scenes.clear();
   impl_->shader_passes.clear();
   impl_->frame_graphs.clear();
@@ -361,6 +363,20 @@ bool AssetRegistry::moveAssetFrom(AssetRegistry& source,
       return false;
     }
     impl_->skins.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "humanoid_rig") {
+    if (impl_->humanoid_rigs.find(key) != impl_->humanoid_rigs.end()) {
+      return false;
+    }
+    auto node = source.impl_->humanoid_rigs.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->humanoid_rigs.insert(std::move(node));
     bumpVersion();
     source.bumpVersion();
     return true;
@@ -753,6 +769,27 @@ bool AssetRegistry::unregisterSkin(const std::string& key) {
 
 const world::Skin* AssetRegistry::findSkin(std::string_view key) const {
   return findInMap(impl_->skins, key);
+}
+
+bool AssetRegistry::registerHumanoidRig(const std::string& key, world::HumanoidRig rig) {
+  if (!isValidAssetKey(key)) {
+    return false;
+  }
+  impl_->humanoid_rigs[key] = std::move(rig);
+  bumpVersion();
+  return true;
+}
+
+bool AssetRegistry::unregisterHumanoidRig(const std::string& key) {
+  if (impl_->humanoid_rigs.erase(key) == 0) {
+    return false;
+  }
+  bumpVersion();
+  return true;
+}
+
+const world::HumanoidRig* AssetRegistry::findHumanoidRig(std::string_view key) const {
+  return findInMap(impl_->humanoid_rigs, key);
 }
 
 bool AssetRegistry::registerGltfSceneAsset(const std::string& key, GltfSceneAsset scene) {

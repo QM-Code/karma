@@ -369,7 +369,8 @@ Focused references:
 - [Explosion Prefab](docs/EXPLOSION_PREFAB.md)
 - [Explosion Stress Performance](docs/EXPLOSION_STRESS_PERF.md)
 - [Animation V2 Architecture](docs/ANIMATION_V2.md)
-- [Rigged glTF/GLB Authoring](docs/RIGGED_GLTF_AUTHORING.md)
+- [Rigged glTF/GLB and Mixamo FBX Authoring](docs/RIGGED_GLTF_AUTHORING.md)
+- [Animation Refactor Status](docs/ANIMATION_REFACTOR_STATUS.md)
 - [Volumetric Solid Transparency](docs/VOLUMETRIC_SPHERE_TRANSPARENCY.md)
 - [Debug Editor](docs/DEBUG_EDITOR.md)
 

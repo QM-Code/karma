@@ -22,6 +22,7 @@
 
 #include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
+#include <assimp/config.h>
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
@@ -35,10 +36,6 @@
 #include "gltf_scene_animation_import.h"
 #include "gltf_scene_mesh_import.h"
 #include "gltf_scene_skinning.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
 #include "karma/components.h"
 #include "karma/world.h"
 
@@ -1446,6 +1443,11 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
   prefab.source_path = path;
 
   Assimp::Importer importer;
+  // FBX pivot/helper nodes are an interchange-format implementation detail,
+  // not a useful runtime hierarchy. Evaluate them into ordinary node-local
+  // transforms so skeleton topology, rest poses, animation channels, and
+  // inverse bind matrices all use the same node space.
+  importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
   constexpr unsigned int kAssimpPostprocess =
       aiProcess_Triangulate | aiProcess_GenNormals |
       aiProcess_CalcTangentSpace;
@@ -1574,7 +1576,7 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
                      prefab.animations.size());
   if (prefab.animations.empty()) {
     stage_start = core::SteadyClock::now();
-    prefab.animations = loadAnimationClips(*scene, node_indices_by_name);
+    prefab.animations = loadAnimationClips(*scene, node_indices_by_name, &prefab);
     logGltfStartupDiag(path,
                        "assimp fallback animations",
                        stage_start,
@@ -1812,6 +1814,7 @@ GltfSceneImportResult instantiateGltfScenePrefab(
                                      result.morph_entities_by_node_index,
                                  .skeletons = prefab.skeletons,
                                  .skins = prefab.skins,
+                                 .humanoid_rigs = prefab.humanoid_rigs,
                                  .current_clip_index = 0,
                                  .time_seconds = 0.0f,
                                  .speed = 1.0f,
@@ -1835,6 +1838,7 @@ GltfSceneImportResult instantiateGltfScenePrefab(
                                    result.morph_entities_by_node_index,
                                .skeletons = prefab.skeletons,
                                .skins = prefab.skins,
+                               .humanoid_rigs = prefab.humanoid_rigs,
                                .current_clip_index = 0,
                                .time_seconds = 0.0f,
                                .speed = 1.0f,
@@ -2030,6 +2034,16 @@ GltfSceneImportResult instantiateGltfSceneAsset(
     }
     return skins;
   };
+  auto collect_humanoid_rigs = [&]() {
+    std::vector<world::HumanoidRig> rigs;
+    rigs.reserve(asset.humanoid_rig_keys.size());
+    for (const std::string& key : asset.humanoid_rig_keys) {
+      if (const world::HumanoidRig* rig = assets.findHumanoidRig(key)) {
+        rigs.push_back(*rig);
+      }
+    }
+    return rigs;
+  };
   auto attach_animator = [&](world::Entity root_entity) {
     std::vector<world::AnimationClip> clips = collect_animation_clips();
     if (clips.empty()) {
@@ -2042,6 +2056,7 @@ GltfSceneImportResult instantiateGltfSceneAsset(
                                    result.morph_entities_by_node_index,
                                .skeletons = collect_skeletons(),
                                .skins = collect_skins(),
+                               .humanoid_rigs = collect_humanoid_rigs(),
                                .current_clip_index = 0,
                                .time_seconds = 0.0f,
                                .speed = 1.0f,

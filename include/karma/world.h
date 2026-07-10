@@ -1080,6 +1080,7 @@ class SystemGraph {
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 
@@ -1149,7 +1150,7 @@ struct AnimationTrack {
 /// \ingroup karma_animation
 /// Node transform animation channel.
 struct AnimationChannel {
-  uint32_t target_node_index = 0;
+  uint32_t target_node_index = kInvalidAnimationIndex;
   uint32_t target_skin_index = kInvalidAnimationIndex;
   uint32_t target_joint_index = kInvalidAnimationIndex;
   InterpolationMode position_interpolation = InterpolationMode::Linear;
@@ -1193,7 +1194,9 @@ struct Joint {
   std::string name;
   uint32_t parent_joint_index = kInvalidAnimationIndex;
   uint32_t node_index = kInvalidAnimationIndex;
-  glm::mat4 inverse_bind_matrix{1.0f};
+  math::Vec3 rest_local_position{};
+  math::Quat rest_local_rotation{};
+  math::Vec3 rest_local_scale{1.0f, 1.0f, 1.0f};
 };
 
 /// \ingroup karma_animation
@@ -1211,6 +1214,120 @@ struct Skin {
   uint32_t skeleton_index = kInvalidAnimationIndex;
   std::vector<uint32_t> joint_node_indices;
   std::vector<glm::mat4> inverse_bind_matrices;
+};
+
+/// \ingroup karma_animation
+/// Semantic humanoid bone identifiers used by rig binding and retargeting.
+enum class HumanoidBone : uint16_t {
+  Root,
+  Hips,
+  Spine,
+  Chest,
+  UpperChest,
+  Neck,
+  Head,
+  LeftShoulder,
+  LeftUpperArm,
+  LeftLowerArm,
+  LeftHand,
+  RightShoulder,
+  RightUpperArm,
+  RightLowerArm,
+  RightHand,
+  LeftUpperLeg,
+  LeftLowerLeg,
+  LeftFoot,
+  LeftToe,
+  RightUpperLeg,
+  RightLowerLeg,
+  RightFoot,
+  RightToe,
+  LeftThumbProximal,
+  LeftThumbIntermediate,
+  LeftThumbDistal,
+  LeftIndexProximal,
+  LeftIndexIntermediate,
+  LeftIndexDistal,
+  LeftMiddleProximal,
+  LeftMiddleIntermediate,
+  LeftMiddleDistal,
+  LeftRingProximal,
+  LeftRingIntermediate,
+  LeftRingDistal,
+  LeftLittleProximal,
+  LeftLittleIntermediate,
+  LeftLittleDistal,
+  RightThumbProximal,
+  RightThumbIntermediate,
+  RightThumbDistal,
+  RightIndexProximal,
+  RightIndexIntermediate,
+  RightIndexDistal,
+  RightMiddleProximal,
+  RightMiddleIntermediate,
+  RightMiddleDistal,
+  RightRingProximal,
+  RightRingIntermediate,
+  RightRingDistal,
+  RightLittleProximal,
+  RightLittleIntermediate,
+  RightLittleDistal,
+};
+
+/// \ingroup karma_animation
+/// Built-in humanoid profile presets.
+enum class HumanoidProfileKind : uint8_t {
+  Mixamo,
+};
+
+/// \ingroup karma_animation
+/// Name aliases for one semantic humanoid bone in a profile.
+struct HumanoidProfileBone {
+  HumanoidBone bone = HumanoidBone::Root;
+  bool required = false;
+  std::vector<std::string> aliases;
+};
+
+/// \ingroup karma_animation
+/// Name-binding profile used to create a semantic rig from an imported skeleton.
+struct HumanoidProfile {
+  HumanoidProfileKind kind = HumanoidProfileKind::Mixamo;
+  std::string name;
+  std::vector<HumanoidProfileBone> bones;
+};
+
+/// \ingroup karma_animation
+/// One semantic humanoid binding to a skeleton joint.
+struct HumanoidBoneBinding {
+  HumanoidBone bone = HumanoidBone::Root;
+  uint32_t joint_index = kInvalidAnimationIndex;
+  std::string joint_name;
+};
+
+/// \ingroup karma_animation
+/// Skeleton, authored semantic contract, and resolved humanoid joint bindings.
+struct HumanoidRig {
+  std::string name;
+  uint32_t skeleton_index = kInvalidAnimationIndex;
+  std::string skeleton_key;
+  Skeleton skeleton;
+  HumanoidProfile profile;
+  std::vector<HumanoidBoneBinding> bindings;
+};
+
+/// \ingroup karma_animation
+/// Diagnostic detail emitted by humanoid binding and retargeting helpers.
+struct HumanoidRetargetDiagnostic {
+  std::vector<HumanoidBone> missing_required_bones;
+  std::vector<HumanoidBone> optional_unmapped_bones;
+  std::vector<HumanoidBone> duplicate_bindings;
+  std::vector<uint32_t> channels_skipped;
+  std::vector<std::string> messages;
+
+  bool valid() const {
+    return missing_required_bones.empty() && duplicate_bindings.empty() &&
+           messages.empty();
+  }
 };
 
 /// \ingroup karma_animation
@@ -1383,6 +1500,16 @@ enum class RetargetRootScalePolicy : uint8_t {
 struct RetargetOptions {
   RetargetRootScalePolicy root_scale_policy = RetargetRootScalePolicy::None;
   float root_translation_scale = 1.0f;
+  uint32_t translation_scale_source_joint_index = kInvalidAnimationIndex;
+  bool copy_unmapped_channels = false;
+};
+
+/// \ingroup karma_animation
+/// Options for semantic humanoid retargeting.
+struct HumanoidRetargetOptions {
+  RetargetRootScalePolicy root_scale_policy = RetargetRootScalePolicy::None;
+  float root_translation_scale = 1.0f;
+  bool derive_root_translation_scale_from_height = true;
   bool copy_unmapped_channels = false;
 };
 
@@ -1398,6 +1525,55 @@ AnimationClip retargetClip(const AnimationClip& source_clip,
                            const Skeleton& target_skeleton,
                            const SkeletonMap& map,
                            const RetargetOptions& options = {});
+
+/// Returns a built-in humanoid profile.
+HumanoidProfile builtinHumanoidProfile(HumanoidProfileKind kind);
+
+/// Binds a skeleton to a semantic humanoid profile by matching joint names.
+HumanoidRig bindHumanoidRig(const Skeleton& skeleton,
+                            const HumanoidProfile& profile,
+                            uint32_t skeleton_index = kInvalidAnimationIndex,
+                            std::string_view skeleton_key = {},
+                            HumanoidRetargetDiagnostic* diagnostic = nullptr);
+
+/// Computes semantic rig height from the current rest hierarchy and bindings.
+float humanoidRigHeight(const HumanoidRig& rig);
+
+/// Validates required and duplicate semantic humanoid bindings.
+bool validateHumanoidRig(const HumanoidRig& rig,
+                         const Skeleton& skeleton,
+                         const HumanoidProfile& profile,
+                         HumanoidRetargetDiagnostic* diagnostic = nullptr);
+
+/// Builds a joint map by matching semantic humanoid bindings.
+SkeletonMap buildHumanoidSkeletonMap(const Skeleton& source_skeleton,
+                                     const HumanoidRig& source_rig,
+                                     const Skeleton& target_skeleton,
+                                     const HumanoidRig& target_rig,
+                                     HumanoidRetargetDiagnostic* diagnostic = nullptr);
+
+/// Builds a joint map from skeleton snapshots stored on the rigs.
+SkeletonMap buildHumanoidSkeletonMap(const HumanoidRig& source_rig,
+                                     const HumanoidRig& target_rig,
+                                     HumanoidRetargetDiagnostic* diagnostic = nullptr);
+
+/// Retargets a clip through semantic humanoid bindings.
+AnimationClip retargetHumanoidClip(
+    const AnimationClip& source_clip,
+    const Skeleton& source_skeleton,
+    const HumanoidRig& source_rig,
+    const Skeleton& target_skeleton,
+    const HumanoidRig& target_rig,
+    const HumanoidRetargetOptions& options = {},
+    HumanoidRetargetDiagnostic* diagnostic = nullptr);
+
+/// Retargets a clip through skeleton snapshots stored on the rigs.
+AnimationClip retargetHumanoidClip(
+    const AnimationClip& source_clip,
+    const HumanoidRig& source_rig,
+    const HumanoidRig& target_rig,
+    const HumanoidRetargetOptions& options = {},
+    HumanoidRetargetDiagnostic* diagnostic = nullptr);
 
 }  // namespace karma::world
 

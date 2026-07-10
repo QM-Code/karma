@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -23,7 +24,7 @@ namespace {
 
 using Json = nlohmann::json;
 
-constexpr std::array<char, 8> kMagic{'K', 'A', 'S', 'S', 'E', 'T', '0', '2'};
+constexpr std::array<char, 8> kMagic{'K', 'A', 'S', 'S', 'E', 'T', '0', '3'};
 constexpr uint32_t kKindMaterialAsset = 3u;
 constexpr uint32_t kKindMaterialVariant = 4u;
 constexpr uint32_t kKindParticleEffect = 5u;
@@ -31,6 +32,7 @@ constexpr uint32_t kKindGltfScene = 6u;
 constexpr uint32_t kKindAnimationClip = 7u;
 constexpr uint32_t kKindSkeleton = 8u;
 constexpr uint32_t kKindSkin = 9u;
+constexpr uint32_t kKindHumanoidRig = 10u;
 constexpr uint32_t kChunkJson = 0x4a534f4eu;      // JSON
 constexpr uint32_t kChunkAnimationClip = 0x414e494du;  // ANIM
 
@@ -1190,6 +1192,7 @@ Json gltfSceneJson(const GltfSceneAsset& scene) {
       {"animation_clip_keys", stringVectorJson(scene.animation_clip_keys)},
       {"skeleton_keys", stringVectorJson(scene.skeleton_keys)},
       {"skin_keys", stringVectorJson(scene.skin_keys)},
+      {"humanoid_rig_keys", stringVectorJson(scene.humanoid_rig_keys)},
       {"scene_key", scene.scene_key},
   };
 }
@@ -1210,7 +1213,8 @@ bool readGltfSceneJson(const Json& json, GltfSceneAsset& scene) {
       !readStringVectorJson(json.value("material_keys", Json::array()), parsed.material_keys) ||
       !readStringVectorJson(json.value("animation_clip_keys", Json::array()), parsed.animation_clip_keys) ||
       !readStringVectorJson(json.value("skeleton_keys", Json::array()), parsed.skeleton_keys) ||
-      !readStringVectorJson(json.value("skin_keys", Json::array()), parsed.skin_keys)) {
+      !readStringVectorJson(json.value("skin_keys", Json::array()), parsed.skin_keys) ||
+      !readStringVectorJson(json.value("humanoid_rig_keys", Json::array()), parsed.humanoid_rig_keys)) {
     return false;
   }
   scene = std::move(parsed);
@@ -1707,7 +1711,9 @@ Json skeletonJson(const world::Skeleton& skeleton) {
         {"name", joint.name},
         {"parent_joint_index", joint.parent_joint_index},
         {"node_index", joint.node_index},
-        {"inverse_bind_matrix", mat4Json(joint.inverse_bind_matrix)},
+        {"rest_local_position", mathVec3Json(joint.rest_local_position)},
+        {"rest_local_rotation", quatJson(joint.rest_local_rotation)},
+        {"rest_local_scale", mathVec3Json(joint.rest_local_scale)},
     });
   }
   return Json{{"name", skeleton.name},
@@ -1738,11 +1744,70 @@ bool readSkeletonJson(const Json& json, world::Skeleton& skeleton) {
     joint.parent_joint_index =
         joint_json.value("parent_joint_index", world::kInvalidAnimationIndex);
     joint.node_index = joint_json.value("node_index", world::kInvalidAnimationIndex);
-    if (!readMat4Json(joint_json.value("inverse_bind_matrix", mat4Json(glm::mat4(1.0f))),
-                      joint.inverse_bind_matrix)) {
+    if (!readMathVec3Json(joint_json.value("rest_local_position", mathVec3Json(joint.rest_local_position)),
+                          joint.rest_local_position) ||
+        !readQuatJson(joint_json.value("rest_local_rotation", quatJson(joint.rest_local_rotation)),
+                      joint.rest_local_rotation) ||
+        !readMathVec3Json(joint_json.value("rest_local_scale", mathVec3Json(joint.rest_local_scale)),
+                          joint.rest_local_scale)) {
       return false;
     }
     parsed.joints.push_back(std::move(joint));
+  }
+
+  std::vector<uint32_t> expected_roots;
+  std::vector<uint8_t> state(parsed.joints.size(), 0u);
+  for (uint32_t joint_index = 0u; joint_index < parsed.joints.size(); ++joint_index) {
+    const world::Joint& joint = parsed.joints[joint_index];
+    if (joint.parent_joint_index == world::kInvalidAnimationIndex) {
+      expected_roots.push_back(joint_index);
+    } else if (joint.parent_joint_index >= parsed.joints.size() ||
+               joint.parent_joint_index == joint_index) {
+      return false;
+    }
+    const float values[] = {
+        joint.rest_local_position.x,
+        joint.rest_local_position.y,
+        joint.rest_local_position.z,
+        joint.rest_local_rotation.x,
+        joint.rest_local_rotation.y,
+        joint.rest_local_rotation.z,
+        joint.rest_local_rotation.w,
+        joint.rest_local_scale.x,
+        joint.rest_local_scale.y,
+        joint.rest_local_scale.z,
+    };
+    if (std::any_of(std::begin(values), std::end(values), [](float value) {
+          return !std::isfinite(value);
+        })) {
+      return false;
+    }
+  }
+  auto visit = [&](auto&& self, uint32_t joint_index) -> bool {
+    if (state[joint_index] == 2u) {
+      return true;
+    }
+    if (state[joint_index] == 1u) {
+      return false;
+    }
+    state[joint_index] = 1u;
+    const uint32_t parent = parsed.joints[joint_index].parent_joint_index;
+    if (parent != world::kInvalidAnimationIndex && !self(self, parent)) {
+      return false;
+    }
+    state[joint_index] = 2u;
+    return true;
+  };
+  for (uint32_t joint_index = 0u; joint_index < parsed.joints.size(); ++joint_index) {
+    if (!visit(visit, joint_index)) {
+      return false;
+    }
+  }
+  std::sort(expected_roots.begin(), expected_roots.end());
+  std::vector<uint32_t> declared_roots = parsed.root_joint_indices;
+  std::sort(declared_roots.begin(), declared_roots.end());
+  if (declared_roots != expected_roots) {
+    return false;
   }
   skeleton = std::move(parsed);
   return true;
@@ -1769,6 +1834,115 @@ bool readSkinJson(const Json& json, world::Skin& skin) {
     return false;
   }
   skin = std::move(parsed);
+  return true;
+}
+
+Json humanoidBindingJson(const world::HumanoidBoneBinding& binding) {
+  return Json{
+      {"bone", static_cast<uint32_t>(binding.bone)},
+      {"joint_index", binding.joint_index},
+      {"joint_name", binding.joint_name},
+  };
+}
+
+Json humanoidProfileBoneJson(const world::HumanoidProfileBone& bone) {
+  return Json{
+      {"bone", static_cast<uint32_t>(bone.bone)},
+      {"required", bone.required},
+      {"aliases", stringVectorJson(bone.aliases)},
+  };
+}
+
+bool readHumanoidProfileBoneJson(const Json& json,
+                                 world::HumanoidProfileBone& bone) {
+  if (!json.is_object()) {
+    return false;
+  }
+  const uint32_t bone_value = json.value("bone", 0u);
+  if (bone_value > static_cast<uint32_t>(world::HumanoidBone::RightLittleDistal)) {
+    return false;
+  }
+  world::HumanoidProfileBone parsed{};
+  parsed.bone = static_cast<world::HumanoidBone>(bone_value);
+  parsed.required = json.value("required", false);
+  if (!readStringVectorJson(json.value("aliases", Json::array()), parsed.aliases)) {
+    return false;
+  }
+  bone = std::move(parsed);
+  return true;
+}
+
+Json humanoidProfileJson(const world::HumanoidProfile& profile) {
+  return Json{
+      {"kind", static_cast<uint32_t>(profile.kind)},
+      {"name", profile.name},
+      {"bones", vectorJson(profile.bones, humanoidProfileBoneJson)},
+  };
+}
+
+bool readHumanoidProfileJson(const Json& json, world::HumanoidProfile& profile) {
+  if (!json.is_object()) {
+    return false;
+  }
+  const uint32_t kind_value = json.value("kind", 0u);
+  if (kind_value > static_cast<uint32_t>(world::HumanoidProfileKind::Mixamo)) {
+    return false;
+  }
+  world::HumanoidProfile parsed{};
+  parsed.kind = static_cast<world::HumanoidProfileKind>(kind_value);
+  parsed.name = json.value("name", std::string{});
+  if (!readVectorJson(json.value("bones", Json::array()),
+                      parsed.bones,
+                      readHumanoidProfileBoneJson)) {
+    return false;
+  }
+  profile = std::move(parsed);
+  return true;
+}
+
+bool readHumanoidBindingJson(const Json& json, world::HumanoidBoneBinding& binding) {
+  if (!json.is_object()) {
+    return false;
+  }
+  const uint32_t bone_value = json.value("bone", 0u);
+  if (bone_value > static_cast<uint32_t>(world::HumanoidBone::RightLittleDistal)) {
+    return false;
+  }
+  world::HumanoidBoneBinding parsed{};
+  parsed.bone = static_cast<world::HumanoidBone>(bone_value);
+  parsed.joint_index = json.value("joint_index", parsed.joint_index);
+  parsed.joint_name = json.value("joint_name", std::string{});
+  binding = std::move(parsed);
+  return true;
+}
+
+Json humanoidRigJson(const world::HumanoidRig& rig) {
+  return Json{
+      {"name", rig.name},
+      {"skeleton_index", rig.skeleton_index},
+      {"skeleton_key", rig.skeleton_key},
+      {"skeleton", skeletonJson(rig.skeleton)},
+      {"profile", humanoidProfileJson(rig.profile)},
+      {"bindings", vectorJson(rig.bindings, humanoidBindingJson)},
+  };
+}
+
+bool readHumanoidRigJson(const Json& json, world::HumanoidRig& rig) {
+  if (!json.is_object()) {
+    return false;
+  }
+  world::HumanoidRig parsed{};
+  parsed.name = json.value("name", std::string{});
+  parsed.skeleton_index = json.value("skeleton_index", parsed.skeleton_index);
+  parsed.skeleton_key = json.value("skeleton_key", std::string{});
+  if (!readSkeletonJson(json.value("skeleton", Json::object()), parsed.skeleton) ||
+      !readHumanoidProfileJson(json.value("profile", Json::object()), parsed.profile) ||
+      !readVectorJson(json.value("bindings", Json::array()),
+                      parsed.bindings,
+                      readHumanoidBindingJson)) {
+    return false;
+  }
+  rig = std::move(parsed);
   return true;
 }
 
@@ -1946,6 +2120,19 @@ std::optional<world::Skin> deserializeSkin(const std::vector<uint8_t>& bytes,
                                                kKindSkin,
                                                readSkinJson,
                                                diagnostic);
+}
+
+std::vector<uint8_t> serializeHumanoidRig(const world::HumanoidRig& rig) {
+  return serializeJsonAsset(kKindHumanoidRig, humanoidRigJson(rig));
+}
+
+std::optional<world::HumanoidRig> deserializeHumanoidRig(
+    const std::vector<uint8_t>& bytes,
+    std::string* diagnostic) {
+  return deserializeJsonAsset<world::HumanoidRig>(bytes,
+                                                  kKindHumanoidRig,
+                                                  readHumanoidRigJson,
+                                                  diagnostic);
 }
 
 }  // namespace karma::assets::detail

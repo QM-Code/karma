@@ -333,41 +333,41 @@ void testAntiAliasingSettingsDefaultsAndClamp() {
   assert(defaults.msaa_samples == 4u);
   assert(nearly(defaults.ssaa_scale, 2.0f));
 
-  const auto none = karma::rendering::clampAntiAliasingSettings(defaults);
+  const auto none = karma::rendering::AntiAliasingSettings::none();
   assert(none.mode == karma::rendering::AntiAliasingMode::None);
   assert(none.msaa_samples == 1u);
   assert(nearly(none.ssaa_scale, 1.0f));
 
-  auto msaa = karma::rendering::AntiAliasingSettings{};
-  msaa.mode = karma::rendering::AntiAliasingMode::MSAA;
-  msaa.msaa_samples = 3u;
-  msaa.ssaa_scale = 3.0f;
-  msaa = karma::rendering::clampAntiAliasingSettings(msaa);
+  const auto msaa = karma::rendering::AntiAliasingSettings::msaa(3u);
   assert(msaa.mode == karma::rendering::AntiAliasingMode::MSAA);
   assert(msaa.msaa_samples == 4u);
   assert(nearly(msaa.ssaa_scale, 1.0f));
 
-  auto ssaa = karma::rendering::AntiAliasingSettings{};
-  ssaa.mode = karma::rendering::AntiAliasingMode::SSAA;
-  ssaa.msaa_samples = 8u;
-  ssaa.ssaa_scale = 8.0f;
-  ssaa = karma::rendering::clampAntiAliasingSettings(ssaa);
+  const auto ssaa = karma::rendering::AntiAliasingSettings::ssaa(8.0f);
   assert(ssaa.mode == karma::rendering::AntiAliasingMode::SSAA);
   assert(ssaa.msaa_samples == 1u);
   assert(nearly(ssaa.ssaa_scale, 4.0f));
 
-  ssaa.mode = karma::rendering::AntiAliasingMode::SSAA;
-  ssaa.ssaa_scale = 0.75f;
-  ssaa = karma::rendering::clampAntiAliasingSettings(ssaa);
-  assert(ssaa.mode == karma::rendering::AntiAliasingMode::None);
-  assert(ssaa.msaa_samples == 1u);
-  assert(nearly(ssaa.ssaa_scale, 1.0f));
+  const auto disabled_ssaa = karma::rendering::AntiAliasingSettings::ssaa(0.75f);
+  assert(disabled_ssaa.mode == karma::rendering::AntiAliasingMode::None);
+  assert(disabled_ssaa.msaa_samples == 1u);
+  assert(nearly(disabled_ssaa.ssaa_scale, 1.0f));
 
-  ssaa.mode = karma::rendering::AntiAliasingMode::SSAA;
-  ssaa.ssaa_scale = std::numeric_limits<float>::quiet_NaN();
-  ssaa = karma::rendering::clampAntiAliasingSettings(ssaa);
-  assert(ssaa.mode == karma::rendering::AntiAliasingMode::None);
-  assert(nearly(ssaa.ssaa_scale, 1.0f));
+  auto raw_ssaa = karma::rendering::AntiAliasingSettings{};
+  raw_ssaa.mode = karma::rendering::AntiAliasingMode::SSAA;
+  raw_ssaa.ssaa_scale = std::numeric_limits<float>::quiet_NaN();
+  raw_ssaa = karma::rendering::clampAntiAliasingSettings(raw_ssaa);
+  assert(raw_ssaa.mode == karma::rendering::AntiAliasingMode::None);
+  assert(nearly(raw_ssaa.ssaa_scale, 1.0f));
+
+  auto raw_msaa = karma::rendering::AntiAliasingSettings{};
+  raw_msaa.mode = karma::rendering::AntiAliasingMode::MSAA;
+  raw_msaa.msaa_samples = 3u;
+  raw_msaa.ssaa_scale = 3.0f;
+  raw_msaa = karma::rendering::clampAntiAliasingSettings(raw_msaa);
+  assert(raw_msaa.mode == msaa.mode);
+  assert(raw_msaa.msaa_samples == msaa.msaa_samples);
+  assert(nearly(raw_msaa.ssaa_scale, msaa.ssaa_scale));
 }
 
 void testRendererSettingsClampNonFiniteValues() {
@@ -482,9 +482,7 @@ void testUIDrawDataValidation() {
 void testCameraDataCarriesAntiAliasingSettings() {
   karma::components::CameraComponent camera{};
   karma::components::TransformComponent transform{};
-  camera.anti_aliasing.mode = karma::rendering::AntiAliasingMode::MSAA;
-  camera.anti_aliasing.msaa_samples = 8u;
-  camera.anti_aliasing.ssaa_scale = 3.0f;
+  camera.anti_aliasing = karma::rendering::AntiAliasingSettings::msaa(8u);
 
   const karma::rendering::CameraData data =
       karma::rendering::render_system::toCameraData(camera, transform, 1.0f);
@@ -542,8 +540,7 @@ void testFrameGraphCopyAndSceneMaskContractsForAaCameras() {
   karma::components::CameraComponent camera{};
   karma::components::TransformComponent transform{};
   camera.frame_graph_key = "aa_graph";
-  camera.anti_aliasing.mode = karma::rendering::AntiAliasingMode::SSAA;
-  camera.anti_aliasing.ssaa_scale = 2.0f;
+  camera.anti_aliasing = karma::rendering::AntiAliasingSettings::ssaa(2.0f);
 
   const karma::rendering::CameraData data =
       karma::rendering::render_system::toCameraData(camera, transform, 1.0f);

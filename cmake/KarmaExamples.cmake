@@ -99,6 +99,9 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_graphical_example(animation_gltf animation gltf
     examples/animation/gltf.cpp
     examples/common/scene_helpers.cpp)
+  karma_add_graphical_example(animation_humanoid_rpg animation humanoid_rpg
+    examples/animation/humanoid_rpg.cpp
+    examples/common/scene_helpers.cpp)
 
   karma_add_graphical_example(particles_billboard particles billboard
     examples/particles/billboard.cpp)

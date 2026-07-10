@@ -82,9 +82,9 @@ cmake -B build \
   -DKARMA_FETCH_DEPS=OFF
 ```
 
-Fetched Assimp builds only GLTF/GLB, OBJ, and STL importers by default through
-`KARMA_ASSIMP_MINIMAL_IMPORTERS=ON`. Disable that option if you need broad
-Assimp format coverage from the fetched dependency.
+Fetched Assimp builds only GLTF/GLB, FBX, OBJ, and STL importers by default
+through `KARMA_ASSIMP_MINIMAL_IMPORTERS=ON`. Disable that option if you need
+broad Assimp format coverage from the fetched dependency.
 
 Optional demo:
 
@@ -1084,12 +1084,12 @@ Current limitation:
 - custom material pipelines do not support arbitrary vertex layouts, geometry or tessellation stages, compute materials, or material graphs
 - hot reload is not implemented for `.mat` files
 
-## glTF Scene Import
-Karma imports authored glTF scenes through asset packages. This is distinct from
-flat mesh assets: a package `mesh` entry registers a shared mesh key for
-`MeshComponent::mesh_asset_key`, while a `gltf_scene` entry registers scene
-metadata plus deterministic child mesh, material, texture, animation, skeleton,
-and skin assets.
+## Authored Scene And Animation Import
+Karma imports authored glTF/GLB and FBX scenes through asset packages. This is
+distinct from flat mesh assets: a package `mesh` entry registers a shared mesh
+key for `MeshComponent::mesh_asset_key`, while a `gltf_scene` entry registers
+scene metadata plus deterministic child mesh, material, texture, animation,
+skeleton, skin, and optional humanoid rig assets.
 
 Declare the source in `assets.package.json`:
 
@@ -1107,6 +1107,42 @@ Declare the source in `assets.package.json`:
   ]
 }
 ```
+
+Standalone animation files use `animation_clip`. The optional `clip` field
+selects a source animation by name, while `name` sets its runtime display name.
+The built-in `mixamo` profile can bind semantic rigs for both an FBX model and a
+standalone FBX clip:
+
+```json
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "gltf_scene",
+      "key": "game/hero",
+      "path": "Character.fbx",
+      "dependencies": ["textures/hero_basecolor.png"],
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "game/hero/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "game/animations/stride",
+      "path": "stride.fbx",
+      "name": "Stride",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "game/animations/stride/rig"
+      }
+    }
+  ]
+}
+```
+
+List external FBX textures or glTF buffers/images in `dependencies`. Package
+cache keys content-hash both the primary source and these declared files.
 
 Load the package and instantiate the registered scene asset:
 
@@ -1138,7 +1174,7 @@ if (imported.valid()) {
 
 Current behavior:
 
-- one structural ECS entity is created for each imported glTF node
+- one structural ECS entity is created for each imported source node
 - imported local transforms are preserved and `world::updateWorldTransforms(...)`
   composes final world transforms
 - imported lights become `LightComponent`s on those node entities
@@ -1158,23 +1194,28 @@ Current behavior:
 
 Animation asset boundary:
 
-- a source `.glb` or `.gltf` is only an import container
+- a source `.glb`, `.gltf`, or `.fbx` is only an import container
 - `gltf_scene` package entries register clips as
   `karma::world::AnimationClip` assets and store their keys on
   `GltfSceneAsset`
+- `animation_clip` entries register a selected standalone clip without
+  instantiating a model; a `humanoid` block also registers its source skeleton
+  and semantic rig; gameplay copies or retargets the registered clip into an
+  animator
 - `instantiateGltfSceneAsset(...)` resolves those clip keys and copies the
   clips into `AnimatorComponent::clips`
 - clips do not own renderer resources, mesh resources, or file handles
 - imported clips still target the source node/skeleton index space until they
   are retargeted
-- reusable humanoid animation libraries should retarget source clips into each
-  target rig with an explicit `SkeletonMap`
+- Mixamo packages can register built-in semantic `HumanoidRig` assets and use
+  `retargetHumanoidClip(...)`; custom rigs may use an authored
+  `HumanoidProfile` or explicit `SkeletonMap`
 
 Animation runtime flow:
 
 - `AnimationSystem` samples imported clips on the root `AnimatorComponent`
-- transform channels write `LocalTransformComponent` values on imported node
-  entities
+- transform channels write local values on `TransformComponent` instances
+  attached to imported node entities
 - morph-weight channels write `DeformableMeshComponent::morph_weights` on the
   matching renderable primitive entities
 - `world::updateWorldTransforms(...)` composes final world transforms after
@@ -1199,11 +1240,11 @@ Current limitations:
 - imported material alpha and double-sided metadata are preserved in generated material assets
 - glTF/GLB light scaling is currently importer-defined, not configurable per asset
 - cameras are not imported yet
-- humanoid semantic retarget profiles are not implemented; retargeting uses
-  explicit skeleton maps
+- Mixamo is the only built-in humanoid semantic profile; other rigs require an
+  authored profile or explicit skeleton map
 
 See [Animation V2 Architecture](ANIMATION_V2.md) and
-[Rigged glTF/GLB Authoring](RIGGED_GLTF_AUTHORING.md) for the full animation
+[Rigged Animation Authoring](RIGGED_GLTF_AUTHORING.md) for the full animation
 runtime and asset-authoring contracts.
 
 ## Rendering Features

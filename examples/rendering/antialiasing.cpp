@@ -268,13 +268,23 @@ class AntiAliasingExample final : public app::GameInterface {
     msaa_sample_index_ = std::clamp(msaa_sample_index_, 0, 2);
     ssaa_scale_ = std::clamp(ssaa_scale_, 1.0f, 4.0f);
 
-    rendering::AntiAliasingSettings settings{};
-    settings.mode = static_cast<rendering::AntiAliasingMode>(aa_mode_);
-    settings.msaa_samples = kSamples[static_cast<size_t>(msaa_sample_index_)];
-    settings.ssaa_scale = ssaa_scale_;
+    rendering::AntiAliasingSettings settings = rendering::AntiAliasingSettings::none();
+    switch (static_cast<rendering::AntiAliasingMode>(aa_mode_)) {
+      case rendering::AntiAliasingMode::MSAA:
+        settings = rendering::AntiAliasingSettings::msaa(
+            kSamples[static_cast<size_t>(msaa_sample_index_)]);
+        break;
+      case rendering::AntiAliasingMode::SSAA:
+        settings = rendering::AntiAliasingSettings::ssaa(ssaa_scale_);
+        break;
+      case rendering::AntiAliasingMode::None:
+      default:
+        settings = rendering::AntiAliasingSettings::none();
+        break;
+    }
 
     auto& camera = world->get<components::CameraComponent>(camera_entity_);
-    camera.anti_aliasing = rendering::clampAntiAliasingSettings(settings);
+    camera.anti_aliasing = settings;
   }
 
   void updateSpokes() {

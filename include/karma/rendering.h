@@ -484,6 +484,13 @@ struct AntiAliasingSettings {
   AntiAliasingMode mode = AntiAliasingMode::None;
   uint32_t msaa_samples = 4u;
   float ssaa_scale = 2.0f;
+
+  /// Returns normalized disabled anti-aliasing settings.
+  static AntiAliasingSettings none();
+  /// Returns a normalized MSAA request. Samples clamp to 2x, 4x, or 8x.
+  static AntiAliasingSettings msaa(uint32_t samples = 4u);
+  /// Returns a normalized SSAA request. Scale clamps to [1, 4], and 1x disables SSAA.
+  static AntiAliasingSettings ssaa(float scale = 2.0f);
 };
 
 inline uint32_t clampRequestedMsaaSamples(uint32_t samples) {
@@ -521,6 +528,24 @@ inline AntiAliasingSettings clampAntiAliasingSettings(AntiAliasingSettings setti
       settings.ssaa_scale = 1.0f;
       return settings;
   }
+}
+
+inline AntiAliasingSettings AntiAliasingSettings::none() {
+  return clampAntiAliasingSettings({});
+}
+
+inline AntiAliasingSettings AntiAliasingSettings::msaa(uint32_t samples) {
+  AntiAliasingSettings settings{};
+  settings.mode = AntiAliasingMode::MSAA;
+  settings.msaa_samples = samples;
+  return clampAntiAliasingSettings(settings);
+}
+
+inline AntiAliasingSettings AntiAliasingSettings::ssaa(float scale) {
+  AntiAliasingSettings settings{};
+  settings.mode = AntiAliasingMode::SSAA;
+  settings.ssaa_scale = scale;
+  return clampAntiAliasingSettings(settings);
 }
 
 }  // namespace karma::rendering

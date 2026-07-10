@@ -1,5 +1,6 @@
 #include "asset_source_import.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -84,6 +85,45 @@ std::string childKey(const std::string& parent,
                      std::string_view kind,
                      std::size_t index) {
   return parent + "/" + std::string(kind) + "/" + std::to_string(index);
+}
+
+bool validateHumanoidImportRig(const world::HumanoidRig& rig,
+                               const world::Skeleton& skeleton,
+                               world::HumanoidProfileKind profile_kind) {
+  world::HumanoidRetargetDiagnostic diagnostic;
+  return world::validateHumanoidRig(rig,
+                                    skeleton,
+                                    world::builtinHumanoidProfile(profile_kind),
+                                    &diagnostic);
+}
+
+std::optional<std::string> registerHumanoidRigForSkeleton(
+    AssetRegistry& assets,
+    const std::string& requested_key,
+    const std::string& default_key,
+    const world::Skeleton& skeleton,
+    uint32_t skeleton_index,
+    const std::string& skeleton_key,
+    world::HumanoidProfileKind profile_kind) {
+  const std::string rig_key = requested_key.empty() ? default_key : requested_key;
+  if (!AssetRegistry::isValidAssetKey(rig_key) ||
+      assets.findHumanoidRig(rig_key) != nullptr) {
+    return std::nullopt;
+  }
+  world::HumanoidRetargetDiagnostic diagnostic;
+  world::HumanoidRig rig =
+      world::bindHumanoidRig(skeleton,
+                             world::builtinHumanoidProfile(profile_kind),
+                             skeleton_index,
+                             skeleton_key,
+                             &diagnostic);
+  if (!validateHumanoidImportRig(rig, skeleton, profile_kind)) {
+    return std::nullopt;
+  }
+  if (!assets.registerHumanoidRig(rig_key, std::move(rig))) {
+    return std::nullopt;
+  }
+  return rig_key;
 }
 
 void assignSingleMaterialSlot(world::MeshData& mesh,
@@ -272,7 +312,8 @@ bool importParticleEffect(AssetRegistry& assets,
 GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
                                     const std::string& key,
                                     const std::filesystem::path& path,
-                                    const world::GltfSceneLoadOptions& options) {
+                                    const world::GltfSceneLoadOptions& options,
+                                    const HumanoidImportOptions& humanoid) {
   if (!AssetRegistry::isValidAssetKey(key)) {
     return {};
   }
@@ -288,6 +329,18 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
                       prefab.nodes.size());
   if (!prefab.valid()) {
     return {};
+  }
+  uint32_t humanoid_skeleton_index = world::kInvalidAnimationIndex;
+  if (humanoid.enabled) {
+    if (prefab.skeletons.empty()) {
+      prefab.skeletons.push_back(
+          world::makeNodeHierarchySkeleton(
+              prefab,
+              prefab.source_path.stem().empty()
+                  ? std::string_view("Humanoid Skeleton")
+                  : std::string_view(prefab.source_path.stem().string())));
+    }
+    humanoid_skeleton_index = 0u;
   }
 
   stage_start = core::SteadyClock::now();
@@ -411,6 +464,36 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
                       core::SteadyClock::now(),
                       asset.skin_keys.size());
 
+  if (humanoid.enabled) {
+    stage_start = core::SteadyClock::now();
+    if (humanoid_skeleton_index >= prefab.skeletons.size() ||
+        humanoid_skeleton_index >= asset.skeleton_keys.size()) {
+      return {};
+    }
+    const std::string default_rig_key =
+        childKey(key, "humanoid_rigs", 0u);
+    std::optional<std::string> rig_key =
+        registerHumanoidRigForSkeleton(
+            assets,
+            humanoid.rig_key,
+            default_rig_key,
+            prefab.skeletons[humanoid_skeleton_index],
+            humanoid_skeleton_index,
+            asset.skeleton_keys[humanoid_skeleton_index],
+            humanoid.profile);
+    if (!rig_key.has_value()) {
+      return {};
+    }
+    asset.humanoid_rig_keys.push_back(std::move(*rig_key));
+    logSourceImportDiag("gltf_scene",
+                        key,
+                        path,
+                        "register humanoid rigs",
+                        stage_start,
+                        core::SteadyClock::now(),
+                        asset.humanoid_rig_keys.size());
+  }
+
   stage_start = core::SteadyClock::now();
   if (!assets.registerGltfSceneAsset(key, asset)) {
     return {};
@@ -424,6 +507,138 @@ GltfSceneAsset importGltfSceneAsset(AssetRegistry& assets,
                       core::SteadyClock::now(),
                       asset.nodes.size());
   return asset;
+}
+
+AnimationClipImportResult importAnimationClipAsset(
+    AssetRegistry& assets,
+    const std::string& key,
+    const std::filesystem::path& path,
+    std::string_view clip_name,
+    std::string_view display_name,
+    const HumanoidImportOptions& humanoid) {
+  AnimationClipImportResult result{};
+  if (!AssetRegistry::isValidAssetKey(key)) {
+    return result;
+  }
+
+  const auto total_start = core::SteadyClock::now();
+  auto stage_start = total_start;
+  world::GltfSceneLoadOptions load_options{};
+  load_options.import_meshes = false;
+  load_options.import_lights = false;
+  world::GltfScenePrefab prefab = world::loadGltfScenePrefab(path, load_options);
+  logSourceImportDiag("animation_clip",
+                      key,
+                      path,
+                      "load prefab",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      prefab.animations.size());
+  if (!prefab.valid() || prefab.animations.empty()) {
+    return result;
+  }
+
+  const world::AnimationClip* selected = nullptr;
+  if (!clip_name.empty()) {
+    selected = [&]() -> const world::AnimationClip* {
+      for (const world::AnimationClip& clip : prefab.animations) {
+        if (clip.name == clip_name) {
+          return &clip;
+        }
+      }
+      return nullptr;
+    }();
+    if (selected == nullptr) {
+      return result;
+    }
+  } else {
+    selected = &prefab.animations.front();
+  }
+
+  world::AnimationClip clip = *selected;
+  if (!display_name.empty()) {
+    clip.name = std::string(display_name);
+  } else if (clip.name.empty()) {
+    clip.name = key;
+  }
+
+  uint32_t humanoid_skeleton_index = world::kInvalidAnimationIndex;
+  if (humanoid.enabled) {
+    if (prefab.skeletons.empty()) {
+      prefab.skeletons.push_back(
+          world::makeNodeHierarchySkeleton(
+              prefab,
+              prefab.source_path.stem().empty()
+                  ? std::string_view("Animation Skeleton")
+                  : std::string_view(prefab.source_path.stem().string())));
+    }
+    humanoid_skeleton_index = 0u;
+  }
+  if (humanoid.enabled && humanoid_skeleton_index >= prefab.skeletons.size()) {
+    return result;
+  }
+
+  stage_start = core::SteadyClock::now();
+  if (!assets.registerAnimationClip(key, std::move(clip))) {
+    return {};
+  }
+  result.clip_key = key;
+  logSourceImportDiag("animation_clip",
+                      key,
+                      path,
+                      "register clip",
+                      stage_start,
+                      core::SteadyClock::now());
+
+  if (!humanoid.enabled) {
+    logSourceImportDiag("animation_clip",
+                        key,
+                        path,
+                        "total",
+                        total_start,
+                        core::SteadyClock::now(),
+                        1u);
+    return result;
+  }
+
+  stage_start = core::SteadyClock::now();
+  for (std::size_t i = 0; i < prefab.skeletons.size(); ++i) {
+    const std::string skeleton_key = childKey(key, "skeletons", i);
+    if (!assets.registerSkeleton(skeleton_key, prefab.skeletons[i])) {
+      return {};
+    }
+    result.skeleton_keys.push_back(skeleton_key);
+  }
+  const std::string default_rig_key =
+      childKey(key, "humanoid_rigs", 0u);
+  std::optional<std::string> rig_key =
+      registerHumanoidRigForSkeleton(
+          assets,
+          humanoid.rig_key,
+          default_rig_key,
+          prefab.skeletons[humanoid_skeleton_index],
+          humanoid_skeleton_index,
+          result.skeleton_keys[humanoid_skeleton_index],
+          humanoid.profile);
+  if (!rig_key.has_value()) {
+    return {};
+  }
+  result.humanoid_rig_keys.push_back(std::move(*rig_key));
+  logSourceImportDiag("animation_clip",
+                      key,
+                      path,
+                      "register humanoid source rig",
+                      stage_start,
+                      core::SteadyClock::now(),
+                      result.humanoid_rig_keys.size());
+  logSourceImportDiag("animation_clip",
+                      key,
+                      path,
+                      "total",
+                      total_start,
+                      core::SteadyClock::now(),
+                      1u + result.skeleton_keys.size() + result.humanoid_rig_keys.size());
+  return result;
 }
 
 }  // namespace detail

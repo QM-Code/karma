@@ -15,6 +15,19 @@ if (KARMA_CONFIG_FETCH_DEPS)
   include(FetchContent)
 endif()
 
+set(_karma_saved_cmake_module_path "${CMAKE_MODULE_PATH}")
+file(GLOB _karma_installed_find_modules
+  LIST_DIRECTORIES false
+  "${PACKAGE_PREFIX_DIR}/share/*/Find*.cmake")
+foreach (_karma_installed_find_module IN LISTS _karma_installed_find_modules)
+  get_filename_component(_karma_installed_find_module_dir
+    "${_karma_installed_find_module}" DIRECTORY)
+  list(APPEND CMAKE_MODULE_PATH "${_karma_installed_find_module_dir}")
+endforeach()
+if (_karma_installed_find_modules)
+  list(REMOVE_DUPLICATES CMAKE_MODULE_PATH)
+endif()
+
 function(_karma_alias_target alias target)
   if (TARGET ${target} AND NOT TARGET ${alias})
     add_library(${alias} ALIAS ${target})
@@ -152,6 +165,7 @@ if (NOT TARGET assimp::assimp AND KARMA_CONFIG_FETCH_DEPS)
   if (@KARMA_ASSIMP_MINIMAL_IMPORTERS@)
     set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
     set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
     set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
     set(ASSIMP_BUILD_STL_IMPORTER ON CACHE BOOL "" FORCE)
     set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
@@ -386,4 +400,5 @@ if (@KARMA_ENABLE_NAVIGATION@)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/karmaTargets.cmake")
+set(CMAKE_MODULE_PATH "${_karma_saved_cmake_module_path}")
 check_required_components(karma)

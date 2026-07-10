@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/idle",
+      "path": "idle.fbx",
+      "name": "Idle",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/idle/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/stride",
+      "path": "stride.fbx",
+      "name": "Stride",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/stride/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/crawl",
+      "path": "crawl.fbx",
+      "name": "Crawl",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/crawl/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/idle_prone",
+      "path": "idle_prone.fbx",
+      "name": "ProneIdle",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/idle_prone/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/jump_start",
+      "path": "jump_start.fbx",
+      "name": "JumpStart",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/jump_start/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/jump_end",
+      "path": "jump_end.fbx",
+      "name": "JumpEnd",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/jump_end/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/fall",
+      "path": "fall.fbx",
+      "name": "Fall",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/fall/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/stand",
+      "path": "stand.fbx",
+      "name": "Stand",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/stand/rig"
+      }
+    },
+    {
+      "type": "animation_clip",
+      "key": "pf2e/animations/character/melee_attack",
+      "path": "melee_attack.fbx",
+      "name": "MeleeAttack",
+      "humanoid": {
+        "profile": "mixamo",
+        "rig_key": "pf2e/animations/character/melee_attack/rig"
+      }
+    }
+  ]
+}

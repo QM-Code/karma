@@ -102,6 +102,7 @@ struct PrefabInstantiateDesc {
   std::string name_override;
   assets::AssetRegistry* assets = nullptr;
   std::unordered_map<std::string, nlohmann::json> variables;
+  bool auto_load_package = true;
 };
 
 /// \ingroup karma_prefabs

@@ -16,7 +16,7 @@ namespace karma::assets::detail {
 
 namespace {
 
-constexpr std::array<char, 8> kMagic{'K', 'A', 'S', 'S', 'E', 'T', '0', '2'};
+constexpr std::array<char, 8> kMagic{'K', 'A', 'S', 'S', 'E', 'T', '0', '3'};
 constexpr uint32_t kKindTexture = 1u;
 constexpr uint32_t kChunkDesc = 0x54444553u;      // TDES
 constexpr uint32_t kChunkSubresources = 0x53554252u;  // SUBR

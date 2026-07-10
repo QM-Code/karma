@@ -75,11 +75,22 @@ Shared example helpers live in `examples/common/`.
   `examples/scene/world_bake`. Loads the baked world scene document, prefers
   baked package blobs for the packaged GLB, and renders it with a skybox.
 - `animation/gltf.cpp`: target `animation_gltf`, output `examples/animation/gltf`.
-  Rigged glTF/GLB animation showcase using
-  `animation_model/source/dustbound_wayfarer_merged_animations.glb` by default,
-  with ImGui clip playback, crossfade, auto-cycle, deformation, and root-motion
-  controls. An optional first command-line argument can point at another glTF/GLB
-  model. See [../docs/ANIMATION_V2.md](../docs/ANIMATION_V2.md) and
+  Rigged glTF/GLB animation showcase using the
+  `examples/assets/animation/dustbound_wayfarer/assets.package.json` package by
+  default, with ImGui clip playback, crossfade, auto-cycle, deformation, and
+  root-motion controls. The optional first command-line argument is another
+  package directory or manifest; the optional second argument is its scene
+  asset key.
+  Build with `cmake --build --preset portable --target animation_gltf` and run
+  `./build/portable/examples/animation/gltf path/to/assets.package.json characters/hero`.
+- `animation/humanoid_rpg.cpp`: target `animation_humanoid_rpg`, output
+  `examples/animation/humanoid_rpg`. Imports the checked-in Mixamo character FBX
+  and nine standalone FBX clips through asset packages, binds the built-in
+  Mixamo humanoid profile, and retargets every clip to the model. The UI exposes
+  clip selection, playback, crossfade, and GPU/CPU reference deformation.
+  Build with `cmake --build --preset portable --target animation_humanoid_rpg`
+  and run `./build/portable/examples/animation/humanoid_rpg`.
+  See [../docs/ANIMATION_V2.md](../docs/ANIMATION_V2.md) and
   [../docs/RIGGED_GLTF_AUTHORING.md](../docs/RIGGED_GLTF_AUTHORING.md).
 
 ## Particles, Effects, And Prefabs

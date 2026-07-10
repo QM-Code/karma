@@ -170,8 +170,27 @@ float4 main(PSInput input) : SV_TARGET
     {
         return source;
     }
-    float4 history = g_History.Sample(g_Sampler, input.UV);
-    return float4(lerp(source.rgb, history.rgb, saturate(g_TaaParams.x)), source.a);
+    float2 texel = g_ScreenParams.zw;
+    float3 current = max(source.rgb, 0.0);
+    float3 n0 = max(g_Source.Sample(g_Sampler, input.UV + float2( texel.x, 0.0)).rgb, 0.0);
+    float3 n1 = max(g_Source.Sample(g_Sampler, input.UV + float2(-texel.x, 0.0)).rgb, 0.0);
+    float3 n2 = max(g_Source.Sample(g_Sampler, input.UV + float2(0.0,  texel.y)).rgb, 0.0);
+    float3 n3 = max(g_Source.Sample(g_Sampler, input.UV + float2(0.0, -texel.y)).rgb, 0.0);
+    float3 neighborhood_min = min(current, min(min(n0, n1), min(n2, n3)));
+    float3 neighborhood_max = max(current, max(max(n0, n1), max(n2, n3)));
+    float3 history = max(g_History.Sample(g_Sampler, input.UV).rgb, 0.0);
+    float current_luma = dot(current, float3(0.2126, 0.7152, 0.0722));
+    float history_luma = dot(history, float3(0.2126, 0.7152, 0.0722));
+    float luma_delta = abs(history_luma - current_luma) /
+                       max(max(history_luma, current_luma), 0.10);
+    float rejection = saturate((luma_delta - 0.05) * 2.5);
+    float feedback = saturate(g_TaaParams.x) * (1.0 - rejection);
+    float3 resolved = lerp(current,
+                           clamp(history, neighborhood_min, neighborhood_max),
+                           feedback);
+    float3 blur = (n0 + n1 + n2 + n3) * 0.25;
+    resolved += (resolved - blur) * g_TaaParams.y;
+    return float4(max(resolved, 0.0), source.a);
 }
 )";
 

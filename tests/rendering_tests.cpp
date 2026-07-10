@@ -12,6 +12,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -34,6 +35,9 @@
 
 #include "../src/rendering/renderer/render_system/extractors.h"
 #include "../src/rendering/renderer/render_system/debug_draw.h"
+#include "../src/content/importers/gltf_scene_import_internal.h"
+#include "../src/private/rendering/ktx_cube_orientation.hpp"
+#include "../src/private/rendering/point_shadow_policy.hpp"
 
 namespace {
 
@@ -73,6 +77,44 @@ class DummyWindow final : public karma::platform::Window {
  private:
   std::vector<karma::platform::Event> events_;
 };
+
+void testRenderFrameOwnershipAndRenderTargetValidation() {
+  karma::rendering::RenderTargetDesc target{};
+  assert(target.valid());
+  target.width = 320;
+  assert(!target.valid());
+  target.height = 180;
+  assert(target.valid());
+  target.width = 0;
+  assert(!target.valid());
+  target.width = -1;
+  target.height = -1;
+  assert(!target.valid());
+  target = {};
+  target.depth = false;
+  assert(!target.valid());
+  target.stencil = true;
+  assert(!target.valid());
+
+  DummyWindow window;
+  karma::rendering::GraphicsDevice device(window);
+  const karma::rendering::FrameInfo frame{
+      .width = 128,
+      .height = 64,
+      .delta_time = 0.016f,
+  };
+  device.beginFrame(frame);
+  bool nested_begin_rejected = false;
+  try {
+    device.beginFrame(frame);
+  } catch (const std::logic_error&) {
+    nested_begin_rejected = true;
+  }
+  assert(nested_begin_rejected);
+  device.endFrame();
+  device.beginFrame(frame);
+  device.endFrame();
+}
 
 void testTerrainHeadlessNoopApi() {
   DummyWindow window;
@@ -138,9 +180,135 @@ void testSkyboxShaderPreservesGeneratedCubemapOrientation() {
                                 skybox_end - skybox_begin);
   assert(shader.find("normalize(input.local_pos)") != std::string_view::npos);
   assert(shader.find("-input.local_pos.y") == std::string_view::npos);
+  assert(shader.find("g_Params.x") != std::string_view::npos);
+  assert(shader.find("1.0 - exp(-color)") != std::string_view::npos);
+
+  const size_t prefilter_begin = source.find("kPrefilterPS", skybox_end);
+  assert(prefilter_begin != std::string::npos);
+  const std::string_view irradiance_shader(source.data() + skybox_end,
+                                           prefilter_begin - skybox_end);
+  assert(irradiance_shader.find("Hammersley(i, SAMPLE_COUNT)") !=
+         std::string_view::npos);
+  assert(irradiance_shader.find("irradiance += g_EnvMap.Sample") !=
+         std::string_view::npos);
+  assert(irradiance_shader.find(".rgb * cos_theta") == std::string_view::npos);
+  assert(irradiance_shader.find("irradiance /= SAMPLE_COUNT") !=
+         std::string_view::npos);
+
+  const size_t brdf_begin = source.find("kBrdfLutVS", prefilter_begin);
+  assert(brdf_begin != std::string::npos);
+  const std::string_view prefilter_shader(source.data() + prefilter_begin,
+                                          brdf_begin - prefilter_begin);
+  assert(prefilter_shader.find("DistributionGGX") != std::string_view::npos);
+  assert(prefilter_shader.find("SampleLevel(g_Sampler, L, mip_level)") !=
+         std::string_view::npos);
+  assert(source.find("lighting_exposure_ * environment_intensity_") !=
+         std::string::npos);
+  assert(source.find("normalizeKtxCubemapWorldDirections") != std::string::npos);
+}
+
+void testKtxCubemapOrientationNormalization() {
+  constexpr std::size_t kFaceCount = 6u;
+  constexpr std::size_t kFaceBytes = 4u;
+  constexpr std::size_t kSecondMipOffset = kFaceCount * kFaceBytes;
+  std::vector<unsigned char> bytes(kSecondMipOffset + kFaceCount);
+  for (std::size_t face = 0; face < kFaceCount; ++face) {
+    for (std::size_t texel = 0; texel < kFaceBytes; ++texel) {
+      bytes[face * kFaceBytes + texel] =
+          static_cast<unsigned char>(face * 10u + texel);
+    }
+    bytes[kSecondMipOffset + face] = static_cast<unsigned char>(100u + face);
+  }
+  const std::vector<std::size_t> offsets{
+      0u, 4u, 8u, 12u, 16u, 20u,
+      24u, 25u, 26u, 27u, 28u, 29u,
+  };
+  const std::vector<std::uint32_t> widths{2u, 1u};
+  const std::vector<std::uint32_t> heights{2u, 1u};
+
+  assert(karma::rendering::detail::normalizeKtxCubemapWorldDirections(
+      bytes, offsets, widths, heights, 1u));
+  const std::vector<unsigned char> expected{
+      2u,  3u,  0u,  1u,
+      12u, 13u, 10u, 11u,
+      32u, 33u, 30u, 31u,
+      22u, 23u, 20u, 21u,
+      42u, 43u, 40u, 41u,
+      52u, 53u, 50u, 51u,
+      100u, 101u, 103u, 102u, 104u, 105u,
+  };
+  assert(bytes == expected);
+
+  std::vector<unsigned char> invalid(8u);
+  const std::vector<std::size_t> overlapping_offsets(12u, 0u);
+  assert(!karma::rendering::detail::normalizeKtxCubemapWorldDirections(
+      invalid, overlapping_offsets, widths, heights, 1u));
+}
+
+void testAssimpEmbeddedTextureCanonicalization() {
+  const std::vector<uint8_t> top_down_bgra{
+      0u, 0u, 255u, 255u,      0u, 255u, 0u, 255u,
+      255u, 0u, 0u, 255u,      255u, 255u, 255u, 128u,
+  };
+  std::vector<uint8_t> rgba;
+  assert(karma::world::detail::canonicalizeAssimpEmbeddedTexture(
+      top_down_bgra, 2u, 2u, rgba));
+  const std::vector<uint8_t> expected{
+      0u, 0u, 255u, 255u,      255u, 255u, 255u, 128u,
+      255u, 0u, 0u, 255u,      0u, 255u, 0u, 255u,
+  };
+  assert(rgba == expected);
+
+  rgba = {1u};
+  assert(!karma::world::detail::canonicalizeAssimpEmbeddedTexture(
+      std::span<const uint8_t>(top_down_bgra.data(), 4u), 2u, 2u, rgba));
+  assert(rgba.empty());
+
+  auto imported_material = std::make_shared<karma::rendering::ImportedMaterialData>();
+  karma::rendering::ImportedMaterialTexture imported_texture{};
+  imported_texture.semantic =
+      karma::rendering::ImportedMaterialTextureSemantic::Emissive;
+  imported_texture.source_key = "tests/raw-assimp-texture";
+  imported_texture.raw_name = "raw-assimp-texture";
+  imported_texture.label = "raw-assimp-texture";
+  imported_texture.source_bytes = expected;
+  imported_texture.width = 2u;
+  imported_texture.height = 2u;
+  imported_texture.embedded = true;
+  imported_texture.compressed = false;
+  imported_texture.srgb = true;
+  imported_material->textures.push_back(std::move(imported_texture));
+
+  karma::rendering::MaterialAssetDesc material{};
+  material.imported_material = std::move(imported_material);
+  karma::assets::AssetRegistry assets;
+  const std::vector<std::string> keys =
+      assets.registerImportedMaterialTextures("tests/raw-assimp-material", material);
+  assert(keys.size() == 1u);
+  const karma::assets::TextureAsset* texture = assets.findTextureAsset(keys.front());
+  assert(texture != nullptr);
+  const auto prepared = karma::assets::prepareTextureUpload(*texture, {});
+  assert(prepared.has_value());
+  assert(!prepared->upload.subresources.empty());
+  const auto& base = prepared->upload.subresources.front();
+  const std::size_t bottom_left = base.offset;
+  const std::size_t top_left = base.offset + base.row_stride;
+  assert(bottom_left + 3u < prepared->upload.bytes.size());
+  assert(top_left + 3u < prepared->upload.bytes.size());
+  assert(prepared->upload.bytes[bottom_left + 2u] == 255u);
+  assert(prepared->upload.bytes[top_left + 0u] == 255u);
 }
 
 void testTextureUploadValidation() {
+  std::size_t texture_size = 99u;
+  assert(karma::rendering::tryTextureDataSize(4, 3, 4u, texture_size));
+  assert(texture_size == 48u);
+  assert(!karma::rendering::tryTextureDataSize(0, 3, 4u, texture_size));
+  assert(texture_size == 0u);
+  assert(!karma::rendering::tryTextureDataSize(
+      2, 1, std::numeric_limits<std::size_t>::max(), texture_size));
+  assert(texture_size == 0u);
+
   karma::rendering::TextureDesc desc{
       .width = 4,
       .height = 2,
@@ -206,6 +374,28 @@ void testTextureUploadValidation() {
   });
   assert(karma::rendering::validateTextureUpload(r8_desc, r8_upload));
 
+  karma::rendering::TextureDesc rgba16f_desc{
+      .width = 2,
+      .height = 2,
+      .format = karma::rendering::TextureFormat::RGBA16F,
+  };
+  karma::rendering::TextureUploadData rgba16f_upload{};
+  rgba16f_upload.format = rgba16f_desc.format;
+  rgba16f_upload.bytes.resize(32u);
+  rgba16f_upload.subresources.push_back(
+      karma::rendering::TextureUploadSubresource{
+          .width = 2,
+          .height = 2,
+          .size = 32u,
+      });
+  assert(rgba16f_desc.valid());
+  assert(karma::rendering::textureUploadMinimumRowStride(
+             rgba16f_desc.format, 2) == 16u);
+  assert(karma::rendering::validateTextureUpload(rgba16f_desc,
+                                                  rgba16f_upload));
+  rgba16f_desc.srgb = true;
+  assert(!rgba16f_desc.valid());
+
   karma::rendering::TextureDesc bc7_desc{
       .width = 7,
       .height = 5,
@@ -253,6 +443,16 @@ void testTextureUploadValidation() {
       };
   assert(karma::rendering::validateTextureUpload(generated_mip_desc,
                                                   generated_mip_upload));
+  generated_mip_upload.subresources.push_back(
+      karma::rendering::TextureUploadSubresource{
+          .mip_level = 1u,
+          .width = 2,
+          .height = 1,
+          .offset = 0u,
+          .size = 8u,
+      });
+  assert(!karma::rendering::validateTextureUpload(generated_mip_desc,
+                                                   generated_mip_upload));
 
   auto invalid_format_desc = desc;
   invalid_format_desc.format = static_cast<karma::rendering::TextureFormat>(255);
@@ -523,6 +723,26 @@ void testCameraAndLightExtractionSanitizesRuntimeData() {
   assert(data.shader_user_params[1].key_hash ==
          karma::rendering::cameraShaderParamKeyHash("z_param"));
   assert(std::isfinite(data.shader_user_params[1].value.r));
+
+  karma::components::CameraComponent parameter_heavy_camera{};
+  const uint32_t authored_parameter_count =
+      karma::rendering::kCameraShaderUserParamCapacity + 5u;
+  for (uint32_t index = authored_parameter_count; index-- > 0u;) {
+    std::string key = "param_00";
+    key[6] = static_cast<char>('0' + (index / 10u));
+    key[7] = static_cast<char>('0' + (index % 10u));
+    parameter_heavy_camera.shader_user_params.emplace(
+        std::move(key),
+        karma::math::Color{static_cast<float>(index), 0.0f, 0.0f, 1.0f});
+  }
+  const auto parameter_heavy_data = karma::rendering::render_system::toCameraData(
+      parameter_heavy_camera, transform, 1.0f);
+  assert(parameter_heavy_data.shader_user_param_count ==
+         karma::rendering::kCameraShaderUserParamCapacity);
+  assert(parameter_heavy_data.shader_user_params.front().key_hash ==
+         karma::rendering::cameraShaderParamKeyHash("param_00"));
+  assert(parameter_heavy_data.shader_user_params.back().key_hash ==
+         karma::rendering::cameraShaderParamKeyHash("param_31"));
 
   karma::components::LightComponent light{};
   light.intensity = std::numeric_limits<float>::quiet_NaN();
@@ -1082,6 +1302,392 @@ std::filesystem::path findRepoRoot() {
   return {};
 }
 
+void testHdrSceneColorPipelineContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string backend_header = read_source(
+      "src/rendering/renderer/backends/diligent/backend.hpp");
+  assert(backend_header.find(
+             "scene_color_format_ = Diligent::TEX_FORMAT_RGBA16_FLOAT") !=
+         std::string::npos);
+
+  const std::string backend_init = read_source(
+      "src/rendering/renderer/backends/diligent/backend_init.cpp");
+  assert(backend_init.find(
+             "GetTextureFormatInfoExt(Diligent::TEX_FORMAT_RGBA16_FLOAT)") !=
+         std::string::npos);
+  assert(backend_init.find("graphics.RTVFormats[0] = sceneColorFormat();") !=
+         std::string::npos);
+
+  const std::vector<std::filesystem::path> scene_pass_sources = {
+      "src/rendering/renderer/backends/diligent/passes/camera_override.cpp",
+      "src/rendering/renderer/backends/diligent/passes/environment.cpp",
+      "src/rendering/renderer/backends/diligent/passes/line.cpp",
+      "src/rendering/renderer/backends/diligent/passes/beam.cpp",
+      "src/rendering/renderer/backends/diligent/passes/particles.cpp",
+      "src/rendering/renderer/backends/diligent/passes/terrain.cpp",
+  };
+  for (const auto& source_path : scene_pass_sources) {
+    assert(read_source(source_path).find("sceneColorFormat()") != std::string::npos);
+  }
+
+  const std::string frame_source = read_source(
+      "src/rendering/renderer/backends/diligent/passes/frame.cpp");
+  const std::string target_source = read_source(
+      "src/rendering/renderer/backends/diligent/resources/render_targets.cpp");
+  assert(frame_source.find("color_desc.Format = sceneColorFormat();") !=
+         std::string::npos);
+  assert(target_source.find("color_desc.Format = sceneColorFormat();") !=
+         std::string::npos);
+
+  const std::string render_source = read_source(
+      "src/rendering/renderer/backends/diligent/backend_render.cpp");
+  const size_t native_present_copy = render_source.find("native_copy_supported");
+  const size_t converted_present =
+      render_source.find("runPresentBlit(present_source_srv");
+  assert(native_present_copy != std::string::npos);
+  assert(converted_present != std::string::npos);
+  assert(native_present_copy < converted_present);
+
+  const std::string graph_source = read_source(
+      "src/rendering/renderer/backends/diligent/passes/frame_graph_shader.cpp");
+  assert(graph_source.find("pipelineCacheKey(*asset, pass, target_format)") !=
+         std::string::npos);
+  assert(graph_source.find(
+             "ensureFrameGraphShaderPassPipeline(*asset, pass, target_format") !=
+         std::string::npos);
+  assert(graph_source.find("asset.pipeline.vertex_entry_point") !=
+         std::string::npos);
+  assert(graph_source.find("asset.pipeline.fragment_entry_point") !=
+         std::string::npos);
+  assert(graph_source.find("asset.pipeline.defines") != std::string::npos);
+  assert(graph_source.find("asset.blend_mode") != std::string::npos);
+  assert(graph_source.find(
+             "return Diligent::TEX_FORMAT_RGBA16_FLOAT;") !=
+         std::string::npos);
+  assert(graph_source.find("sortedStringPairs(pass.inputs)") !=
+         std::string::npos);
+  assert(graph_source.find("sortedStringPairs(asset.textures)") !=
+         std::string::npos);
+
+  const std::string temporal_shader = read_source(
+      "src/rendering/renderer/backends/diligent/shaders/post_process/temporal_resolve_ps.hlsl");
+  const std::string embedded_shaders = read_source(
+      "src/rendering/renderer/backends/diligent/passes/post_process/shader_source.cpp");
+  assert(temporal_shader.find("return float4(max(resolved, 0.0), source.a);") !=
+         std::string::npos);
+  assert(embedded_shaders.find("return float4(max(resolved, 0.0), source.a);") !=
+         std::string::npos);
+
+  const std::string ui_source = read_source(
+      "src/rendering/renderer/backends/diligent/backend_ui.cpp");
+  assert(ui_source.find("swap_chain_->GetDesc().ColorBufferFormat") !=
+         std::string::npos);
+}
+
+void testPerRenderTargetTemporalHistoryContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string backend_header = read_source(
+      "src/rendering/renderer/backends/diligent/backend.hpp");
+  assert(backend_header.find(
+             "unordered_map<rendering::RenderTargetId, PostProcessHistoryResources>") !=
+         std::string::npos);
+  assert(backend_header.find("post_process_history_valid_") == std::string::npos);
+  assert(backend_header.find("post_process_history_index_") == std::string::npos);
+
+  const std::string resource_source = read_source(
+      "src/rendering/renderer/backends/diligent/passes/post_process/resources.cpp");
+  assert(resource_source.find("kMaxPostProcessHistoryTargets") !=
+         std::string::npos);
+  assert(resource_source.find("targets_.find(it->first)") !=
+         std::string::npos);
+  assert(resource_source.find("PostProcessHistoryResources replacement") !=
+         std::string::npos);
+  assert(resource_source.find(
+             "post_process_histories_.emplace(target, std::move(replacement))") !=
+         std::string::npos);
+
+  const std::string chain_source = read_source(
+      "src/rendering/renderer/backends/diligent/passes/post_process/chain.cpp");
+  assert(chain_source.find("post_process_histories_.find(target)") !=
+         std::string::npos);
+  assert(chain_source.find("ensurePostProcessHistoryResources(target") !=
+         std::string::npos);
+  assert(chain_source.find("temporalCameraChanged(history->camera, camera_)") !=
+         std::string::npos);
+  assert(chain_source.find("taa_requested && history != nullptr") !=
+         std::string::npos);
+  assert(chain_source.find("context_->CopyTexture") == std::string::npos);
+
+  const std::string render_source = read_source(
+      "src/rendering/renderer/backends/diligent/backend_render.cpp");
+  const size_t apply_call = render_source.find("applyPostProcessChain(");
+  assert(apply_call != std::string::npos);
+  assert(render_source.find("target);", apply_call) != std::string::npos);
+
+  const std::string state_source = read_source(
+      "src/rendering/renderer/backends/diligent/passes/render_state.cpp");
+  assert(state_source.find("post_process_history_valid_") == std::string::npos);
+}
+
+void testNormalMapMinificationFilteringContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  std::ifstream stream(
+      root / "src/rendering/renderer/backends/diligent/backend_init.cpp");
+  assert(stream);
+  const std::string source{std::istreambuf_iterator<char>(stream),
+                           std::istreambuf_iterator<char>()};
+
+  const size_t helper = source.find("float4 SampleAntialiasedNormal(");
+  const size_t helper_end = source.find("float Bayer4x4(", helper);
+  assert(helper != std::string::npos);
+  assert(helper_end != std::string::npos);
+  const std::string_view body(source.data() + helper, helper_end - helper);
+  assert(body.find("normal_texture.GetDimensions(width, height)") !=
+         std::string_view::npos);
+  assert(body.find("ddx(uv)") != std::string_view::npos);
+  assert(body.find("ddy(uv)") != std::string_view::npos);
+  assert(body.find("SampleBias(g_SamplerData, uv, mip_bias)") !=
+         std::string_view::npos);
+  assert(body.find("normal_confidence") != std::string_view::npos);
+  assert(body.find("variance") != std::string_view::npos);
+
+  assert(source.find("SampleAntialiasedNormal(g_NormalTex") !=
+         std::string::npos);
+  assert(source.find("SampleAntialiasedNormal(g_ClearcoatNormalTex") !=
+         std::string::npos);
+  assert(source.find("roughness * roughness + normal_sample.w") !=
+         std::string::npos);
+  assert(source.find("clearcoat_normal_sample.w") != std::string::npos);
+}
+
+void testRenderCopyUnbindContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+  auto count_occurrences = [](std::string_view text, std::string_view needle) {
+    size_t count = 0u;
+    size_t offset = 0u;
+    while ((offset = text.find(needle, offset)) != std::string_view::npos) {
+      ++count;
+      offset += needle.size();
+    }
+    return count;
+  };
+
+  const std::string backend_header = read_source(
+      "src/rendering/renderer/backends/diligent/backend.hpp");
+  assert(backend_header.find("void copyTextureAfterRender(") !=
+         std::string::npos);
+
+  const std::string common_source = read_source(
+      "src/rendering/renderer/backends/diligent/backend_common.cpp");
+  const size_t helper = common_source.find(
+      "void DiligentBackend::copyTextureAfterRender(");
+  const size_t unbind = common_source.find("context_->SetRenderTargets(0,", helper);
+  const size_t copy = common_source.find("context_->CopyTexture(copy_attribs);", helper);
+  assert(helper != std::string::npos);
+  assert(unbind != std::string::npos);
+  assert(copy != std::string::npos);
+  assert(helper < unbind && unbind < copy);
+  assert(count_occurrences(common_source, "CopyTexture(") == 1u);
+
+  const std::string render_source = read_source(
+      "src/rendering/renderer/backends/diligent/backend_render.cpp");
+  assert(count_occurrences(
+             render_source,
+             "copyTextureAfterRender(particle_scene_texture,") == 2u);
+
+  const std::string graph_source = read_source(
+      "src/rendering/renderer/backends/diligent/passes/frame_graph_shader.cpp");
+  assert(count_occurrences(graph_source, "copyTextureAfterRender(") == 2u);
+
+  const std::filesystem::path backend_root =
+      root / "src/rendering/renderer/backends/diligent";
+  for (const auto& entry : std::filesystem::recursive_directory_iterator(backend_root)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".cpp" ||
+        entry.path().filename() == "backend_common.cpp") {
+      continue;
+    }
+    std::ifstream stream(entry.path());
+    assert(stream);
+    const std::string source{std::istreambuf_iterator<char>(stream),
+                             std::istreambuf_iterator<char>()};
+    assert(source.find("CopyTexture(") == std::string::npos);
+  }
+}
+
+void testParticleShaderFallbackContracts() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string particle_resources = read_source(
+      "src/rendering/renderer/backends/diligent/passes/particles.cpp");
+  const size_t compiler_probe = particle_resources.find(
+      "bool isParticleGlobalShaderCompilerAvailable()");
+  const size_t compiler_guard = particle_resources.find(
+      "if (isParticleGlobalShaderCompilerAvailable())");
+  const size_t global_shader_compile = particle_resources.find(
+      "global_vs = device_with_cache_.CreateShader(shader_ci);");
+  assert(compiler_probe != std::string::npos);
+  assert(particle_resources.find("Diligent::CreateDXCompiler(", compiler_probe) !=
+         std::string::npos);
+  assert(particle_resources.find("compiler->IsLoaded()", compiler_probe) !=
+         std::string::npos);
+  assert(compiler_guard != std::string::npos);
+  assert(global_shader_compile != std::string::npos);
+  assert(compiler_guard < global_shader_compile);
+
+  const size_t clear_vars = particle_resources.find(
+      "kParticleGpuClearVars[]");
+  const size_t clear_pipeline = particle_resources.find(
+      "create_gpu_compute_pipeline(\"Karma Particle GPU Clear CS\"",
+      clear_vars);
+  const size_t clear_mesh_samples_var = particle_resources.find(
+      "\"g_MeshSamples\"", clear_vars);
+  assert(clear_vars != std::string::npos);
+  assert(clear_pipeline != std::string::npos);
+  assert(clear_mesh_samples_var == std::string::npos ||
+         clear_mesh_samples_var >= clear_pipeline);
+
+  const size_t simulate_vars = particle_resources.find(
+      "kParticleGpuSimulateVars[]");
+  const size_t simulate_pipeline = particle_resources.find(
+      "create_gpu_compute_pipeline(\"Karma Particle GPU Simulate CS\"",
+      simulate_vars);
+  const size_t mesh_samples_var = particle_resources.find(
+      "\"g_MeshSamples\"", simulate_vars);
+  assert(simulate_vars != std::string::npos);
+  assert(simulate_pipeline != std::string::npos);
+  assert(mesh_samples_var != std::string::npos);
+  assert(mesh_samples_var < simulate_pipeline);
+
+  const std::string particle_draw = read_source(
+      "src/rendering/renderer/backends/diligent/passes/particle_draw.cpp");
+  assert(particle_draw.find(
+             "set_var(particle_gpu_simulate_mesh_samples_var_, "
+             "particle_gpu_mesh_sample_srv_.RawPtr())") !=
+         std::string::npos);
+  assert(particle_draw.find("global_pipeline_ready(") != std::string::npos);
+}
+
+void testRenderingCacheInvalidationContracts() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string environment = read_source(
+      "src/rendering/renderer/backends/diligent/passes/environment.cpp");
+  const size_t irradiance_create = environment.find("if (!env_irradiance_tex_)");
+  const size_t irradiance_restore =
+      environment.find("if (env_irradiance_tex_)", irradiance_create);
+  const size_t prefilter_create = environment.find("if (!env_prefilter_tex_)");
+  const size_t prefilter_restore =
+      environment.find("if (env_prefilter_tex_)", prefilter_create);
+  assert(irradiance_create != std::string::npos);
+  assert(irradiance_restore != std::string::npos);
+  assert(irradiance_create < irradiance_restore);
+  assert(prefilter_create != std::string::npos);
+  assert(prefilter_restore != std::string::npos);
+  assert(prefilter_create < prefilter_restore);
+
+  const std::string render_system =
+      read_source("src/rendering/renderer/render_system.cpp");
+  assert(render_system.find("lod_binding_changed ||") != std::string::npos);
+
+  const std::string meshes = read_source(
+      "src/rendering/renderer/backends/diligent/resources/meshes.cpp");
+  const size_t mesh_update = meshes.find("void DiligentBackend::updateMesh");
+  assert(mesh_update != std::string::npos);
+  assert(meshes.find("directional_shadow_scene_dirty_ = true;", mesh_update) !=
+         std::string::npos);
+  assert(meshes.find("point_shadow_scene_dirty_ = true;", mesh_update) !=
+         std::string::npos);
+
+  const std::string deformations = read_source(
+      "src/rendering/renderer/backends/diligent/resources/deformations.cpp");
+  assert(deformations.find("affects_shadow_caster") != std::string::npos);
+  assert(deformations.find("affected_shadow_caster") != std::string::npos);
+
+  const std::string backend_init = read_source(
+      "src/rendering/renderer/backends/diligent/backend_init.cpp");
+  assert(backend_init.find("RasterizerDesc.DepthClipEnable = true;") !=
+         std::string::npos);
+  assert(backend_init.find("RasterizerDesc.DepthClipEnable = false;") ==
+         std::string::npos);
+  assert(backend_init.find("replacement_dsv_faces") != std::string::npos);
+  const size_t initialize_device =
+      backend_init.find("void DiligentBackend::initializeDevice()");
+  assert(initialize_device != std::string::npos);
+  assert(backend_init.find("recreatePointShadowMap();", initialize_device) ==
+         std::string::npos);
+
+  const std::string shadows = read_source(
+      "src/rendering/renderer/backends/diligent/passes/shadows.cpp");
+  assert(shadows.find("isPointShadowAllocationCandidate(source_light)") !=
+         std::string::npos);
+  assert(shadows.find("out_state.point_shadow_light_count > 0u && "
+                      "!point_shadow_map_srv_") != std::string::npos);
+
+  const std::string render_state = read_source(
+      "src/rendering/renderer/backends/diligent/passes/render_state.cpp");
+  assert(render_state.find("if (point_shadow_map_tex_) {") !=
+         std::string::npos);
+}
+
+void testPointShadowAllocationPolicy() {
+  karma::rendering::LightData light{};
+  light.type = karma::rendering::LightType::Point;
+  light.casts_shadows = false;
+  assert(!karma::rendering::detail::isPointShadowAllocationCandidate(light));
+
+  light.casts_shadows = true;
+  assert(karma::rendering::detail::isPointShadowAllocationCandidate(light));
+  light.intensity = 0.0f;
+  assert(!karma::rendering::detail::isPointShadowAllocationCandidate(light));
+  light.intensity = 1.0f;
+  light.range = 0.0f;
+  assert(!karma::rendering::detail::isPointShadowAllocationCandidate(light));
+
+  light.range = 10.0f;
+  light.type = karma::rendering::LightType::Spot;
+  assert(!karma::rendering::detail::isPointShadowAllocationCandidate(light));
+  light.type = karma::rendering::LightType::Directional;
+  assert(!karma::rendering::detail::isPointShadowAllocationCandidate(light));
+}
+
 void testAssetRegistryMaterialInheritance() {
   karma::assets::AssetRegistry assets;
 
@@ -1436,6 +2042,14 @@ void testFrameGraphValidationAndRegistryFallback() {
   });
   assert(karma::rendering::validateFrameGraphDesc(mask_graph).valid());
 
+  karma::rendering::FrameGraphDesc hdr_graph = mask_graph;
+  hdr_graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "hdr_intermediate",
+      .kind = karma::rendering::FrameGraphResourceKind::ColorTexture,
+      .format = karma::rendering::TextureFormat::RGBA16F,
+  });
+  assert(karma::rendering::validateFrameGraphDesc(hdr_graph).valid());
+
   karma::rendering::FrameGraphDesc missing_mask_tags = mask_graph;
   missing_mask_tags.passes.front().render_tags.clear();
   karma::rendering::FrameGraphValidationResult missing_mask_tags_result =
@@ -1503,6 +2117,29 @@ void testFrameGraphValidationAndRegistryFallback() {
   assert(!non_finite_scale_result.valid());
   assert(diagnosticsContain(non_finite_scale_result, "must have positive scale"));
 
+  karma::rendering::FrameGraphDesc compressed_target = graph;
+  compressed_target.resources.front().format =
+      karma::rendering::TextureFormat::BC7_RGBA_UNORM;
+  const auto compressed_target_result =
+      karma::rendering::validateFrameGraphDesc(compressed_target);
+  assert(!compressed_target_result.valid());
+  assert(diagnosticsContain(compressed_target_result, "render-target-capable"));
+
+  karma::rendering::FrameGraphDesc history_target = graph;
+  history_target.resources.front().history_count = 2u;
+  const auto history_target_result =
+      karma::rendering::validateFrameGraphDesc(history_target);
+  assert(!history_target_result.valid());
+  assert(diagnosticsContain(history_target_result, "history resources are not implemented"));
+
+  karma::rendering::FrameGraphDesc explicit_external = graph;
+  explicit_external.resources.front().kind =
+      karma::rendering::FrameGraphResourceKind::ExternalColor;
+  const auto external_result =
+      karma::rendering::validateFrameGraphDesc(explicit_external);
+  assert(!external_result.valid());
+  assert(diagnosticsContain(external_result, "external frame graph resources are implicit"));
+
   karma::rendering::FrameGraphDesc cyclic{};
   cyclic.frame_graph_key = "graphs/cycle";
   cyclic.output_resource = "a";
@@ -1521,6 +2158,54 @@ void testFrameGraphValidationAndRegistryFallback() {
       .outputs = {{"target", "b"}},
   });
   assert(!karma::rendering::validateFrameGraphDesc(cyclic).valid());
+}
+
+void testFrameGraphStructuralEquivalence() {
+  karma::rendering::FrameGraphDesc graph{};
+  graph.frame_graph_key = "graphs/equivalence";
+  graph.output_resource = "color";
+  graph.resources.push_back(karma::rendering::FrameGraphResourceDesc{
+      .name = "color",
+      .kind = karma::rendering::FrameGraphResourceKind::ColorTexture,
+      .width_scale = 0.5f,
+      .height_scale = 0.5f,
+  });
+  graph.passes.push_back(karma::rendering::FrameGraphPassDesc{
+      .name = "composite",
+      .kind = karma::rendering::FrameGraphPassKind::Shader,
+      .shader_pass_key = "passes/composite",
+      .inputs = {{"source", std::string(karma::rendering::kFrameGraphCameraColor)}},
+      .outputs = {{"target", "color"}},
+      .params = {
+          {"enabled", true},
+          {"tint", karma::math::Color{0.1f, 0.2f, 0.3f, 0.4f}},
+      },
+  });
+  graph.shader_pass_assets.push_back(karma::rendering::ShaderPassAssetDesc{
+      .shader_pass_key = "passes/composite",
+      .pipeline = karma::rendering::MaterialPipelineDesc{
+          .name = "fullscreen",
+          .vertex_shader_path = "shaders/fullscreen.vs",
+          .fragment_shader_path = "shaders/composite.ps",
+          .defines = {"TEST=1"},
+      },
+      .params = {{"exposure", 1.0f}},
+  });
+
+  karma::rendering::FrameGraphDesc copy = graph;
+  assert(karma::rendering::frameGraphsEquivalent(graph, copy));
+  copy.passes.front().params.erase("enabled");
+  copy.passes.front().params.emplace("enabled", true);
+  assert(karma::rendering::frameGraphsEquivalent(graph, copy));
+
+  copy.resources.front().width_scale = 1.0f;
+  assert(!karma::rendering::frameGraphsEquivalent(graph, copy));
+  copy = graph;
+  copy.passes.front().render_tags.push_back("selected");
+  assert(!karma::rendering::frameGraphsEquivalent(graph, copy));
+  copy = graph;
+  copy.shader_pass_assets.front().params["exposure"] = 2.0f;
+  assert(!karma::rendering::frameGraphsEquivalent(graph, copy));
 }
 
 void testFrameGraphAssetPackageLoadCacheAndUnload() {
@@ -1551,7 +2236,7 @@ void testFrameGraphAssetPackageLoadCacheAndUnload() {
             R"({
               "version": 1,
               "resources": [
-                { "name": "post_ping", "kind": "color_texture", "scale": [1.0, 1.0], "format": "rgba8" },
+                { "name": "post_ping", "kind": "color_texture", "scale": [1.0, 1.0], "format": "rgba16f" },
                 { "name": "selection_mask", "kind": "color_texture", "scale": [1.0, 1.0], "format": "r8" },
                 { "name": "selection_depth", "kind": "depth_texture", "scale": [1.0, 1.0] }
               ],
@@ -1589,7 +2274,11 @@ void testFrameGraphAssetPackageLoadCacheAndUnload() {
   assert(cold_package.has_value());
   assert(diagnostic.empty());
   assert(cold_assets.findShaderPass("passes/composite") != nullptr);
-  assert(cold_assets.findFrameGraph("graphs/composite") != nullptr);
+  const auto* cold_graph = cold_assets.findFrameGraph("graphs/composite");
+  assert(cold_graph != nullptr);
+  assert(!cold_graph->resources.empty());
+  assert(cold_graph->resources.front().format ==
+         karma::rendering::TextureFormat::RGBA16F);
   assert(countJsonFiles(cache_dir / "packages") == 1u);
   for (const auto& asset : cold_package->assets) {
     if (asset.type == "shader_pass" || asset.type == "render_graph") {
@@ -1611,7 +2300,11 @@ void testFrameGraphAssetPackageLoadCacheAndUnload() {
   assert(warm_package.has_value());
   assert(diagnostic.empty());
   assert(warm_assets.findShaderPass("passes/composite") != nullptr);
-  assert(warm_assets.findFrameGraph("graphs/composite") != nullptr);
+  const auto* warm_graph = warm_assets.findFrameGraph("graphs/composite");
+  assert(warm_graph != nullptr);
+  assert(!warm_graph->resources.empty());
+  assert(warm_graph->resources.front().format ==
+         karma::rendering::TextureFormat::RGBA16F);
   assert(countJsonFiles(cache_dir / "packages") == 1u);
   assert(karma::assets::unloadAssetPackage(warm_assets, *warm_package));
   assert(warm_assets.findShaderPass("passes/composite") == nullptr);
@@ -2491,7 +3184,17 @@ void testDeformationHeadlessNoopApi() {
 
 int main() {
   testEngineConfigFramePacingDefaultAndOptOut();
+  testRenderFrameOwnershipAndRenderTargetValidation();
   testSkyboxShaderPreservesGeneratedCubemapOrientation();
+  testHdrSceneColorPipelineContract();
+  testNormalMapMinificationFilteringContract();
+  testPerRenderTargetTemporalHistoryContract();
+  testRenderCopyUnbindContract();
+  testParticleShaderFallbackContracts();
+  testRenderingCacheInvalidationContracts();
+  testPointShadowAllocationPolicy();
+  testKtxCubemapOrientationNormalization();
+  testAssimpEmbeddedTextureCanonicalization();
   testTextureUploadValidation();
   testScreenPointToWorldRayValidation();
   testDebugWireScaleAndCapsuleDimensions();
@@ -2506,6 +3209,7 @@ int main() {
   testMaterialFileLoading();
   testAssetKeyValidationAndPackages();
   testFrameGraphValidationAndRegistryFallback();
+  testFrameGraphStructuralEquivalence();
   testFrameGraphAssetPackageLoadCacheAndUnload();
   testAssetCacheV2AndPackageWarmRestore();
   testPreparedTextureCachePreservesGeneratedMips();

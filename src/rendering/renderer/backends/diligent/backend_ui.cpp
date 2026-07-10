@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 
 namespace karma::rendering::backend {
 
@@ -206,8 +207,7 @@ void DiligentBackend::ensureUiResources() {
                                          : Diligent::BLEND_FACTOR_SRC_ALPHA;
     blend.DestBlend = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
     blend.BlendOp = Diligent::BLEND_OPERATION_ADD;
-    blend.SrcBlendAlpha = premultiplied_alpha ? Diligent::BLEND_FACTOR_ONE
-                                              : Diligent::BLEND_FACTOR_SRC_ALPHA;
+    blend.SrcBlendAlpha = Diligent::BLEND_FACTOR_ONE;
     blend.DestBlendAlpha = Diligent::BLEND_FACTOR_INV_SRC_ALPHA;
     blend.BlendOpAlpha = Diligent::BLEND_OPERATION_ADD;
     blend.RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
@@ -343,34 +343,44 @@ void DiligentBackend::renderUi(const karma::rendering::UIDrawData& draw_data) {
   }
 
   if (ui_vb_size_ < draw_data.vertices.size()) {
-    ui_vb_size_ = draw_data.vertices.size() + 2048;
+    const std::size_t replacement_size = draw_data.vertices.size() + 2048u;
     Diligent::BufferDesc desc{};
     desc.Name = "Karma UI VB";
     desc.Usage = Diligent::USAGE_DYNAMIC;
     desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    desc.Size = static_cast<Diligent::Uint32>(ui_vb_size_ * sizeof(karma::rendering::UIVertex));
-    ui_vb_.Release();
+    desc.Size = static_cast<Diligent::Uint32>(
+        replacement_size * sizeof(karma::rendering::UIVertex));
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> replacement;
     const auto vb_start = core::SteadyClock::now();
-    device_->CreateBuffer(desc, nullptr, &ui_vb_);
+    device_->CreateBuffer(desc, nullptr, &replacement);
     recordResourceCreation("ui", "vertex buffer", vb_start, core::SteadyClock::now());
+    if (replacement) {
+      ui_vb_ = std::move(replacement);
+      ui_vb_size_ = replacement_size;
+    }
   }
 
   if (ui_ib_size_ < draw_data.indices.size()) {
-    ui_ib_size_ = draw_data.indices.size() + 4096;
+    const std::size_t replacement_size = draw_data.indices.size() + 4096u;
     Diligent::BufferDesc desc{};
     desc.Name = "Karma UI IB";
     desc.Usage = Diligent::USAGE_DYNAMIC;
     desc.BindFlags = Diligent::BIND_INDEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    desc.Size = static_cast<Diligent::Uint32>(ui_ib_size_ * sizeof(uint32_t));
-    ui_ib_.Release();
+    desc.Size = static_cast<Diligent::Uint32>(replacement_size * sizeof(uint32_t));
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> replacement;
     const auto ib_start = core::SteadyClock::now();
-    device_->CreateBuffer(desc, nullptr, &ui_ib_);
+    device_->CreateBuffer(desc, nullptr, &replacement);
     recordResourceCreation("ui", "index buffer", ib_start, core::SteadyClock::now());
+    if (replacement) {
+      ui_ib_ = std::move(replacement);
+      ui_ib_size_ = replacement_size;
+    }
   }
 
-  if (!ui_vb_ || !ui_ib_) {
+  if (!ui_vb_ || !ui_ib_ || ui_vb_size_ < draw_data.vertices.size() ||
+      ui_ib_size_ < draw_data.indices.size()) {
     finish_ui_timing();
     return;
   }

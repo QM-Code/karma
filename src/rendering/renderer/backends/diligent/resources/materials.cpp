@@ -29,6 +29,51 @@
 
 namespace karma::rendering::backend {
 
+LoadedImage decodeEmbeddedAssimpTexture(const aiTexture& texture) {
+  if (texture.mHeight == 0) {
+    if (texture.mWidth > static_cast<unsigned int>(std::numeric_limits<int>::max())) {
+      return {};
+    }
+    return loadImageFromMemory(reinterpret_cast<const unsigned char*>(texture.pcData),
+                               texture.mWidth);
+  }
+
+  LoadedImage image{};
+  image.width = static_cast<int>(texture.mWidth);
+  image.height = static_cast<int>(texture.mHeight);
+  std::size_t byte_count = 0u;
+  if (!rendering::tryTextureDataSize(image.width, image.height, 4u, byte_count)) {
+    return {};
+  }
+  image.pixels.resize(byte_count);
+  for (int output_y = 0; output_y < image.height; ++output_y) {
+    const int source_y = image.height - output_y - 1;
+    const aiTexel* source_row =
+        texture.pcData + static_cast<std::size_t>(source_y) * image.width;
+    unsigned char* output_row =
+        image.pixels.data() + static_cast<std::size_t>(output_y) * image.width * 4u;
+    for (int x = 0; x < image.width; ++x) {
+      const aiTexel& source = source_row[x];
+      const std::size_t output = static_cast<std::size_t>(x) * 4u;
+      output_row[output + 0u] = source.r;
+      output_row[output + 1u] = source.g;
+      output_row[output + 2u] = source.b;
+      output_row[output + 3u] = source.a;
+    }
+  }
+  return image;
+}
+
+std::string makeMaterialTextureCacheKey(std::string_view source_key,
+                                        bool srgb,
+                                        bool generate_mips) {
+  std::string key(source_key);
+  key.append("|karma-texture:");
+  key.push_back(srgb ? 's' : 'l');
+  key.push_back(generate_mips ? 'm' : '1');
+  return key;
+}
+
 namespace {
 enum TextureCoordSlot : size_t {
   kTexCoordBaseColor = 0,
@@ -117,24 +162,6 @@ int embeddedTextureIndex(const std::string& raw_key) {
   return static_cast<int>(parsed);
 }
 
-LoadedImage decodeEmbeddedAssimpTexture(const aiTexture& texture) {
-  if (texture.mHeight == 0) {
-    return loadImageFromMemory(reinterpret_cast<const unsigned char*>(texture.pcData),
-                               texture.mWidth);
-  }
-
-  LoadedImage image{};
-  image.width = static_cast<int>(texture.mWidth);
-  image.height = static_cast<int>(texture.mHeight);
-  if (image.width <= 0 || image.height <= 0) {
-    return image;
-  }
-  image.pixels.resize(static_cast<size_t>(image.width) *
-                      static_cast<size_t>(image.height) * 4u);
-  std::memcpy(image.pixels.data(), texture.pcData, image.pixels.size());
-  return image;
-}
-
 LoadedImage decodeImportedTextureBytes(const rendering::ImportedMaterialTexture& texture) {
   LoadedImage image{};
   if (texture.source_bytes.empty()) {
@@ -144,13 +171,19 @@ LoadedImage decodeImportedTextureBytes(const rendering::ImportedMaterialTexture&
     return loadImageFromMemory(texture.source_bytes.data(), texture.source_bytes.size());
   }
 
-  image.width = static_cast<int>(texture.width);
-  image.height = static_cast<int>(texture.height);
-  if (image.width <= 0 || image.height <= 0) {
+  if (texture.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+      texture.height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
     return image;
   }
-  const size_t expected_size =
-      static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 4u;
+  image.width = static_cast<int>(texture.width);
+  image.height = static_cast<int>(texture.height);
+  std::size_t expected_size = 0u;
+  if (!rendering::tryTextureDataSize(image.width,
+                                     image.height,
+                                     4u,
+                                     expected_size)) {
+    return {};
+  }
   if (texture.source_bytes.size() < expected_size) {
     return {};
   }
@@ -165,6 +198,7 @@ void appendAssimpTextureRef(std::vector<AssimpTextureImportRef>& refs,
                             const std::filesystem::path& base_dir,
                             const aiString& tex_path,
                             bool srgb,
+                            bool generate_mips,
                             const char* label) {
   if (tex_path.length == 0) {
     return;
@@ -172,7 +206,9 @@ void appendAssimpTextureRef(std::vector<AssimpTextureImportRef>& refs,
   const std::string raw_key = tex_path.C_Str();
   const bool embedded = !raw_key.empty() && raw_key[0] == '*';
   const std::filesystem::path resolved_path = embedded ? std::filesystem::path{} : (base_dir / raw_key);
-  std::string key = embedded ? model_key + ":" + raw_key : resolved_path.string();
+  const std::string source_key =
+      embedded ? model_key + ":" + raw_key : resolved_path.string();
+  std::string key = makeMaterialTextureCacheKey(source_key, srgb, generate_mips);
   if (!seen_keys.insert(key).second) {
     return;
   }
@@ -189,6 +225,7 @@ void appendAssimpTextureRef(std::vector<AssimpTextureImportRef>& refs,
 void collectAssimpMaterialTextureRefs(const aiMaterial& material,
                                       const std::string& model_key,
                                       const std::filesystem::path& base_dir,
+                                      bool generate_mips,
                                       std::vector<AssimpTextureImportRef>& refs,
                                       std::unordered_set<std::string>& seen_keys) {
   aiString tex_path;
@@ -216,7 +253,14 @@ void collectAssimpMaterialTextureRefs(const aiMaterial& material,
                             &mapping, &uv_index, &blend, &op, mapmode) != AI_SUCCESS) {
       return false;
     }
-    appendAssimpTextureRef(refs, seen_keys, model_key, base_dir, tex_path, srgb, label);
+    appendAssimpTextureRef(refs,
+                          seen_keys,
+                          model_key,
+                          base_dir,
+                          tex_path,
+                          srgb,
+                          generate_mips,
+                          label);
     return true;
   };
 
@@ -379,20 +423,28 @@ void DiligentBackend::bindShadowResourcesToSrb(Diligent::IShaderResourceBinding*
 }
 
 void DiligentBackend::bindForwardPlusResourcesToSrb(Diligent::IShaderResourceBinding* srb) const {
-  if (!srb || !forward_plus_light_srv_ || !forward_plus_tile_count_srv_ ||
-      !forward_plus_tile_index_srv_) {
+  Diligent::IBufferView* light_srv = active_forward_plus_light_srv_
+                                         ? active_forward_plus_light_srv_
+                                         : forward_plus_light_srv_.RawPtr();
+  Diligent::IBufferView* tile_count_srv = active_forward_plus_tile_count_srv_
+                                              ? active_forward_plus_tile_count_srv_
+                                              : forward_plus_tile_count_srv_.RawPtr();
+  Diligent::IBufferView* tile_index_srv = active_forward_plus_tile_index_srv_
+                                              ? active_forward_plus_tile_index_srv_
+                                              : forward_plus_tile_index_srv_.RawPtr();
+  if (!srb || !light_srv || !tile_count_srv || !tile_index_srv) {
     return;
   }
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights")) {
-    var->Set(forward_plus_light_srv_);
+    var->Set(light_srv);
   }
   if (auto* var =
           srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts")) {
-    var->Set(forward_plus_tile_count_srv_);
+    var->Set(tile_count_srv);
   }
   if (auto* var =
           srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightIndices")) {
-    var->Set(forward_plus_tile_index_srv_);
+    var->Set(tile_index_srv);
   }
 }
 
@@ -532,42 +584,11 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   }
   mark_stage("default texture assignment");
 
-  const bool double_sided = record.desc.double_sided;
-  const bool additive = record.blend_mode == rendering::MaterialDesc::BlendMode::Additive;
-  ensureForwardPipeline(ForwardPipelineVariant::Opaque);
-  mark_stage("required pipeline ensure");
-
-  auto initialize_srb = [&](Diligent::IPipelineState* pso,
-                            const char* label,
-                            Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>& srb) {
-    const auto srb_start = core::SteadyClock::now();
-    initializeMaterialBindingForPipeline(record, pso, srb);
-    logRenderResourceDiag("material_bindings", label, srb_start, core::SteadyClock::now());
-  };
-
-  initialize_srb(pipeline_state_.RawPtr(), "opaque srb", record.srb);
-
-  initialize_srb(transparent_pipeline_state_.RawPtr(), "transparent srb", record.transparent_srb);
-
-  if (double_sided) {
-    initialize_srb(transparent_double_sided_pipeline_state_.RawPtr(),
-                   "transparent double-sided srb",
-                   record.transparent_double_sided_srb);
-  } else {
-    record.transparent_double_sided_srb.Release();
-  }
-  if (additive) {
-    initialize_srb(additive_pipeline_state_.RawPtr(), "additive srb", record.additive_srb);
-  } else {
-    record.additive_srb.Release();
-  }
-  if (additive && double_sided) {
-    initialize_srb(additive_double_sided_pipeline_state_.RawPtr(),
-                   "additive double-sided srb",
-                   record.additive_double_sided_srb);
-  } else {
-    record.additive_double_sided_srb.Release();
-  }
+  record.srb.Release();
+  record.transparent_srb.Release();
+  record.transparent_double_sided_srb.Release();
+  record.additive_srb.Release();
+  record.additive_double_sided_srb.Release();
   record.custom_srb.Release();
   record.custom_transparent_srb.Release();
   record.custom_transparent_double_sided_srb.Release();
@@ -580,7 +601,55 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   for (auto& srb : record.layout_custom_srbs) {
     srb.Release();
   }
+  mark_stage("binding invalidation");
   logRenderResourceDiag("material_bindings", "total", total_start, core::SteadyClock::now());
+}
+
+void DiligentBackend::replaceMaterialTextureView(Diligent::ITextureView* previous,
+                                                 Diligent::ITextureView* replacement) {
+  if (previous == nullptr || previous == replacement) {
+    return;
+  }
+
+  auto replace_in_record = [&](MaterialRecord& record) {
+    bool changed = false;
+    auto replace = [&](Diligent::RefCntAutoPtr<Diligent::ITextureView>& view) {
+      if (view.RawPtr() == previous) {
+        view = replacement;
+        changed = true;
+      }
+    };
+    replace(record.base_color_srv);
+    replace(record.normal_srv);
+    replace(record.metallic_roughness_srv);
+    replace(record.occlusion_srv);
+    replace(record.emissive_srv);
+    replace(record.clearcoat_srv);
+    replace(record.clearcoat_roughness_srv);
+    replace(record.clearcoat_normal_srv);
+    replace(record.sheen_color_srv);
+    replace(record.sheen_roughness_srv);
+    replace(record.transmission_srv);
+    replace(record.thickness_srv);
+    if (changed) {
+      initializeMaterialBindings(record);
+    }
+  };
+
+  for (auto& [id, record] : materials_) {
+    (void)id;
+    replace_in_record(record);
+  }
+  for (auto& [key, entry] : imported_material_templates_) {
+    (void)key;
+    for (MaterialRecord& record : entry.materials) {
+      replace_in_record(record);
+    }
+  }
+  for (auto& [key, record] : imported_payload_material_templates_) {
+    (void)key;
+    replace_in_record(record);
+  }
 }
 
 bool DiligentBackend::materialUsesCustomForwardPipeline(const MaterialRecord& material) const {
@@ -787,6 +856,7 @@ void DiligentBackend::preloadAssimpTextures(const aiScene& scene,
     collectAssimpMaterialTextureRefs(*scene.mMaterials[material_index],
                                      model_key,
                                      base_dir,
+                                     generate_mips_enabled_,
                                      refs,
                                      seen_keys);
   }
@@ -878,7 +948,6 @@ void DiligentBackend::preloadAssimpTextures(const aiScene& scene,
       continue;
     }
 
-    const rendering::TextureId id = nextTextureId_++;
     TextureRecord record{};
     record.srv = createTextureSRV(image.pixels.data(),
                                   image.width,
@@ -888,6 +957,18 @@ void DiligentBackend::preloadAssimpTextures(const aiScene& scene,
                                   ref.label.c_str(),
                                   record.texture);
     if (!record.srv) {
+      continue;
+    }
+    record.desc = rendering::TextureDesc{
+        .width = image.width,
+        .height = image.height,
+        .format = rendering::TextureFormat::RGBA8,
+        .srgb = ref.srgb,
+        .generate_mips = generate_mips_enabled_,
+        .mip_levels = 1u,
+    };
+    const rendering::TextureId id = allocateTextureId();
+    if (id == rendering::kInvalidTexture) {
       continue;
     }
     textures_[id] = std::move(record);
@@ -917,7 +998,9 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadImportedMat
     return {};
   }
 
-  auto cache_it = texture_cache_.find(texture.source_key);
+  const std::string cache_key = makeMaterialTextureCacheKey(
+      texture.source_key, texture.srgb, generate_mips_enabled_);
+  auto cache_it = texture_cache_.find(cache_key);
   if (cache_it != texture_cache_.end()) {
     auto tex_it = textures_.find(cache_it->second);
     if (tex_it != textures_.end()) {
@@ -954,7 +1037,6 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadImportedMat
   }
 
   stage_start = core::SteadyClock::now();
-  const rendering::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.srv = createTextureSRV(image.pixels.data(),
                                 image.width,
@@ -974,9 +1056,21 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadImportedMat
                           core::SteadyClock::now());
     return {};
   }
+  record.desc = rendering::TextureDesc{
+      .width = image.width,
+      .height = image.height,
+      .format = rendering::TextureFormat::RGBA8,
+      .srgb = texture.srgb,
+      .generate_mips = generate_mips_enabled_,
+      .mip_levels = 1u,
+  };
+  const rendering::TextureId id = allocateTextureId();
+  if (id == rendering::kInvalidTexture) {
+    return {};
+  }
   Diligent::RefCntAutoPtr<Diligent::ITextureView> srv = record.srv;
   textures_[id] = std::move(record);
-  texture_cache_[texture.source_key] = id;
+  texture_cache_[cache_key] = id;
   logRenderResourceDiag("imported_material_texture",
                         "total",
                         total_start,
@@ -994,7 +1088,9 @@ void DiligentBackend::preloadImportedMaterialTextures(
   refs.reserve(material.textures.size());
   seen_keys.reserve(material.textures.size());
   for (const auto& texture : material.textures) {
-    if (texture.source_key.empty() || !seen_keys.insert(texture.source_key).second) {
+    const std::string cache_key = makeMaterialTextureCacheKey(
+        texture.source_key, texture.srgb, generate_mips_enabled_);
+    if (texture.source_key.empty() || !seen_keys.insert(cache_key).second) {
       continue;
     }
     refs.push_back(&texture);
@@ -1004,7 +1100,9 @@ void DiligentBackend::preloadImportedMaterialTextures(
                              stage_start,
                              core::SteadyClock::now());
 
-  auto is_cached = [&](const std::string& key) {
+  auto is_cached = [&](const rendering::ImportedMaterialTexture& texture) {
+    const std::string key = makeMaterialTextureCacheKey(
+        texture.source_key, texture.srgb, generate_mips_enabled_);
     auto cache_it = texture_cache_.find(key);
     return cache_it != texture_cache_.end() &&
            textures_.find(cache_it->second) != textures_.end();
@@ -1023,7 +1121,7 @@ void DiligentBackend::preloadImportedMaterialTextures(
   for (size_t ref_index = 0; ref_index < refs.size(); ++ref_index) {
     const rendering::ImportedMaterialTexture* texture = refs[ref_index];
     if (texture == nullptr || !texture->embedded || texture->source_bytes.empty() ||
-        is_cached(texture->source_key)) {
+        is_cached(*texture)) {
       continue;
     }
     decode_jobs.push_back(DecodeJob{
@@ -1052,7 +1150,7 @@ void DiligentBackend::preloadImportedMaterialTextures(
   size_t uploaded_count = 0u;
   for (size_t ref_index = 0; ref_index < refs.size(); ++ref_index) {
     const auto& texture = *refs[ref_index];
-    if (is_cached(texture.source_key)) {
+    if (is_cached(texture)) {
       continue;
     }
 
@@ -1074,7 +1172,6 @@ void DiligentBackend::preloadImportedMaterialTextures(
       continue;
     }
 
-    const rendering::TextureId id = nextTextureId_++;
     TextureRecord record{};
     record.srv = createTextureSRV(image.pixels.data(),
                                   image.width,
@@ -1086,8 +1183,21 @@ void DiligentBackend::preloadImportedMaterialTextures(
     if (!record.srv) {
       continue;
     }
+    record.desc = rendering::TextureDesc{
+        .width = image.width,
+        .height = image.height,
+        .format = rendering::TextureFormat::RGBA8,
+        .srgb = texture.srgb,
+        .generate_mips = generate_mips_enabled_,
+        .mip_levels = 1u,
+    };
+    const rendering::TextureId id = allocateTextureId();
+    if (id == rendering::kInvalidTexture) {
+      continue;
+    }
     textures_[id] = std::move(record);
-    texture_cache_[texture.source_key] = id;
+    texture_cache_[makeMaterialTextureCacheKey(
+        texture.source_key, texture.srgb, generate_mips_enabled_)] = id;
     uploaded_count += 1u;
   }
   logRenderTextureImportDiag("imported_payload_texture_preload",
@@ -1741,7 +1851,10 @@ rendering::MaterialId DiligentBackend::createMaterial(const rendering::ResolvedM
 
   rendering::MaterialDesc material = resolved.surface;
 
-  const rendering::MaterialId id = nextMaterialId_++;
+  const rendering::MaterialId id = allocateMaterialId();
+  if (id == rendering::kInvalidMaterial) {
+    return rendering::kInvalidMaterial;
+  }
   MaterialRecord record{};
   initializeTextureCoordTransforms(record);
   record.pipeline = resolved.pipeline;
@@ -1976,7 +2089,10 @@ rendering::MaterialId DiligentBackend::createMaterialFromAsset(const std::filesy
   }
 
   stage_start = stage_end;
-  const rendering::MaterialId id = nextMaterialId_++;
+  const rendering::MaterialId id = allocateMaterialId();
+  if (id == rendering::kInvalidMaterial) {
+    return rendering::kInvalidMaterial;
+  }
   MaterialRecord record = templates->materials[material_index];
   initializeMaterialBindings(record);
   stage_end = core::SteadyClock::now();
@@ -2035,7 +2151,10 @@ rendering::MaterialId DiligentBackend::createMaterialFromImportedPayload(
   }
 
   stage_start = core::SteadyClock::now();
-  const rendering::MaterialId id = nextMaterialId_++;
+  const rendering::MaterialId id = allocateMaterialId();
+  if (id == rendering::kInvalidMaterial) {
+    return rendering::kInvalidMaterial;
+  }
   MaterialRecord record = template_it->second;
   initializeMaterialBindings(record);
   materials_[id] = std::move(record);
@@ -2088,14 +2207,28 @@ void DiligentBackend::updateMaterial(rendering::MaterialId material,
                                            desc.attenuation_color.b);
   it->second.analytic_sphere_normals = desc.analytic_sphere_normals;
   it->second.blend_mode = it->second.desc.blend_mode;
-  it->second.base_color_srv = {};
   initializeMaterialBindings(it->second);
   directional_shadow_scene_dirty_ = true;
   point_shadow_scene_dirty_ = true;
 }
 
+rendering::MaterialId DiligentBackend::allocateMaterialId() noexcept {
+  if (nextMaterialId_ == rendering::kInvalidMaterial) {
+    return rendering::kInvalidMaterial;
+  }
+  const rendering::MaterialId id = nextMaterialId_;
+  nextMaterialId_ = id == std::numeric_limits<rendering::MaterialId>::max()
+                        ? rendering::kInvalidMaterial
+                        : id + 1u;
+  return id;
+}
+
 void DiligentBackend::destroyMaterial(rendering::MaterialId material) {
-  materials_.erase(material);
+  if (materials_.erase(material) == 0u) {
+    return;
+  }
+  directional_shadow_scene_dirty_ = true;
+  point_shadow_scene_dirty_ = true;
 }
 
 void DiligentBackend::setMaterialFloat(rendering::MaterialId material,

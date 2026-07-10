@@ -5,9 +5,6 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "karma/rendering.h"
-#include "karma/rendering.h"
-#include "karma/components.h"
-#include "karma/components.h"
 #include "karma/components.h"
 
 namespace karma::rendering::render_system {

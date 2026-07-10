@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 #include <glm/gtc/matrix_transform.hpp>
@@ -21,18 +22,10 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
-#include "karma/assets.h"
 #include "karma/math.h"
 #include "karma/core.h"
 #include "render_system/debug_draw.h"
 #include "render_system/extractors.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
 #include "karma/components.h"
 
 namespace karma::rendering {
@@ -1639,16 +1632,20 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
     rendering::RenderTargetId target = rendering::kDefaultRenderTarget;
     rendering::FrameGraphDesc frame_graph;
   };
-  std::vector<OffscreenPass> offscreen_passes;
-  std::unordered_set<std::string> active_render_target_keys;
-  std::unordered_set<std::string> active_frame_graph_texture_keys;
+  static thread_local std::vector<OffscreenPass> offscreen_passes;
+  static thread_local std::unordered_set<std::string> active_render_target_keys;
+  static thread_local std::unordered_set<std::string> active_frame_graph_texture_keys;
+  offscreen_passes.clear();
+  active_render_target_keys.clear();
+  active_frame_graph_texture_keys.clear();
   world.forEach<components::CameraComponent, components::TransformComponent>(
       [&](const world::Entity entity) {
     const auto& camera = world.get<components::CameraComponent>(entity);
     const auto& transform = world.get<components::TransformComponent>(entity);
-    const rendering::CameraData cam = toCameraData(camera, transform, interpolation_alpha);
-    const rendering::FrameGraphDesc frame_graph =
+    rendering::CameraData cam = toCameraData(camera, transform, interpolation_alpha);
+    rendering::FrameGraphDesc frame_graph =
         resolveFrameGraphDesc(camera.frame_graph_key, active_frame_graph_texture_keys);
+    const bool select_as_primary = !has_camera && camera.is_primary;
 
     if (camera.render_to_texture) {
       rendering::RenderTargetId target_id = camera.render_target;
@@ -1671,16 +1668,16 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       }
       if (target_id != rendering::kDefaultRenderTarget) {
         offscreen_passes.push_back(OffscreenPass{
-            .camera = cam,
+            .camera = select_as_primary ? cam : std::move(cam),
             .target = target_id,
-            .frame_graph = frame_graph,
+            .frame_graph = select_as_primary ? frame_graph : std::move(frame_graph),
         });
       }
     }
 
-    if (!has_camera && camera.is_primary) {
-      primary_camera = cam;
-      primary_frame_graph = frame_graph;
+    if (select_as_primary) {
+      primary_camera = std::move(cam);
+      primary_frame_graph = std::move(frame_graph);
       has_camera = true;
     }
     return true;
@@ -1711,7 +1708,8 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       warned_no_camera_ = true;
     }
     device_.setCameraActive(false);
-    std::unordered_set<std::string> no_camera_graph_texture_keys;
+    static thread_local std::unordered_set<std::string> no_camera_graph_texture_keys;
+    no_camera_graph_texture_keys.clear();
     device_.renderLayer(0,
                         rendering::kDefaultRenderTarget,
                         resolveFrameGraphDesc({}, no_camera_graph_texture_keys));
@@ -1725,8 +1723,11 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
 
   rendering::DirectionalLightData light{};
   light.intensity = 0.0f;
-  std::vector<rendering::LightData> lights;
-  lights.reserve(16);
+  static thread_local std::vector<rendering::LightData> lights;
+  lights.clear();
+  if (lights.capacity() < 16u) {
+    lights.reserve(16u);
+  }
   bool has_light = false;
   static bool warned_missing_light_transform = false;
   if (!warned_missing_light_transform) {
@@ -1900,7 +1901,7 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
         deformable_mesh->deformation != rendering::kInvalidDeformation) {
       item.deformation = deformable_mesh->deformation;
     }
-    device_.submit(item);
+    device_.submit(std::move(item));
   });
   section_end = core::SteadyClock::now();
   if (diag_enabled) {
@@ -1974,12 +1975,12 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       }
     }
     const bool lod_binding_changed = syncInstancedLodBindings(instanced, it->second);
-    (void)lod_binding_changed;
 
     const size_t instance_count = authoredInstanceCount(instanced);
     const bool payload_changed =
         instanced.dynamic ||
         binding_changed ||
+        lod_binding_changed ||
         it->second.cached_instance_layout != instanced.gpu_layout ||
         it->second.cached_instance_revision != instanced.instance_revision ||
         it->second.cached_instance_count != instance_count;
@@ -2021,7 +2022,7 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
     item.visible = visible;
     item.shadow_visible = visible && instanced.shadow_visible;
     instanced_instance_count += item.instanceCount();
-    device_.submitInstanced(item);
+    device_.submitInstanced(std::move(item));
   });
   section_end = core::SteadyClock::now();
   device_.setInstancingCpuTimings(

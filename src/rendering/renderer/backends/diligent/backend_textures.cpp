@@ -3,8 +3,6 @@
 #include "backend_internal.h"
 
 #include <assimp/scene.h>
-#include <cstring>
-
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/Texture.h>
@@ -55,7 +53,8 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
       stage_start = core::SteadyClock::now();
       Diligent::TextureSubResData subres{};
       subres.pData = upload_data;
-      subres.Stride = static_cast<Diligent::Uint64>(upload_width * 4);
+      subres.Stride = static_cast<Diligent::Uint64>(
+          static_cast<std::size_t>(upload_width) * 4u);
       Diligent::Box update_box{};
       update_box.MinX = 0;
       update_box.MinY = 0;
@@ -77,7 +76,8 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::createTextureSR
     Diligent::TextureData init_data{};
     Diligent::TextureSubResData subres{};
     subres.pData = upload_data;
-    subres.Stride = static_cast<Diligent::Uint64>(upload_width * 4);
+    subres.Stride = static_cast<Diligent::Uint64>(
+        static_cast<std::size_t>(upload_width) * 4u);
     init_data.pSubResources = &subres;
     init_data.NumSubresources = 1;
     device_->CreateTexture(desc, &init_data, &texture);
@@ -178,12 +178,10 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   const std::string raw_key = tex_path.C_Str();
   const bool is_embedded = !raw_key.empty() && raw_key[0] == '*';
   const std::filesystem::path resolved_path = is_embedded ? std::filesystem::path{} : (base_dir / raw_key);
-  std::string key;
-  if (is_embedded) {
-    key = model_key + ":" + raw_key;
-  } else {
-    key = resolved_path.string();
-  }
+  const std::string source_key =
+      is_embedded ? model_key + ":" + raw_key : resolved_path.string();
+  const std::string key = makeMaterialTextureCacheKey(
+      source_key, srgb, generate_mips_enabled_);
   auto cache_it = texture_cache_.find(key);
   if (cache_it != texture_cache_.end()) {
     auto tex_it = textures_.find(cache_it->second);
@@ -196,22 +194,8 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   LoadedImage image{};
   auto stage_start = core::SteadyClock::now();
   if (is_embedded) {
-    const int index = std::atoi(raw_key.c_str() + 1);
-    if (index >= 0 && index < static_cast<int>(scene.mNumTextures)) {
-      const aiTexture* embedded = scene.mTextures[index];
-      if (embedded) {
-        if (embedded->mHeight == 0) {
-          image = loadImageFromMemory(reinterpret_cast<const unsigned char*>(embedded->pcData),
-                                      embedded->mWidth);
-        } else {
-          image.width = static_cast<int>(embedded->mWidth);
-          image.height = static_cast<int>(embedded->mHeight);
-          image.pixels.resize(static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 4);
-          std::memcpy(image.pixels.data(),
-                      embedded->pcData,
-                      image.pixels.size());
-        }
-      }
+    if (const aiTexture* embedded = scene.GetEmbeddedTexture(raw_key.c_str())) {
+      image = decodeEmbeddedAssimpTexture(*embedded);
     }
     logRenderResourceDiag("assimp_texture", "embedded decode", stage_start, core::SteadyClock::now());
   } else {
@@ -225,7 +209,6 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
   }
 
   stage_start = core::SteadyClock::now();
-  const rendering::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.srv = createTextureSRV(image.pixels.data(),
                                 image.width,
@@ -235,10 +218,27 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
                                 label,
                                 record.texture);
   logRenderResourceDiag("assimp_texture", "gpu upload", stage_start, core::SteadyClock::now());
-  textures_[id] = record;
+  if (!record.srv) {
+    logRenderResourceDiag("assimp_texture", "total", total_start, core::SteadyClock::now());
+    return {};
+  }
+  record.desc = rendering::TextureDesc{
+      .width = image.width,
+      .height = image.height,
+      .format = rendering::TextureFormat::RGBA8,
+      .srgb = srgb,
+      .generate_mips = generate_mips_enabled_,
+      .mip_levels = 1u,
+  };
+  const rendering::TextureId id = allocateTextureId();
+  if (id == rendering::kInvalidTexture) {
+    return {};
+  }
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> srv = record.srv;
+  textures_[id] = std::move(record);
   texture_cache_[key] = id;
   logRenderResourceDiag("assimp_texture", "total", total_start, core::SteadyClock::now());
-  return record.srv;
+  return srv;
 }
 
 Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFromFile(
@@ -249,7 +249,8 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
     return {};
   }
 
-  const std::string key = path.string();
+  const std::string key = makeMaterialTextureCacheKey(
+      path.string(), srgb, generate_mips_enabled_);
   auto cache_it = texture_cache_.find(key);
   if (cache_it != texture_cache_.end()) {
     auto tex_it = textures_.find(cache_it->second);
@@ -263,7 +264,6 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
     return {};
   }
 
-  const rendering::TextureId id = nextTextureId_++;
   TextureRecord record{};
   record.srv = createTextureSRV(image.pixels.data(),
                                 image.width,
@@ -272,9 +272,25 @@ Diligent::RefCntAutoPtr<Diligent::ITextureView> DiligentBackend::loadTextureFrom
                                 generate_mips_enabled_,
                                 label,
                                 record.texture);
-  textures_[id] = record;
+  if (!record.srv) {
+    return {};
+  }
+  record.desc = rendering::TextureDesc{
+      .width = image.width,
+      .height = image.height,
+      .format = rendering::TextureFormat::RGBA8,
+      .srgb = srgb,
+      .generate_mips = generate_mips_enabled_,
+      .mip_levels = 1u,
+  };
+  const rendering::TextureId id = allocateTextureId();
+  if (id == rendering::kInvalidTexture) {
+    return {};
+  }
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> srv = record.srv;
+  textures_[id] = std::move(record);
   texture_cache_[key] = id;
-  return record.srv;
+  return srv;
 }
 
 }  // namespace karma::rendering::backend

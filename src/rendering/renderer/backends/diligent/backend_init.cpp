@@ -355,6 +355,7 @@ VSOutput main(VSInput input)
         float weight_sum = weights.x + weights.y + weights.z + weights.w;
         if (weight_sum > 1.0e-5)
         {
+            weights /= weight_sum;
             float4 bind_pos = float4(local_pos, 1.0);
             float4 skinned_pos =
                 mul(g_DeformationMatrices[min(joints.x, joint_count - 1u)], bind_pos) * weights.x +
@@ -535,16 +536,28 @@ void DiligentBackend::recreatePointShadowMap() {
   if (!device_) {
     return;
   }
+  const bool had_previous_texture = point_shadow_map_tex_ != nullptr;
+  const int previous_size = had_previous_texture
+                                ? static_cast<int>(point_shadow_map_tex_->GetDesc().Width)
+                                : point_shadow_map_size_;
+  const int previous_light_limit =
+      had_previous_texture
+          ? std::clamp(static_cast<int>(point_shadow_map_tex_->GetDesc().ArraySize) /
+                           kPointShadowFaceCount,
+                       1,
+                       kMaxPointShadowLights)
+          : point_shadow_max_lights_;
+  auto restore_previous_configuration = [&]() {
+    if (had_previous_texture) {
+      point_shadow_map_size_ = previous_size;
+      point_shadow_max_lights_ = previous_light_limit;
+    }
+  };
+
   const auto& adapter = device_->GetAdapterInfo();
   const int max_dim = static_cast<int>(adapter.Texture.MaxTexture2DDimension);
   if (max_dim > 0 && point_shadow_map_size_ > max_dim) {
     point_shadow_map_size_ = max_dim;
-  }
-
-  point_shadow_map_tex_.Release();
-  point_shadow_map_srv_.Release();
-  for (auto& dsv : point_shadow_map_dsv_faces_) {
-    dsv.Release();
   }
 
   Diligent::TextureDesc shadow_desc{};
@@ -558,34 +571,53 @@ void DiligentBackend::recreatePointShadowMap() {
   shadow_desc.MipLevels = 1;
   shadow_desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
   shadow_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
-  device_->CreateTexture(shadow_desc, nullptr, &point_shadow_map_tex_);
-  if (point_shadow_map_tex_) {
-    Diligent::TextureViewDesc srv_desc{};
-    srv_desc.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
-    srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
-    srv_desc.Format = Diligent::TEX_FORMAT_R32_FLOAT;
-    srv_desc.MostDetailedMip = 0;
-    srv_desc.NumMipLevels = 1;
-    srv_desc.FirstArraySlice = 0;
-    srv_desc.NumArraySlices = static_cast<Diligent::Uint32>(active_point_shadow_faces);
-    point_shadow_map_tex_->CreateView(srv_desc, &point_shadow_map_srv_);
-    if (!point_shadow_map_srv_) {
-      if (auto* srv = point_shadow_map_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE)) {
-        point_shadow_map_srv_ = srv;
-      }
-    }
-    for (int face = 0; face < active_point_shadow_faces; ++face) {
-      Diligent::TextureViewDesc dsv_desc{};
-      dsv_desc.ViewType = Diligent::TEXTURE_VIEW_DEPTH_STENCIL;
-      dsv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
-      dsv_desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
-      dsv_desc.MostDetailedMip = 0;
-      dsv_desc.NumMipLevels = 1;
-      dsv_desc.FirstArraySlice = static_cast<Diligent::Uint32>(face);
-      dsv_desc.NumArraySlices = 1;
-      point_shadow_map_tex_->CreateView(dsv_desc, &point_shadow_map_dsv_faces_[face]);
+  Diligent::RefCntAutoPtr<Diligent::ITexture> replacement_texture;
+  device_->CreateTexture(shadow_desc, nullptr, &replacement_texture);
+  if (!replacement_texture) {
+    restore_previous_configuration();
+    return;
+  }
+
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> replacement_srv;
+  Diligent::TextureViewDesc srv_desc{};
+  srv_desc.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
+  srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
+  srv_desc.Format = Diligent::TEX_FORMAT_R32_FLOAT;
+  srv_desc.MostDetailedMip = 0;
+  srv_desc.NumMipLevels = 1;
+  srv_desc.FirstArraySlice = 0;
+  srv_desc.NumArraySlices = static_cast<Diligent::Uint32>(active_point_shadow_faces);
+  replacement_texture->CreateView(srv_desc, &replacement_srv);
+  if (!replacement_srv) {
+    replacement_srv =
+        replacement_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+  }
+  if (!replacement_srv) {
+    restore_previous_configuration();
+    return;
+  }
+
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, kPointShadowMatrixCount>
+      replacement_dsv_faces{};
+  for (int face = 0; face < active_point_shadow_faces; ++face) {
+    Diligent::TextureViewDesc dsv_desc{};
+    dsv_desc.ViewType = Diligent::TEXTURE_VIEW_DEPTH_STENCIL;
+    dsv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D_ARRAY;
+    dsv_desc.Format = Diligent::TEX_FORMAT_D32_FLOAT;
+    dsv_desc.MostDetailedMip = 0;
+    dsv_desc.NumMipLevels = 1;
+    dsv_desc.FirstArraySlice = static_cast<Diligent::Uint32>(face);
+    dsv_desc.NumArraySlices = 1;
+    replacement_texture->CreateView(dsv_desc, &replacement_dsv_faces[face]);
+    if (!replacement_dsv_faces[face]) {
+      restore_previous_configuration();
+      return;
     }
   }
+
+  point_shadow_map_tex_ = std::move(replacement_texture);
+  point_shadow_map_srv_ = std::move(replacement_srv);
+  point_shadow_map_dsv_faces_ = std::move(replacement_dsv_faces);
 
   for (auto* pso : {pipeline_state_.RawPtr(),
                     opaque_double_sided_pipeline_state_.RawPtr(),
@@ -602,7 +634,15 @@ void DiligentBackend::recreatePointShadowMap() {
                Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
   }
-  for (auto& pso_ref : compact_forward_pipeline_states_) {
+  const size_t compact_depth_prepass_index =
+      forwardPipelineVariantIndex(ForwardPipelineVariant::DepthPrepass);
+  for (size_t pipeline_index = 0u;
+       pipeline_index < compact_forward_pipeline_states_.size();
+       ++pipeline_index) {
+    if (pipeline_index == compact_depth_prepass_index) {
+      continue;
+    }
+    auto& pso_ref = compact_forward_pipeline_states_[pipeline_index];
     auto* pso = pso_ref.RawPtr();
     if (!pso) {
       continue;
@@ -665,7 +705,7 @@ void DiligentBackend::recreateShadowPipeline() {
   // the shadow pass so casters still contribute.
   shadow_graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
   shadow_graphics.RasterizerDesc.FrontCounterClockwise = true;
-  shadow_graphics.RasterizerDesc.DepthClipEnable = false;
+  shadow_graphics.RasterizerDesc.DepthClipEnable = true;
   shadow_graphics.RasterizerDesc.DepthBias = shadow_raster_depth_bias_;
   shadow_graphics.RasterizerDesc.SlopeScaledDepthBias = shadow_raster_slope_bias_;
   shadow_graphics.DepthStencilDesc.DepthEnable = true;
@@ -740,7 +780,8 @@ void DiligentBackend::recreateShadowPipeline() {
     return;
   }
 
-  auto bind_shadow_static_resources = [&](Diligent::IPipelineState* pso) {
+  auto bind_shadow_static_resources = [&](Diligent::IPipelineState* pso,
+                                          bool pixel_stage_active) {
     if (!pso) {
       return;
     }
@@ -749,9 +790,11 @@ void DiligentBackend::recreateShadowPipeline() {
               pso->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
         variable->Set(constants_);
       }
-      if (auto* variable =
-              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
-        variable->Set(constants_);
+      if (pixel_stage_active) {
+        if (auto* variable =
+                pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
+          variable->Set(constants_);
+        }
       }
     }
     if (deformation_constants_) {
@@ -762,7 +805,7 @@ void DiligentBackend::recreateShadowPipeline() {
     }
   };
 
-  bind_shadow_static_resources(shadow_pipeline_state_.RawPtr());
+  bind_shadow_static_resources(shadow_pipeline_state_.RawPtr(), false);
   const auto shadow_srb_start = core::SteadyClock::now();
   shadow_pipeline_state_->CreateShaderResourceBinding(&shadow_srb_, true);
   recordResourceCreation("shadow",
@@ -813,11 +856,12 @@ void DiligentBackend::recreateShadowPipeline() {
                            "Karma Alpha Shadow Pipeline",
                            shadow_alpha_pso_start,
                            core::SteadyClock::now());
-    bind_shadow_static_resources(shadow_alpha_pipeline_state_.RawPtr());
+    bind_shadow_static_resources(shadow_alpha_pipeline_state_.RawPtr(), true);
   }
 }
 
-void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const {
+void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineState* pso,
+                                                         bool pixel_stage_active) const {
   if (!pso) {
     return;
   }
@@ -826,9 +870,11 @@ void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineStat
             pso->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
       variable->Set(constants_);
     }
-    if (auto* variable =
-            pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
-      variable->Set(constants_);
+    if (pixel_stage_active) {
+      if (auto* variable =
+              pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
+        variable->Set(constants_);
+      }
     }
   }
   if (deformation_constants_) {
@@ -836,6 +882,9 @@ void DiligentBackend::bindForwardPipelineStaticResources(Diligent::IPipelineStat
             Diligent::SHADER_TYPE_VERTEX, "DeformationConstants")) {
       variable->Set(deformation_constants_);
     }
+  }
+  if (!pixel_stage_active) {
+    return;
   }
   if (shadow_map_srv_) {
     if (auto* variable =
@@ -974,8 +1023,7 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   graphics.NumRenderTargets = depth_prepass ? 0u : 1u;
   graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
   if (!depth_prepass) {
-    graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                         : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    graphics.RTVFormats[0] = sceneColorFormat();
   }
   graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                    : Diligent::TEX_FORMAT_D32_FLOAT;
@@ -1133,7 +1181,7 @@ Diligent::IPipelineState* DiligentBackend::ensureForwardPipeline(
   const auto pso_start = core::SteadyClock::now();
   *out_pso = createGraphicsPipelineState(pso_ci);
   recordPipelineCreation("forward", name, pso_start, core::SteadyClock::now());
-  bindForwardPipelineStaticResources(out_pso->RawPtr());
+  bindForwardPipelineStaticResources(out_pso->RawPtr(), !depth_prepass);
   if (!depth_prepass && !compact_layout && variant == ForwardPipelineVariant::Opaque &&
       constants_ &&
       *out_pso && !shader_resources_) {
@@ -1364,8 +1412,7 @@ Diligent::IPipelineState* DiligentBackend::ensureCustomForwardPipeline(
   auto& graphics = pso_ci.GraphicsPipeline;
   graphics.NumRenderTargets = 1u;
   graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
-  graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                       : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+  graphics.RTVFormats[0] = sceneColorFormat();
   graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                    : Diligent::TEX_FORMAT_D32_FLOAT;
   graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -1539,6 +1586,9 @@ void DiligentBackend::initializeDevice() {
   engine_ci.Features.Tessellation = Diligent::DEVICE_FEATURE_STATE_OPTIONAL;
   engine_ci.DynamicHeapSize = 64u << 20;
   engine_ci.DynamicHeapPageSize = 4u << 20;
+  const Diligent::Uint32 host_visible_reserve_mb =
+      uintFromEnv("KARMA_RENDER_HOST_VISIBLE_RESERVE_MB", 32u, 16u, 1024u);
+  engine_ci.HostVisibleMemoryReserveSize = host_visible_reserve_mb << 20u;
   engine_ci.AdapterId = chooseVulkanAdapter(*factory);
   mark_stage("factory and adapter selection");
 
@@ -1579,6 +1629,32 @@ void DiligentBackend::initializeDevice() {
   if (!device_ || !context_ || (window_ != nullptr && !swap_chain_)) {
     logStartupDiag("diligent_device", "total", init_start, core::SteadyClock::now());
     return;
+  }
+
+  const Diligent::TEXTURE_FORMAT fallback_scene_format =
+      swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
+                  : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+  scene_color_format_ = fallback_scene_format;
+  const auto& hdr_format_info =
+      device_->GetTextureFormatInfoExt(Diligent::TEX_FORMAT_RGBA16_FLOAT);
+  const Diligent::BIND_FLAGS required_hdr_bind_flags =
+      Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
+  const bool hdr_scene_supported =
+      hdr_format_info.Supported &&
+      (hdr_format_info.BindFlags & required_hdr_bind_flags) == required_hdr_bind_flags &&
+      (hdr_format_info.Dimensions & Diligent::RESOURCE_DIMENSION_SUPPORT_TEX_2D) !=
+          Diligent::RESOURCE_DIMENSION_SUPPORT_NONE &&
+      (hdr_format_info.SampleCounts & Diligent::SAMPLE_COUNT_1) !=
+          Diligent::SAMPLE_COUNT_NONE &&
+      hdr_format_info.Filterable;
+  if (hdr_scene_supported) {
+    scene_color_format_ = Diligent::TEX_FORMAT_RGBA16_FLOAT;
+    spdlog::info("Diligent scene color format: RGBA16_FLOAT");
+  } else {
+    spdlog::warn(
+        "RGBA16_FLOAT is unavailable as a filterable render target; falling back to "
+        "swapchain scene color format ({})",
+        static_cast<int>(fallback_scene_format));
   }
 
   device_with_cache_ = Diligent::RenderDeviceWithCache<false>{device_};
@@ -1767,6 +1843,7 @@ VSOutput main(VSInput input)
         float weight_sum = weights.x + weights.y + weights.z + weights.w;
         if (weight_sum > 1.0e-5)
         {
+            weights /= weight_sum;
             float4 bind_pos = float4(local_pos, 1.0);
             float4 skinned_pos =
                 mul(g_DeformationMatrices[min(joints.x, joint_count - 1u)], bind_pos) * weights.x +
@@ -1800,10 +1877,15 @@ VSOutput main(VSInput input)
     float4 world_pos;
     float3 world_normal;
     float3 world_tangent;
+    float transform_orientation = 1.0;
     if (g_InstanceParams.x > 0.5)
     {
         float3 scale = input.ModelCol1.xyz;
-        float3 safe_scale = max(abs(scale), float3(1.0e-5, 1.0e-5, 1.0e-5));
+        transform_orientation = scale.x * scale.y * scale.z < 0.0 ? -1.0 : 1.0;
+        float3 safe_scale = float3(
+            abs(scale.x) > 1.0e-5 ? scale.x : (scale.x < 0.0 ? -1.0e-5 : 1.0e-5),
+            abs(scale.y) > 1.0e-5 ? scale.y : (scale.y < 0.0 ? -1.0e-5 : 1.0e-5),
+            abs(scale.z) > 1.0e-5 ? scale.z : (scale.z < 0.0 ? -1.0e-5 : 1.0e-5));
         float3 scaled = local_pos * scale;
         float3 normal_scaled = local_normal / safe_scale;
         float3 tangent_scaled = local_tangent * scale;
@@ -1864,19 +1946,34 @@ VSOutput main(VSInput input)
                     input.ModelCol1 * local_pos.y +
                     input.ModelCol2 * local_pos.z +
                     input.ModelCol3;
-        world_normal = input.ModelCol0.xyz * local_normal.x +
-                       input.ModelCol1.xyz * local_normal.y +
-                       input.ModelCol2.xyz * local_normal.z;
-        world_tangent = input.ModelCol0.xyz * local_tangent.x +
-                        input.ModelCol1.xyz * local_tangent.y +
-                        input.ModelCol2.xyz * local_tangent.z;
+        float3 model_col0 = input.ModelCol0.xyz;
+        float3 model_col1 = input.ModelCol1.xyz;
+        float3 model_col2 = input.ModelCol2.xyz;
+        float3 normal_col0 = cross(model_col1, model_col2);
+        float3 normal_col1 = cross(model_col2, model_col0);
+        float3 normal_col2 = cross(model_col0, model_col1);
+        float determinant_sign = dot(model_col0, normal_col0) < 0.0 ? -1.0 : 1.0;
+        transform_orientation = determinant_sign;
+        world_normal = (normal_col0 * local_normal.x +
+                        normal_col1 * local_normal.y +
+                        normal_col2 * local_normal.z) * determinant_sign;
+        world_tangent = model_col0 * local_tangent.x +
+                        model_col1 * local_tangent.y +
+                        model_col2 * local_tangent.z;
     }
     output.Pos = mul(g_MVP, world_pos);
     output.WorldPos = world_pos.xyz;
-    output.Normal = normalize(world_normal);
+    float world_normal_len_sq = dot(world_normal, world_normal);
+    output.Normal = world_normal_len_sq > 1.0e-10
+        ? world_normal * rsqrt(world_normal_len_sq)
+        : float3(0.0, 1.0, 0.0);
     output.UV = input.UV;
     output.UV1 = input.UV1;
-    output.Tangent = float4(normalize(world_tangent), input.Tangent.w);
+    float world_tangent_len_sq = dot(world_tangent, world_tangent);
+    output.Tangent = float4(world_tangent_len_sq > 1.0e-10
+                                ? world_tangent * rsqrt(world_tangent_len_sq)
+                                : float3(0.0, 0.0, 0.0),
+                            input.Tangent.w * transform_orientation < 0.0 ? -1.0 : 1.0);
     output.InstanceParams = input.InstanceParams;
     return output;
 }
@@ -1990,6 +2087,38 @@ float2 MaterialUV(float2 uv0, float2 uv1, uint slot)
                   dot(row1.xy, uv) + row1.z);
 }
 
+float4 SampleAntialiasedNormal(Texture2D normal_texture,
+                               float2 uv,
+                               float normal_scale)
+{
+    uint width = 1u;
+    uint height = 1u;
+    normal_texture.GetDimensions(width, height);
+    float2 dimensions = max(float2((float)width, (float)height), float2(1.0, 1.0));
+    float2 texel_dx = ddx(uv) * dimensions;
+    float2 texel_dy = ddy(uv) * dimensions;
+    float footprint = max(length(texel_dx), length(texel_dy));
+    float minification_lod = max(log2(max(footprint, 1.0)), 0.0);
+
+    // Normal detail needs a wider footprint than color at high minification.
+    // The averaged vector length also records unresolved normal variance.
+    float mip_bias = 0.75 * smoothstep(0.0, 4.0, minification_lod);
+    float3 mapped = normal_texture.SampleBias(g_SamplerData, uv, mip_bias).xyz * 2.0 - 1.0;
+    float mapped_length = min(length(mapped), 1.0);
+    float minification_fade = smoothstep(1.0, 5.0, minification_lod);
+    float normal_confidence = smoothstep(0.72, 0.98, mapped_length);
+    float filtered_scale = max(normal_scale, 0.0) *
+                           lerp(1.0, normal_confidence, minification_fade);
+    mapped.xy *= filtered_scale;
+
+    float mapped_len_sq = dot(mapped, mapped);
+    float3 filtered_normal = mapped_len_sq > 1.0e-8
+        ? mapped * rsqrt(mapped_len_sq)
+        : float3(0.0, 0.0, 1.0);
+    float variance = saturate(1.0 - mapped_length) * minification_fade;
+    return float4(filtered_normal, variance);
+}
+
 float Bayer4x4(float2 pixel)
 {
     static const float values[16] =
@@ -2044,23 +2173,20 @@ float SampleCascadeShadow(uint cascade_idx,
             float2 texel = float2(g_ShadowParams.w, g_ShadowParams.w);
             float sum = 0.0;
             float weight_sum = 0.0;
-            [unroll]
-            for (int y = -4; y <= 4; ++y)
+            [loop]
+            for (int y = -radius; y <= radius; ++y)
             {
-                [unroll]
-                for (int x = -4; x <= 4; ++x)
+                [loop]
+                for (int x = -radius; x <= radius; ++x)
                 {
-                    if (abs(x) <= radius && abs(y) <= radius)
-                    {
-                        float weight = ((float)(radius + 1 - abs(x))) *
-                                       ((float)(radius + 1 - abs(y)));
-                        float2 offset = float2((float)x, (float)y) * texel;
-                        sum += weight * g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
-                                                                       float3(shadow_uv + offset,
-                                                                              (float)cascade_idx),
-                                                                       shadow_depth - bias);
-                        weight_sum += weight;
-                    }
+                    float weight = ((float)(radius + 1 - abs(x))) *
+                                   ((float)(radius + 1 - abs(y)));
+                    float2 offset = float2((float)x, (float)y) * texel;
+                    sum += weight * g_ShadowMap.SampleCmpLevelZero(g_ShadowSampler,
+                                                                   float3(shadow_uv + offset,
+                                                                          (float)cascade_idx),
+                                                                   shadow_depth - bias);
+                    weight_sum += weight;
                 }
             }
             shadow = (weight_sum > 0.0) ? (sum / weight_sum) : 1.0;
@@ -2328,6 +2454,17 @@ float GeometrySmithDirect(float3 n, float3 v, float3 l, float perceptual_roughne
 float3 FresnelSchlick(float cos_theta, float3 f0)
 {
     return f0 + (1.0 - f0) * pow(saturate(1.0 - cos_theta), 5.0);
+}
+
+float3 FresnelSchlickRoughness(float cos_theta,
+                               float3 f0,
+                               float perceptual_roughness)
+{
+    float3 grazing = max(float3(1.0 - perceptual_roughness,
+                                1.0 - perceptual_roughness,
+                                1.0 - perceptual_roughness),
+                         f0);
+    return f0 + (grazing - f0) * pow(saturate(1.0 - cos_theta), 5.0);
 }
 
 bool DebugGlossyOff()
@@ -2819,9 +2956,22 @@ float4 main(PSInput input) : SV_TARGET
         geom_n = -geom_n;
     }
     float3 n = geom_n;
-    float3 t = SafeNormalize(input.Tangent.xyz - geom_n * dot(geom_n, input.Tangent.xyz),
-                             float3(1.0, 0.0, 0.0));
-    float3 b = normalize(cross(geom_n, t) * input.Tangent.w);
+    float3 tangent_candidate = input.Tangent.xyz -
+                               geom_n * dot(geom_n, input.Tangent.xyz);
+    float tangent_len_sq = dot(tangent_candidate, tangent_candidate);
+    float3 t;
+    if (tangent_len_sq > 1.0e-8)
+    {
+        t = tangent_candidate * rsqrt(tangent_len_sq);
+    }
+    else
+    {
+        float3 reference = abs(geom_n.y) < 0.999
+            ? float3(0.0, 1.0, 0.0)
+            : float3(1.0, 0.0, 0.0);
+        t = normalize(cross(reference, geom_n));
+    }
+    float3 b = normalize(cross(geom_n, t)) * input.Tangent.w;
     float2 base_uv = MaterialUV(input.UV, input.UV1, 0u);
     float2 normal_uv = MaterialUV(input.UV, input.UV1, 1u);
     float2 metallic_roughness_uv = MaterialUV(input.UV, input.UV1, 2u);
@@ -2848,14 +2998,15 @@ float4 main(PSInput input) : SV_TARGET
                                       float2(1.0, 1.0));
         base_uv = clamp(base_uv, base_texel, float2(1.0, 1.0) - base_texel);
     }
-    float3 normal_tex = g_NormalTex.Sample(g_SamplerData, normal_uv).xyz * 2.0 - 1.0;
-    normal_tex.xy *= g_PbrParams.w;
-    normal_tex = normalize(normal_tex);
+    float4 normal_sample = SampleAntialiasedNormal(g_NormalTex,
+                                                   normal_uv,
+                                                   g_PbrParams.w);
+    float3 normal_tex = normal_sample.xyz;
     n = normalize(normal_tex.x * t + normal_tex.y * b + normal_tex.z * n);
-    float3 clearcoat_normal_tex =
-        g_ClearcoatNormalTex.Sample(g_SamplerData, clearcoat_normal_uv).xyz * 2.0 - 1.0;
-    clearcoat_normal_tex.xy *= g_PbrParams.w;
-    clearcoat_normal_tex = normalize(clearcoat_normal_tex);
+    float4 clearcoat_normal_sample = SampleAntialiasedNormal(g_ClearcoatNormalTex,
+                                                             clearcoat_normal_uv,
+                                                             g_PbrParams.w);
+    float3 clearcoat_normal_tex = clearcoat_normal_sample.xyz;
     float3 clearcoat_n =
         normalize(clearcoat_normal_tex.x * t +
                   clearcoat_normal_tex.y * b +
@@ -2870,6 +3021,7 @@ float4 main(PSInput input) : SV_TARGET
     float2 mr = g_MetallicRoughnessTex.Sample(g_SamplerData, metallic_roughness_uv).bg;
     float metallic = saturate(mr.x * g_PbrParams.x);
     float roughness = saturate(mr.y * g_PbrParams.y);
+    roughness = sqrt(saturate(roughness * roughness + normal_sample.w));
     bool glossy_debug_off = DebugGlossyOff();
     if (glossy_debug_off)
     {
@@ -2898,6 +3050,8 @@ float4 main(PSInput input) : SV_TARGET
                                   0.045,
                                   1.0)
                           : 0.045;
+    clearcoat_roughness = sqrt(saturate(clearcoat_roughness * clearcoat_roughness +
+                                        clearcoat_normal_sample.w));
     float sheen_roughness =
         standard_material ? clamp(g_MaterialParams3.z *
                                   g_SheenRoughnessTex.Sample(g_SamplerData,
@@ -3087,6 +3241,9 @@ float4 main(PSInput input) : SV_TARGET
     float ndotv = max(dot(n, v), 0.0);
     float3 env_diffuse = float3(0.0, 0.0, 0.0);
     float3 env_spec = float3(0.0, 0.0, 0.0);
+    float3 ibl_fresnel = glossy_debug_off
+        ? float3(0.0, 0.0, 0.0)
+        : FresnelSchlickRoughness(ndotv, spec_color, perceptual_roughness);
     const bool env_debug = g_EnvParams.z > 0.5;
     if (g_EnvParams.x > 0.0 || env_debug)
     {
@@ -3125,7 +3282,9 @@ float4 main(PSInput input) : SV_TARGET
                 lit += env_diffuse * sheen_color * sheen_facing * (1.0 - metallic) * occlusion;
             }
         }
-        lit += env_diffuse * base_color * (1.0 - metallic) * occlusion * base_layer_ibl_weight;
+        float3 ibl_diffuse_weight = (1.0 - ibl_fresnel) * (1.0 - metallic);
+        lit += env_diffuse * base_color * ibl_diffuse_weight *
+               occlusion * base_layer_ibl_weight;
         if (env_debug)
         {
             if (g_EnvParams.z < 1.5)
@@ -3969,7 +4128,6 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
   device_->CreateSampler(shadow_sampler, &shadow_sampler_);
 
   recreateShadowMap();
-  recreatePointShadowMap();
   mark_stage("samplers and shadow maps");
 
   ensureForwardPipeline(ForwardPipelineVariant::Opaque);

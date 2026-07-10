@@ -135,6 +135,14 @@ bool matrixChangedBeyondEpsilon(const glm::mat4& a, const glm::mat4& b, float ep
   return false;
 }
 
+bool materialBindingsEqual(const std::vector<rendering::DrawMaterialBinding>& a,
+                           const std::vector<rendering::DrawMaterialBinding>& b) {
+  return a.size() == b.size() &&
+         std::equal(a.begin(), a.end(), b.begin(), [](const auto& lhs, const auto& rhs) {
+           return lhs.slot == rhs.slot && lhs.material == rhs.material;
+         });
+}
+
 Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_format) {
   switch (depth_format) {
     case Diligent::TEX_FORMAT_D32_FLOAT:
@@ -159,7 +167,10 @@ struct SsaaDownsampleConstants {
 }  // namespace
 
 void DiligentBackend::beginFrame(const rendering::FrameInfo& frame) {
+  auto graph_pass_timings = std::move(current_frame_timing_stats_.graph_pass_timings);
+  graph_pass_timings.clear();
   current_frame_timing_stats_ = {};
+  current_frame_timing_stats_.graph_pass_timings = std::move(graph_pass_timings);
   frame_active_ = true;
   present_frame_ = frame.present;
 
@@ -262,9 +273,7 @@ void DiligentBackend::prewarmRendererResources(bool include_ui) {
 
   const int width = std::max(current_width_, 1);
   const int height = std::max(current_height_, 1);
-  const Diligent::TEXTURE_FORMAT color_format =
-      swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                  : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+  const Diligent::TEXTURE_FORMAT color_format = sceneColorFormat();
 
   ensureDefaultSceneResources(width, height);
   ensureForwardPipeline(ForwardPipelineVariant::Opaque,
@@ -306,39 +315,26 @@ void DiligentBackend::ensureDefaultSceneResources(int width, int height) {
     return;
   }
 
-  default_scene_color_tex_.Release();
-  default_scene_color_srv_.Release();
-  default_scene_color_rtv_.Release();
-  default_scene_depth_tex_.Release();
-  default_scene_depth_srv_.Release();
-  default_scene_depth_dsv_.Release();
-  default_scene_depth_read_only_dsv_.Release();
-  default_scene_width_ = 0;
-  default_scene_height_ = 0;
-
   Diligent::TextureDesc color_desc{};
   color_desc.Name = "Karma Default Scene Color";
   color_desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
   color_desc.Width = static_cast<Diligent::Uint32>(width);
   color_desc.Height = static_cast<Diligent::Uint32>(height);
   color_desc.MipLevels = 1;
-  color_desc.Format = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                  : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+  color_desc.Format = sceneColorFormat();
   color_desc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> color_texture;
   const auto color_start = core::SteadyClock::now();
-  device_->CreateTexture(color_desc, nullptr, &default_scene_color_tex_);
+  device_->CreateTexture(color_desc, nullptr, &color_texture);
   recordResourceCreation("default_scene", "color texture", color_start, core::SteadyClock::now());
-  if (!default_scene_color_tex_) {
+  if (!color_texture) {
     return;
   }
-  default_scene_color_srv_ =
-      default_scene_color_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-  default_scene_color_rtv_ =
-      default_scene_color_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET);
-  if (!default_scene_color_srv_ || !default_scene_color_rtv_) {
-    default_scene_color_tex_.Release();
-    default_scene_color_srv_.Release();
-    default_scene_color_rtv_.Release();
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> color_srv;
+  color_srv = color_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> color_rtv;
+  color_rtv = color_texture->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET);
+  if (!color_srv || !color_rtv) {
     return;
   }
 
@@ -351,43 +347,44 @@ void DiligentBackend::ensureDefaultSceneResources(int width, int height) {
   depth_desc.Format = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                   : Diligent::TEX_FORMAT_D32_FLOAT;
   depth_desc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> depth_texture;
   const auto depth_start = core::SteadyClock::now();
-  device_->CreateTexture(depth_desc, nullptr, &default_scene_depth_tex_);
+  device_->CreateTexture(depth_desc, nullptr, &depth_texture);
   recordResourceCreation("default_scene", "depth texture", depth_start, core::SteadyClock::now());
-  if (!default_scene_depth_tex_) {
-    default_scene_color_tex_.Release();
-    default_scene_color_srv_.Release();
-    default_scene_color_rtv_.Release();
+  if (!depth_texture) {
     return;
   }
 
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> depth_srv;
   Diligent::TextureViewDesc depth_srv_desc{};
   depth_srv_desc.ViewType = Diligent::TEXTURE_VIEW_SHADER_RESOURCE;
   depth_srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D;
   depth_srv_desc.Format = resolveDepthSrvFormat(depth_desc.Format);
   if (depth_srv_desc.Format != Diligent::TEX_FORMAT_UNKNOWN) {
-    default_scene_depth_tex_->CreateView(depth_srv_desc, &default_scene_depth_srv_);
+    depth_texture->CreateView(depth_srv_desc, &depth_srv);
   }
-  if (!default_scene_depth_srv_) {
-    default_scene_depth_srv_ =
-        default_scene_depth_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+  if (!depth_srv) {
+    depth_srv = depth_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
   }
-  default_scene_depth_dsv_ =
-      default_scene_depth_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
-  if (!default_scene_depth_srv_ || !default_scene_depth_dsv_) {
-    default_scene_color_tex_.Release();
-    default_scene_color_srv_.Release();
-    default_scene_color_rtv_.Release();
-    default_scene_depth_tex_.Release();
-    default_scene_depth_srv_.Release();
-    default_scene_depth_dsv_.Release();
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> depth_dsv;
+  depth_dsv = depth_texture->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
+  if (!depth_srv || !depth_dsv) {
     return;
   }
 
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> depth_read_only_dsv;
   Diligent::TextureViewDesc read_only_dsv_desc{};
   read_only_dsv_desc.ViewType = Diligent::TEXTURE_VIEW_READ_ONLY_DEPTH_STENCIL;
   read_only_dsv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D;
-  default_scene_depth_tex_->CreateView(read_only_dsv_desc, &default_scene_depth_read_only_dsv_);
+  depth_texture->CreateView(read_only_dsv_desc, &depth_read_only_dsv);
+
+  default_scene_color_tex_ = std::move(color_texture);
+  default_scene_color_srv_ = std::move(color_srv);
+  default_scene_color_rtv_ = std::move(color_rtv);
+  default_scene_depth_tex_ = std::move(depth_texture);
+  default_scene_depth_srv_ = std::move(depth_srv);
+  default_scene_depth_dsv_ = std::move(depth_dsv);
+  default_scene_depth_read_only_dsv_ = std::move(depth_read_only_dsv);
 
   default_scene_width_ = width;
   default_scene_height_ = height;
@@ -1521,10 +1518,14 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
   }
   auto& record = it->second;
   const bool mesh_changed = record.mesh != item.mesh;
+  const bool shadow_material_changed =
+      record.material != item.material ||
+      !materialBindingsEqual(record.materials, item.materials);
   const bool shadow_scene_changed =
       new_record ? item.shadow_visible
                  : ((record.layer != item.layer ||
                      mesh_changed ||
+                     shadow_material_changed ||
                      record.deformation != item.deformation ||
                      record.shadow_visible != item.shadow_visible) &&
                     (record.shadow_visible || item.shadow_visible));
@@ -1575,10 +1576,14 @@ void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) 
     it = instanced_records_.emplace(item.instance, InstancedRecord{}).first;
   }
   auto& record = it->second;
+  const bool shadow_material_changed =
+      record.material != item.material ||
+      !materialBindingsEqual(record.materials, item.materials);
   const bool shadow_scene_changed =
       new_record ? item.shadow_visible
                  : ((record.layer != item.layer ||
                      record.mesh != item.mesh ||
+                     shadow_material_changed ||
                      record.shadow_visible != item.shadow_visible) &&
                     (record.shadow_visible || item.shadow_visible));
   if (shadow_scene_changed) {
@@ -1591,6 +1596,11 @@ void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) 
                                record.revision != item.revision ||
                                record.gpu_layout != item.gpu_layout ||
                                record.instanceCount() != item_instance_count;
+  if (payload_changed &&
+      (item.shadow_visible || (!new_record && record.shadow_visible))) {
+    directional_shadow_scene_dirty_ = true;
+    point_shadow_scene_dirty_ = true;
+  }
   record.layer = item.layer;
   record.mesh = item.mesh;
   record.material = item.material;

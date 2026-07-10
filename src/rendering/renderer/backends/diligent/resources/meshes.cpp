@@ -8,11 +8,26 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include <glm/geometric.hpp>
 
 namespace karma::rendering::backend {
 
 namespace {
+constexpr size_t kInterleavedVertexFloatCount = 22u;
+
+bool checkedBufferByteSize(size_t element_count,
+                           size_t element_size,
+                           Diligent::Uint64& out_size) {
+  if (element_size == 0u ||
+      element_count > std::numeric_limits<Diligent::Uint64>::max() / element_size) {
+    return false;
+  }
+  out_size = static_cast<Diligent::Uint64>(element_count) *
+             static_cast<Diligent::Uint64>(element_size);
+  return true;
+}
+
 void computeBounds(const world::MeshData& mesh, glm::vec3& out_center, float& out_radius) {
   if (mesh.vertices.empty()) {
     out_center = glm::vec3(0.0f);
@@ -80,6 +95,33 @@ std::vector<ParticleGpuMeshSample> buildParticleMeshSamples(const world::MeshDat
   return samples;
 }
 
+bool meshGpuUploadComplete(const world::MeshData& mesh, const auto& record) {
+  if (mesh.vertices.size() > std::numeric_limits<Diligent::Uint32>::max() ||
+      mesh.indices.size() > std::numeric_limits<Diligent::Uint32>::max() ||
+      mesh.morph_targets.size() > std::numeric_limits<Diligent::Uint32>::max()) {
+    return false;
+  }
+  const bool vertices_ready =
+      mesh.vertices.empty()
+          ? !record.vertex_buffer && record.vertex_count == 0u
+          : record.vertex_buffer &&
+                record.vertex_count == static_cast<Diligent::Uint32>(mesh.vertices.size());
+  const bool indices_ready =
+      mesh.indices.empty()
+          ? !record.index_buffer && record.index_count == 0u
+          : record.index_buffer &&
+                record.index_count == static_cast<Diligent::Uint32>(mesh.indices.size());
+  const bool needs_morph_buffer = !mesh.vertices.empty() && !mesh.morph_targets.empty();
+  const bool morphs_ready =
+      needs_morph_buffer
+          ? record.morph_delta_buffer && record.morph_delta_srv &&
+                record.morph_target_count ==
+                    static_cast<Diligent::Uint32>(mesh.morph_targets.size())
+          : !record.morph_delta_buffer && !record.morph_delta_srv &&
+                record.morph_target_count == 0u;
+  return vertices_ready && indices_ready && morphs_ready;
+}
+
 }  // namespace
 
 void DiligentBackend::refreshSubmeshesFromMeshData(MeshRecord& record) {
@@ -106,51 +148,118 @@ void DiligentBackend::refreshSubmeshesFromMeshData(MeshRecord& record) {
 }
 
 void DiligentBackend::uploadMeshBuffers(const world::MeshData& mesh, MeshRecord& record) {
-  record.vertex_buffer.Release();
-  record.index_buffer.Release();
-  record.vertex_count = 0;
-  record.index_count = 0;
-  record.morph_target_count = 0;
+  if (mesh.vertices.size() > std::numeric_limits<Diligent::Uint32>::max() ||
+      mesh.indices.size() > std::numeric_limits<Diligent::Uint32>::max() ||
+      mesh.morph_targets.size() > std::numeric_limits<Diligent::Uint32>::max() ||
+      (!mesh.indices.empty() && mesh.vertices.empty())) {
+    return;
+  }
+  if (std::any_of(mesh.indices.begin(), mesh.indices.end(), [&](uint32_t index) {
+        return static_cast<size_t>(index) >= mesh.vertices.size();
+      })) {
+    return;
+  }
 
-  if (device_ && !mesh.vertices.empty()) {
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> vertex_buffer;
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> index_buffer;
+  Diligent::Uint32 vertex_count = 0u;
+  Diligent::Uint32 index_count = 0u;
+
+  if (!mesh.vertices.empty()) {
+    if (!device_ ||
+        mesh.vertices.size() >
+            std::numeric_limits<size_t>::max() / kInterleavedVertexFloatCount) {
+      return;
+    }
     const auto interleaved = buildInterleavedVertices(mesh);
-    constexpr Diligent::Uint32 kVertexStride = static_cast<Diligent::Uint32>(22 * sizeof(float));
+    const size_t expected_float_count =
+        mesh.vertices.size() * kInterleavedVertexFloatCount;
+    Diligent::Uint64 vertex_bytes = 0u;
+    if (interleaved.size() != expected_float_count ||
+        !checkedBufferByteSize(interleaved.size(), sizeof(float), vertex_bytes)) {
+      return;
+    }
+    constexpr Diligent::Uint32 kVertexStride =
+        static_cast<Diligent::Uint32>(kInterleavedVertexFloatCount * sizeof(float));
     Diligent::BufferDesc vb_desc{};
     vb_desc.Name = "Karma VB";
     vb_desc.Usage = Diligent::USAGE_IMMUTABLE;
     vb_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     vb_desc.ElementByteStride = kVertexStride;
-    vb_desc.Size = static_cast<Diligent::Uint32>(interleaved.size() * sizeof(float));
+    vb_desc.Size = vertex_bytes;
     Diligent::BufferData vb_data{interleaved.data(), vb_desc.Size};
-    device_->CreateBuffer(vb_desc, &vb_data, &record.vertex_buffer);
-    record.vertex_count = static_cast<Diligent::Uint32>(mesh.vertices.size());
+    device_->CreateBuffer(vb_desc, &vb_data, &vertex_buffer);
+    if (!vertex_buffer) {
+      return;
+    }
+    vertex_count = static_cast<Diligent::Uint32>(mesh.vertices.size());
   }
 
-  if (device_ && !mesh.indices.empty()) {
+  if (!mesh.indices.empty()) {
+    if (!device_) {
+      return;
+    }
+    Diligent::Uint64 index_bytes = 0u;
+    if (!checkedBufferByteSize(mesh.indices.size(), sizeof(uint32_t), index_bytes)) {
+      return;
+    }
     Diligent::BufferDesc ib_desc{};
     ib_desc.Name = "Karma IB";
     ib_desc.Usage = Diligent::USAGE_IMMUTABLE;
     ib_desc.BindFlags = Diligent::BIND_INDEX_BUFFER;
-    ib_desc.Size = static_cast<Diligent::Uint32>(mesh.indices.size() * sizeof(uint32_t));
+    ib_desc.Size = index_bytes;
     Diligent::BufferData ib_data{mesh.indices.data(), ib_desc.Size};
-    device_->CreateBuffer(ib_desc, &ib_data, &record.index_buffer);
-    record.index_count = static_cast<Diligent::Uint32>(mesh.indices.size());
+    device_->CreateBuffer(ib_desc, &ib_data, &index_buffer);
+    if (!index_buffer) {
+      return;
+    }
+    index_count = static_cast<Diligent::Uint32>(mesh.indices.size());
   }
 
-  uploadMeshMorphBuffers(mesh, record);
+  MeshRecord morph_upload{};
+  uploadMeshMorphBuffers(mesh, morph_upload);
+  const bool needs_morph_buffer = !mesh.vertices.empty() && !mesh.morph_targets.empty();
+  if (needs_morph_buffer &&
+      (!morph_upload.morph_delta_buffer || !morph_upload.morph_delta_srv ||
+       morph_upload.morph_target_count !=
+           static_cast<Diligent::Uint32>(mesh.morph_targets.size()))) {
+    return;
+  }
+
+  record.vertex_buffer = std::move(vertex_buffer);
+  record.index_buffer = std::move(index_buffer);
+  record.morph_delta_buffer = std::move(morph_upload.morph_delta_buffer);
+  record.morph_delta_srv = std::move(morph_upload.morph_delta_srv);
+  record.vertex_count = vertex_count;
+  record.index_count = index_count;
+  record.morph_target_count = morph_upload.morph_target_count;
 }
 
 void DiligentBackend::uploadMeshMorphBuffers(const world::MeshData& mesh,
                                              MeshRecord& record) {
-  record.morph_delta_buffer.Release();
-  record.morph_delta_srv.Release();
-  record.morph_target_count = 0;
-  if (!device_ || mesh.vertices.empty() || mesh.morph_targets.empty()) {
+  if (mesh.vertices.empty() || mesh.morph_targets.empty()) {
+    record.morph_delta_buffer.Release();
+    record.morph_delta_srv.Release();
+    record.morph_target_count = 0u;
+    return;
+  }
+  if (!device_ ||
+      mesh.morph_targets.size() > std::numeric_limits<Diligent::Uint32>::max() ||
+      mesh.vertices.size() >
+          std::numeric_limits<size_t>::max() / mesh.morph_targets.size()) {
     return;
   }
 
+  const size_t delta_count = mesh.vertices.size() * mesh.morph_targets.size();
+  Diligent::Uint64 delta_bytes = 0u;
+  if (!checkedBufferByteSize(delta_count, sizeof(MorphTargetDeltaGpu), delta_bytes)) {
+    return;
+  }
   std::vector<MorphTargetDeltaGpu> deltas;
-  deltas.reserve(mesh.vertices.size() * mesh.morph_targets.size());
+  if (delta_count > deltas.max_size()) {
+    return;
+  }
+  deltas.reserve(delta_count);
   for (const world::MeshData::MorphTarget& target : mesh.morph_targets) {
     for (size_t vertex_index = 0; vertex_index < mesh.vertices.size(); ++vertex_index) {
       MorphTargetDeltaGpu delta{};
@@ -175,7 +284,7 @@ void DiligentBackend::uploadMeshMorphBuffers(const world::MeshData& mesh,
       deltas.push_back(delta);
     }
   }
-  if (deltas.empty()) {
+  if (deltas.size() != delta_count) {
     return;
   }
 
@@ -186,30 +295,52 @@ void DiligentBackend::uploadMeshMorphBuffers(const world::MeshData& mesh,
   desc.CPUAccessFlags = Diligent::CPU_ACCESS_NONE;
   desc.Mode = Diligent::BUFFER_MODE_STRUCTURED;
   desc.ElementByteStride = static_cast<Diligent::Uint32>(sizeof(MorphTargetDeltaGpu));
-  desc.Size = static_cast<Diligent::Uint64>(deltas.size()) *
-              static_cast<Diligent::Uint64>(sizeof(MorphTargetDeltaGpu));
+  desc.Size = delta_bytes;
   Diligent::BufferData data{deltas.data(), desc.Size};
-  device_->CreateBuffer(desc, &data, &record.morph_delta_buffer);
-  if (!record.morph_delta_buffer) {
+  Diligent::RefCntAutoPtr<Diligent::IBuffer> morph_delta_buffer;
+  device_->CreateBuffer(desc, &data, &morph_delta_buffer);
+  if (!morph_delta_buffer) {
     return;
   }
-  record.morph_delta_srv =
-      record.morph_delta_buffer->GetDefaultView(Diligent::BUFFER_VIEW_SHADER_RESOURCE);
-  if (record.morph_delta_srv) {
-    record.morph_target_count = static_cast<Diligent::Uint32>(mesh.morph_targets.size());
+  Diligent::RefCntAutoPtr<Diligent::IBufferView> morph_delta_srv;
+  morph_delta_srv =
+      morph_delta_buffer->GetDefaultView(Diligent::BUFFER_VIEW_SHADER_RESOURCE);
+  if (!morph_delta_srv) {
+    return;
   }
+  record.morph_delta_buffer = std::move(morph_delta_buffer);
+  record.morph_delta_srv = std::move(morph_delta_srv);
+  record.morph_target_count =
+      static_cast<Diligent::Uint32>(mesh.morph_targets.size());
+}
+
+rendering::MeshId DiligentBackend::allocateMeshId() noexcept {
+  if (nextMeshId_ == rendering::kInvalidMesh) {
+    return rendering::kInvalidMesh;
+  }
+  const rendering::MeshId id = nextMeshId_;
+  nextMeshId_ = id == std::numeric_limits<rendering::MeshId>::max()
+                    ? rendering::kInvalidMesh
+                    : id + 1u;
+  return id;
 }
 
 rendering::MeshId DiligentBackend::createMesh(const world::MeshData& mesh) {
-  const rendering::MeshId id = nextMeshId_++;
   MeshRecord record{};
+  uploadMeshBuffers(mesh, record);
+  if (!meshGpuUploadComplete(mesh, record)) {
+    return rendering::kInvalidMesh;
+  }
   record.data = mesh;
   computeBounds(mesh, record.bounds_center, record.bounds_radius);
   record.particle_source_samples = buildParticleMeshSamples(record.data);
   record.base_color = glm::vec4(1.0f);
-  uploadMeshBuffers(mesh, record);
   refreshSubmeshesFromMeshData(record);
 
+  const rendering::MeshId id = allocateMeshId();
+  if (id == rendering::kInvalidMesh) {
+    return rendering::kInvalidMesh;
+  }
   meshes_[id] = std::move(record);
   return id;
 }
@@ -220,20 +351,31 @@ void DiligentBackend::updateMesh(rendering::MeshId mesh, const world::MeshData& 
     return;
   }
 
+  MeshRecord replacement{};
+  uploadMeshBuffers(data, replacement);
+  if (!meshGpuUploadComplete(data, replacement)) {
+    return;
+  }
+
   MeshRecord& record = it->second;
-  const std::vector<world::MeshSubmesh> previous_submeshes = record.data.submeshes;
-  const std::vector<world::MeshMaterialSlot> previous_material_slots = record.data.material_slots;
-  record.data = data;
-  if (record.data.submeshes.empty()) {
-    record.data.submeshes = previous_submeshes;
+  replacement.data = data;
+  if (replacement.data.submeshes.empty()) {
+    replacement.data.submeshes = record.data.submeshes;
   }
-  if (record.data.material_slots.empty()) {
-    record.data.material_slots = previous_material_slots;
+  if (replacement.data.material_slots.empty()) {
+    replacement.data.material_slots = record.data.material_slots;
   }
-  computeBounds(data, record.bounds_center, record.bounds_radius);
-  record.particle_source_samples = buildParticleMeshSamples(record.data);
-  uploadMeshBuffers(data, record);
-  refreshSubmeshesFromMeshData(record);
+  computeBounds(data, replacement.bounds_center, replacement.bounds_radius);
+  replacement.particle_source_samples = buildParticleMeshSamples(replacement.data);
+  replacement.base_color = record.base_color;
+  replacement.owned_materials = record.owned_materials;
+  refreshSubmeshesFromMeshData(replacement);
+  record = std::move(replacement);
+  // Geometry, bounds, and alpha-tested submesh ranges all participate in the
+  // cached shadow passes. The handle is stable, so submission-level change
+  // detection cannot observe this mutation.
+  directional_shadow_scene_dirty_ = true;
+  point_shadow_scene_dirty_ = true;
 }
 
 void DiligentBackend::destroyMesh(rendering::MeshId mesh) {

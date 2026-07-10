@@ -10,6 +10,7 @@ struct alignas(16) LineConstants {
 
 struct alignas(16) ParticleBeamConstants {
   float view_proj[16];
+  float exposure_params[4];
 };
 
 struct alignas(16) ParticleConstants {

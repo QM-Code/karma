@@ -74,10 +74,15 @@ bool projectSphereToScreenRect(const glm::mat4& view,
 
   const float max_screen_x = std::max(screen_width - 1.0f, 0.0f);
   const float max_screen_y = std::max(screen_height - 1.0f, 0.0f);
+  const float center_depth = -center_vs.z;
+  if (center_depth + radius_ws <= near_clip) {
+    out_rect = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+    return false;
+  }
   // When the light sphere intersects the near plane, corner sampling tends to
   // underestimate the visible screen coverage and produces hard cut lines in
   // the tiled-light path as the camera moves through the light volume.
-  if (-center_vs.z <= radius_ws + near_clip) {
+  if (center_depth - radius_ws <= near_clip) {
     out_rect = glm::vec4(0.0f, 0.0f, max_screen_x, max_screen_y);
     return true;
   }
@@ -372,6 +377,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     stage_start = stage_end;
   };
 
+  prunePostProcessHistoryResources();
   applyPostProcessSettingsForPass(post_process);
   if (!context_ || !swap_chain_) {
     return;
@@ -384,6 +390,8 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   Diligent::ITextureView* particle_scene_color_srv = nullptr;
   Diligent::ITextureView* particle_scene_depth_srv = nullptr;
   Diligent::ITexture* particle_scene_texture = nullptr;
+  Diligent::ITextureView* present_source_srv = nullptr;
+  Diligent::ITextureView* present_destination_rtv = nullptr;
   Diligent::ITexture* present_source_texture = nullptr;
   Diligent::ITexture* present_destination_texture = nullptr;
   Diligent::TEXTURE_FORMAT active_color_format = Diligent::TEX_FORMAT_UNKNOWN;
@@ -411,6 +419,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     particle_scene_color_srv = default_scene_color_srv_;
     particle_scene_depth_srv = default_scene_depth_srv_;
     particle_scene_texture = default_scene_color_tex_;
+    present_source_srv = default_scene_color_srv_;
     present_source_texture = default_scene_color_tex_;
     if (default_scene_color_tex_) {
       active_color_format = default_scene_color_tex_->GetDesc().Format;
@@ -419,6 +428,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
       active_depth_format = default_scene_depth_tex_->GetDesc().Format;
     }
     if (auto* backbuffer_rtv = swap_chain_->GetCurrentBackBufferRTV()) {
+      present_destination_rtv = backbuffer_rtv;
       present_destination_texture = backbuffer_rtv->GetTexture();
     }
   } else {
@@ -697,15 +707,41 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   };
 
   auto present_active_target = [&]() {
-    if (!rendering_to_default_target || !present_source_texture || !present_destination_texture) {
+    if (!rendering_to_default_target || !present_source_srv || !present_destination_rtv) {
       return;
     }
-    Diligent::CopyTextureAttribs copy_attribs{
-        present_source_texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-        present_destination_texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-    context_->CopyTexture(copy_attribs);
+    const Diligent::TEXTURE_FORMAT present_format =
+        swap_chain_->GetDesc().ColorBufferFormat;
+    const bool native_copy_supported = [&]() {
+      if (!present_source_texture || !present_destination_texture) {
+        return false;
+      }
+      const auto& source_desc = present_source_texture->GetDesc();
+      const auto& destination_desc = present_destination_texture->GetDesc();
+      return source_desc.SampleCount == 1u && destination_desc.SampleCount == 1u &&
+             source_desc.Width == destination_desc.Width &&
+             source_desc.Height == destination_desc.Height &&
+             source_desc.Format == destination_desc.Format;
+    }();
+    if (native_copy_supported) {
+      copyTextureAfterRender(present_source_texture,
+                             present_destination_texture);
+      return;
+    }
+
+    if (runPresentBlit(present_source_srv,
+                       present_destination_rtv,
+                       output_width,
+                       output_height,
+                       present_format)) {
+      return;
+    }
+
+    static bool warned_present_blit_failure = false;
+    if (!warned_present_blit_failure) {
+      warned_present_blit_failure = true;
+      spdlog::error("Failed to convert the HDR scene target into the swapchain backbuffer");
+    }
   };
 
   auto bind_active_target = [&]() {
@@ -856,19 +892,18 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   const glm::mat4 camera_view_proj = projection * view;
   const Diligent::Uint32 forward_plus_tile_size =
       static_cast<Diligent::Uint32>(std::max(forward_plus_tile_size_, 1));
-  const Diligent::Uint32 forward_plus_tiles_x_unclamped = static_cast<Diligent::Uint32>(std::max(
-      (render_width + static_cast<int>(forward_plus_tile_size) - 1) /
-          static_cast<int>(forward_plus_tile_size),
-      1));
-  const Diligent::Uint32 forward_plus_tiles_y_unclamped = static_cast<Diligent::Uint32>(std::max(
-      (render_height + static_cast<int>(forward_plus_tile_size) - 1) /
-          static_cast<int>(forward_plus_tile_size),
-      1));
+  const auto tile_count_for_extent = [forward_plus_tile_size](int extent) {
+    const uint64_t safe_extent = static_cast<uint64_t>(std::max(extent, 1));
+    return (safe_extent + static_cast<uint64_t>(forward_plus_tile_size) - 1u) /
+           static_cast<uint64_t>(forward_plus_tile_size);
+  };
+  const uint64_t forward_plus_tiles_x_unclamped = tile_count_for_extent(render_width);
+  const uint64_t forward_plus_tiles_y_unclamped = tile_count_for_extent(render_height);
   static constexpr Diligent::Uint32 kMaxForwardPlusTilesPerAxis = 2048;
-  const Diligent::Uint32 forward_plus_tiles_x =
-      std::min(forward_plus_tiles_x_unclamped, kMaxForwardPlusTilesPerAxis);
-  const Diligent::Uint32 forward_plus_tiles_y =
-      std::min(forward_plus_tiles_y_unclamped, kMaxForwardPlusTilesPerAxis);
+  const Diligent::Uint32 forward_plus_tiles_x = static_cast<Diligent::Uint32>(
+      std::min<uint64_t>(forward_plus_tiles_x_unclamped, kMaxForwardPlusTilesPerAxis));
+  const Diligent::Uint32 forward_plus_tiles_y = static_cast<Diligent::Uint32>(
+      std::min<uint64_t>(forward_plus_tiles_y_unclamped, kMaxForwardPlusTilesPerAxis));
   const Diligent::Uint32 forward_plus_max_lights_per_tile = static_cast<Diligent::Uint32>(
       std::max(forward_plus_max_lights_per_tile_, 1));
   Diligent::Uint32 active_forward_plus_tile_size = forward_plus_tile_size;
@@ -885,22 +920,30 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
            light.intensity > 0.0f &&
            light.range > 0.0f;
   };
-  std::vector<ForwardPlusGpuLight> forward_plus_lights_gpu;
-  std::vector<size_t> forward_plus_light_source_index;
-  forward_plus_lights_gpu.reserve(lights_.size());
-  forward_plus_light_source_index.reserve(lights_.size());
+  static thread_local std::vector<ForwardPlusGpuLight> forward_plus_lights_gpu;
+  static thread_local std::vector<size_t> forward_plus_light_source_index;
+  forward_plus_lights_gpu.clear();
+  forward_plus_light_source_index.clear();
+  if (forward_plus_lights_gpu.capacity() < lights_.size()) {
+    forward_plus_lights_gpu.reserve(lights_.size());
+  }
+  if (forward_plus_light_source_index.capacity() < lights_.size()) {
+    forward_plus_light_source_index.reserve(lights_.size());
+  }
   for (size_t idx = 0; idx < lights_.size(); ++idx) {
     const auto& light = lights_[idx];
     if (is_local_light(light)) {
       glm::vec4 screen_rect(1.0f, 1.0f, 0.0f, 0.0f);
-      projectSphereToScreenRect(view,
-                                camera_view_proj,
-                                light.position,
-                                std::max(light.range, 0.0f),
-                                std::max(camera_.near_clip, 0.001f),
-                                static_cast<float>(std::max(render_width, 1)),
-                                static_cast<float>(std::max(render_height, 1)),
-                                screen_rect);
+      if (!projectSphereToScreenRect(view,
+                                     camera_view_proj,
+                                     light.position,
+                                     std::max(light.range, 0.0f),
+                                     std::max(camera_.near_clip, 0.001f),
+                                     static_cast<float>(std::max(render_width, 1)),
+                                     static_cast<float>(std::max(render_height, 1)),
+                                     screen_rect)) {
+        continue;
+      }
       forward_plus_lights_gpu.push_back(packForwardPlusLight(light, screen_rect));
       forward_plus_light_source_index.push_back(idx);
     }
@@ -926,8 +969,18 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     if (buffer && srv && capacity >= safe_required && (!needs_uav || (uav && *uav))) {
       return true;
     }
-    const size_t new_capacity =
-        std::max(safe_required, capacity > 0 ? capacity * 2 : safe_required);
+    if (element_stride == 0u ||
+        safe_required > std::numeric_limits<Diligent::Uint64>::max() / element_stride) {
+      return false;
+    }
+    const size_t grown_capacity =
+        capacity > 0u && capacity <= std::numeric_limits<size_t>::max() / 2u
+            ? capacity * 2u
+            : safe_required;
+    const size_t new_capacity = std::max(safe_required, grown_capacity);
+    if (new_capacity > std::numeric_limits<Diligent::Uint64>::max() / element_stride) {
+      return false;
+    }
     Diligent::BufferDesc desc{};
     desc.Name = name;
     desc.Usage = Diligent::USAGE_DEFAULT;
@@ -937,26 +990,32 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
     desc.ElementByteStride = element_stride;
     desc.Size = static_cast<Diligent::Uint64>(new_capacity) *
                 static_cast<Diligent::Uint64>(element_stride);
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> new_buffer;
     const auto buffer_start = core::SteadyClock::now();
-    device_->CreateBuffer(desc, nullptr, &buffer);
+    device_->CreateBuffer(desc, nullptr, &new_buffer);
     recordResourceCreation("forward_plus", name, buffer_start, core::SteadyClock::now());
-    if (!buffer) {
+    if (!new_buffer) {
       return false;
     }
-    srv = buffer->GetDefaultView(Diligent::BUFFER_VIEW_SHADER_RESOURCE);
-    if (!srv) {
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> new_srv;
+    new_srv = new_buffer->GetDefaultView(Diligent::BUFFER_VIEW_SHADER_RESOURCE);
+    if (!new_srv) {
       return false;
     }
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> new_uav;
     if (needs_uav) {
       if (!uav) {
         return false;
       }
-      *uav = buffer->GetDefaultView(Diligent::BUFFER_VIEW_UNORDERED_ACCESS);
-      if (!*uav) {
+      new_uav = new_buffer->GetDefaultView(Diligent::BUFFER_VIEW_UNORDERED_ACCESS);
+      if (!new_uav) {
         return false;
       }
-    } else if (uav) {
-      uav->Release();
+    }
+    buffer = std::move(new_buffer);
+    srv = std::move(new_srv);
+    if (uav) {
+      *uav = std::move(new_uav);
     }
     capacity = new_capacity;
     return true;
@@ -1059,46 +1118,55 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
         fp_constants.screen_params[1] = static_cast<float>(render_height);
         fp_constants.screen_params[2] = static_cast<float>(forward_plus_lights_gpu.size());
         fp_constants.screen_params[3] = 0.0f;
+        bool constants_ready = false;
         {
           Diligent::MapHelper<ForwardPlusComputeConstants> mapped(
               context_, forward_plus_compute_cb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
-          *mapped = fp_constants;
+          if (auto* mapped_constants = getMappedData(mapped)) {
+            *mapped_constants = fp_constants;
+            constants_ready = true;
+          }
         }
 
-        if (forward_plus_compute_lights_var_) {
+        if (constants_ready && forward_plus_compute_lights_var_) {
           forward_plus_compute_lights_var_->Set(forward_plus_light_srv_);
         }
-        if (forward_plus_compute_tile_counts_var_) {
+        if (constants_ready && forward_plus_compute_tile_counts_var_) {
           forward_plus_compute_tile_counts_var_->Set(forward_plus_tile_count_uav_);
         }
-        if (forward_plus_compute_tile_indices_var_) {
+        if (constants_ready && forward_plus_compute_tile_indices_var_) {
           forward_plus_compute_tile_indices_var_->Set(forward_plus_tile_index_uav_);
         }
 
-        context_->SetPipelineState(forward_plus_compute_pso_);
-        context_->CommitShaderResources(forward_plus_compute_srb_,
-                                        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-        static constexpr Diligent::Uint32 kForwardPlusGroupSize = 8u;
-        Diligent::DispatchComputeAttribs dispatch{};
-        dispatch.ThreadGroupCountX =
-            (forward_plus_tiles_x + kForwardPlusGroupSize - 1u) / kForwardPlusGroupSize;
-        dispatch.ThreadGroupCountY =
-            (forward_plus_tiles_y + kForwardPlusGroupSize - 1u) / kForwardPlusGroupSize;
-        dispatch.ThreadGroupCountZ = 1;
-        context_->DispatchCompute(dispatch);
+        if (constants_ready) {
+          context_->SetPipelineState(forward_plus_compute_pso_);
+          context_->CommitShaderResources(forward_plus_compute_srb_,
+                                          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+          static constexpr Diligent::Uint32 kForwardPlusGroupSize = 8u;
+          Diligent::DispatchComputeAttribs dispatch{};
+          dispatch.ThreadGroupCountX =
+              (forward_plus_tiles_x + kForwardPlusGroupSize - 1u) / kForwardPlusGroupSize;
+          dispatch.ThreadGroupCountY =
+              (forward_plus_tiles_y + kForwardPlusGroupSize - 1u) / kForwardPlusGroupSize;
+          dispatch.ThreadGroupCountZ = 1;
+          context_->DispatchCompute(dispatch);
 
-        Diligent::StateTransitionDesc barriers[2];
-        barriers[0].pResource = forward_plus_tile_count_buffer_;
-        barriers[0].OldState = Diligent::RESOURCE_STATE_UNORDERED_ACCESS;
-        barriers[0].NewState = Diligent::RESOURCE_STATE_SHADER_RESOURCE;
-        barriers[0].Flags = Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE;
-        barriers[1].pResource = forward_plus_tile_index_buffer_;
-        barriers[1].OldState = Diligent::RESOURCE_STATE_UNORDERED_ACCESS;
-        barriers[1].NewState = Diligent::RESOURCE_STATE_SHADER_RESOURCE;
-        barriers[1].Flags = Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE;
-        context_->TransitionResourceStates(2, barriers);
+          Diligent::StateTransitionDesc barriers[2];
+          barriers[0].pResource = forward_plus_tile_count_buffer_;
+          barriers[0].OldState = Diligent::RESOURCE_STATE_UNORDERED_ACCESS;
+          barriers[0].NewState = Diligent::RESOURCE_STATE_SHADER_RESOURCE;
+          barriers[0].Flags = Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE;
+          barriers[1].pResource = forward_plus_tile_index_buffer_;
+          barriers[1].OldState = Diligent::RESOURCE_STATE_UNORDERED_ACCESS;
+          barriers[1].NewState = Diligent::RESOURCE_STATE_SHADER_RESOURCE;
+          barriers[1].Flags = Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE;
+          context_->TransitionResourceStates(2, barriers);
 
-        forward_plus_ready = true;
+          forward_plus_ready = true;
+        } else {
+          forward_plus_overflow_risk = true;
+          enable_cpu_forward_plus_fallback();
+        }
       } else {
         forward_plus_overflow_risk = true;
         enable_cpu_forward_plus_fallback();
@@ -1163,69 +1231,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
       desired_forward_plus_tile_index_srv = forward_plus_tile_index_srv_;
     }
   }
-
-  auto bind_forward_plus_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
-    if (!srb ||
-        !desired_forward_plus_light_srv ||
-        !desired_forward_plus_tile_count_srv ||
-        !desired_forward_plus_tile_index_srv) {
-      return;
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights")) {
-      var->Set(desired_forward_plus_light_srv);
-    }
-    if (auto* var =
-            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts")) {
-      var->Set(desired_forward_plus_tile_count_srv);
-    }
-    if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
-                                           "g_ForwardPlusTileLightIndices")) {
-      var->Set(desired_forward_plus_tile_index_srv);
-    }
-  };
-  auto bind_shadow_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
-    bindShadowResourcesToSrb(srb);
-  };
-  bind_forward_plus_to_srb(shader_resources_);
-  bind_forward_plus_to_srb(default_material_srb_);
-  bind_forward_plus_to_srb(opaque_double_sided_default_material_srb_);
-  bind_forward_plus_to_srb(transparent_default_material_srb_);
-  bind_forward_plus_to_srb(transparent_double_sided_default_material_srb_);
-  bind_forward_plus_to_srb(additive_default_material_srb_);
-  bind_forward_plus_to_srb(additive_double_sided_default_material_srb_);
-  bind_forward_plus_to_srb(camera_override_srb_);
-  bind_shadow_to_srb(shader_resources_);
-  bind_shadow_to_srb(default_material_srb_);
-  bind_shadow_to_srb(opaque_double_sided_default_material_srb_);
-  bind_shadow_to_srb(transparent_default_material_srb_);
-  bind_shadow_to_srb(transparent_double_sided_default_material_srb_);
-  bind_shadow_to_srb(additive_default_material_srb_);
-  bind_shadow_to_srb(additive_double_sided_default_material_srb_);
-  bind_shadow_to_srb(camera_override_srb_);
-  for (auto& srb : compact_default_material_srbs_) {
-    bind_forward_plus_to_srb(srb);
-    bind_shadow_to_srb(srb);
-  }
-  for (auto& entry : materials_) {
-    bind_forward_plus_to_srb(entry.second.srb);
-    bind_forward_plus_to_srb(entry.second.transparent_srb);
-    bind_forward_plus_to_srb(entry.second.transparent_double_sided_srb);
-    bind_forward_plus_to_srb(entry.second.additive_srb);
-    bind_forward_plus_to_srb(entry.second.additive_double_sided_srb);
-    bind_shadow_to_srb(entry.second.srb);
-    bind_shadow_to_srb(entry.second.transparent_srb);
-    bind_shadow_to_srb(entry.second.transparent_double_sided_srb);
-    bind_shadow_to_srb(entry.second.additive_srb);
-    bind_shadow_to_srb(entry.second.additive_double_sided_srb);
-    for (auto& srb : entry.second.layout_srbs) {
-      bind_forward_plus_to_srb(srb);
-      bind_shadow_to_srb(srb);
-    }
-    for (auto& srb : entry.second.layout_custom_srbs) {
-      bind_forward_plus_to_srb(srb);
-      bind_shadow_to_srb(srb);
-    }
-  }
+  active_forward_plus_light_srv_ = desired_forward_plus_light_srv;
+  active_forward_plus_tile_count_srv_ = desired_forward_plus_tile_count_srv;
+  active_forward_plus_tile_index_srv_ = desired_forward_plus_tile_index_srv;
   mark_stage("forward plus setup");
 
   const float shadow_map_extent =
@@ -1302,6 +1310,93 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                            forward_plus_lights_gpu.data(),
                            Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
   }
+
+  struct ForwardResourceBindingSnapshot {
+    const DiligentBackend* backend = nullptr;
+    Diligent::IBufferView* light_srv = nullptr;
+    Diligent::IBufferView* tile_count_srv = nullptr;
+    Diligent::IBufferView* tile_index_srv = nullptr;
+    Diligent::ITextureView* shadow_srv = nullptr;
+    Diligent::ITextureView* point_shadow_srv = nullptr;
+    Diligent::ISampler* shadow_sampler = nullptr;
+    Diligent::IShaderResourceBinding* main_srb = nullptr;
+    Diligent::IShaderResourceBinding* camera_override_srb = nullptr;
+  };
+  static thread_local ForwardResourceBindingSnapshot binding_snapshot;
+  const bool forward_resources_changed =
+      binding_snapshot.backend != this ||
+      binding_snapshot.light_srv != desired_forward_plus_light_srv ||
+      binding_snapshot.tile_count_srv != desired_forward_plus_tile_count_srv ||
+      binding_snapshot.tile_index_srv != desired_forward_plus_tile_index_srv ||
+      binding_snapshot.shadow_srv != shadow_map_srv_.RawPtr() ||
+      binding_snapshot.point_shadow_srv != point_shadow_map_srv_.RawPtr() ||
+      binding_snapshot.shadow_sampler != shadow_sampler_.RawPtr() ||
+      binding_snapshot.main_srb != shader_resources_.RawPtr() ||
+      binding_snapshot.camera_override_srb != camera_override_srb_.RawPtr();
+  if (forward_resources_changed) {
+    auto bind_forward_plus_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
+      if (!srb ||
+          !desired_forward_plus_light_srv ||
+          !desired_forward_plus_tile_count_srv ||
+          !desired_forward_plus_tile_index_srv) {
+        return;
+      }
+      constexpr auto overwrite = Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE;
+      if (auto* var =
+              srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights")) {
+        var->Set(desired_forward_plus_light_srv, overwrite);
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                             "g_ForwardPlusTileLightCounts")) {
+        var->Set(desired_forward_plus_tile_count_srv, overwrite);
+      }
+      if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                             "g_ForwardPlusTileLightIndices")) {
+        var->Set(desired_forward_plus_tile_index_srv, overwrite);
+      }
+    };
+    auto bind_resources_to_srb = [&](Diligent::IShaderResourceBinding* srb) {
+      bind_forward_plus_to_srb(srb);
+      bindShadowResourcesToSrb(srb);
+    };
+    bind_resources_to_srb(shader_resources_);
+    bind_resources_to_srb(default_material_srb_);
+    bind_resources_to_srb(opaque_double_sided_default_material_srb_);
+    bind_resources_to_srb(transparent_default_material_srb_);
+    bind_resources_to_srb(transparent_double_sided_default_material_srb_);
+    bind_resources_to_srb(additive_default_material_srb_);
+    bind_resources_to_srb(additive_double_sided_default_material_srb_);
+    bind_resources_to_srb(camera_override_srb_);
+    for (auto& srb : compact_default_material_srbs_) {
+      bind_resources_to_srb(srb);
+    }
+    for (auto& entry : materials_) {
+      bind_resources_to_srb(entry.second.srb);
+      bind_resources_to_srb(entry.second.transparent_srb);
+      bind_resources_to_srb(entry.second.transparent_double_sided_srb);
+      bind_resources_to_srb(entry.second.additive_srb);
+      bind_resources_to_srb(entry.second.additive_double_sided_srb);
+      for (auto& srb : entry.second.layout_srbs) {
+        bind_resources_to_srb(srb);
+      }
+      for (auto& srb : entry.second.layout_custom_srbs) {
+        bind_resources_to_srb(srb);
+      }
+    }
+    binding_snapshot = ForwardResourceBindingSnapshot{
+        .backend = this,
+        .light_srv = desired_forward_plus_light_srv,
+        .tile_count_srv = desired_forward_plus_tile_count_srv,
+        .tile_index_srv = desired_forward_plus_tile_index_srv,
+        .shadow_srv = shadow_map_srv_.RawPtr(),
+        .point_shadow_srv = point_shadow_map_srv_.RawPtr(),
+        .shadow_sampler = shadow_sampler_.RawPtr(),
+        .main_srb = shader_resources_.RawPtr(),
+        .camera_override_srb = camera_override_srb_.RawPtr(),
+    };
+  }
+  mark_stage("forward resource bindings");
+
   auto* rtv = active_rtv;
   auto* dsv = active_dsv;
   context_->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_VERIFY);
@@ -1483,7 +1578,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   }
   mark_stage("terrain pass");
 
-  ForwardLayerState forward_state{};
+  static thread_local ForwardLayerState forward_state;
   ForwardLayerStats forward_stats{};
   const auto forward_collect_start = core::SteadyClock::now();
   collectForwardLayerState(layer,
@@ -1595,12 +1690,8 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                                      render_height,
                                      particle_scene_texture->GetDesc().Format);
     if (particle_scene_color_copy_tex_ && particle_scene_color_copy_srv_) {
-      Diligent::CopyTextureAttribs copy_attribs{
-          particle_scene_texture,
-          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-          particle_scene_color_copy_tex_,
-          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-      context_->CopyTexture(copy_attribs);
+      copyTextureAfterRender(particle_scene_texture,
+                             particle_scene_color_copy_tex_);
       particle_pass_stats_.scene_color_copy = true;
       particle_scene_color_sample_srv = particle_scene_color_copy_srv_;
     }
@@ -1792,12 +1883,8 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                                      render_height,
                                      particle_scene_texture->GetDesc().Format);
     if (particle_scene_color_copy_tex_ && particle_scene_color_copy_srv_) {
-      Diligent::CopyTextureAttribs copy_attribs{
-          particle_scene_texture,
-          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-          particle_scene_color_copy_tex_,
-          Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-      context_->CopyTexture(copy_attribs);
+      copyTextureAfterRender(particle_scene_texture,
+                             particle_scene_color_copy_tex_);
       particle_pass_stats_.post_particle_scene_color_copy = true;
       post_particle_scene_color_sample_srv = particle_scene_color_copy_srv_;
     }
@@ -1844,7 +1931,8 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
                           particle_scene_depth_srv,
                           render_width,
                           render_height,
-                          particle_scene_texture->GetDesc().Format);
+                          particle_scene_texture->GetDesc().Format,
+                          target);
   }
   mark_stage("post process");
   executeFrameGraphScreenPasses(*active_frame_graph,

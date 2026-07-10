@@ -1,6 +1,7 @@
 #include "../backend.hpp"
 
 #include "../backend_internal.h"
+#include "private/rendering/ktx_cube_orientation.hpp"
 
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
@@ -18,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -56,6 +58,54 @@ uint32_t readLe32(const std::vector<unsigned char>& bytes, size_t offset) {
 
 size_t align4(size_t value) {
   return (value + 3u) & ~static_cast<size_t>(3u);
+}
+
+bool hasSupportedKtxCubeOrientation(const std::vector<unsigned char>& bytes,
+                                    uint32_t key_value_bytes) {
+  static constexpr size_t kHeaderSize = 64u;
+  static constexpr std::string_view kOrientationKey = "KTXorientation";
+  static constexpr std::string_view kRightDownOrientation = "S=r,T=d";
+
+  if (bytes.size() < kHeaderSize || key_value_bytes > bytes.size() - kHeaderSize) {
+    return false;
+  }
+  const size_t key_value_end = kHeaderSize + key_value_bytes;
+  size_t offset = kHeaderSize;
+  while (offset < key_value_end) {
+    if (key_value_end - offset < sizeof(uint32_t)) {
+      return false;
+    }
+    const uint32_t entry_size = readLe32(bytes, offset);
+    offset += sizeof(uint32_t);
+    if (entry_size == 0u || entry_size > key_value_end - offset) {
+      return false;
+    }
+
+    const char* const entry = reinterpret_cast<const char*>(bytes.data() + offset);
+    const void* const terminator = std::memchr(entry, '\0', entry_size);
+    if (!terminator) {
+      return false;
+    }
+    const size_t key_size = static_cast<const char*>(terminator) - entry;
+    if (std::string_view(entry, key_size) == kOrientationKey) {
+      const char* value = entry + key_size + 1u;
+      size_t value_size = entry_size - key_size - 1u;
+      while (value_size > 0u && value[value_size - 1u] == '\0') {
+        --value_size;
+      }
+      if (std::string_view(value, value_size) != kRightDownOrientation) {
+        return false;
+      }
+    }
+
+    const size_t padded_entry_size = align4(entry_size);
+    if (padded_entry_size > key_value_end - offset) {
+      return false;
+    }
+    offset += padded_entry_size;
+  }
+  // S=r,T=d is KTX's implicit orientation when the key is absent.
+  return offset == key_value_end;
 }
 
 bool hasExtension(const std::filesystem::path& path, const char* expected) {
@@ -97,8 +147,9 @@ KtxCubeData loadRgba16fKtxCube(const std::filesystem::path& path) {
   const uint32_t key_value_bytes = readLe32(bytes, 60);
   if (gl_type != kGlHalfFloat || gl_type_size != 2u || gl_format != kGlRgba ||
       gl_internal_format != kGlRgba16f || gl_base_internal_format != kGlRgba ||
-      width == 0u || height == 0u || depth != 0u || array_elements != 0u ||
-      faces != 6u || mip_levels == 0u) {
+      width == 0u || height == 0u || width != height || depth != 0u ||
+      array_elements != 0u || faces != 6u || mip_levels == 0u ||
+      !hasSupportedKtxCubeOrientation(bytes, key_value_bytes)) {
     return result;
   }
 
@@ -141,6 +192,13 @@ KtxCubeData loadRgba16fKtxCube(const std::filesystem::path& path) {
   }
 
   result.bytes = std::move(bytes);
+  if (!detail::normalizeKtxCubemapWorldDirections(result.bytes,
+                                                   result.subresource_offsets,
+                                                   result.mip_widths,
+                                                   result.mip_heights,
+                                                   4u * 2u)) {
+    return {};
+  }
   return result;
 }
 
@@ -195,6 +253,12 @@ static constexpr const char* kSkyboxPS = R"(
 TextureCube g_Skybox;
 SamplerState g_Sampler;
 
+cbuffer Constants
+{
+    row_major float4x4 g_ViewProj;
+    float4 g_Params;
+};
+
 struct PSInput
 {
     float4 pos : SV_POSITION;
@@ -206,7 +270,14 @@ float4 main(PSInput input) : SV_TARGET
     // Equirectangular conversion stores each world direction under the matching
     // cubemap direction. Keep display sampling in that same coordinate system.
     float3 dir = normalize(input.local_pos);
-    return g_Skybox.Sample(g_Sampler, dir);
+    float4 sample_value = g_Skybox.Sample(g_Sampler, dir);
+    float exposure = abs(g_Params.x);
+    float3 color = max(sample_value.rgb * exposure, float3(0.0, 0.0, 0.0));
+    if (g_Params.x >= 0.0)
+    {
+        color = 1.0 - exp(-color);
+    }
+    return float4(color, sample_value.a);
 }
 )";
 
@@ -220,6 +291,21 @@ struct PSInput
     float3 local_pos : TEXCOORD0;
 };
 
+float RadicalInverse_VdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10;
+}
+
+float2 Hammersley(uint i, uint count)
+{
+    return float2(float(i) / float(count), RadicalInverse_VdC(i));
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
     float3 n = normalize(input.local_pos);
@@ -229,24 +315,26 @@ float4 main(PSInput input) : SV_TARGET
 
     const float PI = 3.14159265;
     float3 irradiance = float3(0.0, 0.0, 0.0);
-    const int SAMPLE_COUNT = 64;
-    for (int i = 0; i < SAMPLE_COUNT; ++i)
+    const uint SAMPLE_COUNT = 128u;
+    for (uint i = 0u; i < SAMPLE_COUNT; ++i)
     {
-        float xi1 = (float)i / (float)SAMPLE_COUNT;
-        float xi2 = frac(sin((float)(i + 1) * 12.9898) * 43758.5453);
+        float2 xi = Hammersley(i, SAMPLE_COUNT);
 
-        float phi = 2.0 * PI * xi1;
-        float cos_theta = sqrt(1.0 - xi2);
+        float phi = 2.0 * PI * xi.x;
+        float cos_theta = sqrt(1.0 - xi.y);
         float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
 
         float3 sample_dir = sin_theta * cos(phi) * right +
                             sin_theta * sin(phi) * up +
                             cos_theta * n;
 
-        irradiance += g_EnvMap.Sample(g_Sampler, sample_dir).rgb * cos_theta;
+        // The hemisphere directions already follow a cosine-weighted distribution,
+        // so their arithmetic mean is the diffuse convolution expected by the
+        // forward shader. Applying cos(theta) and PI again double-weights it.
+        irradiance += g_EnvMap.Sample(g_Sampler, sample_dir).rgb;
     }
 
-    irradiance = PI * irradiance / SAMPLE_COUNT;
+    irradiance /= SAMPLE_COUNT;
     return float4(irradiance, 1.0);
 }
 )";
@@ -301,6 +389,14 @@ float3 ImportanceSampleGGX(float2 Xi, float3 N, float roughness)
     return normalize(sample_vec);
 }
 
+float DistributionGGX(float n_dot_h, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float denominator = n_dot_h * n_dot_h * (a2 - 1.0) + 1.0;
+    return a2 / max(3.14159265 * denominator * denominator, 1.0e-6);
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
     float3 N = normalize(input.local_pos);
@@ -317,7 +413,21 @@ float4 main(PSInput input) : SV_TARGET
         float n_dot_l = max(dot(N, L), 0.0);
         if (n_dot_l > 0.0)
         {
-            prefiltered += g_EnvMap.Sample(g_Sampler, L).rgb * n_dot_l;
+            float mip_level = 0.0;
+            if (g_Params.x > 0.0)
+            {
+                float n_dot_h = max(dot(N, H), 0.0);
+                float h_dot_v = max(dot(H, V), 1.0e-5);
+                float pdf = max(DistributionGGX(n_dot_h, g_Params.x) * n_dot_h /
+                                (4.0 * h_dot_v), 1.0e-5);
+                float source_size = max(g_Params.y, 1.0);
+                float texel_solid_angle = 4.0 * 3.14159265 /
+                                          (6.0 * source_size * source_size);
+                float sample_solid_angle = 1.0 / (float(SAMPLE_COUNT) * pdf);
+                mip_level = 0.5 * log2(sample_solid_angle / texel_solid_angle);
+            }
+            mip_level = clamp(mip_level, 0.0, max(g_Params.z, 0.0));
+            prefiltered += g_EnvMap.SampleLevel(g_Sampler, L, mip_level).rgb * n_dot_l;
             total_weight += n_dot_l;
         }
     }
@@ -673,8 +783,7 @@ void DiligentBackend::ensureEnvironmentResources() {
                    env_prefilter_pso_, env_prefilter_srb_, Diligent::TEX_FORMAT_RGBA16_FLOAT,
                    false);
     create_env_pso("Karma Skybox PSO", ps_skybox, "g_Skybox",
-                   skybox_pso_, skybox_srb_, swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                                         : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB,
+                   skybox_pso_, skybox_srb_, sceneColorFormat(),
                    true);
 
     if (!brdf_lut_pso_) {
@@ -847,10 +956,13 @@ void DiligentBackend::ensureEnvironmentResources() {
     desc.Format = Diligent::TEX_FORMAT_RGBA16_FLOAT;
     desc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
     device_->CreateTexture(desc, nullptr, &env_irradiance_tex_);
-    if (env_irradiance_tex_) {
-      env_irradiance_srv_ =
-          env_irradiance_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-    }
+  }
+  if (env_irradiance_tex_) {
+    // Clearing an environment keeps the convolution textures allocated but
+    // temporarily points these SRVs at the fallback cube. Restore the real
+    // views whenever a non-empty environment is rebuilt.
+    env_irradiance_srv_ =
+        env_irradiance_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
   }
 
   if (!env_prefilter_tex_) {
@@ -865,10 +977,10 @@ void DiligentBackend::ensureEnvironmentResources() {
     desc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
     desc.MiscFlags = Diligent::MISC_TEXTURE_FLAG_GENERATE_MIPS;
     device_->CreateTexture(desc, nullptr, &env_prefilter_tex_);
-    if (env_prefilter_tex_) {
-      env_prefilter_srv_ =
-          env_prefilter_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-    }
+  }
+  if (env_prefilter_tex_) {
+    env_prefilter_srv_ =
+        env_prefilter_tex_->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
   }
 
   if (env_cubemap_tex_ && env_equirect_srv_ && env_equirect_pso_) {
@@ -1062,6 +1174,11 @@ void DiligentBackend::ensureEnvironmentResources() {
         EnvConstants constants{};
         copyMat4(constants.view_proj, capture_proj * capture_views[face]);
         constants.params[0] = roughness;
+        const auto& source_desc = env_cubemap_tex_->GetDesc();
+        constants.params[1] = static_cast<float>(source_desc.Width);
+        constants.params[2] = source_desc.MipLevels > 0u
+                                  ? static_cast<float>(source_desc.MipLevels - 1u)
+                                  : 0.0f;
         {
           Diligent::MapHelper<EnvConstants> cb_map(context_, env_cb_, Diligent::MAP_WRITE,
                                                    Diligent::MAP_FLAG_DISCARD);
@@ -1157,6 +1274,10 @@ void DiligentBackend::renderSkybox(const glm::mat4& projection, const glm::mat4&
 
   EnvConstants constants{};
   copyMat4(constants.view_proj, projection * view_no_translation);
+  const float sky_exposure = lighting_exposure_ * environment_intensity_;
+  constants.params[0] = post_process_settings_.tone_mapping_enabled
+                            ? -sky_exposure
+                            : sky_exposure;
   {
     Diligent::MapHelper<EnvConstants> cb_map(context_, env_cb_, Diligent::MAP_WRITE,
                                              Diligent::MAP_FLAG_DISCARD);

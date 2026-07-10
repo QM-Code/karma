@@ -73,6 +73,7 @@ class Backend {
       case rendering::TextureFormat::RGBA8:
       case rendering::TextureFormat::RGB8:
       case rendering::TextureFormat::R8:
+      case rendering::TextureFormat::RGBA16F:
         return true;
       case rendering::TextureFormat::BC7_RGBA_UNORM:
       case rendering::TextureFormat::BC7_RGBA_UNORM_SRGB:

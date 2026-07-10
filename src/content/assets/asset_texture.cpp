@@ -952,14 +952,19 @@ std::optional<Rgba8Image> decodeImportedTexture(
                                       texture.source_bytes.size(),
                                       Rgba8ImageLoadOptions{.flip_y = true});
     }
+    if (texture.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+        texture.height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+      return std::nullopt;
+    }
     Rgba8Image image{};
     image.width = static_cast<int>(texture.width);
     image.height = static_cast<int>(texture.height);
-    const std::size_t expected =
-        static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u;
-    if (image.width <= 0 || image.height <= 0 || texture.source_bytes.size() < expected) {
+    std::size_t expected = 0u;
+    if (!rendering::tryTextureDataSize(image.width, image.height, 4u, expected) ||
+        texture.source_bytes.size() < expected) {
       return std::nullopt;
     }
+    // Uncompressed importer payloads are already canonical renderer-order RGBA8.
     image.pixels.assign(texture.source_bytes.begin(),
                         texture.source_bytes.begin() + static_cast<std::ptrdiff_t>(expected));
     return image.valid() ? std::optional<Rgba8Image>{std::move(image)} : std::nullopt;

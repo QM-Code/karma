@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
 
 namespace karma::demo {
 namespace {
@@ -44,6 +45,7 @@ class TerrainExample final : public app::GameInterface {
     pitch_ = -0.22f;
 
     registerTerrainMaterials();
+    environment_map_ = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr");
     spawnTerrain();
     spawnLighting();
     spawnPlayer();
@@ -210,8 +212,9 @@ class TerrainExample final : public app::GameInterface {
     const world::Entity environment = world->createEntity();
     world->setName(environment, "Environment");
     world->add(environment, components::EnvironmentComponent{
-                                .intensity = 0.09f,
-                                .draw_skybox = false,
+                                .environment_map_asset_key = environment_map_,
+                                .intensity = 0.38f,
+                                .draw_skybox = true,
                             });
   }
 
@@ -285,6 +288,7 @@ class TerrainExample final : public app::GameInterface {
   world::Entity player_entity_{};
   world::Entity camera_entity_{};
   rendering::RenderTargetId offscreen_target_ = rendering::kDefaultRenderTarget;
+  std::string environment_map_;
   float yaw_ = 0.0f;
   float pitch_ = 0.0f;
   bool jump_down_prev_ = false;
@@ -309,6 +313,7 @@ int main() {
   config.forward_plus_max_lights_per_tile = 64;
   config.shadow_map_size = 1024;
   config.lighting_exposure = 1.0f;
+  config.background_color = {0.22f, 0.36f, 0.52f, 1.0f};
 
   engine.start(game, config);
   while (engine.isRunning()) {

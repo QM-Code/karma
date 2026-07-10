@@ -9,6 +9,7 @@
 #include <Graphics/GraphicsEngine/interface/Shader.h>
 #include <Graphics/GraphicsEngine/interface/ShaderResourceBinding.h>
 #include <Graphics/GraphicsEngine/interface/SwapChain.h>
+#include <Graphics/ShaderTools/include/DXCompiler.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -18,6 +19,15 @@
 namespace karma::rendering::backend {
 
 namespace {
+bool isParticleGlobalShaderCompilerAvailable() {
+  static const bool available = [] {
+    auto compiler = Diligent::CreateDXCompiler(
+        Diligent::DXCompilerTarget::Vulkan, 0u, nullptr);
+    return compiler && compiler->IsLoaded();
+  }();
+  return available;
+}
+
 static constexpr const char* kParticleVS = R"(
 cbuffer Constants
 {
@@ -420,6 +430,15 @@ float3 reconstructSphereNormal(float2 centered)
     return normal_ws * rsqrt(normal_len_sq);
 }
 
+float3 ApplyParticleExposure(float3 color)
+{
+    color = max(color, float3(0.0f, 0.0f, 0.0f));
+    const float exposure = abs(g_CameraRight.w);
+    return g_CameraRight.w < 0.0f
+        ? color * exposure
+        : 1.0f - exp(-color * exposure);
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
     float use_soft_mask = g_Params.x;
@@ -543,11 +562,12 @@ float4 main(PSInput input) : SV_TARGET
             glass_tint * (outline * 0.72f + rim_light * 0.56f + specular * 1.25f + texel.r * 0.08f);
         const float3 interior =
             glass_tint * (interior_glow * body * (0.12f + texel.a * 0.18f));
-        const float3 combined = refracted_color + shell_rim + interior;
+        const float3 combined = refracted_color +
+                                ApplyParticleExposure(shell_rim + interior);
         return float4(combined, shell_alpha);
     }
 
-    return float4(texture_color * alpha, alpha);
+    return float4(ApplyParticleExposure(texture_color) * alpha, alpha);
 }
 )";
 
@@ -2123,21 +2143,22 @@ void DiligentBackend::ensureParticleResources() {
   const std::string global_particle_ps_source = global_particle_prefix + kParticlePS;
 
   Diligent::RefCntAutoPtr<Diligent::IShader> global_vs;
-  shader_ci.Desc.Name = "Karma Particle Global VS";
-  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
-  shader_ci.EntryPoint = "main";
-  shader_ci.Source = global_particle_vs_source.c_str();
-  shader_ci.ShaderCompiler = Diligent::SHADER_COMPILER_DXC;
-  global_vs = device_with_cache_.CreateShader(shader_ci);
-
   Diligent::RefCntAutoPtr<Diligent::IShader> global_ps;
-  shader_ci.Desc.Name = "Karma Particle Global PS";
-  shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
-  shader_ci.EntryPoint = "main";
-  shader_ci.Source = global_particle_ps_source.c_str();
-  shader_ci.ShaderCompiler = Diligent::SHADER_COMPILER_DXC;
-  global_ps = device_with_cache_.CreateShader(shader_ci);
-  shader_ci.ShaderCompiler = Diligent::SHADER_COMPILER_DEFAULT;
+  if (isParticleGlobalShaderCompilerAvailable()) {
+    shader_ci.Desc.Name = "Karma Particle Global VS";
+    shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
+    shader_ci.EntryPoint = "main";
+    shader_ci.Source = global_particle_vs_source.c_str();
+    shader_ci.ShaderCompiler = Diligent::SHADER_COMPILER_DXC;
+    global_vs = device_with_cache_.CreateShader(shader_ci);
+
+    shader_ci.Desc.Name = "Karma Particle Global PS";
+    shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
+    shader_ci.EntryPoint = "main";
+    shader_ci.Source = global_particle_ps_source.c_str();
+    global_ps = device_with_cache_.CreateShader(shader_ci);
+    shader_ci.ShaderCompiler = Diligent::SHADER_COMPILER_DEFAULT;
+  }
 
   Diligent::RefCntAutoPtr<Diligent::IShader> sim_cs;
   shader_ci.Desc.Name = "Karma Particle Sim CS";
@@ -2387,9 +2408,6 @@ void DiligentBackend::ensureParticleResources() {
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_Stats",
        Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-      {Diligent::SHADER_TYPE_COMPUTE,
-       "g_MeshSamples",
-       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
   };
   create_gpu_compute_pipeline("Karma Particle GPU Clear CS",
                               kParticleGpuClearCS,
@@ -2466,6 +2484,9 @@ void DiligentBackend::ensureParticleResources() {
        Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       {Diligent::SHADER_TYPE_COMPUTE,
        "g_Stats",
+       Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+      {Diligent::SHADER_TYPE_COMPUTE,
+       "g_MeshSamples",
        Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
   };
   create_gpu_compute_pipeline("Karma Particle GPU Simulate CS",
@@ -2731,8 +2752,7 @@ void DiligentBackend::ensureParticleResources() {
     const bool half_res_target = std::string(name).find("HalfRes") != std::string::npos;
     graphics.SmplDesc.Count =
         static_cast<Diligent::Uint8>(half_res_target ? 1u : activeRasterSampleCount());
-    graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                         : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    graphics.RTVFormats[0] = sceneColorFormat();
     graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                      : Diligent::TEX_FORMAT_D32_FLOAT;
     graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -2805,8 +2825,7 @@ void DiligentBackend::ensureParticleResources() {
     const bool half_res_target = std::string(name).find("HalfRes") != std::string::npos;
     graphics.SmplDesc.Count =
         static_cast<Diligent::Uint8>(half_res_target ? 1u : activeRasterSampleCount());
-    graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                         : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    graphics.RTVFormats[0] = sceneColorFormat();
     graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                      : Diligent::TEX_FORMAT_D32_FLOAT;
     graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -3060,8 +3079,7 @@ void DiligentBackend::ensureParticleResources() {
       auto& graphics = composite_pso.GraphicsPipeline;
       graphics.NumRenderTargets = 1;
       graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
-      graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                           : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+      graphics.RTVFormats[0] = sceneColorFormat();
       graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                        : Diligent::TEX_FORMAT_D32_FLOAT;
       graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;

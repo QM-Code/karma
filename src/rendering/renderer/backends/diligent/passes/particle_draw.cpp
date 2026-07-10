@@ -427,7 +427,9 @@ void DiligentBackend::renderParticlePasses(rendering::LayerId layer,
       constants.camera_right[0] = particle_right.x;
       constants.camera_right[1] = particle_right.y;
       constants.camera_right[2] = particle_right.z;
-      constants.camera_right[3] = 0.0f;
+      constants.camera_right[3] = post_process_settings_.tone_mapping_enabled
+                                      ? -lighting_exposure_
+                                      : lighting_exposure_;
       constants.camera_up[0] = particle_up.x;
       constants.camera_up[1] = particle_up.y;
       constants.camera_up[2] = particle_up.z;
@@ -1025,7 +1027,9 @@ void DiligentBackend::renderParticlePasses(rendering::LayerId layer,
     constants.camera_right[0] = context.camera_right.x;
     constants.camera_right[1] = context.camera_right.y;
     constants.camera_right[2] = context.camera_right.z;
-    constants.camera_right[3] = 0.0f;
+    constants.camera_right[3] = post_process_settings_.tone_mapping_enabled
+                                    ? -lighting_exposure_
+                                    : lighting_exposure_;
     constants.camera_up[0] = context.camera_up.x;
     constants.camera_up[1] = context.camera_up.y;
     constants.camera_up[2] = context.camera_up.z;

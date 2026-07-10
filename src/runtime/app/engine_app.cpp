@@ -875,8 +875,12 @@ bool EngineApp::ensureLoadingSplashTexture() {
   int width = 0;
   int height = 0;
   int comp = 0;
-  unsigned char* pixels =
-      stbi_load(config_.loading_splash.image_path.string().c_str(), &width, &height, &comp, 4);
+  stbi_set_flip_vertically_on_load_thread(0);
+  unsigned char* pixels = stbi_load(config_.loading_splash.image_path.string().c_str(),
+                                    &width,
+                                    &height,
+                                    &comp,
+                                    4);
   auto stage_end = core::SteadyClock::now();
   if (startup_diag) {
     spdlog::info("Engine startup diag: area=loading_splash stage=image decode ms={:.2f}",

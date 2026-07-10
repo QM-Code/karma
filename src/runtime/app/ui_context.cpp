@@ -73,6 +73,7 @@ UITexture UIContext::loadTextureRGBA8FromPng(const std::filesystem::path& path,
     return {};
   }
 
+  stbi_set_flip_vertically_on_load_thread(0);
   unsigned char* pixels = stbi_load(path_string.c_str(), &width, &height, &comp, 4);
   if (!pixels || !validTextureDimensions(width, height)) {
     if (pixels) {

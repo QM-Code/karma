@@ -217,20 +217,21 @@ bool DiligentBackend::ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format
   return true;
 }
 
-bool DiligentBackend::ensureFullscreenBlitPipeline(Diligent::TEXTURE_FORMAT format) {
+bool DiligentBackend::ensureBlitPipeline(Diligent::TEXTURE_FORMAT format,
+                                         const char* pipeline_name,
+                                         PostProcessPassResources& pass,
+                                         Diligent::TEXTURE_FORMAT& pipeline_format) {
   using post_process::ShaderFallback;
 
-  if (!device_ || format == Diligent::TEX_FORMAT_UNKNOWN) {
+  if (!device_ || !pipeline_name || format == Diligent::TEX_FORMAT_UNKNOWN) {
     return false;
   }
-  if (post_process::passReady(fullscreen_blit_pass_) &&
-      post_process_cb_ &&
-      fullscreen_blit_pipeline_format_ == format) {
+  if (post_process::passReady(pass) && post_process_cb_ && pipeline_format == format) {
     return true;
   }
 
-  post_process::releasePass(fullscreen_blit_pass_);
-  fullscreen_blit_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  post_process::releasePass(pass);
+  pipeline_format = Diligent::TEX_FORMAT_UNKNOWN;
 
   if (!post_process_cb_) {
     Diligent::BufferDesc cb_desc{};
@@ -258,13 +259,15 @@ bool DiligentBackend::ensureFullscreenBlitPipeline(Diligent::TEXTURE_FORMAT form
   shader_ci.EntryPoint = "main";
 
   Diligent::RefCntAutoPtr<Diligent::IShader> vs;
-  shader_ci.Desc.Name = "Karma Fullscreen Blit VS";
+  const std::string vs_name = std::string(pipeline_name) + " VS";
+  shader_ci.Desc.Name = vs_name.c_str();
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_VERTEX;
   shader_ci.Source = fullscreen_vs_source.c_str();
   vs = device_with_cache_.CreateShader(shader_ci);
 
   Diligent::RefCntAutoPtr<Diligent::IShader> ps;
-  shader_ci.Desc.Name = "Karma Fullscreen Blit PS";
+  const std::string ps_name = std::string(pipeline_name) + " PS";
+  shader_ci.Desc.Name = ps_name.c_str();
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_PIXEL;
   shader_ci.Source = pixel_source.c_str();
   ps = device_with_cache_.CreateShader(shader_ci);
@@ -285,7 +288,7 @@ bool DiligentBackend::ensureFullscreenBlitPipeline(Diligent::TEXTURE_FORMAT form
   };
 
   Diligent::GraphicsPipelineStateCreateInfo pso{};
-  pso.PSODesc.Name = "Karma Fullscreen Blit Pipeline";
+  pso.PSODesc.Name = pipeline_name;
   pso.PSODesc.PipelineType = Diligent::PIPELINE_TYPE_GRAPHICS;
   pso.PSODesc.ResourceLayout.Variables = vars;
   pso.PSODesc.ResourceLayout.NumVariables =
@@ -303,37 +306,51 @@ bool DiligentBackend::ensureFullscreenBlitPipeline(Diligent::TEXTURE_FORMAT form
   graphics.BlendDesc.RenderTargets[0].RenderTargetWriteMask = Diligent::COLOR_MASK_ALL;
 
   const auto pso_start = core::SteadyClock::now();
-  fullscreen_blit_pass_.pso = createGraphicsPipelineState(pso);
-  recordPipelineCreation("post_process", "fullscreen blit", pso_start, core::SteadyClock::now());
-  if (!fullscreen_blit_pass_.pso) {
+  pass.pso = createGraphicsPipelineState(pso);
+  recordPipelineCreation("post_process", pipeline_name, pso_start, core::SteadyClock::now());
+  if (!pass.pso) {
     return false;
   }
-  if (auto* var = fullscreen_blit_pass_.pso->GetStaticVariableByName(
+  if (auto* var = pass.pso->GetStaticVariableByName(
           Diligent::SHADER_TYPE_PIXEL, "PostConstants")) {
     var->Set(post_process_cb_);
   }
 
   const auto srb_start = core::SteadyClock::now();
-  fullscreen_blit_pass_.pso->CreateShaderResourceBinding(&fullscreen_blit_pass_.srb, true);
-  recordResourceCreation("post_process", "fullscreen blit", srb_start, core::SteadyClock::now());
-  if (!fullscreen_blit_pass_.srb) {
-    post_process::releasePass(fullscreen_blit_pass_);
+  pass.pso->CreateShaderResourceBinding(&pass.srb, true);
+  recordResourceCreation("post_process", pipeline_name, srb_start, core::SteadyClock::now());
+  if (!pass.srb) {
+    post_process::releasePass(pass);
     return false;
   }
 
-  fullscreen_blit_pass_.source_var =
-      fullscreen_blit_pass_.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Source");
-  fullscreen_blit_pass_.sampler_var =
-      fullscreen_blit_pass_.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Sampler");
-  if (fullscreen_blit_pass_.sampler_var && sampler_color_) {
-    fullscreen_blit_pass_.sampler_var->Set(sampler_color_);
+  pass.source_var =
+      pass.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Source");
+  pass.sampler_var =
+      pass.srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_Sampler");
+  if (pass.sampler_var && sampler_color_) {
+    pass.sampler_var->Set(sampler_color_);
   }
-  if (!fullscreen_blit_pass_.source_var) {
-    post_process::releasePass(fullscreen_blit_pass_);
+  if (!pass.source_var) {
+    post_process::releasePass(pass);
     return false;
   }
-  fullscreen_blit_pipeline_format_ = format;
+  pipeline_format = format;
   return true;
+}
+
+bool DiligentBackend::ensureFullscreenBlitPipeline(Diligent::TEXTURE_FORMAT format) {
+  return ensureBlitPipeline(format,
+                            "Karma Fullscreen Blit Pipeline",
+                            fullscreen_blit_pass_,
+                            fullscreen_blit_pipeline_format_);
+}
+
+bool DiligentBackend::ensurePresentBlitPipeline(Diligent::TEXTURE_FORMAT format) {
+  return ensureBlitPipeline(format,
+                            "Karma Present Blit Pipeline",
+                            present_blit_pass_,
+                            present_blit_pipeline_format_);
 }
 
 }  // namespace karma::rendering::backend

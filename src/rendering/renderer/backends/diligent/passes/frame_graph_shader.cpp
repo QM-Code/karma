@@ -20,6 +20,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -54,6 +55,8 @@ Diligent::TEXTURE_FORMAT toGraphTextureFormat(rendering::TextureFormat format) {
   switch (format) {
     case rendering::TextureFormat::R8:
       return Diligent::TEX_FORMAT_R8_UNORM;
+    case rendering::TextureFormat::RGBA16F:
+      return Diligent::TEX_FORMAT_RGBA16_FLOAT;
     case rendering::TextureFormat::BC7_RGBA_UNORM:
       return Diligent::TEX_FORMAT_BC7_UNORM;
     case rendering::TextureFormat::BC7_RGBA_UNORM_SRGB:
@@ -74,6 +77,7 @@ Diligent::TEXTURE_FORMAT graphDepthTextureFormat(rendering::TextureFormat format
     case rendering::TextureFormat::BC7_RGBA_UNORM:
     case rendering::TextureFormat::BC7_RGBA_UNORM_SRGB:
     case rendering::TextureFormat::KTX2_BASIS_UASTC:
+    case rendering::TextureFormat::RGBA16F:
     default:
       return Diligent::TEX_FORMAT_D32_FLOAT;
   }
@@ -102,16 +106,69 @@ std::string readTextFile(const std::filesystem::path& path) {
   return stream.str();
 }
 
+std::string graphRuntimeOwnerPrefix(const rendering::FrameGraphDesc& graph,
+                                    rendering::RenderTargetId target) {
+  const std::string_view graph_key = graph.frame_graph_key.empty()
+                                         ? std::string_view("default")
+                                         : std::string_view(graph.frame_graph_key);
+  std::string key;
+  key.reserve(graph_key.size() + 32u);
+  key.append(std::to_string(graph_key.size()));
+  key.push_back(':');
+  key.append(graph_key);
+  key.push_back(':');
+  key.append(std::to_string(target));
+  key.push_back(':');
+  return key;
+}
+
 std::string graphRuntimeKey(const rendering::FrameGraphDesc& graph,
                             rendering::RenderTargetId target,
                             std::string_view local_key) {
-  std::string key = graph.frame_graph_key.empty() ? std::string("default")
-                                                  : graph.frame_graph_key;
-  key.push_back('#');
-  key.append(std::to_string(target));
-  key.push_back('#');
+  std::string key = graphRuntimeOwnerPrefix(graph, target);
+  key.append(std::to_string(local_key.size()));
+  key.push_back(':');
   key.append(local_key);
   return key;
+}
+
+std::string_view graphRuntimeOwnerFromKey(std::string_view key) {
+  const size_t length_separator = key.find(':');
+  if (length_separator == std::string_view::npos || length_separator == 0u) {
+    return {};
+  }
+  size_t graph_key_length = 0u;
+  for (size_t i = 0u; i < length_separator; ++i) {
+    const char digit = key[i];
+    if (digit < '0' || digit > '9') {
+      return {};
+    }
+    const size_t value = static_cast<size_t>(digit - '0');
+    if (graph_key_length >
+        (std::numeric_limits<size_t>::max() - value) / 10u) {
+      return {};
+    }
+    graph_key_length = graph_key_length * 10u + value;
+  }
+
+  const size_t graph_key_start = length_separator + 1u;
+  if (graph_key_length > key.size() - graph_key_start) {
+    return {};
+  }
+  const size_t target_start = graph_key_start + graph_key_length + 1u;
+  if (target_start > key.size() || key[target_start - 1u] != ':') {
+    return {};
+  }
+  const size_t target_end = key.find(':', target_start);
+  if (target_end == std::string_view::npos || target_end == target_start) {
+    return {};
+  }
+  for (size_t i = target_start; i < target_end; ++i) {
+    if (key[i] < '0' || key[i] > '9') {
+      return {};
+    }
+  }
+  return key.substr(0u, target_end + 1u);
 }
 
 std::string sceneMaskPipelineCacheKey(Diligent::TEXTURE_FORMAT color_format,
@@ -128,18 +185,26 @@ std::string sceneMaskPipelineCacheKey(Diligent::TEXTURE_FORMAT color_format,
 
 int resourceWidth(const rendering::FrameGraphResourceDesc& resource, int camera_width) {
   if (resource.size_mode == rendering::FrameGraphResourceSizeMode::Absolute) {
-    return static_cast<int>(std::max(resource.width, 1u));
+    return static_cast<int>(std::min<uint32_t>(
+        std::max(resource.width, 1u),
+        static_cast<uint32_t>(std::numeric_limits<int>::max())));
   }
-  return std::max(1, static_cast<int>(static_cast<float>(camera_width) *
-                                      resource.width_scale));
+  const double scaled = static_cast<double>(camera_width) * resource.width_scale;
+  return std::max(1,
+                  static_cast<int>(std::min(
+                      scaled, static_cast<double>(std::numeric_limits<int>::max()))));
 }
 
 int resourceHeight(const rendering::FrameGraphResourceDesc& resource, int camera_height) {
   if (resource.size_mode == rendering::FrameGraphResourceSizeMode::Absolute) {
-    return static_cast<int>(std::max(resource.height, 1u));
+    return static_cast<int>(std::min<uint32_t>(
+        std::max(resource.height, 1u),
+        static_cast<uint32_t>(std::numeric_limits<int>::max())));
   }
-  return std::max(1, static_cast<int>(static_cast<float>(camera_height) *
-                                      resource.height_scale));
+  const double scaled = static_cast<double>(camera_height) * resource.height_scale;
+  return std::max(1,
+                  static_cast<int>(std::min(
+                      scaled, static_cast<double>(std::numeric_limits<int>::max()))));
 }
 
 std::string shaderVariableNameForSlot(std::string_view slot) {
@@ -195,27 +260,61 @@ const rendering::ShaderPassAssetDesc* findShaderPassAsset(
   return nullptr;
 }
 
+void appendPipelineCacheField(std::string& key, std::string_view value) {
+  key.push_back('#');
+  key.append(std::to_string(value.size()));
+  key.push_back(':');
+  key.append(value);
+}
+
+std::vector<std::pair<std::string, std::string>> sortedStringPairs(
+    const std::unordered_map<std::string, std::string>& values) {
+  std::vector<std::pair<std::string, std::string>> sorted;
+  sorted.reserve(values.size());
+  for (const auto& [name, value] : values) {
+    sorted.emplace_back(name, value);
+  }
+  std::sort(sorted.begin(), sorted.end());
+  return sorted;
+}
+
 std::string pipelineCacheKey(const rendering::ShaderPassAssetDesc& asset,
                              const rendering::FrameGraphPassDesc& pass,
                              Diligent::TEXTURE_FORMAT color_format) {
-  std::string key = asset.shader_pass_key;
-  key.push_back('#');
-  key.append(pass.name);
-  key.push_back('#');
-  key.append(asset.pipeline.vertex_shader_path.string());
-  key.push_back('#');
-  key.append(asset.pipeline.fragment_shader_path.string());
-  key.push_back('#');
-  key.append(std::to_string(static_cast<int>(color_format)));
-  key.push_back('#');
-  key.append(asset.depth_test ? "dt" : "dT");
-  key.append(asset.depth_write ? "dw" : "dW");
-  key.append(asset.blend_enabled ? "b" : "B");
-  for (const auto& [slot, resource] : pass.inputs) {
-    key.push_back('#');
-    key.append(slot);
-    key.push_back('=');
-    key.append(resource);
+  std::string key = "frame_graph_shader_pso_v2";
+  appendPipelineCacheField(key, asset.shader_pass_key);
+  appendPipelineCacheField(key, pass.shader_pass_key);
+  appendPipelineCacheField(key, pass.name);
+  appendPipelineCacheField(key, asset.pipeline.name);
+  appendPipelineCacheField(key, asset.pipeline.vertex_shader_path.generic_string());
+  appendPipelineCacheField(key, asset.pipeline.fragment_shader_path.generic_string());
+  appendPipelineCacheField(key, asset.pipeline.vertex_entry_point);
+  appendPipelineCacheField(key, asset.pipeline.fragment_entry_point);
+  appendPipelineCacheField(key, std::to_string(static_cast<int>(color_format)));
+  appendPipelineCacheField(key, asset.fullscreen ? "fullscreen" : "geometry");
+  appendPipelineCacheField(key, asset.depth_test ? "depth_test" : "no_depth_test");
+  appendPipelineCacheField(key, asset.depth_write ? "depth_write" : "no_depth_write");
+  appendPipelineCacheField(key, asset.blend_enabled ? "blend" : "no_blend");
+  appendPipelineCacheField(
+      key, std::to_string(static_cast<uint32_t>(asset.blend_mode)));
+
+  appendPipelineCacheField(key, std::to_string(asset.pipeline.defines.size()));
+  for (const std::string& define : asset.pipeline.defines) {
+    appendPipelineCacheField(key, define);
+  }
+
+  const auto sorted_inputs = sortedStringPairs(pass.inputs);
+  appendPipelineCacheField(key, std::to_string(sorted_inputs.size()));
+  for (const auto& [slot, resource] : sorted_inputs) {
+    appendPipelineCacheField(key, slot);
+    appendPipelineCacheField(key, resource);
+  }
+
+  const auto sorted_textures = sortedStringPairs(asset.textures);
+  appendPipelineCacheField(key, std::to_string(sorted_textures.size()));
+  for (const auto& [alias, resource] : sorted_textures) {
+    appendPipelineCacheField(key, alias);
+    appendPipelineCacheField(key, resource);
   }
   return key;
 }
@@ -642,7 +741,63 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
       break;
     }
   }
+
+  const std::string resource_owner_prefix = graphRuntimeOwnerPrefix(graph, target);
+  auto prune_inactive_resources = [&](auto& cache, const auto& active_keys) {
+    for (auto it = cache.begin(); it != cache.end();) {
+      const bool owned_by_graph =
+          it->first.compare(0u, resource_owner_prefix.size(), resource_owner_prefix) == 0;
+      if (owned_by_graph && active_keys.find(it->first) == active_keys.end()) {
+        it = cache.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  };
+  auto sweep_stale_resource_owners = [&]() {
+    constexpr size_t kMaxCachedResourceOwners = 8u;
+    std::vector<std::string> retained_owners;
+    retained_owners.reserve(kMaxCachedResourceOwners);
+    retained_owners.push_back(resource_owner_prefix);
+    auto owner_is_retained = [&](std::string_view owner) {
+      return std::any_of(retained_owners.begin(), retained_owners.end(),
+                         [&](const std::string& retained) { return retained == owner; });
+    };
+
+    auto retain_cached_owners = [&](const auto& cache) {
+      for (const auto& [key, texture] : cache) {
+        (void)texture;
+        const std::string_view owner = graphRuntimeOwnerFromKey(key);
+        if (owner.empty() || owner_is_retained(owner)) {
+          continue;
+        }
+        if (retained_owners.size() >= kMaxCachedResourceOwners) {
+          break;
+        }
+        retained_owners.emplace_back(owner);
+      }
+    };
+    retain_cached_owners(frame_graph_color_textures_);
+    retain_cached_owners(frame_graph_depth_textures_);
+
+    auto erase_unretained_owners = [&](auto& cache) {
+      for (auto it = cache.begin(); it != cache.end();) {
+        const std::string_view owner = graphRuntimeOwnerFromKey(it->first);
+        if (owner.empty() || !owner_is_retained(owner)) {
+          it = cache.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    };
+    erase_unretained_owners(frame_graph_color_textures_);
+    erase_unretained_owners(frame_graph_depth_textures_);
+  };
   if (!has_screen_work) {
+    const std::unordered_set<std::string> no_active_resources;
+    prune_inactive_resources(frame_graph_color_textures_, no_active_resources);
+    prune_inactive_resources(frame_graph_depth_textures_, no_active_resources);
+    sweep_stale_resource_owners();
     return true;
   }
 
@@ -664,6 +819,9 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
                                        height,
                                        Diligent::TEX_FORMAT_UNKNOWN});
 
+  std::unordered_set<std::string> active_color_texture_keys;
+  std::unordered_set<std::string> active_depth_texture_keys;
+
   auto ensure_color_texture = [&](const rendering::FrameGraphResourceDesc& resource)
       -> GraphTextureBinding {
     if (resource.kind != rendering::FrameGraphResourceKind::ColorTexture) {
@@ -673,18 +831,14 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
     const int resource_height = resourceHeight(resource, height);
     const Diligent::TEXTURE_FORMAT resource_format =
         toGraphTextureFormat(resource.format);
-    std::string key = graphRuntimeKey(graph, target, resource.name);
-    key.push_back('#');
-    key.append(std::to_string(resource_width));
-    key.push_back('x');
-    key.append(std::to_string(resource_height));
-    key.push_back('#');
-    key.append(std::to_string(static_cast<int>(resource_format)));
+    const std::string key = graphRuntimeKey(graph, target, resource.name);
+    active_color_texture_keys.insert(key);
 
     PostProcessTexture& texture = frame_graph_color_textures_[key];
     if (!texture.texture || !texture.srv || !texture.rtv ||
-        texture.width != resource_width || texture.height != resource_height) {
-      texture = {};
+        texture.width != resource_width || texture.height != resource_height ||
+        texture.format != resource_format) {
+      PostProcessTexture replacement{};
       Diligent::TextureDesc desc{};
       const std::string texture_name = "FrameGraph " + resource.name;
       desc.Name = texture_name.c_str();
@@ -696,18 +850,23 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
       desc.BindFlags = Diligent::BIND_RENDER_TARGET |
                        Diligent::BIND_SHADER_RESOURCE;
       const auto create_start = core::SteadyClock::now();
-      device_->CreateTexture(desc, nullptr, &texture.texture);
+      device_->CreateTexture(desc, nullptr, &replacement.texture);
       recordResourceCreation("frame_graph", resource.name.c_str(), create_start,
                              core::SteadyClock::now());
-      if (!texture.texture) {
+      if (!replacement.texture) {
         return {};
       }
-      texture.srv =
-          texture.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      texture.rtv =
-          texture.texture->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET);
-      texture.width = resource_width;
-      texture.height = resource_height;
+      replacement.srv =
+          replacement.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+      replacement.rtv =
+          replacement.texture->GetDefaultView(Diligent::TEXTURE_VIEW_RENDER_TARGET);
+      if (!replacement.srv || !replacement.rtv) {
+        return {};
+      }
+      replacement.width = resource_width;
+      replacement.height = resource_height;
+      replacement.format = resource_format;
+      texture = std::move(replacement);
     }
     return GraphTextureBinding{texture.texture,
                                texture.srv,
@@ -727,18 +886,14 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
     const int resource_height = resourceHeight(resource, height);
     const Diligent::TEXTURE_FORMAT resource_format =
         graphDepthTextureFormat(resource.format);
-    std::string key = graphRuntimeKey(graph, target, resource.name);
-    key.push_back('#');
-    key.append(std::to_string(resource_width));
-    key.push_back('x');
-    key.append(std::to_string(resource_height));
-    key.push_back('#');
-    key.append(std::to_string(static_cast<int>(resource_format)));
+    const std::string key = graphRuntimeKey(graph, target, resource.name);
+    active_depth_texture_keys.insert(key);
 
     PostProcessTexture& texture = frame_graph_depth_textures_[key];
     if (!texture.texture || !texture.srv || !texture.dsv ||
-        texture.width != resource_width || texture.height != resource_height) {
-      texture = {};
+        texture.width != resource_width || texture.height != resource_height ||
+        texture.format != resource_format) {
+      PostProcessTexture replacement{};
       Diligent::TextureDesc desc{};
       const std::string texture_name = "FrameGraph " + resource.name;
       desc.Name = texture_name.c_str();
@@ -750,10 +905,10 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
       desc.BindFlags = Diligent::BIND_DEPTH_STENCIL |
                        Diligent::BIND_SHADER_RESOURCE;
       const auto create_start = core::SteadyClock::now();
-      device_->CreateTexture(desc, nullptr, &texture.texture);
+      device_->CreateTexture(desc, nullptr, &replacement.texture);
       recordResourceCreation("frame_graph", resource.name.c_str(), create_start,
                              core::SteadyClock::now());
-      if (!texture.texture) {
+      if (!replacement.texture) {
         return {};
       }
       Diligent::TextureViewDesc srv_desc{};
@@ -761,16 +916,21 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
       srv_desc.TextureDim = Diligent::RESOURCE_DIM_TEX_2D;
       srv_desc.Format = resolveDepthSrvFormat(resource_format);
       if (srv_desc.Format != Diligent::TEX_FORMAT_UNKNOWN) {
-        texture.texture->CreateView(srv_desc, &texture.srv);
+        replacement.texture->CreateView(srv_desc, &replacement.srv);
       }
-      if (!texture.srv) {
-        texture.srv =
-            texture.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+      if (!replacement.srv) {
+        replacement.srv = replacement.texture->GetDefaultView(
+            Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
       }
-      texture.dsv =
-          texture.texture->GetDefaultView(Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
-      texture.width = resource_width;
-      texture.height = resource_height;
+      replacement.dsv = replacement.texture->GetDefaultView(
+          Diligent::TEXTURE_VIEW_DEPTH_STENCIL);
+      if (!replacement.srv || !replacement.dsv) {
+        return {};
+      }
+      replacement.width = resource_width;
+      replacement.height = resource_height;
+      replacement.format = resource_format;
+      texture = std::move(replacement);
     }
     return GraphTextureBinding{texture.texture,
                                texture.srv,
@@ -788,6 +948,10 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
       bindings[resource.name] = ensure_depth_texture(resource);
     }
   }
+
+  prune_inactive_resources(frame_graph_color_textures_, active_color_texture_keys);
+  prune_inactive_resources(frame_graph_depth_textures_, active_depth_texture_keys);
+  sweep_stale_resource_owners();
 
   auto binding_for = [&](const std::string& resource_name) -> GraphTextureBinding {
     const auto it = bindings.find(resource_name);
@@ -825,12 +989,8 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
       frame_graph_source_copy_.height = height;
       frame_graph_source_copy_format_ = color_format;
     }
-    Diligent::CopyTextureAttribs copy_attribs{
-        camera_color_texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-        frame_graph_source_copy_.texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-    context_->CopyTexture(copy_attribs);
+    copyTextureAfterRender(camera_color_texture,
+                           frame_graph_source_copy_.texture);
     return GraphTextureBinding{frame_graph_source_copy_.texture,
                                frame_graph_source_copy_.srv,
                                frame_graph_source_copy_.rtv,
@@ -847,24 +1007,38 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
     if (instance_vb_ && instance_vb_capacity_ >= instance_count) {
       return true;
     }
-    const size_t new_capacity =
-        std::max(instance_count,
-                 instance_vb_capacity_ > 0 ? instance_vb_capacity_ * 2 : static_cast<size_t>(128));
+    constexpr size_t kInitialCapacity = 128u;
+    const size_t max_capacity = static_cast<size_t>(std::min<Diligent::Uint64>(
+        {std::numeric_limits<Diligent::Uint32>::max(),
+         std::numeric_limits<Diligent::Uint64>::max() /
+             sizeof(MaskInstanceGpuData),
+         std::numeric_limits<size_t>::max() / sizeof(MaskInstanceGpuData)}));
+    if (instance_count > max_capacity) {
+      return false;
+    }
+    const size_t grown_capacity =
+        instance_vb_capacity_ == 0u
+            ? std::min(kInitialCapacity, max_capacity)
+            : (instance_vb_capacity_ > max_capacity / 2u
+                   ? max_capacity
+                   : instance_vb_capacity_ * 2u);
+    const size_t new_capacity = std::max(instance_count, grown_capacity);
     Diligent::BufferDesc desc{};
     desc.Name = "Karma FrameGraph Mask Instance Buffer";
     desc.Usage = Diligent::USAGE_DYNAMIC;
     desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(MaskInstanceGpuData));
-    instance_vb_.Release();
+    desc.Size = static_cast<Diligent::Uint64>(new_capacity) *
+                static_cast<Diligent::Uint64>(sizeof(MaskInstanceGpuData));
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> replacement;
     const auto create_start = core::SteadyClock::now();
-    device_->CreateBuffer(desc, nullptr, &instance_vb_);
+    device_->CreateBuffer(desc, nullptr, &replacement);
     recordResourceCreation("frame_graph", "scene_mask instance buffer", create_start,
                            core::SteadyClock::now());
-    if (!instance_vb_) {
-      instance_vb_capacity_ = 0;
+    if (!replacement) {
       return false;
     }
+    instance_vb_ = std::move(replacement);
     instance_vb_capacity_ = new_capacity;
     return true;
   };
@@ -880,10 +1054,11 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
     if (data == nullptr) {
       return false;
     }
-    std::memcpy(data, instances, instance_count * sizeof(MaskInstanceGpuData));
+    const uint64_t upload_bytes = static_cast<uint64_t>(instance_count) *
+                                  static_cast<uint64_t>(sizeof(MaskInstanceGpuData));
+    std::memcpy(data, instances, static_cast<size_t>(upload_bytes));
     instancing_stats_.instance_buffer_updates += 1u;
-    instancing_stats_.instance_upload_bytes +=
-        static_cast<uint64_t>(instance_count * sizeof(MaskInstanceGpuData));
+    instancing_stats_.instance_upload_bytes += upload_bytes;
     return true;
   };
 
@@ -1189,12 +1364,8 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
             source_binding.height == target_binding.height &&
             source_desc.Format == target_desc.Format;
         if (native_copy_supported) {
-          Diligent::CopyTextureAttribs copy_attribs{
-              source_binding.texture,
-              Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-              target_binding.texture,
-              Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-          context_->CopyTexture(copy_attribs);
+          copyTextureAfterRender(source_binding.texture,
+                                 target_binding.texture);
         } else if (source_binding.srv && target_binding.rtv) {
           const int target_width = target_binding.width > 0 ? target_binding.width : width;
           const int target_height = target_binding.height > 0 ? target_binding.height : height;
@@ -1220,9 +1391,14 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
                       pass.shader_pass_key);
         pass_ok = false;
       } else {
+        const Diligent::TEXTURE_FORMAT target_format =
+            target_binding.format != Diligent::TEX_FORMAT_UNKNOWN
+                ? target_binding.format
+                : color_format;
         FrameGraphShaderPassResources& runtime =
-            frame_graph_shader_passes_[pipelineCacheKey(*asset, pass, color_format)];
-        pass_ok = ensureFrameGraphShaderPassPipeline(*asset, pass, color_format, runtime);
+            frame_graph_shader_passes_[pipelineCacheKey(*asset, pass, target_format)];
+        pass_ok =
+            ensureFrameGraphShaderPassPipeline(*asset, pass, target_format, runtime);
         if (pass_ok) {
           for (const auto& [slot, resource_name] : pass.inputs) {
             GraphTextureBinding input_binding = binding_for(resource_name);

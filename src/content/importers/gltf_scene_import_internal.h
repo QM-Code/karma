@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,6 +17,16 @@
 #include "karma/world.h"
 
 namespace karma::world {
+
+namespace detail {
+
+/// Converts Assimp's top-down BGRA texels to renderer-order RGBA8 bytes.
+bool canonicalizeAssimpEmbeddedTexture(std::span<const uint8_t> bgra,
+                                       uint32_t width,
+                                       uint32_t height,
+                                       std::vector<uint8_t>& rgba);
+
+}  // namespace detail
 
 /// Sentinel material index for imported glTF scene data.
 constexpr uint32_t kInvalidGltfSceneMaterial = std::numeric_limits<uint32_t>::max();

@@ -37,6 +37,7 @@ struct alignas(16) TerrainConstants {
   float tile_info[4];
   float render_params[4];
   float material_scales[4];
+  float exposure_params[4];
 };
 
 struct TerrainVertex {
@@ -87,6 +88,7 @@ cbuffer TerrainConstants
     float4 g_TileInfo;
     float4 g_RenderParams;
     float4 g_MaterialScales;
+    float4 g_ExposureParams;
 };
 
 struct HSInput
@@ -162,6 +164,7 @@ cbuffer TerrainConstants
     float4 g_TileInfo;
     float4 g_RenderParams;
     float4 g_MaterialScales;
+    float4 g_ExposureParams;
 };
 
 Texture2D<float> g_HeightTexture;
@@ -184,6 +187,7 @@ struct DSOutput
     float4 Pos : SV_POSITION;
     float2 UV : TEXCOORD0;
     float3 WorldPos : TEXCOORD1;
+    float3 WorldNormal : TEXCOORD2;
 };
 
 [domain("tri")]
@@ -196,10 +200,28 @@ DSOutput main(HSConst input,
     float h = g_HeightTexture.SampleLevel(g_HeightSampler, uv, 0.0);
     local_pos.y = h * g_TileInfo.y + g_TileInfo.z;
     float4 world_pos = mul(g_Model, float4(local_pos, 1.0));
+
+    uint height_width;
+    uint height_height;
+    g_HeightTexture.GetDimensions(height_width, height_height);
+    float2 texel = rcp(float2(max(height_width, 1u), max(height_height, 1u)));
+    float h_left = g_HeightTexture.SampleLevel(g_HeightSampler, uv - float2(texel.x, 0.0), 0.0);
+    float h_right = g_HeightTexture.SampleLevel(g_HeightSampler, uv + float2(texel.x, 0.0), 0.0);
+    float h_down = g_HeightTexture.SampleLevel(g_HeightSampler, uv - float2(0.0, texel.y), 0.0);
+    float h_up = g_HeightTexture.SampleLevel(g_HeightSampler, uv + float2(0.0, texel.y), 0.0);
+    float3 local_dx = float3(2.0 * texel.x * g_TileInfo.x,
+                             (h_right - h_left) * g_TileInfo.y,
+                             0.0);
+    float3 local_dz = float3(0.0,
+                             (h_up - h_down) * g_TileInfo.y,
+                             2.0 * texel.y * g_TileInfo.x);
+    float3 world_dx = mul((float3x3)g_Model, local_dx);
+    float3 world_dz = mul((float3x3)g_Model, local_dz);
     DSOutput output;
     output.Pos = mul(g_ViewProj, world_pos);
     output.UV = uv;
     output.WorldPos = world_pos.xyz;
+    output.WorldNormal = normalize(cross(world_dz, world_dx));
     return output;
 }
 )";
@@ -215,6 +237,7 @@ cbuffer TerrainConstants
     float4 g_TileInfo;
     float4 g_RenderParams;
     float4 g_MaterialScales;
+    float4 g_ExposureParams;
 };
 
 struct VSInput
@@ -228,6 +251,7 @@ struct VSOutput
     float4 Pos : SV_POSITION;
     float2 UV : TEXCOORD0;
     float3 WorldPos : TEXCOORD1;
+    float3 WorldNormal : TEXCOORD2;
 };
 
 VSOutput main(VSInput input)
@@ -237,6 +261,7 @@ VSOutput main(VSInput input)
     output.Pos = mul(g_ViewProj, world_pos);
     output.UV = input.UV;
     output.WorldPos = world_pos.xyz;
+    output.WorldNormal = float3(0.0, 0.0, 0.0);
     return output;
 }
 )";
@@ -252,6 +277,7 @@ cbuffer TerrainConstants
     float4 g_TileInfo;
     float4 g_RenderParams;
     float4 g_MaterialScales;
+    float4 g_ExposureParams;
 };
 
 Texture2D<float4> g_ColorTexture;
@@ -276,6 +302,7 @@ struct PSInput
     float4 Pos : SV_POSITION;
     float2 UV : TEXCOORD0;
     float3 WorldPos : TEXCOORD1;
+    float3 WorldNormal : TEXCOORD2;
 };
 
 float4 main(PSInput input) : SV_TARGET
@@ -283,7 +310,9 @@ float4 main(PSInput input) : SV_TARGET
     float4 macro = g_ColorTexture.Sample(g_ColorSampler, input.UV);
     float4 albedo = macro;
     float roughness = 1.0;
-    float3 normal = normalize(cross(ddy(input.WorldPos), ddx(input.WorldPos)));
+    float3 normal = dot(input.WorldNormal, input.WorldNormal) > 1.0e-6
+        ? normalize(input.WorldNormal)
+        : normalize(cross(ddy(input.WorldPos), ddx(input.WorldPos)));
     if (normal.y < 0.0)
     {
         normal = -normal;
@@ -319,13 +348,18 @@ float4 main(PSInput input) : SV_TARGET
         float3 n3 = g_MaterialNormal3.Sample(g_MaterialSampler, uv3).xyz * 2.0 - 1.0;
         float3 blended_tangent_normal =
             normalize(n0 * weights.r + n1 * weights.g + n2 * weights.b + n3 * weights.a);
-        normal = normalize(float3(blended_tangent_normal.x,
-                                  blended_tangent_normal.z,
-                                  blended_tangent_normal.y));
-        if (normal.y < 0.0)
+        float3 tangent_candidate = float3(1.0, 0.0, 0.0) -
+                                   normal * normal.x;
+        if (dot(tangent_candidate, tangent_candidate) <= 1.0e-6)
         {
-            normal = -normal;
+            tangent_candidate = float3(0.0, 0.0, 1.0) -
+                                normal * normal.z;
         }
+        float3 tangent = normalize(tangent_candidate);
+        float3 bitangent = normalize(cross(tangent, normal));
+        normal = normalize(blended_tangent_normal.x * tangent +
+                           blended_tangent_normal.y * bitangent +
+                           blended_tangent_normal.z * normal);
 
         float r0 = g_MaterialRoughness0.Sample(g_MaterialSampler, uv0).r;
         float r1 = g_MaterialRoughness1.Sample(g_MaterialSampler, uv1).r;
@@ -343,6 +377,11 @@ float4 main(PSInput input) : SV_TARGET
                      (1.0 - roughness) * 0.18;
     float3 color = albedo.rgb * (0.30 + light * g_LightColor.rgb * 0.70) +
                    specular * g_LightColor.rgb;
+    float exposure = abs(g_ExposureParams.x);
+    color = max(color, float3(0.0, 0.0, 0.0));
+    color = g_ExposureParams.x < 0.0
+        ? color * exposure
+        : 1.0 - exp(-color * exposure);
     return float4(color, albedo.a);
 }
 )";
@@ -532,8 +571,22 @@ Diligent::TEXTURE_FORMAT textureViewFormat(Diligent::ITextureView* view,
 
 }  // namespace
 
+rendering::TerrainId DiligentBackend::allocateTerrainId() noexcept {
+  if (nextTerrainId_ == rendering::kInvalidTerrain) {
+    return rendering::kInvalidTerrain;
+  }
+  const rendering::TerrainId id = nextTerrainId_;
+  nextTerrainId_ = id == std::numeric_limits<rendering::TerrainId>::max()
+                       ? rendering::kInvalidTerrain
+                       : id + 1u;
+  return id;
+}
+
 rendering::TerrainId DiligentBackend::createTerrain(const rendering::TerrainDesc& desc) {
-  const rendering::TerrainId id = nextTerrainId_++;
+  const rendering::TerrainId id = allocateTerrainId();
+  if (id == rendering::kInvalidTerrain) {
+    return rendering::kInvalidTerrain;
+  }
   TerrainRecord record{};
   record.desc = desc;
   record.desc.tile_size = std::max(record.desc.tile_size, 0.001f);
@@ -1188,9 +1241,7 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
   if (!context_ || !active_rtv || terrain_submissions_.empty()) {
     return 0u;
   }
-  const Diligent::TEXTURE_FORMAT fallback_rtv_format =
-      swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                  : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+  const Diligent::TEXTURE_FORMAT fallback_rtv_format = sceneColorFormat();
   const Diligent::TEXTURE_FORMAT fallback_dsv_format =
       swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                   : Diligent::TEX_FORMAT_D32_FLOAT;
@@ -1313,6 +1364,7 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
               ? std::max(terrain.material_layers[i].uv_scale, 0.001f)
               : 1.0f;
     }
+    constants.exposure_params[0] = base_constants.env_params[3];
     {
       Diligent::MapHelper<TerrainConstants> mapped(
           context_, terrain_cb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);

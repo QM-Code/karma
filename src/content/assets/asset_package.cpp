@@ -506,6 +506,8 @@ Json paramsToJson(const std::unordered_map<std::string, rendering::MaterialParam
 bool parseTextureFormat(std::string_view value, rendering::TextureFormat& out) {
   if (value == "rgba8") {
     out = rendering::TextureFormat::RGBA8;
+  } else if (value == "rgba16f") {
+    out = rendering::TextureFormat::RGBA16F;
   } else if (value == "rgb8") {
     out = rendering::TextureFormat::RGB8;
   } else if (value == "r8") {
@@ -526,6 +528,8 @@ std::string textureFormatName(rendering::TextureFormat format) {
   switch (format) {
     case rendering::TextureFormat::RGBA8:
       return "rgba8";
+    case rendering::TextureFormat::RGBA16F:
+      return "rgba16f";
     case rendering::TextureFormat::RGB8:
       return "rgb8";
     case rendering::TextureFormat::R8:

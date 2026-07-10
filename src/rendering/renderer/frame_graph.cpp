@@ -2,8 +2,113 @@
 
 #include <algorithm>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 namespace karma::rendering {
+
+namespace {
+
+bool colorsEqual(const Color& lhs, const Color& rhs) {
+  return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a;
+}
+
+bool parameterValuesEqual(const MaterialParameterValue& lhs,
+                          const MaterialParameterValue& rhs) {
+  if (lhs.index() != rhs.index()) {
+    return false;
+  }
+  return std::visit(
+      [&rhs](const auto& lhs_value) {
+        using Value = std::decay_t<decltype(lhs_value)>;
+        const Value* rhs_value = std::get_if<Value>(&rhs);
+        if (rhs_value == nullptr) {
+          return false;
+        }
+        if constexpr (std::is_same_v<Value, Color>) {
+          return colorsEqual(lhs_value, *rhs_value);
+        } else {
+          return lhs_value == *rhs_value;
+        }
+      },
+      lhs);
+}
+
+bool parameterMapsEqual(
+    const std::unordered_map<std::string, MaterialParameterValue>& lhs,
+    const std::unordered_map<std::string, MaterialParameterValue>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (const auto& [name, value] : lhs) {
+    const auto it = rhs.find(name);
+    if (it == rhs.end() || !parameterValuesEqual(value, it->second)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool pipelineDescsEqual(const MaterialPipelineDesc& lhs,
+                        const MaterialPipelineDesc& rhs) {
+  return lhs.name == rhs.name &&
+         lhs.vertex_shader_path == rhs.vertex_shader_path &&
+         lhs.fragment_shader_path == rhs.fragment_shader_path &&
+         lhs.vertex_entry_point == rhs.vertex_entry_point &&
+         lhs.fragment_entry_point == rhs.fragment_entry_point &&
+         lhs.defines == rhs.defines;
+}
+
+bool resourcesEqual(const FrameGraphResourceDesc& lhs,
+                    const FrameGraphResourceDesc& rhs) {
+  return lhs.name == rhs.name && lhs.kind == rhs.kind &&
+         lhs.size_mode == rhs.size_mode && lhs.format == rhs.format &&
+         lhs.width_scale == rhs.width_scale && lhs.height_scale == rhs.height_scale &&
+         lhs.width == rhs.width && lhs.height == rhs.height &&
+         lhs.history_count == rhs.history_count;
+}
+
+bool passesEqual(const FrameGraphPassDesc& lhs, const FrameGraphPassDesc& rhs) {
+  return lhs.name == rhs.name && lhs.kind == rhs.kind &&
+         lhs.builtin_pass == rhs.builtin_pass &&
+         lhs.shader_pass_key == rhs.shader_pass_key &&
+         lhs.render_tags == rhs.render_tags && lhs.inputs == rhs.inputs &&
+         lhs.outputs == rhs.outputs && parameterMapsEqual(lhs.params, rhs.params) &&
+         lhs.enabled == rhs.enabled && lhs.clear == rhs.clear &&
+         lhs.clear_depth == rhs.clear_depth &&
+         colorsEqual(lhs.clear_color, rhs.clear_color);
+}
+
+bool shaderPassAssetsEqual(const ShaderPassAssetDesc& lhs,
+                           const ShaderPassAssetDesc& rhs) {
+  return lhs.shader_pass_key == rhs.shader_pass_key &&
+         pipelineDescsEqual(lhs.pipeline, rhs.pipeline) &&
+         parameterMapsEqual(lhs.params, rhs.params) && lhs.textures == rhs.textures &&
+         lhs.texture_handles == rhs.texture_handles && lhs.fullscreen == rhs.fullscreen &&
+         lhs.depth_test == rhs.depth_test && lhs.depth_write == rhs.depth_write &&
+         lhs.blend_enabled == rhs.blend_enabled && lhs.blend_mode == rhs.blend_mode &&
+         lhs.shader_pass_asset_path == rhs.shader_pass_asset_path;
+}
+
+template <typename T, typename Equal>
+bool vectorsEqual(const std::vector<T>& lhs,
+                  const std::vector<T>& rhs,
+                  Equal equal) {
+  return lhs.size() == rhs.size() &&
+         std::equal(lhs.begin(), lhs.end(), rhs.begin(), std::move(equal));
+}
+
+}  // namespace
+
+bool frameGraphsEquivalent(const FrameGraphDesc& lhs, const FrameGraphDesc& rhs) {
+  return lhs.frame_graph_key == rhs.frame_graph_key &&
+         lhs.output_resource == rhs.output_resource && lhs.enabled == rhs.enabled &&
+         vectorsEqual(lhs.resources, rhs.resources, resourcesEqual) &&
+         vectorsEqual(lhs.passes, rhs.passes, passesEqual) &&
+         vectorsEqual(lhs.shader_pass_assets,
+                      rhs.shader_pass_assets,
+                      shaderPassAssetsEqual);
+}
 
 FrameGraphDesc frameGraphFromPostProcessSettings(const PostProcessSettings& settings,
                                                  std::string frame_graph_key) {

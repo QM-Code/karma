@@ -1,3 +1,13 @@
+function(karma_enable_test_assertions target)
+  # The test sources use assert() for checks and exercised calls. Keep them
+  # active even when the surrounding build type defines NDEBUG.
+  if (MSVC)
+    target_compile_options(${target} PRIVATE /UNDEBUG)
+  else()
+    target_compile_options(${target} PRIVATE -UNDEBUG)
+  endif()
+endfunction()
+
 if (BUILD_TESTING AND KARMA_BUILD_TESTS)
   if (TARGET karma::headless)
     add_executable(karma_core_runtime_tests
@@ -152,4 +162,29 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     )
     add_test(NAME karma_navmesh_tests COMMAND karma_navmesh_tests)
   endif()
+
+  set(_karma_assertion_test_targets
+    karma_core_runtime_tests
+    karma_audio_tests
+    karma_collider_geometry_tests
+    karma_asset_cache_tests
+    karma_prefab_tests
+    karma_scene_document_tests
+    karma_scene_runtime_tests
+    karma_scene_bake_tests
+    karma_animation_tests
+    karma_rendering_tests
+    karma_particle_generation_tests
+    karma_physics_tests
+    karma_terrain_tests
+    karma_audio_sdl_tests
+    karma_window_sdl_tests
+    karma_network_tests
+    karma_navmesh_tests
+  )
+  foreach(_karma_test_target IN LISTS _karma_assertion_test_targets)
+    if (TARGET ${_karma_test_target})
+      karma_enable_test_assertions(${_karma_test_target})
+    endif()
+  endforeach()
 endif()

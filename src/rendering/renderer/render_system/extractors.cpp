@@ -4,7 +4,10 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <string_view>
 
 namespace karma::rendering::render_system {
 
@@ -103,19 +106,35 @@ CameraData toCameraData(const components::CameraComponent& camera,
   out.shader_override_vertex_path = camera.shader_override_vertex_path;
   out.shader_override_fragment_path = camera.shader_override_fragment_path;
   out.anti_aliasing = rendering::clampAntiAliasingSettings(camera.anti_aliasing);
-  out.shader_user_param_count = 0u;
-  std::vector<std::pair<std::string_view, const math::Color*>> sorted_params;
-  sorted_params.reserve(camera.shader_user_params.size());
+  std::array<std::pair<std::string_view, const math::Color*>,
+             kCameraShaderUserParamCapacity>
+      sorted_params{};
+  std::size_t sorted_param_count = 0u;
   for (const auto& [key, value] : camera.shader_user_params) {
-    sorted_params.emplace_back(key, &value);
-  }
-  std::sort(sorted_params.begin(), sorted_params.end(), [](const auto& lhs, const auto& rhs) {
-    return lhs.first < rhs.first;
-  });
-  for (const auto& [key, value] : sorted_params) {
-    if (out.shader_user_param_count >= kCameraShaderUserParamCapacity) {
-      break;
+    const auto insert_at = std::lower_bound(
+        sorted_params.begin(),
+        sorted_params.begin() + static_cast<std::ptrdiff_t>(sorted_param_count),
+        key,
+        [](const auto& entry, std::string_view candidate) {
+          return entry.first < candidate;
+        });
+    const std::size_t index = static_cast<std::size_t>(insert_at - sorted_params.begin());
+    if (index >= kCameraShaderUserParamCapacity) {
+      continue;
     }
+    const std::size_t move_end = std::min(
+        sorted_param_count,
+        static_cast<std::size_t>(kCameraShaderUserParamCapacity) - 1u);
+    std::move_backward(sorted_params.begin() + static_cast<std::ptrdiff_t>(index),
+                       sorted_params.begin() + static_cast<std::ptrdiff_t>(move_end),
+                       sorted_params.begin() + static_cast<std::ptrdiff_t>(move_end + 1u));
+    sorted_params[index] = {key, &value};
+    sorted_param_count = std::min(sorted_param_count + 1u,
+                                  static_cast<std::size_t>(kCameraShaderUserParamCapacity));
+  }
+  out.shader_user_param_count = 0u;
+  for (std::size_t index = 0u; index < sorted_param_count; ++index) {
+    const auto& [key, value] = sorted_params[index];
     auto& dst = out.shader_user_params[out.shader_user_param_count++];
     dst.key_hash = cameraShaderParamKeyHash(key);
     dst.value = finiteColor(*value, math::Color{});

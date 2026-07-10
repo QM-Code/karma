@@ -22,6 +22,8 @@ Diligent::TEXTURE_FORMAT toDiligentTextureFormat(const rendering::TextureDesc& d
                        : Diligent::TEX_FORMAT_RGBA8_UNORM;
     case rendering::TextureFormat::R8:
       return Diligent::TEX_FORMAT_R8_UNORM;
+    case rendering::TextureFormat::RGBA16F:
+      return Diligent::TEX_FORMAT_RGBA16_FLOAT;
     case rendering::TextureFormat::RGBA8:
     default:
       return desc.srgb ? Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB
@@ -37,6 +39,14 @@ Diligent::TEXTURE_FORMAT toDiligentTextureFormat(rendering::TextureFormat format
 }
 
 }  // namespace
+
+rendering::TextureId DiligentBackend::allocateTextureId() noexcept {
+  if (nextTextureId_ == rendering::kInvalidTexture ||
+      nextTextureId_ >= kRenderTargetTextureHandleBit) {
+    return rendering::kInvalidTexture;
+  }
+  return nextTextureId_++;
+}
 
 rendering::TextureId DiligentBackend::createTexture(const rendering::TextureDesc& desc) {
   if (!device_ || !desc.valid() ||
@@ -72,7 +82,7 @@ rendering::TextureId DiligentBackend::createTexture(const rendering::TextureDesc
     return rendering::kInvalidTexture;
   }
 
-  const rendering::TextureId id = nextTextureId_++;
+  const rendering::TextureId id = allocateTextureId();
   if (id == rendering::kInvalidTexture) {
     return rendering::kInvalidTexture;
   }
@@ -114,7 +124,14 @@ bool DiligentBackend::uploadTexture(rendering::TextureId texture,
           subresource.row_stride == 0u ? source_min_stride : subresource.row_stride;
       const std::size_t output_stride =
           static_cast<std::size_t>(subresource.width) * 4u;
-      expanded_rgba.resize(output_stride * static_cast<std::size_t>(subresource.height));
+      std::size_t output_size = 0u;
+      if (!rendering::tryTextureDataSize(subresource.width,
+                                         subresource.height,
+                                         4u,
+                                         output_size)) {
+        return false;
+      }
+      expanded_rgba.resize(output_size);
       const std::uint8_t* source = upload.bytes.data() + subresource.offset;
       for (int row = 0; row < subresource.height; ++row) {
         const std::uint8_t* source_row = source + static_cast<std::size_t>(row) * source_stride;
@@ -168,7 +185,23 @@ bool DiligentBackend::uploadTexture(rendering::TextureId texture,
 }
 
 void DiligentBackend::destroyTexture(rendering::TextureId texture) {
-  textures_.erase(texture);
+  auto texture_it = textures_.find(texture);
+  if (texture_it == textures_.end()) {
+    return;
+  }
+
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> old_srv = texture_it->second.srv;
+  for (auto cache_it = texture_cache_.begin(); cache_it != texture_cache_.end();) {
+    if (cache_it->second == texture) {
+      cache_it = texture_cache_.erase(cache_it);
+    } else {
+      ++cache_it;
+    }
+  }
+  replaceMaterialTextureView(old_srv, nullptr);
+  textures_.erase(texture_it);
+  directional_shadow_scene_dirty_ = true;
+  point_shadow_scene_dirty_ = true;
 }
 
 void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
@@ -188,13 +221,6 @@ void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
   const bool size_changed = record.desc.width != w || record.desc.height != h;
   const bool format_changed = record.desc.format != rendering::TextureFormat::RGBA8;
   if (!record.texture || size_changed || format_changed) {
-    record.desc.width = w;
-    record.desc.height = h;
-    record.desc.format = rendering::TextureFormat::RGBA8;
-    record.desc.srgb = false;
-    record.desc.generate_mips = false;
-    record.desc.mip_levels = 1u;
-
     Diligent::TextureDesc tex_desc{};
     tex_desc.Name = "Karma UI Texture";
     tex_desc.Type = Diligent::RESOURCE_DIM_TEX_2D;
@@ -205,23 +231,36 @@ void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
     tex_desc.BindFlags = Diligent::BIND_SHADER_RESOURCE;
     tex_desc.Usage = Diligent::USAGE_DEFAULT;
 
-    record.texture.Release();
-    record.srv.Release();
     Diligent::TextureSubResData subres{};
     subres.pData = pixels;
-    subres.Stride = static_cast<Diligent::Uint32>(w * 4);
+    subres.Stride = static_cast<Diligent::Uint64>(static_cast<std::size_t>(w) * 4u);
     Diligent::TextureData init_data{};
     init_data.pSubResources = &subres;
     init_data.NumSubresources = 1;
-    device_->CreateTexture(tex_desc, &init_data, &record.texture);
-    if (record.texture) {
-      auto* raw_view = record.texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
-      if (raw_view) {
-        Diligent::RefCntAutoPtr<Diligent::ITextureView> view;
-        view = raw_view;
-        record.srv = view;
-      }
+    Diligent::RefCntAutoPtr<Diligent::ITexture> replacement_texture;
+    device_->CreateTexture(tex_desc, &init_data, &replacement_texture);
+    if (!replacement_texture) {
+      return;
     }
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> replacement_srv;
+    replacement_srv =
+        replacement_texture->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE);
+    if (!replacement_srv) {
+      return;
+    }
+
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> old_srv = record.srv;
+    record.desc = rendering::TextureDesc{
+        .width = w,
+        .height = h,
+        .format = rendering::TextureFormat::RGBA8,
+        .srgb = false,
+        .generate_mips = false,
+        .mip_levels = 1u,
+    };
+    record.texture = std::move(replacement_texture);
+    record.srv = std::move(replacement_srv);
+    replaceMaterialTextureView(old_srv, record.srv);
     directional_shadow_scene_dirty_ = true;
     point_shadow_scene_dirty_ = true;
     return;
@@ -233,7 +272,7 @@ void DiligentBackend::updateTextureRGBA8(rendering::TextureId texture,
 
   Diligent::TextureSubResData subres{};
   subres.pData = pixels;
-  subres.Stride = static_cast<Diligent::Uint32>(w * 4);
+  subres.Stride = static_cast<Diligent::Uint64>(static_cast<std::size_t>(w) * 4u);
 
   Diligent::Box box{};
   box.MinX = 0;

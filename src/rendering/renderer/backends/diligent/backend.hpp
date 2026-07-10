@@ -62,6 +62,20 @@ struct PostProcessTexture {
   uint32_t sample_count = 1u;
 };
 
+struct PostProcessHistoryResources {
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITexture>, 2> textures;
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, 2> srvs;
+  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, 2> rtvs;
+  rendering::CameraData camera{};
+  int width = 0;
+  int height = 0;
+  Diligent::TEXTURE_FORMAT format = Diligent::TEX_FORMAT_UNKNOWN;
+  int index = 0;
+  bool valid = false;
+  bool camera_initialized = false;
+  uint64_t last_used_serial = 0u;
+};
+
 struct PostProcessPassResources {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
@@ -697,7 +711,7 @@ class DiligentBackend final : public Backend {
   void clearFrame(const float* color, bool clear_depth);
   void recreateShadowMap();
   void recreatePointShadowMap();
-  void recreateRenderTargetResources(RenderTargetRecord& record, int width, int height);
+  bool recreateRenderTargetResources(RenderTargetRecord& record, int width, int height);
   void recreateShadowPipeline();
   bool ensureCameraOverridePipeline(const rendering::CameraData& camera);
   void updateCameraOverrideUserConstants(const rendering::CameraData& camera);
@@ -707,6 +721,9 @@ class DiligentBackend final : public Backend {
   TerrainPipelineSet* ensureTerrainResources(Diligent::TEXTURE_FORMAT rtv_format,
                                              Diligent::TEXTURE_FORMAT dsv_format);
   void ensureParticleResources();
+  Diligent::TEXTURE_FORMAT sceneColorFormat() const noexcept {
+    return scene_color_format_;
+  }
   uint32_t activeRasterSampleCount() const;
   void setActiveRasterSampleCount(uint32_t sample_count);
   void releaseRasterSampleDependentResources();
@@ -741,11 +758,21 @@ class DiligentBackend final : public Backend {
                          int output_width,
                          int output_height);
   bool ensureFullscreenBlitPipeline(Diligent::TEXTURE_FORMAT format);
+  bool ensurePresentBlitPipeline(Diligent::TEXTURE_FORMAT format);
+  bool ensureBlitPipeline(Diligent::TEXTURE_FORMAT format,
+                          const char* pipeline_name,
+                          PostProcessPassResources& pass,
+                          Diligent::TEXTURE_FORMAT& pipeline_format);
   bool runFullscreenBlit(Diligent::ITextureView* source_srv,
                          Diligent::ITextureView* target_rtv,
                          int target_width,
                          int target_height,
                          Diligent::TEXTURE_FORMAT format);
+  bool runPresentBlit(Diligent::ITextureView* source_srv,
+                      Diligent::ITextureView* target_rtv,
+                      int target_width,
+                      int target_height,
+                      Diligent::TEXTURE_FORMAT format);
   uint32_t renderParticleBeams(rendering::LayerId layer, const ParticlePassContext& context);
   void recordRenderLayerStageTiming(const char* stage, double ms);
   void recordResourceCreation(const char* area,
@@ -764,7 +791,8 @@ class DiligentBackend final : public Backend {
                                                         rendering::InstanceGpuLayout layout =
                                                             rendering::InstanceGpuLayout::
                                                                 Matrix4x4Params);
-  void bindForwardPipelineStaticResources(Diligent::IPipelineState* pso) const;
+  void bindForwardPipelineStaticResources(Diligent::IPipelineState* pso,
+                                          bool pixel_stage_active = true) const;
   bool materialUsesCustomForwardPipeline(const MaterialRecord& material) const;
   Diligent::IShaderResourceBinding* ensureMaterialForwardSrb(MaterialRecord& material,
                                                              ForwardPipelineVariant variant,
@@ -801,17 +829,26 @@ class DiligentBackend final : public Backend {
                                            int height,
                                            Diligent::TEXTURE_FORMAT format);
   void ensureParticleFallbackDepthResource();
+  void copyTextureAfterRender(Diligent::ITexture* source,
+                              Diligent::ITexture* destination);
   void applyPostProcessSettingsForPass(const rendering::PostProcessSettings& settings);
   void ensurePostProcessResources(int width,
                                   int height,
                                   Diligent::TEXTURE_FORMAT format);
+  PostProcessHistoryResources* ensurePostProcessHistoryResources(
+      rendering::RenderTargetId target,
+      int width,
+      int height,
+      Diligent::TEXTURE_FORMAT format);
+  void prunePostProcessHistoryResources();
   bool ensurePostProcessPipelines(Diligent::TEXTURE_FORMAT format);
   void applyPostProcessChain(Diligent::ITexture* scene_texture,
                              Diligent::ITextureView* scene_rtv,
                              Diligent::ITextureView* scene_depth_srv,
                              int width,
                              int height,
-                             Diligent::TEXTURE_FORMAT format);
+                             Diligent::TEXTURE_FORMAT format,
+                             rendering::RenderTargetId target);
   bool runPostProcessPass(PostProcessPassResources& pass,
                           Diligent::ITextureView* source_srv,
                           Diligent::ITextureView* depth_srv,
@@ -898,7 +935,15 @@ class DiligentBackend final : public Backend {
   MaterialRecord buildImportedMaterialRecord(const rendering::ImportedMaterialData& material);
   void applyResolvedMaterial(MaterialRecord& record,
                              const rendering::ResolvedMaterialDesc& resolved);
+  rendering::MeshId allocateMeshId() noexcept;
+  rendering::TextureId allocateTextureId() noexcept;
+  rendering::MaterialId allocateMaterialId() noexcept;
+  rendering::RenderTargetId allocateRenderTargetId() noexcept;
+  rendering::TerrainId allocateTerrainId() noexcept;
+  rendering::DeformationId allocateDeformationId() noexcept;
   void initializeMaterialBindings(MaterialRecord& record);
+  void replaceMaterialTextureView(Diligent::ITextureView* previous,
+                                  Diligent::ITextureView* replacement);
   void initializeTextureCoordTransforms(MaterialRecord& record) const;
   void setTextureCoordTransform(MaterialRecord& record,
                                 const aiMaterial& material,
@@ -934,6 +979,7 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IRenderDevice> device_;
   Diligent::RefCntAutoPtr<Diligent::IDeviceContext> context_;
   Diligent::RefCntAutoPtr<Diligent::ISwapChain> swap_chain_;
+  Diligent::TEXTURE_FORMAT scene_color_format_ = Diligent::TEX_FORMAT_RGBA16_FLOAT;
   Diligent::RenderDeviceWithCache<false> device_with_cache_;
   std::filesystem::path render_state_cache_path_;
   std::filesystem::path pipeline_state_cache_path_;
@@ -1102,6 +1148,9 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_light_srv_;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_count_srv_;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_index_srv_;
+  Diligent::IBufferView* active_forward_plus_light_srv_ = nullptr;
+  Diligent::IBufferView* active_forward_plus_tile_count_srv_ = nullptr;
+  Diligent::IBufferView* active_forward_plus_tile_index_srv_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_count_uav_;
   Diligent::RefCntAutoPtr<Diligent::IBufferView> forward_plus_tile_index_uav_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> forward_plus_compute_pso_;
@@ -1309,15 +1358,15 @@ class DiligentBackend final : public Backend {
   Diligent::TEXTURE_FORMAT ssaa_downsample_color_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   Diligent::TEXTURE_FORMAT ssaa_downsample_depth_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   PostProcessPassResources fullscreen_blit_pass_;
+  PostProcessPassResources present_blit_pass_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> post_process_ping_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_ping_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_ping_rtv_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> post_process_pong_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_pong_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> post_process_pong_rtv_;
-  std::array<Diligent::RefCntAutoPtr<Diligent::ITexture>, 2> post_process_history_tex_;
-  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, 2> post_process_history_srv_;
-  std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, 2> post_process_history_rtv_;
+  std::unordered_map<rendering::RenderTargetId, PostProcessHistoryResources>
+      post_process_histories_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> post_process_cb_;
   PostProcessPassResources post_process_bloom_prefilter_pass_;
   PostProcessPassResources post_process_bloom_downsample_pass_;
@@ -1331,8 +1380,8 @@ class DiligentBackend final : public Backend {
   Diligent::TEXTURE_FORMAT post_process_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   Diligent::TEXTURE_FORMAT post_process_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
   Diligent::TEXTURE_FORMAT fullscreen_blit_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
-  int post_process_history_index_ = 0;
-  bool post_process_history_valid_ = false;
+  Diligent::TEXTURE_FORMAT present_blit_pipeline_format_ = Diligent::TEX_FORMAT_UNKNOWN;
+  uint64_t post_process_history_use_serial_ = 0u;
   std::unordered_map<std::string, PostProcessTexture> frame_graph_color_textures_;
   std::unordered_map<std::string, PostProcessTexture> frame_graph_depth_textures_;
   std::unordered_map<std::string, FrameGraphShaderPassResources> frame_graph_shader_passes_;

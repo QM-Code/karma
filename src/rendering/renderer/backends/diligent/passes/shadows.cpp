@@ -2,6 +2,8 @@
 
 #include "../backend_internal.h"
 
+#include "private/rendering/point_shadow_policy.hpp"
+
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/GraphicsTypes.h>
@@ -18,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -44,7 +47,8 @@ bool uploadInstanceData(Diligent::IDeviceContext* context,
                         Diligent::IBuffer* buffer,
                         const InstanceGpuData* instances,
                         size_t instance_count) {
-  if (!context || !buffer || !instances || instance_count == 0) {
+  if (!context || !buffer || !instances || instance_count == 0 ||
+      instance_count > std::numeric_limits<size_t>::max() / sizeof(InstanceGpuData)) {
     return false;
   }
 
@@ -265,7 +269,8 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
     float distance_sq = 0.0f;
   };
 
-  std::vector<PointShadowSelection> point_shadow_candidates;
+  static thread_local std::vector<PointShadowSelection> point_shadow_candidates;
+  point_shadow_candidates.clear();
   point_shadow_candidates.reserve(local_light_source_indices.size());
   for (size_t local_idx = 0; local_idx < local_light_source_indices.size(); ++local_idx) {
     const size_t source_index = local_light_source_indices[local_idx];
@@ -273,7 +278,7 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       continue;
     }
     const rendering::LightData& source_light = lights_[source_index];
-    if (source_light.type != rendering::LightType::Point || !source_light.casts_shadows) {
+    if (!rendering::detail::isPointShadowAllocationCandidate(source_light)) {
       continue;
     }
     const glm::vec3 to_camera = source_light.position - camera_position;
@@ -306,6 +311,15 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
         candidate.local_light_index;
     out_state.point_shadow_light_count += 1;
   }
+
+  if (camera_.render_shadows && shadow_pipeline_state_ &&
+      out_state.point_shadow_light_count > 0u && !point_shadow_map_srv_) {
+    recreatePointShadowMap();
+  }
+  // Keep the array resident after first use. Shadow-casting lights frequently
+  // cross visibility/layer boundaries, and reallocating all cube faces would
+  // create large GPU-memory and synchronization spikes. Settings changes still
+  // recreate an existing array explicitly.
 
   glm::vec3 shadow_light_dir = directional_light_.direction;
   if (glm::length(shadow_light_dir) < 1e-4f) {
@@ -436,15 +450,6 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       }
     }
   }
-  if (!directional_shadow_needs_update) {
-    for (const auto& entry : instanced_records_) {
-      const auto& record = entry.second;
-      if (record.layer == layer && record.shadow_visible && record.instanceCount() > 0u) {
-        directional_shadow_needs_update = true;
-        break;
-      }
-    }
-  }
   if (!directional_shadow_needs_update && directional_shadow_cache_valid_) {
     out_state.cascade_splits = cached_cascade_splits_;
   } else {
@@ -536,20 +541,34 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
     if (instance_vb_ && instance_vb_capacity_ >= instance_count) {
       return true;
     }
-    const size_t new_capacity =
-        std::max(instance_count,
-                 instance_vb_capacity_ > 0 ? instance_vb_capacity_ * 2 : static_cast<size_t>(128));
+    constexpr size_t kInitialCapacity = 128u;
+    const size_t max_capacity = static_cast<size_t>(std::min<Diligent::Uint64>(
+        {std::numeric_limits<Diligent::Uint32>::max(),
+         std::numeric_limits<Diligent::Uint64>::max() / sizeof(InstanceGpuData),
+         std::numeric_limits<size_t>::max() / sizeof(InstanceGpuData)}));
+    if (instance_count > max_capacity) {
+      return false;
+    }
+    const size_t grown_capacity =
+        instance_vb_capacity_ == 0u
+            ? std::min(kInitialCapacity, max_capacity)
+            : (instance_vb_capacity_ > max_capacity / 2u
+                   ? max_capacity
+                   : instance_vb_capacity_ * 2u);
+    const size_t new_capacity = std::max(instance_count, grown_capacity);
     Diligent::BufferDesc ib_desc{};
     ib_desc.Name = "Karma Instance Buffer";
     ib_desc.Usage = Diligent::USAGE_DYNAMIC;
     ib_desc.BindFlags = Diligent::BIND_VERTEX_BUFFER;
     ib_desc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    ib_desc.Size = static_cast<Diligent::Uint32>(new_capacity * sizeof(InstanceGpuData));
-    instance_vb_.Release();
-    device_->CreateBuffer(ib_desc, nullptr, &instance_vb_);
-    if (!instance_vb_) {
+    ib_desc.Size = static_cast<Diligent::Uint64>(new_capacity) *
+                   static_cast<Diligent::Uint64>(sizeof(InstanceGpuData));
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> replacement;
+    device_->CreateBuffer(ib_desc, nullptr, &replacement);
+    if (!replacement) {
       return false;
     }
+    instance_vb_ = std::move(replacement);
     instance_vb_capacity_ = new_capacity;
     return true;
   };
@@ -680,15 +699,6 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
         }
       }
     }
-    if (!moving_shadow_caster_affects_point_shadow) {
-      for (const auto& entry : instanced_records_) {
-        const auto& record = entry.second;
-        if (record.layer == layer && record.shadow_visible && record.instanceCount() > 0u) {
-          moving_shadow_caster_affects_point_shadow = true;
-          break;
-        }
-      }
-    }
   }
   point_shadow_force_full_refresh =
       point_shadow_force_full_refresh || moving_shadow_caster_affects_point_shadow;
@@ -751,7 +761,11 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
   thread_local std::vector<ShadowBatch> shadow_batches;
   thread_local std::vector<DeformedShadowDraw> deformed_shadow_draws;
   thread_local std::unordered_map<ShadowBatchKey, size_t, ShadowBatchKeyHash> shadow_batch_lookup;
-  shadow_batches.clear();
+  for (ShadowBatch& batch : shadow_batches) {
+    batch.transforms.clear();
+    batch.bounds_spheres.clear();
+  }
+  size_t active_shadow_batch_count = 0u;
   deformed_shadow_draws.clear();
   shadow_batch_lookup.clear();
   if (render_directional_shadows || render_point_shadows) {
@@ -774,8 +788,12 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       }
       auto it = shadow_batch_lookup.find(key);
       if (it == shadow_batch_lookup.end()) {
-        const size_t idx = shadow_batches.size();
-        shadow_batches.push_back(ShadowBatch{.key = key});
+        const size_t idx = active_shadow_batch_count++;
+        if (idx == shadow_batches.size()) {
+          shadow_batches.push_back(ShadowBatch{.key = key});
+        } else {
+          shadow_batches[idx].key = key;
+        }
         shadow_batch_lookup.emplace(key, idx);
         it = shadow_batch_lookup.find(key);
       }
@@ -960,7 +978,8 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       }
     }
     std::sort(shadow_batches.begin(),
-              shadow_batches.end(),
+              shadow_batches.begin() +
+                  static_cast<std::ptrdiff_t>(active_shadow_batch_count),
               [](const ShadowBatch& a, const ShadowBatch& b) {
                 if (a.key.mesh != b.key.mesh) {
                   return a.key.mesh < b.key.mesh;
@@ -1115,7 +1134,10 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       return;
     }
     constants_match_pass = true;
-    for (const auto& batch : shadow_batches) {
+    for (size_t batch_index = 0u;
+         batch_index < active_shadow_batch_count;
+         ++batch_index) {
+      const ShadowBatch& batch = shadow_batches[batch_index];
       if (batch.transforms.empty()) {
         continue;
       }

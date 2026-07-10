@@ -80,6 +80,17 @@ struct RenderTargetDesc {
   int height = 0;
   bool depth = true;
   bool stencil = false;
+
+  /// Returns whether the extent and depth/stencil combination is supported.
+  ///
+  /// Render targets use the backend scene color format and swap-chain depth
+  /// format so every built-in graphics pipeline remains compatible offscreen.
+  /// A depth attachment is currently required; stencil remains optional.
+  [[nodiscard]] bool valid() const {
+    const bool dynamic_extent = width == 0 && height == 0;
+    const bool fixed_extent = width > 0 && height > 0;
+    return depth && (dynamic_extent || fixed_extent);
+  }
 };
 
 }  // namespace karma::rendering
@@ -99,7 +110,8 @@ enum class TextureFormat {
   R8,
   BC7_RGBA_UNORM,
   BC7_RGBA_UNORM_SRGB,
-  KTX2_BASIS_UASTC
+  KTX2_BASIS_UASTC,
+  RGBA16F
 };
 
 /// Returns true when `format` names a supported API enum value.
@@ -111,6 +123,7 @@ inline constexpr bool isTextureFormatValid(TextureFormat format) {
     case TextureFormat::BC7_RGBA_UNORM:
     case TextureFormat::BC7_RGBA_UNORM_SRGB:
     case TextureFormat::KTX2_BASIS_UASTC:
+    case TextureFormat::RGBA16F:
       return true;
   }
   return false;
@@ -131,7 +144,8 @@ struct TextureDesc {
                                   format == TextureFormat::BC7_RGBA_UNORM_SRGB;
     if (!isTextureFormatValid(format) || width <= 0 || height <= 0 ||
         mip_levels == 0u ||
-        (block_compressed && generate_mips)) {
+        (block_compressed && generate_mips) ||
+        (format == TextureFormat::RGBA16F && srgb)) {
       return false;
     }
     uint32_t level_count = 1u;
@@ -172,22 +186,58 @@ inline constexpr bool isBlockCompressedTextureFormat(TextureFormat format) {
          format == TextureFormat::BC7_RGBA_UNORM_SRGB;
 }
 
+/// Computes a tightly packed texture payload size without overflowing `size_t`.
+inline bool tryTextureDataSize(int width,
+                               int height,
+                               std::size_t bytes_per_pixel,
+                               std::size_t& out_size) {
+  out_size = 0u;
+  if (width <= 0 || height <= 0 || bytes_per_pixel == 0u) {
+    return false;
+  }
+  const std::size_t pixel_width = static_cast<std::size_t>(width);
+  const std::size_t pixel_height = static_cast<std::size_t>(height);
+  if (pixel_width > std::numeric_limits<std::size_t>::max() / bytes_per_pixel) {
+    return false;
+  }
+  const std::size_t row_size = pixel_width * bytes_per_pixel;
+  if (pixel_height > std::numeric_limits<std::size_t>::max() / row_size) {
+    return false;
+  }
+  out_size = row_size * pixel_height;
+  return true;
+}
+
 /// Returns the minimum byte stride for one upload row, or zero for container formats.
 inline std::size_t textureUploadMinimumRowStride(TextureFormat format, int width) {
   if (width <= 0) {
     return 0u;
   }
   const std::size_t pixel_width = static_cast<std::size_t>(width);
+  const auto packed_stride = [pixel_width](std::size_t bytes_per_pixel)
+      -> std::size_t {
+    return pixel_width <=
+                   std::numeric_limits<std::size_t>::max() / bytes_per_pixel
+               ? pixel_width * bytes_per_pixel
+               : 0u;
+  };
   switch (format) {
     case TextureFormat::RGBA8:
-      return pixel_width * 4u;
+      return packed_stride(4u);
     case TextureFormat::RGB8:
-      return pixel_width * 3u;
+      return packed_stride(3u);
     case TextureFormat::R8:
       return pixel_width;
+    case TextureFormat::RGBA16F:
+      return packed_stride(8u);
     case TextureFormat::BC7_RGBA_UNORM:
-    case TextureFormat::BC7_RGBA_UNORM_SRGB:
-      return ((pixel_width + 3u) / 4u) * 16u;
+    case TextureFormat::BC7_RGBA_UNORM_SRGB: {
+      const std::size_t block_count =
+          pixel_width / 4u + (pixel_width % 4u != 0u ? 1u : 0u);
+      return block_count <= std::numeric_limits<std::size_t>::max() / 16u
+                 ? block_count * 16u
+                 : 0u;
+    }
     case TextureFormat::KTX2_BASIS_UASTC:
       return 0u;
   }
@@ -213,6 +263,11 @@ inline bool validateTextureUpload(const TextureDesc& desc,
   if (!desc.valid() || upload.format != desc.format || upload.bytes.empty() ||
       upload.subresources.empty() ||
       upload.format == TextureFormat::KTX2_BASIS_UASTC) {
+    return false;
+  }
+  if (desc.generate_mips &&
+      (upload.subresources.size() != 1u ||
+       upload.subresources.front().mip_level != 0u)) {
     return false;
   }
 
@@ -916,6 +971,7 @@ struct ImportedMaterialTexture {
   uint32_t width = 0u;
   uint32_t height = 0u;
   bool embedded = false;
+  /// False means `source_bytes` is tightly packed RGBA8 in renderer upload order.
   bool compressed = true;
   bool srgb = false;
 };
@@ -1171,6 +1227,23 @@ inline bool isFrameGraphDepthResource(FrameGraphResourceKind kind) {
          kind == FrameGraphResourceKind::ExternalDepth;
 }
 
+inline bool isFrameGraphResourceKindValid(FrameGraphResourceKind kind) {
+  switch (kind) {
+    case FrameGraphResourceKind::ColorTexture:
+    case FrameGraphResourceKind::DepthTexture:
+    case FrameGraphResourceKind::ExternalColor:
+    case FrameGraphResourceKind::ExternalDepth:
+    case FrameGraphResourceKind::Backbuffer:
+      return true;
+  }
+  return false;
+}
+
+inline bool isFrameGraphResourceSizeModeValid(FrameGraphResourceSizeMode mode) {
+  return mode == FrameGraphResourceSizeMode::CameraRelative ||
+         mode == FrameGraphResourceSizeMode::Absolute;
+}
+
 inline const char* frameGraphResourceClassName(FrameGraphResourceClass resource_class) {
   switch (resource_class) {
     case FrameGraphResourceClass::Any: return "resource";
@@ -1419,7 +1492,21 @@ inline FrameGraphValidationResult validateFrameGraphDesc(
       detail::addFrameGraphDiagnostic(result,
                                       "duplicate frame graph resource: " + resource.name);
     }
-    if (resource.size_mode == FrameGraphResourceSizeMode::CameraRelative) {
+    if (!detail::isFrameGraphResourceKindValid(resource.kind)) {
+      detail::addFrameGraphDiagnostic(result,
+                                      "frame graph resource '" + resource.name +
+                                          "' has an invalid kind");
+    }
+    if (!isTextureFormatValid(resource.format)) {
+      detail::addFrameGraphDiagnostic(result,
+                                      "frame graph resource '" + resource.name +
+                                          "' has an invalid texture format");
+    }
+    if (!detail::isFrameGraphResourceSizeModeValid(resource.size_mode)) {
+      detail::addFrameGraphDiagnostic(result,
+                                      "frame graph resource '" + resource.name +
+                                          "' has an invalid size mode");
+    } else if (resource.size_mode == FrameGraphResourceSizeMode::CameraRelative) {
       if (!std::isfinite(resource.width_scale) ||
           !std::isfinite(resource.height_scale) ||
           resource.width_scale <= 0.0f || resource.height_scale <= 0.0f) {
@@ -1427,10 +1514,38 @@ inline FrameGraphValidationResult validateFrameGraphDesc(
                                         "camera-relative resource '" + resource.name +
                                             "' must have positive scale");
       }
-    } else if (resource.width == 0u || resource.height == 0u) {
-      detail::addFrameGraphDiagnostic(result,
-                                      "absolute resource '" + resource.name +
-                                          "' must have non-zero width and height");
+    } else {
+      if (resource.width == 0u || resource.height == 0u) {
+        detail::addFrameGraphDiagnostic(result,
+                                        "absolute resource '" + resource.name +
+                                            "' must have non-zero width and height");
+      } else if (resource.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+                 resource.height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+        detail::addFrameGraphDiagnostic(result,
+                                        "absolute resource '" + resource.name +
+                                            "' exceeds the renderer extent limit");
+      }
+    }
+    if (resource.kind == FrameGraphResourceKind::ExternalColor ||
+        resource.kind == FrameGraphResourceKind::ExternalDepth) {
+      detail::addFrameGraphDiagnostic(
+          result,
+          "external frame graph resources are implicit and cannot be declared: " +
+              resource.name);
+    }
+    if (resource.kind == FrameGraphResourceKind::ColorTexture &&
+        resource.format != TextureFormat::RGBA8 &&
+        resource.format != TextureFormat::RGBA16F &&
+        resource.format != TextureFormat::R8) {
+      detail::addFrameGraphDiagnostic(
+          result,
+          "color resource '" + resource.name +
+              "' must use a render-target-capable format");
+    }
+    if (resource.history_count != 0u) {
+      detail::addFrameGraphDiagnostic(
+          result,
+          "frame graph history resources are not implemented: " + resource.name);
     }
     if (resource.kind == FrameGraphResourceKind::Backbuffer &&
         resource.name != kFrameGraphBackbuffer) {
@@ -1523,6 +1638,11 @@ inline FrameGraphValidationResult validateFrameGraphDesc(
         }
         detail::validateSceneMaskFrameGraphContract(pass, resources, result);
         break;
+      default:
+        detail::addFrameGraphDiagnostic(result,
+                                        "graph pass '" + pass.name +
+                                            "' has an invalid kind");
+        break;
     }
 
     for (const auto& [slot, resource_name] : pass.inputs) {
@@ -1587,6 +1707,10 @@ inline FrameGraphValidationResult validateFrameGraphDesc(
 
   return result;
 }
+
+/// Returns whether two frame graphs have identical executable structure and parameters.
+[[nodiscard]] bool frameGraphsEquivalent(const FrameGraphDesc& lhs,
+                                          const FrameGraphDesc& rhs);
 
 /// Builds a default scene graph with a post-process param pass for legacy
 /// bloom/TAA/tone controls.
@@ -2864,9 +2988,9 @@ class GraphicsDevice {
   DeformationStats getDeformationStats() const;
 
   /// Submits one mesh draw item.
-  void submit(const DrawItem& item);
+  void submit(DrawItem item);
   /// Submits one shared mesh draw with many instances.
-  void submitInstanced(const InstancedDrawItem& item);
+  void submitInstanced(InstancedDrawItem item);
   /// Submits a compatibility particle batch.
   void submitParticles(ParticleBatch batch);
   /// Submits a packed particle batch.
@@ -2981,6 +3105,7 @@ class GraphicsDevice {
     world::MeshData data;
   };
   std::unordered_map<std::string, RuntimeMeshRegistration> runtime_meshes_;
+  std::vector<std::shared_ptr<const FrameGraphDesc>> frame_graph_snapshots_;
   mutable std::recursive_mutex mutex_;
   int framebuffer_width_ = 0;
   int framebuffer_height_ = 0;

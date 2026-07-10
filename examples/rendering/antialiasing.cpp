@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -23,7 +25,21 @@ constexpr const char* kMatWhite = "examples/rendering/antialiasing/white";
 constexpr const char* kMatCyan = "examples/rendering/antialiasing/cyan";
 constexpr const char* kMatAmber = "examples/rendering/antialiasing/amber";
 constexpr const char* kMatRed = "examples/rendering/antialiasing/red";
+constexpr const char* kTaaFrameGraphKey = "examples/rendering/antialiasing/taa";
 constexpr float kPi = 3.14159265358979323846f;
+
+enum class ExampleAaMode : int {
+  None = 0,
+  MSAA = 1,
+  SSAA = 2,
+  TAA = 3,
+};
+
+struct ExampleOptions {
+  ExampleAaMode mode = ExampleAaMode::None;
+  bool show_help = false;
+  bool valid = true;
+};
 
 rendering::MaterialDesc makeUnlitMaterial(const math::Color& color) {
   rendering::MaterialDesc material{};
@@ -43,7 +59,7 @@ math::Quat fromAxisAngle(const math::Vec3& axis, float radians) {
   return {n.x * s, n.y * s, n.z * s, std::cos(half)};
 }
 
-const char* aaModeName(rendering::AntiAliasingMode mode) {
+const char* rasterAaModeName(rendering::AntiAliasingMode mode) {
   switch (mode) {
     case rendering::AntiAliasingMode::MSAA: return "MSAA";
     case rendering::AntiAliasingMode::SSAA: return "SSAA";
@@ -52,14 +68,72 @@ const char* aaModeName(rendering::AntiAliasingMode mode) {
   }
 }
 
+const char* aaModeName(ExampleAaMode mode) {
+  switch (mode) {
+    case ExampleAaMode::MSAA: return "MSAA";
+    case ExampleAaMode::SSAA: return "SSAA";
+    case ExampleAaMode::TAA: return "TAA";
+    case ExampleAaMode::None:
+    default: return "None";
+  }
+}
+
+bool parseAaMode(std::string_view value, ExampleAaMode& mode) {
+  if (value == "none") {
+    mode = ExampleAaMode::None;
+    return true;
+  }
+  if (value == "msaa") {
+    mode = ExampleAaMode::MSAA;
+    return true;
+  }
+  if (value == "ssaa") {
+    mode = ExampleAaMode::SSAA;
+    return true;
+  }
+  if (value == "taa") {
+    mode = ExampleAaMode::TAA;
+    return true;
+  }
+  return false;
+}
+
+ExampleOptions parseOptions(int argc, char** argv) {
+  ExampleOptions options{};
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg =
+        argv[i] ? std::string_view(argv[i]) : std::string_view{};
+    if (arg == "--help" || arg == "-h") {
+      options.show_help = true;
+      continue;
+    }
+    if (arg == "--mode" && i + 1 < argc && argv[i + 1]) {
+      options.valid = parseAaMode(argv[++i], options.mode) && options.valid;
+      continue;
+    }
+    options.valid = false;
+  }
+  return options;
+}
+
+void printUsage(const char* executable) {
+  std::fprintf(stderr,
+               "Usage: %s [--mode none|msaa|ssaa|taa]\n",
+               executable ? executable : "antialiasing");
+}
+
 }  // namespace
 
 class AntiAliasingExample final : public app::GameInterface {
  public:
+  explicit AntiAliasingExample(ExampleAaMode initial_mode)
+      : aa_mode_(static_cast<int>(initial_mode)) {}
+
   void onStart() override {
     input->bindKey("aa_none", platform::Key::Num1, app::Trigger::Pressed);
     input->bindKey("aa_msaa", platform::Key::Num2, app::Trigger::Pressed);
     input->bindKey("aa_ssaa", platform::Key::Num3, app::Trigger::Pressed);
+    input->bindKey("aa_taa", platform::Key::Num4, app::Trigger::Pressed);
     input->bindKey("animate", platform::Key::Space, app::Trigger::Pressed);
 
     registerAssets();
@@ -70,15 +144,19 @@ class AntiAliasingExample final : public app::GameInterface {
 
   void onUpdate(float dt) override {
     if (input->actionPressed("aa_none")) {
-      aa_mode_ = static_cast<int>(rendering::AntiAliasingMode::None);
+      aa_mode_ = static_cast<int>(ExampleAaMode::None);
       applyAntiAliasing();
     }
     if (input->actionPressed("aa_msaa")) {
-      aa_mode_ = static_cast<int>(rendering::AntiAliasingMode::MSAA);
+      aa_mode_ = static_cast<int>(ExampleAaMode::MSAA);
       applyAntiAliasing();
     }
     if (input->actionPressed("aa_ssaa")) {
-      aa_mode_ = static_cast<int>(rendering::AntiAliasingMode::SSAA);
+      aa_mode_ = static_cast<int>(ExampleAaMode::SSAA);
+      applyAntiAliasing();
+    }
+    if (input->actionPressed("aa_taa")) {
+      aa_mode_ = static_cast<int>(ExampleAaMode::TAA);
       applyAntiAliasing();
     }
     if (input->actionPressed("animate")) {
@@ -105,7 +183,7 @@ class AntiAliasingExample final : public app::GameInterface {
     ImGui::Begin("Anti-Aliasing");
 
     bool changed = false;
-    const char* mode_items[] = {"None", "MSAA", "SSAA"};
+    const char* mode_items[] = {"None", "MSAA", "SSAA", "TAA"};
     changed |= ImGui::Combo("Mode", &aa_mode_, mode_items, IM_ARRAYSIZE(mode_items));
 
     const char* sample_items[] = {"2x", "4x", "8x"};
@@ -123,7 +201,8 @@ class AntiAliasingExample final : public app::GameInterface {
         graphics ? graphics->getRendererFrameTimingStats()
                  : rendering::RendererFrameTimingStats{};
     ImGui::Separator();
-    ImGui::Text("Effective: %s", aaModeName(timing.anti_aliasing_mode));
+    ImGui::Text("Requested: %s", aaModeName(static_cast<ExampleAaMode>(aa_mode_)));
+    ImGui::Text("Raster AA: %s", rasterAaModeName(timing.anti_aliasing_mode));
     ImGui::Text("MSAA: %ux", static_cast<unsigned int>(timing.anti_aliasing_msaa_samples));
     ImGui::Text("SSAA: %.2f", timing.anti_aliasing_ssaa_scale);
     ImGui::Text("Raster: %ux%u",
@@ -152,6 +231,14 @@ class AntiAliasingExample final : public app::GameInterface {
                                   makeUnlitMaterial({1.0f, 0.64f, 0.18f, 1.0f}));
     assets->registerMaterialAsset(kMatRed,
                                   makeUnlitMaterial({1.0f, 0.18f, 0.16f, 1.0f}));
+
+    rendering::PostProcessSettings taa{};
+    taa.temporal_antialiasing_enabled = true;
+    taa.taa_feedback = 0.90f;
+    taa.taa_sharpening = 0.04f;
+    assets->registerFrameGraph(
+        kTaaFrameGraphKey,
+        rendering::frameGraphFromPostProcessSettings(taa, kTaaFrameGraphKey));
   }
 
   world::Entity spawnBox(const std::string& name,
@@ -264,27 +351,26 @@ class AntiAliasingExample final : public app::GameInterface {
     }
 
     static constexpr std::array<uint32_t, 3> kSamples = {2u, 4u, 8u};
-    aa_mode_ = std::clamp(aa_mode_, 0, 2);
+    aa_mode_ = std::clamp(aa_mode_, 0, 3);
     msaa_sample_index_ = std::clamp(msaa_sample_index_, 0, 2);
     ssaa_scale_ = std::clamp(ssaa_scale_, 1.0f, 4.0f);
 
-    rendering::AntiAliasingSettings settings = rendering::AntiAliasingSettings::none();
-    switch (static_cast<rendering::AntiAliasingMode>(aa_mode_)) {
-      case rendering::AntiAliasingMode::MSAA:
-        settings = rendering::AntiAliasingSettings::msaa(
-            kSamples[static_cast<size_t>(msaa_sample_index_)]);
-        break;
-      case rendering::AntiAliasingMode::SSAA:
-        settings = rendering::AntiAliasingSettings::ssaa(ssaa_scale_);
-        break;
-      case rendering::AntiAliasingMode::None:
-      default:
-        settings = rendering::AntiAliasingSettings::none();
-        break;
+    rendering::AntiAliasingSettings settings =
+        rendering::AntiAliasingSettings::none();
+    const ExampleAaMode mode = static_cast<ExampleAaMode>(aa_mode_);
+    if (mode == ExampleAaMode::MSAA) {
+      settings = rendering::AntiAliasingSettings::msaa(
+          kSamples[static_cast<size_t>(msaa_sample_index_)]);
+    } else if (mode == ExampleAaMode::SSAA) {
+      settings = rendering::AntiAliasingSettings::ssaa(ssaa_scale_);
     }
 
     auto& camera = world->get<components::CameraComponent>(camera_entity_);
     camera.anti_aliasing = settings;
+    camera.frame_graph_key = mode == ExampleAaMode::TAA ? kTaaFrameGraphKey : "";
+
+    std::fprintf(stdout, "[Karma][AA Example] Requested mode: %s\n", aaModeName(mode));
+    std::fflush(stdout);
   }
 
   void updateSpokes() {
@@ -325,7 +411,7 @@ class AntiAliasingExample final : public app::GameInterface {
 
   world::Entity camera_entity_{};
   std::vector<world::Entity> spokes_;
-  int aa_mode_ = static_cast<int>(rendering::AntiAliasingMode::None);
+  int aa_mode_ = static_cast<int>(ExampleAaMode::None);
   int msaa_sample_index_ = 1;
   float ssaa_scale_ = 2.0f;
   float time_ = 0.0f;
@@ -334,9 +420,15 @@ class AntiAliasingExample final : public app::GameInterface {
 
 }  // namespace karma::demo
 
-int main() {
+int main(int argc, char** argv) {
+  const karma::demo::ExampleOptions options = karma::demo::parseOptions(argc, argv);
+  if (options.show_help || !options.valid) {
+    karma::demo::printUsage(argc > 0 ? argv[0] : nullptr);
+    return options.valid ? 0 : 2;
+  }
+
   karma::app::EngineApp engine;
-  karma::demo::AntiAliasingExample game;
+  karma::demo::AntiAliasingExample game(options.mode);
   engine.setUi(karma::ui::imgui::createUiLayer(
       [&game](karma::app::UIContext& ctx) { game.drawUi(ctx); }));
 

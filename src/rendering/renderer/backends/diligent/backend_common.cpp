@@ -60,6 +60,24 @@
 
 namespace karma::rendering::backend {
 
+void DiligentBackend::copyTextureAfterRender(Diligent::ITexture* source,
+                                             Diligent::ITexture* destination) {
+  if (!context_ || !source || !destination) {
+    return;
+  }
+
+  context_->SetRenderTargets(0,
+                             nullptr,
+                             nullptr,
+                             Diligent::RESOURCE_STATE_TRANSITION_MODE_NONE);
+  Diligent::CopyTextureAttribs copy_attribs{
+      source,
+      Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+      destination,
+      Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
+  context_->CopyTexture(copy_attribs);
+}
+
 namespace {
 struct FileInfo {
   bool exists = false;
@@ -418,6 +436,10 @@ std::vector<unsigned char> readFileBytes(const std::filesystem::path& path) {
 
 LoadedImage loadImageFromMemory(const unsigned char* data, size_t size) {
   LoadedImage image{};
+  if (data == nullptr || size == 0u ||
+      size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    return image;
+  }
   int w = 0;
   int h = 0;
   int comp = 0;
@@ -426,9 +448,16 @@ LoadedImage loadImageFromMemory(const unsigned char* data, size_t size) {
   if (!decoded) {
     return image;
   }
+  if (w <= 0 || h <= 0 ||
+      static_cast<size_t>(w) > std::numeric_limits<size_t>::max() /
+                                   static_cast<size_t>(h) / 4u) {
+    stbi_image_free(decoded);
+    return image;
+  }
+  const size_t pixel_byte_count = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
   image.width = w;
   image.height = h;
-  image.pixels.assign(decoded, decoded + (w * h * 4));
+  image.pixels.assign(decoded, decoded + pixel_byte_count);
   stbi_image_free(decoded);
   return image;
 }
@@ -446,14 +475,21 @@ LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path) {
   int w = 0;
   int h = 0;
   int comp = 0;
-  stbi_set_flip_vertically_on_load(1);
+  stbi_set_flip_vertically_on_load_thread(1);
   float* decoded = stbi_loadf(path.string().c_str(), &w, &h, &comp, 4);
   if (!decoded) {
     return image;
   }
+  if (w <= 0 || h <= 0 ||
+      static_cast<size_t>(w) > std::numeric_limits<size_t>::max() /
+                                   static_cast<size_t>(h) / 4u) {
+    stbi_image_free(decoded);
+    return image;
+  }
+  const size_t pixel_count = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
   image.width = w;
   image.height = h;
-  image.pixels.assign(decoded, decoded + (w * h * 4));
+  image.pixels.assign(decoded, decoded + pixel_count);
   stbi_image_free(decoded);
   return image;
 }
@@ -507,6 +543,63 @@ world::MeshData combineMeshes(const aiScene& scene,
   bool has_color = false;
   out_submeshes.clear();
 
+  size_t total_vertices = 0u;
+  size_t total_indices = 0u;
+  size_t total_submeshes = 0u;
+  bool valid_scene = true;
+  constexpr size_t kMaxMeshElements = std::numeric_limits<uint32_t>::max();
+  if (scene.mNumMeshes > 0u && scene.mMeshes == nullptr) {
+    return {};
+  }
+  for (unsigned int i = 0; i < scene.mNumMeshes && valid_scene; ++i) {
+    const aiMesh* mesh = scene.mMeshes != nullptr ? scene.mMeshes[i] : nullptr;
+    if (!mesh) {
+      continue;
+    }
+    if ((mesh->mNumVertices > 0u && mesh->mVertices == nullptr) ||
+        (mesh->mNumFaces > 0u && mesh->mFaces == nullptr) ||
+        static_cast<size_t>(mesh->mNumVertices) > kMaxMeshElements - total_vertices) {
+      valid_scene = false;
+      break;
+    }
+    total_vertices += static_cast<size_t>(mesh->mNumVertices);
+    size_t mesh_index_count = 0u;
+    for (unsigned int face_index = 0u; face_index < mesh->mNumFaces; ++face_index) {
+      const aiFace& face = mesh->mFaces[face_index];
+      if ((face.mNumIndices > 0u && face.mIndices == nullptr) ||
+          static_cast<size_t>(face.mNumIndices) > kMaxMeshElements - mesh_index_count) {
+        valid_scene = false;
+        break;
+      }
+      for (unsigned int index = 0u; index < face.mNumIndices; ++index) {
+        if (face.mIndices[index] >= mesh->mNumVertices) {
+          valid_scene = false;
+          break;
+        }
+      }
+      if (!valid_scene) {
+        break;
+      }
+      mesh_index_count += static_cast<size_t>(face.mNumIndices);
+    }
+    if (mesh_index_count > kMaxMeshElements - total_indices) {
+      valid_scene = false;
+      break;
+    }
+    total_indices += mesh_index_count;
+    total_submeshes += mesh_index_count > 0u ? 1u : 0u;
+  }
+  if (!valid_scene) {
+    return {};
+  }
+  combined.vertices.reserve(total_vertices);
+  combined.normals.reserve(total_vertices);
+  combined.uvs.reserve(total_vertices);
+  combined.uvs1.reserve(total_vertices);
+  combined.tangents.reserve(total_vertices);
+  combined.indices.reserve(total_indices);
+  out_submeshes.reserve(total_submeshes);
+
   for (unsigned int i = 0; i < scene.mNumMeshes; ++i) {
     const aiMesh* mesh = scene.mMeshes[i];
     if (!mesh) {
@@ -528,12 +621,6 @@ world::MeshData combineMeshes(const aiScene& scene,
     }
 
     const size_t base_vertex = combined.vertices.size();
-    combined.vertices.reserve(base_vertex + mesh->mNumVertices);
-    combined.normals.reserve(base_vertex + mesh->mNumVertices);
-    combined.uvs.reserve(base_vertex + mesh->mNumVertices);
-    combined.uvs1.reserve(base_vertex + mesh->mNumVertices);
-    combined.tangents.reserve(base_vertex + mesh->mNumVertices);
-
     for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
       const auto& vert = mesh->mVertices[v];
       combined.vertices.emplace_back(vert.x, vert.y, vert.z);
@@ -564,8 +651,7 @@ world::MeshData combineMeshes(const aiScene& scene,
         const auto& b = mesh->mBitangents[v];
         const glm::vec3 tangent(t.x, t.y, t.z);
         const glm::vec3 bitangent(b.x, b.y, b.z);
-        const auto& n = mesh->mNormals[v];
-        const glm::vec3 normal(n.x, n.y, n.z);
+        const glm::vec3 normal = combined.normals.back();
         const float sign = (glm::dot(glm::cross(normal, tangent), bitangent) < 0.0f) ? -1.0f : 1.0f;
         combined.tangents.emplace_back(tangent.x, tangent.y, tangent.z, sign);
       } else {
@@ -595,10 +681,7 @@ world::MeshData combineMeshes(const aiScene& scene,
 }
 
 void copyMat4(float out[16], const glm::mat4& m) {
-  const float* ptr = glm::value_ptr(m);
-  for (int i = 0; i < 16; ++i) {
-    out[i] = ptr[i];
-  }
+  std::memcpy(out, glm::value_ptr(m), sizeof(float) * 16u);
 }
 
 std::vector<float> buildInterleavedVertices(const world::MeshData& mesh) {
@@ -608,39 +691,42 @@ std::vector<float> buildInterleavedVertices(const world::MeshData& mesh) {
   const bool has_tangents = mesh.tangents.size() == mesh.vertices.size();
   const bool has_joint_indices = mesh.joint_indices.size() == mesh.vertices.size();
   const bool has_joint_weights = mesh.joint_weights.size() == mesh.vertices.size();
-  const size_t stride = 22;
-  std::vector<float> data;
-  data.reserve(mesh.vertices.size() * stride);
+  constexpr size_t stride = 22u;
+  if (mesh.vertices.size() > std::numeric_limits<size_t>::max() / stride) {
+    return {};
+  }
+  std::vector<float> data(mesh.vertices.size() * stride);
   for (size_t i = 0; i < mesh.vertices.size(); ++i) {
+    float* out = data.data() + i * stride;
     const auto& v = mesh.vertices[i];
-    data.push_back(v.x);
-    data.push_back(v.y);
-    data.push_back(v.z);
+    out[0] = v.x;
+    out[1] = v.y;
+    out[2] = v.z;
     const glm::vec3 n = has_normals ? mesh.normals[i] : glm::vec3(0.0f, 1.0f, 0.0f);
-    data.push_back(n.x);
-    data.push_back(n.y);
-    data.push_back(n.z);
+    out[3] = n.x;
+    out[4] = n.y;
+    out[5] = n.z;
     const glm::vec4 t = has_tangents ? mesh.tangents[i] : glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
-    data.push_back(t.x);
-    data.push_back(t.y);
-    data.push_back(t.z);
-    data.push_back(t.w);
+    out[6] = t.x;
+    out[7] = t.y;
+    out[8] = t.z;
+    out[9] = t.w;
     const glm::vec2 uv = has_uvs ? mesh.uvs[i] : glm::vec2(0.0f, 0.0f);
-    data.push_back(uv.x);
-    data.push_back(uv.y);
+    out[10] = uv.x;
+    out[11] = uv.y;
     const glm::vec2 uv1 = has_uvs1 ? mesh.uvs1[i] : uv;
-    data.push_back(uv1.x);
-    data.push_back(uv1.y);
+    out[12] = uv1.x;
+    out[13] = uv1.y;
     const glm::uvec4 joints = has_joint_indices ? mesh.joint_indices[i] : glm::uvec4(0u);
-    data.push_back(static_cast<float>(joints.x));
-    data.push_back(static_cast<float>(joints.y));
-    data.push_back(static_cast<float>(joints.z));
-    data.push_back(static_cast<float>(joints.w));
+    out[14] = static_cast<float>(joints.x);
+    out[15] = static_cast<float>(joints.y);
+    out[16] = static_cast<float>(joints.z);
+    out[17] = static_cast<float>(joints.w);
     const glm::vec4 weights = has_joint_weights ? mesh.joint_weights[i] : glm::vec4(0.0f);
-    data.push_back(weights.x);
-    data.push_back(weights.y);
-    data.push_back(weights.z);
-    data.push_back(weights.w);
+    out[18] = weights.x;
+    out[19] = weights.y;
+    out[20] = weights.z;
+    out[21] = weights.w;
   }
   return data;
 }

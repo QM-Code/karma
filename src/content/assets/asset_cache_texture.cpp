@@ -144,7 +144,8 @@ bool parseTextureDesc(const std::vector<uint8_t>& payload,
   if (width == 0u || height == 0u ||
       width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
       height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
-      format > static_cast<uint32_t>(rendering::TextureFormat::KTX2_BASIS_UASTC) ||
+      !rendering::isTextureFormatValid(
+          static_cast<rendering::TextureFormat>(format)) ||
       srgb > 1u || generate_mips > 1u || mip_levels == 0u ||
       payload_format > static_cast<uint32_t>(TextureAsset::PayloadFormat::PreparedUpload) ||
       semantic > static_cast<uint32_t>(TextureAsset::Semantic::Data)) {

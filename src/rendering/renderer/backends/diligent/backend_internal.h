@@ -5,6 +5,8 @@
 #include "karma/world.h"
 
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <Primitives/interface/BasicTypes.h>
@@ -13,6 +15,7 @@
 #include <glm/mat4x4.hpp>
 
 struct aiScene;
+struct aiTexture;
 
 #if defined(KARMA_WINDOW_BACKEND_SDL)
 struct SDL_Window;
@@ -145,6 +148,10 @@ std::vector<unsigned char> readFileBytes(const std::filesystem::path& path);
 LoadedImage loadImageFromMemory(const unsigned char* data, size_t size);
 LoadedImage loadImageFromFile(const std::filesystem::path& path);
 LoadedImageHDR loadImageFromFileHDR(const std::filesystem::path& path);
+LoadedImage decodeEmbeddedAssimpTexture(const aiTexture& texture);
+std::string makeMaterialTextureCacheKey(std::string_view source_key,
+                                        bool srgb,
+                                        bool generate_mips);
 
 #if defined(KARMA_WINDOW_BACKEND_SDL)
 Diligent::NativeWindow toNativeWindow(SDL_Window* window);

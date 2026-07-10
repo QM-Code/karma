@@ -191,7 +191,7 @@ std::optional<ScalarImage> loadImageFileScalarImage(
   int width = 0;
   int height = 0;
   int components = 0;
-  stbi_set_flip_vertically_on_load(options.flip_y ? 1 : 0);
+  stbi_set_flip_vertically_on_load_thread(options.flip_y ? 1 : 0);
 
   const std::string extension = lowercaseExtension(path);
   if (extension == ".exr" || extension == ".tif" || extension == ".tiff") {
@@ -297,7 +297,7 @@ std::optional<Rgba8Image> loadRgba8Image(
   int width = 0;
   int height = 0;
   int components = 0;
-  stbi_set_flip_vertically_on_load(options.flip_y ? 1 : 0);
+  stbi_set_flip_vertically_on_load_thread(options.flip_y ? 1 : 0);
   stbi_uc* decoded = stbi_load(path.string().c_str(), &width, &height, &components, 4);
   if (decoded == nullptr || width <= 0 || height <= 0) {
     if (lowercaseExtension(path) == ".exr") {
@@ -336,7 +336,7 @@ std::optional<Rgba8Image> loadRgba8ImageFromMemory(const std::uint8_t* data,
   int width = 0;
   int height = 0;
   int components = 0;
-  stbi_set_flip_vertically_on_load(options.flip_y ? 1 : 0);
+  stbi_set_flip_vertically_on_load_thread(options.flip_y ? 1 : 0);
   stbi_uc* decoded = stbi_load_from_memory(data,
                                            static_cast<int>(size),
                                            &width,

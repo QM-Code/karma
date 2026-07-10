@@ -64,6 +64,18 @@ bool uploadInstanceData(Diligent::IDeviceContext* context,
   return mapped_data != nullptr;
 }
 
+InstanceGpuData packInstanceData(const glm::mat4& transform, const glm::vec4& params) {
+  InstanceGpuData packed{};
+  const float* transform_data = glm::value_ptr(transform);
+  std::memcpy(packed.col0, transform_data, sizeof(packed.col0));
+  std::memcpy(packed.col1, transform_data + 4, sizeof(packed.col1));
+  std::memcpy(packed.col2, transform_data + 8, sizeof(packed.col2));
+  std::memcpy(packed.col3, transform_data + 12, sizeof(packed.col3));
+  const float* params_data = glm::value_ptr(params);
+  std::memcpy(packed.params, params_data, sizeof(packed.params));
+  return packed;
+}
+
 float maxTransformScale(const glm::mat4& transform) {
   const float sx = glm::length(glm::vec3(transform[0]));
   const float sy = glm::length(glm::vec3(transform[1]));
@@ -800,6 +812,15 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
     }
   };
 
+  static thread_local std::vector<std::vector<rendering::InstanceData>>
+      opaque_instance_vector_pool;
+  for (ForwardBatch& batch : out_state.opaque_batches) {
+    if (batch.instances.capacity() == 0u) {
+      continue;
+    }
+    batch.instances.clear();
+    opaque_instance_vector_pool.push_back(std::move(batch.instances));
+  }
   out_state.opaque_batches.clear();
   out_state.deformed_opaque_draws.clear();
   out_state.scene_reflection_draws.clear();
@@ -814,7 +835,20 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
   out_state.post_particle_draws.reserve(instances_.size() / 4 + 1);
   out_stats = ForwardLayerStats{};
 
-  std::unordered_map<ForwardBatchKey, size_t, ForwardBatchKeyHash> opaque_batch_lookup;
+  struct ForwardBatchLookupValue {
+    size_t index = 0u;
+    uint64_t generation = 0u;
+  };
+  static thread_local std::unordered_map<ForwardBatchKey,
+                                         ForwardBatchLookupValue,
+                                         ForwardBatchKeyHash>
+      opaque_batch_lookup;
+  static thread_local uint64_t opaque_batch_lookup_generation = 0u;
+  ++opaque_batch_lookup_generation;
+  if (opaque_batch_lookup_generation == 0u) {
+    opaque_batch_lookup.clear();
+    opaque_batch_lookup_generation = 1u;
+  }
   opaque_batch_lookup.reserve(instances_.size() + instanced_records_.size());
 
   auto append_opaque_forward_batch = [&](const ForwardBatchKey& key,
@@ -829,14 +863,32 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
       });
       return;
     }
-    auto it = opaque_batch_lookup.find(key);
-    if (it == opaque_batch_lookup.end()) {
+    auto lookup_it = opaque_batch_lookup.find(key);
+    if (lookup_it == opaque_batch_lookup.end() ||
+        lookup_it->second.generation != opaque_batch_lookup_generation) {
       const size_t idx = out_state.opaque_batches.size();
-      out_state.opaque_batches.push_back(ForwardBatch{.key = key});
-      opaque_batch_lookup.emplace(key, idx);
-      it = opaque_batch_lookup.find(key);
+      ForwardBatch batch{.key = key};
+      if (!opaque_instance_vector_pool.empty()) {
+        batch.instances = std::move(opaque_instance_vector_pool.back());
+        opaque_instance_vector_pool.pop_back();
+      }
+      out_state.opaque_batches.push_back(std::move(batch));
+      if (lookup_it == opaque_batch_lookup.end()) {
+        lookup_it = opaque_batch_lookup
+                        .emplace(key,
+                                 ForwardBatchLookupValue{
+                                     .index = idx,
+                                     .generation = opaque_batch_lookup_generation,
+                                 })
+                        .first;
+      } else {
+        lookup_it->second = ForwardBatchLookupValue{
+            .index = idx,
+            .generation = opaque_batch_lookup_generation,
+        };
+      }
     }
-    out_state.opaque_batches[it->second].instances.push_back(instance);
+    out_state.opaque_batches[lookup_it->second.index].instances.push_back(instance);
   };
 
   auto append_persistent_instanced_batch = [&](const ForwardBatchKey& key,
@@ -1372,7 +1424,12 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
 
   auto compare_transparent_draws = [&](const TransparentForwardDraw& a,
                                        const TransparentForwardDraw& b) {
-    if (a.depth != b.depth) {
+    const bool finite_a = std::isfinite(a.depth);
+    const bool finite_b = std::isfinite(b.depth);
+    if (finite_a != finite_b) {
+      return finite_a;
+    }
+    if (finite_a && a.depth != b.depth) {
       return a.depth > b.depth;
     }
     const MaterialRecord* mat_a = lookup_material(a.key.material);
@@ -1408,6 +1465,18 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
   std::sort(out_state.post_particle_draws.begin(),
             out_state.post_particle_draws.end(),
             compare_transparent_draws);
+
+  const size_t lookup_retention_limit =
+      std::max<size_t>(256u, out_state.opaque_batches.size() * 4u + 64u);
+  if (opaque_batch_lookup.size() > lookup_retention_limit) {
+    for (auto it = opaque_batch_lookup.begin(); it != opaque_batch_lookup.end();) {
+      if (it->second.generation != opaque_batch_lookup_generation) {
+        it = opaque_batch_lookup.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
 }
 
 Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
@@ -1432,12 +1501,23 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     if (instance_count == 0) {
       return false;
     }
+    constexpr size_t kMaxInstanceCount =
+        static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max()) /
+        sizeof(InstanceGpuData);
+    if (instance_count > kMaxInstanceCount) {
+      return false;
+    }
     if (instance_vb_ && instance_vb_capacity_ >= instance_count) {
       return true;
     }
-    const size_t new_capacity =
+    const size_t grown_capacity =
+        instance_vb_capacity_ > 0u && instance_vb_capacity_ <= kMaxInstanceCount / 2u
+            ? instance_vb_capacity_ * 2u
+            : kMaxInstanceCount;
+    const size_t new_capacity = std::min(
+        kMaxInstanceCount,
         std::max(instance_count,
-                 instance_vb_capacity_ > 0 ? instance_vb_capacity_ * 2 : static_cast<size_t>(128));
+                 instance_vb_capacity_ > 0u ? grown_capacity : static_cast<size_t>(128u)));
     Diligent::BufferDesc ib_desc{};
     ib_desc.Name = "Karma Instance Buffer";
     ib_desc.Usage = Diligent::USAGE_DYNAMIC;
@@ -1476,20 +1556,12 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     return mat_it != materials_.end() ? &mat_it->second : nullptr;
   };
 
-  thread_local std::vector<InstanceGpuData> packed_instances;
+  thread_local std::vector<InstanceGpuData> fallback_packed_instances;
   auto pack_instances = [&](const std::vector<rendering::InstanceData>& instances) {
-    packed_instances.clear();
-    packed_instances.reserve(instances.size());
+    fallback_packed_instances.clear();
+    fallback_packed_instances.reserve(instances.size());
     for (const rendering::InstanceData& instance : instances) {
-      InstanceGpuData packed{};
-      const float* ptr = glm::value_ptr(instance.transform);
-      std::memcpy(packed.col0, ptr, sizeof(packed.col0));
-      std::memcpy(packed.col1, ptr + 4, sizeof(packed.col1));
-      std::memcpy(packed.col2, ptr + 8, sizeof(packed.col2));
-      std::memcpy(packed.col3, ptr + 12, sizeof(packed.col3));
-      const float* params = glm::value_ptr(instance.params);
-      std::memcpy(packed.params, params, sizeof(packed.params));
-      packed_instances.push_back(packed);
+      fallback_packed_instances.push_back(packInstanceData(instance.transform, instance.params));
     }
   };
 
@@ -1771,18 +1843,19 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
 
   auto bind_forward_geometry =
       [&](const MeshRecord& mesh,
-          const std::vector<InstanceGpuData>& instances,
+          const InstanceGpuData* instances,
+          size_t instance_count,
           Diligent::IBuffer*& bound_mesh_vb,
           Diligent::IBuffer*& bound_instance_vb) -> bool {
-    if (!ensure_instance_buffer(instances.size())) {
+    if (!ensure_instance_buffer(instance_count)) {
       return false;
     }
-    if (!uploadInstanceData(context_, instance_vb_, instances.data(), instances.size())) {
+    if (!uploadInstanceData(context_, instance_vb_, instances, instance_count)) {
       return false;
     }
     instancing_stats_.instance_buffer_updates += 1u;
     instancing_stats_.instance_upload_bytes +=
-        static_cast<uint64_t>(instances.size() * sizeof(InstanceGpuData));
+        static_cast<uint64_t>(instance_count * sizeof(InstanceGpuData));
     return bind_forward_instance_buffer(
         mesh, instance_vb_.RawPtr(), bound_mesh_vb, bound_instance_vb);
   };
@@ -1790,6 +1863,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   auto draw_forward_batch = [&](const MeshRecord& mesh,
                                 const ForwardBatchKey& key,
                                 Diligent::Uint32 instance_count,
+                                Diligent::Uint32 first_instance,
                                 Diligent::IBuffer*& bound_index_buffer,
                                 const char* pass_label) {
     auto log_draw = [&](const char* draw_kind) {
@@ -1832,6 +1906,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       indexed.NumIndices = key.index_count;
       indexed.FirstIndexLocation = key.index_offset;
       indexed.NumInstances = instance_count;
+      indexed.FirstInstanceLocation = first_instance;
       indexed.Flags = kHotPathDrawFlags;
       log_draw("indexed");
       context_->DrawIndexed(indexed);
@@ -1841,6 +1916,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     Diligent::DrawAttribs draw_attrs{};
     draw_attrs.NumVertices = mesh.vertex_count;
     draw_attrs.NumInstances = instance_count;
+    draw_attrs.FirstInstanceLocation = first_instance;
     draw_attrs.Flags = kHotPathDrawFlags;
     log_draw("non-indexed");
     context_->Draw(draw_attrs);
@@ -2000,7 +2076,9 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     std::array<GpuLodBucketDraw, kInstancedGpuLodBucketCapacity> buckets{};
   };
 
-  std::unordered_map<rendering::InstanceId, GpuLodClassification> gpu_lod_classifications;
+  static thread_local std::unordered_map<rendering::InstanceId, GpuLodClassification>
+      gpu_lod_classifications;
+  gpu_lod_classifications.clear();
   gpu_lod_classifications.reserve(instanced_records_.size());
 
   auto lod_bucket_index_for_batch =
@@ -2017,6 +2095,32 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     bucket_index = batch.instanced_lod_index + 1u;
     return bucket_index < kInstancedGpuLodBucketCapacity;
   };
+
+  struct GpuLodBatchSet {
+    std::array<const ForwardBatch*, kInstancedGpuLodBucketCapacity> batches{};
+    bool invalid = false;
+  };
+  static thread_local std::unordered_map<rendering::InstanceId, GpuLodBatchSet>
+      gpu_lod_batch_sets;
+  gpu_lod_batch_sets.clear();
+  gpu_lod_batch_sets.reserve(instanced_records_.size());
+  for (const ForwardBatch& batch : state.opaque_batches) {
+    if (batch.instanced_record == rendering::kInvalidInstance) {
+      continue;
+    }
+    const auto record_it = instanced_records_.find(batch.instanced_record);
+    if (record_it == instanced_records_.end() || record_it->second.lods.empty()) {
+      continue;
+    }
+    GpuLodBatchSet& batch_set = gpu_lod_batch_sets[batch.instanced_record];
+    uint32_t bucket_index = 0u;
+    if (!lod_bucket_index_for_batch(batch, record_it->second, bucket_index) ||
+        batch_set.batches[bucket_index] != nullptr) {
+      batch_set.invalid = true;
+      continue;
+    }
+    batch_set.batches[bucket_index] = &batch;
+  }
 
   auto draw_preclassified_gpu_lod_batch =
       [&](const MeshRecord& mesh,
@@ -2096,30 +2200,20 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       return &classification;
     }
 
-    std::array<const ForwardBatch*, kInstancedGpuLodBucketCapacity> batch_by_bucket{};
-    for (const auto& candidate : state.opaque_batches) {
-      if (candidate.instanced_record != record_id) {
-        continue;
-      }
-      if (!candidate.key.indexed ||
-          candidate.key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
-          candidate.persistent_instance_count != instance_count) {
-        return &classification;
-      }
-      uint32_t bucket_index = 0u;
-      if (!lod_bucket_index_for_batch(candidate, record, bucket_index) ||
-          bucket_index >= classification.bucket_count ||
-          batch_by_bucket[bucket_index] != nullptr) {
-        return &classification;
-      }
-      batch_by_bucket[bucket_index] = &candidate;
+    const auto batch_set_it = gpu_lod_batch_sets.find(record_id);
+    if (batch_set_it == gpu_lod_batch_sets.end() || batch_set_it->second.invalid) {
+      return &classification;
     }
+    const auto& batch_by_bucket = batch_set_it->second.batches;
 
     for (uint32_t bucket_index = 0u;
          bucket_index < classification.bucket_count;
          ++bucket_index) {
       const ForwardBatch* bucket_batch = batch_by_bucket[bucket_index];
-      if (!bucket_batch) {
+      if (!bucket_batch ||
+          !bucket_batch->key.indexed ||
+          bucket_batch->key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
+          bucket_batch->persistent_instance_count != instance_count) {
         return &classification;
       }
       auto mesh_it = meshes_.find(bucket_batch->key.mesh);
@@ -2270,6 +2364,58 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     return &classification;
   };
 
+  static thread_local std::vector<InstanceGpuData> frame_packed_instances;
+  static thread_local std::vector<Diligent::Uint32> opaque_batch_first_instances;
+  static thread_local std::vector<Diligent::Uint32> deformed_first_instances;
+  frame_packed_instances.clear();
+  opaque_batch_first_instances.assign(state.opaque_batches.size(), 0u);
+  deformed_first_instances.assign(state.deformed_opaque_draws.size(), 0u);
+
+  constexpr size_t kMaxSharedInstanceCount =
+      static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max()) /
+      sizeof(InstanceGpuData);
+  size_t shared_instance_count = state.deformed_opaque_draws.size();
+  bool shared_instance_count_valid = shared_instance_count <= kMaxSharedInstanceCount;
+  for (const ForwardBatch& batch : state.opaque_batches) {
+    if (!shared_instance_count_valid ||
+        batch.instances.size() > kMaxSharedInstanceCount - shared_instance_count) {
+      shared_instance_count_valid = false;
+      break;
+    }
+    shared_instance_count += batch.instances.size();
+  }
+
+  bool frame_packed_instances_ready = false;
+  if (shared_instance_count_valid && shared_instance_count > 0u) {
+    frame_packed_instances.reserve(shared_instance_count);
+    for (size_t batch_index = 0u; batch_index < state.opaque_batches.size(); ++batch_index) {
+      opaque_batch_first_instances[batch_index] =
+          static_cast<Diligent::Uint32>(frame_packed_instances.size());
+      for (const rendering::InstanceData& instance :
+           state.opaque_batches[batch_index].instances) {
+        frame_packed_instances.push_back(packInstanceData(instance.transform, instance.params));
+      }
+    }
+    for (size_t draw_index = 0u;
+         draw_index < state.deformed_opaque_draws.size();
+         ++draw_index) {
+      deformed_first_instances[draw_index] =
+          static_cast<Diligent::Uint32>(frame_packed_instances.size());
+      const DeformedForwardDraw& draw = state.deformed_opaque_draws[draw_index];
+      frame_packed_instances.push_back(packInstanceData(draw.transform, draw.params));
+    }
+    if (ensure_instance_buffer(frame_packed_instances.size()) &&
+        uploadInstanceData(context_,
+                           instance_vb_,
+                           frame_packed_instances.data(),
+                           frame_packed_instances.size())) {
+      instancing_stats_.instance_buffer_updates += 1u;
+      instancing_stats_.instance_upload_bytes += static_cast<uint64_t>(
+          frame_packed_instances.size() * sizeof(InstanceGpuData));
+      frame_packed_instances_ready = true;
+    }
+  }
+
   const Diligent::Viewport viewport = buildViewport(render_width, render_height);
   Diligent::Uint32 draw_count = 0;
   const auto& adapter_info = device_->GetAdapterInfo();
@@ -2287,7 +2433,10 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   }();
   bool has_custom_opaque_material = false;
   bool has_masked_opaque_material = false;
-  for (const auto& batch : state.opaque_batches) {
+  for (size_t batch_index = 0u;
+       batch_index < state.opaque_batches.size();
+       ++batch_index) {
+    const ForwardBatch& batch = state.opaque_batches[batch_index];
     if (MaterialRecord* mat = lookup_material(batch.key.material)) {
       if (materialUsesCustomForwardPipeline(*mat)) {
         has_custom_opaque_material = true;
@@ -2309,8 +2458,13 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       }
     }
   }
+  const bool has_depth_prepass_draws =
+      !state.deformed_opaque_draws.empty() ||
+      std::any_of(state.opaque_batches.begin(),
+                  state.opaque_batches.end(),
+                  [](const ForwardBatch& batch) { return !batch.instances.empty(); });
   const bool depth_prepass_candidate =
-      active_dsv && state.opaque_batches.size() > 1 &&
+      active_dsv && has_depth_prepass_draws && state.opaque_batches.size() > 1 &&
       (!disable_depth_prepass_for_driver || force_depth_prepass_for_env) &&
       !disable_depth_prepass_for_env &&
       !has_masked_opaque_material &&
@@ -2343,7 +2497,11 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     Diligent::IBuffer* depth_bound_instance_vb = nullptr;
     Diligent::IBuffer* depth_bound_index_buffer = nullptr;
     if (depth_prepass_ready) {
-      for (const auto& batch : state.opaque_batches) {
+      bool default_deformation_bound = false;
+      for (size_t batch_index = 0u;
+           batch_index < state.opaque_batches.size();
+           ++batch_index) {
+        const ForwardBatch& batch = state.opaque_batches[batch_index];
         if (batch.instances.empty()) {
           continue;
         }
@@ -2355,7 +2513,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         if (!mesh.vertex_buffer) {
           continue;
         }
-        if (depth_prepass_srb_) {
+        if (depth_prepass_srb_ && !default_deformation_bound) {
           if (!bindDeformationResources(depth_prepass_srb_,
                                         mesh,
                                         rendering::kInvalidDeformation)) {
@@ -2363,20 +2521,39 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
           }
           context_->CommitShaderResources(depth_prepass_srb_,
                                           Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+          default_deformation_bound = true;
         }
 
-        pack_instances(batch.instances);
-        if (!bind_forward_geometry(
-                mesh, packed_instances, depth_bound_mesh_vb, depth_bound_instance_vb)) {
-          continue;
+        Diligent::Uint32 first_instance = 0u;
+        if (frame_packed_instances_ready) {
+          if (!bind_forward_instance_buffer(mesh,
+                                            instance_vb_.RawPtr(),
+                                            depth_bound_mesh_vb,
+                                            depth_bound_instance_vb)) {
+            continue;
+          }
+          first_instance = opaque_batch_first_instances[batch_index];
+        } else {
+          pack_instances(batch.instances);
+          if (!bind_forward_geometry(mesh,
+                                     fallback_packed_instances.data(),
+                                     fallback_packed_instances.size(),
+                                     depth_bound_mesh_vb,
+                                     depth_bound_instance_vb)) {
+            continue;
+          }
         }
         draw_forward_batch(mesh,
                            batch.key,
-                           static_cast<Diligent::Uint32>(packed_instances.size()),
+                           static_cast<Diligent::Uint32>(batch.instances.size()),
+                           first_instance,
                            depth_bound_index_buffer,
                            "opaque-depth-prepass");
       }
-      for (const auto& draw : state.deformed_opaque_draws) {
+      for (size_t draw_index = 0u;
+           draw_index < state.deformed_opaque_draws.size();
+           ++draw_index) {
+        const DeformedForwardDraw& draw = state.deformed_opaque_draws[draw_index];
         auto mesh_it = meshes_.find(draw.key.mesh);
         if (mesh_it == meshes_.end()) {
           continue;
@@ -2394,20 +2571,32 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         } else if (!updateDeformationConstants(mesh, draw.deformation)) {
           continue;
         }
-        InstanceGpuData packed_transform{};
-        const float* ptr = glm::value_ptr(draw.transform);
-        std::memcpy(packed_transform.col0, ptr, sizeof(packed_transform.col0));
-        std::memcpy(packed_transform.col1, ptr + 4, sizeof(packed_transform.col1));
-        std::memcpy(packed_transform.col2, ptr + 8, sizeof(packed_transform.col2));
-        std::memcpy(packed_transform.col3, ptr + 12, sizeof(packed_transform.col3));
-        const float* params = glm::value_ptr(draw.params);
-        std::memcpy(packed_transform.params, params, sizeof(packed_transform.params));
-        std::vector<InstanceGpuData> single_transform{packed_transform};
-        if (!bind_forward_geometry(
-                mesh, single_transform, depth_bound_mesh_vb, depth_bound_instance_vb)) {
-          continue;
+        Diligent::Uint32 first_instance = 0u;
+        if (frame_packed_instances_ready) {
+          if (!bind_forward_instance_buffer(mesh,
+                                            instance_vb_.RawPtr(),
+                                            depth_bound_mesh_vb,
+                                            depth_bound_instance_vb)) {
+            continue;
+          }
+          first_instance = deformed_first_instances[draw_index];
+        } else {
+          const InstanceGpuData packed_transform =
+              packInstanceData(draw.transform, draw.params);
+          if (!bind_forward_geometry(mesh,
+                                     &packed_transform,
+                                     1u,
+                                     depth_bound_mesh_vb,
+                                     depth_bound_instance_vb)) {
+            continue;
+          }
         }
-        draw_forward_batch(mesh, draw.key, 1, depth_bound_index_buffer, "deformed-depth-prepass");
+        draw_forward_batch(mesh,
+                           draw.key,
+                           1u,
+                           first_instance,
+                           depth_bound_index_buffer,
+                           "deformed-depth-prepass");
       }
     }
 
@@ -2446,7 +2635,10 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                     Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     bound_forward_srb = camera_override_srb_;
   }
-  for (const auto& batch : state.opaque_batches) {
+  for (size_t batch_index = 0u;
+       batch_index < state.opaque_batches.size();
+       ++batch_index) {
+    const ForwardBatch& batch = state.opaque_batches[batch_index];
     if (batch.instances.empty() && batch.instanced_record == rendering::kInvalidInstance) {
       continue;
     }
@@ -2510,6 +2702,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
 
     Diligent::Uint32 instance_count = 0u;
+    Diligent::Uint32 first_instance = 0u;
     if (batch.instanced_record != rendering::kInvalidInstance) {
       auto record_it = instanced_records_.find(batch.instanced_record);
       if (record_it == instanced_records_.end() ||
@@ -2640,15 +2833,30 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         continue;
       }
     } else {
-      pack_instances(batch.instances);
-      instance_count = static_cast<Diligent::Uint32>(packed_instances.size());
-      if (!bind_forward_geometry(mesh, packed_instances, bound_mesh_vb, bound_instance_vb)) {
-        continue;
+      instance_count = static_cast<Diligent::Uint32>(batch.instances.size());
+      if (frame_packed_instances_ready) {
+        if (!bind_forward_instance_buffer(mesh,
+                                          instance_vb_.RawPtr(),
+                                          bound_mesh_vb,
+                                          bound_instance_vb)) {
+          continue;
+        }
+        first_instance = opaque_batch_first_instances[batch_index];
+      } else {
+        pack_instances(batch.instances);
+        if (!bind_forward_geometry(mesh,
+                                   fallback_packed_instances.data(),
+                                   fallback_packed_instances.size(),
+                                   bound_mesh_vb,
+                                   bound_instance_vb)) {
+          continue;
+        }
       }
     }
     if (draw_forward_batch(mesh,
                            batch.key,
                            instance_count,
+                           first_instance,
                            bound_index_buffer,
                            "opaque-forward")) {
       draw_count += 1;
@@ -2660,7 +2868,10 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     }
   }
 
-  for (const auto& draw : state.deformed_opaque_draws) {
+  for (size_t draw_index = 0u;
+       draw_index < state.deformed_opaque_draws.size();
+       ++draw_index) {
+    const DeformedForwardDraw& draw = state.deformed_opaque_draws[draw_index];
     auto mesh_it = meshes_.find(draw.key.mesh);
     if (mesh_it == meshes_.end()) {
       continue;
@@ -2721,21 +2932,31 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       continue;
     }
 
-    InstanceGpuData packed_transform{};
-    const float* ptr = glm::value_ptr(draw.transform);
-    std::memcpy(packed_transform.col0, ptr, sizeof(packed_transform.col0));
-    std::memcpy(packed_transform.col1, ptr + 4, sizeof(packed_transform.col1));
-    std::memcpy(packed_transform.col2, ptr + 8, sizeof(packed_transform.col2));
-    std::memcpy(packed_transform.col3, ptr + 12, sizeof(packed_transform.col3));
-    const float* params = glm::value_ptr(draw.params);
-    std::memcpy(packed_transform.params, params, sizeof(packed_transform.params));
-    if (!bind_forward_geometry(mesh,
-                               std::vector<InstanceGpuData>{packed_transform},
-                               bound_mesh_vb,
-                               bound_instance_vb)) {
-      continue;
+    Diligent::Uint32 first_instance = 0u;
+    if (frame_packed_instances_ready) {
+      if (!bind_forward_instance_buffer(mesh,
+                                        instance_vb_.RawPtr(),
+                                        bound_mesh_vb,
+                                        bound_instance_vb)) {
+        continue;
+      }
+      first_instance = deformed_first_instances[draw_index];
+    } else {
+      const InstanceGpuData packed_transform = packInstanceData(draw.transform, draw.params);
+      if (!bind_forward_geometry(mesh,
+                                 &packed_transform,
+                                 1u,
+                                 bound_mesh_vb,
+                                 bound_instance_vb)) {
+        continue;
+      }
     }
-    if (draw_forward_batch(mesh, draw.key, 1, bound_index_buffer, "deformed-forward")) {
+    if (draw_forward_batch(mesh,
+                           draw.key,
+                           1u,
+                           first_instance,
+                           bound_index_buffer,
+                           "deformed-forward")) {
       draw_count += 1;
     }
   }
@@ -2767,12 +2988,23 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     if (instance_count == 0) {
       return false;
     }
+    constexpr size_t kMaxInstanceCount =
+        static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max()) /
+        sizeof(InstanceGpuData);
+    if (instance_count > kMaxInstanceCount) {
+      return false;
+    }
     if (instance_vb_ && instance_vb_capacity_ >= instance_count) {
       return true;
     }
-    const size_t new_capacity =
+    const size_t grown_capacity =
+        instance_vb_capacity_ > 0u && instance_vb_capacity_ <= kMaxInstanceCount / 2u
+            ? instance_vb_capacity_ * 2u
+            : kMaxInstanceCount;
+    const size_t new_capacity = std::min(
+        kMaxInstanceCount,
         std::max(instance_count,
-                 instance_vb_capacity_ > 0 ? instance_vb_capacity_ * 2 : static_cast<size_t>(128));
+                 instance_vb_capacity_ > 0u ? grown_capacity : static_cast<size_t>(128u)));
     Diligent::BufferDesc ib_desc{};
     ib_desc.Name = "Karma Instance Buffer";
     ib_desc.Usage = Diligent::USAGE_DYNAMIC;
@@ -3139,19 +3371,10 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     return default_material_srb_ ? default_material_srb_ : shader_resources_;
   };
 
-  auto bind_forward_geometry =
+  auto bind_forward_instance_buffer =
       [&](const MeshRecord& mesh,
-          const InstanceGpuData* instances,
-          size_t instance_count,
           Diligent::IBuffer*& bound_mesh_vb,
           Diligent::IBuffer*& bound_instance_vb) -> bool {
-    if (!ensure_instance_buffer(instance_count)) {
-      return false;
-    }
-    if (!uploadInstanceData(context_, instance_vb_, instances, instance_count)) {
-      return false;
-    }
-
     Diligent::IBuffer* mesh_vb = mesh.vertex_buffer.RawPtr();
     Diligent::IBuffer* instance_vb = instance_vb_.RawPtr();
     if (mesh_vb != bound_mesh_vb || instance_vb != bound_instance_vb) {
@@ -3169,9 +3392,26 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     return true;
   };
 
+  auto bind_forward_geometry =
+      [&](const MeshRecord& mesh,
+          const InstanceGpuData* instances,
+          size_t instance_count,
+          Diligent::IBuffer*& bound_mesh_vb,
+          Diligent::IBuffer*& bound_instance_vb) -> bool {
+    if (!ensure_instance_buffer(instance_count) ||
+        !uploadInstanceData(context_, instance_vb_, instances, instance_count)) {
+      return false;
+    }
+    instancing_stats_.instance_buffer_updates += 1u;
+    instancing_stats_.instance_upload_bytes +=
+        static_cast<uint64_t>(instance_count * sizeof(InstanceGpuData));
+    return bind_forward_instance_buffer(mesh, bound_mesh_vb, bound_instance_vb);
+  };
+
   auto draw_forward_batch = [&](const MeshRecord& mesh,
                                 const ForwardBatchKey& key,
                                 Diligent::Uint32 instance_count,
+                                Diligent::Uint32 first_instance,
                                 Diligent::IBuffer*& bound_index_buffer) {
     auto log_draw = [&](const char* draw_kind) {
       if (!draw_debug) {
@@ -3212,6 +3452,7 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       indexed.NumIndices = key.index_count;
       indexed.FirstIndexLocation = key.index_offset;
       indexed.NumInstances = instance_count;
+      indexed.FirstInstanceLocation = first_instance;
       indexed.Flags = kHotPathDrawFlags;
       log_draw("indexed");
       context_->DrawIndexed(indexed);
@@ -3221,11 +3462,35 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     Diligent::DrawAttribs draw_attrs{};
     draw_attrs.NumVertices = mesh.vertex_count;
     draw_attrs.NumInstances = instance_count;
+    draw_attrs.FirstInstanceLocation = first_instance;
     draw_attrs.Flags = kHotPathDrawFlags;
     log_draw("non-indexed");
     context_->Draw(draw_attrs);
     return true;
   };
+
+  static thread_local std::vector<InstanceGpuData> transparent_packed_instances;
+  transparent_packed_instances.clear();
+  bool transparent_packed_instances_ready = false;
+  constexpr size_t kMaxTransparentInstanceCount =
+      static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max()) /
+      sizeof(InstanceGpuData);
+  if (draws.size() <= kMaxTransparentInstanceCount) {
+    transparent_packed_instances.reserve(draws.size());
+    for (const TransparentForwardDraw& draw : draws) {
+      transparent_packed_instances.push_back(packInstanceData(draw.transform, draw.params));
+    }
+    if (ensure_instance_buffer(transparent_packed_instances.size()) &&
+        uploadInstanceData(context_,
+                           instance_vb_,
+                           transparent_packed_instances.data(),
+                           transparent_packed_instances.size())) {
+      instancing_stats_.instance_buffer_updates += 1u;
+      instancing_stats_.instance_upload_bytes += static_cast<uint64_t>(
+          transparent_packed_instances.size() * sizeof(InstanceGpuData));
+      transparent_packed_instances_ready = true;
+    }
+  }
 
   ensureParticleFallbackDepthResource();
   const Diligent::Viewport viewport = buildViewport(render_width, render_height);
@@ -3250,7 +3515,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   rendering::MeshId last_constants_mesh = rendering::kInvalidMesh;
   auto last_constants_scene_sample_mode = TransparentForwardDraw::SceneSampleMode::None;
   Diligent::Uint32 draw_count = 0;
-  for (const auto& draw : draws) {
+  for (size_t draw_index = 0u; draw_index < draws.size(); ++draw_index) {
+    const TransparentForwardDraw& draw = draws[draw_index];
     auto mesh_it = meshes_.find(draw.key.mesh);
     if (mesh_it == meshes_.end()) {
       continue;
@@ -3330,18 +3596,23 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       continue;
     }
 
-    InstanceGpuData packed_transform{};
-    const float* ptr = glm::value_ptr(draw.transform);
-    std::memcpy(packed_transform.col0, ptr, sizeof(packed_transform.col0));
-    std::memcpy(packed_transform.col1, ptr + 4, sizeof(packed_transform.col1));
-    std::memcpy(packed_transform.col2, ptr + 8, sizeof(packed_transform.col2));
-    std::memcpy(packed_transform.col3, ptr + 12, sizeof(packed_transform.col3));
-    const float* params = glm::value_ptr(draw.params);
-    std::memcpy(packed_transform.params, params, sizeof(packed_transform.params));
-    if (!bind_forward_geometry(mesh, &packed_transform, 1, bound_mesh_vb, bound_instance_vb)) {
-      continue;
+    Diligent::Uint32 first_instance = 0u;
+    if (transparent_packed_instances_ready) {
+      if (!bind_forward_instance_buffer(mesh, bound_mesh_vb, bound_instance_vb)) {
+        continue;
+      }
+      first_instance = static_cast<Diligent::Uint32>(draw_index);
+    } else {
+      const InstanceGpuData packed_transform = packInstanceData(draw.transform, draw.params);
+      if (!bind_forward_geometry(mesh,
+                                 &packed_transform,
+                                 1u,
+                                 bound_mesh_vb,
+                                 bound_instance_vb)) {
+        continue;
+      }
     }
-    if (draw_forward_batch(mesh, draw.key, 1, bound_index_buffer)) {
+    if (draw_forward_batch(mesh, draw.key, 1u, first_instance, bound_index_buffer)) {
       draw_count += 1;
     }
   }

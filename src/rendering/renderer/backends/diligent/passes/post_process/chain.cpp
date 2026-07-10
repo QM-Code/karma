@@ -6,6 +6,7 @@
 #include <Graphics/GraphicsTools/interface/MapHelper.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace karma::rendering::backend {
 namespace {
@@ -13,6 +14,27 @@ namespace {
 template <typename T, bool KeepStrongReferences = false>
 T* getMappedData(Diligent::MapHelper<T, KeepStrongReferences>& map) {
   return static_cast<T*>(map);
+}
+
+bool temporalCameraChanged(const rendering::CameraData& previous,
+                           const rendering::CameraData& current) {
+  const auto changed = [](float a, float b, float epsilon = 1.0e-5f) {
+    return std::abs(a - b) > epsilon;
+  };
+  const glm::vec3 position_delta = previous.position - current.position;
+  const float rotation_dot =
+      std::min(std::abs(glm::dot(previous.rotation, current.rotation)), 1.0f);
+  return glm::dot(position_delta, position_delta) > 1.0e-8f ||
+         1.0f - rotation_dot > 1.0e-6f ||
+         previous.perspective != current.perspective ||
+         changed(previous.fov_y_degrees, current.fov_y_degrees) ||
+         changed(previous.aspect, current.aspect) ||
+         changed(previous.near_clip, current.near_clip) ||
+         changed(previous.far_clip, current.far_clip) ||
+         changed(previous.ortho_left, current.ortho_left) ||
+         changed(previous.ortho_right, current.ortho_right) ||
+         changed(previous.ortho_top, current.ortho_top) ||
+         changed(previous.ortho_bottom, current.ortho_bottom);
 }
 
 }  // namespace
@@ -126,6 +148,27 @@ bool DiligentBackend::runFullscreenBlit(Diligent::ITextureView* source_srv,
                             false);
 }
 
+bool DiligentBackend::runPresentBlit(Diligent::ITextureView* source_srv,
+                                     Diligent::ITextureView* target_rtv,
+                                     int target_width,
+                                     int target_height,
+                                     Diligent::TEXTURE_FORMAT format) {
+  if (!source_srv || !target_rtv || target_width <= 0 || target_height <= 0 ||
+      format == Diligent::TEX_FORMAT_UNKNOWN ||
+      !ensurePresentBlitPipeline(format)) {
+    return false;
+  }
+  return runPostProcessPass(present_blit_pass_,
+                            source_srv,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            target_rtv,
+                            target_width,
+                            target_height,
+                            false);
+}
+
 Diligent::ITextureView* DiligentBackend::runBloomChain(Diligent::ITextureView* source_srv,
                                                        int width,
                                                        int height,
@@ -189,12 +232,7 @@ Diligent::ITextureView* DiligentBackend::runBloomChain(Diligent::ITextureView* s
       return post_process_bloom_mips_.front().srv;
     }
 
-    Diligent::CopyTextureAttribs copy_attribs{
-        scratch.texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-        higher.texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-    context_->CopyTexture(copy_attribs);
+    copyTextureAfterRender(scratch.texture, higher.texture);
   }
 
   return post_process_bloom_mips_.front().srv;
@@ -205,11 +243,23 @@ void DiligentBackend::applyPostProcessChain(Diligent::ITexture* scene_texture,
                                             Diligent::ITextureView* scene_depth_srv,
                                             int width,
                                             int height,
-                                            Diligent::TEXTURE_FORMAT format) {
-  if (!post_process::hasActiveEffect(post_process_settings_) ||
-      !context_ || !scene_texture || !scene_rtv ||
+                                            Diligent::TEXTURE_FORMAT format,
+                                            rendering::RenderTargetId target) {
+  if (!context_ || !scene_texture || !scene_rtv ||
       width <= 0 || height <= 0 ||
       format == Diligent::TEX_FORMAT_UNKNOWN) {
+    return;
+  }
+
+  const bool taa_requested =
+      post_process_settings_.temporal_antialiasing_enabled;
+  if (!taa_requested) {
+    if (auto history = post_process_histories_.find(target);
+        history != post_process_histories_.end()) {
+      history->second.valid = false;
+    }
+  }
+  if (!post_process::hasActiveEffect(post_process_settings_)) {
     return;
   }
 
@@ -222,21 +272,27 @@ void DiligentBackend::applyPostProcessChain(Diligent::ITexture* scene_texture,
     return;
   }
 
-  {
-    Diligent::CopyTextureAttribs copy_attribs{
-        scene_texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-        post_process_ping_tex_,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-    context_->CopyTexture(copy_attribs);
+  PostProcessHistoryResources* history = nullptr;
+  if (taa_requested) {
+    history = ensurePostProcessHistoryResources(target, width, height, format);
+    if (history) {
+      if (!history->camera_initialized ||
+          temporalCameraChanged(history->camera, camera_)) {
+        history->valid = false;
+      }
+      history->camera = camera_;
+      history->camera_initialized = true;
+    }
   }
+
+  copyTextureAfterRender(scene_texture, post_process_ping_tex_);
 
   Diligent::ITextureView* bloom_srv = nullptr;
   if (post_process_settings_.bloom_enabled) {
     bloom_srv = runBloomChain(post_process_ping_srv_, width, height, format);
   }
 
-  const bool taa_enabled = post_process_settings_.temporal_antialiasing_enabled;
+  const bool taa_enabled = taa_requested && history != nullptr;
   Diligent::ITextureView* composite_target = scene_rtv;
   if (taa_enabled) {
     composite_target = post_process_pong_rtv_;
@@ -254,15 +310,14 @@ void DiligentBackend::applyPostProcessChain(Diligent::ITexture* scene_texture,
   }
 
   if (!taa_enabled) {
-    post_process_history_valid_ = false;
     return;
   }
 
-  const int read_history_index = std::clamp(post_process_history_index_, 0, 1);
+  const int read_history_index = std::clamp(history->index, 0, 1);
   const int write_history_index = 1 - read_history_index;
   Diligent::ITextureView* history_srv = post_process_pong_srv_;
-  if (post_process_history_valid_) {
-    history_srv = post_process_history_srv_[read_history_index];
+  if (history->valid) {
+    history_srv = history->srvs[read_history_index];
   }
   if (!runPostProcessPass(post_process_temporal_pass_,
                           post_process_pong_srv_,
@@ -272,19 +327,15 @@ void DiligentBackend::applyPostProcessChain(Diligent::ITexture* scene_texture,
                           scene_rtv,
                           width,
                           height,
-                          post_process_history_valid_)) {
+                          history->valid)) {
     return;
   }
 
-  if (post_process_history_tex_[write_history_index]) {
-    Diligent::CopyTextureAttribs history_copy{
-        scene_texture,
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
-        post_process_history_tex_[write_history_index],
-        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION};
-    context_->CopyTexture(history_copy);
-    post_process_history_index_ = write_history_index;
-    post_process_history_valid_ = true;
+  if (history->textures[write_history_index]) {
+    copyTextureAfterRender(scene_texture,
+                           history->textures[write_history_index]);
+    history->index = write_history_index;
+    history->valid = true;
   }
 }
 

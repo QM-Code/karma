@@ -36,6 +36,7 @@ static constexpr const char* kBeamVS = R"(
 cbuffer Constants
 {
     row_major float4x4 g_ViewProj;
+    float4 g_ExposureParams;
 };
 
 struct VSInput
@@ -66,6 +67,12 @@ PSInput main(VSInput input)
 )";
 
 static constexpr const char* kBeamPS = R"(
+cbuffer Constants
+{
+    row_major float4x4 g_ViewProj;
+    float4 g_ExposureParams;
+};
+
 Texture2D g_Texture;
 SamplerState g_Texture_sampler;
 
@@ -87,6 +94,11 @@ float4 main(PSInput input) : SV_TARGET
         float edge = min(input.uv.y, 1.0 - input.uv.y);
         color.a *= smoothstep(0.0, softness, edge);
     }
+    float exposure = abs(g_ExposureParams.x);
+    color.rgb = max(color.rgb, float3(0.0, 0.0, 0.0));
+    color.rgb = g_ExposureParams.x < 0.0
+        ? color.rgb * exposure
+        : 1.0 - exp(-color.rgb * exposure);
     return color;
 }
 )";
@@ -127,10 +139,19 @@ glm::vec3 safeNormalize(const glm::vec3& value, const glm::vec3& fallback) {
   return value * (1.0f / std::sqrt(len2));
 }
 
+glm::quat safeNormalize(const glm::quat& value) {
+  const float len2 = value.w * value.w + value.x * value.x +
+                     value.y * value.y + value.z * value.z;
+  if (!std::isfinite(len2) || len2 <= 1.0e-8f) {
+    return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+  }
+  return value * (1.0f / std::sqrt(len2));
+}
+
 glm::vec3 transformPoint(const rendering::ParticleBeamGpuDesc& beam,
                          const math::Vec3& point) {
   const glm::vec3 position = toBeamGlm(beam.position);
-  const glm::quat rotation = toBeamGlm(beam.rotation);
+  const glm::quat rotation = safeNormalize(toBeamGlm(beam.rotation));
   const glm::vec3 scale = toBeamGlm(beam.scale);
   return position + rotation * (toBeamGlm(point) * scale);
 }
@@ -211,6 +232,7 @@ void DiligentBackend::ensureParticleBeamResources() {
 
   static const Diligent::ShaderResourceVariableDesc kBeamVars[] = {
       {Diligent::SHADER_TYPE_VERTEX, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
+      {Diligent::SHADER_TYPE_PIXEL, "Constants", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_STATIC},
       {Diligent::SHADER_TYPE_PIXEL, "g_Texture", Diligent::SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC},
   };
   static const Diligent::SamplerDesc kBeamSamplerDesc{
@@ -244,8 +266,7 @@ void DiligentBackend::ensureParticleBeamResources() {
     auto& graphics = pso.GraphicsPipeline;
     graphics.NumRenderTargets = 1;
     graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
-    graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                         : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    graphics.RTVFormats[0] = sceneColorFormat();
     graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                      : Diligent::TEX_FORMAT_D32_FLOAT;
     graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -283,6 +304,10 @@ void DiligentBackend::ensureParticleBeamResources() {
     }
     if (auto* var =
             out_pso->GetStaticVariableByName(Diligent::SHADER_TYPE_VERTEX, "Constants")) {
+      var->Set(particle_beam_cb_);
+    }
+    if (auto* var =
+            out_pso->GetStaticVariableByName(Diligent::SHADER_TYPE_PIXEL, "Constants")) {
       var->Set(particle_beam_cb_);
     }
     const auto srb_start = core::SteadyClock::now();
@@ -355,7 +380,8 @@ uint32_t DiligentBackend::renderParticleBeams(rendering::LayerId layer,
   }
 
   using GroupKey = std::tuple<bool, rendering::ParticleBlendMode, rendering::TextureId>;
-  std::vector<GroupKey> groups;
+  static thread_local std::vector<GroupKey> groups;
+  groups.clear();
   groups.reserve(particle_beam_submissions_.size());
   for (const ParticleBeamSubmission& submission : particle_beam_submissions_) {
     const auto& beam = submission.desc;
@@ -395,6 +421,9 @@ uint32_t DiligentBackend::renderParticleBeams(rendering::LayerId layer,
 
   ParticleBeamConstants constants{};
   copyMat4(constants.view_proj, context.view_proj);
+  constants.exposure_params[0] = post_process_settings_.tone_mapping_enabled
+                                      ? -lighting_exposure_
+                                      : lighting_exposure_;
   {
     Diligent::MapHelper<ParticleBeamConstants> cb_map(context_,
                                                       particle_beam_cb_,
@@ -408,7 +437,12 @@ uint32_t DiligentBackend::renderParticleBeams(rendering::LayerId layer,
   }
 
   uint32_t draw_calls = 0u;
-  std::vector<ParticleBeamVertex> vertices;
+  static thread_local std::vector<ParticleBeamVertex> vertices;
+  static thread_local std::vector<glm::vec3> points;
+  static thread_local std::vector<float> distances;
+  static thread_local std::vector<glm::vec3> segment_sides;
+  static thread_local std::vector<glm::vec3> offsets;
+  vertices.clear();
   auto resolve_beam_texture = [&](rendering::TextureId texture) {
     if (texture != rendering::kInvalidTexture) {
       const auto it = textures_.find(texture);
@@ -439,7 +473,7 @@ uint32_t DiligentBackend::renderParticleBeams(rendering::LayerId layer,
         continue;
       }
 
-      std::vector<glm::vec3> points;
+      points.clear();
       points.reserve(beam.local_path_points.size());
       for (const math::Vec3& point : beam.local_path_points) {
         const glm::vec3 world_point = transformPoint(beam, point);
@@ -451,7 +485,7 @@ uint32_t DiligentBackend::renderParticleBeams(rendering::LayerId layer,
         continue;
       }
 
-      std::vector<float> distances(points.size(), 0.0f);
+      distances.assign(points.size(), 0.0f);
       for (std::size_t i = 1; i < points.size(); ++i) {
         const float segment_len = glm::length(points[i] - points[i - 1]);
         distances[i] = distances[i - 1] + (std::isfinite(segment_len) ? segment_len : 0.0f);
@@ -483,7 +517,7 @@ uint32_t DiligentBackend::renderParticleBeams(rendering::LayerId layer,
         vertices.push_back(vertex);
       };
 
-      std::vector<glm::vec3> segment_sides;
+      segment_sides.clear();
       segment_sides.reserve(points.size() - 1u);
       glm::vec3 previous_side = fallback_side;
       for (std::size_t i = 1; i < points.size(); ++i) {
@@ -498,7 +532,7 @@ uint32_t DiligentBackend::renderParticleBeams(rendering::LayerId layer,
         previous_side = side;
       }
 
-      std::vector<glm::vec3> offsets(points.size(), glm::vec3(0.0f));
+      offsets.assign(points.size(), glm::vec3(0.0f));
       for (std::size_t i = 0; i < points.size(); ++i) {
         glm::vec3 side = segment_sides.front();
         float side_scale = 1.0f;

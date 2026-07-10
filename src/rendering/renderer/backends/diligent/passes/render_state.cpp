@@ -8,10 +8,33 @@
 #include <Graphics/GraphicsEngine/interface/ShaderResourceBinding.h>
 
 #include <algorithm>
+#include <cmath>
+#include <utility>
 
 #include <spdlog/spdlog.h>
 
 namespace karma::rendering::backend {
+namespace {
+
+float finiteOr(float value, float fallback) {
+  return std::isfinite(value) ? value : fallback;
+}
+
+glm::vec3 finiteVec3Or(const glm::vec3& value, const glm::vec3& fallback) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z)
+             ? value
+             : fallback;
+}
+
+math::Color finiteNonnegativeColor(math::Color color, const math::Color& fallback) {
+  color.r = std::isfinite(color.r) ? std::max(color.r, 0.0f) : fallback.r;
+  color.g = std::isfinite(color.g) ? std::max(color.g, 0.0f) : fallback.g;
+  color.b = std::isfinite(color.b) ? std::max(color.b, 0.0f) : fallback.b;
+  color.a = std::isfinite(color.a) ? std::max(color.a, 0.0f) : fallback.a;
+  return color;
+}
+
+}  // namespace
 
 Diligent::ITextureView* DiligentBackend::defaultBrdfLutSrv() const {
   return default_brdf_lut_ ? default_brdf_lut_.RawPtr() : default_base_color_.RawPtr();
@@ -70,7 +93,30 @@ void DiligentBackend::bindEnvironmentResources() {
 }
 
 void DiligentBackend::setCamera(const rendering::CameraData& camera) {
-  camera_ = camera;
+  rendering::CameraData sanitized = camera;
+  sanitized.position = finiteVec3Or(sanitized.position, glm::vec3(0.0f));
+  const float rotation_len_sq = glm::dot(sanitized.rotation, sanitized.rotation);
+  sanitized.rotation = std::isfinite(rotation_len_sq) && rotation_len_sq > 1.0e-8f
+                           ? glm::normalize(sanitized.rotation)
+                           : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+  sanitized.fov_y_degrees =
+      std::clamp(finiteOr(sanitized.fov_y_degrees, 60.0f), 1.0f, 179.0f);
+  sanitized.aspect = std::clamp(finiteOr(sanitized.aspect, 1.0f), 0.01f, 100.0f);
+  sanitized.near_clip = std::max(finiteOr(sanitized.near_clip, 0.1f), 0.001f);
+  sanitized.far_clip = std::max(finiteOr(sanitized.far_clip, 1000.0f),
+                                sanitized.near_clip + 0.001f);
+  sanitized.ortho_left = finiteOr(sanitized.ortho_left, -1.0f);
+  sanitized.ortho_right = finiteOr(sanitized.ortho_right, 1.0f);
+  sanitized.ortho_top = finiteOr(sanitized.ortho_top, 1.0f);
+  sanitized.ortho_bottom = finiteOr(sanitized.ortho_bottom, -1.0f);
+  if (std::abs(sanitized.ortho_right - sanitized.ortho_left) < 1.0e-5f) {
+    sanitized.ortho_right = sanitized.ortho_left + 1.0f;
+  }
+  if (std::abs(sanitized.ortho_top - sanitized.ortho_bottom) < 1.0e-5f) {
+    sanitized.ortho_top = sanitized.ortho_bottom + 1.0f;
+  }
+
+  camera_ = std::move(sanitized);
 }
 
 void DiligentBackend::setCameraActive(bool active) {
@@ -80,6 +126,15 @@ void DiligentBackend::setCameraActive(bool active) {
 void DiligentBackend::setDirectionalLight(const rendering::DirectionalLightData& light) {
   const rendering::DirectionalLightData previous_light = directional_light_;
   directional_light_ = light;
+  directional_light_.direction =
+      finiteVec3Or(directional_light_.direction, glm::vec3(0.3f, -1.0f, 0.2f));
+  directional_light_.position = finiteVec3Or(directional_light_.position, glm::vec3(0.0f));
+  directional_light_.color =
+      finiteNonnegativeColor(directional_light_.color, math::Color{1.0f, 1.0f, 1.0f, 1.0f});
+  directional_light_.intensity =
+      std::max(finiteOr(directional_light_.intensity, 0.0f), 0.0f);
+  directional_light_.shadow_extent =
+      std::max(finiteOr(directional_light_.shadow_extent, 0.0f), 0.0f);
   if (glm::length(directional_light_.direction) < 1e-4f) {
     directional_light_.direction = glm::vec3(0.3f, -1.0f, 0.2f);
   } else {
@@ -99,19 +154,21 @@ void DiligentBackend::setDirectionalLight(const rendering::DirectionalLightData&
 void DiligentBackend::setLights(const std::vector<rendering::LightData>& lights) {
   lights_ = lights;
   for (auto& light : lights_) {
-    if (light.intensity < 0.0f) {
-      light.intensity = 0.0f;
-    }
-    if (light.range < 0.0f) {
-      light.range = 0.0f;
-    }
+    light.position = finiteVec3Or(light.position, glm::vec3(0.0f));
+    light.direction = finiteVec3Or(light.direction, glm::vec3(0.0f, -1.0f, 0.0f));
+    light.color =
+        finiteNonnegativeColor(light.color, math::Color{1.0f, 1.0f, 1.0f, 1.0f});
+    light.intensity = std::max(finiteOr(light.intensity, 0.0f), 0.0f);
+    light.range = std::max(finiteOr(light.range, 0.0f), 0.0f);
     if (glm::length(light.direction) < 1e-4f) {
       light.direction = glm::vec3(0.0f, -1.0f, 0.0f);
     } else {
       light.direction = glm::normalize(light.direction);
     }
-    light.inner_cone_cos = std::clamp(light.inner_cone_cos, -1.0f, 1.0f);
-    light.outer_cone_cos = std::clamp(light.outer_cone_cos, -1.0f, 1.0f);
+    light.inner_cone_cos =
+        std::clamp(finiteOr(light.inner_cone_cos, 0.9659258f), -1.0f, 1.0f);
+    light.outer_cone_cos =
+        std::clamp(finiteOr(light.outer_cone_cos, 0.8660254f), -1.0f, 1.0f);
     if (light.inner_cone_cos < light.outer_cone_cos) {
       std::swap(light.inner_cone_cos, light.outer_cone_cos);
     }
@@ -120,19 +177,24 @@ void DiligentBackend::setLights(const std::vector<rendering::LightData>& lights)
 
 void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float intensity,
                                         bool draw_skybox) {
+  const float safe_intensity = std::max(finiteOr(intensity, 0.0f), 0.0f);
   const bool path_changed = environment_map_ != path;
+  const bool resources_ready =
+      path.empty() ||
+      (env_cubemap_srv_ && env_irradiance_srv_ && env_prefilter_srv_ && env_brdf_lut_srv_);
+  const bool rebuild_resources = path_changed || env_dirty_ || !resources_ready;
   if (environment_map_ == path &&
-      environment_intensity_ == intensity &&
+      environment_intensity_ == safe_intensity &&
       draw_skybox_ == draw_skybox &&
-      !env_dirty_ &&
-      (path.empty() || (env_cubemap_srv_ && env_irradiance_srv_ && env_prefilter_srv_ &&
-                        env_brdf_lut_srv_))) {
+      !rebuild_resources) {
     return;
   }
-  environment_intensity_ = intensity;
+  environment_intensity_ = safe_intensity;
   environment_map_ = path;
   draw_skybox_ = draw_skybox;
-  env_dirty_ = true;
+  if (rebuild_resources) {
+    env_dirty_ = true;
+  }
   if (path_changed) {
     env_equirect_tex_.Release();
     env_equirect_srv_.Release();
@@ -149,18 +211,20 @@ void DiligentBackend::setEnvironmentMap(const std::filesystem::path& path, float
     env_prefilter_srv_ = default_env_;
     env_brdf_lut_srv_ = defaultBrdfLutSrv();
     env_dirty_ = false;
-  } else {
+  } else if (rebuild_resources) {
     ensureEnvironmentResources();
   }
 
-  bindEnvironmentResources();
+  if (rebuild_resources) {
+    bindEnvironmentResources();
+  }
 }
 
 void DiligentBackend::setClearColor(const math::Color& color) {
-  clear_color_[0] = std::clamp(color.r, 0.0f, 1.0f);
-  clear_color_[1] = std::clamp(color.g, 0.0f, 1.0f);
-  clear_color_[2] = std::clamp(color.b, 0.0f, 1.0f);
-  clear_color_[3] = std::clamp(color.a, 0.0f, 1.0f);
+  clear_color_[0] = std::clamp(finiteOr(color.r, 0.0f), 0.0f, 1.0f);
+  clear_color_[1] = std::clamp(finiteOr(color.g, 0.0f), 0.0f, 1.0f);
+  clear_color_[2] = std::clamp(finiteOr(color.b, 0.0f), 0.0f, 1.0f);
+  clear_color_[3] = std::clamp(finiteOr(color.a, 1.0f), 0.0f, 1.0f);
 }
 
 void DiligentBackend::setVsync(bool enabled) {
@@ -303,7 +367,12 @@ void DiligentBackend::setAnisotropy(bool enabled, int level) {
 }
 
 void DiligentBackend::setGenerateMips(bool enabled) {
+  if (generate_mips_enabled_ == enabled) {
+    return;
+  }
   generate_mips_enabled_ = enabled;
+  imported_material_templates_.clear();
+  imported_payload_material_templates_.clear();
 }
 
 void DiligentBackend::setForwardPlusSettings(int tile_size,
@@ -477,7 +546,9 @@ void DiligentBackend::setShadowSettings(float bias,
     shadow_map_size_ = clamped_size;
     point_shadow_map_size_ = std::max(256, shadow_map_size_ / 2);
     recreateShadowMap();
-    recreatePointShadowMap();
+    if (point_shadow_map_tex_) {
+      recreatePointShadowMap();
+    }
   }
 }
 
@@ -505,7 +576,9 @@ void DiligentBackend::setPointShadowLightLimit(int max_lights) {
   }
 
   point_shadow_max_lights_ = clamped_max_lights;
-  recreatePointShadowMap();
+  if (point_shadow_map_tex_) {
+    recreatePointShadowMap();
+  }
 }
 
 void DiligentBackend::setLocalLightingSettings(float distance_damping,
@@ -534,10 +607,6 @@ void DiligentBackend::applyPostProcessSettingsForPass(
     const rendering::PostProcessSettings& settings) {
   const rendering::PostProcessSettings clamped =
       rendering::clampPostProcessSettings(settings);
-  if (!clamped.temporal_antialiasing_enabled ||
-      !post_process_settings_.temporal_antialiasing_enabled) {
-    post_process_history_valid_ = false;
-  }
   post_process_settings_ = clamped;
 }
 

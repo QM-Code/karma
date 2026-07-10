@@ -48,6 +48,7 @@ struct OwnedInstancedDrawItem {
   MeshId mesh = kInvalidMesh;
   MaterialId material = kInvalidMaterial;
   std::vector<DrawMaterialBinding> materials;
+  std::vector<std::string> render_tags;
   std::vector<InstancedLodDrawDesc> lods;
   InstanceGpuLayout gpu_layout = InstanceGpuLayout::Matrix4x4Params;
   std::vector<InstanceData> instances;
@@ -62,12 +63,13 @@ struct OwnedInstancedDrawItem {
   bool visible = true;
   bool shadow_visible = true;
 
-  explicit OwnedInstancedDrawItem(const InstancedDrawItem& item)
+  explicit OwnedInstancedDrawItem(InstancedDrawItem&& item)
       : instance(item.instance),
         mesh(item.mesh),
         material(item.material),
-        materials(item.materials),
-        lods(item.lods),
+        materials(std::move(item.materials)),
+        render_tags(std::move(item.render_tags)),
+        lods(std::move(item.lods)),
         gpu_layout(item.gpu_layout),
         instances(item.instances.begin(), item.instances.end()),
         planar_instances(item.planar_instances.begin(), item.planar_instances.end()),
@@ -81,13 +83,14 @@ struct OwnedInstancedDrawItem {
         visible(item.visible),
         shadow_visible(item.shadow_visible) {}
 
-  void submit(rendering::backend::Backend& backend) const {
+  void submit(rendering::backend::Backend& backend) {
     InstancedDrawItem item{};
     item.instance = instance;
     item.mesh = mesh;
     item.material = material;
-    item.materials = materials;
-    item.lods = lods;
+    item.materials = std::move(materials);
+    item.render_tags = std::move(render_tags);
+    item.lods = std::move(lods);
     item.gpu_layout = gpu_layout;
     item.instances = std::span<const InstanceData>(instances.data(), instances.size());
     item.planar_instances =
@@ -157,7 +160,12 @@ class GraphicsDevice::RenderScheduler {
 
   void beginFrame(const FrameInfo& frame) {
     std::lock_guard<std::mutex> lock(record_mutex_);
+    if (current_frame_) {
+      throw std::logic_error("GraphicsDevice::beginFrame called before endFrame");
+    }
     current_frame_.emplace();
+    current_frame_->commands = std::move(recycled_frame_commands_);
+    current_frame_->commands.clear();
     current_frame_->record_start = core::SteadyClock::now();
     current_frame_->commands.push_back([frame](Backend& backend) {
       backend.beginFrame(frame);
@@ -355,7 +363,19 @@ class GraphicsDevice::RenderScheduler {
         backend_available_ = false;
       }
     });
-    init_future.get();
+    try {
+      init_future.get();
+    } catch (...) {
+      {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        stopping_ = true;
+      }
+      queue_cv_.notify_all();
+      if (worker_.joinable()) {
+        worker_.join();
+      }
+      throw;
+    }
   }
 
   void workerLoop() {
@@ -390,7 +410,7 @@ class GraphicsDevice::RenderScheduler {
     }
   }
 
-  void executeFrame(const FramePacket& packet) {
+  void executeFrame(FramePacket& packet) {
     const auto frame_start = core::SteadyClock::now();
     if (backend_ != nullptr) {
       for (const RenderCommand& command : packet.commands) {
@@ -400,6 +420,11 @@ class GraphicsDevice::RenderScheduler {
     const float frame_ms =
         static_cast<float>(core::elapsedMillisecondsSince(frame_start));
     refreshCachedStats(packet.record_ms, packet.submit_ms, frame_ms);
+    packet.commands.clear();
+    std::lock_guard<std::mutex> lock(record_mutex_);
+    if (packet.commands.capacity() > recycled_frame_commands_.capacity()) {
+      recycled_frame_commands_ = std::move(packet.commands);
+    }
   }
 
   void submitLatestFrame(FramePacket packet) {
@@ -428,7 +453,7 @@ class GraphicsDevice::RenderScheduler {
       executeFrame(packet);
       return;
     }
-    invokeVoid([this, packet = std::move(packet)](Backend*) {
+    invokeVoid([this, packet = std::move(packet)](Backend*) mutable {
       executeFrame(packet);
     });
   }
@@ -503,6 +528,7 @@ class GraphicsDevice::RenderScheduler {
   mutable std::mutex record_mutex_;
   std::optional<FramePacket> current_frame_;
   std::vector<RenderCommand> pre_frame_commands_;
+  std::vector<RenderCommand> recycled_frame_commands_;
 
   mutable std::mutex queue_mutex_;
   std::condition_variable queue_cv_;
@@ -755,7 +781,7 @@ bool GraphicsDevice::supportsTextureFormat(TextureFormat format) const {
 
 bool GraphicsDevice::uploadTexture(TextureId texture, const TextureUploadData& upload) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
-  return scheduler_ ? scheduler_->invoke([texture, upload](RenderScheduler::Backend* backend) {
+  return scheduler_ ? scheduler_->invoke([texture, &upload](RenderScheduler::Backend* backend) {
     return backend != nullptr && backend->uploadTexture(texture, upload);
   }) : false;
 }
@@ -952,20 +978,22 @@ DeformationStats GraphicsDevice::getDeformationStats() const {
   }) : DeformationStats{};
 }
 
-void GraphicsDevice::submit(const DrawItem& item) {
+void GraphicsDevice::submit(DrawItem item) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
-    scheduler_->recordFrameCommand([item](RenderScheduler::Backend& backend) {
+    scheduler_->recordFrameCommand([item = std::move(item)](
+                                       RenderScheduler::Backend& backend) {
       backend.submit(item);
     });
   }
 }
 
-void GraphicsDevice::submitInstanced(const InstancedDrawItem& item) {
+void GraphicsDevice::submitInstanced(InstancedDrawItem item) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
-    OwnedInstancedDrawItem owned{item};
-    scheduler_->recordFrameCommand([owned](RenderScheduler::Backend& backend) {
+    OwnedInstancedDrawItem owned{std::move(item)};
+    scheduler_->recordFrameCommand([owned = std::move(owned)](
+                                       RenderScheduler::Backend& backend) mutable {
       owned.submit(backend);
     });
   }
@@ -1030,8 +1058,24 @@ void GraphicsDevice::renderLayer(LayerId layer,
                                  const FrameGraphDesc& frame_graph) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
-    scheduler_->recordFrameCommand([layer, target, frame_graph](RenderScheduler::Backend& backend) {
-      backend.renderLayer(layer, target, frame_graph);
+    std::shared_ptr<const FrameGraphDesc> snapshot;
+    for (const auto& cached : frame_graph_snapshots_) {
+      if (cached && frameGraphsEquivalent(*cached, frame_graph)) {
+        snapshot = cached;
+        break;
+      }
+    }
+    if (!snapshot) {
+      snapshot = std::make_shared<const FrameGraphDesc>(frame_graph);
+      constexpr std::size_t kMaxFrameGraphSnapshots = 8u;
+      if (frame_graph_snapshots_.size() >= kMaxFrameGraphSnapshots) {
+        frame_graph_snapshots_.erase(frame_graph_snapshots_.begin());
+      }
+      frame_graph_snapshots_.push_back(snapshot);
+    }
+    scheduler_->recordFrameCommand([layer, target, snapshot = std::move(snapshot)](
+                                       RenderScheduler::Backend& backend) {
+      backend.renderLayer(layer, target, *snapshot);
     });
   }
 }
@@ -1339,22 +1383,11 @@ TextureId GraphicsDevice::createTextureRGBA8(int width, int height, const void* 
 
 void GraphicsDevice::updateTextureRGBA8(TextureId texture, int width, int height, const void* pixels) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
-  if (scheduler_) {
-    const std::size_t byte_count =
-        pixels != nullptr && width > 0 && height > 0
-            ? static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u
-            : 0u;
-    std::vector<std::byte> pixel_copy(byte_count);
-    if (byte_count > 0u) {
-      std::memcpy(pixel_copy.data(), pixels, byte_count);
-    }
-    scheduler_->invokeVoid(
-        [texture, width, height, pixel_copy = std::move(pixel_copy)](RenderScheduler::Backend* backend) {
+  if (scheduler_ && pixels != nullptr && width > 0 && height > 0) {
+    scheduler_->invokeVoid([texture, width, height, pixels](
+                               RenderScheduler::Backend* backend) {
       if (backend != nullptr) {
-        backend->updateTextureRGBA8(texture,
-                                    width,
-                                    height,
-                                    pixel_copy.empty() ? nullptr : pixel_copy.data());
+        backend->updateTextureRGBA8(texture, width, height, pixels);
       }
     });
   }

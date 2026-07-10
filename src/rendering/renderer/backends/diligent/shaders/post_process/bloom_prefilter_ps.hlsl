@@ -31,8 +31,11 @@ float3 ThresholdBright(float3 color)
     float threshold = max(g_BloomParams.x, 0.0);
     float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
     float knee = max(threshold * 0.35, 1.0e-3);
-    float bright = saturate((luminance - threshold + knee) / max(knee, 1.0e-3));
-    return max(color, 0.0) * bright;
+    float soft = clamp(luminance - threshold + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / max(4.0 * knee, 1.0e-4);
+    float contribution = max(luminance - threshold, soft);
+    contribution = saturate(contribution / max(luminance, 1.0e-4));
+    return max(color, 0.0) * contribution;
 }
 
 float4 main(PSInput input) : SV_TARGET

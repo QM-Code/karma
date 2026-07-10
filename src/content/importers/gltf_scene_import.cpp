@@ -41,6 +41,43 @@
 
 namespace karma::world {
 
+namespace detail {
+
+bool canonicalizeAssimpEmbeddedTexture(std::span<const uint8_t> bgra,
+                                       uint32_t width,
+                                       uint32_t height,
+                                       std::vector<uint8_t>& rgba) {
+  rgba.clear();
+  if (width == 0u || height == 0u ||
+      width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+      height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+    return false;
+  }
+  const uint64_t byte_count = static_cast<uint64_t>(width) * height * 4u;
+  if (byte_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      bgra.size() < static_cast<size_t>(byte_count)) {
+    return false;
+  }
+
+  rgba.resize(static_cast<size_t>(byte_count));
+  const size_t row_bytes = static_cast<size_t>(width) * 4u;
+  for (uint32_t output_y = 0u; output_y < height; ++output_y) {
+    const uint32_t source_y = height - output_y - 1u;
+    const uint8_t* source_row = bgra.data() + static_cast<size_t>(source_y) * row_bytes;
+    uint8_t* output_row = rgba.data() + static_cast<size_t>(output_y) * row_bytes;
+    for (uint32_t x = 0u; x < width; ++x) {
+      const size_t pixel = static_cast<size_t>(x) * 4u;
+      output_row[pixel + 0u] = source_row[pixel + 2u];
+      output_row[pixel + 1u] = source_row[pixel + 1u];
+      output_row[pixel + 2u] = source_row[pixel + 0u];
+      output_row[pixel + 3u] = source_row[pixel + 3u];
+    }
+  }
+  return true;
+}
+
+}  // namespace detail
+
 namespace {
 
 bool envFlagEnabled(const char* value) {
@@ -674,11 +711,14 @@ bool appendImportedTexture(rendering::ImportedMaterialData& data,
       if (byte_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
         return false;
       }
-      texture.source_bytes.resize(static_cast<size_t>(byte_count));
-      if (!texture.source_bytes.empty()) {
-        std::memcpy(texture.source_bytes.data(),
-                    embedded_texture.pcData,
-                    texture.source_bytes.size());
+      const auto* raw_bytes =
+          reinterpret_cast<const uint8_t*>(embedded_texture.pcData);
+      if (!detail::canonicalizeAssimpEmbeddedTexture(
+              std::span<const uint8_t>(raw_bytes, static_cast<size_t>(byte_count)),
+              texture.width,
+              texture.height,
+              texture.source_bytes)) {
+        return false;
       }
     }
   } else {

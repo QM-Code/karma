@@ -109,8 +109,7 @@ void DiligentBackend::ensureLineResources() {
     auto& graphics = pso.GraphicsPipeline;
     graphics.NumRenderTargets = 1;
     graphics.SmplDesc.Count = static_cast<Diligent::Uint8>(activeRasterSampleCount());
-    graphics.RTVFormats[0] = swap_chain_ ? swap_chain_->GetDesc().ColorBufferFormat
-                                         : Diligent::TEX_FORMAT_RGBA8_UNORM_SRGB;
+    graphics.RTVFormats[0] = sceneColorFormat();
     graphics.DSVFormat = swap_chain_ ? swap_chain_->GetDesc().DepthBufferFormat
                                      : Diligent::TEX_FORMAT_D32_FLOAT;
     graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_LINE_LIST;

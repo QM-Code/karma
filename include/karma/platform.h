@@ -51,7 +51,31 @@ enum class Key {
   NumLock,
   ScrollLock,
   World1,
-  World2
+  World2,
+  Comma,
+  Period,
+  Slash,
+  Semicolon,
+  Backslash,
+  PrintScreen,
+  Pause,
+  Keypad0,
+  Keypad1,
+  Keypad2,
+  Keypad3,
+  Keypad4,
+  Keypad5,
+  Keypad6,
+  Keypad7,
+  Keypad8,
+  Keypad9,
+  KeypadDecimal,
+  KeypadDivide,
+  KeypadMultiply,
+  KeypadSubtract,
+  KeypadAdd,
+  KeypadEnter,
+  KeypadEqual
 };
 
 /// \ingroup karma_platform

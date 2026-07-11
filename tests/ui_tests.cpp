@@ -39,6 +39,11 @@ struct SystemTestAccess {
     return capture.keyboard && capture.pointer && capture.gamepad;
   }
 
+  static bool capturesKeyboardAndGamepad(const System& system) {
+    const System::InputCapture capture = system.inputCapture();
+    return capture.keyboard && capture.gamepad;
+  }
+
   static platform::CursorShape cursorShape(const System& system) {
     return system.cursorShape();
   }
@@ -482,6 +487,7 @@ void testVerticalSliderInput() {
   assert(ui.get(opened.document, "volume")->asNumber().value_or(0.0) >= 0.8);
 
   assert(ui.focus(slider));
+  assert(SystemTestAccess::capturesKeyboardAndGamepad(ui));
   const double before = ui.get(opened.document, "volume")->asNumber().value();
   assert(SystemTestAccess::processEvent(
       ui, Event{.type = EventType::KeyDown, .key = karma::platform::Key::Down}));

@@ -7,8 +7,8 @@ retained UI. Read [NATIVE_UI.md](NATIVE_UI.md) for the public API and authoring
 contract. Native authoring is a hard cutover to `.kui.json5` documents and
 `.kstyle.json5` themes. Do not restore the removed XML/KSS path.
 
-The current project version is 0.7.0. See the
-[0.7.0 changelog](../CHANGELOG.md) for the user-facing release summary; this
+The current project version is 0.8.0. See the
+[0.8.0 changelog](../CHANGELOG.md) for the user-facing release summary; this
 document retains the implementation and verification detail.
 
 The second pass is now usable for desktop game menus, settings, HUDs, tool

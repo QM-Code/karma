@@ -681,7 +681,18 @@ B emits cancel, and shoulder bindings page. Bindings are configurable through
 Documents render by ascending layer and opening order; input uses the reverse.
 A visible modal document blocks lower documents and gameplay. Consumed keys,
 buttons, axes, and pointer drags are filtered from event-driven and live-polled
-gameplay input.
+gameplay input. A visible document with a valid focused element persistently
+captures keyboard and gamepad input, preventing already-held gameplay controls
+from leaking through between discrete UI events. Release and neutral-axis
+events continue through stacked UI providers even when a higher provider
+consumes them, so lower layers cannot retain stale pressed state.
+
+At rendering time, non-empty native, custom, and debug draw lists are composed
+in visual order into one validated UI submission. The engine keeps the
+single-layer direct path and merges adjacent compatible commands in multi-layer
+frames, avoiding redundant dynamic-buffer uploads and render-state setup.
+The ImGui provider routes copy/paste through the active Karma window clipboard
+and applies controller deadzones before emitting navigation axes.
 
 Document, element, listener, and dynamic-image handles are generational. Stale
 handles fail safely. Closing a document or removing a retained node invalidates

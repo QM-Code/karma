@@ -80,8 +80,31 @@ bias fields. See `docs/ENGINE_USAGE.md` for recommended baseline values.
 The default `gameplay_tank` scene uses a shadow-casting directional sun over the
 tank/world movement scene, plus local point lights.
 
+## PBR Material Semantics
+
+`karma::rendering::MaterialDesc` scalar metallic and roughness values work with
+or without metallic-roughness textures. A missing packed texture contributes
+neutral multipliers, so a textureless material can still be fully metallic.
+
+`MaterialDesc::ior` controls dielectric F0 using the Fresnel IOR relationship;
+the default IOR of 1.5 produces F0 0.04. The specular factor and color then
+scale and tint that dielectric response. Material occlusion affects indirect
+environment diffuse and specular lighting, including specular occlusion at
+grazing angles. It does not darken direct directional light. Local-light AO is
+opt-in through `LocalLightingSettings::ao_affects_local_lights`.
+
+## UI Draw Submission
+
+UI providers produce validated `karma::rendering::UIDrawData`. When several UI
+layers are visible, `EngineApp` composes them in draw order into one renderer
+submission, rebases indices, and coalesces adjacent commands with identical
+state. A single visible layer retains a direct fast path. Low-level integrations
+can use `composeUIDrawData()` to apply the same validation and ordering rules.
+
 ## Source Layout
 
 Renderer source is intentionally split by responsibility:
 
-- public renderer API: `include/karma/rendering.h
+- public renderer API: `include/karma/rendering.h`
+- renderer orchestration: `src/rendering/renderer/`
+- Diligent passes and shaders: `src/rendering/renderer/backends/diligent/`

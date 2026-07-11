@@ -7,7 +7,7 @@
 #endif
 
 int main() {
-  static_assert(karma::core::VersionMinor == 7);
+  static_assert(karma::core::VersionMinor == 8);
 
 #if defined(KARMA_TEST_EXPECT_NATIVE_UI)
   // Construct the retained system so this smoke verifies the native static

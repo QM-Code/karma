@@ -7,22 +7,10 @@
 #include <string>
 
 #if defined(KARMA_ENABLE_IMGUI)
-#include <imgui.h>
+#include "karma/ui_imgui.h"
 #endif
 
 namespace karma::demo {
-
-namespace {
-#if defined(KARMA_ENABLE_IMGUI)
-ImTextureID toImTextureId(karma::app::UITextureHandle handle) {
-  return static_cast<ImTextureID>(handle);
-}
-
-karma::app::UITextureHandle fromImTextureId(ImTextureID id) {
-  return static_cast<karma::app::UITextureHandle>(id);
-}
-#endif
-}  // namespace
 
 struct RadarOverlayState {
   app::UITextureHandle radar_texture = 0;
@@ -31,134 +19,28 @@ struct RadarOverlayState {
 };
 
 #if defined(KARMA_ENABLE_IMGUI)
-class RadarImGuiLayer final : public app::UiLayer {
- public:
-  explicit RadarImGuiLayer(RadarOverlayState& state) : state_(state) {
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.BackendPlatformName = "karma";
-    io.BackendRendererName = "karma_ui_draw";
-  }
-
-  ~RadarImGuiLayer() override = default;
-
-  void onFrame(app::UIContext& ctx) override {
-    pending_ctx_ = &ctx;
-    ImGuiIO& io = ImGui::GetIO();
-    const auto frame = ctx.frame();
-    io.DisplaySize = ImVec2(static_cast<float>(frame.logical_width),
-                            static_cast<float>(frame.logical_height));
-    io.DisplayFramebufferScale = ImVec2(frame.scale_x, frame.scale_y);
-    io.DeltaTime = frame.dt > 0.0f ? frame.dt : (1.0f / 60.0f);
-
-    if (!font_texture_) {
-      unsigned char* pixels = nullptr;
-      int width = 0;
-      int height = 0;
-      io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-      font_texture_ = ctx.createTextureRGBA8(width, height, pixels);
-      io.Fonts->SetTexID(toImTextureId(font_texture_));
-    }
-
-    ImGui::NewFrame();
-    ImGui::SetNextWindowBgAlpha(0.85f);
-    ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
-    ImGui::Begin("Radar", nullptr,
-                 ImGuiWindowFlags_NoCollapse |
-                 ImGuiWindowFlags_NoSavedSettings |
-                 ImGuiWindowFlags_AlwaysAutoResize);
-    if (state_.radar_texture != 0) {
-      const float radar_size = 256.0f;
-      ImGui::Image(toImTextureId(state_.radar_texture),
-                   ImVec2(radar_size, radar_size),
-                   ImVec2(0.0f, 1.0f),
-                   ImVec2(1.0f, 0.0f));
-    } else {
-      ImGui::TextUnformatted("Radar target unavailable");
-    }
-    ImGui::End();
-    ImGui::Render();
-
-    const ImDrawData* draw_data = ImGui::GetDrawData();
-    if (!draw_data) {
-      return;
-    }
-
-    rendering::UIDrawData& out = ctx.drawData();
-    out.clear();
-    out.vertices.reserve(static_cast<size_t>(draw_data->TotalVtxCount));
-    out.indices.reserve(static_cast<size_t>(draw_data->TotalIdxCount));
-    out.commands.reserve(static_cast<size_t>(draw_data->CmdListsCount));
-
-    int global_vtx_offset = 0;
-    uint32_t global_idx_offset = 0;
-    for (int n = 0; n < draw_data->CmdListsCount; ++n) {
-      const ImDrawList* cmd_list = draw_data->CmdLists[n];
-      for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
-        const ImDrawVert& v = cmd_list->VtxBuffer[i];
-        rendering::UIVertex out_v{};
-        out_v.x = (v.pos.x - draw_data->DisplayPos.x) * draw_data->FramebufferScale.x;
-        out_v.y = (v.pos.y - draw_data->DisplayPos.y) * draw_data->FramebufferScale.y;
-        out_v.u = v.uv.x;
-        out_v.v = v.uv.y;
-        out_v.rgba = v.col;
-        out.vertices.push_back(out_v);
-      }
-      for (int i = 0; i < cmd_list->IdxBuffer.Size; ++i) {
-        out.indices.push_back(static_cast<uint32_t>(cmd_list->IdxBuffer[i] + global_vtx_offset));
-      }
-      for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.Size; ++cmd_i) {
-        const ImDrawCmd& cmd = cmd_list->CmdBuffer[cmd_i];
-        if (cmd.UserCallback) {
-          cmd.UserCallback(cmd_list, &cmd);
-          global_idx_offset += cmd.ElemCount;
-          continue;
+std::unique_ptr<app::UiLayer> createRadarImGuiLayer(RadarOverlayState& state) {
+  return ui::imgui::createUiLayer(
+      [&state](app::UIContext&) {
+        ImGui::SetNextWindowBgAlpha(0.85f);
+        ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+        ImGui::Begin("Radar", nullptr,
+                     ImGuiWindowFlags_NoCollapse |
+                         ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoInputs |
+                         ImGuiWindowFlags_AlwaysAutoResize);
+        if (state.radar_texture != 0) {
+          constexpr float radar_size = 256.0f;
+          ImGui::Image(ui::imgui::toTextureId(state.radar_texture),
+                       ImVec2(radar_size, radar_size),
+                       ImVec2(0.0f, 1.0f),
+                       ImVec2(1.0f, 0.0f));
+        } else {
+          ImGui::TextUnformatted("Radar target unavailable");
         }
-        ImVec4 clip = cmd.ClipRect;
-        clip.x = (clip.x - draw_data->DisplayPos.x) * draw_data->FramebufferScale.x;
-        clip.y = (clip.y - draw_data->DisplayPos.y) * draw_data->FramebufferScale.y;
-        clip.z = (clip.z - draw_data->DisplayPos.x) * draw_data->FramebufferScale.x;
-        clip.w = (clip.w - draw_data->DisplayPos.y) * draw_data->FramebufferScale.y;
-        if (clip.z <= clip.x || clip.w <= clip.y) {
-          global_idx_offset += cmd.ElemCount;
-          continue;
-        }
-
-        rendering::UIDrawCmd out_cmd{};
-        out_cmd.index_offset = global_idx_offset;
-        out_cmd.index_count = cmd.ElemCount;
-        out_cmd.scissor_enabled = true;
-        out_cmd.scissor_x = static_cast<int>(clip.x);
-        out_cmd.scissor_y = static_cast<int>(clip.y);
-        out_cmd.scissor_w = static_cast<int>(clip.z - clip.x);
-        out_cmd.scissor_h = static_cast<int>(clip.w - clip.y);
-        out_cmd.texture = fromImTextureId(cmd.GetTexID());
-        out_cmd.blend_mode = rendering::UIBlendMode::StraightAlpha;
-        out_cmd.sampler_mode = rendering::UISamplerMode::Linear;
-        out_cmd.texture_mode = rendering::UITextureMode::Color;
-        out.commands.push_back(out_cmd);
-        global_idx_offset += cmd.ElemCount;
-      }
-      global_vtx_offset += cmd_list->VtxBuffer.Size;
-    }
-  }
-
-  void onShutdown() override {
-    if (font_texture_ != 0) {
-      if (pending_ctx_) {
-        pending_ctx_->destroyTexture(font_texture_);
-      }
-      font_texture_ = 0;
-    }
-    ImGui::DestroyContext();
-  }
-
- private:
-  RadarOverlayState& state_;
-  app::UITextureHandle font_texture_ = 0;
-  app::UIContext* pending_ctx_ = nullptr;
-};
+        ImGui::End();
+      });
+}
 #endif
 
 class DemoGame : public app::GameInterface {
@@ -475,11 +357,11 @@ class DemoGame : public app::GameInterface {
 }  // namespace karma::demo
 
 int main() {
-  karma::app::EngineApp engine;
   karma::demo::RadarOverlayState radar_state;
+  karma::app::EngineApp engine;
   karma::demo::DemoGame game(radar_state);
 #if defined(KARMA_ENABLE_IMGUI) && !defined(KARMA_ENABLE_NATIVE_UI)
-  engine.setUi(std::make_unique<karma::demo::RadarImGuiLayer>(radar_state));
+  engine.setUi(karma::demo::createRadarImGuiLayer(radar_state));
 #endif
 
   karma::app::EngineConfig config;

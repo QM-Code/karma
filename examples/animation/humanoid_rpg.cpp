@@ -2,7 +2,7 @@
 #include "scene_helpers.h"
 
 #include "karma/karma.h"
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,6 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <imgui.h>
 #include <spdlog/spdlog.h>
 
 namespace karma::demo {

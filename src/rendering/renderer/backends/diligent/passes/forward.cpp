@@ -1690,7 +1690,8 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params4[1] = sheen_color.g;
       constants.material_params4[2] = sheen_color.b;
       constants.material_params4[3] = mat ? mat->transmission_factor : 0.0f;
-      constants.material_params5[0] = mat ? mat->ior : 1.5f;
+      constants.material_params5[0] =
+          (mat && std::isfinite(mat->ior)) ? std::max(mat->ior, 1.0f) : 1.5f;
       constants.material_params5[1] = mat ? mat->thickness_factor : 0.0f;
       constants.material_params5[2] =
           (mat && std::isfinite(mat->attenuation_distance)) ? mat->attenuation_distance : 0.0f;
@@ -3221,7 +3222,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params4[1] = sheen_color.g;
       constants.material_params4[2] = sheen_color.b;
       constants.material_params4[3] = mat ? mat->transmission_factor : 0.0f;
-      constants.material_params5[0] = mat ? mat->ior : 1.5f;
+      constants.material_params5[0] =
+          (mat && std::isfinite(mat->ior)) ? std::max(mat->ior, 1.0f) : 1.5f;
       constants.material_params5[1] = mat ? mat->thickness_factor : 0.0f;
       constants.material_params5[2] =
           (mat && std::isfinite(mat->attenuation_distance)) ? mat->attenuation_distance : 0.0f;

@@ -9,8 +9,8 @@
 #include "karma/karma.h"
 #include "karma/scene_authoring.h"
 #include "karma/ui.h"
+#include "karma/ui_imgui.h"
 
-#include <imgui.h>
 #include <nfd.hpp>
 
 #include <algorithm>

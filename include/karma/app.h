@@ -796,6 +796,7 @@ class EngineApp {
   UIContext debug_ui_context_{};
 #endif
   UIContext user_ui_context_{};
+  rendering::UIDrawData composed_ui_draw_data_{};
   InputFilter ui_input_filter_{};
   bool debug_ui_enabled_ = false;
   uint64_t last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();

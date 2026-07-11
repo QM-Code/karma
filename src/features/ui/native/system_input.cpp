@@ -1068,6 +1068,10 @@ System::InputCapture System::inputCapture() const {
       capture.gamepad = true;
       return capture;
     }
+    if (impl_->document_runtime.element(doc->focused) != nullptr) {
+      capture.keyboard = true;
+      capture.gamepad = true;
+    }
     capture.pointer = capture.pointer || doc->pointer_capture.valid();
   }
   return capture;

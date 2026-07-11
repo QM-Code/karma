@@ -2553,6 +2553,13 @@ float3 FresnelSchlickRoughness(float cos_theta,
     return f0 + (grazing - f0) * pow(saturate(1.0 - cos_theta), 5.0);
 }
 
+float SpecularOcclusion(float n_dot_v, float occlusion, float perceptual_roughness)
+{
+    return saturate(pow(n_dot_v + occlusion,
+                        exp2(-16.0 * perceptual_roughness - 1.0)) -
+                    1.0 + occlusion);
+}
+
 uint EditorViewMode()
 {
     return min((uint)round(max(g_CameraClipParams.w, 0.0)), 3u);
@@ -3157,8 +3164,11 @@ float4 main(PSInput input) : SV_TARGET
     float specular_weight = saturate(
         g_MaterialParams7.w *
         g_SpecularTex.Sample(g_SamplerData, specular_uv).a);
+    float material_ior = max(g_MaterialParams5.x, 1.0);
+    float ior_f0 = (material_ior - 1.0) / (material_ior + 1.0);
+    ior_f0 *= ior_f0;
     float3 dielectric_f0 = saturate(
-        float3(0.04, 0.04, 0.04) * g_MaterialParams7.rgb *
+        ior_f0 * g_MaterialParams7.rgb *
         g_SpecularColorTex.Sample(g_SamplerColor, specular_color_uv).rgb *
         specular_weight);
     float3 spec_color = lerp(dielectric_f0, base_color, metallic);
@@ -3364,7 +3374,7 @@ float4 main(PSInput input) : SV_TARGET
                                           sheen_roughness);
     occlusion = lerp(1.0, occlusion, g_PbrParams.z);
     float local_ao_factor = lerp(1.0, occlusion, saturate(g_LocalLightParams.z));
-    float3 lit = lit_directional * occlusion + lit_local * local_ao_factor + baked_diffuse;
+    float3 lit = lit_directional + lit_local * local_ao_factor + baked_diffuse;
     float ndotv = max(dot(n, v), 0.0);
     float3 env_diffuse = float3(0.0, 0.0, 0.0);
     float3 env_spec = float3(0.0, 0.0, 0.0);
@@ -3385,11 +3395,14 @@ float4 main(PSInput input) : SV_TARGET
             prefiltered = g_PrefilterTex.SampleLevel(g_SamplerColor, r, mip).rgb;
             brdf = g_BRDFLUT.Sample(g_SamplerColor, float2(ndotv, perceptual_roughness)).rg;
             env_spec = prefiltered * (spec_color * brdf.x + brdf.y);
+            float base_specular_occlusion =
+                SpecularOcclusion(ndotv, occlusion, perceptual_roughness);
             float clearcoat_ndotv = max(dot(clearcoat_n, v), 0.0);
             float clearcoat_ibl_fresnel =
                 FresnelSchlick(clearcoat_ndotv, float3(0.04, 0.04, 0.04)).r * clearcoat_factor;
             base_layer_ibl_weight = 1.0 - clearcoat_ibl_fresnel;
-            lit += env_spec * g_EnvParams.x * base_layer_ibl_weight;
+            lit += env_spec * g_EnvParams.x * base_layer_ibl_weight *
+                   base_specular_occlusion;
             if (clearcoat_factor > 0.0)
             {
                 float clearcoat_mip = saturate(clearcoat_roughness) * g_EnvParams.y;
@@ -3401,7 +3414,10 @@ float4 main(PSInput input) : SV_TARGET
                 float3 clearcoat_spec =
                     clearcoat_prefiltered * (float3(0.04, 0.04, 0.04) * clearcoat_brdf.x +
                                              clearcoat_brdf.y);
-                lit += clearcoat_spec * g_EnvParams.x * clearcoat_factor;
+                float clearcoat_specular_occlusion =
+                    SpecularOcclusion(clearcoat_ndotv, occlusion, clearcoat_roughness);
+                lit += clearcoat_spec * g_EnvParams.x * clearcoat_factor *
+                       clearcoat_specular_occlusion;
             }
             if (max(max(sheen_color.r, sheen_color.g), sheen_color.b) > 0.0)
             {
@@ -4369,7 +4385,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
                                               default_base_color_tex_);
   default_normal_ = createSolidTextureSRV(128, 128, 255, 255, false, "DefaultNormal",
                                           default_normal_tex_);
-  default_metallic_roughness_ = createSolidTextureSRV(255, 255, 0, 255, false, "DefaultMetalRough",
+  default_metallic_roughness_ = createSolidTextureSRV(255, 255, 255, 255, false, "DefaultMetalRough",
                                                       default_metallic_roughness_tex_);
   default_brdf_lut_ = createSolidTextureSRV(0, 0, 0, 255, false, "DefaultBRDFLUT",
                                             default_brdf_lut_tex_);

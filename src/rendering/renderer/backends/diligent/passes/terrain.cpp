@@ -424,6 +424,12 @@ float3 FresnelSchlickRoughness(float cos_theta, float3 f0, float roughness)
     return f0 + (grazing - f0) * pow(saturate(1.0 - cos_theta), 5.0);
 }
 
+float SpecularOcclusion(float n_dot_v, float occlusion, float roughness)
+{
+    return saturate(pow(n_dot_v + occlusion, exp2(-16.0 * roughness - 1.0)) -
+                    1.0 + occlusion);
+}
+
 float3 EvaluatePbrLight(float3 n,
                         float3 v,
                         float3 l,
@@ -892,7 +898,7 @@ float4 main(PSInput input) : SV_TARGET
                                   metallic,
                                   roughness,
                                   dielectric_f0,
-                                  glossy_off) * occlusion;
+                                  glossy_off);
     float local_ao = lerp(1.0, occlusion, saturate(g_LocalLightParams.z));
     lit += local_lighting * local_ao;
 
@@ -915,7 +921,9 @@ float4 main(PSInput input) : SV_TARGET
                 g_PrefilterTex.SampleLevel(g_ColorSampler, reflection, mip).rgb;
             float2 brdf =
                 g_BRDFLUT.Sample(g_ColorSampler, float2(ndotv, roughness)).rg;
-            lit += prefiltered * (specular_f0 * brdf.x + brdf.y) * g_EnvParams.x;
+            float specular_occlusion = SpecularOcclusion(ndotv, occlusion, roughness);
+            lit += prefiltered * (specular_f0 * brdf.x + brdf.y) *
+                   g_EnvParams.x * specular_occlusion;
         }
     }
 

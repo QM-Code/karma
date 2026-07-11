@@ -458,7 +458,9 @@ void DiligentBackend::renderUi(const karma::rendering::UIDrawData& draw_data) {
   }
 
   if (ui_vb_size_ < draw_data.vertices.size()) {
-    const std::size_t replacement_size = draw_data.vertices.size() + 2048u;
+    const std::size_t replacement_size = std::max(
+        draw_data.vertices.size(),
+        ui_vb_size_ + std::max(ui_vb_size_ / 2u, std::size_t{1}));
     Diligent::BufferDesc desc{};
     desc.Name = "Karma UI VB";
     desc.Usage = Diligent::USAGE_DYNAMIC;
@@ -477,7 +479,9 @@ void DiligentBackend::renderUi(const karma::rendering::UIDrawData& draw_data) {
   }
 
   if (ui_ib_size_ < draw_data.indices.size()) {
-    const std::size_t replacement_size = draw_data.indices.size() + 4096u;
+    const std::size_t replacement_size = std::max(
+        draw_data.indices.size(),
+        ui_ib_size_ + std::max(ui_ib_size_ / 2u, std::size_t{1}));
     Diligent::BufferDesc desc{};
     desc.Name = "Karma UI IB";
     desc.Usage = Diligent::USAGE_DYNAMIC;

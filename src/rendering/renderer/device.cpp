@@ -174,6 +174,9 @@ class GraphicsDevice::RenderScheduler {
                                     std::make_move_iterator(pre_frame_commands_.begin()),
                                     std::make_move_iterator(pre_frame_commands_.end()));
     pre_frame_commands_.clear();
+    current_frame_->durable_commands =
+        std::move(pre_frame_durable_commands_);
+    pre_frame_durable_commands_.clear();
   }
 
   void recordFrameCommand(RenderCommand command) {
@@ -183,6 +186,27 @@ class GraphicsDevice::RenderScheduler {
     } else {
       pre_frame_commands_.push_back(std::move(command));
     }
+  }
+
+  void recordDurableFrameCommand(RenderCommand command) {
+    std::lock_guard<std::mutex> lock(record_mutex_);
+    if (current_frame_) {
+      current_frame_->commands.push_back(command);
+      current_frame_->durable_commands.push_back(std::move(command));
+    } else {
+      pre_frame_commands_.push_back(command);
+      pre_frame_durable_commands_.push_back(std::move(command));
+    }
+  }
+
+  bool recordDurableFrameCommandIfActive(RenderCommand command) {
+    std::lock_guard<std::mutex> lock(record_mutex_);
+    if (!current_frame_) {
+      return false;
+    }
+    current_frame_->commands.push_back(command);
+    current_frame_->durable_commands.push_back(std::move(command));
+    return true;
   }
 
   bool recordFrameCommandIfActive(RenderCommand command) {
@@ -330,9 +354,13 @@ class GraphicsDevice::RenderScheduler {
 
  private:
   struct FramePacket {
-    FramePacket() : commands(), record_start(), record_ms(0.0f), submit_ms(0.0f) {}
+    FramePacket()
+        : commands(), durable_commands(), record_start(), record_ms(0.0f),
+          submit_ms(0.0f) {}
 
     std::vector<RenderCommand> commands;
+    // State mutations that must survive latest-frame replacement.
+    std::vector<RenderCommand> durable_commands;
     core::SteadyClock::time_point record_start{};
     float record_ms = 0.0f;
     float submit_ms = 0.0f;
@@ -434,6 +462,21 @@ class GraphicsDevice::RenderScheduler {
       ++submitted_frames_;
       if (pending_frame_) {
         ++dropped_frames_;
+        if (!pending_frame_->durable_commands.empty()) {
+          const auto command_insert =
+              packet.commands.empty() ? packet.commands.begin()
+                                      : std::next(packet.commands.begin());
+          packet.commands.insert(
+              command_insert,
+              pending_frame_->durable_commands.begin(),
+              pending_frame_->durable_commands.end());
+          packet.durable_commands.insert(
+              packet.durable_commands.begin(),
+              std::make_move_iterator(
+                  pending_frame_->durable_commands.begin()),
+              std::make_move_iterator(
+                  pending_frame_->durable_commands.end()));
+        }
       }
       packet.submit_ms =
           static_cast<float>(core::elapsedMillisecondsSince(submit_start));
@@ -528,6 +571,7 @@ class GraphicsDevice::RenderScheduler {
   mutable std::mutex record_mutex_;
   std::optional<FramePacket> current_frame_;
   std::vector<RenderCommand> pre_frame_commands_;
+  std::vector<RenderCommand> pre_frame_durable_commands_;
   std::vector<RenderCommand> recycled_frame_commands_;
 
   mutable std::mutex queue_mutex_;
@@ -1056,7 +1100,7 @@ void GraphicsDevice::setParticleSystemStats(const ParticlePassStats& stats) {
 void GraphicsDevice::retireInstance(InstanceId instance) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
-    scheduler_->recordFrameCommand([instance](RenderScheduler::Backend& backend) {
+    scheduler_->recordDurableFrameCommand([instance](RenderScheduler::Backend& backend) {
       backend.retireInstance(instance);
     });
   }
@@ -1156,7 +1200,7 @@ void GraphicsDevice::setEnvironmentMap(const std::filesystem::path& path, float 
                                        bool draw_skybox) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (scheduler_) {
-    if (!scheduler_->recordFrameCommandIfActive(
+    if (!scheduler_->recordDurableFrameCommandIfActive(
             [path, intensity, draw_skybox](RenderScheduler::Backend& backend) {
               backend.setEnvironmentMap(path, intensity, draw_skybox);
             })) {

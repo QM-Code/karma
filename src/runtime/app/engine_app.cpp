@@ -1,6 +1,7 @@
 #include "karma/app.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -36,6 +37,7 @@
 #include "karma/world.h"
 
 #include "cursor_arbitration.h"
+#include "ui_event_routing.h"
 #include "../../../third_party/stb_image.h"
 
 namespace karma::app {
@@ -1822,15 +1824,17 @@ void EngineApp::tick() {
                     disposition == UiEventDisposition::Consumed);
       }
 #endif
-      if (!consumed && user_ui_) {
+      if (user_ui_ && detail::shouldRouteToLowerUiLayer(consumed, event)) {
         const UiInputCapture capture = user_ui_->inputCapture();
         const UiEventDisposition disposition = user_ui_->onEvent(event);
-        consumed = input_event &&
-                   (capturesEvent(capture, device) ||
-                    disposition == UiEventDisposition::Consumed);
+        const bool layer_consumed =
+            input_event &&
+            (capturesEvent(capture, device) ||
+             disposition == UiEventDisposition::Consumed);
+        consumed = consumed || layer_consumed;
       }
 #if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
-      if (!consumed && native_ui_) {
+      if (native_ui_ && detail::shouldRouteToLowerUiLayer(consumed, event)) {
         const ui::System::InputCapture capture = native_ui_->inputCapture();
         bool captured = false;
         switch (device) {
@@ -1848,8 +1852,10 @@ void EngineApp::tick() {
         }
         const ui::System::InputDisposition disposition =
             native_ui_->processEvent(event);
-        consumed = input_event &&
-                   (captured || disposition != ui::System::InputDisposition::Ignored);
+        const bool layer_consumed =
+            input_event &&
+            (captured || disposition != ui::System::InputDisposition::Ignored);
+        consumed = consumed || layer_consumed;
       }
 #endif
 
@@ -2199,19 +2205,40 @@ void EngineApp::tick() {
     render_system_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
+    std::array<const rendering::UIDrawData*, 3> ui_layers{};
+    std::size_t ui_layer_count = 0u;
+    auto append_ui_layer = [&](const rendering::UIDrawData& draw_data) {
+      if (!draw_data.vertices.empty() || !draw_data.indices.empty() ||
+          !draw_data.commands.empty()) {
+        ui_layers[ui_layer_count++] = &draw_data;
+      }
+    };
 #if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
     if (native_ui_) {
-      graphics_->renderUi(native_ui_draw_data_);
+      append_ui_layer(native_ui_draw_data_);
     }
 #endif
     if (user_ui_) {
-      graphics_->renderUi(user_ui_context_.draw_data_);
+      append_ui_layer(user_ui_context_.draw_data_);
     }
 #if defined(KARMA_DEBUG_UI)
     if (debug_ui_) {
-      graphics_->renderUi(debug_ui_context_.draw_data_);
+      append_ui_layer(debug_ui_context_.draw_data_);
     }
 #endif
+    if (ui_layer_count == 1u) {
+      graphics_->renderUi(*ui_layers[0]);
+    } else if (ui_layer_count > 1u) {
+      const std::span<const rendering::UIDrawData* const> layers(
+          ui_layers.data(), ui_layer_count);
+      if (rendering::composeUIDrawData(composed_ui_draw_data_, layers)) {
+        graphics_->renderUi(composed_ui_draw_data_);
+      } else {
+        for (const rendering::UIDrawData* layer : layers) {
+          graphics_->renderUi(*layer);
+        }
+      }
+    }
     section_end = core::SteadyClock::now();
     render_ui_ms = core::elapsedMilliseconds(section_start, section_end);
 

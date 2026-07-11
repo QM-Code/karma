@@ -111,7 +111,12 @@ void InputSystem::update(const std::vector<platform::Event>& events,
   mouse_delta_x_ = 0.0f;
   mouse_delta_y_ = 0.0f;
 
-  if (window_) {
+  const bool focus_lost = std::any_of(
+      events.begin(), events.end(), [](const platform::Event& event) {
+        return event.type == platform::EventType::WindowFocus && !event.focused;
+      });
+
+  if (window_ && !focus_lost) {
     platform::Modifiers modifiers = currentModifiers(*window_);
     if (filter.suppresses(platform::Key::LeftShift) ||
         filter.suppresses(platform::Key::RightShift)) {
@@ -159,6 +164,7 @@ void InputSystem::update(const std::vector<platform::Event>& events,
   for (const auto& event : events) {
     if (event.type == platform::EventType::WindowFocus && !event.focused) {
       has_mouse_pos_ = false;
+      previous_gamepad_axes_.clear();
     }
     if (event.type == platform::EventType::MouseMove ||
         event.type == platform::EventType::MouseButtonDown ||
@@ -210,45 +216,49 @@ void InputSystem::update(const std::vector<platform::Event>& events,
       event_modifiers.super = false;
     }
 
-    const float previous_axis_value =
-        event.type == platform::EventType::GamepadAxisMotion
-            ? previous_gamepad_axes_[event.gamepad][event.gamepadAxis]
-            : 0.0f;
-    for (const auto& [action, bindings] : bindings_) {
-      for (const auto& binding : bindings) {
-        if (binding.trigger != Trigger::Pressed || event.repeat) {
-          continue;
-        }
-        if (!matchesModifiers(event_modifiers, binding.mods)) {
-          continue;
-        }
-        if (binding.use_gamepad_axis && !gamepad_axis_suppressed &&
-            event.type == platform::EventType::GamepadAxisMotion &&
-            event.gamepadAxis == binding.gamepad_axis &&
-            axisActive(event.gamepadValue,
-                       binding.gamepad_axis_threshold,
-                       binding.gamepad_axis_positive) &&
-            !axisActive(previous_axis_value,
-                        binding.gamepad_axis_threshold,
-                        binding.gamepad_axis_positive)) {
-          pressed_this_frame_.insert(action);
-        } else if (binding.use_gamepad_button && !gamepad_button_suppressed &&
-                   isGamepadButtonEvent(event,
-                                        binding.gamepad_button,
-                                        platform::EventType::GamepadButtonDown)) {
-          pressed_this_frame_.insert(action);
-        } else if (binding.use_key && !key_suppressed &&
-            isKeyEvent(event, binding.key, platform::EventType::KeyDown)) {
-          pressed_this_frame_.insert(action);
-        }
-        if (!binding.use_key && !binding.use_gamepad_button &&
-            !binding.use_gamepad_axis && !mouse_suppressed &&
-            isMouseEvent(event, binding.mouse, platform::EventType::MouseButtonDown)) {
-          pressed_this_frame_.insert(action);
+    if (!focus_lost) {
+      const float previous_axis_value =
+          event.type == platform::EventType::GamepadAxisMotion
+              ? previous_gamepad_axes_[event.gamepad][event.gamepadAxis]
+              : 0.0f;
+      for (const auto& [action, bindings] : bindings_) {
+        for (const auto& binding : bindings) {
+          if (binding.trigger != Trigger::Pressed || event.repeat) {
+            continue;
+          }
+          if (!matchesModifiers(event_modifiers, binding.mods)) {
+            continue;
+          }
+          if (binding.use_gamepad_axis && !gamepad_axis_suppressed &&
+              event.type == platform::EventType::GamepadAxisMotion &&
+              event.gamepadAxis == binding.gamepad_axis &&
+              axisActive(event.gamepadValue,
+                         binding.gamepad_axis_threshold,
+                         binding.gamepad_axis_positive) &&
+              !axisActive(previous_axis_value,
+                          binding.gamepad_axis_threshold,
+                          binding.gamepad_axis_positive)) {
+            pressed_this_frame_.insert(action);
+          } else if (binding.use_gamepad_button && !gamepad_button_suppressed &&
+                     isGamepadButtonEvent(
+                         event, binding.gamepad_button,
+                         platform::EventType::GamepadButtonDown)) {
+            pressed_this_frame_.insert(action);
+          } else if (binding.use_key && !key_suppressed &&
+                     isKeyEvent(event, binding.key,
+                                platform::EventType::KeyDown)) {
+            pressed_this_frame_.insert(action);
+          }
+          if (!binding.use_key && !binding.use_gamepad_button &&
+              !binding.use_gamepad_axis && !mouse_suppressed &&
+              isMouseEvent(event, binding.mouse,
+                           platform::EventType::MouseButtonDown)) {
+            pressed_this_frame_.insert(action);
+          }
         }
       }
     }
-    if (event.type == platform::EventType::GamepadAxisMotion) {
+    if (!focus_lost && event.type == platform::EventType::GamepadAxisMotion) {
       previous_gamepad_axes_[event.gamepad][event.gamepadAxis] = event.gamepadValue;
     } else if (event.type == platform::EventType::GamepadDisconnected) {
       previous_gamepad_axes_.erase(event.gamepad);

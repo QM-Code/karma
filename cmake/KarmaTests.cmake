@@ -483,16 +483,41 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
   endif()
 
   set(_karma_assertion_test_targets
+    karma_ui_json_profile_tests
+    karma_cursor_tests
     karma_core_runtime_tests
     karma_audio_tests
     karma_collider_geometry_tests
     karma_asset_cache_tests
+    karma_ui_asset_package_tests
     karma_prefab_tests
     karma_scene_document_tests
     karma_scene_runtime_tests
     karma_scene_bake_tests
     karma_animation_tests
     karma_rendering_tests
+    karma_ui_accessibility_builder_tests
+    karma_ui_development_path_tests
+    karma_ui_authoring_tests
+    karma_ui_binding_tests
+    karma_ui_document_reconciler_tests
+    karma_ui_document_runtime_tests
+    karma_ui_listener_registry_tests
+    karma_ui_file_watcher_tests
+    karma_ui_hot_reload_coordinator_tests
+    karma_ui_focus_runtime_tests
+    karma_ui_transient_runtime_tests
+    karma_ui_tests
+    karma_ui_layout_tests
+    karma_ui_document_layout_runtime_tests
+    karma_ui_motion_tests
+    karma_ui_style_runtime_tests
+    karma_ui_paint_tests
+    karma_ui_widget_paint_tests
+    karma_ui_widget_runtime_tests
+    karma_ui_presentation_tests
+    karma_ui_presentation_builder_tests
+    karma_ui_screenshot_golden_tests
     karma_particle_generation_tests
     karma_physics_tests
     karma_terrain_tests

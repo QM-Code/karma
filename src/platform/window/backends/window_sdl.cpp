@@ -146,10 +146,32 @@ Key toKey(SDL_Scancode scancode) {
         case SDL_SCANCODE_DOWN: return Key::Down;
         case SDL_SCANCODE_LEFTBRACKET: return Key::LeftBracket;
         case SDL_SCANCODE_RIGHTBRACKET: return Key::RightBracket;
+        case SDL_SCANCODE_COMMA: return Key::Comma;
+        case SDL_SCANCODE_PERIOD: return Key::Period;
+        case SDL_SCANCODE_SLASH: return Key::Slash;
+        case SDL_SCANCODE_SEMICOLON: return Key::Semicolon;
+        case SDL_SCANCODE_BACKSLASH: return Key::Backslash;
         case SDL_SCANCODE_MINUS: return Key::Minus;
         case SDL_SCANCODE_EQUALS: return Key::Equal;
         case SDL_SCANCODE_APOSTROPHE: return Key::Apostrophe;
         case SDL_SCANCODE_GRAVE: return Key::GraveAccent;
+        case SDL_SCANCODE_KP_0: return Key::Keypad0;
+        case SDL_SCANCODE_KP_1: return Key::Keypad1;
+        case SDL_SCANCODE_KP_2: return Key::Keypad2;
+        case SDL_SCANCODE_KP_3: return Key::Keypad3;
+        case SDL_SCANCODE_KP_4: return Key::Keypad4;
+        case SDL_SCANCODE_KP_5: return Key::Keypad5;
+        case SDL_SCANCODE_KP_6: return Key::Keypad6;
+        case SDL_SCANCODE_KP_7: return Key::Keypad7;
+        case SDL_SCANCODE_KP_8: return Key::Keypad8;
+        case SDL_SCANCODE_KP_9: return Key::Keypad9;
+        case SDL_SCANCODE_KP_PERIOD: return Key::KeypadDecimal;
+        case SDL_SCANCODE_KP_DIVIDE: return Key::KeypadDivide;
+        case SDL_SCANCODE_KP_MULTIPLY: return Key::KeypadMultiply;
+        case SDL_SCANCODE_KP_MINUS: return Key::KeypadSubtract;
+        case SDL_SCANCODE_KP_PLUS: return Key::KeypadAdd;
+        case SDL_SCANCODE_KP_ENTER: return Key::KeypadEnter;
+        case SDL_SCANCODE_KP_EQUALS: return Key::KeypadEqual;
         case SDL_SCANCODE_LSHIFT: return Key::LeftShift;
         case SDL_SCANCODE_RSHIFT: return Key::RightShift;
         case SDL_SCANCODE_LCTRL: return Key::LeftControl;
@@ -168,6 +190,8 @@ Key toKey(SDL_Scancode scancode) {
         case SDL_SCANCODE_CAPSLOCK: return Key::CapsLock;
         case SDL_SCANCODE_NUMLOCKCLEAR: return Key::NumLock;
         case SDL_SCANCODE_SCROLLLOCK: return Key::ScrollLock;
+        case SDL_SCANCODE_PRINTSCREEN: return Key::PrintScreen;
+        case SDL_SCANCODE_PAUSE: return Key::Pause;
         default: return Key::Unknown;
     }
 }
@@ -245,10 +269,32 @@ SDL_Scancode toScancode(Key key) {
         case Key::Down: return SDL_SCANCODE_DOWN;
         case Key::LeftBracket: return SDL_SCANCODE_LEFTBRACKET;
         case Key::RightBracket: return SDL_SCANCODE_RIGHTBRACKET;
+        case Key::Comma: return SDL_SCANCODE_COMMA;
+        case Key::Period: return SDL_SCANCODE_PERIOD;
+        case Key::Slash: return SDL_SCANCODE_SLASH;
+        case Key::Semicolon: return SDL_SCANCODE_SEMICOLON;
+        case Key::Backslash: return SDL_SCANCODE_BACKSLASH;
         case Key::Minus: return SDL_SCANCODE_MINUS;
         case Key::Equal: return SDL_SCANCODE_EQUALS;
         case Key::Apostrophe: return SDL_SCANCODE_APOSTROPHE;
         case Key::GraveAccent: return SDL_SCANCODE_GRAVE;
+        case Key::Keypad0: return SDL_SCANCODE_KP_0;
+        case Key::Keypad1: return SDL_SCANCODE_KP_1;
+        case Key::Keypad2: return SDL_SCANCODE_KP_2;
+        case Key::Keypad3: return SDL_SCANCODE_KP_3;
+        case Key::Keypad4: return SDL_SCANCODE_KP_4;
+        case Key::Keypad5: return SDL_SCANCODE_KP_5;
+        case Key::Keypad6: return SDL_SCANCODE_KP_6;
+        case Key::Keypad7: return SDL_SCANCODE_KP_7;
+        case Key::Keypad8: return SDL_SCANCODE_KP_8;
+        case Key::Keypad9: return SDL_SCANCODE_KP_9;
+        case Key::KeypadDecimal: return SDL_SCANCODE_KP_PERIOD;
+        case Key::KeypadDivide: return SDL_SCANCODE_KP_DIVIDE;
+        case Key::KeypadMultiply: return SDL_SCANCODE_KP_MULTIPLY;
+        case Key::KeypadSubtract: return SDL_SCANCODE_KP_MINUS;
+        case Key::KeypadAdd: return SDL_SCANCODE_KP_PLUS;
+        case Key::KeypadEnter: return SDL_SCANCODE_KP_ENTER;
+        case Key::KeypadEqual: return SDL_SCANCODE_KP_EQUALS;
         case Key::LeftShift: return SDL_SCANCODE_LSHIFT;
         case Key::RightShift: return SDL_SCANCODE_RSHIFT;
         case Key::LeftControl: return SDL_SCANCODE_LCTRL;
@@ -267,6 +313,8 @@ SDL_Scancode toScancode(Key key) {
         case Key::CapsLock: return SDL_SCANCODE_CAPSLOCK;
         case Key::NumLock: return SDL_SCANCODE_NUMLOCKCLEAR;
         case Key::ScrollLock: return SDL_SCANCODE_SCROLLLOCK;
+        case Key::PrintScreen: return SDL_SCANCODE_PRINTSCREEN;
+        case Key::Pause: return SDL_SCANCODE_PAUSE;
         default: return SDL_SCANCODE_UNKNOWN;
     }
 }

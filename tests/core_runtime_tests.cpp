@@ -21,6 +21,7 @@
 #include "karma/platform.h"
 #include "karma/world.h"
 #include "../src/platform/window/gamepad_repeat.h"
+#include "../src/runtime/app/ui_event_routing.h"
 
 namespace {
 
@@ -134,6 +135,30 @@ void testGamepadRepeatScheduler() {
   scheduler.resetGamepad(3);
   scheduler.appendDue(events, start + std::chrono::seconds(4));
   assert(events.empty());
+}
+
+void testStackedUiReleaseRouting() {
+  using karma::app::detail::isUiStateReleaseEvent;
+  using karma::app::detail::shouldRouteToLowerUiLayer;
+  using karma::platform::Event;
+  using karma::platform::EventType;
+
+  assert(!shouldRouteToLowerUiLayer(
+      true, Event{.type = EventType::KeyDown}));
+  assert(shouldRouteToLowerUiLayer(
+      true, Event{.type = EventType::KeyUp}));
+  assert(shouldRouteToLowerUiLayer(
+      true, Event{.type = EventType::MouseButtonUp}));
+  assert(shouldRouteToLowerUiLayer(
+      true, Event{.type = EventType::GamepadButtonUp}));
+  assert(isUiStateReleaseEvent(
+      Event{.type = EventType::GamepadDisconnected}));
+  assert(isUiStateReleaseEvent(
+      Event{.type = EventType::GamepadAxisMotion, .gamepadValue = 0.1f}));
+  assert(!isUiStateReleaseEvent(
+      Event{.type = EventType::GamepadAxisMotion, .gamepadValue = 0.8f}));
+  assert(shouldRouteToLowerUiLayer(
+      false, Event{.type = EventType::KeyDown}));
 }
 
 void testEntityLivenessAndComponents() {
@@ -279,6 +304,12 @@ void testInputRepeatAndHeldModifiers() {
   input.bindKey("save", karma::platform::Key::S, karma::app::Trigger::Down);
   input.setRequiredModifiers("save", {.control = true});
   input.bindKey("jump", karma::platform::Key::Space, karma::app::Trigger::Pressed);
+  input.bindMouse("fire", karma::platform::MouseButton::Left,
+                  karma::app::Trigger::Down);
+  input.bindGamepadButton("accept", karma::platform::GamepadButton::A,
+                          karma::app::Trigger::Down);
+  input.bindGamepadAxis("steer", karma::platform::GamepadAxis::LeftX, 0.5f,
+                        true, karma::app::Trigger::Down);
 
   window.keys_.insert(karma::platform::Key::S);
   input.update({});
@@ -314,7 +345,18 @@ void testInputRepeatAndHeldModifiers() {
   karma::platform::Event resumed_move = second_move;
   resumed_move.x = 900.0;
   resumed_move.y = 700.0;
-  input.update({focus_lost, resumed_move});
+  window.mouse_buttons_.insert(karma::platform::MouseButton::Left);
+  window.gamepad_buttons_.insert(karma::platform::GamepadButton::A);
+  window.gamepad_axes_[karma::platform::GamepadAxis::LeftX] = 0.8f;
+  karma::platform::Event focus_lost_press{};
+  focus_lost_press.type = karma::platform::EventType::KeyDown;
+  focus_lost_press.key = karma::platform::Key::Space;
+  input.update({focus_lost_press, focus_lost, resumed_move});
+  assert(!input.actionDown("save"));
+  assert(!input.actionDown("fire"));
+  assert(!input.actionDown("accept"));
+  assert(!input.actionDown("steer"));
+  assert(!input.actionPressed("jump"));
   assert(input.mouseDeltaX() == 0.0f && input.mouseDeltaY() == 0.0f);
 }
 
@@ -695,6 +737,7 @@ void testEngineValidationAndHeadlessLifecycle() {
 
 int main() {
   testGamepadRepeatScheduler();
+  testStackedUiReleaseRouting();
   testConcurrentTypeIds();
   testEntityLivenessAndComponents();
   testSceneCycleRejection();

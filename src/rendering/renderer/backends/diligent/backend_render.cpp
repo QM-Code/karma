@@ -1024,10 +1024,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   };
 
   static constexpr size_t kCpuForwardPlusFallbackLightCount = 64u;
-  // The direct CPU path already has room for 64 local lights in DrawConstants,
-  // so keep scenes within that budget on the stable direct path and reserve the
-  // tiled compute path for genuinely higher local-light counts.
-  static constexpr size_t kCpuForwardPlusDirectLightCount = kCpuForwardPlusFallbackLightCount;
+  // Avoid tiled setup for small light counts while retaining the full
+  // DrawConstants budget when compute culling is unavailable.
+  static constexpr size_t kCpuForwardPlusDirectLightCount = 8u;
   const bool forward_plus_compute_available =
       forward_plus_compute_pso_ && forward_plus_compute_srb_ && forward_plus_compute_cb_;
   std::array<ForwardPlusGpuLight, kCpuForwardPlusFallbackLightCount> cpu_forward_plus_lights{};

@@ -6,6 +6,45 @@ Earlier project history remains available in Git.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Karma uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-11
+
+### Added
+
+- Added a procedural water rendering lab with depth-aware color, shoreline
+  brightening and foam, animated flow, lighting, terrain, and live controls.
+- Added public UI draw-data composition for combining multiple engine UI layers
+  into one validated, correctly rebased renderer submission.
+
+### Changed
+
+- Improved PBR consistency across forward and terrain rendering. Dielectric F0
+  now follows material IOR, textureless metallic materials retain their scalar
+  metallic value, specular occlusion is applied to environment lighting, and
+  material AO no longer incorrectly darkens direct directional light.
+- Enabled Forward+ for compute-capable scenes at eight lights, while preserving
+  the higher direct-light fallback threshold on devices without compute support.
+- Unified native, application, and debug UI rendering; GPU UI buffers now grow
+  geometrically, and durable renderer state changes survive pending-frame
+  replacement.
+- Expanded the ImGui adapter with punctuation, keypad, F13-F24, gamepad
+  navigation, clipboard routing, cursor arbitration, and correct vertex/index
+  offset handling. Engine examples now use the reusable adapter instead of
+  maintaining private bridges.
+
+### Fixed
+
+- Fixed focus loss producing one extra gameplay input frame and cleared stale
+  held, pressed, and analog input state when the window loses focus.
+- Fixed stacked UI layers retaining pressed keys, buttons, or gamepad state when
+  release and neutral events were consumed by a higher layer.
+- Fixed unsafe ImGui callback translation and immediate debug-transform edits
+  not updating world transforms in the same frame.
+
+### Performance
+
+- Reduced UI submission overhead by composing compatible draw lists once per
+  frame and coalescing adjacent commands with identical render state.
+
 ## [0.7.0] - 2026-07-11
 
 ### Added

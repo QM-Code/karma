@@ -13,6 +13,7 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -991,6 +992,8 @@ struct MaterialDesc {
   float roughness = 1.0f;
   float normal_scale = 1.0f;
   NormalMapConvention normal_map_convention = NormalMapConvention::OpenGL;
+  /// Material AO strength. AO affects indirect diffuse/specular lighting;
+  /// direct local-light AO remains controlled by LocalLightingSettings.
   float occlusion_strength = 1.0f;
   float emissive_strength = 1.0f;
   /// KHR_materials_specular dielectric specular strength in [0, 1].
@@ -1003,6 +1006,8 @@ struct MaterialDesc {
   float sheen_roughness = 0.0f;
   float anisotropy = 0.0f;
   float transmission = 0.0f;
+  /// Dielectric index of refraction used for F0 and transmission. The default
+  /// 1.5 produces the conventional 0.04 dielectric reflectance.
   float ior = 1.5f;
   float thickness = 0.0f;
   float attenuation_distance = std::numeric_limits<float>::infinity();
@@ -3014,6 +3019,89 @@ inline bool validateUIDrawData(const UIDrawData& draw_data) {
       return false;
     }
   }
+  return true;
+}
+
+/// Composes ordered UI layers into one validated draw list.
+///
+/// Vertex and index references are rebased per layer, while adjacent commands
+/// with identical render state are coalesced. Empty layers are ignored. On
+/// validation failure, `output` is left unchanged.
+inline bool composeUIDrawData(
+    UIDrawData& output,
+    std::span<const UIDrawData* const> layers) {
+  std::size_t vertex_count = 0u;
+  std::size_t index_count = 0u;
+  std::size_t command_count = 0u;
+  for (const UIDrawData* layer : layers) {
+    if (layer == nullptr) {
+      continue;
+    }
+    const bool empty = layer->vertices.empty() && layer->indices.empty() &&
+                       layer->commands.empty();
+    if (empty) {
+      continue;
+    }
+    if (!validateUIDrawData(*layer) ||
+        layer->vertices.size() > kMaxUIVertices - vertex_count ||
+        layer->indices.size() > kMaxUIIndices - index_count ||
+        layer->commands.size() > kMaxUIDrawCommands - command_count) {
+      return false;
+    }
+    vertex_count += layer->vertices.size();
+    index_count += layer->indices.size();
+    command_count += layer->commands.size();
+  }
+
+  if (vertex_count == 0u) {
+    output.clear();
+    return true;
+  }
+
+  UIDrawData composed;
+  composed.vertices.reserve(vertex_count);
+  composed.indices.reserve(index_count);
+  composed.commands.reserve(command_count);
+
+  auto same_render_state = [](const UIDrawCmd& lhs, const UIDrawCmd& rhs) {
+    return lhs.scissor_enabled == rhs.scissor_enabled &&
+           lhs.scissor_x == rhs.scissor_x && lhs.scissor_y == rhs.scissor_y &&
+           lhs.scissor_w == rhs.scissor_w && lhs.scissor_h == rhs.scissor_h &&
+           lhs.texture == rhs.texture && lhs.blend_mode == rhs.blend_mode &&
+           lhs.sampler_mode == rhs.sampler_mode &&
+           lhs.texture_mode == rhs.texture_mode;
+  };
+
+  for (const UIDrawData* layer : layers) {
+    if (layer == nullptr || layer->vertices.empty()) {
+      continue;
+    }
+    const uint32_t vertex_offset =
+        static_cast<uint32_t>(composed.vertices.size());
+    const uint32_t index_offset =
+        static_cast<uint32_t>(composed.indices.size());
+    composed.vertices.insert(composed.vertices.end(), layer->vertices.begin(),
+                             layer->vertices.end());
+    for (uint32_t index : layer->indices) {
+      composed.indices.push_back(index + vertex_offset);
+    }
+    for (const UIDrawCmd& source_command : layer->commands) {
+      UIDrawCmd command = source_command;
+      command.index_offset += index_offset;
+      if (!composed.commands.empty()) {
+        UIDrawCmd& previous = composed.commands.back();
+        const bool contiguous =
+            previous.index_offset + previous.index_count == command.index_offset;
+        if (contiguous && same_render_state(previous, command)) {
+          previous.index_count += command.index_count;
+          continue;
+        }
+      }
+      composed.commands.push_back(command);
+    }
+  }
+
+  output = std::move(composed);
   return true;
 }
 

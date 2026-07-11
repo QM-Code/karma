@@ -26,12 +26,19 @@ Rendering is frame-graph resolved per camera. `EngineApp` owns an
 `AssetRegistry`, `CameraComponent::frame_graph_key` selects a named graph, and
 `RenderSystem` passes the resolved `FrameGraphDesc` into each
 `GraphicsDevice::renderLayer` call. There is no global backend graph state API.
+Threaded latest-frame replacement carries durable renderer mutations, such as
+instance retirement and environment changes, into the replacement packet so
+latency control cannot leave stale backend state.
 
 ### Shadows
 - Directional light and shadow pipeline live in the Diligent backend.
 - Shadow settings are controlled via engine config (bias, map size, pcf radius).
 - Cascaded shadow maps (CSM) are integrated in the renderer.
 - Point-light shadows are budgeted through `point_shadow_max_lights`.
+- Standard and terrain PBR apply material AO to indirect lighting, including
+  environment specular occlusion, rather than directional direct light.
+- Forward+ keeps a small direct path for up to eight local lights when compute
+  culling is available; the non-compute fallback retains its 64-light budget.
 
 ## UI / Draw Data Integration
 - `EngineApp` owns the first-party `ui::System` when native UI is enabled and
@@ -39,6 +46,10 @@ Rendering is frame-graph resolved per camera. `EngineApp` owns an
 - Optional providers live in `src/features/ui/<provider>` and translate their
   draw lists into `rendering::UIDrawData` behind factories returning
   `app::UiLayer`.
+- Non-empty UI providers are composed in visual order into one renderer
+  submission, with a no-copy single-layer path. Stateful release events are
+  broadcast down the reverse input stack even when a higher layer consumes
+  them.
 - The native runtime uses concrete private services for document/element
   lifetime, reconciliation dependencies, style/motion execution, layout,
   transients, presentation resources, retained draw assembly, accessibility,

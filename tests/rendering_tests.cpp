@@ -812,6 +812,44 @@ void testUIDrawDataValidation() {
       karma::rendering::kMaxUIVertices + 1u, 3u, 1u));
   assert(!karma::rendering::validateUIDrawCounts(
       3u, karma::rendering::kMaxUIIndices + 1u, 1u));
+
+  karma::rendering::UIDrawData first{};
+  first.vertices = {
+      {.x = 0.0f, .y = 0.0f},
+      {.x = 1.0f, .y = 0.0f},
+      {.x = 0.0f, .y = 1.0f},
+  };
+  first.indices = {0u, 1u, 2u};
+  first.commands.push_back({.index_count = 3u, .texture = 7u});
+  karma::rendering::UIDrawData second = first;
+  second.vertices[0].x = 2.0f;
+  second.vertices[1].x = 3.0f;
+  second.vertices[2].x = 2.0f;
+
+  karma::rendering::UIDrawData composed{};
+  const std::array<const karma::rendering::UIDrawData*, 2> layers{
+      &first, &second};
+  assert(karma::rendering::composeUIDrawData(composed, layers));
+  assert(composed.vertices.size() == 6u);
+  assert((composed.indices == std::vector<uint32_t>{0u, 1u, 2u, 3u, 4u, 5u}));
+  assert(composed.commands.size() == 1u);
+  assert(composed.commands.front().index_offset == 0u);
+  assert(composed.commands.front().index_count == 6u);
+  assert(karma::rendering::validateUIDrawData(composed));
+
+  second.commands.front().texture = 9u;
+  assert(karma::rendering::composeUIDrawData(composed, layers));
+  assert(composed.commands.size() == 2u);
+  assert(composed.commands[1].index_offset == 3u);
+  assert(composed.commands[1].texture == 9u);
+
+  const karma::rendering::UIDrawData before_invalid = composed;
+  second.indices.back() = 99u;
+  assert(!karma::rendering::composeUIDrawData(composed, layers));
+  assert(composed.vertices.size() == before_invalid.vertices.size());
+  assert(composed.indices == before_invalid.indices);
+  assert(composed.commands.size() == before_invalid.commands.size());
+  assert(composed.commands[1].texture == before_invalid.commands[1].texture);
 }
 
 void testCameraDataCarriesAntiAliasingSettings() {
@@ -1836,6 +1874,15 @@ void testSpecularAndNormalConventionRendererContract() {
     return std::string(std::istreambuf_iterator<char>(stream),
                        std::istreambuf_iterator<char>());
   };
+  auto count_occurrences = [](std::string_view text, std::string_view needle) {
+    std::size_t count = 0u;
+    std::size_t offset = 0u;
+    while ((offset = text.find(needle, offset)) != std::string_view::npos) {
+      ++count;
+      offset += needle.size();
+    }
+    return count;
+  };
 
   const std::string shader = read_source(
       "src/rendering/renderer/backends/diligent/backend_init.cpp");
@@ -1848,6 +1895,16 @@ void testSpecularAndNormalConventionRendererContract() {
          std::string::npos);
   assert(shader.find("float3 f0 = lerp(dielectric_f0, base_color, metallic);") !=
          std::string::npos);
+  assert(shader.find("float material_ior = max(g_MaterialParams5.x, 1.0);") !=
+         std::string::npos);
+  assert(shader.find("ior_f0 *= ior_f0;") != std::string::npos);
+  assert(shader.find("float SpecularOcclusion(") != std::string::npos);
+  assert(shader.find("SpecularOcclusion(ndotv, occlusion, perceptual_roughness)") !=
+         std::string::npos);
+  assert(shader.find("lit_directional * occlusion") == std::string::npos);
+  assert(shader.find(
+             "createSolidTextureSRV(255, 255, 255, 255, false, \"DefaultMetalRough\"") !=
+         std::string::npos);
   assert(shader.find("normal_tex.y *= normal_y_sign;") != std::string::npos);
   assert(shader.find("clearcoat_normal_tex.y *= normal_y_sign;") !=
          std::string::npos);
@@ -1858,6 +1915,10 @@ void testSpecularAndNormalConventionRendererContract() {
          std::string::npos);
   assert(forward.find("constants.material_params7[3] = mat ? "
                       "mat->specular_factor : 1.0f;") != std::string::npos);
+  assert(count_occurrences(
+             forward,
+             "(mat && std::isfinite(mat->ior)) ? std::max(mat->ior, 1.0f) : 1.5f;") ==
+         2u);
 
   const std::string materials = read_source(
       "src/rendering/renderer/backends/diligent/resources/materials.cpp");
@@ -1865,12 +1926,79 @@ void testSpecularAndNormalConventionRendererContract() {
   assert(materials.find("\"g_SpecularColorTex\"") != std::string::npos);
   assert(materials.find("record.editor_wireframe_srbs") != std::string::npos);
 
+  const std::string backend_render = read_source(
+      "src/rendering/renderer/backends/diligent/backend_render.cpp");
+  assert(backend_render.find("kCpuForwardPlusFallbackLightCount = 64u") !=
+         std::string::npos);
+  assert(backend_render.find("kCpuForwardPlusDirectLightCount = 8u") !=
+         std::string::npos);
+
   const std::string render_system = read_source(
       "src/rendering/renderer/render_system.cpp");
   assert(render_system.find("\"normal_map_convention\"") !=
          std::string::npos);
   assert(render_system.find("\"specular_factor\"") != std::string::npos);
   assert(render_system.find("\"specular_color\"") != std::string::npos);
+}
+
+void testImGuiBridgeSourceContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::array<std::string, 2> sources{
+      read_source("src/features/ui/imgui/imgui_layer.cpp"),
+      read_source("src/runtime/debug/debug_overlay.cpp"),
+  };
+  for (const std::string& source : sources) {
+    assert(source.find("ImGuiBackendFlags_RendererHasVtxOffset") !=
+           std::string::npos);
+    assert(source.find("Platform_GetClipboardTextFn") != std::string::npos);
+    assert(source.find("kGamepadDeadzone = 0.1f") != std::string::npos);
+    assert(source.find("ImGuiMod_Ctrl") != std::string::npos);
+    assert(source.find("platform::Key::KeypadEnter") != std::string::npos);
+    assert(source.find("cmd_list->IdxBuffer[cmd.IdxOffset + i]") !=
+           std::string::npos);
+    assert(source.find("cmd.VtxOffset + local_index") != std::string::npos);
+    assert(source.find("cmd.UserCallback(cmd_list") == std::string::npos);
+    assert(source.find("if (io.WantCaptureMouse)") != std::string::npos);
+  }
+  assert(sources[1].find("ImGuiKey_GamepadFaceDown") != std::string::npos);
+  assert(sources[1].find("ImGuiConfigFlags_NavEnableGamepad") !=
+         std::string::npos);
+
+  const std::array<std::string, 2> examples{
+      read_source("examples/gameplay/tank.cpp"),
+      read_source("examples/physics/collision_events.cpp"),
+  };
+  for (const std::string& source : examples) {
+    assert(source.find("ui::imgui::createUiLayer") != std::string::npos);
+    assert(source.find("cmd.UserCallback") == std::string::npos);
+  }
+}
+
+void testRenderSchedulerDurableCommandContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  std::ifstream stream(root / "src/rendering/renderer/device.cpp");
+  assert(stream);
+  const std::string source{std::istreambuf_iterator<char>(stream),
+                           std::istreambuf_iterator<char>()};
+  assert(source.find("void recordDurableFrameCommand(RenderCommand command)") !=
+         std::string::npos);
+  assert(source.find("recordDurableFrameCommandIfActive") !=
+         std::string::npos);
+  assert(source.find("pending_frame_->durable_commands.begin()") !=
+         std::string::npos);
+  assert(source.find("scheduler_->recordDurableFrameCommand([instance]") !=
+         std::string::npos);
+  assert(source.find("backend.setEnvironmentMap(path, intensity, draw_skybox)") !=
+         std::string::npos);
 }
 
 void testRuntimeLightmapPbrContract() {
@@ -2031,6 +2159,10 @@ void testTerrainPbrLightingParityContract() {
   assert(source.find("g_IrradianceTex.Sample") != std::string::npos);
   assert(source.find("g_PrefilterTex.SampleLevel") != std::string::npos);
   assert(source.find("g_BRDFLUT.Sample") != std::string::npos);
+  assert(source.find("float SpecularOcclusion(") != std::string::npos);
+  assert(source.find("SpecularOcclusion(ndotv, occlusion, roughness)") !=
+         std::string::npos);
+  assert(source.find("glossy_off) * occlusion;") == std::string::npos);
   assert(source.find("editor_view_mode == 2u") != std::string::npos);
   assert(source.find("editor_view_mode == 3u") != std::string::npos);
   assert(source.find("float spec_power = lerp") == std::string::npos);
@@ -4158,6 +4290,8 @@ int main() {
   testHdrSceneColorPipelineContract();
   testNormalMapMinificationFilteringContract();
   testSpecularAndNormalConventionRendererContract();
+  testImGuiBridgeSourceContract();
+  testRenderSchedulerDurableCommandContract();
   testRuntimeLightmapPbrContract();
   testTerrainPbrLightingParityContract();
   testPerRenderTargetTemporalHistoryContract();

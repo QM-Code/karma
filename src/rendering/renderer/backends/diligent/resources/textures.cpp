@@ -184,6 +184,73 @@ bool DiligentBackend::uploadTexture(rendering::TextureId texture,
   return true;
 }
 
+bool DiligentBackend::updateTextureRegion(
+    rendering::TextureId texture,
+    const rendering::TextureRegionUploadData& upload) {
+  if (!device_ || !context_ || texture == rendering::kInvalidTexture) {
+    return false;
+  }
+  auto it = textures_.find(texture);
+  if (it == textures_.end() || !it->second.texture ||
+      !rendering::validateTextureRegionUpload(it->second.desc, upload)) {
+    return false;
+  }
+
+  std::vector<std::uint8_t> expanded_rgba;
+  Diligent::TextureSubResData subresource{};
+  if (upload.format == rendering::TextureFormat::RGB8) {
+    const std::size_t source_minimum_stride =
+        rendering::textureUploadMinimumRowStride(upload.format, upload.width);
+    const std::size_t source_stride =
+        upload.row_stride == 0u ? source_minimum_stride : upload.row_stride;
+    const std::size_t output_stride =
+        static_cast<std::size_t>(upload.width) * 4u;
+    expanded_rgba.resize(output_stride * static_cast<std::size_t>(upload.height));
+    for (int row = 0; row < upload.height; ++row) {
+      const std::uint8_t* source = upload.bytes.data() +
+          static_cast<std::size_t>(row) * source_stride;
+      std::uint8_t* destination = expanded_rgba.data() +
+          static_cast<std::size_t>(row) * output_stride;
+      for (int column = 0; column < upload.width; ++column) {
+        const std::size_t source_index = static_cast<std::size_t>(column) * 3u;
+        const std::size_t destination_index = static_cast<std::size_t>(column) * 4u;
+        destination[destination_index + 0u] = source[source_index + 0u];
+        destination[destination_index + 1u] = source[source_index + 1u];
+        destination[destination_index + 2u] = source[source_index + 2u];
+        destination[destination_index + 3u] = 255u;
+      }
+    }
+    subresource.pData = expanded_rgba.data();
+    subresource.Stride = static_cast<Diligent::Uint64>(output_stride);
+  } else {
+    subresource.pData = upload.bytes.data();
+    subresource.Stride = static_cast<Diligent::Uint64>(
+        upload.row_stride == 0u
+            ? rendering::textureUploadMinimumRowStride(upload.format,
+                                                        upload.width)
+            : upload.row_stride);
+  }
+  Diligent::Box box{};
+  box.MinX = static_cast<Diligent::Uint32>(upload.x);
+  box.MaxX = static_cast<Diligent::Uint32>(upload.x + upload.width);
+  box.MinY = static_cast<Diligent::Uint32>(upload.y);
+  box.MaxY = static_cast<Diligent::Uint32>(upload.y + upload.height);
+  box.MinZ = 0u;
+  box.MaxZ = 1u;
+  context_->UpdateTexture(
+      it->second.texture,
+      static_cast<Diligent::Uint32>(upload.mip_level),
+      static_cast<Diligent::Uint32>(upload.array_layer), box, subresource,
+      Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION,
+      Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+  if (it->second.srv && it->second.desc.generate_mips) {
+    context_->GenerateMips(it->second.srv);
+  }
+  directional_shadow_scene_dirty_ = true;
+  point_shadow_scene_dirty_ = true;
+  return true;
+}
+
 void DiligentBackend::destroyTexture(rendering::TextureId texture) {
   auto texture_it = textures_.find(texture);
   if (texture_it == textures_.end()) {

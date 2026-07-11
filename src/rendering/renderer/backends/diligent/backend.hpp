@@ -147,6 +147,9 @@ class DiligentBackend final : public Backend {
   bool supportsTextureFormat(rendering::TextureFormat format) const override;
   bool uploadTexture(rendering::TextureId texture,
                      const rendering::TextureUploadData& upload) override;
+  bool updateTextureRegion(
+      rendering::TextureId texture,
+      const rendering::TextureRegionUploadData& upload) override;
   void destroyTexture(rendering::TextureId texture) override;
 
   rendering::RenderTargetId createRenderTarget(const rendering::RenderTargetDesc& desc) override;
@@ -186,6 +189,8 @@ class DiligentBackend final : public Backend {
                 const math::Color& color, bool depth_test, float thickness) override;
 
   unsigned int getRenderTargetTextureId(rendering::RenderTargetId target) const override;
+  std::optional<rendering::RenderTargetDesc> getRenderTargetDesc(
+      rendering::RenderTargetId target) const override;
 
   void setCamera(const rendering::CameraData& camera) override;
   void setCameraActive(bool active) override;
@@ -1149,26 +1154,13 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> point_shadow_map_srv_;
   std::array<Diligent::RefCntAutoPtr<Diligent::ITextureView>, kPointShadowMatrixCount>
       point_shadow_map_dsv_faces_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_scissor_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_scissor_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_premultiplied_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_color_scissor_premultiplied_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_premultiplied_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> ui_pso_texture_scissor_premultiplied_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_scissor_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_scissor_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_premultiplied_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_color_scissor_premultiplied_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_premultiplied_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> ui_srb_texture_scissor_premultiplied_;
-  Diligent::IShaderResourceVariable* ui_texture_var_ = nullptr;
-  Diligent::IShaderResourceVariable* ui_texture_scissor_var_ = nullptr;
-  Diligent::IShaderResourceVariable* ui_texture_premultiplied_var_ = nullptr;
-  Diligent::IShaderResourceVariable* ui_texture_scissor_premultiplied_var_ = nullptr;
+  struct UiPipelineResources {
+    Diligent::RefCntAutoPtr<Diligent::IPipelineState> pso;
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> srb;
+    Diligent::IShaderResourceVariable* texture_var = nullptr;
+  };
+  // blend mode x scissor state x (solid, color linear/nearest, mask linear/nearest)
+  std::array<UiPipelineResources, 20> ui_pipelines_{};
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_vb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_ib_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> ui_cb_;

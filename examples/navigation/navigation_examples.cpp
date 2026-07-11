@@ -17,7 +17,7 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 #include "karma/karma.h"
 #include "karma/rendering.h"
 #include "karma/components.h"

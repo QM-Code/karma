@@ -27,6 +27,7 @@ Handwritten guides live beside this generated reference:
 - `docs/ARCHITECTURE.md`
 - `docs/ENGINE_USAGE.md#post-process-profiles`
 - `docs/RENDERING_STARTUP_OPTIMIZATION.md`
+- `docs/NATIVE_UI.md`
 - `docs/NAVIGATION.md`
 - `docs/ANIMATION_V2.md`
 - `docs/PARTICLE_SYSTEM.md`

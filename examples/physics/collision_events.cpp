@@ -151,8 +151,17 @@ class CollisionUiLayer final : public app::UiLayer {
     io.BackendRendererName = "karma_ui_draw";
   }
 
-  void onEvent(const platform::Event& event) override {
+  app::UiEventDisposition onEvent(const platform::Event& event) override {
     ImGuiIO& io = ImGui::GetIO();
+    const bool keyboard_event = event.type == platform::EventType::KeyDown ||
+                                event.type == platform::EventType::KeyUp ||
+                                event.type == platform::EventType::TextInput;
+    const bool pointer_event = event.type == platform::EventType::MouseButtonDown ||
+                               event.type == platform::EventType::MouseButtonUp ||
+                               event.type == platform::EventType::MouseMove ||
+                               event.type == platform::EventType::MouseScroll;
+    const bool captured = (keyboard_event && (io.WantCaptureKeyboard || io.WantTextInput)) ||
+                          (pointer_event && io.WantCaptureMouse);
     applyModifierState(io, event.mods);
     switch (event.type) {
       case platform::EventType::KeyDown:
@@ -188,15 +197,25 @@ class CollisionUiLayer final : public app::UiLayer {
       default:
         break;
     }
+    return captured ? app::UiEventDisposition::Consumed
+                    : app::UiEventDisposition::Ignored;
+  }
+
+  [[nodiscard]] app::UiInputCapture inputCapture() const override {
+    const ImGuiIO& io = ImGui::GetIO();
+    return {
+        .keyboard = io.WantCaptureKeyboard || io.WantTextInput,
+        .pointer = io.WantCaptureMouse,
+    };
   }
 
   void onFrame(app::UIContext& ctx) override {
     pending_ctx_ = &ctx;
     ImGuiIO& io = ImGui::GetIO();
     const auto frame = ctx.frame();
-    io.DisplaySize = ImVec2(static_cast<float>(frame.viewport_w),
-                            static_cast<float>(frame.viewport_h));
-    io.DisplayFramebufferScale = ImVec2(frame.dpi_scale, frame.dpi_scale);
+    io.DisplaySize = ImVec2(static_cast<float>(frame.logical_width),
+                            static_cast<float>(frame.logical_height));
+    io.DisplayFramebufferScale = ImVec2(frame.scale_x, frame.scale_y);
     io.DeltaTime = frame.dt > 0.0f ? frame.dt : (1.0f / 60.0f);
 
     if (!font_texture_) {
@@ -296,8 +315,8 @@ class CollisionUiLayer final : public app::UiLayer {
       for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
         const ImDrawVert& v = cmd_list->VtxBuffer[i];
         rendering::UIVertex out_v{};
-        out_v.x = v.pos.x;
-        out_v.y = v.pos.y;
+        out_v.x = (v.pos.x - draw_data->DisplayPos.x) * draw_data->FramebufferScale.x;
+        out_v.y = (v.pos.y - draw_data->DisplayPos.y) * draw_data->FramebufferScale.y;
         out_v.u = v.uv.x;
         out_v.v = v.uv.y;
         out_v.rgba = v.col;
@@ -333,6 +352,9 @@ class CollisionUiLayer final : public app::UiLayer {
         out_cmd.scissor_w = static_cast<int>(clip.z - clip.x);
         out_cmd.scissor_h = static_cast<int>(clip.w - clip.y);
         out_cmd.texture = fromImTextureId(cmd.GetTexID());
+        out_cmd.blend_mode = rendering::UIBlendMode::StraightAlpha;
+        out_cmd.sampler_mode = rendering::UISamplerMode::Linear;
+        out_cmd.texture_mode = rendering::UITextureMode::Color;
         out.commands.push_back(out_cmd);
         global_idx_offset += cmd.ElemCount;
       }

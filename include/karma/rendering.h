@@ -181,6 +181,19 @@ struct TextureUploadData {
   std::vector<std::uint8_t> bytes;
 };
 
+/// A rectangular update for one mip of an existing 2D texture.
+struct TextureRegionUploadData {
+  TextureFormat format = TextureFormat::RGBA8;
+  uint32_t mip_level = 0u;
+  uint32_t array_layer = 0u;
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+  std::size_t row_stride = 0u;
+  std::vector<std::uint8_t> bytes;
+};
+
 /// Returns true for GPU block-compressed upload formats.
 inline constexpr bool isBlockCompressedTextureFormat(TextureFormat format) {
   return format == TextureFormat::BC7_RGBA_UNORM ||
@@ -326,6 +339,54 @@ inline bool validateTextureUpload(const TextureDesc& desc,
     }
   }
   return !desc.generate_mips || has_base_mip;
+}
+
+/// Validates a rectangular upload against its destination texture.
+inline bool validateTextureRegionUpload(
+    const TextureDesc& desc,
+    const TextureRegionUploadData& upload) {
+  if (!desc.valid() || upload.format != desc.format || upload.bytes.empty() ||
+      upload.array_layer != 0u || upload.x < 0 || upload.y < 0 ||
+      upload.width <= 0 || upload.height <= 0 ||
+      isBlockCompressedTextureFormat(upload.format) ||
+      upload.format == TextureFormat::KTX2_BASIS_UASTC) {
+    return false;
+  }
+  uint32_t full_mip_count = 1u;
+  uint32_t mip_width = static_cast<uint32_t>(desc.width);
+  uint32_t mip_height = static_cast<uint32_t>(desc.height);
+  while (mip_width > 1u || mip_height > 1u) {
+    mip_width = std::max(mip_width / 2u, 1u);
+    mip_height = std::max(mip_height / 2u, 1u);
+    ++full_mip_count;
+  }
+  const uint32_t available_mips =
+      desc.generate_mips ? full_mip_count : desc.mip_levels;
+  if (upload.mip_level >= available_mips) return false;
+  mip_width = static_cast<uint32_t>(desc.width);
+  mip_height = static_cast<uint32_t>(desc.height);
+  for (uint32_t level = 0u; level < upload.mip_level; ++level) {
+    mip_width = std::max(mip_width / 2u, 1u);
+    mip_height = std::max(mip_height / 2u, 1u);
+  }
+  const uint64_t maximum_x = static_cast<uint64_t>(upload.x) +
+                             static_cast<uint64_t>(upload.width);
+  const uint64_t maximum_y = static_cast<uint64_t>(upload.y) +
+                             static_cast<uint64_t>(upload.height);
+  if (maximum_x > mip_width || maximum_y > mip_height) return false;
+  const std::size_t minimum_stride =
+      textureUploadMinimumRowStride(upload.format, upload.width);
+  const std::size_t stride =
+      upload.row_stride == 0u ? minimum_stride : upload.row_stride;
+  if (minimum_stride == 0u || stride < minimum_stride) return false;
+  if (static_cast<std::size_t>(upload.height) > 1u &&
+      stride > (std::numeric_limits<std::size_t>::max() - minimum_stride) /
+                   (static_cast<std::size_t>(upload.height) - 1u)) {
+    return false;
+  }
+  const std::size_t required =
+      (static_cast<std::size_t>(upload.height) - 1u) * stride + minimum_stride;
+  return upload.bytes.size() >= required;
 }
 
 /// Texture creation plus prepared upload payload for batched renderer uploads.
@@ -2818,6 +2879,51 @@ namespace karma::rendering {
 /// Renderer texture handle used by UI draw commands.
 using UITextureHandle = uint32_t;
 
+/// Alpha convention used by one UI draw command.
+enum class UIBlendMode : uint8_t {
+  StraightAlpha,
+  PremultipliedAlpha,
+};
+
+/// Texture filtering used by one UI draw command.
+enum class UISamplerMode : uint8_t {
+  Linear,
+  Nearest,
+};
+
+/// Interpretation of a sampled UI texture.
+enum class UITextureMode : uint8_t {
+  Color,
+  AlphaMask,
+};
+
+inline constexpr bool isUIBlendModeValid(UIBlendMode mode) {
+  switch (mode) {
+    case UIBlendMode::StraightAlpha:
+    case UIBlendMode::PremultipliedAlpha:
+      return true;
+  }
+  return false;
+}
+
+inline constexpr bool isUISamplerModeValid(UISamplerMode mode) {
+  switch (mode) {
+    case UISamplerMode::Linear:
+    case UISamplerMode::Nearest:
+      return true;
+  }
+  return false;
+}
+
+inline constexpr bool isUITextureModeValid(UITextureMode mode) {
+  switch (mode) {
+    case UITextureMode::Color:
+    case UITextureMode::AlphaMask:
+      return true;
+  }
+  return false;
+}
+
 /// \ingroup karma_rendering
 /// One UI vertex in screen-space pixels.
 struct UIVertex {
@@ -2839,6 +2945,9 @@ struct UIDrawCmd {
   int scissor_w = 0;
   int scissor_h = 0;
   UITextureHandle texture = 0;
+  UIBlendMode blend_mode = UIBlendMode::StraightAlpha;
+  UISamplerMode sampler_mode = UISamplerMode::Linear;
+  UITextureMode texture_mode = UITextureMode::Color;
 };
 
 /// \ingroup karma_rendering
@@ -2847,15 +2956,12 @@ struct UIDrawData {
   std::vector<UIVertex> vertices;
   std::vector<uint32_t> indices;
   std::vector<UIDrawCmd> commands;
-  /// True when vertex colors and sampled textures already store RGB multiplied by alpha.
-  bool premultiplied_alpha = false;
 
-  /// Clears vertices, indices, commands, and alpha mode for a new frame.
+  /// Clears vertices, indices, and commands for a new frame.
   void clear() {
     vertices.clear();
     indices.clear();
     commands.clear();
-    premultiplied_alpha = false;
   }
 };
 
@@ -2899,6 +3005,12 @@ inline bool validateUIDrawData(const UIDrawData& draw_data) {
     }
     if (command.scissor_enabled &&
         (command.scissor_w <= 0 || command.scissor_h <= 0)) {
+      return false;
+    }
+    if (!isUIBlendModeValid(command.blend_mode) ||
+        !isUISamplerModeValid(command.sampler_mode) ||
+        !isUITextureModeValid(command.texture_mode) ||
+        (command.texture_mode == UITextureMode::AlphaMask && command.texture == 0)) {
       return false;
     }
   }
@@ -3024,6 +3136,9 @@ class GraphicsDevice {
   bool supportsTextureFormat(TextureFormat format) const;
   /// Uploads prepared texture subresources when the backend supports the format.
   bool uploadTexture(TextureId texture, const TextureUploadData& upload);
+  /// Updates one rectangular region without re-uploading the full texture.
+  bool updateTextureRegion(TextureId texture,
+                           const TextureRegionUploadData& upload);
   /// Creates and uploads textures in one render-thread invocation.
   std::vector<TextureUploadBatchResult> createAndUploadTextures(
       std::vector<TextureUploadBatchRequest> requests);
@@ -3093,6 +3208,9 @@ class GraphicsDevice {
 
   /// Returns a backend texture id for UI/provider interop when supported.
   unsigned int getRenderTargetTextureId(RenderTargetId target) const;
+  /// Returns the retained dimensions of a non-default render target.
+  [[nodiscard]] std::optional<RenderTargetDesc> getRenderTargetDesc(
+      RenderTargetId target) const;
 
   /// Sets active camera data.
   void setCamera(const CameraData& camera);

@@ -22,7 +22,7 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 #include "karma/karma.h"
 #include "karma/rendering.h"
 #include "karma/navigation.h"

@@ -1,13 +1,19 @@
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <vector>
 
+#include "demo_asset_paths.h"
 #include "physics_example_common.h"
-#include "karma/ui.h"
+#if defined(KARMA_ENABLE_IMGUI)
+#include "karma/ui_imgui.h"
 
 #include <imgui.h>
+#endif
 
 namespace karma::demo::physics_examples {
 
@@ -15,6 +21,8 @@ namespace {
 
 constexpr std::array<const char*, 8> kConstraintNames = {
     "Fixed", "Point", "Distance", "Hinge", "Slider", "Cone", "Swing twist", "Six DOF"};
+constexpr std::array<const char*, 8> kConstraintValues = {
+    "fixed", "point", "distance", "hinge", "slider", "cone", "swing-twist", "six-dof"};
 
 components::PhysicsConstraintKind kindFromIndex(int index) {
   switch (index) {
@@ -58,9 +66,10 @@ struct ConstraintState {
   std::string selected_name;
 };
 
-class ConstraintUi final {
+#if defined(KARMA_ENABLE_IMGUI)
+class ConstraintImGui final {
  public:
-  explicit ConstraintUi(std::shared_ptr<ConstraintState> state) : state_(std::move(state)) {}
+  explicit ConstraintImGui(std::shared_ptr<ConstraintState> state) : state_(std::move(state)) {}
 
   void draw(app::UIContext&) {
     ImGui::SetNextWindowPos(ImVec2(18.0f, 18.0f), ImGuiCond_FirstUseEver);
@@ -113,6 +122,7 @@ class ConstraintUi final {
  private:
   std::shared_ptr<ConstraintState> state_;
 };
+#endif
 
 struct Pair {
   world::Entity anchor{};
@@ -130,10 +140,16 @@ class ConstraintLabGame final : public app::GameInterface {
     bindFlyCameraControls(*input);
     addDefaultLighting(*world, assets);
     createFlyCamera(*world, camera_, {0.0f, 8.0f, 24.0f}, 3.14159f, -0.32f);
+#if defined(KARMA_ENABLE_NATIVE_UI)
+    openNativeControls();
+#endif
     resetScene();
   }
 
   void onFixedUpdate(float) override {
+#if defined(KARMA_ENABLE_NATIVE_UI)
+    pullNativeControlValues();
+#endif
     physics->setGravity(-state_->gravity);
     applySelectedSettings();
     if (state_->impulse_selected) {
@@ -149,17 +165,120 @@ class ConstraintLabGame final : public app::GameInterface {
     }
     updateFlyCamera(*world, *input, camera_, dt);
     updateStats();
+#if defined(KARMA_ENABLE_NATIVE_UI)
+    publishNativeStats();
+#endif
     if (graphics) {
       drawScene();
     }
   }
 
   void onShutdown() override {
+#if defined(KARMA_ENABLE_NATIVE_UI)
+    closeNativeControls();
+#endif
     destroyEntities(*world, entities_);
     pairs_.clear();
   }
 
  private:
+#if defined(KARMA_ENABLE_NATIVE_UI)
+  void openNativeControls() {
+    if (ui == nullptr) return;
+    const auto opened = ui->open("ui/pilots/constraint-lab", {.layer = 100});
+    controls_ = opened.document;
+    if (!controls_) return;
+
+    ui->setMany(
+        controls_,
+        {{"controls.enabled", state_->enabled},
+         {"controls.local_space", state_->local_space},
+         {"controls.gravity", state_->gravity},
+         {"controls.impulse", state_->impulse},
+         {"controls.constraint", kConstraintValues[state_->selected]},
+         {"controls.priority", state_->priority},
+         {"controls.velocity_steps", state_->velocity_solver_steps},
+         {"controls.position_steps", state_->position_solver_steps},
+         {"controls.min_distance", state_->min_distance},
+         {"controls.max_distance", state_->max_distance},
+         {"controls.spring_frequency", state_->spring_frequency},
+         {"controls.spring_damping", state_->spring_damping},
+         {"stats.name", kConstraintNames[state_->selected]},
+         {"stats.position", "Body: --"},
+         {"stats.velocity", "Velocity: --"}});
+
+    reset_listener_ = ui->onAction(controls_, "reset", [state = state_](const ui::ActionEvent&) {
+      state->reset_requested = true;
+    });
+    impulse_listener_ =
+        ui->onAction(controls_, "impulse", [state = state_](const ui::ActionEvent&) {
+          state->impulse_selected = true;
+        });
+  }
+
+  void closeNativeControls() {
+    if (ui == nullptr || !controls_) return;
+    ui->removeListener(reset_listener_);
+    ui->removeListener(impulse_listener_);
+    ui->close(controls_);
+    controls_ = {};
+    reset_listener_ = {};
+    impulse_listener_ = {};
+  }
+
+  void pullNativeControlValues() {
+    if (ui == nullptr || !controls_) return;
+    auto number = [&](std::string_view path, auto& target) {
+      if (const auto value = ui->get(controls_, path)) {
+        if (const auto numeric = value->asNumber()) {
+          target = static_cast<std::remove_reference_t<decltype(target)>>(*numeric);
+        }
+      }
+    };
+    auto boolean = [&](std::string_view path, bool& target) {
+      if (const auto value = ui->get(controls_, path)) {
+        if (const auto enabled = value->asBoolean()) target = *enabled;
+      }
+    };
+
+    boolean("controls.enabled", state_->enabled);
+    boolean("controls.local_space", state_->local_space);
+    number("controls.gravity", state_->gravity);
+    number("controls.impulse", state_->impulse);
+    number("controls.priority", state_->priority);
+    number("controls.velocity_steps", state_->velocity_solver_steps);
+    number("controls.position_steps", state_->position_solver_steps);
+    number("controls.min_distance", state_->min_distance);
+    number("controls.max_distance", state_->max_distance);
+    number("controls.spring_frequency", state_->spring_frequency);
+    number("controls.spring_damping", state_->spring_damping);
+    if (const auto value = ui->get(controls_, "controls.constraint")) {
+      if (const std::string* selected = value->asString()) {
+        const auto found = std::find(kConstraintValues.begin(), kConstraintValues.end(), *selected);
+        if (found != kConstraintValues.end()) {
+          state_->selected = static_cast<int>(found - kConstraintValues.begin());
+        }
+      }
+    }
+  }
+
+  static std::string vectorText(const char* label, const math::Vec3& value) {
+    std::array<char, 128> text{};
+    std::snprintf(text.data(), text.size(), "%s: %.2f  %.2f  %.2f", label,
+                  value.x, value.y, value.z);
+    return text.data();
+  }
+
+  void publishNativeStats() {
+    if (ui == nullptr || !controls_) return;
+    ui->setMany(
+        controls_,
+        {{"stats.name", state_->selected_name},
+         {"stats.position", vectorText("Body", state_->selected_position)},
+         {"stats.velocity", vectorText("Velocity", state_->selected_velocity)}});
+  }
+#endif
+
   void resetScene() {
     destroyEntities(*world, entities_);
     pairs_.clear();
@@ -375,6 +494,11 @@ class ConstraintLabGame final : public app::GameInterface {
   CameraRig camera_{};
   std::vector<world::Entity> entities_;
   std::vector<Pair> pairs_;
+#if defined(KARMA_ENABLE_NATIVE_UI)
+  ui::DocumentHandle controls_{};
+  ui::ListenerHandle reset_listener_{};
+  ui::ListenerHandle impulse_listener_{};
+#endif
 };
 
 }  // namespace
@@ -385,9 +509,11 @@ int main() {
   karma::app::EngineApp engine;
   auto state = std::make_shared<karma::demo::physics_examples::ConstraintState>();
   karma::demo::physics_examples::ConstraintLabGame game(state);
-  auto ui = std::make_shared<karma::demo::physics_examples::ConstraintUi>(state);
+#if defined(KARMA_ENABLE_IMGUI) && !defined(KARMA_ENABLE_NATIVE_UI)
+  auto imgui = std::make_shared<karma::demo::physics_examples::ConstraintImGui>(state);
   engine.setUi(karma::ui::imgui::createUiLayer(
-      [ui](karma::app::UIContext& ctx) { ui->draw(ctx); }));
+      [imgui](karma::app::UIContext& ctx) { imgui->draw(ctx); }));
+#endif
 
   karma::app::EngineConfig config;
   config.window.title = "Physics Constraint Lab";
@@ -398,6 +524,10 @@ int main() {
   config.generate_mipmaps = true;
   config.shadow_map_size = 2048;
   config.shadow_pcf_radius = 1;
+#if defined(KARMA_ENABLE_NATIVE_UI)
+  config.startup_asset_packages.push_back(karma::demo::resolveExamplePath(
+      "examples/assets/ui/constraint_lab"));
+#endif
 
   engine.start(game, config);
   while (engine.isRunning()) {

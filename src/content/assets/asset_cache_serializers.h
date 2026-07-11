@@ -47,4 +47,19 @@ std::optional<world::HumanoidRig> deserializeHumanoidRig(
     const std::vector<uint8_t>& bytes,
     std::string* diagnostic);
 
+std::vector<uint8_t> serializeUiDocument(const UiDocumentAsset& document);
+std::optional<UiDocumentAsset> deserializeUiDocument(
+    const std::vector<uint8_t>& bytes,
+    std::string* diagnostic);
+std::vector<uint8_t> serializeUiTheme(const UiThemeAsset& theme);
+std::optional<UiThemeAsset> deserializeUiTheme(
+    const std::vector<uint8_t>& bytes,
+    std::string* diagnostic);
+std::vector<uint8_t> serializeFont(const FontAsset& font);
+std::optional<FontAsset> deserializeFont(const std::vector<uint8_t>& bytes,
+                                         std::string* diagnostic);
+std::vector<uint8_t> serializeSvg(const SvgAsset& svg);
+std::optional<SvgAsset> deserializeSvg(const std::vector<uint8_t>& bytes,
+                                       std::string* diagnostic);
+
 }  // namespace karma::assets::detail

@@ -1,0 +1,811 @@
+{
+  format: 'karma.ui.document',
+  version: 2,
+
+  canvas: {
+    reference_size: [1600, 900],
+    scale_mode: 'fit',
+    safe_area: 'platform',
+  },
+
+  themes: [
+    {file: 'showcase.kstyle.json5', kind: 'theme'},
+  ],
+
+  root: {
+    type: 'body',
+    id: 'showcase-root',
+    styles: ['screen'],
+    semantics: {
+      role: 'document',
+      label: 'Karma native UI feature showcase',
+      description: 'Interactive retained-mode UI demonstration',
+    },
+    children: [
+      {
+        type: 'panel',
+        styles: ['top-bar'],
+        children: [
+          {
+            type: 'svg',
+            styles: ['brand-icon'],
+            props: {src: {asset: 'ui/showcase/icon', kind: 'svg'}},
+            semantics: {label: 'Karma forge mark'},
+          },
+          {
+            type: 'panel',
+            styles: ['title-stack'],
+            children: [
+              {
+                type: 'text',
+                styles: ['title'],
+                props: {text: {loc: 'showcase.title'}},
+              },
+              {
+                type: 'text',
+                styles: ['subtitle'],
+                props: {text: {loc: 'showcase.subtitle'}},
+              },
+            ],
+          },
+          {
+            type: 'text',
+            styles: ['header-greeting'],
+            props: {
+              text: {
+                loc: 'showcase.greeting',
+                args: {name: {bind: 'profile.name'}},
+              },
+            },
+          },
+          {type: 'spacer', styles: ['header-spacer']},
+          {
+            type: 'img',
+            id: 'dynamic-preview',
+            styles: ['dynamic-preview'],
+            props: {sampling: 'nearest', object_fit: 'fill'},
+            semantics: {
+              role: 'image',
+              label: 'System-owned animated dynamic image',
+            },
+          },
+          {
+            type: 'button',
+            id: 'help-anchor',
+            styles: ['header-button'],
+            props: {text: 'Hover for help'},
+          },
+          {
+            type: 'tooltip',
+            id: 'help-tooltip',
+            props: {
+              anchor: 'help-anchor',
+              placement: 'bottom',
+              delay_ms: 300,
+              text: 'Mouse, keyboard, and gamepad are active. Tab moves focus.',
+            },
+            semantics: {role: 'tooltip'},
+          },
+          {
+            type: 'button',
+            id: 'menu-anchor',
+            styles: ['header-button'],
+            props: {text: 'Actions v'},
+          },
+          {
+            type: 'menu',
+            id: 'showcase-menu',
+            styles: ['action-menu'],
+            props: {
+              anchor: 'menu-anchor',
+              placement: 'bottom',
+              open: {bind: 'menu_open', mode: 'two_way'},
+            },
+            on: {cancel: 'menu-cancel'},
+            children: [
+              {
+                type: 'menu-item',
+                props: {text: 'Save layout'},
+                on: {click: 'menu-save'},
+              },
+              {
+                type: 'menu-item',
+                props: {text: 'Reset inspector'},
+                on: {click: 'menu-reset'},
+              },
+            ],
+          },
+          {
+            type: 'button',
+            styles: ['header-button'],
+            props: {text: 'Reopen Window'},
+            on: {click: 'reopen-window'},
+          },
+          {
+            type: 'panel',
+            styles: ['header-toggle-row'],
+            children: [
+              {type: 'text', styles: ['header-label'], props: {text: 'RTL'}},
+              {
+                type: 'toggle',
+                id: 'locale-toggle',
+                props: {value: {bind: 'locale_rtl', mode: 'two_way'}},
+                on: {change: 'locale-changed'},
+                semantics: {
+                  label: 'Toggle Arabic locale and right-to-left shaping',
+                },
+              },
+            ],
+          },
+        ],
+      },
+
+      {
+        type: 'panel',
+        styles: ['main-shell'],
+        children: [
+          {
+            type: 'tabs',
+            id: 'feature-tabs',
+            styles: ['tabs-row'],
+            props: {value: {bind: 'active_tab', mode: 'two_way'}},
+            on: {change: 'tab-changed'},
+            semantics: {label: 'Showcase feature pages'},
+            children: [
+              {
+                type: 'tab',
+                styles: ['feature-tab'],
+                props: {value: 'controls', text: 'Controls & Binding'},
+              },
+              {
+                type: 'tab',
+                styles: ['feature-tab'],
+                props: {value: 'data', text: 'Trees & Virtual Data'},
+              },
+              {
+                type: 'tab',
+                styles: ['feature-tab'],
+                props: {value: 'layout', text: 'Layout & Nine-Slice'},
+              },
+              {type: 'spacer', styles: ['tab-spacer']},
+              {
+                type: 'button',
+                styles: ['quit-button'],
+                props: {text: 'Quit'},
+                on: {click: 'quit'},
+              },
+            ],
+          },
+          {type: 'separator', styles: ['rule-horizontal']},
+
+          {
+            type: 'panel',
+            styles: ['content-host'],
+            children: [
+              {
+                type: 'panel',
+                styles: ['content-page', 'controls-grid'],
+                when: {expr: "active_tab == 'controls'"},
+                children: [
+                  {
+                    type: 'div',
+                    styles: ['card'],
+                    children: [
+                      {
+                        type: 'text',
+                        styles: ['section-title'],
+                        props: {text: 'Reactive controls'},
+                      },
+                      {
+                        type: 'button',
+                        styles: ['primary', 'attention', 'wide-button'],
+                        props: {text: 'Animated primary action'},
+                        on: {click: 'control-change'},
+                      },
+                      {
+                        type: 'button',
+                        styles: ['wide-button'],
+                        props: {text: 'Disabled action', disabled: true},
+                      },
+                      {
+                        type: 'panel',
+                        styles: ['form-row'],
+                        children: [
+                          {
+                            type: 'text',
+                            styles: ['form-label'],
+                            props: {text: 'VSync toggle'},
+                          },
+                          {
+                            type: 'toggle',
+                            props: {
+                              value: {bind: 'settings.vsync', mode: 'two_way'},
+                            },
+                            on: {change: 'control-change'},
+                            semantics: {label: 'Vertical synchronization'},
+                          },
+                        ],
+                      },
+                      {
+                        type: 'panel',
+                        styles: ['form-row'],
+                        children: [
+                          {
+                            type: 'text',
+                            styles: ['form-label'],
+                            props: {text: 'Volume slider'},
+                          },
+                          {
+                            type: 'slider',
+                            props: {
+                              value: {bind: 'settings.volume', mode: 'two_way'},
+                              min: 0,
+                              max: 1,
+                              step: 0.05,
+                            },
+                            on: {change: 'control-change'},
+                            semantics: {label: 'Master volume'},
+                          },
+                        ],
+                      },
+                      {
+                        type: 'panel',
+                        styles: ['progress-stack'],
+                        children: [
+                          {
+                            type: 'text',
+                            styles: ['small-caption'],
+                            props: {text: 'Live model-driven progress'},
+                          },
+                          {
+                            type: 'progress',
+                            props: {
+                              value: {bind: 'progress'},
+                              min: 0,
+                              max: 1,
+                            },
+                            semantics: {label: 'Animated loading progress'},
+                          },
+                        ],
+                      },
+                      {
+                        type: 'panel',
+                        styles: ['vertical-control-row'],
+                        children: [
+                          {
+                            type: 'slider',
+                            styles: ['vertical-slider'],
+                            props: {
+                              orientation: 'vertical',
+                              value: {bind: 'settings.gamma', mode: 'two_way'},
+                              min: 0,
+                              max: 1,
+                              step: 0.02,
+                            },
+                            on: {change: 'control-change'},
+                            semantics: {label: 'Vertical gamma slider'},
+                          },
+                          {
+                            type: 'text',
+                            styles: ['section-copy', 'vertical-copy'],
+                            props: {
+                              text: 'Vertical orientation, pointer capture, keyboard arrows, and gamepad navigation.',
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+
+                  {
+                    type: 'panel',
+                    styles: ['card'],
+                    children: [
+                      {
+                        type: 'text',
+                        styles: ['section-title'],
+                        props: {text: 'Transient & retained state'},
+                      },
+                      {
+                        type: 'panel',
+                        styles: ['form-row'],
+                        children: [
+                          {
+                            type: 'text',
+                            styles: ['form-label'],
+                            props: {text: 'Quality select'},
+                          },
+                          {
+                            type: 'select',
+                            id: 'quality-select',
+                            props: {
+                              value: {bind: 'settings.quality', mode: 'two_way'},
+                              placement: 'auto',
+                            },
+                            on: {change: 'control-change'},
+                            children: [
+                              {type: 'option', props: {value: 'low', text: 'Low'}},
+                              {type: 'option', props: {value: 'medium', text: 'Medium'}},
+                              {type: 'option', props: {value: 'high', text: 'High'}},
+                              {type: 'option', props: {value: 'ultra', text: 'Ultra'}},
+                            ],
+                          },
+                        ],
+                      },
+                      {
+                        type: 'panel',
+                        styles: ['form-row'],
+                        children: [
+                          {
+                            type: 'text',
+                            styles: ['form-label'],
+                            props: {text: 'Mount advanced subtree'},
+                          },
+                          {
+                            type: 'toggle',
+                            props: {
+                              value: {bind: 'show_advanced', mode: 'two_way'},
+                            },
+                            on: {change: 'advanced-changed'},
+                          },
+                        ],
+                      },
+                      {
+                        type: 'panel',
+                        id: 'conditional-panel',
+                        styles: ['advanced-box'],
+                        when: {bind: 'show_advanced'},
+                        children: [
+                          {type: 'text', props: {text: 'This panel is controlled by when.'}},
+                          {
+                            type: 'text',
+                            styles: ['small-caption'],
+                            props: {text: 'Its element handle is generational and invalidates when removed.'},
+                          },
+                        ],
+                      },
+                      {
+                        type: 'button',
+                        id: 'info-anchor',
+                        styles: ['wide-button'],
+                        props: {text: 'Open anchored popup'},
+                      },
+                      {
+                        type: 'popup',
+                        id: 'info-popup',
+                        styles: ['popup-card'],
+                        props: {
+                          anchor: 'info-anchor',
+                          placement: 'bottom',
+                          open: {bind: 'popup_open', mode: 'two_way'},
+                        },
+                        on: {cancel: 'popup-cancel'},
+                        children: [
+                          {
+                            type: 'text',
+                            styles: ['section-title'],
+                            props: {text: 'Overlay pass'},
+                          },
+                          {
+                            type: 'text',
+                            styles: ['section-copy'],
+                            props: {text: 'This popup escapes local sibling stacking and restores focus when dismissed.'},
+                          },
+                        ],
+                      },
+                      {
+                        type: 'disclosure',
+                        id: 'advanced-disclosure',
+                        styles: ['showcase-disclosure'],
+                        props: {
+                          expanded: {bind: 'advanced_open', mode: 'two_way'},
+                        },
+                        on: {toggle: 'control-change'},
+                        children: [
+                          {type: 'text', props: {text: 'Expandable disclosure'}},
+                          {
+                            type: 'panel',
+                            styles: ['disclosure-content'],
+                            children: [
+                              {type: 'text', styles: ['small-caption'], props: {text: 'Collapsed descendants leave layout,'}},
+                              {type: 'text', styles: ['small-caption'], props: {text: 'paint, hit testing, focus, and accessibility.'}},
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+
+                  {
+                    type: 'panel',
+                    styles: ['card'],
+                    children: [
+                      {
+                        type: 'text',
+                        styles: ['section-title'],
+                        props: {text: 'Keyed repeat + scrollbar'},
+                      },
+                      {
+                        type: 'scroll',
+                        id: 'quest-scroll',
+                        styles: ['quest-scroll'],
+                        props: {
+                          scroll_x: 'hidden',
+                          scroll_y: 'auto',
+                          scrollbar_placement: 'gutter',
+                          scrollbar_visibility: 'always',
+                        },
+                        children: [
+                          {
+                            type: 'repeat',
+                            props: {
+                              items: {bind: 'quests'},
+                              item: 'quest',
+                              key: {expr: 'quest.id'},
+                              template: {
+                                type: 'button',
+                                styles: ['quest-button'],
+                                props: {text: {bind: 'quest.name'}},
+                                on: {click: 'quest-click'},
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+
+              {
+                type: 'panel',
+                styles: ['content-page', 'data-row'],
+                when: {expr: "active_tab == 'data'"},
+                children: [
+                  {
+                    type: 'panel',
+                    id: 'tree-pane',
+                    styles: ['card', 'tree-card'],
+                    children: [
+                      {type: 'text', styles: ['section-title'], props: {text: 'Scene tree'}},
+                      {
+                        type: 'tree',
+                        id: 'scene-tree',
+                        styles: ['scene-tree'],
+                        props: {
+                          value: {bind: 'tree_selection', mode: 'two_way'},
+                        },
+                        on: {change: 'tree-changed'},
+                        children: [
+                          {
+                            type: 'tree-item',
+                            props: {
+                              value: 'armory',
+                              text: 'Armory',
+                              expanded: {bind: 'tree_expanded', mode: 'two_way'},
+                            },
+                            children: [
+                              {type: 'tree-item', props: {value: 'weapons', text: 'Weapons'}},
+                              {type: 'tree-item', props: {value: 'shields', text: 'Shields'}},
+                              {type: 'tree-item', props: {value: 'armor', text: 'Armor'}},
+                            ],
+                          },
+                          {type: 'tree-item', props: {value: 'forge', text: 'Forge'}},
+                          {type: 'tree-item', props: {value: 'courtyard', text: 'Courtyard'}},
+                          {type: 'tree-item', props: {value: 'catacombs', text: 'Catacombs'}},
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    type: 'splitter',
+                    id: 'data-splitter',
+                    styles: ['data-splitter'],
+                    props: {orientation: 'vertical'},
+                    on: {change: 'control-change'},
+                    semantics: {label: 'Resize tree and virtual-list panes'},
+                  },
+                  {
+                    type: 'panel',
+                    styles: ['card', 'list-card'],
+                    children: [
+                      {
+                        type: 'panel',
+                        styles: ['list-toolbar'],
+                        children: [
+                          {type: 'text', styles: ['section-title'], props: {text: '250-row virtual list'}},
+                          {type: 'spacer', styles: ['tab-spacer']},
+                          {
+                            type: 'button',
+                            styles: ['toolbar-button'],
+                            props: {text: 'First row'},
+                            on: {click: 'scroll-start'},
+                          },
+                          {
+                            type: 'button',
+                            styles: ['toolbar-button'],
+                            props: {text: 'Last row'},
+                            on: {click: 'scroll-end'},
+                          },
+                        ],
+                      },
+                      {
+                        type: 'text',
+                        styles: ['section-copy'],
+                        props: {text: 'Only the visible fixed-extent keyed range plus overscan exists in the live DOM.'},
+                      },
+                      {
+                        type: 'list',
+                        id: 'virtual-list',
+                        styles: ['virtual-list'],
+                        props: {
+                          items: {bind: 'rows'},
+                          item: 'row',
+                          key: {expr: 'row.id'},
+                          item_extent: 34,
+                          overscan: 2,
+                          scrollbar_placement: 'gutter',
+                          scrollbar_visibility: 'always',
+                          scroll_x: 'hidden',
+                          scroll_y: 'auto',
+                          template: {
+                            type: 'button',
+                            styles: ['virtual-row'],
+                            props: {text: {bind: 'row.name'}},
+                            on: {click: 'row-click'},
+                          },
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+
+              {
+                type: 'panel',
+                styles: ['content-page'],
+                when: {expr: "active_tab == 'layout'"},
+                children: [
+                  {
+                    type: 'scroll',
+                    styles: ['layout-scroll'],
+                    props: {
+                      scroll_x: 'hidden',
+                      scroll_y: 'auto',
+                      scrollbar_placement: 'overlay',
+                      scrollbar_visibility: 'always',
+                    },
+                    children: [
+                      {
+                        type: 'panel',
+                        styles: ['layout-stack'],
+                        children: [
+                          {
+                            type: 'text',
+                            styles: ['section-title'],
+                            props: {text: 'One generated texture, three nine-slice sizes'},
+                          },
+                          {
+                            type: 'panel',
+                            styles: ['nine-row'],
+                            children: [
+                              {
+                                type: 'panel',
+                                styles: ['nine-small'],
+                                children: [{type: 'text', styles: ['nine-label'], props: {text: '210 × 110'}}],
+                              },
+                              {
+                                type: 'panel',
+                                styles: ['nine-medium'],
+                                children: [{type: 'text', styles: ['nine-label'], props: {text: '360 × 110'}}],
+                              },
+                              {
+                                type: 'panel',
+                                styles: ['nine-wide'],
+                                children: [{type: 'text', styles: ['nine-label'], props: {text: 'Flexible width — corners stay fixed'}}],
+                              },
+                            ],
+                          },
+                          {
+                            type: 'text',
+                            styles: ['section-title'],
+                            props: {text: 'Practical Grid auto-placement'},
+                          },
+                          {
+                            type: 'panel',
+                            styles: ['layout-grid'],
+                            children: [
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 1'}}]},
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 2'}}]},
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 3'}}]},
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 4'}}]},
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 5'}}]},
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 6'}}]},
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 7'}}]},
+                              {type: 'panel', styles: ['grid-tile'], children: [{type: 'text', props: {text: 'Grid 8'}}]},
+                            ],
+                          },
+                          {
+                            type: 'text',
+                            styles: ['section-title'],
+                            props: {text: 'Normalized anchors and stretched bounds'},
+                          },
+                          {
+                            type: 'panel',
+                            styles: ['anchor-demo'],
+                            children: [
+                              {
+                                type: 'panel',
+                                styles: ['anchor-chip'],
+                                layout: {
+                                  anchors: {min: [0, 0], max: [0, 0]},
+                                  pivot: [0, 0],
+                                  position: [14, 14],
+                                },
+                                children: [{type: 'text', props: {text: 'Top-left anchor'}}],
+                              },
+                              {
+                                type: 'panel',
+                                styles: ['anchor-chip'],
+                                layout: {
+                                  anchors: {min: [0.5, 0.5], max: [0.5, 0.5]},
+                                  pivot: [0.5, 0.5],
+                                  position: [0, 0],
+                                },
+                                children: [{type: 'text', props: {text: 'Centered pivot'}}],
+                              },
+                              {
+                                type: 'panel',
+                                styles: ['anchor-chip'],
+                                layout: {
+                                  anchors: {min: [0.72, 0.15], max: [0.98, 0.85]},
+                                  offsets: {left: 6, top: 4, right: 6, bottom: 4},
+                                },
+                                children: [{type: 'text', props: {text: 'Stretched anchor'}}],
+                              },
+                            ],
+                          },
+                          {
+                            type: 'text',
+                            styles: ['section-title'],
+                            props: {text: 'Independent horizontal overflow'},
+                          },
+                          {
+                            type: 'scroll',
+                            styles: ['wide-scroll'],
+                            props: {
+                              scroll_x: 'auto',
+                              scroll_y: 'hidden',
+                              scrollbar_visibility: 'always',
+                              scrollbar_placement: 'gutter',
+                            },
+                            children: [
+                              {
+                                type: 'panel',
+                                styles: ['wide-strip'],
+                                children: [
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 1'}}]},
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 2'}}]},
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 3'}}]},
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 4'}}]},
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 5'}}]},
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 6'}}]},
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 7'}}]},
+                                  {type: 'panel', styles: ['strip-tile'], children: [{type: 'text', props: {text: 'Horizontal 8'}}]},
+                                ],
+                              },
+                            ],
+                          },
+                          {
+                            type: 'panel',
+                            styles: ['media-row'],
+                            children: [
+                              {
+                                type: 'image',
+                                styles: ['skin-preview'],
+                                props: {
+                                  src: {asset: 'ui/showcase/medieval-frame', kind: 'texture'},
+                                  sampling: 'linear',
+                                  object_fit: 'cover',
+                                  object_position: 'center',
+                                },
+                                semantics: {label: 'Raw generated medieval nine-slice texture'},
+                              },
+                              {
+                                type: 'svg',
+                                styles: ['svg-preview'],
+                                props: {src: {asset: 'ui/showcase/icon', kind: 'svg'}},
+                                semantics: {label: 'Runtime-rasterized SVG'},
+                              },
+                              {
+                                type: 'text',
+                                styles: ['section-copy', 'media-copy'],
+                                props: {text: 'The raster preview uses linear sampling and cover placement. The icon is sandbox-validated SVG rasterized at its final physical size. The animated checker in the header is a System-owned dynamic texture.'},
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+
+          {type: 'separator', styles: ['rule-horizontal']},
+          {
+            type: 'panel',
+            styles: ['status-bar'],
+            children: [
+              {type: 'panel', styles: ['status-dot']},
+              {
+                type: 'text',
+                styles: ['status'],
+                props: {text: {bind: 'status'}},
+                semantics: {label: 'Last showcase action'},
+              },
+              {
+                type: 'text',
+                styles: ['hot-reload-copy'],
+                props: {text: 'LIVE: edit showcase.kui.json5, showcase.kstyle.json5, or base.kstyle.json5'},
+              },
+            ],
+          },
+        ],
+      },
+
+      {
+        type: 'window',
+        id: 'inspector-window',
+        styles: ['inspector-window'],
+        layout: {
+          position: [1140, 560],
+          width: 400,
+          height: 280,
+          min_width: 300,
+          min_height: 190,
+          z: 60,
+        },
+        props: {
+          title: 'Floating Inspector',
+          state: {bind: 'windows.inspector', mode: 'two_way'},
+          resizable: true,
+          closable: true,
+          collapsible: true,
+        },
+        on: {close: 'window-close', toggle: 'window-toggle'},
+        semantics: {role: 'window', label: 'Movable and resizable inspector'},
+        children: [
+          {
+            type: 'panel',
+            styles: ['inspector-content'],
+            children: [
+              {
+                type: 'panel',
+                styles: ['inspector-row'],
+                children: [
+                  {type: 'text', props: {text: 'Input capture'}},
+                  {type: 'toggle', props: {checked: true}},
+                ],
+              },
+              {
+                type: 'panel',
+                styles: ['inspector-row'],
+                children: [
+                  {type: 'text', props: {text: 'Modal document'}},
+                  {type: 'toggle', props: {checked: true, disabled: true}},
+                ],
+              },
+              {
+                type: 'button',
+                props: {text: 'Reset window state'},
+                on: {click: 'menu-reset'},
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+}

@@ -13,6 +13,6 @@ Public headers should expose data contracts and narrow subsystem APIs. Keep
 backend internals and large implementation records in `src/` unless users
 actually need them.
 
-UI provider adapters live under `src/features/ui/<provider>`. Their public API
-should be a small provider-specific factory in `karma/ui.h` around the generic
-`karma/app.h` UI layer contract.
+UI provider adapters live under `src/features/ui/<provider>`. Their public APIs
+belong in provider-specific headers such as `karma/ui_imgui.h` and
+`karma/ui_rmlui.h`, around the generic `karma/app.h` UI layer contract.

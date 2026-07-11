@@ -1937,6 +1937,18 @@ unsigned int DiligentBackend::getRenderTargetTextureId(rendering::RenderTargetId
   return static_cast<unsigned int>(target | kRenderTargetTextureHandleBit);
 }
 
+std::optional<rendering::RenderTargetDesc> DiligentBackend::getRenderTargetDesc(
+    rendering::RenderTargetId target) const {
+  if (target == rendering::kDefaultRenderTarget ||
+      (target & kRenderTargetTextureHandleBit) != 0u) {
+    return std::nullopt;
+  }
+  const auto found = targets_.find(target);
+  return found == targets_.end()
+             ? std::optional<rendering::RenderTargetDesc>{}
+             : std::optional<rendering::RenderTargetDesc>{found->second.desc};
+}
+
 void DiligentBackend::clearFrame(const float* color, bool clear_depth) {
   if (!context_ || !swap_chain_) {
     return;

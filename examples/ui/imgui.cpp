@@ -6,7 +6,7 @@
 #include <string_view>
 
 #include "demo_asset_paths.h"
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 #include "karma/karma.h"
 #include "karma/components.h"
 

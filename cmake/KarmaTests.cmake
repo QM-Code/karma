@@ -9,6 +9,25 @@ function(karma_enable_test_assertions target)
 endfunction()
 
 if (BUILD_TESTING AND KARMA_BUILD_TESTS)
+  if (TARGET karma_content)
+    add_executable(karma_ui_json_profile_tests
+      tests/ui_json_profile_tests.cpp
+    )
+    target_include_directories(karma_ui_json_profile_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_json_profile_tests PRIVATE karma_content)
+    add_test(NAME karma_ui_json_profile_tests COMMAND karma_ui_json_profile_tests)
+  endif()
+
+  if (TARGET karma_core)
+    add_executable(karma_cursor_tests
+      tests/cursor_tests.cpp
+    )
+    target_link_libraries(karma_cursor_tests PRIVATE karma_core)
+    add_test(NAME karma_cursor_tests COMMAND karma_cursor_tests)
+  endif()
+
   if (TARGET karma::headless)
     add_executable(karma_core_runtime_tests
       tests/core_runtime_tests.cpp
@@ -34,6 +53,12 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     )
     target_link_libraries(karma_asset_cache_tests PRIVATE karma_content)
     add_test(NAME karma_asset_cache_tests COMMAND karma_asset_cache_tests)
+
+    add_executable(karma_ui_asset_package_tests
+      tests/ui_asset_package_tests.cpp
+    )
+    target_link_libraries(karma_ui_asset_package_tests PRIVATE karma_content)
+    add_test(NAME karma_ui_asset_package_tests COMMAND karma_ui_asset_package_tests)
 
     add_executable(karma_prefab_tests
       tests/prefab_tests.cpp
@@ -168,6 +193,247 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     set_tests_properties(karma_audio_sdl_tests PROPERTIES
       ENVIRONMENT "SDL_AUDIODRIVER=dummy"
     )
+  endif()
+
+  if (TARGET karma_features_ui_native)
+    add_executable(karma_ui_accessibility_builder_tests
+      tests/ui_accessibility_builder_tests.cpp
+    )
+    target_include_directories(karma_ui_accessibility_builder_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_accessibility_builder_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_accessibility_builder_tests
+      COMMAND karma_ui_accessibility_builder_tests)
+
+    add_executable(karma_ui_development_path_tests
+      tests/ui_development_path_tests.cpp
+      src/features/ui/native/development_path.cpp
+    )
+    target_include_directories(karma_ui_development_path_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_compile_features(karma_ui_development_path_tests PRIVATE cxx_std_20)
+    add_test(NAME karma_ui_development_path_tests
+      COMMAND karma_ui_development_path_tests)
+
+    add_executable(karma_ui_authoring_tests
+      tests/ui_authoring_tests.cpp
+    )
+    target_include_directories(karma_ui_authoring_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_compile_definitions(karma_ui_authoring_tests PRIVATE
+      KARMA_UI_SCHEMA_DIR="${PROJECT_SOURCE_DIR}/schemas/ui"
+      KARMA_UI_SHOWCASE_DIR="${PROJECT_SOURCE_DIR}/examples/assets/ui/showcase"
+    )
+    target_link_libraries(karma_ui_authoring_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_authoring_tests COMMAND karma_ui_authoring_tests)
+
+    add_executable(karma_ui_binding_tests
+      tests/ui_binding_tests.cpp
+    )
+    target_include_directories(karma_ui_binding_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_binding_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_binding_tests COMMAND karma_ui_binding_tests)
+
+    add_executable(karma_ui_document_reconciler_tests
+      tests/ui_document_reconciler_tests.cpp
+    )
+    target_include_directories(karma_ui_document_reconciler_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_document_reconciler_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_document_reconciler_tests
+      COMMAND karma_ui_document_reconciler_tests)
+
+    add_executable(karma_ui_document_runtime_tests
+      tests/ui_document_runtime_tests.cpp
+    )
+    target_include_directories(karma_ui_document_runtime_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_document_runtime_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_document_runtime_tests
+      COMMAND karma_ui_document_runtime_tests)
+
+    add_executable(karma_ui_listener_registry_tests
+      tests/ui_listener_registry_tests.cpp
+    )
+    target_include_directories(karma_ui_listener_registry_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_listener_registry_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_listener_registry_tests
+      COMMAND karma_ui_listener_registry_tests)
+
+    add_executable(karma_ui_file_watcher_tests
+      tests/ui_file_watcher_tests.cpp
+    )
+    target_include_directories(karma_ui_file_watcher_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_file_watcher_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_file_watcher_tests COMMAND karma_ui_file_watcher_tests)
+
+    add_executable(karma_ui_hot_reload_coordinator_tests
+      tests/ui_hot_reload_coordinator_tests.cpp
+    )
+    target_include_directories(karma_ui_hot_reload_coordinator_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_hot_reload_coordinator_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_hot_reload_coordinator_tests
+      COMMAND karma_ui_hot_reload_coordinator_tests)
+
+    add_executable(karma_ui_focus_runtime_tests
+      tests/ui_focus_runtime_tests.cpp
+    )
+    target_include_directories(karma_ui_focus_runtime_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_focus_runtime_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_focus_runtime_tests
+      COMMAND karma_ui_focus_runtime_tests)
+
+    add_executable(karma_ui_transient_runtime_tests
+      tests/ui_transient_runtime_tests.cpp
+    )
+    target_include_directories(karma_ui_transient_runtime_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_transient_runtime_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_transient_runtime_tests
+      COMMAND karma_ui_transient_runtime_tests)
+
+    add_executable(karma_ui_tests
+      tests/ui_tests.cpp
+    )
+    target_link_libraries(karma_ui_tests PRIVATE karma_features_ui_native)
+    add_test(NAME karma_ui_tests COMMAND karma_ui_tests)
+
+    add_executable(karma_ui_layout_tests
+      tests/ui_layout_tests.cpp
+    )
+    target_include_directories(karma_ui_layout_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(karma_ui_layout_tests PRIVATE karma_features_ui_native)
+    add_test(NAME karma_ui_layout_tests COMMAND karma_ui_layout_tests)
+
+    add_executable(karma_ui_document_layout_runtime_tests
+      tests/ui_document_layout_runtime_tests.cpp
+    )
+    target_include_directories(karma_ui_document_layout_runtime_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_document_layout_runtime_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_document_layout_runtime_tests
+      COMMAND karma_ui_document_layout_runtime_tests)
+
+    add_executable(karma_ui_motion_tests
+      tests/ui_motion_tests.cpp
+    )
+    target_include_directories(karma_ui_motion_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(karma_ui_motion_tests PRIVATE karma_features_ui_native)
+    add_test(NAME karma_ui_motion_tests COMMAND karma_ui_motion_tests)
+
+    add_executable(karma_ui_style_runtime_tests
+      tests/ui_style_runtime_tests.cpp
+    )
+    target_include_directories(karma_ui_style_runtime_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_style_runtime_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_style_runtime_tests
+      COMMAND karma_ui_style_runtime_tests)
+
+    add_executable(karma_ui_paint_tests
+      tests/ui_paint_tests.cpp
+    )
+    target_include_directories(karma_ui_paint_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(karma_ui_paint_tests PRIVATE karma_features_ui_native)
+    add_test(NAME karma_ui_paint_tests COMMAND karma_ui_paint_tests)
+
+    add_executable(karma_ui_widget_paint_tests
+      tests/ui_widget_paint_tests.cpp
+      src/features/ui/native/paint_engine.cpp
+      src/features/ui/native/widget_paint.cpp
+    )
+    target_include_directories(karma_ui_widget_paint_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_widget_paint_tests PRIVATE karma_core)
+    add_test(NAME karma_ui_widget_paint_tests COMMAND karma_ui_widget_paint_tests)
+
+    add_executable(karma_ui_widget_runtime_tests
+      tests/ui_widget_runtime_tests.cpp
+    )
+    target_include_directories(karma_ui_widget_runtime_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_widget_runtime_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_widget_runtime_tests
+      COMMAND karma_ui_widget_runtime_tests)
+
+    add_executable(karma_ui_presentation_tests
+      tests/ui_presentation_tests.cpp
+    )
+    target_include_directories(karma_ui_presentation_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_compile_definitions(karma_ui_presentation_tests PRIVATE
+      KARMA_TEST_ASSET_DIR="${PROJECT_SOURCE_DIR}/examples/assets")
+    target_link_libraries(karma_ui_presentation_tests PRIVATE karma_features_ui_native)
+    add_test(NAME karma_ui_presentation_tests COMMAND karma_ui_presentation_tests)
+
+    add_executable(karma_ui_presentation_builder_tests
+      tests/ui_presentation_builder_tests.cpp
+    )
+    target_include_directories(karma_ui_presentation_builder_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(karma_ui_presentation_builder_tests
+      PRIVATE karma_features_ui_native
+    )
+    add_test(NAME karma_ui_presentation_builder_tests
+      COMMAND karma_ui_presentation_builder_tests)
+
+    add_executable(karma_ui_screenshot_golden_tests
+      tests/ui_screenshot_golden_tests.cpp
+    )
+    target_include_directories(karma_ui_screenshot_golden_tests
+      PRIVATE ${PROJECT_SOURCE_DIR}/src
+    )
+    target_compile_definitions(karma_ui_screenshot_golden_tests PRIVATE
+      KARMA_UI_GOLDEN_ASSET_DIR="${PROJECT_SOURCE_DIR}/examples/assets/ui/native_menu"
+    )
+    target_link_libraries(karma_ui_screenshot_golden_tests PRIVATE karma_features_ui_native)
+    add_test(NAME karma_ui_screenshot_golden_tests COMMAND karma_ui_screenshot_golden_tests)
   endif()
 
   if (TARGET karma_platform_window_graphical AND KARMA_WINDOW_BACKEND_SDL)

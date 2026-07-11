@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 
+set_and_check(KARMA_UI_SCHEMA_DIR
+  "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/karma/schemas/ui")
+
 include(CMakeFindDependencyMacro)
 
 if (NOT DEFINED KARMA_CONFIG_FETCH_DEPS)
@@ -103,6 +106,94 @@ if (NOT TARGET meshoptimizer::meshoptimizer AND KARMA_CONFIG_FETCH_DEPS)
   _karma_alias_target(meshoptimizer::meshoptimizer meshoptimizer)
 endif()
 _karma_require_target(meshoptimizer::meshoptimizer meshoptimizer)
+
+if (@KARMA_ENABLE_NATIVE_UI@)
+  find_package(yoga QUIET CONFIG)
+  _karma_alias_target(yoga::yogacore yogacore)
+  if (NOT TARGET yoga::yogacore AND KARMA_CONFIG_FETCH_DEPS)
+    FetchContent_Declare(
+      karma_yoga
+      GIT_REPOSITORY https://github.com/facebook/yoga.git
+      GIT_TAG v3.2.1
+      SOURCE_SUBDIR yoga
+    )
+    FetchContent_MakeAvailable(karma_yoga)
+    _karma_alias_target(yoga::yogacore yogacore)
+  endif()
+  _karma_require_target(yoga::yogacore Yoga)
+
+  # Prefer FreeType's config package because its static target records codec
+  # dependencies; CMake's FindFreetype module exposes only the archive.
+  find_package(Freetype 2.6 QUIET CONFIG)
+  if (NOT TARGET Freetype::Freetype)
+    find_package(Freetype 2.6 QUIET)
+  endif()
+  if (NOT TARGET Freetype::Freetype AND KARMA_CONFIG_FETCH_DEPS)
+    set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      freetype
+      GIT_REPOSITORY https://gitlab.freedesktop.org/freetype/freetype.git
+      GIT_TAG VER-2-13-3
+    )
+    FetchContent_MakeAvailable(freetype)
+    if (TARGET freetype AND NOT TARGET Freetype::Freetype)
+      add_library(Freetype::Freetype ALIAS freetype)
+    endif()
+  endif()
+  _karma_require_target(Freetype::Freetype FreeType)
+
+  # FreeType's own CMake install exports an INTERFACE wrapper around its
+  # static target. When that wrapper is consumed through LINK_ONLY, CMake does
+  # not traverse the wrapped target's private codec links. Remember those
+  # links so they can be attached directly to Karma's imported native target.
+  if (TARGET freetype)
+    get_target_property(_karma_freetype_alias
+      Freetype::Freetype ALIASED_TARGET)
+    get_target_property(_karma_freetype_links
+      freetype INTERFACE_LINK_LIBRARIES)
+    if (NOT _karma_freetype_alias AND _karma_freetype_links)
+      set(_karma_ui_freetype_link_only ${_karma_freetype_links})
+    endif()
+    unset(_karma_freetype_alias)
+    unset(_karma_freetype_links)
+  endif()
+
+  find_package(ICU COMPONENTS uc i18n QUIET)
+  _karma_require_target(ICU::uc "ICU uc")
+  _karma_require_target(ICU::i18n "ICU i18n")
+
+  find_package(harfbuzz QUIET CONFIG)
+  _karma_alias_target(harfbuzz::harfbuzz harfbuzz)
+  if (NOT TARGET harfbuzz::harfbuzz AND KARMA_CONFIG_FETCH_DEPS)
+    set(HB_HAVE_FREETYPE ON CACHE BOOL "" FORCE)
+    set(HB_BUILD_UTILS OFF CACHE BOOL "" FORCE)
+    set(HB_BUILD_SUBSET OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      harfbuzz
+      GIT_REPOSITORY https://github.com/harfbuzz/harfbuzz.git
+      GIT_TAG 8.3.0
+    )
+    FetchContent_MakeAvailable(harfbuzz)
+    _karma_alias_target(harfbuzz::harfbuzz harfbuzz)
+  endif()
+  _karma_require_target(harfbuzz::harfbuzz HarfBuzz)
+
+  find_package(lunasvg QUIET CONFIG)
+  _karma_alias_target(lunasvg::lunasvg lunasvg)
+  if (NOT TARGET lunasvg::lunasvg AND KARMA_CONFIG_FETCH_DEPS)
+    set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LUNASVG_DISABLE_LOAD_SYSTEM_FONTS ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      lunasvg
+      GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
+      GIT_TAG v3.5.0
+      GIT_SUBMODULES_RECURSE TRUE
+    )
+    FetchContent_MakeAvailable(lunasvg)
+    _karma_alias_target(lunasvg::lunasvg lunasvg)
+  endif()
+  _karma_require_target(lunasvg::lunasvg LunaSVG)
+endif()
 
 find_package(spdlog QUIET CONFIG)
 _karma_alias_target(spdlog::spdlog spdlog)
@@ -323,12 +414,15 @@ if (@KARMA_ENABLE_RMLUI@)
     set(RMLUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_VIEWER OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-      lunasvg
-      GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
-      GIT_TAG v2.4.0
-    )
-    FetchContent_MakeAvailable(lunasvg)
+    # Native UI may already have supplied LunaSVG in this package scope.
+    if (NOT TARGET lunasvg::lunasvg AND NOT TARGET lunasvg)
+      FetchContent_Declare(
+        lunasvg
+        GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
+        GIT_TAG v2.4.0
+      )
+      FetchContent_MakeAvailable(lunasvg)
+    endif()
     FetchContent_Declare(
       rmlui
       GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
@@ -400,5 +494,13 @@ if (@KARMA_ENABLE_NAVIGATION@)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/karmaTargets.cmake")
+if (TARGET karma::karma_features_ui_native AND _karma_ui_freetype_link_only)
+  foreach (_karma_freetype_link IN LISTS _karma_ui_freetype_link_only)
+    set_property(TARGET karma::karma_features_ui_native APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES "$<LINK_ONLY:${_karma_freetype_link}>")
+  endforeach()
+endif()
+unset(_karma_freetype_link)
+unset(_karma_ui_freetype_link_only)
 set(CMAKE_MODULE_PATH "${_karma_saved_cmake_module_path}")
 check_required_components(karma)

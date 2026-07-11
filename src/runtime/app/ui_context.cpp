@@ -135,6 +135,9 @@ void UIContext::reset() {
   draw_data_.clear();
   input_ = nullptr;
   device_ = nullptr;
+  window_ = nullptr;
+  requested_cursor_shape_ = platform::CursorShape::Default;
+  cursor_shape_requested_ = false;
 }
 
 karma::app::InputSystem& UIContext::input() {
@@ -142,6 +145,21 @@ karma::app::InputSystem& UIContext::input() {
     throw std::logic_error("UIContext is not attached to an active UI frame.");
   }
   return *input_;
+}
+
+void UIContext::setClipboardText(std::string_view text) {
+  if (window_) {
+    window_->setClipboardText(text);
+  }
+}
+
+std::string UIContext::clipboardText() const {
+  return window_ ? window_->getClipboardText() : std::string{};
+}
+
+void UIContext::setCursorShape(platform::CursorShape shape) {
+  requested_cursor_shape_ = shape;
+  cursor_shape_requested_ = true;
 }
 
 }  // namespace karma::app

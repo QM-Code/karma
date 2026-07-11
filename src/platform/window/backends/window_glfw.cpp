@@ -1,8 +1,14 @@
 #include "karma/platform.h"
 
+#include "../gamepad_repeat.h"
+#include "../standard_cursor_cache.h"
+
 #include <GLFW/glfw3.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <mutex>
 #include <unordered_map>
@@ -275,6 +281,86 @@ int toGlfwMouseButton(MouseButton button) {
     }
 }
 
+GamepadButton toGamepadButton(int button) {
+    switch (button) {
+        case GLFW_GAMEPAD_BUTTON_A: return GamepadButton::A;
+        case GLFW_GAMEPAD_BUTTON_B: return GamepadButton::B;
+        case GLFW_GAMEPAD_BUTTON_X: return GamepadButton::X;
+        case GLFW_GAMEPAD_BUTTON_Y: return GamepadButton::Y;
+        case GLFW_GAMEPAD_BUTTON_BACK: return GamepadButton::Back;
+        case GLFW_GAMEPAD_BUTTON_GUIDE: return GamepadButton::Guide;
+        case GLFW_GAMEPAD_BUTTON_START: return GamepadButton::Start;
+        case GLFW_GAMEPAD_BUTTON_LEFT_THUMB: return GamepadButton::LeftStick;
+        case GLFW_GAMEPAD_BUTTON_RIGHT_THUMB: return GamepadButton::RightStick;
+        case GLFW_GAMEPAD_BUTTON_LEFT_BUMPER: return GamepadButton::LeftShoulder;
+        case GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER: return GamepadButton::RightShoulder;
+        case GLFW_GAMEPAD_BUTTON_DPAD_UP: return GamepadButton::DpadUp;
+        case GLFW_GAMEPAD_BUTTON_DPAD_RIGHT: return GamepadButton::DpadRight;
+        case GLFW_GAMEPAD_BUTTON_DPAD_DOWN: return GamepadButton::DpadDown;
+        case GLFW_GAMEPAD_BUTTON_DPAD_LEFT: return GamepadButton::DpadLeft;
+        default: return GamepadButton::Unknown;
+    }
+}
+
+int toGlfwGamepadButton(GamepadButton button) {
+    switch (button) {
+        case GamepadButton::A: return GLFW_GAMEPAD_BUTTON_A;
+        case GamepadButton::B: return GLFW_GAMEPAD_BUTTON_B;
+        case GamepadButton::X: return GLFW_GAMEPAD_BUTTON_X;
+        case GamepadButton::Y: return GLFW_GAMEPAD_BUTTON_Y;
+        case GamepadButton::Back: return GLFW_GAMEPAD_BUTTON_BACK;
+        case GamepadButton::Guide: return GLFW_GAMEPAD_BUTTON_GUIDE;
+        case GamepadButton::Start: return GLFW_GAMEPAD_BUTTON_START;
+        case GamepadButton::LeftStick: return GLFW_GAMEPAD_BUTTON_LEFT_THUMB;
+        case GamepadButton::RightStick: return GLFW_GAMEPAD_BUTTON_RIGHT_THUMB;
+        case GamepadButton::LeftShoulder: return GLFW_GAMEPAD_BUTTON_LEFT_BUMPER;
+        case GamepadButton::RightShoulder: return GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER;
+        case GamepadButton::DpadUp: return GLFW_GAMEPAD_BUTTON_DPAD_UP;
+        case GamepadButton::DpadRight: return GLFW_GAMEPAD_BUTTON_DPAD_RIGHT;
+        case GamepadButton::DpadDown: return GLFW_GAMEPAD_BUTTON_DPAD_DOWN;
+        case GamepadButton::DpadLeft: return GLFW_GAMEPAD_BUTTON_DPAD_LEFT;
+        default: return -1;
+    }
+}
+
+GamepadAxis toGamepadAxis(int axis) {
+    switch (axis) {
+        case GLFW_GAMEPAD_AXIS_LEFT_X: return GamepadAxis::LeftX;
+        case GLFW_GAMEPAD_AXIS_LEFT_Y: return GamepadAxis::LeftY;
+        case GLFW_GAMEPAD_AXIS_RIGHT_X: return GamepadAxis::RightX;
+        case GLFW_GAMEPAD_AXIS_RIGHT_Y: return GamepadAxis::RightY;
+        case GLFW_GAMEPAD_AXIS_LEFT_TRIGGER: return GamepadAxis::LeftTrigger;
+        case GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER: return GamepadAxis::RightTrigger;
+        default: return GamepadAxis::Unknown;
+    }
+}
+
+int toGlfwGamepadAxis(GamepadAxis axis) {
+    switch (axis) {
+        case GamepadAxis::LeftX: return GLFW_GAMEPAD_AXIS_LEFT_X;
+        case GamepadAxis::LeftY: return GLFW_GAMEPAD_AXIS_LEFT_Y;
+        case GamepadAxis::RightX: return GLFW_GAMEPAD_AXIS_RIGHT_X;
+        case GamepadAxis::RightY: return GLFW_GAMEPAD_AXIS_RIGHT_Y;
+        case GamepadAxis::LeftTrigger: return GLFW_GAMEPAD_AXIS_LEFT_TRIGGER;
+        case GamepadAxis::RightTrigger: return GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER;
+        default: return -1;
+    }
+}
+
+float normalizeGamepadAxis(int axis, float value) {
+    if (axis == GLFW_GAMEPAD_AXIS_LEFT_TRIGGER ||
+        axis == GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+        const float normalized = std::clamp((value + 1.0f) * 0.5f, 0.0f, 1.0f);
+        return normalized < 0.05f ? 0.0f : normalized;
+    }
+    constexpr float dead_zone = 0.18f;
+    const float magnitude = std::abs(value);
+    if (magnitude <= dead_zone) {
+        return 0.0f;
+    }
+    return std::copysign((magnitude - dead_zone) / (1.0f - dead_zone), value);
+}
+
 Modifiers toModifiers(int mods) {
     Modifiers out;
     out.shift = (mods & GLFW_MOD_SHIFT) != 0;
@@ -317,6 +403,7 @@ public:
     }
 
     ~WindowGlfw() override {
+        cursors.clear([](GLFWcursor* cursor) { glfwDestroyCursor(cursor); });
         if (window) {
             glfwDestroyWindow(window);
             window = nullptr;
@@ -330,6 +417,7 @@ public:
     void pollEvents() override {
         eventsBuffer.clear();
         glfwPollEvents();
+        pollGamepads();
     }
 
     const std::vector<Event>& events() const override {
@@ -410,8 +498,18 @@ public:
         height = framebufferH;
     }
 
+    void getLogicalSize(int &width, int &height) const override {
+        width = windowW;
+        height = windowH;
+    }
+
     float getContentScale() const override {
-        return contentScale;
+        return static_cast<float>(framebufferScaleX());
+    }
+
+    void getContentScale(float& scale_x, float& scale_y) const override {
+        scale_x = static_cast<float>(framebufferScaleX());
+        scale_y = static_cast<float>(framebufferScaleY());
     }
 
     bool isKeyDown(Key key) const override {
@@ -432,11 +530,86 @@ public:
         return glfwGetMouseButton(window, toGlfwMouseButton(button)) == GLFW_PRESS;
     }
 
+    bool isGamepadButtonDown(GamepadButton button, int gamepad = -1) const override {
+        const int glfw_button = toGlfwGamepadButton(button);
+        if (glfw_button < 0) {
+            return false;
+        }
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid) {
+            if (gamepad >= 0 && jid != gamepad) {
+                continue;
+            }
+            const auto& state = gamepads[static_cast<std::size_t>(jid)];
+            if (state.connected && state.buttons[static_cast<std::size_t>(glfw_button)] != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    float gamepadAxis(GamepadAxis axis, int gamepad = -1) const override {
+        const int glfw_axis = toGlfwGamepadAxis(axis);
+        if (glfw_axis < 0) {
+            return 0.0f;
+        }
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid) {
+            if (gamepad >= 0 && jid != gamepad) {
+                continue;
+            }
+            const auto& state = gamepads[static_cast<std::size_t>(jid)];
+            if (state.connected) {
+                return state.axes[static_cast<std::size_t>(glfw_axis)];
+            }
+        }
+        return 0.0f;
+    }
+
     void setCursorVisible(bool visible) override {
         if (!window) {
             return;
         }
         glfwSetInputMode(window, GLFW_CURSOR, visible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+    }
+
+    void setCursorShape(CursorShape shape) override {
+        if (!window || shape == cursorShape) {
+            return;
+        }
+        if (shape == CursorShape::Default) {
+            glfwSetCursor(window, nullptr);
+            cursorShape = shape;
+            return;
+        }
+        int glfw_shape = GLFW_ARROW_CURSOR;
+        switch (shape) {
+            case CursorShape::Pointer: glfw_shape = GLFW_HAND_CURSOR; break;
+            case CursorShape::Text: glfw_shape = GLFW_IBEAM_CURSOR; break;
+            case CursorShape::Crosshair: glfw_shape = GLFW_CROSSHAIR_CURSOR; break;
+            case CursorShape::ResizeHorizontal: glfw_shape = GLFW_HRESIZE_CURSOR; break;
+            case CursorShape::ResizeVertical: glfw_shape = GLFW_VRESIZE_CURSOR; break;
+#if defined(GLFW_RESIZE_ALL_CURSOR)
+            case CursorShape::Move: glfw_shape = GLFW_RESIZE_ALL_CURSOR; break;
+#endif
+#if defined(GLFW_RESIZE_NWSE_CURSOR)
+            case CursorShape::ResizeDiagonalNwSe: glfw_shape = GLFW_RESIZE_NWSE_CURSOR; break;
+#endif
+#if defined(GLFW_RESIZE_NESW_CURSOR)
+            case CursorShape::ResizeDiagonalNeSw: glfw_shape = GLFW_RESIZE_NESW_CURSOR; break;
+#endif
+#if defined(GLFW_NOT_ALLOWED_CURSOR)
+            case CursorShape::NotAllowed: glfw_shape = GLFW_NOT_ALLOWED_CURSOR; break;
+#endif
+            default: glfw_shape = GLFW_ARROW_CURSOR; break;
+        }
+        GLFWcursor* requested = cursors.getOrCreate(
+            glfw_shape, [](int native_shape) {
+                return glfwCreateStandardCursor(native_shape);
+            });
+        if (!requested) {
+            return;
+        }
+        glfwSetCursor(window, requested);
+        cursorShape = shape;
     }
 
     void setIcon(const std::string& path) override {
@@ -466,10 +639,20 @@ public:
     }
 
 private:
+    struct CachedGamepadState {
+        bool connected = false;
+        std::array<unsigned char, GLFW_GAMEPAD_BUTTON_LAST + 1> buttons{};
+        std::array<float, GLFW_GAMEPAD_AXIS_LAST + 1> axes{};
+    };
+
     GLFWwindow *window = nullptr;
+    detail::StandardCursorCache<int, GLFWcursor*> cursors;
     std::vector<Event> eventsBuffer;
+    std::array<CachedGamepadState, GLFW_JOYSTICK_LAST + 1> gamepads{};
+    detail::GamepadRepeatScheduler gamepadRepeats;
     bool fullscreen = false;
     bool glfwAcquired = false;
+    CursorShape cursorShape = CursorShape::Default;
     int windowedX = 0;
     int windowedY = 0;
     int windowedW = 1280;
@@ -478,7 +661,8 @@ private:
     int windowH = 720;
     int framebufferW = 0;
     int framebufferH = 0;
-    float contentScale = 1.0f;
+    float contentScaleX = 1.0f;
+    float contentScaleY = 1.0f;
     double cursorX = 0.0;
     double cursorY = 0.0;
 
@@ -488,16 +672,15 @@ private:
             windowH = 0;
             framebufferW = 0;
             framebufferH = 0;
-            contentScale = 1.0f;
+            contentScaleX = 1.0f;
+            contentScaleY = 1.0f;
             cursorX = 0.0;
             cursorY = 0.0;
             return;
         }
         glfwGetWindowSize(window, &windowW, &windowH);
         glfwGetFramebufferSize(window, &framebufferW, &framebufferH);
-        float xscale = 1.0f;
-        glfwGetWindowContentScale(window, &xscale, nullptr);
-        contentScale = xscale;
+        glfwGetWindowContentScale(window, &contentScaleX, &contentScaleY);
         glfwGetCursorPos(window, &cursorX, &cursorY);
     }
 
@@ -509,6 +692,78 @@ private:
     double framebufferScaleY() const {
         return (windowH > 0) ? static_cast<double>(framebufferH) / static_cast<double>(windowH)
                              : 1.0;
+    }
+
+    void appendResizeEvent() {
+        Event ev;
+        ev.type = EventType::WindowResize;
+        ev.width = framebufferW;
+        ev.height = framebufferH;
+        ev.logicalWidth = windowW;
+        ev.logicalHeight = windowH;
+        ev.framebufferWidth = framebufferW;
+        ev.framebufferHeight = framebufferH;
+        ev.scaleX = static_cast<float>(framebufferScaleX());
+        ev.scaleY = static_cast<float>(framebufferScaleY());
+        eventsBuffer.push_back(ev);
+    }
+
+    void pollGamepads() {
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid) {
+            auto& cached = gamepads[static_cast<std::size_t>(jid)];
+            const bool connected = glfwJoystickIsGamepad(jid) == GLFW_TRUE;
+            if (connected != cached.connected) {
+                Event event;
+                event.type = connected ? EventType::GamepadConnected
+                                       : EventType::GamepadDisconnected;
+                event.gamepad = jid;
+                eventsBuffer.push_back(event);
+                cached = {};
+                cached.connected = connected;
+                gamepadRepeats.resetGamepad(jid);
+            }
+            if (!connected) {
+                continue;
+            }
+
+            GLFWgamepadstate current{};
+            if (glfwGetGamepadState(jid, &current) != GLFW_TRUE) {
+                continue;
+            }
+            for (int button = 0; button <= GLFW_GAMEPAD_BUTTON_LAST; ++button) {
+                const unsigned char pressed =
+                    current.buttons[button] == GLFW_PRESS ? 1u : 0u;
+                if (pressed == cached.buttons[static_cast<std::size_t>(button)]) {
+                    continue;
+                }
+                cached.buttons[static_cast<std::size_t>(button)] = pressed;
+                const GamepadButton normalized_button = toGamepadButton(button);
+                gamepadRepeats.buttonChanged(jid, normalized_button, pressed != 0u);
+                Event event;
+                event.type = pressed ? EventType::GamepadButtonDown
+                                     : EventType::GamepadButtonUp;
+                event.gamepad = jid;
+                event.gamepadButton = normalized_button;
+                eventsBuffer.push_back(event);
+            }
+            for (int axis = 0; axis <= GLFW_GAMEPAD_AXIS_LAST; ++axis) {
+                const float value = normalizeGamepadAxis(axis, current.axes[axis]);
+                float& previous = cached.axes[static_cast<std::size_t>(axis)];
+                if (std::abs(value - previous) < 0.002f) {
+                    continue;
+                }
+                previous = value;
+                const GamepadAxis normalized_axis = toGamepadAxis(axis);
+                gamepadRepeats.axisChanged(jid, normalized_axis, value);
+                Event event;
+                event.type = EventType::GamepadAxisMotion;
+                event.gamepad = jid;
+                event.gamepadAxis = normalized_axis;
+                event.gamepadValue = value;
+                eventsBuffer.push_back(event);
+            }
+        }
+        gamepadRepeats.appendDue(eventsBuffer);
     }
 
     void setupCallbacks() {
@@ -551,8 +806,8 @@ private:
             ev.mouseButton = toMouseButton(button);
             ev.mods = toModifiers(mods);
             ev.type = (action == GLFW_PRESS) ? EventType::MouseButtonDown : EventType::MouseButtonUp;
-            ev.x = self->cursorX * self->framebufferScaleX();
-            ev.y = self->cursorY * self->framebufferScaleY();
+            ev.x = self->cursorX;
+            ev.y = self->cursorY;
             self->eventsBuffer.push_back(ev);
         });
 
@@ -565,8 +820,8 @@ private:
             ev.type = EventType::MouseMove;
             self->cursorX = xpos;
             self->cursorY = ypos;
-            ev.x = xpos * self->framebufferScaleX();
-            ev.y = ypos * self->framebufferScaleY();
+            ev.x = xpos;
+            ev.y = ypos;
             self->eventsBuffer.push_back(ev);
         });
 
@@ -577,6 +832,16 @@ private:
             }
             Event ev;
             ev.type = EventType::MouseScroll;
+            ev.x = self->cursorX;
+            ev.y = self->cursorY;
+            ev.mods.shift = glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                            glfwGetKey(w, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+            ev.mods.control = glfwGetKey(w, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                              glfwGetKey(w, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            ev.mods.alt = glfwGetKey(w, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+                          glfwGetKey(w, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+            ev.mods.super = glfwGetKey(w, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
+                            glfwGetKey(w, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
             ev.scrollX = xoffset;
             ev.scrollY = yoffset;
             self->eventsBuffer.push_back(ev);
@@ -610,6 +875,8 @@ private:
             }
             self->windowW = width;
             self->windowH = height;
+            glfwGetFramebufferSize(w, &self->framebufferW, &self->framebufferH);
+            self->appendResizeEvent();
         });
 
         glfwSetFramebufferSizeCallback(window, [](GLFWwindow *w, int width, int height) {
@@ -619,19 +886,18 @@ private:
             }
             self->framebufferW = width;
             self->framebufferH = height;
-            Event ev;
-            ev.type = EventType::WindowResize;
-            ev.width = width;
-            ev.height = height;
-            self->eventsBuffer.push_back(ev);
+            glfwGetWindowSize(w, &self->windowW, &self->windowH);
+            self->appendResizeEvent();
         });
 
-        glfwSetWindowContentScaleCallback(window, [](GLFWwindow *w, float xscale, float) {
+        glfwSetWindowContentScaleCallback(window, [](GLFWwindow *w, float xscale, float yscale) {
             auto *self = static_cast<WindowGlfw *>(glfwGetWindowUserPointer(w));
             if (!self) {
                 return;
             }
-            self->contentScale = xscale;
+            self->contentScaleX = xscale;
+            self->contentScaleY = yscale;
+            self->appendResizeEvent();
         });
     }
 };

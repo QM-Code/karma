@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include "karma/core.h"
 #include "karma/platform.h"
 #include "karma/world.h"
+#include "../src/platform/window/gamepad_repeat.h"
 
 namespace {
 
@@ -67,6 +69,71 @@ void testConcurrentTypeIds() {
   assert(std::none_of(ids.begin(), ids.end(), [](karma::core::TypeId id) {
     return id == 0;
   }));
+}
+
+void testGamepadRepeatScheduler() {
+  using karma::platform::Event;
+  using karma::platform::EventType;
+  using karma::platform::GamepadAxis;
+  using karma::platform::GamepadButton;
+  using karma::platform::detail::GamepadRepeatScheduler;
+
+  GamepadRepeatScheduler scheduler;
+  std::vector<Event> events;
+  const GamepadRepeatScheduler::TimePoint start{};
+
+  scheduler.buttonChanged(3, GamepadButton::DpadRight, true, start);
+  scheduler.buttonChanged(3, GamepadButton::A, true, start);
+  scheduler.axisChanged(3, GamepadAxis::LeftY, -0.8f, start);
+  scheduler.buttonChanged(3, GamepadButton::DpadRight, true,
+                          start + std::chrono::milliseconds(200));
+  scheduler.axisChanged(3, GamepadAxis::LeftY, -0.9f,
+                        start + std::chrono::milliseconds(200));
+  scheduler.appendDue(events, start + std::chrono::milliseconds(449));
+  assert(events.empty());
+
+  scheduler.appendDue(events, start + std::chrono::milliseconds(450));
+  assert(events.size() == 2u);
+  assert(events[0].repeat && events[1].repeat);
+  assert(std::ranges::any_of(events, [](const Event& event) {
+    return event.type == EventType::GamepadButtonDown &&
+           event.gamepadButton == GamepadButton::DpadRight;
+  }));
+  assert(std::ranges::any_of(events, [](const Event& event) {
+    return event.type == EventType::GamepadAxisMotion &&
+           event.gamepadAxis == GamepadAxis::LeftY &&
+           event.gamepadValue == -0.9f;
+  }));
+  assert(std::ranges::none_of(events, [](const Event& event) {
+    return event.gamepadButton == GamepadButton::A;
+  }));
+
+  events.clear();
+  scheduler.appendDue(events, start + std::chrono::milliseconds(539));
+  assert(events.empty());
+  scheduler.appendDue(events, start + std::chrono::milliseconds(540));
+  assert(events.size() == 2u);
+
+  events.clear();
+  scheduler.buttonChanged(3, GamepadButton::DpadRight, false,
+                          start + std::chrono::milliseconds(550));
+  scheduler.axisChanged(3, GamepadAxis::LeftY, 0.0f,
+                        start + std::chrono::milliseconds(550));
+  scheduler.appendDue(events, start + std::chrono::seconds(2));
+  assert(events.empty());
+
+  scheduler.axisChanged(3, GamepadAxis::LeftX, 0.9f, start);
+  scheduler.axisChanged(3, GamepadAxis::LeftX, -0.9f,
+                        start + std::chrono::milliseconds(300));
+  scheduler.appendDue(events, start + std::chrono::milliseconds(749));
+  assert(events.empty());
+  scheduler.appendDue(events, start + std::chrono::milliseconds(750));
+  assert(events.size() == 1u && events.front().gamepadValue == -0.9f);
+
+  events.clear();
+  scheduler.resetGamepad(3);
+  scheduler.appendDue(events, start + std::chrono::seconds(4));
+  assert(events.empty());
 }
 
 void testEntityLivenessAndComponents() {
@@ -184,6 +251,14 @@ class FakeWindow final : public karma::platform::Window {
   bool isMouseDown(karma::platform::MouseButton button) const override {
     return mouse_buttons_.contains(button);
   }
+  bool isGamepadButtonDown(karma::platform::GamepadButton button,
+                           int = -1) const override {
+    return gamepad_buttons_.contains(button);
+  }
+  float gamepadAxis(karma::platform::GamepadAxis axis, int = -1) const override {
+    const auto found = gamepad_axes_.find(axis);
+    return found == gamepad_axes_.end() ? 0.0f : found->second;
+  }
   void setCursorVisible(bool) override {}
   void setClipboardText(std::string_view text) override { clipboard_ = text; }
   std::string getClipboardText() const override { return clipboard_; }
@@ -191,6 +266,8 @@ class FakeWindow final : public karma::platform::Window {
 
   std::unordered_set<karma::platform::Key> keys_;
   std::unordered_set<karma::platform::MouseButton> mouse_buttons_;
+  std::unordered_set<karma::platform::GamepadButton> gamepad_buttons_;
+  std::unordered_map<karma::platform::GamepadAxis, float> gamepad_axes_;
   std::vector<karma::platform::Event> events_;
   std::string clipboard_;
 };
@@ -239,6 +316,76 @@ void testInputRepeatAndHeldModifiers() {
   resumed_move.y = 700.0;
   input.update({focus_lost, resumed_move});
   assert(input.mouseDeltaX() == 0.0f && input.mouseDeltaY() == 0.0f);
+}
+
+void testInputFilteringAndGamepadBindings() {
+  using namespace karma;
+  FakeWindow window;
+  app::InputSystem input;
+  input.setWindow(&window);
+  input.bindKey("held-key", platform::Key::W);
+  input.bindKey("filtered-shortcut", platform::Key::S, app::Trigger::Pressed);
+  input.setRequiredModifiers("filtered-shortcut", {.control = true});
+  input.bindMouse("held-mouse", platform::MouseButton::Left);
+  input.bindGamepadButton("pad-press", platform::GamepadButton::A,
+                          app::Trigger::Pressed);
+  input.bindGamepadButton("pad-held", platform::GamepadButton::A);
+  input.bindGamepadAxis("pad-right", platform::GamepadAxis::LeftX, 0.5f);
+
+  window.keys_.insert(platform::Key::W);
+  window.mouse_buttons_.insert(platform::MouseButton::Left);
+  window.gamepad_buttons_.insert(platform::GamepadButton::A);
+  window.gamepad_axes_[platform::GamepadAxis::LeftX] = 0.8f;
+  input.update({});
+  assert(input.actionDown("held-key"));
+  assert(input.actionDown("held-mouse"));
+  assert(input.actionDown("pad-held"));
+  assert(input.actionDown("pad-right"));
+
+  app::InputFilter held_filter;
+  held_filter.keys.insert(platform::Key::W);
+  held_filter.keys.insert(platform::Key::LeftControl);
+  held_filter.mouse_buttons.insert(platform::MouseButton::Left);
+  held_filter.gamepad_buttons.insert(platform::GamepadButton::A);
+  held_filter.gamepad_axes.insert(platform::GamepadAxis::LeftX);
+  input.update({}, held_filter);
+  assert(!input.actionDown("held-key"));
+  assert(!input.actionDown("held-mouse"));
+  assert(!input.actionDown("pad-held"));
+  assert(!input.actionDown("pad-right"));
+
+  platform::Event shortcut{};
+  shortcut.type = platform::EventType::KeyDown;
+  shortcut.key = platform::Key::S;
+  shortcut.mods.control = true;
+  input.update({shortcut}, held_filter);
+  assert(!input.actionPressed("filtered-shortcut"));
+
+  platform::Event button_down{};
+  button_down.type = platform::EventType::GamepadButtonDown;
+  button_down.gamepadButton = platform::GamepadButton::A;
+  input.update({button_down}, held_filter);
+  assert(!input.actionPressed("pad-press"));
+  input.update({button_down});
+  assert(input.actionPressed("pad-press"));
+
+  platform::Event first_move{};
+  first_move.type = platform::EventType::MouseMove;
+  first_move.x = 4.0;
+  first_move.y = 6.0;
+  input.update({first_move});
+  platform::Event captured_move = first_move;
+  captured_move.x = 40.0;
+  captured_move.y = 60.0;
+  app::InputFilter motion_filter;
+  motion_filter.mouse_motion = true;
+  input.update({captured_move}, motion_filter);
+  assert(input.mouseDeltaX() == 0.0f && input.mouseDeltaY() == 0.0f);
+  platform::Event resumed_move = captured_move;
+  resumed_move.x = 42.0;
+  resumed_move.y = 63.0;
+  input.update({resumed_move});
+  assert(input.mouseDeltaX() == 2.0f && input.mouseDeltaY() == 3.0f);
 }
 
 struct RuntimeCounts {
@@ -547,11 +694,13 @@ void testEngineValidationAndHeadlessLifecycle() {
 }  // namespace
 
 int main() {
+  testGamepadRepeatScheduler();
   testConcurrentTypeIds();
   testEntityLivenessAndComponents();
   testSceneCycleRejection();
   testSystemGraphValidationAndOrder();
   testInputRepeatAndHeldModifiers();
+  testInputFilteringAndGamepadBindings();
   testEngineValidationAndHeadlessLifecycle();
   return 0;
 }

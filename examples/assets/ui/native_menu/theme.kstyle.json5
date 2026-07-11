@@ -1,0 +1,218 @@
+{
+  format: 'karma.ui.theme',
+  version: 2,
+
+  variables: {
+    panel: '#182033f2',
+    surface: '#29344a',
+    accent: '#438cff',
+    text: '#f4f7ff',
+  },
+
+  fonts: {
+    'Karma Demo': {
+      src: { asset: 'ui/demo/font' },
+    },
+  },
+
+  motions: {
+    'focus-pulse': {
+      duration_ms: 800,
+      easing: 'ease-in-out',
+      iterations: 'infinite',
+      direction: 'alternate',
+      keyframes: [
+        { at: 0, appearance: { box: { border_color: '#ffffff' } } },
+        { at: 1, appearance: { box: { border_color: '#75a9ff' } } },
+      ],
+    },
+  },
+
+  defaults: {
+    panel: {
+      appearance: {
+        text: {
+          color: { var: 'text' },
+          font_family: ['Karma Demo'],
+          font_size: 18,
+        },
+      },
+    },
+    text: {
+      appearance: {
+        text: {
+          color: { var: 'text' },
+          font_family: ['Karma Demo'],
+          font_size: 18,
+        },
+      },
+    },
+    button: {
+      layout: {
+        height: 44,
+        padding: [10, 10, 10, 10],
+        align_self: 'stretch',
+      },
+      appearance: {
+        box: {
+          background_color: { var: 'surface' },
+          border_width: 1,
+          border_color: '#65728a',
+        },
+        text: {
+          color: { var: 'text' },
+          font_family: ['Karma Demo'],
+          font_size: 18,
+          align: 'center',
+        },
+        transitions: {
+          background_color: { duration_ms: 120, easing: 'ease-out' },
+          border_color: { duration_ms: 120, easing: 'linear' },
+        },
+        states: {
+          hover: { box: { background_color: '#35435e' } },
+          focus: { box: { border_color: '#ffffff' } },
+          pressed: { box: { background_color: '#1d67d7' } },
+          disabled: { box: { opacity: 0.45 } },
+        },
+      },
+    },
+    slider: {
+      layout: { width: 240, height: 22 },
+      appearance: {
+        parts: {
+          track: {
+            box: { background_color: '#1a2334', border_radius: 4 },
+            metrics: { thickness: 8 },
+          },
+          fill: {
+            box: { background_color: { var: 'accent' }, border_radius: 4 },
+          },
+          thumb: {
+            box: {
+              background_color: '#f4f7ff',
+              border_color: '#29344a',
+              border_width: 1,
+              border_radius: 8,
+            },
+            metrics: { width: 16, height: 16 },
+          },
+        },
+        states: {
+          focus: { parts: { thumb: { box: { border_color: '#ffffff' } } } },
+          disabled: { box: { opacity: 0.45 } },
+        },
+      },
+    },
+    toggle: {
+      layout: { width: 28, height: 28 },
+      appearance: {
+        parts: {
+          track: {
+            box: {
+              background_color: '#1a2334',
+              border_color: '#65728a',
+              border_width: 1,
+              border_radius: 4,
+            },
+          },
+          checkmark: { text: { color: '#ffffff' } },
+        },
+        states: {
+          checked: { parts: { track: { box: { background_color: { var: 'accent' } } } } },
+          focus: { parts: { track: { box: { border_color: '#ffffff' } } } },
+          disabled: { box: { opacity: 0.45 } },
+        },
+      },
+    },
+    scroll: {
+      appearance: {
+        parts: {
+          vertical_track: { box: { background_color: '#101725cc' }, metrics: { width: 12 } },
+          vertical_thumb: {
+            box: { background_color: '#52647f', border_radius: 6 },
+            metrics: { min_length: 24 },
+            states: {
+              hover: { box: { background_color: '#657a9b' } },
+              pressed: { box: { background_color: { var: 'accent' } } },
+            },
+          },
+          horizontal_track: { box: { background_color: '#101725cc' }, metrics: { height: 12 } },
+          horizontal_thumb: {
+            box: { background_color: '#52647f', border_radius: 6 },
+            metrics: { min_length: 24 },
+          },
+          corner: { box: { background_color: '#101725cc' } },
+        },
+      },
+    },
+  },
+
+  styles: {
+    screen: {
+      layout: {
+        mode: 'overlay',
+        width: 1280,
+        height: 720,
+        padding: [72, 72, 72, 72],
+      },
+      appearance: {
+        box: { background_color: '#090d17cc' },
+      },
+    },
+    panel: {
+      layout: {
+        mode: 'column',
+        width: 520,
+        height: 570,
+        padding: [32, 32, 32, 32],
+        gap: 18,
+      },
+      appearance: {
+        box: {
+          background_color: { var: 'panel' },
+          border_width: 2,
+          border_color: '#52647f',
+        },
+      },
+    },
+    logo: { layout: { width: 64, height: 64 } },
+    title: {
+      layout: { height: 48 },
+      appearance: { text: { color: '#ffffff', font_size: 32 } },
+    },
+    status: {
+      layout: { height: 28 },
+      appearance: { text: { color: '#aab9d4' } },
+    },
+    primary: {
+      appearance: {
+        box: { background_color: { var: 'accent' } },
+        states: {
+          focus: { motion: 'focus-pulse' },
+        },
+      },
+    },
+    'setting-row': {
+      layout: {
+        mode: 'grid',
+        height: 44,
+        columns: ['1fr', 240],
+        gap: 20,
+        align_items: 'center',
+        align_self: 'stretch',
+      },
+    },
+    'save-list': {
+      layout: {
+        mode: 'column',
+        height: 155,
+        padding: [4, 4, 4, 4],
+        align_self: 'stretch',
+      },
+    },
+    save: {
+      layout: { margin: [4, 4, 4, 4] },
+    },
+  },
+}

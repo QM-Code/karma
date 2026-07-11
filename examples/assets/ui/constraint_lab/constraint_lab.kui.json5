@@ -1,0 +1,152 @@
+{
+  format: 'karma.ui.document',
+  version: 2,
+
+  themes: [
+    { asset: 'ui/pilots/constraint-lab-theme' },
+  ],
+
+  root: {
+    type: 'panel',
+    id: 'constraint-controls',
+    styles: ['panel'],
+    children: [
+      { type: 'text', styles: ['title'], props: { text: 'Physics Constraint Lab' } },
+      { type: 'text', styles: ['help'], props: { text: 'WASD + QE fly, hold RMB to look' } },
+      {
+        type: 'panel',
+        styles: ['actions'],
+        children: [
+          {
+            type: 'button',
+            id: 'reset',
+            styles: ['primary'],
+            props: { text: 'Reset' },
+            on: { click: 'reset' },
+          },
+          {
+            type: 'button',
+            id: 'impulse',
+            props: { text: 'Impulse' },
+            on: { click: 'impulse' },
+          },
+        ],
+      },
+      {
+        type: 'scroll',
+        styles: ['control-list'],
+        props: {
+          scroll_x: 'hidden',
+          scroll_y: 'auto',
+          scrollbar_placement: 'gutter',
+        },
+        children: [
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Enabled' } },
+              { type: 'toggle', id: 'enabled', props: { value: { bind: 'controls.enabled', mode: 'two_way' } } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Local body frames' } },
+              { type: 'toggle', id: 'local-space', props: { value: { bind: 'controls.local_space', mode: 'two_way' } } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Constraint' } },
+              {
+                type: 'select',
+                id: 'constraint',
+                props: { value: { bind: 'controls.constraint', mode: 'two_way' } },
+                children: [
+                  { type: 'option', props: { value: 'fixed', text: 'Fixed' } },
+                  { type: 'option', props: { value: 'point', text: 'Point' } },
+                  { type: 'option', props: { value: 'distance', text: 'Distance' } },
+                  { type: 'option', props: { value: 'hinge', text: 'Hinge' } },
+                  { type: 'option', props: { value: 'slider', text: 'Slider' } },
+                  { type: 'option', props: { value: 'cone', text: 'Cone' } },
+                  { type: 'option', props: { value: 'swing-twist', text: 'Swing twist' } },
+                  { type: 'option', props: { value: 'six-dof', text: 'Six DOF' } },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Gravity' } },
+              { type: 'slider', id: 'gravity', props: { value: { bind: 'controls.gravity', mode: 'two_way' }, min: 0, max: 30, step: 0.25 } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Impulse' } },
+              { type: 'slider', id: 'impulse-strength', props: { value: { bind: 'controls.impulse', mode: 'two_way' }, min: 0, max: 35, step: 0.5 } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Priority' } },
+              { type: 'slider', id: 'priority', props: { value: { bind: 'controls.priority', mode: 'two_way' }, min: 0, max: 8, step: 1 } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Velocity steps' } },
+              { type: 'slider', id: 'velocity-steps', props: { value: { bind: 'controls.velocity_steps', mode: 'two_way' }, min: 0, max: 16, step: 1 } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Position steps' } },
+              { type: 'slider', id: 'position-steps', props: { value: { bind: 'controls.position_steps', mode: 'two_way' }, min: 0, max: 16, step: 1 } },
+            ],
+          },
+          { type: 'text', styles: ['section'], props: { text: 'Distance / Linear' } },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Min distance' } },
+              { type: 'slider', id: 'min-distance', props: { value: { bind: 'controls.min_distance', mode: 'two_way' }, min: 0, max: 3, step: 0.05 } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Max distance' } },
+              { type: 'slider', id: 'max-distance', props: { value: { bind: 'controls.max_distance', mode: 'two_way' }, min: 0, max: 5, step: 0.05 } },
+            ],
+          },
+          { type: 'text', styles: ['section'], props: { text: 'Spring' } },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Frequency' } },
+              { type: 'slider', id: 'spring-frequency', props: { value: { bind: 'controls.spring_frequency', mode: 'two_way' }, min: 0, max: 10, step: 0.1 } },
+            ],
+          },
+          {
+            type: 'panel', styles: ['row'], children: [
+              { type: 'text', props: { text: 'Damping' } },
+              { type: 'slider', id: 'spring-damping', props: { value: { bind: 'controls.spring_damping', mode: 'two_way' }, min: 0, max: 2, step: 0.05 } },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'panel',
+        styles: ['stats'],
+        children: [
+          {
+            type: 'panel',
+            styles: ['editing-row'],
+            children: [
+              { type: 'text', styles: ['editing'], props: { text: 'Editing:' } },
+              { type: 'text', styles: ['editing'], props: { text: { bind: 'stats.name' } } },
+            ],
+          },
+          { type: 'text', props: { text: { bind: 'stats.position' } } },
+          { type: 'text', props: { text: { bind: 'stats.velocity' } } },
+        ],
+      },
+    ],
+  },
+}

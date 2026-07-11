@@ -18,7 +18,7 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/karma.h"
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 
 #include "shared.h"
 

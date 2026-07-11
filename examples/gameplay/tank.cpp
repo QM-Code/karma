@@ -2,11 +2,18 @@
 #include "karma/karma.h"
 #include "karma/components.h"
 
+#include <array>
+#include <cstdio>
+#include <string>
+
+#if defined(KARMA_ENABLE_IMGUI)
 #include <imgui.h>
+#endif
 
 namespace karma::demo {
 
 namespace {
+#if defined(KARMA_ENABLE_IMGUI)
 ImTextureID toImTextureId(karma::app::UITextureHandle handle) {
   return static_cast<ImTextureID>(handle);
 }
@@ -14,6 +21,7 @@ ImTextureID toImTextureId(karma::app::UITextureHandle handle) {
 karma::app::UITextureHandle fromImTextureId(ImTextureID id) {
   return static_cast<karma::app::UITextureHandle>(id);
 }
+#endif
 }  // namespace
 
 struct RadarOverlayState {
@@ -22,9 +30,10 @@ struct RadarOverlayState {
   int radar_height = 0;
 };
 
-class RadarUiLayer final : public app::UiLayer {
+#if defined(KARMA_ENABLE_IMGUI)
+class RadarImGuiLayer final : public app::UiLayer {
  public:
-  explicit RadarUiLayer(RadarOverlayState& state) : state_(state) {
+  explicit RadarImGuiLayer(RadarOverlayState& state) : state_(state) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -32,14 +41,15 @@ class RadarUiLayer final : public app::UiLayer {
     io.BackendRendererName = "karma_ui_draw";
   }
 
-  ~RadarUiLayer() override = default;
+  ~RadarImGuiLayer() override = default;
 
   void onFrame(app::UIContext& ctx) override {
     pending_ctx_ = &ctx;
     ImGuiIO& io = ImGui::GetIO();
     const auto frame = ctx.frame();
-    io.DisplaySize = ImVec2(static_cast<float>(frame.viewport_w), static_cast<float>(frame.viewport_h));
-    io.DisplayFramebufferScale = ImVec2(frame.dpi_scale, frame.dpi_scale);
+    io.DisplaySize = ImVec2(static_cast<float>(frame.logical_width),
+                            static_cast<float>(frame.logical_height));
+    io.DisplayFramebufferScale = ImVec2(frame.scale_x, frame.scale_y);
     io.DeltaTime = frame.dt > 0.0f ? frame.dt : (1.0f / 60.0f);
 
     if (!font_texture_) {
@@ -88,8 +98,8 @@ class RadarUiLayer final : public app::UiLayer {
       for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
         const ImDrawVert& v = cmd_list->VtxBuffer[i];
         rendering::UIVertex out_v{};
-        out_v.x = v.pos.x;
-        out_v.y = v.pos.y;
+        out_v.x = (v.pos.x - draw_data->DisplayPos.x) * draw_data->FramebufferScale.x;
+        out_v.y = (v.pos.y - draw_data->DisplayPos.y) * draw_data->FramebufferScale.y;
         out_v.u = v.uv.x;
         out_v.v = v.uv.y;
         out_v.rgba = v.col;
@@ -124,6 +134,9 @@ class RadarUiLayer final : public app::UiLayer {
         out_cmd.scissor_w = static_cast<int>(clip.z - clip.x);
         out_cmd.scissor_h = static_cast<int>(clip.w - clip.y);
         out_cmd.texture = fromImTextureId(cmd.GetTexID());
+        out_cmd.blend_mode = rendering::UIBlendMode::StraightAlpha;
+        out_cmd.sampler_mode = rendering::UISamplerMode::Linear;
+        out_cmd.texture_mode = rendering::UITextureMode::Color;
         out.commands.push_back(out_cmd);
         global_idx_offset += cmd.ElemCount;
       }
@@ -146,6 +159,7 @@ class RadarUiLayer final : public app::UiLayer {
   app::UITextureHandle font_texture_ = 0;
   app::UIContext* pending_ctx_ = nullptr;
 };
+#endif
 
 class DemoGame : public app::GameInterface {
  public:
@@ -168,7 +182,7 @@ class DemoGame : public app::GameInterface {
     world->add(world_entity, components::MeshComponent{
         .mesh_asset_key = importExampleMeshAsset(assets, "world.glb")});
     world->add(world_entity, components::ColliderComponent::mesh());
-    
+
     auto player = world->createEntity();
     world->setName(player, "Player");
     world->add(player, components::TransformComponent{});
@@ -290,6 +304,10 @@ class DemoGame : public app::GameInterface {
         .environment_map_asset_key = registerExampleEnvironmentMap(assets, "golden_gate_hills_4k.hdr"),
         .intensity = 0.4f,
         .draw_skybox = true});
+
+#if defined(KARMA_ENABLE_NATIVE_UI)
+    openNativeHud();
+#endif
   }
 
   void onFixedUpdate(float dt) override {
@@ -359,6 +377,10 @@ class DemoGame : public app::GameInterface {
       radar_xform.setRotation(math::fromYawPitch(0.0f, -1.5702f));
     }
 
+#if defined(KARMA_ENABLE_NATIVE_UI)
+    updateNativeHud();
+#endif
+
     if (graphics) {
       const float axis_len = 5.0f;
       graphics->drawLine(math::Vec3{0.0f, 0.0f, 0.0f}, math::Vec3{axis_len, 0.0f, 0.0f},
@@ -371,6 +393,13 @@ class DemoGame : public app::GameInterface {
   }
 
   void onShutdown() override {
+#if defined(KARMA_ENABLE_NATIVE_UI)
+    if (ui != nullptr && hud_) {
+      ui->close(hud_);
+      hud_ = {};
+      radar_element_ = {};
+    }
+#endif
     if (graphics && radar_target_ != rendering::kDefaultRenderTarget) {
       graphics->destroyRenderTarget(radar_target_);
       radar_target_ = rendering::kDefaultRenderTarget;
@@ -383,6 +412,49 @@ class DemoGame : public app::GameInterface {
   }
 
  private:
+#if defined(KARMA_ENABLE_NATIVE_UI)
+  void openNativeHud() {
+    if (ui == nullptr) return;
+    const auto opened = ui->open("ui/pilots/tank-hud", {.layer = 90});
+    hud_ = opened.document;
+    if (!hud_) return;
+    radar_element_ = ui->findById(hud_, "radar-image");
+    const char* radar_status = "UNAVAILABLE";
+    if (radar_element_ && radar_target_ != rendering::kDefaultRenderTarget) {
+      ui->setImage(radar_element_, ui::ImageSource::renderTarget(radar_target_));
+      radar_status = "LIVE";
+    }
+    ui->setMany(hud_, {{"radar.status", radar_status},
+                       {"telemetry.position", "Position: --"},
+                       {"telemetry.speed", "Speed: --"}});
+  }
+
+  static std::string telemetryText(const char* label,
+                                   const math::Vec3& value,
+                                   bool magnitude_only = false) {
+    std::array<char, 128> text{};
+    if (magnitude_only) {
+      std::snprintf(text.data(), text.size(), "%s: %.1f", label, math::length(value));
+    } else {
+      std::snprintf(text.data(), text.size(), "%s: %.1f  %.1f  %.1f", label,
+                    value.x, value.y, value.z);
+    }
+    return text.data();
+  }
+
+  void updateNativeHud() {
+    if (ui == nullptr || !hud_ || !world->isAlive(player_entity_)) return;
+    const auto& transform = world->get<components::TransformComponent>(player_entity_);
+    const auto& controller = world->get<components::CharacterControllerComponent>(player_entity_);
+    ui->setMany(
+        hud_,
+        {{"telemetry.position",
+          telemetryText("Position", transform.getInterpolatedPosition(
+                                        renderInterpolationAlpha()))},
+         {"telemetry.speed", telemetryText("Speed", controller.velocity, true)}});
+  }
+#endif
+
   RadarOverlayState* radar_state_ = nullptr;
   world::Entity camera_entity_{};
   world::Entity radar_camera_entity_{};
@@ -394,6 +466,10 @@ class DemoGame : public app::GameInterface {
   float move_speed_ = 8.0f;
   float turn_speed_rad_ = 2.4f;
   bool reset_down_prev_ = false;
+#if defined(KARMA_ENABLE_NATIVE_UI)
+  ui::DocumentHandle hud_{};
+  ui::ElementHandle radar_element_{};
+#endif
 };
 
 }  // namespace karma::demo
@@ -402,7 +478,9 @@ int main() {
   karma::app::EngineApp engine;
   karma::demo::RadarOverlayState radar_state;
   karma::demo::DemoGame game(radar_state);
-  engine.setUi(std::make_unique<karma::demo::RadarUiLayer>(radar_state));
+#if defined(KARMA_ENABLE_IMGUI) && !defined(KARMA_ENABLE_NATIVE_UI)
+  engine.setUi(std::make_unique<karma::demo::RadarImGuiLayer>(radar_state));
+#endif
 
   karma::app::EngineConfig config;
   config.window.title = "Karma Example";
@@ -429,6 +507,10 @@ int main() {
   config.ao_affects_local_lights = false;
   config.local_light_directional_shadow_lift_strength = 0.85f;
   config.lighting_exposure = 1.1f;
+#if defined(KARMA_ENABLE_NATIVE_UI)
+  config.startup_asset_packages.push_back(
+      karma::demo::resolveExamplePath("examples/assets/ui/tank_hud"));
+#endif
 
   engine.start(game, config);
   while (engine.isRunning()) {

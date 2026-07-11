@@ -10,7 +10,8 @@ Shared example helpers live in `examples/common/`.
 
 - `gameplay/tank.cpp`: target `gameplay_tank`, output `examples/gameplay/tank`.
   Base tank/world movement demo with follow camera, radar camera, HDR lighting,
-  local lights, and a small ImGui overlay.
+  local lights, and a native HUD that displays the borrowed radar render target.
+  An ImGui fallback remains available only when that optional provider is built.
 
 ## Physics
 
@@ -31,7 +32,9 @@ Shared example helpers live in `examples/common/`.
   shrunken/deepest casts.
 - `physics/constraint_lab.cpp`: target `physics_constraint_lab`, output
   `examples/physics/constraint_lab`. ECS constraint editor for fixed, point,
-  distance, hinge, slider, cone, swing-twist, and six-DOF constraints.
+  distance, hinge, slider, cone, swing-twist, and six-DOF constraints. Its
+  controls and live statistics use native UI when available, with an optional
+  ImGui fallback.
 - `physics/car.cpp`: target `physics_car`, output `examples/physics/car`.
   Vehicle sample with ImGui tuning, wheel/contact/suspension telemetry, road
   obstacles, chase/free camera, drive modes, and collision tester selection.
@@ -172,7 +175,23 @@ Shared example helpers live in `examples/common/`.
 
 ## UI And Network
 
-- `ui/imgui.cpp`: target `ui_imgui`, output `examples/ui/imgui`.
+- `ui/native.cpp`: target `ui_native`, output `examples/ui/native`. First-party
+  retained `.kui.json5`/`.kstyle.json5` menu demonstrating explicit bindings,
+  widgets, keyed lists, actions, localization-ready text, modal input, themed
+  scrollbars, controller-based ownership, direct-file hot reload in development,
+  and packaged font/SVG fallback. See
+  [Native UI](../docs/NATIVE_UI.md) and the
+  [implementation roadmap](../docs/NATIVE_UI_STATUS.md).
+- `ui/showcase.cpp`: target `ui_showcase`, output `examples/ui/showcase`.
+  Exhaustive provider-free native UI forge covering JSON5 theme imports and
+  hot reload, localization/RTL, bindings, conditions, keyed repeats, virtual
+  lists, tabs, trees, disclosures, select/popup/menu/tooltip overlays,
+  splitters, floating windows, per-axis scrollbars, Grid/Flex/anchors,
+  raster/SVG/dynamic images, motion, accessibility metadata, and generated
+  medieval nine-slice skinning. Its live files are under
+  `examples/assets/ui/showcase/`.
+- `ui/imgui.cpp`: target `ui_imgui`, output `examples/ui/imgui` when ImGui and
+  its demo are enabled.
 - `ui/rmlui.cpp`: target `ui_rmlui`, output `examples/ui/rmlui` when RmlUi is
   enabled.
 - `network/server.cpp`: target `network_server`, output

@@ -79,9 +79,97 @@ else()
   message(FATAL_ERROR "meshoptimizer is required for compressed glTF import. Provide meshoptimizer or enable KARMA_FETCH_DEPS.")
 endif()
 
-# Graphical examples and the built-in ImGui UI adapter need ImGui even when the
-# standalone ImGui demo target is disabled.
-if (KARMA_BUILD_GRAPHICAL_PROFILE)
+if (KARMA_ENABLE_NATIVE_UI)
+  find_package(yoga CONFIG QUIET)
+  if (NOT TARGET yoga::yogacore AND NOT TARGET yogacore AND KARMA_FETCH_DEPS)
+    FetchContent_Declare(
+      karma_yoga
+      GIT_REPOSITORY https://github.com/facebook/yoga.git
+      GIT_TAG v3.2.1
+      SOURCE_SUBDIR yoga
+    )
+    FetchContent_MakeAvailable(karma_yoga)
+  endif()
+  if (TARGET yoga::yogacore)
+    set(KARMA_YOGA_TARGET yoga::yogacore)
+  elseif (TARGET yogacore)
+    set(KARMA_YOGA_TARGET yogacore)
+  else()
+    message(FATAL_ERROR
+      "KARMA_ENABLE_NATIVE_UI=ON but Yoga was not found. Provide the yoga package or enable KARMA_FETCH_DEPS.")
+  endif()
+
+  find_package(Freetype 2.6 QUIET)
+  if (NOT TARGET Freetype::Freetype AND KARMA_FETCH_DEPS)
+    set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      freetype
+      GIT_REPOSITORY https://gitlab.freedesktop.org/freetype/freetype.git
+      GIT_TAG VER-2-13-3
+    )
+    FetchContent_MakeAvailable(freetype)
+    if (TARGET freetype AND NOT TARGET Freetype::Freetype)
+      add_library(Freetype::Freetype ALIAS freetype)
+    endif()
+  endif()
+  if (NOT TARGET Freetype::Freetype)
+    message(FATAL_ERROR
+      "KARMA_ENABLE_NATIVE_UI=ON but FreeType 2.6 or newer was not found.")
+  endif()
+  set(KARMA_FREETYPE_TARGET Freetype::Freetype)
+
+  find_package(ICU COMPONENTS uc i18n QUIET)
+  if (NOT TARGET ICU::uc OR NOT TARGET ICU::i18n)
+    message(FATAL_ERROR
+      "KARMA_ENABLE_NATIVE_UI=ON but ICU (uc and i18n) was not found. Install ICU development files (the vcpkg dependency is 'icu').")
+  endif()
+
+  find_package(harfbuzz CONFIG QUIET)
+  if (NOT TARGET harfbuzz::harfbuzz AND NOT TARGET harfbuzz AND KARMA_FETCH_DEPS)
+    set(HB_HAVE_FREETYPE ON CACHE BOOL "" FORCE)
+    set(HB_BUILD_UTILS OFF CACHE BOOL "" FORCE)
+    set(HB_BUILD_SUBSET OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      harfbuzz
+      GIT_REPOSITORY https://github.com/harfbuzz/harfbuzz.git
+      GIT_TAG 8.3.0
+    )
+    FetchContent_MakeAvailable(harfbuzz)
+  endif()
+  if (TARGET harfbuzz::harfbuzz)
+    set(KARMA_HARFBUZZ_TARGET harfbuzz::harfbuzz)
+  elseif (TARGET harfbuzz)
+    set(KARMA_HARFBUZZ_TARGET harfbuzz)
+  else()
+    message(FATAL_ERROR
+      "KARMA_ENABLE_NATIVE_UI=ON but HarfBuzz was not found. Provide HarfBuzz or enable KARMA_FETCH_DEPS.")
+  endif()
+
+  find_package(lunasvg CONFIG QUIET)
+  if (NOT TARGET lunasvg::lunasvg AND NOT TARGET lunasvg AND KARMA_FETCH_DEPS)
+    set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LUNASVG_DISABLE_LOAD_SYSTEM_FONTS ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      lunasvg
+      GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
+      GIT_TAG v3.5.0
+      GIT_SUBMODULES_RECURSE TRUE
+    )
+    FetchContent_MakeAvailable(lunasvg)
+  endif()
+  if (TARGET lunasvg::lunasvg)
+    set(KARMA_LUNASVG_TARGET lunasvg::lunasvg)
+  elseif (TARGET lunasvg)
+    set(KARMA_LUNASVG_TARGET lunasvg)
+  else()
+    message(FATAL_ERROR
+      "KARMA_ENABLE_NATIVE_UI=ON but LunaSVG was not found. Provide LunaSVG or enable KARMA_FETCH_DEPS.")
+  endif()
+endif()
+
+# ImGui is an optional debug/provider dependency, not a graphical-profile
+# dependency. Native graphical consumers do not need ImGui installed.
+if (KARMA_ENABLE_IMGUI)
   find_package(imgui CONFIG QUIET)
   if (TARGET ui::imgui::imgui)
     set(KARMA_IMGUI_TARGET ui::imgui::imgui)
@@ -130,12 +218,14 @@ if (KARMA_ENABLE_RMLUI)
     set(RMLUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_VIEWER OFF CACHE BOOL "" FORCE)
     set(RMLUI_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-      lunasvg
-      GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
-      GIT_TAG v2.4.0
-    )
-    FetchContent_MakeAvailable(lunasvg)
+    if (NOT TARGET lunasvg::lunasvg AND NOT TARGET lunasvg)
+      FetchContent_Declare(
+        lunasvg
+        GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
+        GIT_TAG v2.4.0
+      )
+      FetchContent_MakeAvailable(lunasvg)
+    endif()
     FetchContent_Declare(
       rmlui
       GIT_REPOSITORY https://github.com/mikke89/RmlUi.git

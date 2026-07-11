@@ -63,6 +63,14 @@ Related durable animation guides:
   coverage, and bounded follow-up work.
 - `docs/RIGGED_GLTF_AUTHORING.md`: rigged glTF/GLB and Mixamo FBX authoring.
 
+Related native UI guides:
+
+- `docs/NATIVE_UI.md`: public native UI lifecycle, JSON5 document/theme
+  authoring, direct development files, widgets, rendering, accessibility, and
+  hot reload.
+- `docs/NATIVE_UI_STATUS.md`: implementation map, verification matrix, current
+  boundaries, and prioritized continuation plan.
+
 ## Publish To GitHub Pages
 
 The `.github/workflows/docs.yml` workflow builds this target on pull requests

@@ -30,6 +30,7 @@
 #include "karma/assets.h"
 
 #include "asset_texture_internal.h"
+#include "asset_ui_source_import.h"
 #include "asset_source_import.h"
 #include "../importers/gltf_scene_import_internal.h"
 
@@ -40,7 +41,7 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr std::string_view kPackageCacheContentVersion =
-    "package-cache-v8-scene-assets-imported-texture-paths";
+    "package-cache-v9-scene-assets-native-ui-imported-texture-paths";
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -1226,6 +1227,18 @@ bool keyAlreadyExists(const AssetRegistry& assets,
   if (type == "mesh") {
     return assets.findMeshAsset(key) != nullptr;
   }
+  if (type == "ui_document") {
+    return assets.findUiDocumentAsset(key) != nullptr;
+  }
+  if (type == "ui_theme") {
+    return assets.findUiThemeAsset(key) != nullptr;
+  }
+  if (type == "font") {
+    return assets.findFontAsset(key) != nullptr;
+  }
+  if (type == "svg") {
+    return assets.findSvgAsset(key) != nullptr;
+  }
   if (type == "material") {
     return assets.findMaterialAsset(key) != nullptr ||
            assets.findMaterialVariant(key) != nullptr;
@@ -1278,6 +1291,43 @@ bool copyAssetTo(AssetRegistry& target,
     const world::MeshData* mesh = source.findMeshAsset(asset.key);
     if (mesh == nullptr || !target.registerMeshAsset(asset.key, *mesh)) {
       return fail(diagnostic, "failed to commit mesh asset: " + asset.key);
+    }
+    return true;
+  }
+  if (asset.type == "ui_document") {
+    const UiDocumentAsset* document = source.findUiDocumentAsset(asset.key);
+    if (document == nullptr || !target.registerUiDocumentAsset(asset.key, *document)) {
+      return fail(diagnostic, "failed to commit UI document asset: " + asset.key);
+    }
+    if (const auto source_path =
+            detail::UiSourceMetadataAccess::document(source, asset.key)) {
+      detail::UiSourceMetadataAccess::setDocument(target, asset.key, *source_path);
+    }
+    return true;
+  }
+  if (asset.type == "ui_theme") {
+    const UiThemeAsset* theme = source.findUiThemeAsset(asset.key);
+    if (theme == nullptr ||
+        !target.registerUiThemeAsset(asset.key, *theme)) {
+      return fail(diagnostic, "failed to commit UI theme asset: " + asset.key);
+    }
+    if (const auto source_path =
+            detail::UiSourceMetadataAccess::theme(source, asset.key)) {
+      detail::UiSourceMetadataAccess::setTheme(target, asset.key, *source_path);
+    }
+    return true;
+  }
+  if (asset.type == "font") {
+    const FontAsset* font = source.findFontAsset(asset.key);
+    if (font == nullptr || !target.registerFontAsset(asset.key, *font)) {
+      return fail(diagnostic, "failed to commit font asset: " + asset.key);
+    }
+    return true;
+  }
+  if (asset.type == "svg") {
+    const SvgAsset* svg = source.findSvgAsset(asset.key);
+    if (svg == nullptr || !target.registerSvgAsset(asset.key, *svg)) {
+      return fail(diagnostic, "failed to commit SVG asset: " + asset.key);
     }
     return true;
   }
@@ -1483,6 +1533,37 @@ bool importEntry(AssetRegistry& assets,
     }
     if (!detail::importMeshAsset(assets, key, source_path)) {
       return fail(diagnostic, "failed to import mesh asset: " + source_path.string());
+    }
+    addLoaded(handle, type, key);
+    logAssetPackageEntryDiag(manifest_path,
+                             type,
+                             key,
+                             source_path,
+                             entry_start,
+                             core::SteadyClock::now());
+    return true;
+  }
+
+  if (type == "ui_document" || type == "ui_theme" ||
+      type == "font" || type == "svg") {
+    if (!readRequiredPath(entry, base_dir, source_path, diagnostic)) {
+      return false;
+    }
+    bool imported = false;
+    if (type == "ui_document") {
+      imported = detail::importUiDocumentAsset(assets, key, source_path, diagnostic);
+    } else if (type == "ui_theme") {
+      imported = detail::importUiThemeAsset(assets, key, source_path, diagnostic);
+    } else if (type == "font") {
+      imported = detail::importFontAsset(assets, key, source_path, diagnostic);
+    } else {
+      imported = detail::importSvgAsset(assets, key, source_path, diagnostic);
+    }
+    if (!imported) {
+      return diagnostic != nullptr && !diagnostic->empty()
+                 ? false
+                 : fail(diagnostic,
+                        "failed to import " + type + " asset: " + source_path.string());
     }
     addLoaded(handle, type, key);
     logAssetPackageEntryDiag(manifest_path,
@@ -1764,6 +1845,18 @@ std::string importerVersionForType(std::string_view type) {
   if (type == "scene") {
     return "scene-document-v1";
   }
+  if (type == "ui_document") {
+    return "ui-document-json-v2";
+  }
+  if (type == "ui_theme") {
+    return "ui-theme-json-v2";
+  }
+  if (type == "font") {
+    return "packaged-opentype-v1";
+  }
+  if (type == "svg") {
+    return "sandboxed-static-svg-v1";
+  }
   return "unknown";
 }
 
@@ -1992,6 +2085,38 @@ std::optional<std::vector<uint8_t>> serializePackageAssetBlob(
     }
     return detail::serializeMesh(*mesh);
   }
+  if (asset.type == "ui_document") {
+    const UiDocumentAsset* document = assets.findUiDocumentAsset(asset.key);
+    if (document == nullptr) {
+      fail(diagnostic, "missing UI document for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeUiDocument(*document);
+  }
+  if (asset.type == "ui_theme") {
+    const UiThemeAsset* theme = assets.findUiThemeAsset(asset.key);
+    if (theme == nullptr) {
+      fail(diagnostic, "missing UI theme for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeUiTheme(*theme);
+  }
+  if (asset.type == "font") {
+    const FontAsset* font = assets.findFontAsset(asset.key);
+    if (font == nullptr) {
+      fail(diagnostic, "missing font for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeFont(*font);
+  }
+  if (asset.type == "svg") {
+    const SvgAsset* svg = assets.findSvgAsset(asset.key);
+    if (svg == nullptr) {
+      fail(diagnostic, "missing SVG for baked blob: " + asset.key);
+      return std::nullopt;
+    }
+    return detail::serializeSvg(*svg);
+  }
   if (asset.type == "material") {
     if (const rendering::MaterialVariantDesc* variant = assets.findMaterialVariant(asset.key)) {
       return detail::serializeMaterialVariant(*variant);
@@ -2088,6 +2213,24 @@ bool writePackageAssetBlob(AssetCache& cache,
   if (asset.type == "mesh") {
     const world::MeshData* mesh = assets.findMeshAsset(asset.key);
     return mesh != nullptr && cache.writeMesh(asset.cache_blob_key, *mesh, diagnostic);
+  }
+  if (asset.type == "ui_document") {
+    const UiDocumentAsset* document = assets.findUiDocumentAsset(asset.key);
+    return document != nullptr &&
+           cache.writeUiDocument(asset.cache_blob_key, *document, diagnostic);
+  }
+  if (asset.type == "ui_theme") {
+    const UiThemeAsset* theme = assets.findUiThemeAsset(asset.key);
+    return theme != nullptr &&
+           cache.writeUiTheme(asset.cache_blob_key, *theme, diagnostic);
+  }
+  if (asset.type == "font") {
+    const FontAsset* font = assets.findFontAsset(asset.key);
+    return font != nullptr && cache.writeFont(asset.cache_blob_key, *font, diagnostic);
+  }
+  if (asset.type == "svg") {
+    const SvgAsset* svg = assets.findSvgAsset(asset.key);
+    return svg != nullptr && cache.writeSvg(asset.cache_blob_key, *svg, diagnostic);
   }
   if (asset.type == "material") {
     if (const rendering::MaterialVariantDesc* variant = assets.findMaterialVariant(asset.key)) {
@@ -2345,6 +2488,28 @@ bool restoreCachedAsset(AssetCache& cache,
     if (!mesh.has_value() || !staging.registerMeshAsset(record.key, std::move(*mesh))) {
       return fail(diagnostic, "failed to restore cached mesh: " + record.key);
     }
+  } else if (record.blob_type == "ui_document") {
+    auto document = cache.readUiDocument(record.blob_key, diagnostic);
+    if (!document.has_value() ||
+        !staging.registerUiDocumentAsset(record.key, std::move(*document))) {
+      return fail(diagnostic, "failed to restore cached UI document: " + record.key);
+    }
+  } else if (record.blob_type == "ui_theme") {
+    auto theme = cache.readUiTheme(record.blob_key, diagnostic);
+    if (!theme.has_value() ||
+        !staging.registerUiThemeAsset(record.key, std::move(*theme))) {
+      return fail(diagnostic, "failed to restore cached UI theme: " + record.key);
+    }
+  } else if (record.blob_type == "font") {
+    auto font = cache.readFont(record.blob_key, diagnostic);
+    if (!font.has_value() || !staging.registerFontAsset(record.key, std::move(*font))) {
+      return fail(diagnostic, "failed to restore cached font: " + record.key);
+    }
+  } else if (record.blob_type == "svg") {
+    auto svg = cache.readSvg(record.blob_key, diagnostic);
+    if (!svg.has_value() || !staging.registerSvgAsset(record.key, std::move(*svg))) {
+      return fail(diagnostic, "failed to restore cached SVG: " + record.key);
+    }
   } else if (record.blob_type == "material_asset") {
     auto material = cache.readMaterialAsset(record.blob_key, diagnostic);
     if (!material.has_value() || !staging.registerMaterialAsset(record.key, std::move(*material))) {
@@ -2520,6 +2685,101 @@ std::optional<AssetPackageHandle> loadPackageFromCache(AssetCache& cache,
   return handle;
 }
 
+const char* uiDependencyKindName(UiAssetDependencyKind kind) {
+  switch (kind) {
+    case UiAssetDependencyKind::UiTheme:
+      return "ui_theme";
+    case UiAssetDependencyKind::Texture:
+      return "texture";
+    case UiAssetDependencyKind::Font:
+      return "font";
+    case UiAssetDependencyKind::Svg:
+      return "svg";
+  }
+  return "unknown";
+}
+
+bool registryHasUiDependency(const AssetRegistry& registry,
+                             const UiAssetDependency& dependency) {
+  switch (dependency.kind) {
+    case UiAssetDependencyKind::UiTheme:
+      return registry.findUiThemeAsset(dependency.key) != nullptr;
+    case UiAssetDependencyKind::Texture:
+      return registry.findTextureAsset(dependency.key) != nullptr;
+    case UiAssetDependencyKind::Font:
+      return registry.findFontAsset(dependency.key) != nullptr;
+    case UiAssetDependencyKind::Svg:
+      return registry.findSvgAsset(dependency.key) != nullptr;
+  }
+  return false;
+}
+
+bool validateStagedUiDependencies(const AssetRegistry& staging,
+                                  const AssetRegistry& target,
+                                  const AssetPackageHandle& staged,
+                                  std::string* diagnostic) {
+  for (const AssetPackageLoadedAsset& asset : staged.assets) {
+    const std::vector<UiAssetDependency>* dependencies = nullptr;
+    if (asset.type == "ui_document") {
+      const UiDocumentAsset* document = staging.findUiDocumentAsset(asset.key);
+      if (document == nullptr) {
+        return fail(diagnostic, "missing staged UI document asset: " + asset.key);
+      }
+      dependencies = &document->dependencies;
+    } else if (asset.type == "ui_theme") {
+      const UiThemeAsset* theme = staging.findUiThemeAsset(asset.key);
+      if (theme == nullptr) {
+        return fail(diagnostic, "missing staged UI theme asset: " + asset.key);
+      }
+      dependencies = &theme->dependencies;
+    }
+    if (dependencies == nullptr) {
+      continue;
+    }
+    for (const UiAssetDependency& dependency : *dependencies) {
+      if (!registryHasUiDependency(staging, dependency) &&
+          !registryHasUiDependency(target, dependency)) {
+        return fail(diagnostic,
+                    "UI asset '" + asset.key + "' requires missing " +
+                        uiDependencyKindName(dependency.kind) + " asset: " +
+                        dependency.key);
+      }
+    }
+  }
+  return true;
+}
+
+bool attachSourcePackageUiMetadata(AssetRegistry& staging,
+                                   const Json& package,
+                                   const std::filesystem::path& base_dir,
+                                   std::string* diagnostic) {
+  for (const Json& entry : package["assets"]) {
+    if (!entry.is_object()) {
+      continue;
+    }
+    const auto type_it = entry.find("type");
+    if (type_it == entry.end() || !type_it->is_string()) {
+      continue;
+    }
+    const std::string type = type_it->get<std::string>();
+    if (type != "ui_document" && type != "ui_theme") {
+      continue;
+    }
+    std::string key;
+    std::filesystem::path source_path;
+    if (!readRequiredString(entry, "key", key, diagnostic) ||
+        !readRequiredPath(entry, base_dir, source_path, diagnostic)) {
+      return false;
+    }
+    if (type == "ui_document") {
+      detail::UiSourceMetadataAccess::setDocument(staging, key, source_path);
+    } else {
+      detail::UiSourceMetadataAccess::setTheme(staging, key, source_path);
+    }
+  }
+  return true;
+}
+
 std::optional<AssetPackageHandle> commitStagedPackage(AssetRegistry& target,
                                                       AssetRegistry& staging,
                                                       const AssetPackageHandle& staged,
@@ -2530,6 +2790,9 @@ std::optional<AssetPackageHandle> commitStagedPackage(AssetRegistry& target,
       fail(diagnostic, "asset package would overwrite existing key: " + asset.key);
       return std::nullopt;
     }
+  }
+  if (!validateStagedUiDependencies(staging, target, staged, diagnostic)) {
+    return std::nullopt;
   }
 
   AssetPackageHandle committed{};
@@ -2733,6 +2996,11 @@ std::optional<AssetPackageHandle> importAssetPackage(AssetRegistry& assets,
                           stage_start,
                           core::SteadyClock::now(),
                           cached->assets.size());
+      if (!attachSourcePackageUiMetadata(cached_staging, root,
+                                         packageDirectory(manifest_path),
+                                         diagnostic)) {
+        return std::nullopt;
+      }
       stage_start = core::SteadyClock::now();
       if (auto committed = commitStagedPackage(assets,
                                                cached_staging,
@@ -3094,6 +3362,14 @@ bool unloadAssetPackage(AssetRegistry& assets, const AssetPackageHandle& package
       removed_any = assets.unregisterTextureAsset(it->key) || removed_any;
     } else if (it->type == "mesh") {
       removed_any = assets.unregisterMeshAsset(it->key) || removed_any;
+    } else if (it->type == "ui_document") {
+      removed_any = assets.unregisterUiDocumentAsset(it->key) || removed_any;
+    } else if (it->type == "ui_theme") {
+      removed_any = assets.unregisterUiThemeAsset(it->key) || removed_any;
+    } else if (it->type == "font") {
+      removed_any = assets.unregisterFontAsset(it->key) || removed_any;
+    } else if (it->type == "svg") {
+      removed_any = assets.unregisterSvgAsset(it->key) || removed_any;
     } else if (it->type == "material") {
       removed_any = assets.unregisterMaterial(it->key) || removed_any;
     } else if (it->type == "particle_effect") {

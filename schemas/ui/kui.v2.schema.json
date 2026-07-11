@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://karma-engine.dev/schemas/ui/kui.v2.schema.json",
+  "title": "Karma UI v2 document",
+  "description": "Machine-readable contract for .kui.json5 authoring documents after JSON5 canonicalization.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": "karma.ui.document" },
+    "version": { "const": 2 },
+    "canvas": {
+      "type": "object",
+      "properties": {
+        "reference_size": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "scale_mode": {
+          "enum": ["logical", "fit", "fill", "stretch", "pixel-perfect",
+                   "pixel_perfect"]
+        },
+        "safe_area": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "enum": ["none", "platform"] }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scale_mode": {
+                "enum": ["fit", "fill", "stretch", "pixel-perfect",
+                         "pixel_perfect"]
+              }
+            },
+            "required": ["scale_mode"]
+          },
+          "then": {
+            "type": "object",
+            "properties": { "reference_size": true },
+            "required": ["reference_size"]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "themes": {
+      "type": "array",
+      "items": { "$ref": "common.v2.schema.json#/$defs/assetReference" }
+    },
+    "model": { "type": "object" },
+    "root": { "$ref": "common.v2.schema.json#/$defs/node" }
+  },
+  "required": ["format", "version", "root"],
+  "additionalProperties": false
+}

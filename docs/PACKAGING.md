@@ -27,10 +27,51 @@ The default manifest features match Karma's non-visual default dependencies:
 ENet networking, Jolt physics, and Recast/Detour navigation. Use vcpkg feature
 selection when building a different backend set.
 
-The `graphical` manifest feature installs GLFW, ImGui, miniaudio, and the local
-`diligentcore` overlay port. The DiligentCore overlay port packages the Vulkan
-backend and installs a `DiligentCoreConfig.cmake` wrapper that exposes the
-Diligent targets Karma expects.
+The `graphical` manifest feature installs GLFW, miniaudio, the native-UI
+dependencies (Yoga, FreeType, HarfBuzz, ICU, and LunaSVG), and the local
+`diligentcore` overlay port. `nlohmann-json`, used by the common content
+pipeline and native UI's canonical JSON assets, is a base dependency. ImGui has
+its own optional `imgui` feature.
+
+Native UI's third-party implementation targets are link-only requirements of
+the installed static archive. They do not propagate include directories,
+compile options, or compile definitions into a consumer; linking
+`karma::graphical` still supplies the libraries needed to resolve that archive.
+The package loader also preserves codec libraries recorded by a static
+FreeType config export while keeping their compile usage private.
+
+The DiligentCore overlay port packages the Vulkan backend and installs a
+`DiligentCoreConfig.cmake` wrapper that exposes the Diligent targets Karma
+expects.
+
+## Native UI assets
+
+Native UI uses a hard-cutover JSON5 source pair:
+
+- `ui_document` imports UTF-8 `.kui.json5` with
+  `format: 'karma.ui.document'` and integer `version: 2`.
+- `ui_theme` imports UTF-8 `.kstyle.json5` with
+  `format: 'karma.ui.theme'` and integer `version: 2`.
+- `font` packages deterministic TTF/OTF/TTC/OTC bytes.
+- `svg` packages validated static SVG source; raster images remain texture
+  assets.
+
+The document/theme authoring profile accepts comments, trailing commas,
+single-quoted strings, and unquoted ASCII identifier keys. Import performs
+strict source-located nested validation, records typed and transitive
+dependencies, composes recursive theme imports, and stores deterministic
+canonical strict JSON. Cache serialization, asynchronous package commit,
+bake/restore, source fingerprints, and unload use that canonical form.
+Cross-reference validation occurs after staging, so manifest entry order is
+irrelevant. Draft 2020-12 authoring schemas are installed under
+`share/karma/schemas/ui`; `find_package(karma)` exposes that directory as
+`KARMA_UI_SCHEMA_DIR`.
+
+The removed version-1 document and stylesheet package forms are not aliases;
+old manifests must be converted. Shipping consumers should open packaged asset
+keys. Sandboxed relative `{file: ...}` references and `System::openFile()` are
+development facilities gated by `DevelopmentUiFilesConfig`, not portable
+shipping package references. Baked packages retain no loose-file ownership.
 
 ## Local SDK Install
 
@@ -127,8 +168,10 @@ Optional overlay features:
 
 - `server`: builds `karma::server`.
 - `headless`: builds `karma::headless`.
-- `graphical`: builds `karma::graphical` with GLFW, ImGui, miniaudio, and
+- `graphical`: builds `karma::graphical` with GLFW, native UI, miniaudio, and
   DiligentCore/Vulkan.
+- `imgui`: adds the optional ImGui adapter and debug tooling to a graphical
+  build.
 - `network`: enables ENet.
 - `physics-jolt`: enables Jolt.
 - `physics-bullet`: enables Bullet. Do not combine with `physics-jolt`.

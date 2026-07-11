@@ -219,6 +219,51 @@ struct TextureImportOptions {
   bool prefer_compressed = true;
 };
 
+/// Expected registry type for an asset reference embedded in UI authoring data.
+enum class UiAssetDependencyKind : uint8_t {
+  UiTheme = 0u,
+  Texture = 1u,
+  Font = 2u,
+  Svg = 3u,
+};
+
+/// Logical, typed reference extracted from a UI document or theme.
+struct UiAssetDependency {
+  UiAssetDependencyKind kind = UiAssetDependencyKind::Texture;
+  std::string key;
+
+  bool operator==(const UiAssetDependency&) const = default;
+};
+
+/// Canonical JSON representation of a validated UI document and its direct
+/// asset dependencies. Development authoring sources use `.kui.json5`; source
+/// formatting and comments are intentionally not retained in packaged assets.
+struct UiDocumentAsset {
+  std::string canonical_json_utf8;
+  std::vector<UiAssetDependency> dependencies;
+  std::string content_hash;
+};
+
+/// Canonical JSON representation of a validated UI theme and its direct asset
+/// dependencies. Development authoring sources use `.kstyle.json5`.
+struct UiThemeAsset {
+  std::string canonical_json_utf8;
+  std::vector<UiAssetDependency> dependencies;
+  std::string content_hash;
+};
+
+/// Deterministically packaged OpenType font bytes.
+struct FontAsset {
+  std::vector<uint8_t> bytes;
+  std::string content_hash;
+};
+
+/// Validated, sandboxed UTF-8 static SVG source.
+struct SvgAsset {
+  std::string source_utf8;
+  std::string content_hash;
+};
+
 /// Runtime audio clip registration. `path` is an import source resolved at
 /// registration time; runtime components reference only `key`.
 struct AudioClipAsset {
@@ -280,6 +325,10 @@ struct GltfSceneAsset {
 struct SceneAsset;
 class AssetPackageStore;
 
+namespace detail {
+struct UiSourceMetadataAccess;
+}
+
 /// \ingroup karma_content
 /// Explicit registry for normalized runtime assets.
 ///
@@ -311,6 +360,23 @@ class AssetRegistry {
   bool registerTextureAsset(const std::string& key, TextureAsset texture);
   bool unregisterTextureAsset(const std::string& key);
   const TextureAsset* findTextureAsset(std::string_view key) const;
+
+  bool registerUiDocumentAsset(const std::string& key, UiDocumentAsset document);
+  bool unregisterUiDocumentAsset(const std::string& key);
+  const UiDocumentAsset* findUiDocumentAsset(std::string_view key) const;
+
+  bool registerUiThemeAsset(const std::string& key, UiThemeAsset theme);
+  bool unregisterUiThemeAsset(const std::string& key);
+  const UiThemeAsset* findUiThemeAsset(std::string_view key) const;
+
+  bool registerFontAsset(const std::string& key, FontAsset font);
+  bool unregisterFontAsset(const std::string& key);
+  const FontAsset* findFontAsset(std::string_view key) const;
+
+  bool registerSvgAsset(const std::string& key, SvgAsset svg);
+  bool unregisterSvgAsset(const std::string& key);
+  const SvgAsset* findSvgAsset(std::string_view key) const;
+
   std::vector<std::string> registerImportedMaterialTextures(
       const std::string& material_key,
       rendering::MaterialAssetDesc& material);
@@ -382,6 +448,8 @@ class AssetRegistry {
   AssetPackageStore& sharedPackageStore();
 
  private:
+  friend struct detail::UiSourceMetadataAccess;
+
   void bumpVersion();
   void bumpMeshVersion();
   void bumpTextureVersion();
@@ -504,6 +572,28 @@ class AssetCache {
   bool writeHumanoidRig(std::string_view cache_key,
                         const world::HumanoidRig& rig,
                         std::string* diagnostic = nullptr);
+  std::optional<UiDocumentAsset> readUiDocument(
+      std::string_view cache_key,
+      std::string* diagnostic = nullptr);
+  bool writeUiDocument(std::string_view cache_key,
+                       const UiDocumentAsset& document,
+                       std::string* diagnostic = nullptr);
+  std::optional<UiThemeAsset> readUiTheme(
+      std::string_view cache_key,
+      std::string* diagnostic = nullptr);
+  bool writeUiTheme(std::string_view cache_key,
+                    const UiThemeAsset& theme,
+                    std::string* diagnostic = nullptr);
+  std::optional<FontAsset> readFont(std::string_view cache_key,
+                                    std::string* diagnostic = nullptr);
+  bool writeFont(std::string_view cache_key,
+                 const FontAsset& font,
+                 std::string* diagnostic = nullptr);
+  std::optional<SvgAsset> readSvg(std::string_view cache_key,
+                                  std::string* diagnostic = nullptr);
+  bool writeSvg(std::string_view cache_key,
+                const SvgAsset& svg,
+                std::string* diagnostic = nullptr);
 
   std::optional<nlohmann::json> readPackageManifest(std::string_view manifest_hash,
                                                     std::string* diagnostic = nullptr);

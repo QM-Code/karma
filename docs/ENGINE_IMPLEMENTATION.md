@@ -34,13 +34,39 @@ Rendering is frame-graph resolved per camera. `EngineApp` owns an
 - Point-light shadows are budgeted through `point_shadow_max_lights`.
 
 ## UI / Draw Data Integration
-- Core types: `include/karma/app.h<provider>` and
-  `src/features/ui/<provider>`. They translate provider draw lists into
-  `rendering::UIDrawData` behind factories returning `app::UiLayer`.
+- `EngineApp` owns the first-party `ui::System` when native UI is enabled and
+  renders it between the scene and optional `UiLayer` extension.
+- Optional providers live in `src/features/ui/<provider>` and translate their
+  draw lists into `rendering::UIDrawData` behind factories returning
+  `app::UiLayer`.
+- The native runtime uses concrete private services for document/element
+  lifetime, reconciliation dependencies, style/motion execution, layout,
+  transients, presentation resources, retained draw assembly, accessibility,
+  and hot reload under `src/features/ui/native/`. Six small System translation
+  units retain only lifecycle, public delegation, reconciliation coordination,
+  interaction, input routing, and frame sequencing. See
+  [NATIVE_UI.md](NATIVE_UI.md) for behavior and
+  [NATIVE_UI_STATUS.md](NATIVE_UI_STATUS.md) for the full module map,
+  invariants, and verification matrix.
+- Native documents and themes are canonical JSON assets imported from
+  `.kui.json5` and `.kstyle.json5`. The public authoring model has explicit
+  bindings/actions and named theme styles rather than an authored selector
+  language. Sandboxed development graphs add direct files, watcher/debounce,
+  staging, and last-good frame-boundary reload.
+- `src/features/ui/native/system_impl.h` is private and declaration-only;
+  runtime modules do not include it. `system_frame.cpp` intentionally retains
+  the ordered reload/reconcile/style/motion/layout/paint/accessibility sequence,
+  and `system_input.cpp` retains platform-event routing so neither boundary is
+  replaced with a callback host mirroring `System::Impl`.
 
 ## Optional Dependencies
 Optional dependencies are controlled via CMake (window/audio/physics/network backends). When `KARMA_FETCH_DEPS=ON`,
-missing dependencies are fetched automatically. The ImGui demo is optional via `KARMA_BUILD_IMGUI_DEMO`.
+missing dependencies are fetched automatically. ImGui support is opt-in via
+`KARMA_ENABLE_IMGUI`; its demo is controlled by `KARMA_BUILD_IMGUI_DEMO`.
+Native UI is enabled for graphical builds by `KARMA_ENABLE_NATIVE_UI`. Its
+authoring pipeline uses Karma's deterministic JSON5 profile over nlohmann JSON;
+Yoga, FreeType, HarfBuzz, ICU, and LunaSVG provide layout, text, and static SVG
+implementation details. ImGui and RmlUi remain separate optional providers.
 `KARMA_HEADLESS=ON` builds only the `karma::headless` non-visual profile: it
 disables window/render backends, graphical UI providers, debug UI, audio
 backends, graphics examples, and the rendered navmesh example. It does not

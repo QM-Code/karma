@@ -35,6 +35,7 @@
 #include "karma/components.h"
 #include "karma/world.h"
 
+#include "cursor_arbitration.h"
 #include "../../../third_party/stb_image.h"
 
 namespace karma::app {
@@ -42,6 +43,52 @@ namespace {
 
 constexpr std::string_view kStartupEnvironmentMapAssetKey =
     "__engine/startup/environment_map";
+
+enum class UiInputDevice : std::uint8_t {
+  None,
+  Keyboard,
+  Pointer,
+  Gamepad,
+};
+
+UiInputDevice uiInputDevice(const platform::Event& event) {
+  switch (event.type) {
+    case platform::EventType::KeyDown:
+    case platform::EventType::KeyUp:
+    case platform::EventType::TextInput:
+      return UiInputDevice::Keyboard;
+    case platform::EventType::MouseButtonDown:
+    case platform::EventType::MouseButtonUp:
+    case platform::EventType::MouseMove:
+    case platform::EventType::MouseScroll:
+      return UiInputDevice::Pointer;
+    case platform::EventType::GamepadConnected:
+    case platform::EventType::GamepadDisconnected:
+    case platform::EventType::GamepadButtonDown:
+    case platform::EventType::GamepadButtonUp:
+    case platform::EventType::GamepadAxisMotion:
+      return UiInputDevice::Gamepad;
+    case platform::EventType::WindowResize:
+    case platform::EventType::WindowFocus:
+    case platform::EventType::WindowClose:
+      return UiInputDevice::None;
+  }
+  return UiInputDevice::None;
+}
+
+bool capturesEvent(const UiInputCapture& capture, UiInputDevice device) {
+  switch (device) {
+    case UiInputDevice::Keyboard:
+      return capture.keyboard;
+    case UiInputDevice::Pointer:
+      return capture.pointer;
+    case UiInputDevice::Gamepad:
+      return capture.gamepad;
+    case UiInputDevice::None:
+      return false;
+  }
+  return false;
+}
 
 bool envFlagEnabled(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -524,6 +571,13 @@ void EngineApp::initSubsystems() {
 
     particle_system_ = std::make_unique<visual::particles::ParticleSystem>(graphics_.get(), &assets_);
     log_init_stage("particle system create", core::SteadyClock::now());
+
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+    if (config_.native_ui.enabled) {
+      native_ui_ = std::make_unique<ui::System>(assets_, graphics_.get(), config_.native_ui);
+      log_init_stage("native ui create", core::SteadyClock::now());
+    }
+#endif
   }
 
   auto physics_system = std::make_unique<physics::PhysicsSystem>(physics_);
@@ -594,6 +648,9 @@ void EngineApp::warmUpRenderer() {
 
   const bool include_ui_prewarm =
       user_ui_ != nullptr
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+      || native_ui_ != nullptr
+#endif
 #if defined(KARMA_DEBUG_UI)
       || debug_ui_ != nullptr
 #endif
@@ -762,17 +819,6 @@ void EngineApp::warmUpRenderer() {
 
 void EngineApp::shutdownSubsystems() {
   running_ = false;
-  if (user_ui_) {
-    try {
-      user_ui_->onShutdown();
-    } catch (const std::exception& error) {
-      spdlog::error("User UI shutdown failed: {}", error.what());
-    } catch (...) {
-      spdlog::error("User UI shutdown failed with an unknown exception");
-    }
-    user_ui_.reset();
-  }
-  user_ui_context_.reset();
 #if defined(KARMA_DEBUG_UI)
   if (debug_ui_) {
     try {
@@ -786,6 +832,25 @@ void EngineApp::shutdownSubsystems() {
   }
   debug_ui_context_.reset();
 #endif
+  if (user_ui_) {
+    try {
+      user_ui_->onShutdown();
+    } catch (const std::exception& error) {
+      spdlog::error("User UI shutdown failed: {}", error.what());
+    } catch (...) {
+      spdlog::error("User UI shutdown failed with an unknown exception");
+    }
+    user_ui_.reset();
+  }
+  user_ui_context_.reset();
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+  if (native_ui_) {
+    native_ui_->shutdown();
+    native_ui_.reset();
+  }
+  native_ui_draw_data_.clear();
+#endif
+  ui_input_filter_ = {};
   if (!attached_runtime_modules_.empty()) {
     const std::size_t module_count = runtime_modules_.size();
     for (std::size_t offset = 0; offset < module_count; ++offset) {
@@ -852,6 +917,14 @@ void EngineApp::setUi(std::unique_ptr<UiLayer> ui) {
     user_ui_context_.reset();
   }
   user_ui_ = std::move(ui);
+}
+
+ui::System* EngineApp::nativeUi() const {
+#if defined(KARMA_HEADLESS) || !defined(KARMA_ENABLE_NATIVE_UI)
+  return nullptr;
+#else
+  return native_ui_.get();
+#endif
 }
 
 void EngineApp::setCursorVisible(bool visible) {
@@ -1016,6 +1089,9 @@ bool EngineApp::renderLoadingSplash(float progress) {
     cmd.index_offset = command_index_offset;
     cmd.index_count = index_count;
     cmd.texture = texture;
+    cmd.blend_mode = rendering::UIBlendMode::StraightAlpha;
+    cmd.sampler_mode = rendering::UISamplerMode::Linear;
+    cmd.texture_mode = rendering::UITextureMode::Color;
     draw_data.commands.push_back(cmd);
     command_index_offset += index_count;
   };
@@ -1329,7 +1405,8 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
                      graphics_.get(),
                      render_system_.get(),
                      assets_,
-                     systems_);
+                     systems_,
+                     nativeUi());
   finish_startup_stage("bind game context");
 
   prefabs::bindPrefabAssetRegistry(&assets_);
@@ -1363,7 +1440,14 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   double startup_wait_poll_ms = 0.0;
   double startup_wait_sleep_ms = 0.0;
   double startup_wait_splash_ms = 0.0;
-  if (config_.loading_splash.enabled && window_ && graphics_) {
+  bool use_async_loading_splash =
+      config_.loading_splash.enabled && window_ && graphics_;
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+  // Game startup may immediately open native documents. Keep those calls on
+  // the main thread because native UI callbacks and DOM mutation are synchronous.
+  use_async_loading_splash = use_async_loading_splash && native_ui_ == nullptr;
+#endif
+  if (use_async_loading_splash) {
     std::atomic<bool> startup_done{false};
     std::thread startup_thread([&]() {
       game_on_start_body_start = core::SteadyClock::now();
@@ -1632,6 +1716,16 @@ void EngineApp::tick() {
   const std::vector<RuntimeModule*> frame_runtime_modules =
       snapshotRuntimeModules(runtime_modules_);
 
+  // Cursor requests belong to one frame.  Clear them before event routing so
+  // providers such as RmlUi can request a shape from onEvent() and keep that
+  // request through their subsequent onFrame() call.
+  user_ui_context_.requested_cursor_shape_ = platform::CursorShape::Default;
+  user_ui_context_.cursor_shape_requested_ = false;
+#if defined(KARMA_DEBUG_UI)
+  debug_ui_context_.requested_cursor_shape_ = platform::CursorShape::Default;
+  debug_ui_context_.cursor_shape_requested_ = false;
+#endif
+
   if (!frame_diag_initialized_) {
     frame_diag_initialized_ = true;
     frame_diag_enabled_ = envFlagEnabled(std::getenv("KARMA_ENGINE_FRAME_DIAG"));
@@ -1710,21 +1804,142 @@ void EngineApp::tick() {
     }
 
     event_section_start = event_section_end;
+    ui_input_filter_.keyboard = false;
+    ui_input_filter_.pointer = false;
+    ui_input_filter_.gamepad = false;
+    ui_input_filter_.mouse_motion = false;
     for (const auto& event : window_->events()) {
-      if (user_ui_) {
-        user_ui_->onEvent(event);
-      }
+      const UiInputDevice device = uiInputDevice(event);
+      const bool input_event = device != UiInputDevice::None;
+      bool consumed = false;
+
 #if defined(KARMA_DEBUG_UI)
       if (debug_ui_) {
-        debug_ui_->onEvent(event);
+        const UiInputCapture capture = debug_ui_->inputCapture();
+        const UiEventDisposition disposition = debug_ui_->onEvent(event);
+        consumed = input_event &&
+                   (capturesEvent(capture, device) ||
+                    disposition == UiEventDisposition::Consumed);
       }
 #endif
+      if (!consumed && user_ui_) {
+        const UiInputCapture capture = user_ui_->inputCapture();
+        const UiEventDisposition disposition = user_ui_->onEvent(event);
+        consumed = input_event &&
+                   (capturesEvent(capture, device) ||
+                    disposition == UiEventDisposition::Consumed);
+      }
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+      if (!consumed && native_ui_) {
+        const ui::System::InputCapture capture = native_ui_->inputCapture();
+        bool captured = false;
+        switch (device) {
+          case UiInputDevice::Keyboard:
+            captured = capture.keyboard;
+            break;
+          case UiInputDevice::Pointer:
+            captured = capture.pointer;
+            break;
+          case UiInputDevice::Gamepad:
+            captured = capture.gamepad;
+            break;
+          case UiInputDevice::None:
+            break;
+        }
+        const ui::System::InputDisposition disposition =
+            native_ui_->processEvent(event);
+        consumed = input_event &&
+                   (captured || disposition != ui::System::InputDisposition::Ignored);
+      }
+#endif
+
+      if (!consumed) {
+        continue;
+      }
+      switch (event.type) {
+        case platform::EventType::KeyDown:
+          ui_input_filter_.keys.insert(event.key);
+          break;
+        case platform::EventType::MouseButtonDown:
+          ui_input_filter_.mouse_buttons.insert(event.mouseButton);
+          break;
+        case platform::EventType::MouseMove:
+          ui_input_filter_.mouse_motion = true;
+          break;
+        case platform::EventType::GamepadButtonDown:
+          ui_input_filter_.gamepad_buttons.insert(event.gamepadButton);
+          break;
+        case platform::EventType::GamepadAxisMotion:
+          if (std::abs(event.gamepadValue) > 0.15f) {
+            ui_input_filter_.gamepad_axes.insert(event.gamepadAxis);
+          }
+          break;
+        default:
+          break;
+      }
     }
+
+#if defined(KARMA_DEBUG_UI)
+    if (debug_ui_) {
+      const UiInputCapture capture = debug_ui_->inputCapture();
+      ui_input_filter_.keyboard = ui_input_filter_.keyboard || capture.keyboard;
+      ui_input_filter_.pointer = ui_input_filter_.pointer || capture.pointer;
+      ui_input_filter_.gamepad = ui_input_filter_.gamepad || capture.gamepad;
+    }
+#endif
+    if (user_ui_) {
+      const UiInputCapture capture = user_ui_->inputCapture();
+      ui_input_filter_.keyboard = ui_input_filter_.keyboard || capture.keyboard;
+      ui_input_filter_.pointer = ui_input_filter_.pointer || capture.pointer;
+      ui_input_filter_.gamepad = ui_input_filter_.gamepad || capture.gamepad;
+    }
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+    if (native_ui_) {
+      const ui::System::InputCapture capture = native_ui_->inputCapture();
+      ui_input_filter_.keyboard = ui_input_filter_.keyboard || capture.keyboard;
+      ui_input_filter_.pointer = ui_input_filter_.pointer || capture.pointer;
+      ui_input_filter_.gamepad = ui_input_filter_.gamepad || capture.gamepad;
+    }
+#endif
     event_section_end = core::SteadyClock::now();
     ui_events_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
 
     event_section_start = event_section_end;
-    input_.update(events);
+    input_.update(events, ui_input_filter_);
+    // Keep a consumed press filtered from live-polled Down bindings until its
+    // matching release has passed through this update.
+    for (const platform::Event& event : events) {
+      switch (event.type) {
+        case platform::EventType::KeyUp:
+          ui_input_filter_.keys.erase(event.key);
+          break;
+        case platform::EventType::MouseButtonUp:
+          ui_input_filter_.mouse_buttons.erase(event.mouseButton);
+          break;
+        case platform::EventType::GamepadButtonUp:
+          ui_input_filter_.gamepad_buttons.erase(event.gamepadButton);
+          break;
+        case platform::EventType::GamepadAxisMotion:
+          if (std::abs(event.gamepadValue) <= 0.15f) {
+            ui_input_filter_.gamepad_axes.erase(event.gamepadAxis);
+          }
+          break;
+        case platform::EventType::GamepadDisconnected:
+          ui_input_filter_.gamepad_buttons.clear();
+          ui_input_filter_.gamepad_axes.clear();
+          break;
+        case platform::EventType::WindowFocus:
+          if (!event.focused) {
+            ui_input_filter_.keys.clear();
+            ui_input_filter_.mouse_buttons.clear();
+            ui_input_filter_.gamepad_buttons.clear();
+            ui_input_filter_.gamepad_axes.clear();
+          }
+          break;
+        default:
+          break;
+      }
+    }
     event_section_end = core::SteadyClock::now();
     input_update_ms = core::elapsedMilliseconds(event_section_start, event_section_end);
 
@@ -1845,6 +2060,10 @@ void EngineApp::tick() {
 
   double framebuffer_ms = 0.0;
   double ui_frame_ms = 0.0;
+  double native_ui_frame_ms = 0.0;
+  double custom_ui_frame_ms = 0.0;
+  double debug_ui_frame_ms = 0.0;
+  ui::UiFrameDiagnostics native_ui_diagnostics{};
   double begin_frame_ms = 0.0;
   double particles_ms = 0.0;
   double runtime_modules_ms = 0.0;
@@ -1856,9 +2075,29 @@ void EngineApp::tick() {
   if (graphics_ && render_system_) {
     int fb_width = 0;
     int fb_height = 0;
+    int logical_width = 0;
+    int logical_height = 0;
+    float scale_x = 1.0f;
+    float scale_y = 1.0f;
     section_start = section_end;
     if (window_) {
       window_->getFramebufferSize(fb_width, fb_height);
+      window_->getLogicalSize(logical_width, logical_height);
+      window_->getContentScale(scale_x, scale_y);
+    }
+    if (logical_width <= 0 || logical_height <= 0) {
+      logical_width = fb_width;
+      logical_height = fb_height;
+    }
+    if (!std::isfinite(scale_x) || scale_x <= 0.0f) {
+      scale_x = logical_width > 0
+                    ? static_cast<float>(fb_width) / static_cast<float>(logical_width)
+                    : 1.0f;
+    }
+    if (!std::isfinite(scale_y) || scale_y <= 0.0f) {
+      scale_y = logical_height > 0
+                    ? static_cast<float>(fb_height) / static_cast<float>(logical_height)
+                    : 1.0f;
     }
     section_end = core::SteadyClock::now();
     framebuffer_ms = core::elapsedMilliseconds(section_start, section_end);
@@ -1867,23 +2106,61 @@ void EngineApp::tick() {
       ctx.frame_.dt = frame_dt;
       ctx.frame_.viewport_w = fb_width;
       ctx.frame_.viewport_h = fb_height;
-      ctx.frame_.dpi_scale = window_ ? window_->getContentScale() : 1.0f;
+      ctx.frame_.dpi_scale = scale_x;
+      ctx.frame_.logical_width = logical_width;
+      ctx.frame_.logical_height = logical_height;
+      ctx.frame_.framebuffer_width = fb_width;
+      ctx.frame_.framebuffer_height = fb_height;
+      ctx.frame_.scale_x = scale_x;
+      ctx.frame_.scale_y = scale_y;
       ctx.draw_data_.clear();
       ctx.input_ = &input_;
       ctx.device_ = graphics_.get();
+      ctx.window_ = window_.get();
     };
 
     section_start = section_end;
+    detail::CursorArbitrator cursor;
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+    if (native_ui_) {
+      const auto layer_start = core::SteadyClock::now();
+      native_ui_->buildFrame(frame_dt,
+                             logical_width,
+                             logical_height,
+                             fb_width,
+                             fb_height,
+                             scale_x,
+                             scale_y,
+                             native_ui_draw_data_,
+                             window_ ? window_->getSafeAreaInsets()
+                                     : platform::SafeAreaInsets{});
+      native_ui_frame_ms = core::elapsedMilliseconds(
+          layer_start, core::SteadyClock::now());
+      native_ui_diagnostics = native_ui_->frameDiagnostics();
+      cursor = detail::CursorArbitrator(native_ui_->cursorShape());
+    }
+#endif
     if (user_ui_) {
+      const auto layer_start = core::SteadyClock::now();
       prepare_ui_context(user_ui_context_);
       user_ui_->onFrame(user_ui_context_);
+      custom_ui_frame_ms = core::elapsedMilliseconds(
+          layer_start, core::SteadyClock::now());
+      cursor.overrideWith(user_ui_context_.cursor_shape_requested_,
+                          user_ui_context_.requested_cursor_shape_);
     }
 #if defined(KARMA_DEBUG_UI)
     if (debug_ui_) {
+      const auto layer_start = core::SteadyClock::now();
       prepare_ui_context(debug_ui_context_);
       debug_ui_->onFrame(debug_ui_context_);
+      debug_ui_frame_ms = core::elapsedMilliseconds(
+          layer_start, core::SteadyClock::now());
+      cursor.overrideWith(debug_ui_context_.cursor_shape_requested_,
+                          debug_ui_context_.requested_cursor_shape_);
     }
 #endif
+    cursor.commit(window_.get());
     section_end = core::SteadyClock::now();
     ui_frame_ms = core::elapsedMilliseconds(section_start, section_end);
     if (!running_) {
@@ -1922,6 +2199,11 @@ void EngineApp::tick() {
     render_system_ms = core::elapsedMilliseconds(section_start, section_end);
 
     section_start = section_end;
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+    if (native_ui_) {
+      graphics_->renderUi(native_ui_draw_data_);
+    }
+#endif
     if (user_ui_) {
       graphics_->renderUi(user_ui_context_.draw_data_);
     }
@@ -1989,7 +2271,13 @@ void EngineApp::tick() {
         "count={} mb={} mb_age={} mm={} focus={} resize={} skip_present={}] "
         "fixed={:.3f}({}) game={:.3f} light_pulse={:.3f} "
         "sync_scene={:.3f} animation={:.3f} scene_xform={:.3f} mesh_deform={:.3f} audio={:.3f} "
-        "fb={:.3f} ui_frame={:.3f} begin={:.3f} particles={:.3f} modules={:.3f} "
+        "fb={:.3f} ui_frame={:.3f} "
+        "ui_layers=[native={:.3f} custom={:.3f} debug={:.3f} "
+        "native_stages=[reconcile={:.3f} style={:.3f} layout={:.3f} "
+        "placement={:.3f} paint={:.3f} accessibility={:.3f}] "
+        "work=[reconciled={} restyled={} laid_out={} placed={} motion={} fragments={} "
+        "accessibility={} vertices={} commands={}]] "
+        "begin={:.3f} particles={:.3f} modules={:.3f} "
         "render_system={:.3f} render_layer={:.3f} render_ui={:.3f} end_frame={:.3f} "
         "swap={:.3f} alpha={:.3f} accumulator={:.3f} "
         "renderer_backend=[submitted={} completed={} dropped={} queue={} "
@@ -2034,6 +2322,24 @@ void EngineApp::tick() {
         audio_ms,
         framebuffer_ms,
         ui_frame_ms,
+        native_ui_frame_ms,
+        custom_ui_frame_ms,
+        debug_ui_frame_ms,
+        native_ui_diagnostics.reconcile_ms,
+        native_ui_diagnostics.style_ms,
+        native_ui_diagnostics.layout_ms,
+        native_ui_diagnostics.placement_ms,
+        native_ui_diagnostics.paint_ms,
+        native_ui_diagnostics.accessibility_ms,
+        native_ui_diagnostics.reconciled_nodes,
+        native_ui_diagnostics.restyled_nodes,
+        native_ui_diagnostics.laid_out_nodes,
+        native_ui_diagnostics.placed_nodes,
+        native_ui_diagnostics.advanced_motion_nodes,
+        native_ui_diagnostics.rebuilt_fragments,
+        native_ui_diagnostics.accessibility_nodes,
+        native_ui_diagnostics.output_vertices,
+        native_ui_diagnostics.output_commands,
         begin_frame_ms,
         particles_ms,
         runtime_modules_ms,

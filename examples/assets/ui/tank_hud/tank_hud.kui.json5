@@ -1,0 +1,51 @@
+{
+  format: 'karma.ui.document',
+  version: 2,
+
+  canvas: {
+    scale_mode: 'logical',
+    safe_area: 'platform',
+  },
+
+  themes: [
+    { asset: 'ui/pilots/tank-hud-theme' },
+  ],
+
+  root: {
+    type: 'panel',
+    id: 'tank-hud',
+    styles: ['hud'],
+    props: { pointer_events: 'none' },
+    semantics: { label: 'Tank heads-up display' },
+    children: [
+      {
+        type: 'panel',
+        styles: ['header'],
+        children: [
+          { type: 'text', styles: ['title'], props: { text: 'TACTICAL RADAR' } },
+          { type: 'text', styles: ['live'], props: { text: { bind: 'radar.status' } } },
+        ],
+      },
+      {
+        type: 'svg',
+        id: 'radar-image',
+        styles: ['radar'],
+        props: {
+          src: { asset: 'ui/pilots/radar-placeholder', kind: 'svg' },
+          sampling: 'linear',
+          object_fit: 'contain',
+        },
+        semantics: { label: 'Overhead tactical radar' },
+      },
+      {
+        type: 'panel',
+        styles: ['telemetry'],
+        children: [
+          { type: 'text', props: { text: { bind: 'telemetry.position' } } },
+          { type: 'text', props: { text: { bind: 'telemetry.speed' } } },
+          { type: 'text', styles: ['controls'], props: { text: 'W/S move  A/D turn  R reset' } },
+        ],
+      },
+    ],
+  },
+}

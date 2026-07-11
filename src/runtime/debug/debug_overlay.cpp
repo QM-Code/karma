@@ -38,6 +38,20 @@
 namespace karma::app {
 
 namespace {
+
+platform::CursorShape toCursorShape(ImGuiMouseCursor cursor) {
+  switch (cursor) {
+    case ImGuiMouseCursor_TextInput: return platform::CursorShape::Text;
+    case ImGuiMouseCursor_ResizeAll: return platform::CursorShape::Move;
+    case ImGuiMouseCursor_ResizeNS: return platform::CursorShape::ResizeVertical;
+    case ImGuiMouseCursor_ResizeEW: return platform::CursorShape::ResizeHorizontal;
+    case ImGuiMouseCursor_ResizeNESW: return platform::CursorShape::ResizeDiagonalNeSw;
+    case ImGuiMouseCursor_ResizeNWSE: return platform::CursorShape::ResizeDiagonalNwSe;
+    case ImGuiMouseCursor_Hand: return platform::CursorShape::Pointer;
+    case ImGuiMouseCursor_NotAllowed: return platform::CursorShape::NotAllowed;
+    default: return platform::CursorShape::Default;
+  }
+}
 class ScopedImGuiContext {
  public:
   explicit ScopedImGuiContext(ImGuiContext* context)
@@ -453,10 +467,11 @@ DebugOverlayLayer::DebugOverlayLayer(world::World* world,
   }
 }
 
-void DebugOverlayLayer::onEvent(const platform::Event& event) {
+UiEventDisposition DebugOverlayLayer::onEvent(const platform::Event& event) {
   if (!imgui_context_) {
-    return;
+    return UiEventDisposition::Ignored;
   }
+  const UiInputCapture capture = inputCapture();
   ScopedImGuiContext context_scope(imgui_context_);
   ImGuiIO& io = ImGui::GetIO();
   applyModifierState(io, event.mods);
@@ -494,6 +509,26 @@ void DebugOverlayLayer::onEvent(const platform::Event& event) {
     default:
       break;
   }
+  const bool consumed =
+      ((event.type == platform::EventType::KeyDown ||
+        event.type == platform::EventType::KeyUp ||
+        event.type == platform::EventType::TextInput) && capture.keyboard) ||
+      ((event.type == platform::EventType::MouseButtonDown ||
+        event.type == platform::EventType::MouseButtonUp ||
+        event.type == platform::EventType::MouseMove ||
+        event.type == platform::EventType::MouseScroll) && capture.pointer);
+  return consumed ? UiEventDisposition::Consumed : UiEventDisposition::Ignored;
+}
+
+UiInputCapture DebugOverlayLayer::inputCapture() const {
+  if (!imgui_context_) {
+    return {};
+  }
+  ScopedImGuiContext context_scope(imgui_context_);
+  const ImGuiIO& io = ImGui::GetIO();
+  return UiInputCapture{.keyboard = io.WantCaptureKeyboard || io.WantTextInput,
+                        .pointer = io.WantCaptureMouse,
+                        .gamepad = false};
 }
 
 void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
@@ -504,9 +539,15 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
   pending_ctx_ = &ctx;
   ImGuiIO& io = ImGui::GetIO();
   const auto frame = ctx.frame();
-  io.DisplaySize = ImVec2(static_cast<float>(frame.viewport_w),
-                          static_cast<float>(frame.viewport_h));
-  io.DisplayFramebufferScale = ImVec2(frame.dpi_scale, frame.dpi_scale);
+  const int logical_width = frame.logical_width > 0 ? frame.logical_width
+                                                     : frame.viewport_w;
+  const int logical_height = frame.logical_height > 0 ? frame.logical_height
+                                                       : frame.viewport_h;
+  const float scale_x = frame.scale_x > 0.0f ? frame.scale_x : frame.dpi_scale;
+  const float scale_y = frame.scale_y > 0.0f ? frame.scale_y : frame.dpi_scale;
+  io.DisplaySize = ImVec2(static_cast<float>(logical_width),
+                          static_cast<float>(logical_height));
+  io.DisplayFramebufferScale = ImVec2(scale_x, scale_y);
   io.DeltaTime = frame.dt > 0.0f ? frame.dt : (1.0f / 60.0f);
   const float frame_ms = io.DeltaTime * 1000.0f;
   frame_time_history_ms_[frame_time_history_cursor_] = frame_ms;
@@ -529,6 +570,7 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
   ImGui::NewFrame();
   drawDebugWindow(frame_ms, io.Framerate);
   ImGui::Render();
+  ctx.setCursorShape(toCursorShape(ImGui::GetMouseCursor()));
 
   const ImDrawData* draw_data = ImGui::GetDrawData();
   if (!draw_data) {
@@ -548,8 +590,8 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
     for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
       const ImDrawVert& v = cmd_list->VtxBuffer[i];
       rendering::UIVertex out_v{};
-      out_v.x = v.pos.x;
-      out_v.y = v.pos.y;
+      out_v.x = (v.pos.x - draw_data->DisplayPos.x) * draw_data->FramebufferScale.x;
+      out_v.y = (v.pos.y - draw_data->DisplayPos.y) * draw_data->FramebufferScale.y;
       out_v.u = v.uv.x;
       out_v.v = v.uv.y;
       out_v.rgba = v.col;
@@ -584,6 +626,9 @@ void DebugOverlayLayer::onFrame(app::UIContext& ctx) {
       out_cmd.scissor_w = static_cast<int>(clip.z - clip.x);
       out_cmd.scissor_h = static_cast<int>(clip.w - clip.y);
       out_cmd.texture = static_cast<app::UITextureHandle>(static_cast<uintptr_t>(cmd.GetTexID()));
+      out_cmd.blend_mode = rendering::UIBlendMode::StraightAlpha;
+      out_cmd.sampler_mode = rendering::UISamplerMode::Linear;
+      out_cmd.texture_mode = rendering::UITextureMode::Color;
       out.commands.push_back(out_cmd);
       global_idx_offset += cmd.ElemCount;
     }

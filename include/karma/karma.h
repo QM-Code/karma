@@ -2,7 +2,8 @@
 
 /// \file
 /// Convenience umbrella header for the profile-neutral Karma public API.
-/// Optional UI adapters are available through `karma/ui.h`.
+/// Optional UI adapters are available through `karma/ui_imgui.h` and
+/// `karma/ui_rmlui.h`.
 
 #include "karma/version.h"
 #include "karma/core.h"

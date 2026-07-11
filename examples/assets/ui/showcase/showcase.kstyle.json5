@@ -1,0 +1,444 @@
+{
+  format: 'karma.ui.theme',
+  version: 2,
+
+  imports: [
+    {file: 'base.kstyle.json5', kind: 'theme'},
+  ],
+
+  variables: {
+    frame_texture: {asset: 'ui/showcase/medieval-frame', kind: 'texture'},
+    panel_glow: '#e4b558',
+  },
+
+  motions: {
+    'forge-pulse': {
+      duration_ms: 900,
+      easing: 'ease-in-out',
+      iterations: 'infinite',
+      direction: 'alternate',
+      keyframes: [
+        {at: 0, appearance: {box: {opacity: 0.72}}},
+        {at: 1, appearance: {box: {opacity: 1}}},
+      ],
+    },
+    'status-pulse': {
+      duration_ms: 700,
+      easing: 'linear',
+      iterations: 'infinite',
+      direction: 'alternate',
+      keyframes: [
+        {at: 0, appearance: {text: {color: '#b99a69'}}},
+        {at: 1, appearance: {text: {color: '#ffe39a'}}},
+      ],
+    },
+  },
+
+  styles: {
+    screen: {
+      layout: {
+        mode: 'overlay',
+        width: 1600,
+        height: 900,
+      },
+      appearance: {
+        box: {background_color: '#090706'},
+      },
+    },
+    rtl: {
+      appearance: {
+        text: {direction: 'rtl', align: 'right', locale: 'ar'},
+      },
+    },
+    'frame-skin': {
+      appearance: {
+        box: {
+          background_color: '#2d1d13',
+          border_image: {
+            source: {asset: 'ui/showcase/medieval-frame', kind: 'texture'},
+            slice: [220, 220, 220, 220],
+            width: [14, 14, 14, 14],
+            repeat: 'round',
+          },
+          image_sampling: 'linear',
+        },
+      },
+    },
+    'rpg-outline': {
+      appearance: {
+        box: {
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+      },
+    },
+    'top-bar': {
+      extends: 'frame-skin',
+      layout: {
+        mode: 'row',
+        position: [28, 20],
+        width: 1544,
+        height: 72,
+        padding: [10, 18, 10, 18],
+        gap: 12,
+        align_items: 'center',
+      },
+    },
+    'brand-icon': {layout: {width: 42, height: 42, shrink: 0}},
+    'title-stack': {
+      layout: {mode: 'column', width: 400, height: 46, gap: 1, shrink: 0},
+    },
+    title: {
+      layout: {height: 27},
+      appearance: {
+        text: {
+          font_family: ['Forge Display', 'Forge Arabic'],
+          font_size: 24,
+          font_weight: 400,
+          color: '#ffe7b2',
+        },
+      },
+    },
+    subtitle: {
+      layout: {height: 16},
+      appearance: {text: {font_size: 12, color: '#bea174'}},
+    },
+    'header-greeting': {
+      layout: {width: 140, height: 28, shrink: 0},
+      appearance: {text: {font_size: 12, color: '#e5c98f', align: 'center'}},
+    },
+    'header-spacer': {layout: {grow: 1, height: 1}},
+    'header-button': {
+      layout: {width: 132, height: 32, shrink: 0},
+    },
+    'header-toggle-row': {
+      layout: {mode: 'row', width: 118, height: 30, gap: 6, align_items: 'center'},
+    },
+    'header-label': {
+      layout: {grow: 1},
+      appearance: {text: {font_size: 12, color: '#d9bc87'}},
+    },
+    'dynamic-preview': {
+      extends: 'rpg-outline',
+      layout: {width: 40, height: 40, shrink: 0},
+      appearance: {
+        box: {
+          border_color: '#d3a64c',
+          border_width: 1,
+          border_radius: 1,
+          image_sampling: 'nearest',
+          object_fit: 'fill',
+        },
+      },
+    },
+    'main-shell': {
+      extends: 'frame-skin',
+      layout: {
+        mode: 'column',
+        position: [28, 104],
+        width: 1544,
+        height: 768,
+        padding: [18, 20, 16, 20],
+        gap: 10,
+      },
+    },
+    'tabs-row': {
+      layout: {mode: 'row', height: 34, gap: 4, align_self: 'stretch'},
+    },
+    'feature-tab': {layout: {width: 176, height: 32, shrink: 0}},
+    'tab-spacer': {layout: {grow: 1, height: 1}},
+    'quit-button': {
+      layout: {width: 92, height: 32, shrink: 0},
+      appearance: {
+        box: {background_color: '#632b25', border_color: '#b67559'},
+        states: {
+          hover: {box: {background_color: '#8c3b31'}},
+          pressed: {box: {background_color: '#3a1714'}},
+        },
+      },
+    },
+    'rule-horizontal': {layout: {height: 2, align_self: 'stretch'}},
+    'content-host': {
+      layout: {mode: 'overlay', height: 565, align_self: 'stretch'},
+    },
+    'content-page': {
+      layout: {
+        position: [0, 0],
+        width: 1472,
+        height: 565,
+      },
+    },
+    'controls-grid': {
+      layout: {
+        mode: 'grid',
+        columns: ['1fr', '1fr', '1fr'],
+        rows: ['1fr'],
+        column_gap: 12,
+        align_items: 'stretch',
+      },
+    },
+    card: {
+      extends: 'rpg-outline',
+      layout: {
+        mode: 'column',
+        padding: [12, 12, 12, 12],
+        gap: 8,
+        align_items: 'stretch',
+        justify_content: 'flex-start',
+      },
+      appearance: {
+        box: {
+          background_color: '#1c130ff0',
+          border_color: '#4b453c',
+          border_width: 1,
+          border_radius: 1,
+        },
+      },
+    },
+    'section-title': {
+      layout: {height: 24},
+      appearance: {
+        text: {
+          font_family: ['Forge Display', 'Forge Arabic'],
+          font_size: 18,
+          font_weight: 400,
+          color: '#f2cf78',
+        },
+      },
+    },
+    'section-copy': {
+      layout: {height: 36, shrink: 0},
+      appearance: {text: {font_size: 12, color: '#bda479', line_height: '16px'}},
+    },
+    'form-row': {
+      layout: {
+        mode: 'grid',
+        height: 32,
+        columns: ['1fr', 230],
+        gap: 10,
+        align_items: 'center',
+      },
+    },
+    'form-label': {
+      appearance: {text: {font_size: 13, color: '#d8bd8c'}},
+    },
+    primary: {
+      appearance: {
+        box: {
+          background_color: '#765027',
+          border_color: '#d3a64c',
+          border_width: 1,
+        },
+        states: {
+          hover: {box: {background_color: '#986c31'}},
+          pressed: {box: {background_color: '#4e321a'}},
+          focus: {box: {border_color: '#ffe49b'}},
+        },
+      },
+    },
+    'wide-button': {layout: {width: '100%'}},
+    attention: {
+      appearance: {motion: 'forge-pulse'},
+    },
+    disabled: {appearance: {box: {opacity: 0.38}}},
+    'progress-stack': {layout: {mode: 'column', gap: 4, height: 34}},
+    'small-caption': {
+      layout: {height: 16, shrink: 0},
+      appearance: {text: {font_size: 11, color: '#ad936a'}},
+    },
+    'vertical-control-row': {
+      layout: {mode: 'row', height: 126, gap: 14, align_items: 'center'},
+    },
+    'vertical-slider': {layout: {width: 22, height: 110, shrink: 0}},
+    'vertical-copy': {layout: {grow: 1, height: 64}},
+    'advanced-box': {
+      extends: 'rpg-outline',
+      layout: {mode: 'column', height: 64, padding: [7, 8, 7, 8], gap: 3},
+      appearance: {
+        box: {
+          background_color: '#3a2819',
+          border_color: '#98733b',
+          border_width: 1,
+        },
+      },
+    },
+    'disclosure-content': {
+      layout: {mode: 'column', height: 76, padding: [6, 6, 6, 6], gap: 4},
+      appearance: {box: {background_color: '#17110d'}},
+    },
+    'showcase-disclosure': {
+      layout: {width: '100%', height: 116},
+    },
+    'quest-scroll': {
+      layout: {
+        mode: 'column',
+        height: 360,
+        padding: [4, 4, 4, 4],
+      },
+    },
+    'quest-button': {
+      layout: {width: 430, height: 30, margin: [2, 2, 2, 2]},
+      appearance: {text: {font_size: 12}},
+    },
+    'data-row': {
+      layout: {mode: 'row', width: 1472, height: 565},
+    },
+    'tree-card': {
+      layout: {mode: 'column', width: 380, height: 565, padding: [12, 12, 12, 12], gap: 8, shrink: 0},
+    },
+    'scene-tree': {
+      layout: {mode: 'column', grow: 1, padding: [4, 4, 4, 4]},
+    },
+    'data-splitter': {layout: {width: 10, height: 565, shrink: 0}},
+    'list-card': {
+      layout: {mode: 'column', grow: 1, height: 565, padding: [12, 12, 12, 12], gap: 8},
+    },
+    'list-toolbar': {
+      layout: {mode: 'row', height: 32, gap: 8, align_items: 'center'},
+    },
+    'toolbar-button': {layout: {width: 122, height: 30, shrink: 0}},
+    'toolbar-copy': {
+      layout: {grow: 1},
+      appearance: {text: {font_size: 12, color: '#bda479', align: 'right'}},
+    },
+    'virtual-list': {
+      layout: {height: 438, align_self: 'stretch'},
+    },
+    'virtual-row': {
+      layout: {height: 30, margin: [2, 3, 2, 3]},
+      appearance: {
+        box: {background_color: '#2b1d14', border_width: 0},
+        text: {align: 'left', font_size: 13},
+        states: {
+          hover: {box: {background_color: '#51371e'}},
+          focus: {box: {border_color: '#d3a64c', border_width: 1}},
+        },
+      },
+    },
+    'layout-scroll': {
+      layout: {mode: 'column', width: 1472, height: 565, padding: [4, 12, 4, 4]},
+    },
+    'layout-stack': {
+      layout: {mode: 'column', width: 1400, gap: 14, padding: [8, 8, 20, 8]},
+    },
+    'nine-row': {
+      layout: {mode: 'row', height: 122, gap: 14, align_items: 'stretch'},
+    },
+    'nine-small': {
+      extends: 'frame-skin',
+      layout: {width: 210, height: 110, padding: [18, 18, 18, 18], shrink: 0},
+    },
+    'nine-medium': {
+      extends: 'frame-skin',
+      layout: {width: 360, height: 110, padding: [18, 18, 18, 18], shrink: 0},
+    },
+    'nine-wide': {
+      extends: 'frame-skin',
+      layout: {grow: 1, height: 110, padding: [18, 18, 18, 18]},
+    },
+    'nine-label': {
+      appearance: {text: {font_size: 13, color: '#ffe2a4', align: 'center'}},
+    },
+    'layout-grid': {
+      layout: {
+        mode: 'grid',
+        height: 112,
+        columns: ['1fr', '1fr', '1fr', '1fr'],
+        rows: [48, 48],
+        gap: 8,
+      },
+    },
+    'grid-tile': {
+      extends: 'rpg-outline',
+      layout: {padding: [8, 8, 8, 8]},
+      appearance: {
+        box: {
+          background_color: '#2d1f15',
+          border_color: '#67553b',
+          border_width: 1,
+        },
+        text: {align: 'center', color: '#d7bc88', font_size: 13},
+      },
+    },
+    'anchor-demo': {
+      extends: 'rpg-outline',
+      layout: {mode: 'overlay', width: 1360, height: 170},
+      appearance: {
+        box: {
+          background_color: '#15100dcc',
+          border_color: '#4d4334',
+          border_width: 1,
+        },
+      },
+    },
+    'anchor-chip': {
+      extends: 'rpg-outline',
+      layout: {width: 190, height: 38, padding: [8, 10, 8, 10]},
+      appearance: {
+        box: {background_color: '#694821', border_color: '#d3a64c', border_width: 1},
+        text: {font_size: 13, align: 'center'},
+      },
+    },
+    'wide-scroll': {
+      layout: {mode: 'row', width: 1360, height: 82, padding: [6, 6, 13, 6]},
+    },
+    'wide-strip': {
+      layout: {mode: 'row', width: 2200, height: 54, gap: 8, shrink: 0},
+    },
+    'strip-tile': {
+      extends: 'rpg-outline',
+      layout: {width: 180, height: 48, shrink: 0, padding: [12, 12, 12, 12]},
+      appearance: {box: {background_color: '#3b2818', border_color: '#6d5a3e', border_width: 1}},
+    },
+    'media-row': {
+      layout: {mode: 'row', height: 112, gap: 14, align_items: 'center'},
+    },
+    'skin-preview': {
+      extends: 'rpg-outline',
+      layout: {width: 110, height: 100, shrink: 0},
+      appearance: {box: {object_fit: 'cover', image_sampling: 'linear'}},
+    },
+    'svg-preview': {layout: {width: 88, height: 88, shrink: 0}},
+    'media-copy': {layout: {grow: 1, height: 80}},
+    'status-bar': {
+      layout: {mode: 'row', height: 24, gap: 8, align_items: 'center'},
+    },
+    'status-dot': {
+      layout: {width: 10, height: 10, shrink: 0},
+      appearance: {
+        box: {background_color: '#d3a64c', border_radius: 5},
+        motion: 'forge-pulse',
+      },
+    },
+    status: {
+      layout: {grow: 1},
+      appearance: {text: {font_size: 12, color: '#d9bd87'}, motion: 'status-pulse'},
+    },
+    'hot-reload-copy': {
+      appearance: {text: {font_size: 12, color: '#987f5b', align: 'right'}},
+    },
+    'popup-card': {layout: {mode: 'column', width: 300, height: 118, gap: 6}},
+    'action-menu': {layout: {mode: 'column', width: 210, height: 76}},
+    'inspector-window': {
+      layout: {min_width: 300, min_height: 190},
+    },
+    'inspector-content': {
+      layout: {
+        mode: 'column',
+        width: '100%',
+        height: 210,
+        padding: [10, 10, 10, 10],
+        gap: 7,
+        justify_content: 'flex-start',
+      },
+    },
+    'inspector-row': {
+      layout: {mode: 'grid', height: 28, columns: ['1fr', 64], gap: 8, align_items: 'center'},
+    },
+  },
+}

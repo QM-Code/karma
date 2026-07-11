@@ -9,6 +9,7 @@
 #include "karma/platform.h"
 #include "karma/rendering.h"
 #include "karma/scenes.h"
+#include "karma/ui.h"
 #include "karma/world.h"
 
 namespace karma::visual { class LightPulseSystem; namespace particles { class ParticleSystem; } }
@@ -40,8 +41,40 @@ struct Binding {
   Trigger trigger = Trigger::Down;
   platform::Key key = platform::Key::Unknown;
   platform::MouseButton mouse = platform::MouseButton::Left;
+  platform::GamepadButton gamepad_button = platform::GamepadButton::Unknown;
+  platform::GamepadAxis gamepad_axis = platform::GamepadAxis::Unknown;
+  float gamepad_axis_threshold = 0.5f;
+  bool gamepad_axis_positive = true;
   platform::Modifiers mods{};
   bool use_key = true;
+  bool use_gamepad_button = false;
+  bool use_gamepad_axis = false;
+};
+
+/// Controls and whole input devices withheld from gameplay for one frame.
+struct InputFilter {
+  bool keyboard = false;
+  bool pointer = false;
+  bool gamepad = false;
+  /// Suppresses gameplay mouse deltas without claiming pointer buttons.
+  bool mouse_motion = false;
+  std::unordered_set<platform::Key> keys;
+  std::unordered_set<platform::MouseButton> mouse_buttons;
+  std::unordered_set<platform::GamepadButton> gamepad_buttons;
+  std::unordered_set<platform::GamepadAxis> gamepad_axes;
+
+  [[nodiscard]] bool suppresses(platform::Key key) const {
+    return keyboard || keys.contains(key);
+  }
+  [[nodiscard]] bool suppresses(platform::MouseButton button) const {
+    return pointer || mouse_buttons.contains(button);
+  }
+  [[nodiscard]] bool suppresses(platform::GamepadButton button) const {
+    return gamepad || gamepad_buttons.contains(button);
+  }
+  [[nodiscard]] bool suppresses(platform::GamepadAxis axis) const {
+    return gamepad || gamepad_axes.contains(axis);
+  }
 };
 
 /// \ingroup karma_runtime
@@ -52,18 +85,35 @@ struct Binding {
 class InputSystem {
  public:
   /// Sets the platform window used for current key/mouse state.
-  void setWindow(const platform::Window* window) { window_ = window; }
+  void setWindow(const platform::Window* window) {
+    if (window_ != window) {
+      window_ = window;
+      previous_gamepad_axes_.clear();
+      has_mouse_pos_ = false;
+    }
+  }
 
   /// Binds a keyboard key to an action.
   void bindKey(const std::string& action, platform::Key key, Trigger trigger = Trigger::Down);
   /// Binds a mouse button to an action.
   void bindMouse(const std::string& action, platform::MouseButton button,
                  Trigger trigger = Trigger::Down);
+  /// Binds a normalized gamepad button to an action.
+  void bindGamepadButton(const std::string& action,
+                         platform::GamepadButton button,
+                         Trigger trigger = Trigger::Down);
+  /// Binds a normalized gamepad axis direction to an action.
+  void bindGamepadAxis(const std::string& action,
+                       platform::GamepadAxis axis,
+                       float threshold = 0.5f,
+                       bool positive = true,
+                       Trigger trigger = Trigger::Down);
   /// Requires modifiers for an existing action binding.
   void setRequiredModifiers(const std::string& action, platform::Modifiers mods);
 
   /// Consumes platform events and updates action/mouse state.
-  void update(const std::vector<platform::Event>& events);
+  void update(const std::vector<platform::Event>& events,
+              const InputFilter& filter = {});
 
   /// Returns true while an action is currently down.
   bool actionDown(const std::string& action) const;
@@ -93,6 +143,8 @@ class InputSystem {
   std::unordered_map<std::string, std::vector<Binding>> bindings_;
   std::unordered_set<std::string> pressed_this_frame_;
   std::unordered_set<std::string> down_this_frame_;
+  std::unordered_map<int, std::unordered_map<platform::GamepadAxis, float>>
+      previous_gamepad_axes_;
   const platform::Window* window_ = nullptr;
   float mouse_delta_x_ = 0.0f;
   float mouse_delta_y_ = 0.0f;
@@ -125,9 +177,17 @@ struct UITexture {
 /// Timing and viewport data supplied to UI layers.
 struct UIFrameInfo {
   float dt = 0.0f;
+  /// Compatibility framebuffer viewport dimensions.
   int viewport_w = 0;
   int viewport_h = 0;
+  /// Compatibility X-axis scale. Prefer `scale_x` and `scale_y`.
   float dpi_scale = 1.0f;
+  int logical_width = 0;
+  int logical_height = 0;
+  int framebuffer_width = 0;
+  int framebuffer_height = 0;
+  float scale_x = 1.0f;
+  float scale_y = 1.0f;
 };
 
 }  // namespace karma::app
@@ -186,6 +246,12 @@ class UIContext {
 
   /// Input system for UI provider adapters.
   karma::app::InputSystem& input();
+  /// Replaces the platform clipboard text while the context is attached.
+  void setClipboardText(std::string_view text);
+  /// Returns current platform clipboard text while the context is attached.
+  [[nodiscard]] std::string clipboardText() const;
+  /// Requests a platform cursor shape for the current UI frame.
+  void setCursorShape(platform::CursorShape shape);
 
  private:
   friend class EngineApp;
@@ -194,6 +260,25 @@ class UIContext {
   std::unordered_set<UITextureHandle> owned_textures_;
   app::InputSystem* input_ = nullptr;
   rendering::GraphicsDevice* device_ = nullptr;
+  platform::Window* window_ = nullptr;
+  platform::CursorShape requested_cursor_shape_ =
+      platform::CursorShape::Default;
+  bool cursor_shape_requested_ = false;
+};
+
+/// Per-event result used to stop routing to lower UI layers and gameplay.
+enum class UiEventDisposition : std::uint8_t {
+  Ignored,
+  Consumed,
+};
+
+/// Persistent whole-device capture reported by a UI layer.
+struct UiInputCapture {
+  bool keyboard = false;
+  bool pointer = false;
+  bool gamepad = false;
+
+  [[nodiscard]] bool any() const { return keyboard || pointer || gamepad; }
 };
 
 /// \ingroup karma_runtime
@@ -204,7 +289,12 @@ class UiLayer {
   /// Called once per frame to populate `UIContext::drawData()`.
   virtual void onFrame(UIContext& ctx) = 0;
   /// Receives platform events before the app clears them.
-  virtual void onEvent(const platform::Event& event) { (void)event; }
+  virtual UiEventDisposition onEvent(const platform::Event& event) {
+    (void)event;
+    return UiEventDisposition::Ignored;
+  }
+  /// Reports persistent capture such as focused keyboard input or pointer drag.
+  [[nodiscard]] virtual UiInputCapture inputCapture() const { return {}; }
   /// Called during engine shutdown.
   virtual void onShutdown() {}
 };
@@ -326,6 +416,8 @@ class GameInterface {
   assets::AssetRegistry* assets = nullptr;
   /// Borrowed optional system graph.
   world::SystemGraph* systems = nullptr;
+  /// Borrowed first-party UI system. Null in headless or disabled profiles.
+  ui::System* ui = nullptr;
 
  private:
   friend class EngineApp;
@@ -333,7 +425,8 @@ class GameInterface {
                    physics::World& physics, rendering::GraphicsDevice* graphics,
                    rendering::RenderSystem* renderer,
                    assets::AssetRegistry& assets,
-                   world::SystemGraph& systems) {
+                   world::SystemGraph& systems,
+                   ui::System* native_ui) {
     this->world = &world;
     this->scene = &scene;
     this->input = &input;
@@ -342,6 +435,7 @@ class GameInterface {
     this->renderer = renderer;
     this->assets = &assets;
     this->systems = &systems;
+    this->ui = native_ui;
   }
 
   void unbindContext() {
@@ -353,6 +447,7 @@ class GameInterface {
     renderer = nullptr;
     assets = nullptr;
     systems = nullptr;
+    ui = nullptr;
     render_interpolation_alpha_ = 1.0f;
   }
 
@@ -423,7 +518,8 @@ class DebugOverlayLayer final : public app::UiLayer {
                     float lighting_exposure,
                     int forward_plus_max_local_lights);
 
-  void onEvent(const platform::Event& event) override;
+  UiEventDisposition onEvent(const platform::Event& event) override;
+  [[nodiscard]] UiInputCapture inputCapture() const override;
   void onFrame(app::UIContext& ctx) override;
   void onShutdown() override;
 
@@ -527,6 +623,7 @@ struct EngineConfig {
 
   platform::WindowConfig window{};
   LoadingSplashConfig loading_splash{};
+  ui::UiSystemConfig native_ui{};
   float fixed_dt = 1.0f / 60.0f;
   float max_frame_dt = 0.25f;
   // Default to the low-latency present path. Set true to force vblank pacing.
@@ -632,6 +729,8 @@ class EngineApp {
   void requestStop();
   /// Sets the user UI layer. Can be called before startup.
   void setUi(std::unique_ptr<UiLayer> ui);
+  /// Returns the owned first-party UI system, or null when unavailable/disabled.
+  [[nodiscard]] ui::System* nativeUi() const;
   /// Shows or hides the platform cursor.
   void setCursorVisible(bool visible);
   /// Registers an optional runtime feature module.
@@ -687,12 +786,17 @@ class EngineApp {
   std::vector<std::unique_ptr<RuntimeModule>> runtime_modules_;
   std::unordered_set<RuntimeModule*> attached_runtime_modules_;
   EngineConfig config_{};
+#if !defined(KARMA_HEADLESS) && defined(KARMA_ENABLE_NATIVE_UI)
+  std::unique_ptr<ui::System> native_ui_;
+  rendering::UIDrawData native_ui_draw_data_{};
+#endif
   std::unique_ptr<UiLayer> user_ui_;
 #if defined(KARMA_DEBUG_UI)
   std::unique_ptr<UiLayer> debug_ui_;
   UIContext debug_ui_context_{};
 #endif
   UIContext user_ui_context_{};
+  InputFilter ui_input_filter_{};
   bool debug_ui_enabled_ = false;
   uint64_t last_synced_entity_version_ = std::numeric_limits<uint64_t>::max();
 

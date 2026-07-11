@@ -1,5 +1,6 @@
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
@@ -7,6 +8,20 @@
 namespace karma::ui::imgui {
 
 namespace {
+
+platform::CursorShape toCursorShape(ImGuiMouseCursor cursor) {
+  switch (cursor) {
+    case ImGuiMouseCursor_TextInput: return platform::CursorShape::Text;
+    case ImGuiMouseCursor_ResizeAll: return platform::CursorShape::Move;
+    case ImGuiMouseCursor_ResizeNS: return platform::CursorShape::ResizeVertical;
+    case ImGuiMouseCursor_ResizeEW: return platform::CursorShape::ResizeHorizontal;
+    case ImGuiMouseCursor_ResizeNESW: return platform::CursorShape::ResizeDiagonalNeSw;
+    case ImGuiMouseCursor_ResizeNWSE: return platform::CursorShape::ResizeDiagonalNwSe;
+    case ImGuiMouseCursor_Hand: return platform::CursorShape::Pointer;
+    case ImGuiMouseCursor_NotAllowed: return platform::CursorShape::NotAllowed;
+    default: return platform::CursorShape::Default;
+  }
+}
 
 class ScopedImGuiContext {
  public:
@@ -121,6 +136,57 @@ int toImGuiMouseButton(platform::MouseButton button) {
   }
 }
 
+ImGuiKey toImGuiGamepadButton(platform::GamepadButton button) {
+  switch (button) {
+    case platform::GamepadButton::A: return ImGuiKey_GamepadFaceDown;
+    case platform::GamepadButton::B: return ImGuiKey_GamepadFaceRight;
+    case platform::GamepadButton::X: return ImGuiKey_GamepadFaceLeft;
+    case platform::GamepadButton::Y: return ImGuiKey_GamepadFaceUp;
+    case platform::GamepadButton::Back: return ImGuiKey_GamepadBack;
+    case platform::GamepadButton::Start: return ImGuiKey_GamepadStart;
+    case platform::GamepadButton::LeftStick: return ImGuiKey_GamepadL3;
+    case platform::GamepadButton::RightStick: return ImGuiKey_GamepadR3;
+    case platform::GamepadButton::LeftShoulder: return ImGuiKey_GamepadL1;
+    case platform::GamepadButton::RightShoulder: return ImGuiKey_GamepadR1;
+    case platform::GamepadButton::DpadUp: return ImGuiKey_GamepadDpadUp;
+    case platform::GamepadButton::DpadRight: return ImGuiKey_GamepadDpadRight;
+    case platform::GamepadButton::DpadDown: return ImGuiKey_GamepadDpadDown;
+    case platform::GamepadButton::DpadLeft: return ImGuiKey_GamepadDpadLeft;
+    default: return ImGuiKey_None;
+  }
+}
+
+void addImGuiGamepadAxis(ImGuiIO& io, platform::GamepadAxis axis, float value) {
+  const float positive = std::max(value, 0.0f);
+  const float negative = std::max(-value, 0.0f);
+  switch (axis) {
+    case platform::GamepadAxis::LeftX:
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickLeft, negative > 0.0f, negative);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickRight, positive > 0.0f, positive);
+      break;
+    case platform::GamepadAxis::LeftY:
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickUp, negative > 0.0f, negative);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickDown, positive > 0.0f, positive);
+      break;
+    case platform::GamepadAxis::RightX:
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadRStickLeft, negative > 0.0f, negative);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadRStickRight, positive > 0.0f, positive);
+      break;
+    case platform::GamepadAxis::RightY:
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadRStickUp, negative > 0.0f, negative);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadRStickDown, positive > 0.0f, positive);
+      break;
+    case platform::GamepadAxis::LeftTrigger:
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadL2, value > 0.0f, std::max(value, 0.0f));
+      break;
+    case platform::GamepadAxis::RightTrigger:
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadR2, value > 0.0f, std::max(value, 0.0f));
+      break;
+    default:
+      break;
+  }
+}
+
 void applyModifierState(ImGuiIO& io, const platform::Modifiers& mods) {
   io.AddKeyEvent(ImGuiKey_LeftShift, mods.shift);
   io.AddKeyEvent(ImGuiKey_LeftCtrl, mods.control);
@@ -164,8 +230,8 @@ void submitDrawData(const ImDrawData& draw_data, rendering::UIDrawData& out) {
     for (int i = 0; i < cmd_list->VtxBuffer.Size; ++i) {
       const ImDrawVert& v = cmd_list->VtxBuffer[i];
       rendering::UIVertex out_v{};
-      out_v.x = v.pos.x;
-      out_v.y = v.pos.y;
+      out_v.x = (v.pos.x - draw_data.DisplayPos.x) * draw_data.FramebufferScale.x;
+      out_v.y = (v.pos.y - draw_data.DisplayPos.y) * draw_data.FramebufferScale.y;
       out_v.u = v.uv.x;
       out_v.v = v.uv.y;
       out_v.rgba = v.col;
@@ -201,6 +267,9 @@ void submitDrawData(const ImDrawData& draw_data, rendering::UIDrawData& out) {
       out_cmd.scissor_w = static_cast<int>(clip.z - clip.x);
       out_cmd.scissor_h = static_cast<int>(clip.w - clip.y);
       out_cmd.texture = fromTextureId(cmd.GetTexID());
+      out_cmd.blend_mode = rendering::UIBlendMode::StraightAlpha;
+      out_cmd.sampler_mode = rendering::UISamplerMode::Linear;
+      out_cmd.texture_mode = rendering::UITextureMode::Color;
       out.commands.push_back(out_cmd);
       global_idx_offset += cmd.ElemCount;
     }
@@ -225,14 +294,17 @@ class ImGuiUiLayer final : public app::UiLayer {
       ImGuiIO& io = ImGui::GetIO();
       io.BackendPlatformName = config_.backend_platform_name;
       io.BackendRendererName = config_.backend_renderer_name;
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard |
+                        ImGuiConfigFlags_NavEnableGamepad;
     }
   }
 
-  void onEvent(const platform::Event& event) override {
+  app::UiEventDisposition onEvent(const platform::Event& event) override {
     if (!imgui_context_) {
-      return;
+      return app::UiEventDisposition::Ignored;
     }
 
+    const app::UiInputCapture capture = inputCapture();
     ScopedImGuiContext context_scope(imgui_context_);
     ImGuiIO& io = ImGui::GetIO();
     applyModifierState(io, event.mods);
@@ -267,9 +339,44 @@ class ImGuiUiLayer final : public app::UiLayer {
       case platform::EventType::WindowFocus:
         io.AddFocusEvent(event.focused);
         break;
+      case platform::EventType::GamepadButtonDown:
+      case platform::EventType::GamepadButtonUp: {
+        const ImGuiKey key = toImGuiGamepadButton(event.gamepadButton);
+        if (key != ImGuiKey_None) {
+          io.AddKeyEvent(key, event.type == platform::EventType::GamepadButtonDown);
+        }
+        break;
+      }
+      case platform::EventType::GamepadAxisMotion:
+        addImGuiGamepadAxis(io, event.gamepadAxis, event.gamepadValue);
+        break;
       default:
         break;
     }
+    const bool consumed =
+        ((event.type == platform::EventType::KeyDown ||
+          event.type == platform::EventType::KeyUp ||
+          event.type == platform::EventType::TextInput) && capture.keyboard) ||
+        ((event.type == platform::EventType::MouseButtonDown ||
+          event.type == platform::EventType::MouseButtonUp ||
+          event.type == platform::EventType::MouseMove ||
+          event.type == platform::EventType::MouseScroll) && capture.pointer) ||
+        ((event.type == platform::EventType::GamepadButtonDown ||
+          event.type == platform::EventType::GamepadButtonUp ||
+          event.type == platform::EventType::GamepadAxisMotion) && capture.gamepad);
+    return consumed ? app::UiEventDisposition::Consumed
+                    : app::UiEventDisposition::Ignored;
+  }
+
+  app::UiInputCapture inputCapture() const override {
+    if (!imgui_context_) {
+      return {};
+    }
+    ScopedImGuiContext context_scope(imgui_context_);
+    const ImGuiIO& io = ImGui::GetIO();
+    return app::UiInputCapture{.keyboard = io.WantCaptureKeyboard || io.WantTextInput,
+                               .pointer = io.WantCaptureMouse,
+                               .gamepad = io.NavActive};
   }
 
   void onFrame(app::UIContext& ctx) override {
@@ -283,9 +390,15 @@ class ImGuiUiLayer final : public app::UiLayer {
     ScopedImGuiContext context_scope(imgui_context_);
     ImGuiIO& io = ImGui::GetIO();
     const app::UIFrameInfo frame = ctx.frame();
-    io.DisplaySize = ImVec2(static_cast<float>(frame.viewport_w),
-                            static_cast<float>(frame.viewport_h));
-    io.DisplayFramebufferScale = ImVec2(frame.dpi_scale, frame.dpi_scale);
+    const int logical_width = frame.logical_width > 0 ? frame.logical_width
+                                                       : frame.viewport_w;
+    const int logical_height = frame.logical_height > 0 ? frame.logical_height
+                                                         : frame.viewport_h;
+    const float scale_x = frame.scale_x > 0.0f ? frame.scale_x : frame.dpi_scale;
+    const float scale_y = frame.scale_y > 0.0f ? frame.scale_y : frame.dpi_scale;
+    io.DisplaySize = ImVec2(static_cast<float>(logical_width),
+                            static_cast<float>(logical_height));
+    io.DisplayFramebufferScale = ImVec2(scale_x, scale_y);
     io.DeltaTime = frame.dt > 0.0f ? frame.dt : (1.0f / 60.0f);
 
     if (!font_texture_) {
@@ -302,6 +415,7 @@ class ImGuiUiLayer final : public app::UiLayer {
       callbacks_.draw(ctx);
     }
     ImGui::Render();
+    ctx.setCursorShape(toCursorShape(ImGui::GetMouseCursor()));
 
     const ImDrawData* draw_data = ImGui::GetDrawData();
     if (draw_data) {

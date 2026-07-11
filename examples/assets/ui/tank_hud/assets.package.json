@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "ui_document",
+      "key": "ui/pilots/tank-hud",
+      "path": "tank_hud.kui.json5"
+    },
+    {
+      "type": "ui_theme",
+      "key": "ui/pilots/tank-hud-theme",
+      "path": "tank_hud.kstyle.json5"
+    },
+    {
+      "type": "font",
+      "key": "ui/pilots/font",
+      "path": "../../Roboto-Black.ttf"
+    },
+    {
+      "type": "svg",
+      "key": "ui/pilots/radar-placeholder",
+      "path": "../../demo_icon.svg"
+    }
+  ]
+}

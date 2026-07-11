@@ -786,6 +786,15 @@ bool GraphicsDevice::uploadTexture(TextureId texture, const TextureUploadData& u
   }) : false;
 }
 
+bool GraphicsDevice::updateTextureRegion(
+    TextureId texture,
+    const TextureRegionUploadData& upload) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return scheduler_ ? scheduler_->invoke([texture, upload](RenderScheduler::Backend* backend) {
+    return backend != nullptr && backend->updateTextureRegion(texture, upload);
+  }) : false;
+}
+
 std::vector<TextureUploadBatchResult> GraphicsDevice::createAndUploadTextures(
     std::vector<TextureUploadBatchRequest> requests) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -1096,6 +1105,15 @@ unsigned int GraphicsDevice::getRenderTargetTextureId(RenderTargetId target) con
   return scheduler_ ? scheduler_->invoke([target](RenderScheduler::Backend* backend) {
     return backend != nullptr ? backend->getRenderTargetTextureId(target) : 0u;
   }) : 0u;
+}
+
+std::optional<RenderTargetDesc> GraphicsDevice::getRenderTargetDesc(
+    RenderTargetId target) const {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return scheduler_ ? scheduler_->invoke([target](RenderScheduler::Backend* backend) {
+    return backend != nullptr ? backend->getRenderTargetDesc(target)
+                              : std::optional<RenderTargetDesc>{};
+  }) : std::optional<RenderTargetDesc>{};
 }
 
 void GraphicsDevice::setCamera(const CameraData& camera) {

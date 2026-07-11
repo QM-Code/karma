@@ -1,0 +1,504 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://karma-engine.dev/schemas/ui/common.v2.schema.json",
+  "title": "Karma UI v2 common authoring types",
+  "$defs": {
+    "assetReference": {
+      "type": "object",
+      "properties": {
+        "asset": { "type": "string", "minLength": 1 },
+        "file": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": ["theme", "ui_theme", "texture", "image", "font", "svg"]
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "asset": true },
+          "required": ["asset"]
+        },
+        {
+          "type": "object",
+          "properties": { "file": true },
+          "required": ["file"]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "bind": { "type": "string", "minLength": 1 },
+            "mode": { "enum": ["one_way", "two_way"] }
+          },
+          "required": ["bind"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": { "expr": { "type": "string", "minLength": 1 } },
+          "required": ["expr"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "localizedText": {
+      "type": "object",
+      "properties": {
+        "loc": { "type": "string", "minLength": 1 },
+        "args": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/binding" }
+        }
+      },
+      "required": ["loc"],
+      "additionalProperties": false
+    },
+    "bindableBoolean": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "$ref": "#/$defs/binding" }
+      ]
+    },
+    "point": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "anchors": {
+      "type": "object",
+      "properties": {
+        "min": { "$ref": "#/$defs/point" },
+        "max": { "$ref": "#/$defs/point" }
+      },
+      "required": ["min", "max"],
+      "additionalProperties": false
+    },
+    "offsets": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "object",
+          "properties": {
+            "left": { "type": "number" },
+            "top": { "type": "number" },
+            "right": { "type": "number" },
+            "bottom": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "styleValue": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "array", "items": { "$ref": "#/$defs/styleValue" } },
+        {
+          "type": "object",
+          "properties": { "var": { "type": "string", "minLength": 1 } },
+          "required": ["var"],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/assetReference" }
+      ]
+    },
+    "fontFamily": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        {
+          "type": "object",
+          "properties": { "var": { "type": "string", "minLength": 1 } },
+          "required": ["var"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string" },
+        "width": { "$ref": "#/$defs/styleValue" },
+        "height": { "$ref": "#/$defs/styleValue" },
+        "min_width": { "$ref": "#/$defs/styleValue" },
+        "min_height": { "$ref": "#/$defs/styleValue" },
+        "max_width": { "$ref": "#/$defs/styleValue" },
+        "max_height": { "$ref": "#/$defs/styleValue" },
+        "left": { "$ref": "#/$defs/styleValue" },
+        "top": { "$ref": "#/$defs/styleValue" },
+        "right": { "$ref": "#/$defs/styleValue" },
+        "bottom": { "$ref": "#/$defs/styleValue" },
+        "margin": { "$ref": "#/$defs/styleValue" },
+        "padding": { "$ref": "#/$defs/styleValue" },
+        "gap": { "$ref": "#/$defs/styleValue" },
+        "row_gap": { "$ref": "#/$defs/styleValue" },
+        "column_gap": { "$ref": "#/$defs/styleValue" },
+        "grow": { "$ref": "#/$defs/styleValue" },
+        "shrink": { "$ref": "#/$defs/styleValue" },
+        "basis": { "$ref": "#/$defs/styleValue" },
+        "align_items": { "$ref": "#/$defs/styleValue" },
+        "align_self": { "$ref": "#/$defs/styleValue" },
+        "align_content": { "$ref": "#/$defs/styleValue" },
+        "justify_content": { "$ref": "#/$defs/styleValue" },
+        "justify_items": { "$ref": "#/$defs/styleValue" },
+        "justify_self": { "$ref": "#/$defs/styleValue" },
+        "z": { "$ref": "#/$defs/styleValue" },
+        "overflow": { "$ref": "#/$defs/styleValue" },
+        "position": { "$ref": "#/$defs/point" },
+        "size": { "$ref": "#/$defs/styleValue" },
+        "anchors": { "$ref": "#/$defs/anchors" },
+        "pivot": { "$ref": "#/$defs/point" },
+        "offsets": { "$ref": "#/$defs/offsets" },
+        "columns": { "$ref": "#/$defs/styleValue" },
+        "rows": { "$ref": "#/$defs/styleValue" },
+        "grid_column": { "$ref": "#/$defs/styleValue" },
+        "grid_row": { "$ref": "#/$defs/styleValue" },
+        "cursor": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "borderImage": {
+      "type": "object",
+      "properties": {
+        "source": { "$ref": "#/$defs/assetReference" },
+        "slice": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "width": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "repeat": {
+          "description": "One mode applies to both axes; an array is [horizontal, vertical]. Omitted repeat defaults to stretch on both axes.",
+          "default": "stretch",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": ["stretch", "repeat", "round"]
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["stretch", "repeat", "round"]
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        }
+      },
+      "required": ["source", "slice"],
+      "additionalProperties": false
+    },
+    "box": {
+      "type": "object",
+      "properties": {
+        "background_color": { "$ref": "#/$defs/styleValue" },
+        "background": { "$ref": "#/$defs/styleValue" },
+        "background_image": { "$ref": "#/$defs/styleValue" },
+        "border_color": { "$ref": "#/$defs/styleValue" },
+        "border_width": { "$ref": "#/$defs/styleValue" },
+        "border_radius": { "$ref": "#/$defs/styleValue" },
+        "border_image": { "$ref": "#/$defs/borderImage" },
+        "opacity": { "$ref": "#/$defs/styleValue" },
+        "image_sampling": { "$ref": "#/$defs/styleValue" },
+        "object_fit": { "$ref": "#/$defs/styleValue" },
+        "object_position": { "$ref": "#/$defs/styleValue" }
+      },
+      "additionalProperties": false
+    },
+    "textStyle": {
+      "type": "object",
+      "properties": {
+        "color": { "$ref": "#/$defs/styleValue" },
+        "font_family": { "$ref": "#/$defs/fontFamily" },
+        "font_size": { "$ref": "#/$defs/styleValue" },
+        "font_weight": { "$ref": "#/$defs/styleValue" },
+        "font_style": { "$ref": "#/$defs/styleValue" },
+        "line_height": { "$ref": "#/$defs/styleValue" },
+        "letter_spacing": { "$ref": "#/$defs/styleValue" },
+        "align": { "$ref": "#/$defs/styleValue" },
+        "direction": { "$ref": "#/$defs/styleValue" },
+        "locale": { "$ref": "#/$defs/styleValue" },
+        "white_space": { "$ref": "#/$defs/styleValue" }
+      },
+      "additionalProperties": false
+    },
+    "partState": {
+      "type": "object",
+      "properties": {
+        "box": {
+          "type": "object",
+          "properties": {
+            "background_color": { "$ref": "#/$defs/styleValue" }
+          },
+          "required": ["background_color"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["box"],
+      "additionalProperties": false
+    },
+    "part": {
+      "type": "object",
+      "properties": {
+        "box": { "$ref": "#/$defs/box" },
+        "text": { "$ref": "#/$defs/textStyle" },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "width": { "$ref": "#/$defs/styleValue" },
+            "height": { "$ref": "#/$defs/styleValue" },
+            "min_length": { "$ref": "#/$defs/styleValue" },
+            "thickness": { "$ref": "#/$defs/styleValue" },
+            "size": { "$ref": "#/$defs/styleValue" }
+          },
+          "additionalProperties": false
+        },
+        "states": {
+          "type": "object",
+          "properties": {
+            "hover": { "$ref": "#/$defs/partState" },
+            "pressed": { "$ref": "#/$defs/partState" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "staticPart": {
+      "allOf": [
+        { "$ref": "#/$defs/part" },
+        {
+          "not": {
+            "type": "object",
+            "properties": { "states": true },
+            "required": ["states"]
+          }
+        }
+      ]
+    },
+    "widgetParts": {
+      "type": "object",
+      "properties": {
+        "track": { "$ref": "#/$defs/staticPart" },
+        "fill": { "$ref": "#/$defs/staticPart" },
+        "thumb": { "$ref": "#/$defs/staticPart" },
+        "checkmark": { "$ref": "#/$defs/staticPart" },
+        "arrow": { "$ref": "#/$defs/staticPart" },
+        "chevron": { "$ref": "#/$defs/staticPart" },
+        "grip": { "$ref": "#/$defs/staticPart" },
+        "vertical_track": { "$ref": "#/$defs/staticPart" },
+        "vertical_thumb": { "$ref": "#/$defs/part" },
+        "horizontal_track": { "$ref": "#/$defs/staticPart" },
+        "horizontal_thumb": { "$ref": "#/$defs/part" },
+        "corner": { "$ref": "#/$defs/staticPart" },
+        "titlebar": { "$ref": "#/$defs/staticPart" },
+        "close_button": { "$ref": "#/$defs/staticPart" },
+        "collapse_button": { "$ref": "#/$defs/staticPart" },
+        "resize_grip": { "$ref": "#/$defs/staticPart" },
+        "popup": { "$ref": "#/$defs/staticPart" },
+        "option": { "$ref": "#/$defs/part" }
+      },
+      "additionalProperties": false
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "box": { "$ref": "#/$defs/box" },
+        "text": { "$ref": "#/$defs/textStyle" },
+        "parts": { "$ref": "#/$defs/widgetParts" },
+        "transitions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "duration_ms": { "type": "number", "minimum": 0 },
+              "easing": { "type": "string" },
+              "delay_ms": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "states": {
+          "type": "object",
+          "properties": {
+            "checked": { "$ref": "#/$defs/appearance" },
+            "selected": { "$ref": "#/$defs/appearance" },
+            "expanded": { "$ref": "#/$defs/appearance" },
+            "hover": { "$ref": "#/$defs/appearance" },
+            "focus": { "$ref": "#/$defs/appearance" },
+            "pressed": { "$ref": "#/$defs/appearance" },
+            "disabled": { "$ref": "#/$defs/appearance" }
+          },
+          "additionalProperties": false
+        },
+        "motion": { "type": "string", "minLength": 1 },
+        "cursor": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "inlineAppearance": {
+      "type": "object",
+      "description": "Per-node appearance. Stateful overlays and named motions belong in themes so they participate in the cascade and hot reload consistently.",
+      "properties": {
+        "box": { "$ref": "#/$defs/box" },
+        "text": { "$ref": "#/$defs/textStyle" },
+        "parts": { "$ref": "#/$defs/widgetParts" },
+        "transitions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "duration_ms": { "type": "number", "minimum": 0 },
+              "easing": { "type": "string" },
+              "delay_ms": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "cursor": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "styleEntry": {
+      "type": "object",
+      "properties": {
+        "extends": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "layout": { "$ref": "#/$defs/layout" },
+        "appearance": { "$ref": "#/$defs/appearance" }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": ["body", "div", "panel", "text", "img", "image", "svg",
+                   "button", "toggle", "slider", "select", "option", "progress",
+                   "scroll", "template", "repeat", "window", "tabs", "tab",
+                   "disclosure", "tree", "tree-item", "splitter", "separator",
+                   "spacer", "popup", "menu", "menu-item", "tooltip", "list"]
+        },
+        "id": { "type": "string" },
+        "styles": { "type": "array", "items": { "type": "string" } },
+        "layout": { "$ref": "#/$defs/layout" },
+        "appearance": { "$ref": "#/$defs/inlineAppearance" },
+        "when": { "$ref": "#/$defs/binding" },
+        "props": {
+          "type": "object",
+          "properties": {
+            "state": { "$ref": "#/$defs/binding" },
+            "title": {
+              "oneOf": [
+                { "type": "string" },
+                { "$ref": "#/$defs/binding" }
+              ]
+            },
+            "text": {
+              "oneOf": [
+                { "type": "string" },
+                { "$ref": "#/$defs/binding" },
+                { "$ref": "#/$defs/localizedText" }
+              ]
+            },
+            "src": { "$ref": "#/$defs/assetReference" },
+            "value": {},
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "step": { "type": "number" },
+            "disabled": { "$ref": "#/$defs/bindableBoolean" },
+            "checked": { "$ref": "#/$defs/bindableBoolean" },
+            "expanded": { "$ref": "#/$defs/bindableBoolean" },
+            "selected": { "$ref": "#/$defs/bindableBoolean" },
+            "open": { "$ref": "#/$defs/bindableBoolean" },
+            "collapsed": { "$ref": "#/$defs/bindableBoolean" },
+            "orientation": { "enum": ["horizontal", "vertical"] },
+            "resizable": { "type": "boolean" },
+            "closable": { "type": "boolean" },
+            "collapsible": { "type": "boolean" },
+            "scrollbar_placement": { "enum": ["gutter", "overlay"] },
+            "scrollbar_visibility": { "enum": ["auto", "always", "hidden"] },
+            "scroll_x": { "enum": ["visible", "hidden", "auto", "scroll"] },
+            "scroll_y": { "enum": ["visible", "hidden", "auto", "scroll"] },
+            "pointer_events": { "enum": ["auto", "none"] },
+            "sampling": { "enum": ["nearest", "linear"] },
+            "object_fit": {
+              "enum": ["fill", "contain", "cover", "none", "scale-down"]
+            },
+            "object_position": { "type": "string" },
+            "items": { "$ref": "#/$defs/binding" },
+            "item": { "type": "string", "minLength": 1 },
+            "key": { "$ref": "#/$defs/binding" },
+            "template": { "$ref": "#/$defs/node" },
+            "overscan": { "type": "integer", "minimum": 0 },
+            "item_extent": { "type": "number", "minimum": 0 },
+            "position": { "$ref": "#/$defs/point" },
+            "size": { "$ref": "#/$defs/point" }, "z": { "type": "number" },
+            "anchor": { "type": "string", "minLength": 1 },
+            "placement": { "enum": ["auto", "top", "bottom"] },
+            "delay_ms": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "on": {
+          "type": "object",
+          "properties": {
+            "click": { "type": "string", "minLength": 1 },
+            "change": { "type": "string", "minLength": 1 },
+            "cancel": { "type": "string", "minLength": 1 },
+            "toggle": { "type": "string", "minLength": 1 },
+            "close": { "type": "string", "minLength": 1 },
+            "select": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "semantics": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string" },
+            "description": { "type": "string" },
+            "role": {
+              "enum": ["document", "group", "text", "image", "button",
+                       "toggle", "slider", "select", "option", "progress",
+                       "scroll", "window", "tab-list", "tab", "disclosure",
+                       "tree", "tree-item", "separator", "menu", "menu-item",
+                       "tooltip"]
+            },
+            "tab_index": { "type": "integer" }
+          },
+          "additionalProperties": false
+        },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    }
+  }
+}

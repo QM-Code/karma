@@ -1,0 +1,51 @@
+{
+  format: 'karma.ui.theme',
+  version: 2,
+
+  fonts: {
+    'Karma Pilot': {
+      src: { asset: 'ui/pilots/font' },
+    },
+  },
+
+  defaults: {
+    panel: {
+      appearance: { text: { color: '#d9efff', font_family: ['Karma Pilot'], font_size: 14 } },
+    },
+    text: {
+      appearance: { text: { color: '#d9efff', font_family: ['Karma Pilot'], font_size: 14 } },
+    },
+  },
+
+  styles: {
+    hud: {
+      layout: {
+        mode: 'column',
+        width: 304,
+        height: 390,
+        margin: [20, 20, 20, 20],
+        padding: [14, 14, 14, 14],
+        gap: 9,
+      },
+      appearance: {
+        box: { background_color: '#07111bd9', border_width: 2, border_color: '#50bdf2' },
+      },
+    },
+    header: {
+      layout: { mode: 'grid', columns: ['1fr', 54], height: 24, gap: 8, align_self: 'stretch' },
+    },
+    title: { appearance: { text: { color: '#f5fbff', font_size: 18 } } },
+    live: { appearance: { text: { color: '#62f59a', align: 'right' } } },
+    radar: {
+      layout: { width: 272, height: 272 },
+      appearance: {
+        box: { background_color: '#071c2b', border_width: 1, border_color: '#3988ad' },
+      },
+    },
+    telemetry: {
+      layout: { mode: 'column', height: 59, gap: 3 },
+      appearance: { text: { color: '#b8dbed' } },
+    },
+    controls: { appearance: { text: { color: '#6ea5c0', font_size: 12 } } },
+  },
+}

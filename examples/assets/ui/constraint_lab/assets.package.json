@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "ui_document",
+      "key": "ui/pilots/constraint-lab",
+      "path": "constraint_lab.kui.json5"
+    },
+    {
+      "type": "ui_theme",
+      "key": "ui/pilots/constraint-lab-theme",
+      "path": "constraint_lab.kstyle.json5"
+    },
+    {
+      "type": "font",
+      "key": "ui/pilots/font",
+      "path": "../../Roboto-Black.ttf"
+    }
+  ]
+}

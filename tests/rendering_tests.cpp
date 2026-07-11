@@ -415,6 +415,25 @@ void testTextureUploadValidation() {
   });
   assert(karma::rendering::validateTextureUpload(desc, upload));
 
+  karma::rendering::TextureRegionUploadData region{
+      .format = desc.format,
+      .x = 1,
+      .y = 0,
+      .width = 2,
+      .height = 2,
+      .row_stride = 12u,
+      .bytes = std::vector<std::uint8_t>(24u),
+  };
+  assert(karma::rendering::validateTextureRegionUpload(desc, region));
+  region.x = 3;
+  assert(!karma::rendering::validateTextureRegionUpload(desc, region));
+  region.x = 1;
+  region.row_stride = 7u;
+  assert(!karma::rendering::validateTextureRegionUpload(desc, region));
+  region.row_stride = 12u;
+  region.format = karma::rendering::TextureFormat::R8;
+  assert(!karma::rendering::validateTextureRegionUpload(desc, region));
+
   upload.subresources.front().size = 35u;
   assert(!karma::rendering::validateTextureUpload(desc, upload));
   upload.subresources.front().size = 36u;
@@ -742,6 +761,12 @@ void testUIDrawDataValidation() {
   };
   draw_data.indices = {0u, 1u, 2u};
   draw_data.commands.push_back({.index_count = 3u});
+  assert(draw_data.commands.front().blend_mode ==
+         karma::rendering::UIBlendMode::StraightAlpha);
+  assert(draw_data.commands.front().sampler_mode ==
+         karma::rendering::UISamplerMode::Linear);
+  assert(draw_data.commands.front().texture_mode ==
+         karma::rendering::UITextureMode::Color);
   assert(karma::rendering::validateUIDrawData(draw_data));
 
   draw_data.vertices.front().x = std::numeric_limits<float>::quiet_NaN();
@@ -757,6 +782,31 @@ void testUIDrawDataValidation() {
   draw_data.commands.front().scissor_w = -1;
   draw_data.commands.front().scissor_h = 10;
   assert(!karma::rendering::validateUIDrawData(draw_data));
+  draw_data.commands.front().scissor_enabled = false;
+
+  draw_data.commands.front().blend_mode =
+      static_cast<karma::rendering::UIBlendMode>(255);
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+  draw_data.commands.front().blend_mode =
+      karma::rendering::UIBlendMode::StraightAlpha;
+  draw_data.commands.front().sampler_mode =
+      static_cast<karma::rendering::UISamplerMode>(255);
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+  draw_data.commands.front().sampler_mode =
+      karma::rendering::UISamplerMode::Linear;
+  draw_data.commands.front().texture_mode =
+      static_cast<karma::rendering::UITextureMode>(255);
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+  draw_data.commands.front().texture_mode =
+      karma::rendering::UITextureMode::AlphaMask;
+  assert(!karma::rendering::validateUIDrawData(draw_data));
+
+  draw_data.commands.front().texture = 1u;
+  draw_data.commands.front().blend_mode =
+      karma::rendering::UIBlendMode::PremultipliedAlpha;
+  draw_data.commands.front().sampler_mode =
+      karma::rendering::UISamplerMode::Nearest;
+  assert(karma::rendering::validateUIDrawData(draw_data));
 
   assert(!karma::rendering::validateUIDrawCounts(
       karma::rendering::kMaxUIVertices + 1u, 3u, 1u));

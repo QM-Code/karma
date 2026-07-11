@@ -293,11 +293,15 @@ karma_add_static(karma_content
   src/content/assets/asset_cache_json.cpp
   src/content/assets/asset_cache_mesh.cpp
   src/content/assets/asset_cache_texture.cpp
+  src/content/assets/asset_cache_ui.cpp
   src/content/assets/bake_artifacts.cpp
   src/content/assets/asset_package.cpp
   src/content/assets/asset_registry.cpp
   src/content/assets/asset_source_import.cpp
   src/content/assets/asset_texture.cpp
+  src/content/assets/asset_ui_source_import.cpp
+  src/content/assets/ui_json_profile.cpp
+  src/content/assets/ui_json_validation.cpp
   src/content/importers/gltf_document.cpp
   src/content/importers/mesh_import.cpp
   src/content/importers/gltf_scene_animation_import.cpp
@@ -448,21 +452,107 @@ if (KARMA_BUILD_HEADLESS_PROFILE)
 endif()
 
 if (KARMA_BUILD_GRAPHICAL_PROFILE)
-  set(KARMA_IMGUI_LINK_TARGET "${KARMA_IMGUI_TARGET}")
-  if (NOT KARMA_IMGUI_LINK_TARGET AND DEFINED IMGUI_SOURCES)
-    karma_add_static(karma_imgui_vendor
-      ${IMGUI_SOURCES}
+  if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.26)
+    set(KARMA_YOGA_BUILD_LINK "$<BUILD_LOCAL_INTERFACE:${KARMA_YOGA_TARGET}>")
+    set(KARMA_FREETYPE_BUILD_LINK "$<BUILD_LOCAL_INTERFACE:${KARMA_FREETYPE_TARGET}>")
+    set(KARMA_HARFBUZZ_BUILD_LINK "$<BUILD_LOCAL_INTERFACE:${KARMA_HARFBUZZ_TARGET}>")
+    set(KARMA_ICU_UC_BUILD_LINK "$<BUILD_LOCAL_INTERFACE:ICU::uc>")
+    set(KARMA_ICU_I18N_BUILD_LINK "$<BUILD_LOCAL_INTERFACE:ICU::i18n>")
+    set(KARMA_LUNASVG_BUILD_LINK "$<BUILD_LOCAL_INTERFACE:${KARMA_LUNASVG_TARGET}>")
+  else()
+    set(KARMA_YOGA_BUILD_LINK "$<BUILD_INTERFACE:${KARMA_YOGA_TARGET}>")
+    set(KARMA_FREETYPE_BUILD_LINK "$<BUILD_INTERFACE:${KARMA_FREETYPE_TARGET}>")
+    set(KARMA_HARFBUZZ_BUILD_LINK "$<BUILD_INTERFACE:${KARMA_HARFBUZZ_TARGET}>")
+    set(KARMA_ICU_UC_BUILD_LINK "$<BUILD_INTERFACE:ICU::uc>")
+    set(KARMA_ICU_I18N_BUILD_LINK "$<BUILD_INTERFACE:ICU::i18n>")
+    set(KARMA_LUNASVG_BUILD_LINK "$<BUILD_INTERFACE:${KARMA_LUNASVG_TARGET}>")
+  endif()
+  if (KARMA_ENABLE_NATIVE_UI)
+    karma_add_static(karma_features_ui_native
+      src/features/ui/native/accessibility_builder.cpp
+      src/features/ui/native/value.cpp
+      src/features/ui/native/asset_reference.cpp
+      src/features/ui/native/authoring.cpp
+      src/features/ui/native/binding_engine.cpp
+      src/features/ui/native/canvas_layout.cpp
+      src/features/ui/native/computed_style_values.cpp
+      src/features/ui/native/controller.cpp
+      src/features/ui/native/diagnostics.cpp
+      src/features/ui/native/development_path.cpp
+      src/features/ui/native/document_loader.cpp
+      src/features/ui/native/document_layout_runtime.cpp
+      src/features/ui/native/document_reconciler.cpp
+      src/features/ui/native/document_runtime.cpp
+      src/features/ui/native/focus_runtime.cpp
+      src/features/ui/native/hot_reload_coordinator.cpp
+      src/features/ui/native/hot_reload_runtime.cpp
+      src/features/ui/native/runtime_dom.cpp
+      src/features/ui/native/system.cpp
+      src/features/ui/native/system_documents.cpp
+      src/features/ui/native/system_frame.cpp
+      src/features/ui/native/system_input.cpp
+      src/features/ui/native/system_interaction.cpp
+      src/features/ui/native/system_reconciliation.cpp
+      src/features/ui/native/development_loader.cpp
+      src/features/ui/native/file_watcher.cpp
+      src/features/ui/native/font_face.cpp
+      src/features/ui/native/layout_engine.cpp
+      src/features/ui/native/listener_registry.cpp
+      src/features/ui/native/motion_engine.cpp
+      src/features/ui/native/paint_engine.cpp
+      src/features/ui/native/presentation_resources.cpp
+      src/features/ui/native/presentation_builder.cpp
+      src/features/ui/native/presentation_runtime.cpp
+      src/features/ui/native/style_runtime.cpp
+      src/features/ui/native/text_engine.cpp
+      src/features/ui/native/transient_runtime.cpp
+      src/features/ui/native/widget_paint.cpp
+      src/features/ui/native/widget_runtime.cpp
+      src/features/ui/native/svg_rasterizer.cpp
     )
-    if (imgui_SOURCE_DIR)
-      target_include_directories(karma_imgui_vendor
-        PUBLIC
-          $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>
-          $<INSTALL_INTERFACE:include/karma/vendor/imgui>
+    target_link_libraries(karma_features_ui_native
+      PUBLIC
+        karma_core
+        karma_content
+        karma_rendering_graphical
+      # PRIVATE dependencies of a static target remain transitive link-only
+      # requirements without exporting their compile usage to consumers.
+      PRIVATE
+        ${KARMA_YOGA_BUILD_LINK}
+        ${KARMA_FREETYPE_BUILD_LINK}
+        ${KARMA_HARFBUZZ_BUILD_LINK}
+        ${KARMA_ICU_UC_BUILD_LINK}
+        ${KARMA_ICU_I18N_BUILD_LINK}
+        ${KARMA_LUNASVG_BUILD_LINK}
+        $<INSTALL_INTERFACE:$<1:yoga::yogacore>>
+        $<INSTALL_INTERFACE:$<1:Freetype::Freetype>>
+        $<INSTALL_INTERFACE:$<1:harfbuzz::harfbuzz>>
+        $<INSTALL_INTERFACE:$<1:ICU::uc>>
+        $<INSTALL_INTERFACE:$<1:ICU::i18n>>
+        $<INSTALL_INTERFACE:$<1:lunasvg::lunasvg>>
+    )
+    target_compile_definitions(karma_features_ui_native PUBLIC KARMA_ENABLE_NATIVE_UI)
+    list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_native)
+  endif()
+
+  set(KARMA_IMGUI_LINK_TARGET "")
+  if (KARMA_ENABLE_IMGUI)
+    set(KARMA_IMGUI_LINK_TARGET "${KARMA_IMGUI_TARGET}")
+    if (NOT KARMA_IMGUI_LINK_TARGET AND DEFINED IMGUI_SOURCES)
+      karma_add_static(karma_imgui_vendor
+        ${IMGUI_SOURCES}
       )
+      if (imgui_SOURCE_DIR)
+        target_include_directories(karma_imgui_vendor
+          PUBLIC
+            $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>
+            $<INSTALL_INTERFACE:include/karma/vendor/imgui>
+        )
+      endif()
+      set_target_properties(karma_imgui_vendor PROPERTIES EXPORT_NAME imgui_vendor)
+      list(APPEND KARMA_INSTALL_TARGETS karma_imgui_vendor)
+      set(KARMA_IMGUI_LINK_TARGET karma_imgui_vendor)
     endif()
-    set_target_properties(karma_imgui_vendor PROPERTIES EXPORT_NAME imgui_vendor)
-    list(APPEND KARMA_INSTALL_TARGETS karma_imgui_vendor)
-    set(KARMA_IMGUI_LINK_TARGET karma_imgui_vendor)
   endif()
 
   set(KARMA_RUNTIME_GRAPHICAL_SOURCES ${KARMA_RUNTIME_COMMON_SOURCES})
@@ -489,6 +579,10 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       karma_platform_window_graphical
       karma_features_visual
   )
+  if (KARMA_ENABLE_NATIVE_UI)
+    target_link_libraries(karma_runtime_graphical PUBLIC karma_features_ui_native)
+    target_compile_definitions(karma_runtime_graphical PUBLIC KARMA_ENABLE_NATIVE_UI)
+  endif()
   if (KARMA_RENDER_BACKEND_DILIGENT)
     target_compile_definitions(karma_runtime_graphical PUBLIC KARMA_RENDER_BACKEND_DILIGENT)
   endif()
@@ -508,21 +602,21 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   target_link_libraries(karma_runtime_graphical PUBLIC karma_content)
   list(APPEND KARMA_INSTALL_TARGETS karma_runtime_graphical)
 
-  set(KARMA_IMGUI_ADAPTER_SOURCES
-    src/features/ui/imgui/imgui_layer.cpp
-  )
-
-  karma_add_static(karma_features_ui_imgui
-    ${KARMA_IMGUI_ADAPTER_SOURCES}
-  )
-  target_link_libraries(karma_features_ui_imgui PUBLIC karma_core karma_runtime_graphical)
-  if (KARMA_IMGUI_LINK_TARGET)
-    target_link_libraries(karma_features_ui_imgui PUBLIC ${KARMA_IMGUI_LINK_TARGET})
+  if (KARMA_ENABLE_IMGUI)
+    karma_add_static(karma_features_ui_imgui
+      src/features/ui/imgui/imgui_layer.cpp
+    )
+    target_link_libraries(karma_features_ui_imgui PUBLIC karma_core karma_runtime_graphical)
+    if (KARMA_IMGUI_LINK_TARGET)
+      target_link_libraries(karma_features_ui_imgui PUBLIC ${KARMA_IMGUI_LINK_TARGET})
+    endif()
+    if (imgui_SOURCE_DIR)
+      target_include_directories(karma_features_ui_imgui
+        PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
+    endif()
+    target_compile_definitions(karma_features_ui_imgui PUBLIC KARMA_ENABLE_IMGUI)
+    list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_imgui)
   endif()
-  if (imgui_SOURCE_DIR)
-    target_include_directories(karma_features_ui_imgui PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
-  endif()
-  list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_imgui)
 
   if (KARMA_ENABLE_RMLUI)
     if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.26)
@@ -540,13 +634,6 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
         ${KARMA_RMLUI_BUILD_LINK}
         $<INSTALL_INTERFACE:$<1:RmlUi::Core>>
     )
-    if (KARMA_IMGUI_LINK_TARGET)
-      target_link_libraries(karma_features_ui_rmlui PUBLIC ${KARMA_IMGUI_LINK_TARGET})
-    endif()
-    if (imgui_SOURCE_DIR)
-      target_include_directories(karma_features_ui_rmlui
-        PUBLIC $<BUILD_INTERFACE:${imgui_SOURCE_DIR}>)
-    endif()
     target_compile_definitions(karma_features_ui_rmlui PUBLIC KARMA_ENABLE_RMLUI)
     list(APPEND KARMA_INSTALL_TARGETS karma_features_ui_rmlui)
   endif()
@@ -603,7 +690,6 @@ endif()
 if (KARMA_BUILD_GRAPHICAL_PROFILE)
   set(KARMA_GRAPHICAL_PROFILE_LIBS
     karma_runtime_graphical
-    karma_features_ui_imgui
     karma_features_visual
     karma_features_network
     karma_platform_window_graphical
@@ -616,6 +702,12 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     karma_world
     karma_core
   )
+  if (KARMA_ENABLE_NATIVE_UI)
+    list(APPEND KARMA_GRAPHICAL_PROFILE_LIBS karma_features_ui_native)
+  endif()
+  if (KARMA_ENABLE_IMGUI)
+    list(APPEND KARMA_GRAPHICAL_PROFILE_LIBS karma_features_ui_imgui)
+  endif()
   if (KARMA_ENABLE_NAVIGATION)
     list(APPEND KARMA_GRAPHICAL_PROFILE_LIBS karma_simulation_navigation)
   endif()
@@ -628,6 +720,9 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   add_library(karma::graphical ALIAS karma_graphical)
   karma_configure_interface(karma_graphical)
   target_link_libraries(karma_graphical INTERFACE ${KARMA_GRAPHICAL_PROFILE_LIBS})
+  if (KARMA_ENABLE_NATIVE_UI)
+    target_compile_definitions(karma_graphical INTERFACE KARMA_ENABLE_NATIVE_UI)
+  endif()
   if (KARMA_RENDER_BACKEND_DILIGENT)
     target_compile_definitions(karma_graphical INTERFACE KARMA_RENDER_BACKEND_DILIGENT)
   endif()

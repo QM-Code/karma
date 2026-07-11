@@ -33,11 +33,10 @@ Karma is organized as layered engine code under `include/karma/<layer>` and
 - `runtime`: `EngineApp`, input, UI context, debug overlay, and app wiring.
 
 The default graphical profile currently enables GLFW, Diligent, miniaudio,
-ENet, Jolt, navigation, debug UI, and the ImGui demo. RmlUi is opt-in because
-system RmlUi/FreeType packages vary more across machines. The server profile is
-a minimal ECS/network surface, while the headless profile keeps the broader
-non-visual runtime surface and omits window, graphical renderer, UI provider,
-and audio backends by default.
+ENet, Jolt, navigation, and the first-party native UI. ImGui/debug tooling and
+RmlUi are opt-in. The server profile is a minimal ECS/network surface, while
+the headless profile keeps the broader non-visual runtime surface and omits
+window, graphical renderer, UI providers, and audio backends by default.
 
 ## Quick Start
 
@@ -218,13 +217,18 @@ before `find_package(karma)` to allow package-time fetching.
   events, grounded/support state, character controllers, Jolt constraints,
   filtered queries, vehicles, soft bodies, static navmesh baking, and Detour
   path queries.
-- UI adapters for ImGui and RmlUi behind `runtime/app/UiLayer`.
+- [First-party retained native UI](docs/NATIVE_UI.md) for graphical apps, with
+  JSON5 documents/themes, explicit bindings/actions, game-oriented layout,
+  skinned scrollbars, loose-file hot reload, and RAII screen controllers.
+  ImGui and RmlUi remain optional `UiLayer` adapters. See the
+  [implementation status and roadmap](docs/NATIVE_UI_STATUS.md) for verified
+  coverage and continuation work.
 - Audio and networking through miniaudio/SDL and ENet-backed abstractions.
 
 ## TODO
 
 - Investigate a VDB/NanoVDB-backed volume renderer using
-  [GPU Volume Rendering with Hierarchical Compression Using VDB](2504.04564v2.pdf)
+  [GPU Volume Rendering with Hierarchical Compression Using VDB](docs/2504.04564v2.pdf)
   as the design reference. The paper is enough to define the architecture
   (OpenVDB CPU compression, NanoVDB GPU sampling, sparse texture-like renderer
   backend), but implementation should also use OpenVDB/NanoVDB docs or samples
@@ -253,8 +257,11 @@ build into category directories under `build/examples/`:
   prefab proof/stress scenes.
 - `navigation_*`: click-to-move, sample-gallery, crowd, tile-cache, query,
   off-mesh, and physics-bridge navigation examples.
-- `ui_imgui`, `ui_rmlui`, `network_server`, and `network_client`: provider and
-  platform demos.
+- `ui_native`: compact first-party retained JSON5 menu.
+- `ui_showcase`: exhaustive native UI forge with medieval nine-slice skinning,
+  hot reload, every game-oriented widget family, and live dynamic resources.
+- `ui_imgui`, `ui_rmlui`, `network_server`, and `network_client`: optional
+  provider and platform demos.
 
 See [examples/README.md](examples/README.md) for the full target list and
 runtime flags.
@@ -288,9 +295,13 @@ Common CMake switches:
 - `KARMA_NETWORK_BACKEND_ENET`: build the default ENet networking transport and
   split network demo targets when their profiles are enabled.
 - `KARMA_ENABLE_NAVIGATION`: build Recast/Detour navigation support.
-- `KARMA_BUILD_DEBUG_UI`: build the runtime debug overlay.
-- `KARMA_BUILD_IMGUI_DEMO`, `KARMA_BUILD_RMLUI_DEMO`, `KARMA_ENABLE_RMLUI`:
-  optional UI demos/adapters.
+- `KARMA_ENABLE_NATIVE_UI`: build the first-party retained UI runtime. It is on
+  by default for the graphical profile and off for headless builds.
+- `KARMA_ENABLE_IMGUI`: build the optional ImGui adapter and ImGui-backed
+  tooling. `KARMA_BUILD_DEBUG_UI` and `KARMA_BUILD_IMGUI_DEMO` are available
+  when it is enabled.
+- `KARMA_ENABLE_RMLUI`, `KARMA_BUILD_RMLUI_DEMO`: build the optional RmlUi
+  compatibility adapter and demo.
 
 ## CI/CD
 
@@ -366,6 +377,8 @@ Start with:
 Focused references:
 
 - [Navigation](docs/NAVIGATION.md)
+- [Native UI Authoring And Runtime](docs/NATIVE_UI.md)
+- [Native UI Implementation Status And Roadmap](docs/NATIVE_UI_STATUS.md)
 - [Jolt Physics](docs/JOLT_PHYSICS.md)
 - [Particle System](docs/PARTICLE_SYSTEM.md)
 - [Particle Effect Generation](docs/PARTICLE_EFFECT_GENERATION.md)

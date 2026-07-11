@@ -51,6 +51,8 @@ install(FILES
   ${PROJECT_SOURCE_DIR}/include/karma/scenes.h
   ${PROJECT_SOURCE_DIR}/include/karma/server.h
   ${PROJECT_SOURCE_DIR}/include/karma/ui.h
+  ${PROJECT_SOURCE_DIR}/include/karma/ui_imgui.h
+  ${PROJECT_SOURCE_DIR}/include/karma/ui_rmlui.h
   ${PROJECT_SOURCE_DIR}/include/karma/visual.h
   ${PROJECT_SOURCE_DIR}/include/karma/world.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/karma
@@ -72,6 +74,12 @@ endif()
 if (EXISTS "${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders")
   install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/rendering/renderer/backends/diligent/shaders/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/karma/shaders/diligent
+  )
+endif()
+
+if (EXISTS "${PROJECT_SOURCE_DIR}/schemas/ui")
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/schemas/ui/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/karma/schemas/ui
   )
 endif()
 

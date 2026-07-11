@@ -650,6 +650,106 @@ bool AssetCache::writeHumanoidRig(std::string_view cache_key,
   return ok;
 }
 
+std::optional<UiDocumentAsset> AssetCache::readUiDocument(
+    std::string_view cache_key,
+    std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return std::nullopt;
+  }
+  auto bytes = readBinaryFile(blobPath(cache_key));
+  return bytes.has_value() ? detail::deserializeUiDocument(*bytes, diagnostic)
+                           : std::nullopt;
+}
+
+bool AssetCache::writeUiDocument(std::string_view cache_key,
+                                 const UiDocumentAsset& document,
+                                 std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return false;
+  }
+  const bool ok = writeAtomic(blobPath(cache_key),
+                              detail::serializeUiDocument(document),
+                              diagnostic);
+  if (ok) {
+    touchIndex(cache_key, "ui_document");
+  }
+  return ok;
+}
+
+std::optional<UiThemeAsset> AssetCache::readUiTheme(
+    std::string_view cache_key,
+    std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return std::nullopt;
+  }
+  auto bytes = readBinaryFile(blobPath(cache_key));
+  return bytes.has_value() ? detail::deserializeUiTheme(*bytes, diagnostic)
+                           : std::nullopt;
+}
+
+bool AssetCache::writeUiTheme(std::string_view cache_key,
+                              const UiThemeAsset& theme,
+                              std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return false;
+  }
+  const bool ok = writeAtomic(blobPath(cache_key),
+                              detail::serializeUiTheme(theme),
+                              diagnostic);
+  if (ok) {
+    touchIndex(cache_key, "ui_theme");
+  }
+  return ok;
+}
+
+std::optional<FontAsset> AssetCache::readFont(std::string_view cache_key,
+                                              std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return std::nullopt;
+  }
+  auto bytes = readBinaryFile(blobPath(cache_key));
+  return bytes.has_value() ? detail::deserializeFont(*bytes, diagnostic)
+                           : std::nullopt;
+}
+
+bool AssetCache::writeFont(std::string_view cache_key,
+                           const FontAsset& font,
+                           std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return false;
+  }
+  const bool ok =
+      writeAtomic(blobPath(cache_key), detail::serializeFont(font), diagnostic);
+  if (ok) {
+    touchIndex(cache_key, "font");
+  }
+  return ok;
+}
+
+std::optional<SvgAsset> AssetCache::readSvg(std::string_view cache_key,
+                                            std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return std::nullopt;
+  }
+  auto bytes = readBinaryFile(blobPath(cache_key));
+  return bytes.has_value() ? detail::deserializeSvg(*bytes, diagnostic)
+                           : std::nullopt;
+}
+
+bool AssetCache::writeSvg(std::string_view cache_key,
+                          const SvgAsset& svg,
+                          std::string* diagnostic) {
+  if (!enabled() || !validateCacheKey(cache_key, diagnostic)) {
+    return false;
+  }
+  const bool ok =
+      writeAtomic(blobPath(cache_key), detail::serializeSvg(svg), diagnostic);
+  if (ok) {
+    touchIndex(cache_key, "svg");
+  }
+  return ok;
+}
+
 std::optional<Json> AssetCache::readPackageManifest(std::string_view manifest_hash,
                                                     std::string* diagnostic) {
   if (!enabled() || !validateCacheKey(manifest_hash, diagnostic)) {

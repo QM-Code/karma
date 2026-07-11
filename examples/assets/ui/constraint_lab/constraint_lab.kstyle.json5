@@ -1,0 +1,138 @@
+{
+  format: 'karma.ui.theme',
+  version: 2,
+
+  variables: {
+    panel: '#141c2eee',
+    surface: '#2b3852',
+    accent: '#4a91ff',
+  },
+
+  fonts: {
+    'Karma Pilot': {
+      src: { asset: 'ui/pilots/font' },
+    },
+  },
+
+  defaults: {
+    panel: {
+      appearance: { text: { color: '#f2f6ff', font_family: ['Karma Pilot'], font_size: 15 } },
+    },
+    text: {
+      appearance: { text: { color: '#f2f6ff', font_family: ['Karma Pilot'], font_size: 15 } },
+    },
+    button: {
+      layout: { height: 36, padding: [8, 8, 8, 8], align_self: 'stretch' },
+      appearance: {
+        box: { background_color: { var: 'surface' }, border_width: 1, border_color: '#71819b' },
+        text: { color: '#f2f6ff', font_family: ['Karma Pilot'], font_size: 15, align: 'center' },
+        transitions: { background_color: { duration_ms: 100, easing: 'linear' } },
+        states: {
+          hover: { box: { background_color: '#3a4b6b' } },
+          pressed: { box: { background_color: '#226bd6' } },
+          focus: { box: { border_color: '#ffffff' } },
+          disabled: { box: { opacity: 0.45 } },
+        },
+      },
+    },
+    select: {
+      layout: { width: 210, height: 36, padding: [8, 8, 8, 8] },
+      appearance: {
+        box: { background_color: { var: 'surface' }, border_width: 1, border_color: '#71819b' },
+        text: { color: '#f2f6ff', font_family: ['Karma Pilot'], font_size: 15 },
+        parts: {
+          arrow: { text: { color: '#cbd7eb' }, metrics: { width: 18 } },
+          popup: { box: { background_color: '#202b40', border_width: 1, border_color: '#71819b' } },
+          option: { box: { background_color: '#202b40' }, states: { hover: { box: { background_color: '#3a4b6b' } } } },
+        },
+        states: {
+          hover: { box: { background_color: '#3a4b6b' } },
+          focus: { box: { border_color: '#ffffff' } },
+          disabled: { box: { opacity: 0.45 } },
+        },
+      },
+    },
+    slider: {
+      layout: { width: 210, height: 18 },
+      appearance: {
+        parts: {
+          track: { box: { background_color: '#1d2739', border_radius: 3 }, metrics: { thickness: 6 } },
+          fill: { box: { background_color: { var: 'accent' }, border_radius: 3 } },
+          thumb: {
+            box: { background_color: '#f2f6ff', border_color: '#71819b', border_width: 1, border_radius: 7 },
+            metrics: { width: 14, height: 14 },
+          },
+        },
+        states: {
+          focus: { parts: { thumb: { box: { border_color: '#ffffff' } } } },
+          disabled: { box: { opacity: 0.45 } },
+        },
+      },
+    },
+    toggle: {
+      layout: { width: 24, height: 24, justify_self: 'end' },
+      appearance: {
+        parts: {
+          track: { box: { background_color: '#1d2739', border_color: '#71819b', border_width: 1, border_radius: 3 } },
+          checkmark: { text: { color: '#ffffff' } },
+        },
+        states: {
+          checked: { parts: { track: { box: { background_color: { var: 'accent' } } } } },
+          focus: { parts: { track: { box: { border_color: '#ffffff' } } } },
+          disabled: { box: { opacity: 0.45 } },
+        },
+      },
+    },
+    scroll: {
+      appearance: {
+        parts: {
+          vertical_track: { box: { background_color: '#0c1320cc' }, metrics: { width: 11 } },
+          vertical_thumb: {
+            box: { background_color: '#60718d', border_radius: 5.5 },
+            metrics: { min_length: 24 },
+            states: {
+              hover: { box: { background_color: '#8296b6' } },
+              pressed: { box: { background_color: { var: 'accent' } } },
+            },
+          },
+          horizontal_track: { box: { background_color: '#0c1320cc' }, metrics: { height: 11 } },
+          horizontal_thumb: { box: { background_color: '#60718d', border_radius: 5.5 }, metrics: { min_length: 24 } },
+          corner: { box: { background_color: '#0c1320cc' } },
+        },
+      },
+    },
+  },
+
+  styles: {
+    panel: {
+      layout: {
+        mode: 'column',
+        width: 430,
+        height: 680,
+        margin: [18, 18, 18, 18],
+        padding: [18, 18, 18, 18],
+        gap: 10,
+      },
+      appearance: {
+        box: { background_color: { var: 'panel' }, border_width: 2, border_color: '#60718d' },
+      },
+    },
+    title: { layout: { height: 34 }, appearance: { text: { color: '#ffffff', font_size: 25 } } },
+    help: { layout: { height: 22 }, appearance: { text: { color: '#aebbd0' } } },
+    actions: { layout: { mode: 'grid', columns: ['1fr', '1fr'], height: 42, gap: 10 } },
+    'control-list': {
+      layout: { mode: 'column', height: 405, padding: [4, 4, 4, 4], gap: 7, align_self: 'stretch' },
+    },
+    row: {
+      layout: { mode: 'grid', columns: ['1fr', 210], height: 34, gap: 12, align_items: 'center', align_self: 'stretch' },
+    },
+    section: { layout: { height: 25 }, appearance: { text: { color: '#89b7ff' } } },
+    stats: {
+      layout: { mode: 'column', height: 68, gap: 4 },
+      appearance: { text: { color: '#b9c8df' } },
+    },
+    'editing-row': { layout: { mode: 'row', height: 20, gap: 5 } },
+    editing: { appearance: { text: { color: '#ffffff' } } },
+    primary: { appearance: { box: { background_color: { var: 'accent' } } } },
+  },
+}

@@ -58,22 +58,30 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     add_custom_target(karma_fix_xxhash DEPENDS ${KARMA_XXHASH_STAMP})
   endif()
 
-  karma_add_graphical_example(gameplay_tank gameplay tank
-    examples/gameplay/tank.cpp)
-  karma_add_physics_example(physics_collision_events collision_events
-    examples/physics/collision_events.cpp)
+  if (KARMA_ENABLE_NATIVE_UI OR KARMA_ENABLE_IMGUI)
+    karma_add_graphical_example(gameplay_tank gameplay tank
+      examples/gameplay/tank.cpp)
+  endif()
+  if (KARMA_ENABLE_IMGUI)
+    karma_add_physics_example(physics_collision_events collision_events
+      examples/physics/collision_events.cpp)
+  endif()
 
   karma_add_graphical_example(rendering_light_stress rendering light_stress
     examples/rendering/light_stress.cpp)
-  karma_add_graphical_example(rendering_antialiasing rendering antialiasing
-    examples/rendering/antialiasing.cpp
-    examples/common/scene_helpers.cpp)
+  if (KARMA_ENABLE_IMGUI)
+    karma_add_graphical_example(rendering_antialiasing rendering antialiasing
+      examples/rendering/antialiasing.cpp
+      examples/common/scene_helpers.cpp)
+  endif()
   karma_add_graphical_example(rendering_material_assignment rendering material_assignment
     examples/rendering/material_assignment.cpp)
   karma_add_graphical_example(rendering_grass_card rendering grass_card
     examples/rendering/grass_card.cpp)
-  karma_add_graphical_example(rendering_grass_field rendering grass_field
-    examples/rendering/grass_field.cpp)
+  if (KARMA_ENABLE_IMGUI)
+    karma_add_graphical_example(rendering_grass_field rendering grass_field
+      examples/rendering/grass_field.cpp)
+  endif()
   karma_add_graphical_example(rendering_postwar_city rendering postwar_city
     examples/rendering/postwar_city.cpp
     examples/common/scene_helpers.cpp)
@@ -96,12 +104,14 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_graphical_example(scene_world_bake scene world_bake
     examples/scene/world_bake.cpp
     examples/common/scene_helpers.cpp)
-  karma_add_graphical_example(animation_gltf animation gltf
-    examples/animation/gltf.cpp
-    examples/common/scene_helpers.cpp)
-  karma_add_graphical_example(animation_humanoid_rpg animation humanoid_rpg
-    examples/animation/humanoid_rpg.cpp
-    examples/common/scene_helpers.cpp)
+  if (KARMA_ENABLE_IMGUI)
+    karma_add_graphical_example(animation_gltf animation gltf
+      examples/animation/gltf.cpp
+      examples/common/scene_helpers.cpp)
+    karma_add_graphical_example(animation_humanoid_rpg animation humanoid_rpg
+      examples/animation/humanoid_rpg.cpp
+      examples/common/scene_helpers.cpp)
+  endif()
 
   karma_add_graphical_example(particles_billboard particles billboard
     examples/particles/billboard.cpp)
@@ -145,9 +155,16 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_graphical_example(prefabs_particle_isolation prefabs particle_isolation
     examples/prefabs/particle_isolation.cpp)
 
-  if (KARMA_BUILD_IMGUI_DEMO)
+  if (KARMA_ENABLE_IMGUI AND KARMA_BUILD_IMGUI_DEMO)
     karma_add_graphical_example(ui_imgui ui imgui
       examples/ui/imgui.cpp)
+  endif()
+
+  if (KARMA_ENABLE_NATIVE_UI)
+    karma_add_graphical_example(ui_native ui native
+      examples/ui/native.cpp)
+    karma_add_graphical_example(ui_showcase ui showcase
+      examples/ui/showcase.cpp)
   endif()
 
   if (KARMA_BUILD_RMLUI_DEMO)
@@ -155,16 +172,22 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
       examples/ui/rmlui.cpp)
   endif()
 
-  karma_add_physics_example(physics_shape_gallery shape_gallery
-    examples/physics/shape_gallery.cpp)
-  karma_add_physics_example(physics_constraint_lab constraint_lab
-    examples/physics/constraint_lab.cpp)
-  karma_add_physics_example(physics_query_lab query_lab
-    examples/physics/query_lab.cpp)
-  karma_add_physics_example(physics_body_controls body_controls
-    examples/physics/body_controls.cpp)
-  karma_add_physics_example(physics_car car
-    examples/physics/car.cpp)
+  if (KARMA_ENABLE_IMGUI)
+    karma_add_physics_example(physics_shape_gallery shape_gallery
+      examples/physics/shape_gallery.cpp)
+  endif()
+  if (KARMA_ENABLE_NATIVE_UI OR KARMA_ENABLE_IMGUI)
+    karma_add_physics_example(physics_constraint_lab constraint_lab
+      examples/physics/constraint_lab.cpp)
+  endif()
+  if (KARMA_ENABLE_IMGUI)
+    karma_add_physics_example(physics_query_lab query_lab
+      examples/physics/query_lab.cpp)
+    karma_add_physics_example(physics_body_controls body_controls
+      examples/physics/body_controls.cpp)
+    karma_add_physics_example(physics_car car
+      examples/physics/car.cpp)
+  endif()
 endif()
 
 if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_SERVER_PROFILE)
@@ -180,7 +203,7 @@ if (KARMA_NETWORK_BACKEND_ENET AND KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_graphical_example(network_client network client
     examples/network/client.cpp
     examples/network/shared.cpp)
-  if (KARMA_BUILD_IMGUI_DEMO)
+  if (KARMA_ENABLE_IMGUI)
     karma_add_graphical_example(network_discovery_directory network discovery_directory
       examples/network/discovery_directory.cpp)
   endif()
@@ -217,42 +240,44 @@ if (KARMA_ENABLE_NAVIGATION AND KARMA_BUILD_GRAPHICAL_PROFILE)
     examples/navigation/navmesh.cpp
     examples/common/scene_helpers.cpp)
 
-  function(karma_add_navigation_sample target output_name source)
-    karma_add_graphical_example(${target} "navigation/samples" "${output_name}"
-      ${source}
-      examples/navigation/samples/sample_app.cpp
-      examples/common/scene_helpers.cpp)
-  endfunction()
+  if (KARMA_ENABLE_IMGUI)
+    function(karma_add_navigation_sample target output_name source)
+      karma_add_graphical_example(${target} "navigation/samples" "${output_name}"
+        ${source}
+        examples/navigation/samples/sample_app.cpp
+        examples/common/scene_helpers.cpp)
+    endfunction()
 
-  karma_add_navigation_sample(navigation_solo_mesh solo_mesh
-    examples/navigation/samples/solo_mesh.cpp)
-  karma_add_navigation_sample(navigation_tile_mesh tile_mesh
-    examples/navigation/samples/tile_mesh.cpp)
-  karma_add_navigation_sample(navigation_temp_obstacles temp_obstacles
-    examples/navigation/samples/temp_obstacles.cpp)
-  karma_add_navigation_sample(navigation_debug debug
-    examples/navigation/samples/debug.cpp)
+    karma_add_navigation_sample(navigation_solo_mesh solo_mesh
+      examples/navigation/samples/solo_mesh.cpp)
+    karma_add_navigation_sample(navigation_tile_mesh tile_mesh
+      examples/navigation/samples/tile_mesh.cpp)
+    karma_add_navigation_sample(navigation_temp_obstacles temp_obstacles
+      examples/navigation/samples/temp_obstacles.cpp)
+    karma_add_navigation_sample(navigation_debug debug
+      examples/navigation/samples/debug.cpp)
 
-  function(karma_add_navigation_example target output_name source)
-    karma_add_graphical_example(${target} "navigation" "${output_name}"
-      ${source}
-      examples/navigation/navigation_example_scene.cpp
-      examples/navigation/navigation_examples.cpp
-      examples/common/scene_helpers.cpp)
-  endfunction()
+    function(karma_add_navigation_example target output_name source)
+      karma_add_graphical_example(${target} "navigation" "${output_name}"
+        ${source}
+        examples/navigation/navigation_example_scene.cpp
+        examples/navigation/navigation_examples.cpp
+        examples/common/scene_helpers.cpp)
+    endfunction()
 
-  karma_add_navigation_example(navigation_point_click point_click
-    examples/navigation/point_click.cpp)
-  karma_add_navigation_example(navigation_crowds crowds
-    examples/navigation/crowds.cpp)
-  karma_add_navigation_example(navigation_tile_cache tile_cache
-    examples/navigation/tile_cache.cpp)
-  karma_add_navigation_example(navigation_query_lab query_lab
-    examples/navigation/query_lab.cpp)
-  karma_add_navigation_example(navigation_offmesh_areas offmesh_areas
-    examples/navigation/offmesh_areas.cpp)
-  karma_add_navigation_example(navigation_physics_bridge physics_bridge
-    examples/navigation/physics_bridge.cpp)
+    karma_add_navigation_example(navigation_point_click point_click
+      examples/navigation/point_click.cpp)
+    karma_add_navigation_example(navigation_crowds crowds
+      examples/navigation/crowds.cpp)
+    karma_add_navigation_example(navigation_tile_cache tile_cache
+      examples/navigation/tile_cache.cpp)
+    karma_add_navigation_example(navigation_query_lab query_lab
+      examples/navigation/query_lab.cpp)
+    karma_add_navigation_example(navigation_offmesh_areas offmesh_areas
+      examples/navigation/offmesh_areas.cpp)
+    karma_add_navigation_example(navigation_physics_bridge physics_bridge
+      examples/navigation/physics_bridge.cpp)
+  endif()
 
   karma_add_graphical_example(navigation_samples_gallery "navigation/samples" gallery
     examples/navigation/samples/gallery.cpp

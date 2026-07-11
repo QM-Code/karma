@@ -88,6 +88,13 @@ class Backend {
     (void)upload;
     return false;
   }
+  virtual bool updateTextureRegion(
+      rendering::TextureId texture,
+      const rendering::TextureRegionUploadData& upload) {
+    (void)texture;
+    (void)upload;
+    return false;
+  }
   virtual void destroyTexture(rendering::TextureId texture) = 0;
 
   virtual rendering::RenderTargetId createRenderTarget(const rendering::RenderTargetDesc& desc) = 0;
@@ -151,6 +158,8 @@ class Backend {
                         const math::Color& color, bool depth_test, float thickness) = 0;
 
   virtual unsigned int getRenderTargetTextureId(rendering::RenderTargetId target) const = 0;
+  virtual std::optional<rendering::RenderTargetDesc> getRenderTargetDesc(
+      rendering::RenderTargetId target) const = 0;
 
   virtual void setCamera(const rendering::CameraData& camera) = 0;
   virtual void setCameraActive(bool active) = 0;

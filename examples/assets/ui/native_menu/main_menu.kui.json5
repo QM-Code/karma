@@ -1,0 +1,108 @@
+{
+  format: 'karma.ui.document',
+  version: 2,
+
+  canvas: {
+    reference_size: [1280, 720],
+    scale_mode: 'fit',
+    safe_area: 'platform',
+  },
+
+  themes: [
+    { asset: 'ui/demo/theme' },
+  ],
+
+  root: {
+    type: 'panel',
+    id: 'main-menu',
+    styles: ['screen'],
+    children: [
+      {
+        type: 'panel',
+        styles: ['panel'],
+        children: [
+          {
+            type: 'svg',
+            styles: ['logo'],
+            props: { src: { asset: 'ui/demo/icon', kind: 'svg' } },
+            semantics: { label: 'Karma logo' },
+          },
+          {
+            type: 'text',
+            styles: ['title'],
+            props: { text: { bind: 'title' } },
+          },
+          {
+            type: 'text',
+            styles: ['status'],
+            props: { text: { bind: 'status' } },
+          },
+          {
+            type: 'button',
+            id: 'play',
+            styles: ['primary'],
+            props: { text: 'Play' },
+            on: { click: 'play' },
+          },
+          {
+            type: 'panel',
+            styles: ['setting-row'],
+            children: [
+              { type: 'text', props: { text: 'Volume' } },
+              {
+                type: 'slider',
+                id: 'volume',
+                props: {
+                  value: { bind: 'settings.volume', mode: 'two_way' },
+                  min: 0,
+                  max: 1,
+                  step: 0.05,
+                },
+                on: { change: 'volume-changed' },
+              },
+            ],
+          },
+          {
+            type: 'panel',
+            styles: ['setting-row'],
+            children: [
+              { type: 'text', props: { text: 'Fullscreen' } },
+              {
+                type: 'toggle',
+                id: 'fullscreen',
+                props: {
+                  value: { bind: 'settings.fullscreen', mode: 'two_way' },
+                },
+              },
+            ],
+          },
+          {
+            type: 'scroll',
+            styles: ['save-list'],
+            props: {
+              scroll_x: 'hidden',
+              scroll_y: 'auto',
+              scrollbar_placement: 'gutter',
+            },
+            children: [
+              {
+                type: 'repeat',
+                props: {
+                  items: { bind: 'saves' },
+                  item: 'slot',
+                  key: { expr: 'slot.id' },
+                  template: {
+                    type: 'button',
+                    styles: ['save'],
+                    props: { text: { bind: 'slot.name' } },
+                    on: { click: 'load-save' },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+}

@@ -1,8 +1,13 @@
 #include "karma/platform.h"
 
+#include "../gamepad_repeat.h"
+#include "../standard_cursor_cache.h"
+
 #include <SDL3/SDL.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <mutex>
@@ -35,8 +40,8 @@ bool acquireSdlVideo() {
             SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11");
         }
 #endif
-        if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
-            spdlog::error("SDL video subsystem failed to initialize: {}", SDL_GetError());
+        if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+            spdlog::error("SDL video/gamepad subsystems failed to initialize: {}", SDL_GetError());
             return false;
         }
 #if defined(KARMA_RENDER_BACKEND_DILIGENT) && defined(__linux__)
@@ -45,7 +50,7 @@ bool acquireSdlVideo() {
             spdlog::error(
                 "Karma's Diligent Vulkan backend requires SDL's x11 video driver on Linux; active driver is '{}'",
                 active_driver ? active_driver : "(null)");
-            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
             return false;
         }
 #endif
@@ -64,7 +69,7 @@ void releaseSdlVideo() {
     }
     --runtime.users;
     if (runtime.users == 0u) {
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
     }
 }
 
@@ -291,6 +296,62 @@ uint8_t toSdlButton(MouseButton button) {
     }
 }
 
+GamepadButton toGamepadButton(uint8_t button) {
+    switch (static_cast<SDL_GamepadButton>(button)) {
+        case SDL_GAMEPAD_BUTTON_SOUTH: return GamepadButton::A;
+        case SDL_GAMEPAD_BUTTON_EAST: return GamepadButton::B;
+        case SDL_GAMEPAD_BUTTON_WEST: return GamepadButton::X;
+        case SDL_GAMEPAD_BUTTON_NORTH: return GamepadButton::Y;
+        case SDL_GAMEPAD_BUTTON_BACK: return GamepadButton::Back;
+        case SDL_GAMEPAD_BUTTON_GUIDE: return GamepadButton::Guide;
+        case SDL_GAMEPAD_BUTTON_START: return GamepadButton::Start;
+        case SDL_GAMEPAD_BUTTON_LEFT_STICK: return GamepadButton::LeftStick;
+        case SDL_GAMEPAD_BUTTON_RIGHT_STICK: return GamepadButton::RightStick;
+        case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return GamepadButton::LeftShoulder;
+        case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return GamepadButton::RightShoulder;
+        case SDL_GAMEPAD_BUTTON_DPAD_UP: return GamepadButton::DpadUp;
+        case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return GamepadButton::DpadRight;
+        case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return GamepadButton::DpadDown;
+        case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return GamepadButton::DpadLeft;
+        default: return GamepadButton::Unknown;
+    }
+}
+
+GamepadAxis toGamepadAxis(uint8_t axis) {
+    switch (static_cast<SDL_GamepadAxis>(axis)) {
+        case SDL_GAMEPAD_AXIS_LEFTX: return GamepadAxis::LeftX;
+        case SDL_GAMEPAD_AXIS_LEFTY: return GamepadAxis::LeftY;
+        case SDL_GAMEPAD_AXIS_RIGHTX: return GamepadAxis::RightX;
+        case SDL_GAMEPAD_AXIS_RIGHTY: return GamepadAxis::RightY;
+        case SDL_GAMEPAD_AXIS_LEFT_TRIGGER: return GamepadAxis::LeftTrigger;
+        case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: return GamepadAxis::RightTrigger;
+        default: return GamepadAxis::Unknown;
+    }
+}
+
+float normalizeGamepadAxis(GamepadAxis axis, int16_t raw_value) {
+    const float value = raw_value < 0
+                            ? static_cast<float>(raw_value) / 32768.0f
+                            : static_cast<float>(raw_value) / 32767.0f;
+    if (axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger) {
+        return value < 0.05f ? 0.0f : std::clamp(value, 0.0f, 1.0f);
+    }
+    constexpr float dead_zone = 0.18f;
+    const float magnitude = std::abs(value);
+    if (magnitude <= dead_zone) {
+        return 0.0f;
+    }
+    return std::copysign((magnitude - dead_zone) / (1.0f - dead_zone), value);
+}
+
+bool isGamepadEvent(uint32_t type) {
+    return type == SDL_EVENT_GAMEPAD_ADDED ||
+           type == SDL_EVENT_GAMEPAD_REMOVED ||
+           type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+           type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+           type == SDL_EVENT_GAMEPAD_AXIS_MOTION;
+}
+
 Modifiers toModifiers(SDL_Keymod mods) {
     Modifiers out;
     out.shift = (mods & SDL_KMOD_SHIFT) != 0;
@@ -401,6 +462,14 @@ public:
         if (window) {
             SDL_StopTextInput(window);
         }
+        cursors.clear([](SDL_Cursor* cursor) { SDL_DestroyCursor(cursor); });
+        for (auto& [id, gamepad] : gamepads) {
+            (void)id;
+            if (gamepad) {
+                SDL_CloseGamepad(gamepad);
+            }
+        }
+        gamepads.clear();
         if (glContext) {
             SDL_GL_DestroyContext(glContext);
             glContext = nullptr;
@@ -428,6 +497,13 @@ public:
                 }
                 continue;
             }
+            if (isGamepadEvent(event.type)) {
+                for (const auto& [id, target] : runtime.windows) {
+                    (void)id;
+                    target->enqueueSdlEvent(event);
+                }
+                continue;
+            }
             const SDL_WindowID target_id = sdlEventWindowId(event);
             const auto target = runtime.windows.find(target_id);
             if (target != runtime.windows.end()) {
@@ -435,6 +511,7 @@ public:
             }
         }
         eventsBuffer.swap(pendingEvents);
+        gamepadRepeats.appendDue(eventsBuffer);
     }
 
     const std::vector<Event>& events() const override {
@@ -504,9 +581,27 @@ public:
         SDL_GetWindowSizeInPixels(window, &width, &height);
     }
 
-    float getContentScale() const override {
+    void getLogicalSize(int &width, int &height) const override {
         if (!window) {
-            return 1.0f;
+            width = 0;
+            height = 0;
+            return;
+        }
+        SDL_GetWindowSize(window, &width, &height);
+    }
+
+    float getContentScale() const override {
+        float scale_x = 1.0f;
+        float scale_y = 1.0f;
+        getContentScale(scale_x, scale_y);
+        return scale_x;
+    }
+
+    void getContentScale(float& scale_x, float& scale_y) const override {
+        if (!window) {
+            scale_x = 1.0f;
+            scale_y = 1.0f;
+            return;
         }
         int winW = 0;
         int winH = 0;
@@ -514,10 +609,8 @@ public:
         int fbH = 0;
         SDL_GetWindowSize(window, &winW, &winH);
         SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
-        if (winW <= 0) {
-            return 1.0f;
-        }
-        return static_cast<float>(fbW) / static_cast<float>(winW);
+        scale_x = winW > 0 ? static_cast<float>(fbW) / static_cast<float>(winW) : 1.0f;
+        scale_y = winH > 0 ? static_cast<float>(fbH) / static_cast<float>(winH) : 1.0f;
     }
 
     bool isKeyDown(Key key) const override {
@@ -546,12 +639,68 @@ public:
         return (mask & SDL_BUTTON_MASK(toSdlButton(button))) != 0;
     }
 
+    bool isGamepadButtonDown(GamepadButton button, int gamepad = -1) const override {
+        for (const auto& [id, buttons] : gamepadButtons) {
+            if (gamepad >= 0 && id != gamepad) {
+                continue;
+            }
+            const auto found = buttons.find(button);
+            if (found != buttons.end() && found->second) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    float gamepadAxis(GamepadAxis axis, int gamepad = -1) const override {
+        for (const auto& [id, axes] : gamepadAxes) {
+            if (gamepad >= 0 && id != gamepad) {
+                continue;
+            }
+            const auto found = axes.find(axis);
+            if (found != axes.end()) {
+                return found->second;
+            }
+        }
+        return 0.0f;
+    }
+
     void setCursorVisible(bool visible) override {
         if (visible) {
             SDL_ShowCursor();
         } else {
             SDL_HideCursor();
         }
+    }
+
+    void setCursorShape(CursorShape shape) override {
+        if (shape == cursorShape) {
+            return;
+        }
+        SDL_SystemCursor system_cursor = SDL_SYSTEM_CURSOR_DEFAULT;
+        switch (shape) {
+            case CursorShape::Pointer: system_cursor = SDL_SYSTEM_CURSOR_POINTER; break;
+            case CursorShape::Text: system_cursor = SDL_SYSTEM_CURSOR_TEXT; break;
+            case CursorShape::Crosshair: system_cursor = SDL_SYSTEM_CURSOR_CROSSHAIR; break;
+            case CursorShape::Move: system_cursor = SDL_SYSTEM_CURSOR_MOVE; break;
+            case CursorShape::ResizeHorizontal: system_cursor = SDL_SYSTEM_CURSOR_EW_RESIZE; break;
+            case CursorShape::ResizeVertical: system_cursor = SDL_SYSTEM_CURSOR_NS_RESIZE; break;
+            case CursorShape::ResizeDiagonalNwSe: system_cursor = SDL_SYSTEM_CURSOR_NWSE_RESIZE; break;
+            case CursorShape::ResizeDiagonalNeSw: system_cursor = SDL_SYSTEM_CURSOR_NESW_RESIZE; break;
+            case CursorShape::NotAllowed: system_cursor = SDL_SYSTEM_CURSOR_NOT_ALLOWED; break;
+            default: system_cursor = SDL_SYSTEM_CURSOR_DEFAULT; break;
+        }
+        const int cache_key = static_cast<int>(system_cursor);
+        SDL_Cursor* requested = cursors.getOrCreate(
+            cache_key, [](int native_shape) {
+                return SDL_CreateSystemCursor(
+                    static_cast<SDL_SystemCursor>(native_shape));
+            });
+        if (!requested) {
+            return;
+        }
+        SDL_SetCursor(requested);
+        cursorShape = shape;
     }
 
     void setIcon(const std::string& path) override {
@@ -602,11 +751,24 @@ private:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
                 Event ev;
                 ev.type = EventType::WindowResize;
+                int logicalW = 0;
+                int logicalH = 0;
                 int fbW = 0;
                 int fbH = 0;
+                SDL_GetWindowSize(window, &logicalW, &logicalH);
                 SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
                 ev.width = fbW;
                 ev.height = fbH;
+                ev.logicalWidth = logicalW;
+                ev.logicalHeight = logicalH;
+                ev.framebufferWidth = fbW;
+                ev.framebufferHeight = fbH;
+                ev.scaleX = logicalW > 0
+                                ? static_cast<float>(fbW) / static_cast<float>(logicalW)
+                                : 1.0f;
+                ev.scaleY = logicalH > 0
+                                ? static_cast<float>(fbH) / static_cast<float>(logicalH)
+                                : 1.0f;
                 pendingEvents.push_back(ev);
                 break;
             }
@@ -629,16 +791,8 @@ private:
                 ev.type = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) ? EventType::MouseButtonDown : EventType::MouseButtonUp;
                 ev.mouseButton = toMouseButton(event.button.button);
                 ev.mods = toModifiers(SDL_GetModState());
-                int winW = 0;
-                int winH = 0;
-                int fbW = 0;
-                int fbH = 0;
-                SDL_GetWindowSize(window, &winW, &winH);
-                SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
-                const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
-                const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
-                ev.x = event.button.x * scaleX;
-                ev.y = event.button.y * scaleY;
+                ev.x = event.button.x;
+                ev.y = event.button.y;
                 pendingEvents.push_back(ev);
                 break;
             }
@@ -646,16 +800,8 @@ private:
                 Event ev;
                 ev.type = EventType::MouseMove;
                 ev.mods = toModifiers(SDL_GetModState());
-                int winW = 0;
-                int winH = 0;
-                int fbW = 0;
-                int fbH = 0;
-                SDL_GetWindowSize(window, &winW, &winH);
-                SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
-                const double scaleX = (winW > 0) ? static_cast<double>(fbW) / static_cast<double>(winW) : 1.0;
-                const double scaleY = (winH > 0) ? static_cast<double>(fbH) / static_cast<double>(winH) : 1.0;
-                ev.x = event.motion.x * scaleX;
-                ev.y = event.motion.y * scaleY;
+                ev.x = event.motion.x;
+                ev.y = event.motion.y;
                 pendingEvents.push_back(ev);
                 break;
             }
@@ -663,8 +809,71 @@ private:
                 Event ev;
                 ev.type = EventType::MouseScroll;
                 ev.mods = toModifiers(SDL_GetModState());
+                ev.x = event.wheel.mouse_x;
+                ev.y = event.wheel.mouse_y;
                 ev.scrollX = event.wheel.x;
                 ev.scrollY = event.wheel.y;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_GAMEPAD_ADDED: {
+                const int id = static_cast<int>(event.gdevice.which);
+                if (!gamepads.contains(id)) {
+                    if (SDL_Gamepad* gamepad = SDL_OpenGamepad(event.gdevice.which)) {
+                        gamepads.emplace(id, gamepad);
+                    }
+                }
+                gamepadButtons.try_emplace(id);
+                gamepadAxes.try_emplace(id);
+                Event ev;
+                ev.type = EventType::GamepadConnected;
+                ev.gamepad = id;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_GAMEPAD_REMOVED: {
+                const int id = static_cast<int>(event.gdevice.which);
+                if (const auto found = gamepads.find(id); found != gamepads.end()) {
+                    if (found->second) {
+                        SDL_CloseGamepad(found->second);
+                    }
+                    gamepads.erase(found);
+                }
+                gamepadButtons.erase(id);
+                gamepadAxes.erase(id);
+                gamepadRepeats.resetGamepad(id);
+                Event ev;
+                ev.type = EventType::GamepadDisconnected;
+                ev.gamepad = id;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+                const int id = static_cast<int>(event.gbutton.which);
+                const GamepadButton button = toGamepadButton(event.gbutton.button);
+                const bool pressed = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+                gamepadButtons[id][button] = pressed;
+                gamepadRepeats.buttonChanged(id, button, pressed);
+                Event ev;
+                ev.type = pressed ? EventType::GamepadButtonDown
+                                  : EventType::GamepadButtonUp;
+                ev.gamepad = id;
+                ev.gamepadButton = button;
+                pendingEvents.push_back(ev);
+                break;
+            }
+            case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+                const int id = static_cast<int>(event.gaxis.which);
+                const GamepadAxis axis = toGamepadAxis(event.gaxis.axis);
+                const float value = normalizeGamepadAxis(axis, event.gaxis.value);
+                gamepadAxes[id][axis] = value;
+                gamepadRepeats.axisChanged(id, axis, value);
+                Event ev;
+                ev.type = EventType::GamepadAxisMotion;
+                ev.gamepad = id;
+                ev.gamepadAxis = axis;
+                ev.gamepadValue = value;
                 pendingEvents.push_back(ev);
                 break;
             }
@@ -675,9 +884,15 @@ private:
 
     SDL_Window *window = nullptr;
     SDL_GLContext glContext = nullptr;
+    detail::StandardCursorCache<int, SDL_Cursor*> cursors;
     std::vector<Event> eventsBuffer;
     std::vector<Event> pendingEvents;
+    std::unordered_map<int, std::unordered_map<GamepadButton, bool>> gamepadButtons;
+    std::unordered_map<int, std::unordered_map<GamepadAxis, float>> gamepadAxes;
+    std::unordered_map<int, SDL_Gamepad*> gamepads;
+    detail::GamepadRepeatScheduler gamepadRepeats;
     SDL_WindowID windowId = 0;
+    CursorShape cursorShape = CursorShape::Default;
     bool fullscreen = false;
     bool closeRequested = false;
     bool sdlVideoAcquired = false;

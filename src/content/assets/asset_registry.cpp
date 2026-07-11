@@ -16,6 +16,7 @@
 #include "karma/assets.h"
 
 #include "asset_texture_internal.h"
+#include "asset_ui_source_import.h"
 #include "material_registry_backing.h"
 
 namespace karma::assets {
@@ -35,10 +36,10 @@ bool hasKnownSourceExtension(std::string_view key) {
   if (ext.empty()) {
     return false;
   }
-  static constexpr std::array<std::string_view, 20> kSourceExtensions{
+  static constexpr std::array<std::string_view, 26> kSourceExtensions{
       ".glb", ".gltf", ".obj", ".fbx", ".dae", ".png", ".jpg", ".jpeg", ".tga",
       ".bmp", ".hdr", ".exr", ".ktx", ".dds", ".mat", ".json", ".kpeffect",
-      ".wav", ".ogg", ".mp3"};
+      ".wav", ".ogg", ".mp3", ".json5", ".svg", ".ttf", ".otf", ".ttc", ".otc"};
   return std::find(kSourceExtensions.begin(), kSourceExtensions.end(), ext) !=
          kSourceExtensions.end();
 }
@@ -101,6 +102,12 @@ std::string meshContentHash(const world::MeshData& mesh) {
 struct AssetRegistry::Impl {
   std::unordered_map<std::string, std::shared_ptr<world::MeshData>> meshes;
   std::unordered_map<std::string, std::shared_ptr<TextureAsset>> textures;
+  std::unordered_map<std::string, UiDocumentAsset> ui_documents;
+  std::unordered_map<std::string, UiThemeAsset> ui_themes;
+  std::unordered_map<std::string, std::filesystem::path> ui_document_source_paths;
+  std::unordered_map<std::string, std::filesystem::path> ui_theme_source_paths;
+  std::unordered_map<std::string, FontAsset> fonts;
+  std::unordered_map<std::string, SvgAsset> svgs;
   std::unordered_map<std::string, std::weak_ptr<world::MeshData>> mesh_payloads_by_hash;
   std::unordered_map<std::string, std::weak_ptr<TextureAsset>> texture_payloads_by_hash;
   std::unordered_map<std::string, std::string> imported_texture_keys_by_source_hash;
@@ -191,6 +198,12 @@ void AssetRegistry::clear() {
   }
   impl_->meshes.clear();
   impl_->textures.clear();
+  impl_->ui_documents.clear();
+  impl_->ui_themes.clear();
+  impl_->ui_document_source_paths.clear();
+  impl_->ui_theme_source_paths.clear();
+  impl_->fonts.clear();
+  impl_->svgs.clear();
   impl_->mesh_payloads_by_hash.clear();
   impl_->texture_payloads_by_hash.clear();
   impl_->imported_texture_keys_by_source_hash.clear();
@@ -246,6 +259,70 @@ bool AssetRegistry::moveAssetFrom(AssetRegistry& source,
     impl_->meshes.insert(std::move(node));
     bumpMeshVersion();
     source.bumpMeshVersion();
+    return true;
+  }
+
+  if (type == "ui_document") {
+    if (impl_->ui_documents.find(key) != impl_->ui_documents.end()) {
+      return false;
+    }
+    auto node = source.impl_->ui_documents.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->ui_documents.insert(std::move(node));
+    if (auto source_path = source.impl_->ui_document_source_paths.extract(key);
+        !source_path.empty()) {
+      impl_->ui_document_source_paths.insert(std::move(source_path));
+    }
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "ui_theme") {
+    if (impl_->ui_themes.find(key) != impl_->ui_themes.end()) {
+      return false;
+    }
+    auto node = source.impl_->ui_themes.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->ui_themes.insert(std::move(node));
+    if (auto source_path = source.impl_->ui_theme_source_paths.extract(key);
+        !source_path.empty()) {
+      impl_->ui_theme_source_paths.insert(std::move(source_path));
+    }
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "font") {
+    if (impl_->fonts.find(key) != impl_->fonts.end()) {
+      return false;
+    }
+    auto node = source.impl_->fonts.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->fonts.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
+    return true;
+  }
+
+  if (type == "svg") {
+    if (impl_->svgs.find(key) != impl_->svgs.end()) {
+      return false;
+    }
+    auto node = source.impl_->svgs.extract(key);
+    if (node.empty()) {
+      return false;
+    }
+    impl_->svgs.insert(std::move(node));
+    bumpVersion();
+    source.bumpVersion();
     return true;
   }
 
@@ -450,6 +527,144 @@ bool AssetRegistry::unregisterTextureAsset(const std::string& key) {
 const TextureAsset* AssetRegistry::findTextureAsset(std::string_view key) const {
   const auto it = impl_->textures.find(std::string(key));
   return it != impl_->textures.end() && it->second ? it->second.get() : nullptr;
+}
+
+bool AssetRegistry::registerUiDocumentAsset(const std::string& key,
+                                            UiDocumentAsset document) {
+  if (!isValidAssetKey(key)) {
+    return false;
+  }
+  document.content_hash = hashString(document.canonical_json_utf8);
+  impl_->ui_documents[key] = std::move(document);
+  impl_->ui_document_source_paths.erase(key);
+  bumpVersion();
+  return true;
+}
+
+bool AssetRegistry::unregisterUiDocumentAsset(const std::string& key) {
+  if (impl_->ui_documents.erase(key) == 0u) {
+    return false;
+  }
+  impl_->ui_document_source_paths.erase(key);
+  bumpVersion();
+  return true;
+}
+
+const UiDocumentAsset* AssetRegistry::findUiDocumentAsset(std::string_view key) const {
+  return findInMap(impl_->ui_documents, key);
+}
+
+bool AssetRegistry::registerUiThemeAsset(const std::string& key,
+                                         UiThemeAsset theme) {
+  if (!isValidAssetKey(key)) {
+    return false;
+  }
+  theme.content_hash = hashString(theme.canonical_json_utf8);
+  impl_->ui_themes[key] = std::move(theme);
+  impl_->ui_theme_source_paths.erase(key);
+  bumpVersion();
+  return true;
+}
+
+bool AssetRegistry::unregisterUiThemeAsset(const std::string& key) {
+  if (impl_->ui_themes.erase(key) == 0u) {
+    return false;
+  }
+  impl_->ui_theme_source_paths.erase(key);
+  bumpVersion();
+  return true;
+}
+
+const UiThemeAsset* AssetRegistry::findUiThemeAsset(std::string_view key) const {
+  return findInMap(impl_->ui_themes, key);
+}
+
+void detail::UiSourceMetadataAccess::setDocument(
+    AssetRegistry& assets,
+    std::string_view key,
+    const std::filesystem::path& path) {
+  const std::string owned_key(key);
+  if (assets.impl_->ui_documents.contains(owned_key)) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    assets.impl_->ui_document_source_paths[owned_key] =
+        (error ? path : absolute).lexically_normal();
+  }
+}
+
+void detail::UiSourceMetadataAccess::setTheme(
+    AssetRegistry& assets,
+    std::string_view key,
+    const std::filesystem::path& path) {
+  const std::string owned_key(key);
+  if (assets.impl_->ui_themes.contains(owned_key)) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    assets.impl_->ui_theme_source_paths[owned_key] =
+        (error ? path : absolute).lexically_normal();
+  }
+}
+
+std::optional<std::filesystem::path>
+detail::UiSourceMetadataAccess::document(const AssetRegistry& assets,
+                                         std::string_view key) {
+  const auto found = assets.impl_->ui_document_source_paths.find(std::string(key));
+  return found == assets.impl_->ui_document_source_paths.end()
+             ? std::nullopt
+             : std::optional<std::filesystem::path>(found->second);
+}
+
+std::optional<std::filesystem::path>
+detail::UiSourceMetadataAccess::theme(const AssetRegistry& assets,
+                                      std::string_view key) {
+  const auto found = assets.impl_->ui_theme_source_paths.find(std::string(key));
+  return found == assets.impl_->ui_theme_source_paths.end()
+             ? std::nullopt
+             : std::optional<std::filesystem::path>(found->second);
+}
+
+bool AssetRegistry::registerFontAsset(const std::string& key, FontAsset font) {
+  if (!isValidAssetKey(key)) {
+    return false;
+  }
+  font.content_hash = hashBytes(font.bytes.data(), font.bytes.size());
+  impl_->fonts[key] = std::move(font);
+  bumpVersion();
+  return true;
+}
+
+bool AssetRegistry::unregisterFontAsset(const std::string& key) {
+  if (impl_->fonts.erase(key) == 0u) {
+    return false;
+  }
+  bumpVersion();
+  return true;
+}
+
+const FontAsset* AssetRegistry::findFontAsset(std::string_view key) const {
+  return findInMap(impl_->fonts, key);
+}
+
+bool AssetRegistry::registerSvgAsset(const std::string& key, SvgAsset svg) {
+  if (!isValidAssetKey(key)) {
+    return false;
+  }
+  svg.content_hash = hashString(svg.source_utf8);
+  impl_->svgs[key] = std::move(svg);
+  bumpVersion();
+  return true;
+}
+
+bool AssetRegistry::unregisterSvgAsset(const std::string& key) {
+  if (impl_->svgs.erase(key) == 0u) {
+    return false;
+  }
+  bumpVersion();
+  return true;
+}
+
+const SvgAsset* AssetRegistry::findSvgAsset(std::string_view key) const {
+  return findInMap(impl_->svgs, key);
 }
 
 std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(

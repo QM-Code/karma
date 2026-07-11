@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "texture_rgba8",
+      "key": "ui/showcase/medieval-frame",
+      "path": "medieval_nine_slice.png",
+      "srgb": true,
+      "generate_mips": true
+    },
+    {
+      "type": "texture_rgba8",
+      "key": "ui/showcase/rpg-control-border",
+      "path": "rpg_control_border.png",
+      "srgb": true,
+      "generate_mips": true
+    },
+    {
+      "type": "font",
+      "key": "ui/showcase/font-display",
+      "path": "fonts/MarcellusSC-Regular.ttf"
+    },
+    {
+      "type": "font",
+      "key": "ui/showcase/font-body",
+      "path": "fonts/AlegreyaSans-Regular.ttf"
+    },
+    {
+      "type": "font",
+      "key": "ui/showcase/font-control",
+      "path": "fonts/AlegreyaSans-Bold.ttf"
+    },
+    {
+      "type": "font",
+      "key": "ui/showcase/font-arabic",
+      "path": "fonts/NotoNaskhArabic-wght.ttf"
+    },
+    {
+      "type": "svg",
+      "key": "ui/showcase/icon",
+      "path": "../../demo_icon.svg"
+    }
+  ]
+}

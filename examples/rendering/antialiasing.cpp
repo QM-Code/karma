@@ -1,6 +1,6 @@
 #include "scene_helpers.h"
 #include "karma/karma.h"
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 
 #include <algorithm>
 #include <array>

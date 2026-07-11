@@ -1,0 +1,831 @@
+{
+  format: 'karma.ui.theme',
+  version: 2,
+
+  variables: {
+    ink: '#f3dfb5',
+    muted_ink: '#c1a578',
+    shadow: '#0b0806f2',
+    leather: '#342216f2',
+    leather_light: '#4b321f',
+    wood: '#3b2818',
+    wood_hover: '#5a3c21',
+    iron: '#3d3b38',
+    brass: '#d3a64c',
+    brass_hot: '#f0c868',
+    danger: '#87372f',
+  },
+
+  fonts: {
+    'Forge Display': {
+      src: {asset: 'ui/showcase/font-display', kind: 'font'},
+      weight: 400,
+      style: 'normal',
+      face_index: 0,
+    },
+    'Forge UI': {
+      src: {asset: 'ui/showcase/font-body', kind: 'font'},
+      weight: 400,
+      style: 'normal',
+      face_index: 0,
+    },
+    'Forge UI Bold': {
+      src: {asset: 'ui/showcase/font-control', kind: 'font'},
+      weight: 700,
+      style: 'normal',
+      face_index: 0,
+    },
+    'Forge Arabic': {
+      src: {asset: 'ui/showcase/font-arabic', kind: 'font'},
+      weight: 400,
+      style: 'normal',
+      face_index: 0,
+    },
+  },
+
+  defaults: {
+    body: {
+      appearance: {
+        text: {
+          color: {var: 'ink'},
+          font_family: ['Forge UI', 'Forge Arabic'],
+          font_size: 14,
+          line_height: '18px',
+          direction: 'auto',
+        },
+      },
+    },
+    panel: {
+      appearance: {
+        text: {
+          color: {var: 'ink'},
+          font_family: ['Forge UI', 'Forge Arabic'],
+          font_size: 14,
+          line_height: '18px',
+          direction: 'auto',
+        },
+      },
+    },
+    text: {
+      appearance: {
+        text: {
+          color: {var: 'ink'},
+          font_family: ['Forge UI', 'Forge Arabic'],
+          font_size: 14,
+          line_height: '18px',
+          direction: 'auto',
+        },
+      },
+    },
+    button: {
+      layout: {
+        height: 32,
+        padding: [5, 10, 5, 10],
+        align_self: 'stretch',
+        cursor: 'pointer',
+      },
+      appearance: {
+        box: {
+          background_color: {var: 'wood'},
+          border_color: {var: 'iron'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        text: {
+          color: {var: 'ink'},
+          font_family: ['Forge UI Bold', 'Forge Arabic'],
+          font_size: 14,
+          font_weight: 700,
+          align: 'center',
+        },
+        transitions: {
+          background_color: {duration_ms: 100, easing: 'ease-out'},
+        },
+        states: {
+          hover: {
+            box: {
+              background_color: {var: 'wood_hover'},
+              border_color: {var: 'brass'},
+            },
+          },
+          focus: {box: {background_color: '#6a4b20', border_color: {var: 'brass_hot'}}},
+          pressed: {box: {background_color: '#24170f'}},
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    toggle: {
+      layout: {width: 40, height: 22, cursor: 'pointer'},
+      appearance: {
+        parts: {
+          track: {
+            box: {
+              background_color: '#17120f',
+              border_color: {var: 'iron'},
+              border_width: 1,
+              border_radius: 2,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+          checkmark: {
+            text: {color: {var: 'brass_hot'}},
+            metrics: {thickness: 2},
+          },
+        },
+        states: {
+          checked: {
+            parts: {
+              track: {
+                box: {
+                  background_color: '#6a4b20',
+                  border_color: {var: 'brass'},
+                },
+              },
+            },
+          },
+          hover: {
+            parts: {track: {box: {background_color: '#3f2b19'}}},
+          },
+          focus: {
+            parts: {track: {box: {background_color: '#5b3f20', border_color: {var: 'brass_hot'}}}},
+          },
+          pressed: {
+            parts: {track: {box: {background_color: '#0f0b09'}}},
+          },
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    slider: {
+      layout: {width: 230, height: 18, cursor: 'pointer'},
+      appearance: {
+        parts: {
+          track: {
+            box: {
+              background_color: '#15100d',
+              border_color: {var: 'iron'},
+              border_width: 1,
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {thickness: 5},
+          },
+          fill: {
+            box: {
+              background_color: {var: 'brass'},
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+          thumb: {
+            box: {
+              background_color: '#e4c77c',
+              border_color: '#17110d',
+              border_width: 1,
+              border_radius: 2,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {width: 14, height: 14},
+          },
+        },
+        states: {
+          hover: {
+            parts: {thumb: {box: {background_color: '#f0d995'}}},
+          },
+          focus: {
+            parts: {thumb: {box: {background_color: '#fff0bd', border_color: {var: 'brass_hot'}}}},
+          },
+          pressed: {
+            parts: {thumb: {box: {background_color: {var: 'brass_hot'}}}},
+          },
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    progress: {
+      layout: {height: 12, align_self: 'stretch'},
+      appearance: {
+        parts: {
+          track: {
+            box: {
+              background_color: '#15100d',
+              border_color: {var: 'iron'},
+              border_width: 1,
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+          fill: {
+            box: {
+              background_color: {var: 'brass'},
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+        },
+      },
+    },
+    select: {
+      layout: {height: 32, padding: [5, 10, 5, 10], cursor: 'pointer'},
+      appearance: {
+        box: {
+          background_color: {var: 'wood'},
+          border_color: {var: 'iron'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        text: {
+          color: {var: 'ink'},
+          font_family: ['Forge UI Bold', 'Forge Arabic'],
+          font_size: 14,
+          font_weight: 700,
+        },
+        parts: {
+          arrow: {
+            box: {
+              background_color: '#22160f',
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            text: {color: {var: 'brass_hot'}},
+            metrics: {size: 12},
+          },
+          popup: {
+            box: {
+              background_color: '#241912fa',
+              border_color: {var: 'brass'},
+              border_width: 1,
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+          option: {
+            box: {
+              background_color: '#342216',
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            text: {color: {var: 'ink'}},
+            states: {
+              hover: {box: {background_color: '#694821'}},
+              pressed: {box: {background_color: '#8a632b'}},
+            },
+          },
+        },
+        states: {
+          hover: {box: {background_color: {var: 'wood_hover'}}},
+          focus: {box: {background_color: '#6a4b20', border_color: {var: 'brass_hot'}}},
+          pressed: {box: {background_color: '#24170f'}},
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    option: {
+      layout: {height: 28, padding: [4, 8, 4, 8]},
+      appearance: {
+        text: {color: {var: 'ink'}, font_family: ['Forge UI', 'Forge Arabic'], font_size: 14},
+      },
+    },
+    tab: {
+      layout: {height: 32, padding: [5, 14, 5, 14], cursor: 'pointer'},
+      appearance: {
+        box: {
+          background_color: '#21160f',
+          border_color: {var: 'iron'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        text: {
+          color: {var: 'muted_ink'},
+          font_family: ['Forge UI Bold', 'Forge Arabic'],
+          font_size: 14,
+          font_weight: 700,
+          align: 'center',
+        },
+        states: {
+          selected: {
+            box: {
+              background_color: '#66461f',
+              border_color: {var: 'brass'},
+            },
+            text: {color: {var: 'ink'}},
+          },
+          hover: {box: {background_color: '#49311d'}},
+          focus: {box: {background_color: '#5b3f20', border_color: {var: 'brass_hot'}}},
+          pressed: {box: {background_color: '#17100c'}},
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    disclosure: {
+      layout: {padding: [5, 8, 5, 8], cursor: 'pointer'},
+      appearance: {
+        box: {
+          background_color: '#241912',
+          border_color: {var: 'iron'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        parts: {
+          chevron: {
+            text: {color: {var: 'brass_hot'}},
+            metrics: {size: 12},
+          },
+        },
+        text: {
+          font_family: ['Forge UI Bold', 'Forge Arabic'],
+          font_size: 14,
+          font_weight: 700,
+        },
+        states: {
+          expanded: {box: {border_color: {var: 'brass'}}},
+          hover: {box: {background_color: '#49311d'}},
+          focus: {box: {background_color: '#5b3f20', border_color: {var: 'brass_hot'}}},
+          pressed: {box: {background_color: '#17100c'}},
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    tree: {
+      appearance: {
+        box: {
+          background_color: '#17110df0',
+          border_color: {var: 'iron'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+      },
+    },
+    'tree-item': {
+      layout: {height: 28, padding: [4, 6, 4, 18], cursor: 'pointer'},
+      appearance: {
+        box: {
+          background_color: '#241912',
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [1, 1, 1, 1],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        text: {color: {var: 'ink'}, font_family: ['Forge UI', 'Forge Arabic'], font_size: 14},
+        states: {
+          selected: {box: {background_color: '#674720'}},
+          hover: {box: {background_color: '#49311d'}},
+          focus: {box: {background_color: '#5b3f20', border_color: {var: 'brass_hot'}, border_width: 1}},
+          pressed: {box: {background_color: '#17100c'}},
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    splitter: {
+      layout: {cursor: 'ew-resize'},
+      appearance: {
+        box: {
+          background_color: '#17110d',
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [1, 1, 1, 1],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        parts: {
+          grip: {
+            box: {
+              background_color: {var: 'brass'},
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {size: 22, thickness: 2},
+          },
+        },
+        states: {
+          hover: {box: {background_color: '#4b321f'}},
+          focus: {box: {background_color: '#5b3f20', border_color: {var: 'brass_hot'}, border_width: 1}},
+          pressed: {box: {background_color: '#0e0a08'}},
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    separator: {
+      appearance: {box: {background_color: {var: 'iron'}}},
+    },
+    scroll: {
+      appearance: {
+        parts: {
+          vertical_track: {
+            box: {
+              background_color: '#100c0acc',
+              border_color: {var: 'iron'},
+              border_width: 0,
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {width: 10},
+          },
+          vertical_thumb: {
+            box: {
+              background_color: '#77572f',
+              border_color: {var: 'brass'},
+              border_width: 0,
+              border_radius: 2,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {min_length: 24},
+            states: {
+              hover: {box: {background_color: '#a27a3b'}},
+              pressed: {box: {background_color: {var: 'brass_hot'}}},
+            },
+          },
+          horizontal_track: {
+            box: {
+              background_color: '#100c0acc',
+              border_color: {var: 'iron'},
+              border_width: 0,
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {height: 10},
+          },
+          horizontal_thumb: {
+            box: {
+              background_color: '#77572f',
+              border_color: {var: 'brass'},
+              border_width: 0,
+              border_radius: 2,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {min_length: 26},
+            states: {
+              hover: {box: {background_color: '#a27a3b'}},
+              pressed: {box: {background_color: {var: 'brass_hot'}}},
+            },
+          },
+          corner: {
+            box: {
+              background_color: '#17110d',
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+        },
+      },
+    },
+    list: {
+      appearance: {
+        box: {
+          background_color: '#17110df0',
+          border_color: {var: 'iron'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        parts: {
+          vertical_track: {
+            box: {
+              background_color: '#100c0acc',
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {width: 10},
+          },
+          vertical_thumb: {
+            box: {
+              background_color: '#77572f',
+              border_color: {var: 'brass'},
+              border_width: 0,
+              border_radius: 2,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {min_length: 24},
+            states: {
+              hover: {box: {background_color: '#a27a3b'}},
+              pressed: {box: {background_color: {var: 'brass_hot'}}},
+            },
+          },
+          horizontal_track: {
+            box: {
+              background_color: '#100c0acc',
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {height: 10},
+          },
+          horizontal_thumb: {
+            box: {
+              background_color: '#77572f',
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {min_length: 26},
+            states: {
+              hover: {box: {background_color: '#a27a3b'}},
+              pressed: {box: {background_color: {var: 'brass_hot'}}},
+            },
+          },
+          corner: {
+            box: {
+              background_color: '#17110d',
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+        },
+      },
+    },
+    window: {
+      appearance: {
+        box: {
+          background_color: '#241912fa',
+          border_color: {var: 'brass'},
+          border_width: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        parts: {
+          titlebar: {
+            box: {
+              background_color: '#4c321c',
+              border_color: {var: 'brass'},
+              border_width: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {height: 30},
+          },
+          close_button: {
+            box: {
+              background_color: {var: 'danger'},
+              border_color: '#d8aa6a',
+              border_width: 1,
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+          collapse_button: {
+            box: {
+              background_color: '#5f4725',
+              border_color: {var: 'brass'},
+              border_width: 1,
+              border_radius: 1,
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+          },
+          resize_grip: {
+            box: {
+              background_color: {var: 'brass'},
+              border_image: {
+                source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+                slice: [112, 112, 112, 112],
+                width: [1, 1, 1, 1],
+                repeat: 'stretch',
+              },
+            },
+            metrics: {size: 12},
+          },
+        },
+      },
+    },
+    popup: {
+      layout: {padding: [12, 12, 12, 12]},
+      appearance: {
+        box: {
+          background_color: '#241912fa',
+          border_color: {var: 'brass'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+      },
+    },
+    menu: {
+      layout: {padding: [4, 4, 4, 4]},
+      appearance: {
+        box: {
+          background_color: '#241912fa',
+          border_color: {var: 'brass'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [2, 2, 2, 2],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+      },
+    },
+    'menu-item': {
+      layout: {height: 30, padding: [5, 8, 5, 8], cursor: 'pointer'},
+      appearance: {
+        box: {
+          background_color: '#342216',
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [1, 1, 1, 1],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        text: {
+          color: {var: 'ink'},
+          font_family: ['Forge UI Bold', 'Forge Arabic'],
+          font_size: 14,
+          font_weight: 700,
+        },
+        states: {
+          hover: {box: {background_color: '#674720'}},
+          focus: {box: {background_color: '#5b3f20', border_color: {var: 'brass_hot'}, border_width: 1}},
+          pressed: {box: {background_color: '#17100c'}},
+          disabled: {box: {opacity: 0.38}},
+        },
+      },
+    },
+    tooltip: {
+      layout: {padding: [5, 8, 5, 8]},
+      appearance: {
+        box: {
+          background_color: '#0e0a08f5',
+          border_color: {var: 'brass'},
+          border_width: 1,
+          border_radius: 1,
+          border_image: {
+            source: {asset: 'ui/showcase/rpg-control-border', kind: 'texture'},
+            slice: [112, 112, 112, 112],
+            width: [1, 1, 1, 1],
+            repeat: 'stretch',
+          },
+          image_sampling: 'linear',
+        },
+        text: {
+          color: '#ffe8b7',
+          font_family: ['Forge UI', 'Forge Arabic'],
+          font_size: 13,
+        },
+      },
+    },
+  },
+}

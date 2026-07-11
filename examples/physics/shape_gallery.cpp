@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "physics_example_common.h"
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 
 #include <imgui.h>
 

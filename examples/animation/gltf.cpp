@@ -1,6 +1,6 @@
 #include "demo_asset_paths.h"
 #include "scene_helpers.h"
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 #include "karma/karma.h"
 
 #include <algorithm>

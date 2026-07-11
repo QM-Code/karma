@@ -10,6 +10,7 @@ INPUT                  = @KARMA_DOXYGEN_INPUT_DIR@/include/karma \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/api/rendering.md \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/api/groups.dox \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/API.md \
+                         @KARMA_DOXYGEN_INPUT_DIR@/docs/NATIVE_UI.md \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/ANIMATION_V2.md \
                          @KARMA_DOXYGEN_INPUT_DIR@/docs/RIGGED_GLTF_AUTHORING.md
 USE_MDFILE_AS_MAINPAGE = @KARMA_DOXYGEN_INPUT_DIR@/docs/api/mainpage.md

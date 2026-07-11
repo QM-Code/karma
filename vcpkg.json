@@ -22,9 +22,19 @@
       "description": "Install graphical dependencies for Karma source builds, including the local DiligentCore overlay port.",
       "dependencies": [
         "diligentcore",
+        "freetype",
         "glfw3",
-        "imgui",
-        "miniaudio"
+        "harfbuzz",
+        "icu",
+        "lunasvg",
+        "miniaudio",
+        "yoga"
+      ]
+    },
+    "imgui": {
+      "description": "Install ImGui for the optional adapter and debug tooling.",
+      "dependencies": [
+        "imgui"
       ]
     },
     "navigation": {

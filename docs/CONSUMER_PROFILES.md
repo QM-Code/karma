@@ -25,8 +25,9 @@ those subsystems are enabled. It does not build graphical window, Diligent
 renderer, graphical UI provider, debug UI, or audio backends.
 
 `karma::graphical` is the complete runtime profile used by examples. It includes
-the headless-capable subsystems plus graphical window, renderer, visual feature,
-debug UI, ImGui UI, and audio backend support.
+the headless-capable subsystems plus the graphical window, renderer, visual
+features, first-party native UI, and audio backend support. ImGui-backed debug
+tooling and the ImGui/RmlUi adapters remain separately opt-in.
 
 ## Profile Headers
 
@@ -101,5 +102,11 @@ Additional smoke checks covered:
 - installed-package consumer linking `karma::server` and `karma::headless`
 - source-vendored graphical consumer linking `karma::graphical`
 - source-vendored alias consumer linking `karma::karma`
+- source-vendored graphical smokes with server, headless, audio, KTX2, ENet,
+  physics, and navigation disabled; both construct the native retained system
+  so its static implementation linkage is exercised
+- installed graphical and alias smokes with the same native-system symbol
+  reference and an explicit native-UI profile assertion
 - full default graphical profile build with GLFW, Diligent/Vulkan, miniaudio,
-  ENet, Jolt, Recast/Detour, debug UI, and ImGui
+  ENet, Jolt, Recast/Detour, and native UI while ImGui/debug UI and RmlUi remain
+  opt-in

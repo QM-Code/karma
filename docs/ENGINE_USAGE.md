@@ -90,8 +90,36 @@ Optional demo:
 
 ```bash
 cmake -B build \
+  -DKARMA_ENABLE_IMGUI=ON \
   -DKARMA_BUILD_IMGUI_DEMO=ON
 ```
+
+First-party native UI demo without optional providers:
+
+```bash
+cmake -S . -B build/native-ui \
+  -DKARMA_HEADLESS=OFF \
+  -DKARMA_ENABLE_NATIVE_UI=ON \
+  -DKARMA_ENABLE_IMGUI=OFF \
+  -DKARMA_BUILD_IMGUI_DEMO=OFF \
+  -DKARMA_ENABLE_RMLUI=OFF \
+  -DKARMA_BUILD_RMLUI_DEMO=OFF \
+  -DKARMA_BUILD_EXAMPLES=ON \
+  -DKARMA_FETCH_DEPS=ON
+cmake --build build/native-ui --target ui_native --parallel
+./build/native-ui/examples/ui/native
+```
+
+Build and run the exhaustive medieval-skinned showcase:
+
+```bash
+cmake --build build/native-ui --target ui_showcase --parallel
+./build/native-ui/examples/ui/showcase
+```
+
+While it runs, edit `examples/assets/ui/showcase/showcase.kui.json5`,
+`showcase.kstyle.json5`, or `base.kstyle.json5` to exercise transactional hot
+reload. Invalid edits retain the last-good interface.
 
 RmlUi demo:
 
@@ -529,8 +557,20 @@ int main() {
 ```
 
 ## UI draw data
-Karma's UI integration is backend-agnostic. You provide a `UiLayer` implementation
-that owns its UI system and submits draw data into `UIContext` each frame:
+Karma's graphical profile creates a first-party `ui::System` by default. Game
+code can access it through the protected `GameInterface::ui` pointer or
+`EngineApp::nativeUi()`. Set `config.native_ui.enabled = false` to disable the
+instance, or configure with `KARMA_ENABLE_NATIVE_UI=OFF` to omit the runtime.
+Native documents use `.kui.json5`, themes use `.kstyle.json5`, and gameplay
+binds model paths and action names explicitly. Packaged screens open by asset
+key; sandboxed `openFile()` roots are available for development hot reload.
+`DocumentController` provides move-only RAII ownership when raw document and
+listener handles are unnecessary. See [NATIVE_UI.md](NATIVE_UI.md) for the
+authoring/runtime contract and [NATIVE_UI_STATUS.md](NATIVE_UI_STATUS.md) for
+implementation ownership, verified tests, current boundaries, and next work.
+
+`UiLayer` remains the backend-agnostic extension seam above native UI. A custom
+layer submits draw data into `UIContext` each frame:
 
 - `onEvent(...)` for input
 - `onFrame(...)` for timing + draw list submission
@@ -538,13 +578,15 @@ that owns its UI system and submits draw data into `UIContext` each frame:
 - `UIContext::loadTextureRGBA8FromPng(...)` for PNG UI textures owned by the
   UI context and destroyed automatically when the UI context shuts down
 
-The engine renders your UI draw lists on top of the 3D frame.
+The render order is scene, native UI, custom layer, then debug overlay. Input
+is offered in the reverse order, and captured controls are withheld from
+gameplay bindings.
 
 For ImGui, Karma provides the adapter layer and you provide only the ImGui
 content:
 
 ```cpp
-#include "karma/ui.h"
+#include "karma/ui_imgui.h"
 #include <imgui.h>
 
 struct ToolsUi {
@@ -573,15 +615,16 @@ engine.setUi(karma::ui::imgui::createUiLayer([tools](karma::app::UIContext& ctx)
 ```
 
 Provider adapters live under `src/features/ui/<provider>` and expose their
-small public factories through `karma/ui.h`. Keep code that talks to ImGui,
-RmlUi, or another UI library in that adapter; keep engine composition on the
-generic `UiLayer` contract.
+small public factories through provider-specific headers such as
+`karma/ui_imgui.h` and `karma/ui_rmlui.h`. Keep code that talks to ImGui, RmlUi,
+or another UI library in that adapter; keep engine composition on the generic
+`UiLayer` contract.
 
 RmlUi follows the same pattern. Karma owns the RmlUi render/system/file bridge,
 and app code only initializes documents when the RmlUi context is ready:
 
 ```cpp
-#include "karma/ui.h"
+#include "karma/ui_rmlui.h"
 #include <RmlUi/Core.h>
 
 engine.setUi(karma::ui::rmlui::createUiLayer([](Rml::Context& context) {
@@ -1288,7 +1331,7 @@ Reference sample:
   sample. It uses a shadow-casting directional sun with intensity `1.6`, plus
   local point lights and a radar render-target camera.
 - [../examples/rendering/light_stress.cpp](../examples/rendering/light_stress.cpp) provides the current local-light probe workflow for `1-16` safe-mode shadowed point lights.
-- [../NEXT_AGENT.md](../NEXT_AGENT.md) carries active renderer/local-light handoff notes.
+- [NEXT_AGENT.md](NEXT_AGENT.md) carries active renderer/local-light handoff notes.
 
 ## Data Path
 Assets and configs are typically loaded from the `data/` directory.
@@ -1300,5 +1343,7 @@ KARMA_DATA_DIR="$PWD/data" ./build/examples/gameplay/tank
 
 ## Demos
 - `gameplay_tank` (default scene)
+- `ui_native` (first-party retained JSON5 document/theme demo)
+- `ui_showcase` (exhaustive native UI, hot-reload, and nine-slice skinning lab)
 - `ui_imgui` (ImGui draw data bridge)
 - `ui_rmlui` (RmlUi draw data bridge)

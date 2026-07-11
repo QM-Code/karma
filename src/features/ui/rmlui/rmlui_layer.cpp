@@ -1,4 +1,4 @@
-#include "karma/ui.h"
+#include "karma/ui_rmlui.h"
 
 #include <algorithm>
 #include <cmath>
@@ -169,51 +169,56 @@ class RmlUiLayer final : public app::UiLayer,
     }
   }
 
-  void onEvent(const platform::Event& event) override {
+  app::UiEventDisposition onEvent(const platform::Event& event) override {
     if (!context_) {
-      return;
+      return app::UiEventDisposition::Ignored;
     }
+    bool not_consumed = true;
     const int mods = toRmlModifiers(event.mods);
     switch (event.type) {
       case platform::EventType::KeyDown:
         if (const auto key = toRmlKey(event.key); key != Rml::Input::KI_UNKNOWN) {
-          context_->ProcessKeyDown(key, mods);
+          not_consumed = context_->ProcessKeyDown(key, mods);
+          keyboard_capture_ = !not_consumed;
         }
         break;
       case platform::EventType::KeyUp:
         if (const auto key = toRmlKey(event.key); key != Rml::Input::KI_UNKNOWN) {
-          context_->ProcessKeyUp(key, mods);
+          not_consumed = context_->ProcessKeyUp(key, mods);
+          keyboard_capture_ = !not_consumed;
         }
         break;
       case platform::EventType::TextInput:
         if (event.codepoint != 0 && validCodepoint(event.codepoint)) {
-          context_->ProcessTextInput(static_cast<Rml::Character>(event.codepoint));
+          not_consumed =
+              context_->ProcessTextInput(static_cast<Rml::Character>(event.codepoint));
+          keyboard_capture_ = !not_consumed;
         }
         break;
       case platform::EventType::MouseMove:
         if (std::isfinite(event.x) && std::isfinite(event.y)) {
-          context_->ProcessMouseMove(toRmlCoordinate(event.x),
-                                     toRmlCoordinate(event.y),
-                                     mods);
+          not_consumed = context_->ProcessMouseMove(toRmlCoordinate(event.x),
+                                                    toRmlCoordinate(event.y),
+                                                    mods);
         }
         break;
       case platform::EventType::MouseButtonDown: {
         const int button = toRmlMouseButton(event.mouseButton);
         if (button >= 0) {
-          context_->ProcessMouseButtonDown(button, mods);
+          not_consumed = context_->ProcessMouseButtonDown(button, mods);
         }
         break;
       }
       case platform::EventType::MouseButtonUp: {
         const int button = toRmlMouseButton(event.mouseButton);
         if (button >= 0) {
-          context_->ProcessMouseButtonUp(button, mods);
+          not_consumed = context_->ProcessMouseButtonUp(button, mods);
         }
         break;
       }
       case platform::EventType::MouseScroll:
         if (std::isfinite(event.scrollX) && std::isfinite(event.scrollY)) {
-          context_->ProcessMouseWheel(
+          not_consumed = context_->ProcessMouseWheel(
               Rml::Vector2f(-toRmlScroll(event.scrollX),
                             -toRmlScroll(event.scrollY)),
               mods);
@@ -221,12 +226,21 @@ class RmlUiLayer final : public app::UiLayer,
         break;
       case platform::EventType::WindowFocus:
         if (!event.focused) {
-          context_->ProcessMouseLeave();
+          not_consumed = context_->ProcessMouseLeave();
+          keyboard_capture_ = false;
         }
         break;
       default:
         break;
     }
+    return not_consumed ? app::UiEventDisposition::Ignored
+                        : app::UiEventDisposition::Consumed;
+  }
+
+  app::UiInputCapture inputCapture() const override {
+    return app::UiInputCapture{.keyboard = keyboard_capture_,
+                               .pointer = context_ && context_->IsMouseInteracting(),
+                               .gamepad = false};
   }
 
   void onFrame(app::UIContext& ctx) override {
@@ -236,11 +250,16 @@ class RmlUiLayer final : public app::UiLayer,
       return;
     }
     ctx_ = &ctx;
-    out.premultiplied_alpha = true;
 
     const app::UIFrameInfo frame = ctx.frame();
-    width_ = std::max(frame.viewport_w, 0);
-    height_ = std::max(frame.viewport_h, 0);
+    width_ = std::max(frame.logical_width > 0 ? frame.logical_width : frame.viewport_w, 0);
+    height_ = std::max(frame.logical_height > 0 ? frame.logical_height : frame.viewport_h, 0);
+    framebuffer_width_ = std::max(
+        frame.framebuffer_width > 0 ? frame.framebuffer_width : frame.viewport_w, 0);
+    framebuffer_height_ = std::max(
+        frame.framebuffer_height > 0 ? frame.framebuffer_height : frame.viewport_h, 0);
+    scale_x_ = frame.scale_x > 0.0f ? frame.scale_x : frame.dpi_scale;
+    scale_y_ = frame.scale_y > 0.0f ? frame.scale_y : frame.dpi_scale;
     if (std::isfinite(frame.dt) && frame.dt > 0.0f &&
         time_ <= std::numeric_limits<double>::max() - frame.dt) {
       time_ += frame.dt;
@@ -305,6 +324,37 @@ class RmlUiLayer final : public app::UiLayer,
     return time_;
   }
 
+  void SetMouseCursor(const Rml::String& cursor_name) override {
+    if (!ctx_) {
+      return;
+    }
+    platform::CursorShape shape = platform::CursorShape::Default;
+    if (cursor_name == "pointer") {
+      shape = platform::CursorShape::Pointer;
+    } else if (cursor_name == "text") {
+      shape = platform::CursorShape::Text;
+    } else if (cursor_name == "cross" || cursor_name == "crosshair") {
+      shape = platform::CursorShape::Crosshair;
+    } else if (cursor_name == "move") {
+      shape = platform::CursorShape::Move;
+    } else if (cursor_name == "resize") {
+      shape = platform::CursorShape::ResizeDiagonalNwSe;
+    } else if (cursor_name == "unavailable") {
+      shape = platform::CursorShape::NotAllowed;
+    }
+    ctx_->setCursorShape(shape);
+  }
+
+  void SetClipboardText(const Rml::String& text) override {
+    if (ctx_) {
+      ctx_->setClipboardText(text);
+    }
+  }
+
+  void GetClipboardText(Rml::String& text) override {
+    text = ctx_ ? ctx_->clipboardText() : std::string{};
+  }
+
   bool LogMessage(Rml::Log::Type type, const Rml::String& message) override {
     switch (type) {
       case Rml::Log::LT_ERROR:
@@ -362,12 +412,21 @@ class RmlUiLayer final : public app::UiLayer,
     }
 
     rendering::UIDrawCmd cmd{};
+    cmd.blend_mode = rendering::UIBlendMode::PremultipliedAlpha;
+    cmd.sampler_mode = rendering::UISamplerMode::Linear;
+    cmd.texture_mode = rendering::UITextureMode::Color;
     cmd.scissor_enabled = scissor_enabled_;
     if (scissor_enabled_) {
-      const int64_t left = std::max<int64_t>(scissor_.Left(), 0);
-      const int64_t top = std::max<int64_t>(scissor_.Top(), 0);
-      const int64_t right = std::min<int64_t>(scissor_.Right(), width_);
-      const int64_t bottom = std::min<int64_t>(scissor_.Bottom(), height_);
+      const int64_t left = std::max<int64_t>(
+          static_cast<int64_t>(std::floor(scissor_.Left() * scale_x_)), 0);
+      const int64_t top = std::max<int64_t>(
+          static_cast<int64_t>(std::floor(scissor_.Top() * scale_y_)), 0);
+      const int64_t right = std::min<int64_t>(
+          static_cast<int64_t>(std::ceil(scissor_.Right() * scale_x_)),
+          framebuffer_width_);
+      const int64_t bottom = std::min<int64_t>(
+          static_cast<int64_t>(std::ceil(scissor_.Bottom() * scale_y_)),
+          framebuffer_height_);
       if (right <= left || bottom <= top) {
         return;
       }
@@ -398,8 +457,8 @@ class RmlUiLayer final : public app::UiLayer,
       }
 
       rendering::UIVertex out_v{};
-      out_v.x = pos.x;
-      out_v.y = pos.y;
+      out_v.x = pos.x * scale_x_;
+      out_v.y = pos.y * scale_y_;
       out_v.u = v.tex_coord.x;
       out_v.v = v.tex_coord.y;
       out_v.rgba = packColor(v.colour);
@@ -660,6 +719,10 @@ class RmlUiLayer final : public app::UiLayer,
   Rml::FileInterface* previous_file_interface_ = nullptr;
   int width_ = 0;
   int height_ = 0;
+  int framebuffer_width_ = 0;
+  int framebuffer_height_ = 0;
+  float scale_x_ = 1.0f;
+  float scale_y_ = 1.0f;
   double time_ = 0.0;
 
   Rml::CompiledGeometryHandle next_geometry_handle_ = 1;
@@ -668,6 +731,7 @@ class RmlUiLayer final : public app::UiLayer,
   std::unordered_map<Rml::TextureHandle, app::UITextureHandle> textures_;
   bool shutdown_ = false;
   bool initialized_rmlui_ = false;
+  bool keyboard_capture_ = false;
   bool scissor_enabled_ = false;
   Rml::Rectanglei scissor_{};
   bool has_transform_ = false;

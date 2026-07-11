@@ -189,7 +189,9 @@ Shared example helpers live in `examples/common/`.
   splitters, floating windows, per-axis scrollbars, Grid/Flex/anchors,
   raster/SVG/dynamic images, motion, accessibility metadata, and generated
   medieval nine-slice skinning. Its live files are under
-  `examples/assets/ui/showcase/`.
+  `examples/assets/ui/showcase/`. See the
+  [RPG showcase design system](../docs/NATIVE_UI.md#rpg-showcase-design-system)
+  for its typography, border, and control metrics.
 - `ui/imgui.cpp`: target `ui_imgui`, output `examples/ui/imgui` when ImGui and
   its demo are enabled.
 - `ui/rmlui.cpp`: target `ui_rmlui`, output `examples/ui/rmlui` when RmlUi is

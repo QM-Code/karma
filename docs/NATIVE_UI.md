@@ -636,6 +636,15 @@ actions. Titlebar, close/collapse buttons, and the resize grip accept the same
 rounded, bordered, opacity, and nine-slice part skinning as controls.
 `bringToFront()` is also public.
 
+Title-bar movement is placement-only. Each pointer move translates the live
+window subtree and its clip/hit geometry immediately, so the window follows
+the pointer in the same input frame without reconciling the model, traversing
+style, running Yoga layout, or moving ordinary siblings. Raising the window is
+a targeted z-order restyle. Edge/corner resizing remains layout-affecting
+because its children may need to reflow. The bound window state's `position`
+is committed when the drag ends; live placement is already current before
+that commit.
+
 The optional state binding reads and writes an object with `open`, `collapsed`,
 `position: [x, y]`, `size: [width, height]`, and `z`. Use a bound model when
 geometry must also live in the game model. Valid hot reload restores unbound
@@ -798,6 +807,31 @@ modal input; and movable/resizable/collapsible windows. The medieval panel in
 `examples/assets/ui/showcase/medieval_nine_slice.png` is shown at several
 sizes through the real `border_image` nine-slice path.
 
+### RPG showcase design system
+
+The UI Forge theme is a compact reference skin, not a change to native UI's
+engine defaults. Its reusable values live in
+[`base.kstyle.json5`](../examples/assets/ui/showcase/base.kstyle.json5), while
+page-specific dimensions live in
+[`showcase.kstyle.json5`](../examples/assets/ui/showcase/showcase.kstyle.json5).
+
+| Role | Showcase choice |
+| --- | --- |
+| Body and ordinary text | Alegreya Sans Regular at 14 logical px with an 18 px line height |
+| Control labels | Alegreya Sans Bold at 14 logical px |
+| Section and page headings | Marcellus SC at 18 and 24 logical px |
+| Arabic fallback | Noto Naskh Arabic, resolved per grapheme cluster |
+| Standard controls | Buttons, selects, and tabs are 32 px high; options and tree items are 28 px high |
+| Compact controls | Toggles are 40x22 px; sliders are 230x18 px with a 14 px thumb; progress bars are 12 px high |
+| Chrome | Box borders are 1 logical px; outer control nine-slices use 2 px destination borders and most part skins use 1 px |
+| Scrolling and windows | Scrollbar tracks are 10 px thick; window title bars are 30 px high and resize grips are 12 px |
+
+Header buttons are 132x32 px, page tabs are 176x32 px, and toolbar buttons are
+122x30 px. Most supporting labels use 11-13 px text to keep the 1600x900 forge
+dense without changing the shared 14 px body/control scale. The checked-in
+font binaries, exact Google Fonts revision, and OFL licenses are recorded in
+`examples/assets/ui/showcase/fonts/SOURCES.md`.
+
 The example opens `showcase.kui.json5` as a sandboxed loose document. Edit it,
 `showcase.kstyle.json5`, or its imported `base.kstyle.json5` while the process
 runs to demonstrate dependency-aware transactional hot reload. The generated
@@ -814,6 +848,9 @@ texture, packaged font, and SVG still load through the normal asset registry.
   `NATIVE_UI_STATUS.md`.
 - Splitter maximum/symmetric policy and window docking/snapping constraints
   are not yet productized.
+- `radio` and radio-group behavior are not built in. An unknown
+  `type: 'radio'` fails document validation; use `select` or app-managed
+  mutually exclusive toggles when that interaction is needed.
 - Painted transforms do not change layout, hit-test bounds, accessibility
   bounds, or scissors.
 - Rounded/nested clipping, arbitrary masks, blur, and shadows are unavailable.

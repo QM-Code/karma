@@ -336,6 +336,11 @@ updates should still be intentional. The README badge reads the pushed `main`
 branch's `VERSION` file through Shields, so local unpushed version edits are
 visible in the file itself before the badge updates.
 
+User-facing release notes live in [CHANGELOG.md](CHANGELOG.md). Updating
+`VERSION` on `main` records the next project version but does not publish a
+release by itself. Push a matching `v*` tag intentionally when the release
+artifacts and GitHub release should be produced.
+
 ## Runtime Diagnostics
 
 Useful environment flags:
@@ -365,6 +370,7 @@ Vulkan mouse-click present stall observed in dense grass rendering tests.
 
 Start with:
 
+- [Changelog](CHANGELOG.md)
 - [Usage Guide](docs/ENGINE_USAGE.md)
 - [Known Issues](docs/KNOWN_ISSUES.md)
 - [Consumer Profiles And Versioning](docs/CONSUMER_PROFILES.md)

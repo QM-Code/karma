@@ -1,11 +1,15 @@
 # Native UI Implementation Status And Roadmap
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 This is the implementation and continuation record for Karma's first-party
 retained UI. Read [NATIVE_UI.md](NATIVE_UI.md) for the public API and authoring
 contract. Native authoring is a hard cutover to `.kui.json5` documents and
 `.kstyle.json5` themes. Do not restore the removed XML/KSS path.
+
+The current project version is 0.7.0. See the
+[0.7.0 changelog](../CHANGELOG.md) for the user-facing release summary; this
+document retains the implementation and verification detail.
 
 The second pass is now usable for desktop game menus, settings, HUDs, tool
 panels, popup controls, scrollable and virtualized lists, tabs, trees, menus,
@@ -78,7 +82,10 @@ graphical-profile default and builds with ImGui and RmlUi disabled.
   reconcile only the visible keyed range plus bounded overscan and preserve
   stable handles while an item remains live.
 - Floating windows move, resize on every edge/corner, change z-order, close,
-  collapse, expose state bindings, and select matching cursor shapes.
+  collapse, expose state bindings, and select matching cursor shapes. Title-bar
+  movement translates live placement and interaction geometry on the pointer
+  event without model reconciliation, style traversal, or Yoga layout; resize
+  remains layout-affecting so children can reflow.
 - Horizontal and vertical sliders support pointer, keyboard, and gamepad input.
 - Capture/target/bubble dispatch, propagation/default cancellation, deferred
   close, modal capture, gameplay suppression, tab focus, and spatial gamepad
@@ -209,6 +216,10 @@ graphical-profile default and builds with ImGui and RmlUi disabled.
   existing style traversal.
 - Adjacent draw commands still coalesce by texture/blend/sampler/texture-mode/
   clip state.
+- Floating-window title drag is a placement-only fast path: it invalidates the
+  moved presentation fragments and required assembly ancestors, keeps sibling
+  bounds stable, and commits bound position only on release. Bringing a window
+  forward is a targeted restyle; resizing is intentionally not on this path.
 
 ## Debug showcase benchmark
 
@@ -303,6 +314,9 @@ a callback table rather than establish ownership.
 
 ### P2: intentionally deferred systems
 
+- Radio buttons/radio groups are not built-in. Use `select` or app-managed
+  mutually exclusive toggles until a group/value authoring contract is
+  designed.
 - Editable text, selection, clipboard editing semantics, IME/composition, and
   touch/multi-pointer input.
 - OS accessibility bridges and action round-trips.
@@ -324,6 +338,8 @@ a callback table rather than establish ownership.
 8. Render targets remain borrowed; UI destroys only owned resources.
 9. Invalid reloads never replace last-good live content.
 10. Graphical consumers continue to build with both optional providers off.
+11. Title-bar movement remains placement-only and may not disturb sibling
+    layout; window resizing may request layout for child reflow.
 
 ## Verification handoff
 

@@ -24,12 +24,14 @@ using native::focus_runtime::sortFocusableForTab;
 using native::focus_runtime::spatialCandidate;
 using native::jsonNumber;
 using native::runtime_dom::attributeBoolean;
+using native::runtime_dom::clipForOverflow;
+using native::runtime_dom::clipsOverflow;
 using native::runtime_dom::contains;
 using native::runtime_dom::DocumentInstance;
 using native::runtime_dom::DragInteraction;
 using native::runtime_dom::forRuntimeChildren;
-using native::runtime_dom::intersectRects;
 using native::runtime_dom::invalidatePaint;
+using native::runtime_dom::invalidatePaintTree;
 using native::runtime_dom::isFocusableTag;
 using native::runtime_dom::isScrollContainer;
 using native::runtime_dom::isVisibleForInteraction;
@@ -39,6 +41,7 @@ using native::runtime_dom::runtimeChildrenInPaintOrder;
 using native::runtime_dom::ScrollbarPart;
 using native::runtime_dom::styleFloat;
 using native::runtime_dom::styleString;
+using native::runtime_dom::translateSubtree;
 using native::string_utils::lower;
 using native::style_runtime::setInlineStyleProperty;
 using native::widget_runtime::cursorForNode;
@@ -71,6 +74,51 @@ Value windowStateValue(const Node& node) {
       {"size", Value::Array{node.layout.width, node.layout.height}},
       {"z", styleFloat(node, "z-index", 0.0f)},
   };
+}
+
+Rect inheritedClipFor(const Node& node) {
+  if (node.parent == nullptr) return node.clip;
+  const Node& parent = *node.parent;
+  Rect inherited = parent.clip;
+  if (clipsOverflow(parent)) {
+    inherited = clipForOverflow(
+        parent, inherited,
+        isScrollContainer(parent) ? parent.scroll_viewport : parent.layout);
+  }
+  return inherited;
+}
+
+void moveWindowPlacement(DocumentInstance& document,
+                         Node& window,
+                         float x,
+                         float y) {
+  const float delta_x = x - window.layout.x;
+  const float delta_y = y - window.layout.y;
+  if (delta_x == 0.0f && delta_y == 0.0f) return;
+
+  const std::string left = jsonNumber(x);
+  const std::string top = jsonNumber(y);
+  setInlineStyleProperty(window, "left", left);
+  setInlineStyleProperty(window, "top", top);
+  // Placement is authoritative during capture. Keep computed values aligned
+  // with the authored inline state so an unrelated frame-bound layout cannot
+  // snap the window back before its two-way binding commits on release.
+  window.style["left"] = left;
+  window.style["top"] = top;
+  window.transitions.erase("left");
+  window.transitions.erase("top");
+  if (window.transitions.empty()) {
+    document.active_transition_nodes.erase(&window);
+  }
+
+  translateSubtree(window, delta_x, delta_y, inheritedClipFor(window));
+  document.placement_revision = true;
+  document.accessibility_revision = true;
+  // Retained fragments contain framebuffer-space geometry. Rebuild the moved
+  // subtree and its assembly ancestors, while unchanged sibling fragments stay
+  // reusable and style/layout revisions remain settled.
+  invalidatePaintTree(window);
+  invalidatePaint(window.parent);
 }
 
 }  // namespace
@@ -330,8 +378,10 @@ System::InputDisposition System::processEvent(const platform::Event& event) {
           const float delta_y = static_cast<float>(event_y - target->drag_start_y);
           Rect rect = target->drag_start_rect;
           const DragInteraction interaction = target->drag_interaction;
+          bool requires_layout = false;
           if (interaction == DragInteraction::Splitter &&
               target->drag_resize_target != nullptr) {
+            requires_layout = true;
             Node& resized = *target->drag_resize_target;
             const auto orientation_attribute =
                 target->attributes.find("orientation");
@@ -369,6 +419,7 @@ System::InputDisposition System::processEvent(const platform::Event& event) {
                                 std::max(bounds.y,
                                          bounds.y + bounds.height - 24.0f));
           } else {
+            requires_layout = true;
             const bool resize_left =
                 interaction == DragInteraction::WindowResizeLeft ||
                 interaction == DragInteraction::WindowResizeTopLeft ||
@@ -411,12 +462,16 @@ System::InputDisposition System::processEvent(const platform::Event& event) {
           if (interaction != DragInteraction::Splitter &&
               interaction != DragInteraction::WindowClose &&
               interaction != DragInteraction::WindowCollapse) {
-            setInlineStyleProperty(*target, "left", jsonNumber(rect.x));
-            setInlineStyleProperty(*target, "top", jsonNumber(rect.y));
-            setInlineStyleProperty(*target, "width", jsonNumber(rect.width));
-            setInlineStyleProperty(*target, "height", jsonNumber(rect.height));
-            target->layout = rect;
-            updateWindowGeometry(*target);
+            if (interaction == DragInteraction::WindowMove) {
+              moveWindowPlacement(*doc, *target, rect.x, rect.y);
+            } else {
+              setInlineStyleProperty(*target, "left", jsonNumber(rect.x));
+              setInlineStyleProperty(*target, "top", jsonNumber(rect.y));
+              setInlineStyleProperty(*target, "width", jsonNumber(rect.width));
+              setInlineStyleProperty(*target, "height", jsonNumber(rect.height));
+              target->layout = rect;
+              updateWindowGeometry(*target);
+            }
           }
           Event input{.type = EventType::Input,
                       .document = doc->handle,
@@ -425,7 +480,7 @@ System::InputDisposition System::processEvent(const platform::Event& event) {
                           {"x", rect.x}, {"y", rect.y},
                           {"width", rect.width}, {"height", rect.height}}};
           impl_->dispatchEvent(*doc, *target, input);
-          impl_->markDirty(*doc);
+          if (requires_layout) impl_->markDirty(*doc);
         }
         if (target->tag == "slider" && doc->pointer_down && !move.defaultPrevented()) {
           impl_->activateDefault(*doc, *target,

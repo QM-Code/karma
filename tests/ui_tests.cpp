@@ -2045,6 +2045,7 @@ void testDisclosureWindowAndSplitterWidgets() {
           },
           "children": [{
             "type": "panel",
+            "id": "window-content",
             "layout": { "width": 160, "height": 70 }
           }]
         },
@@ -2136,9 +2137,11 @@ void testDisclosureWindowAndSplitterWidgets() {
   const auto disclosure_content =
       ui.findById(document_handle, "details-content");
   const auto window = ui.findById(document_handle, "floating-window");
+  const auto window_content = ui.findById(document_handle, "window-content");
   const auto left_pane = ui.findById(document_handle, "left-pane");
   const auto splitter = ui.findById(document_handle, "pane-splitter");
-  assert(disclosure && disclosure_content && window && left_pane && splitter);
+  assert(disclosure && disclosure_content && window && window_content &&
+         left_pane && splitter);
 
   int disclosure_toggles = 0;
   bool last_disclosure_value = false;
@@ -2165,6 +2168,7 @@ void testDisclosureWindowAndSplitterWidgets() {
   const auto build = [&] {
     SystemTestAccess::buildFrame(ui, 0.0f, 420, 320, 420, 320, 1.0f, 1.0f,
                                  draw_data);
+    return ui.frameDiagnostics();
   };
   build();
   assert(containsVertexColor(draw_data, 0xff503020u));
@@ -2190,29 +2194,67 @@ void testDisclosureWindowAndSplitterWidgets() {
   assert(accessible(ui, window)->open);
   const double move_start_x = window_bounds.x + 40.0;
   const double move_start_y = window_bounds.y + 14.0;
-  const double move_end_x = move_start_x + 30.0;
-  const double move_end_y = move_start_y + 20.0;
+  constexpr float moved_window_x = 1.0f;
+  constexpr float moved_window_y = 0.0f;
+  const double move_end_x =
+      move_start_x + moved_window_x - window_bounds.x;
+  const double move_end_y =
+      move_start_y + moved_window_y - window_bounds.y;
   assert(SystemTestAccess::processEvent(
       ui, Event{.type = EventType::MouseMove,
                 .x = move_start_x,
                 .y = move_start_y}));
+  (void)build();  // Settle hover before measuring drag-only work.
   assert(SystemTestAccess::processEvent(
       ui, Event{.type = EventType::MouseButtonDown,
                 .x = move_start_x,
                 .y = move_start_y}));
   assert(SystemTestAccess::processEvent(
       ui, Event{.type = EventType::MouseMove,
+                .x = move_start_x,
+                .y = move_start_y}));
+  const auto pointer_down_work = build();
+  assert(pointer_down_work.laid_out_nodes == 0u);
+  const auto disclosure_before_drag = accessible(ui, disclosure)->bounds;
+  const auto pane_before_drag = accessible(ui, left_pane)->bounds;
+  const auto content_before_drag = accessible(ui, window_content)->bounds;
+  assert(SystemTestAccess::processEvent(
+      ui, Event{.type = EventType::MouseMove,
                 .x = move_end_x,
                 .y = move_end_y}));
-  build();
+  const auto drag_work = build();
+  assert(drag_work.reconciled_nodes == 0u);
+  assert(drag_work.restyled_nodes == 0u);
+  assert(drag_work.laid_out_nodes == 0u);
+  const auto window_during_drag = accessible(ui, window)->bounds;
+  const auto content_during_drag = accessible(ui, window_content)->bounds;
+  const auto disclosure_during_drag = accessible(ui, disclosure)->bounds;
+  const auto pane_during_drag = accessible(ui, left_pane)->bounds;
+  assert(nearlyEqual(window_during_drag.x, moved_window_x));
+  assert(nearlyEqual(window_during_drag.y, moved_window_y));
+  assert(nearlyEqual(content_during_drag.x,
+                     content_before_drag.x + moved_window_x - window_bounds.x));
+  assert(nearlyEqual(content_during_drag.y,
+                     content_before_drag.y + moved_window_y - window_bounds.y));
+  assert(nearlyEqual(disclosure_during_drag.x, disclosure_before_drag.x));
+  assert(nearlyEqual(disclosure_during_drag.y, disclosure_before_drag.y));
+  assert(nearlyEqual(disclosure_during_drag.width,
+                     disclosure_before_drag.width));
+  assert(nearlyEqual(disclosure_during_drag.height,
+                     disclosure_before_drag.height));
+  assert(nearlyEqual(pane_during_drag.x, pane_before_drag.x));
+  assert(nearlyEqual(pane_during_drag.y, pane_before_drag.y));
+  assert(nearlyEqual(pane_during_drag.width, pane_before_drag.width));
+  assert(nearlyEqual(pane_during_drag.height, pane_before_drag.height));
   assert(SystemTestAccess::processEvent(
       ui, Event{.type = EventType::MouseButtonUp,
                 .x = move_end_x,
                 .y = move_end_y}));
-  build();
+  const auto release_work = build();
+  assert(release_work.laid_out_nodes == 0u);
   auto moved_window_bounds = accessible(ui, window)->bounds;
-  assert(nearlyEqual(moved_window_bounds.x, window_bounds.x + 30.0f));
-  assert(nearlyEqual(moved_window_bounds.y, window_bounds.y + 20.0f));
+  assert(nearlyEqual(moved_window_bounds.x, moved_window_x));
+  assert(nearlyEqual(moved_window_bounds.y, moved_window_y));
 
   const auto moved_window_state = ui.get(document_handle, "window_state");
   assert(moved_window_state.has_value() &&

@@ -493,7 +493,9 @@ bool System::bringToFront(ElementHandle element) {
   }
   setInlineStyleProperty(*resolved.node, "z-index",
                          std::to_string(maximum + 1.0f));
-  impl_->markDirty(*resolved.document);
+  impl_->recordStyleResult(native::style_runtime::restyleNode(
+      *resolved.document, resolved.node,
+      impl_->styleInputs(*resolved.document)));
   return true;
 }
 

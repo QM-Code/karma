@@ -73,6 +73,9 @@ if (KARMA_BUILD_GRAPHICAL_PROFILE)
     karma_add_graphical_example(rendering_antialiasing rendering antialiasing
       examples/rendering/antialiasing.cpp
       examples/common/scene_helpers.cpp)
+    karma_add_graphical_example(rendering_water rendering water
+      examples/rendering/water.cpp
+      examples/common/scene_helpers.cpp)
   endif()
   karma_add_graphical_example(rendering_material_assignment rendering material_assignment
     examples/rendering/material_assignment.cpp)

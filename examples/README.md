@@ -71,6 +71,14 @@ Shared example helpers live in `examples/common/`.
   `examples/rendering/terrain`. Fixed-size heightmap terrain renderer sample
   using `examples/assets/Heightmap.png`, with GPU tessellation when available
   and CPU grid fallback.
+- `rendering/water.cpp`: target `rendering_water`, output
+  `examples/rendering/water`. Static flat-plane water using custom HLSL, opaque
+  scene color/depth sampling, spectral absorption, automatic broken shoreline
+  foam, guarded refraction, bottom-anchored caustics, HDR Fresnel reflection,
+  GGX sun glints, and runtime-generated seamless micro normals. Its ImGui lab
+  includes four water presets, full surface/depth/flow/lighting controls, orbit
+  inspection, and shader debug views. Runtime assets live under
+  `examples/assets/rendering/water/`.
 
 ## Scene And Animation
 

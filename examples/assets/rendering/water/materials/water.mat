@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "pipeline": {
+    "name": "custom",
+    "vertex": "../shaders/water_vs.hlsl",
+    "fragment": "../shaders/water_ps.hlsl",
+    "vertex_entry": "VSMain",
+    "fragment_entry": "PSMain"
+  },
+  "surface": {
+    "base_color": [1.0, 1.0, 1.0, 1.0],
+    "metallic": 0.0,
+    "roughness": 0.075,
+    "transmission": 1.0,
+    "ior": 1.333,
+    "unlit": true
+  },
+  "render_state": {
+    "alpha_mode": "blend",
+    "blend_mode": "alpha",
+    "depth_test": true,
+    "depth_write": false,
+    "double_sided": false,
+    "transparent": true
+  },
+  "params": {
+    "material_params0": [0.018, 0.18, 0.27, 0.92],
+    "material_params1": [0.002, 0.018, 0.060, 0.16],
+    "material_params2": [0.90, 0.93, 0.90, 0.34],
+    "material_params3": [0.46, 0.20, 0.58, 0.35],
+    "material_params4": [0.45, 0.075, 5.0, 1.0],
+    "material_params5": [0.48, 0.20, 8.0, 1.65],
+    "material_params6": [0.16, 1.35, 0.0, 1.0]
+  },
+  "textures": {
+    "normal": "examples/rendering/water/generated_normal"
+  }
+}

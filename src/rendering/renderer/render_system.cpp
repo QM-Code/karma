@@ -34,6 +34,7 @@ namespace {
 using render_system::drawBoxWire;
 using render_system::drawCapsuleWire;
 using render_system::drawSphereWire;
+using render_system::extractInstancedMesh;
 using render_system::toCameraData;
 using render_system::toDirectionalLight;
 using render_system::toLightData;
@@ -96,52 +97,6 @@ void logRenderSystemStage(const bool enabled,
   }
 }
 
-glm::mat4 toInstanceTransform(const components::MeshInstance& instance) {
-  glm::mat4 transform = glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
-  transform *= glm::mat4_cast(math::toGlm(instance.rotation));
-  transform = glm::scale(transform, math::toGlm(instance.scale));
-  return transform;
-}
-
-rendering::InstanceData toRendererInstance(const components::MeshInstance& instance) {
-  rendering::InstanceData out{};
-  out.transform = toInstanceTransform(instance);
-  out.params = glm::vec4(instance.params[0],
-                         instance.params[1],
-                         instance.params[2],
-                         instance.params[3]);
-  return out;
-}
-
-rendering::PlanarInstanceData toRendererPlanarInstance(
-    const components::PlanarMeshInstance& instance) {
-  rendering::PlanarInstanceData out{};
-  out.position_yaw = glm::vec4(instance.position.x,
-                               instance.position.y,
-                               instance.position.z,
-                               instance.yaw_radians);
-  out.scale_pad = glm::vec4(instance.scale.x, instance.scale.y, instance.scale.z, 0.0f);
-  out.params = glm::vec4(instance.params[0],
-                         instance.params[1],
-                         instance.params[2],
-                         instance.params[3]);
-  return out;
-}
-
-glm::mat4 toPlanarInstanceTransform(const components::PlanarMeshInstance& instance) {
-  glm::mat4 transform = glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
-  transform = glm::rotate(transform, instance.yaw_radians, glm::vec3(0.0f, 1.0f, 0.0f));
-  transform = glm::scale(transform, math::toGlm(instance.scale));
-  return transform;
-}
-
-float maxTransformScale(const glm::mat4& transform) {
-  const float sx = glm::length(glm::vec3(transform[0]));
-  const float sy = glm::length(glm::vec3(transform[1]));
-  const float sz = glm::length(glm::vec3(transform[2]));
-  return std::max(sx, std::max(sy, sz));
-}
-
 void mergeSphere(glm::vec3& center,
                  float& radius,
                  bool& valid,
@@ -175,52 +130,61 @@ void mergeSphere(glm::vec3& center,
   radius = new_radius;
 }
 
+bool matrixChangedBeyondEpsilon(const glm::mat4& a,
+                                const glm::mat4& b,
+                                float epsilon = 1.0e-5f) {
+  for (int column = 0; column < 4; ++column) {
+    for (int row = 0; row < 4; ++row) {
+      const float delta = a[column][row] - b[column][row];
+      if (!std::isfinite(delta) || std::abs(delta) > epsilon) return true;
+    }
+  }
+  return false;
+}
+
 template <typename RenderRecordT>
 void rebuildCachedInstances(const components::InstancedMeshComponent& instanced,
+                            const glm::mat4& owner_world_transform,
                             RenderRecordT& record) {
-  record.cached_instance_layout = instanced.gpu_layout;
+  record.cached_authored_instance_layout = instanced.gpu_layout;
   record.cached_instance_revision = instanced.instance_revision;
   record.cached_instance_dynamic = instanced.dynamic;
-  record.cached_instance_bounds_valid = false;
-  record.cached_instance_bounds_center = glm::vec3(0.0f);
-  record.cached_instance_bounds_radius = 0.0f;
-  record.cached_instances.clear();
-  record.cached_planar_instances.clear();
+  record.cached_owner_world_transform = owner_world_transform;
+  record.cached_owner_world_transform_valid = true;
 
-  if (instanced.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
-    record.cached_planar_instances.reserve(instanced.planar_instances.size());
-    for (const auto& instance : instanced.planar_instances) {
-      record.cached_planar_instances.push_back(toRendererPlanarInstance(instance));
-      if (record.bounds_valid) {
-        const glm::mat4 transform = toPlanarInstanceTransform(instance);
-        const glm::vec3 center =
-            glm::vec3(transform * glm::vec4(record.bounds_center, 1.0f));
-        mergeSphere(record.cached_instance_bounds_center,
-                    record.cached_instance_bounds_radius,
-                    record.cached_instance_bounds_valid,
-                    center,
-                    record.bounds_radius * maxTransformScale(transform));
-      }
+  glm::vec3 combined_bounds_center{0.0f};
+  float combined_bounds_radius = 0.0f;
+  bool combined_bounds_valid = false;
+  if (record.bounds_valid) {
+    mergeSphere(combined_bounds_center,
+                combined_bounds_radius,
+                combined_bounds_valid,
+                record.bounds_center,
+                record.bounds_radius);
+  }
+  for (const auto& lod : record.instanced_lods) {
+    if (lod.bounds_valid) {
+      mergeSphere(combined_bounds_center,
+                  combined_bounds_radius,
+                  combined_bounds_valid,
+                  lod.bounds_center,
+                  lod.bounds_radius);
     }
-    record.cached_instance_count = record.cached_planar_instances.size();
-    return;
   }
 
-  record.cached_instances.reserve(instanced.instances.size());
-  for (const auto& instance : instanced.instances) {
-    rendering::InstanceData renderer_instance = toRendererInstance(instance);
-    if (record.bounds_valid) {
-      const glm::vec3 center =
-          glm::vec3(renderer_instance.transform * glm::vec4(record.bounds_center, 1.0f));
-      mergeSphere(record.cached_instance_bounds_center,
-                  record.cached_instance_bounds_radius,
-                  record.cached_instance_bounds_valid,
-                  center,
-                  record.bounds_radius * maxTransformScale(renderer_instance.transform));
-    }
-    record.cached_instances.push_back(renderer_instance);
-  }
-  record.cached_instance_count = record.cached_instances.size();
+  render_system::ExtractedInstancedMesh extracted = extractInstancedMesh(
+      instanced,
+      owner_world_transform,
+      combined_bounds_center,
+      combined_bounds_radius,
+      combined_bounds_valid);
+  record.cached_instance_count = extracted.instanceCount();
+  record.cached_instance_layout = extracted.gpu_layout;
+  record.cached_instances = std::move(extracted.instances);
+  record.cached_planar_instances = std::move(extracted.planar_instances);
+  record.cached_instance_bounds_center = extracted.bounds_center;
+  record.cached_instance_bounds_radius = extracted.bounds_radius;
+  record.cached_instance_bounds_valid = extracted.bounds_valid;
 }
 
 size_t authoredInstanceCount(const components::InstancedMeshComponent& instanced) {
@@ -283,8 +247,12 @@ std::string materialFingerprint(const rendering::ResolvedMaterialDesc& resolved)
   appendScalar(stream, "metallic", material.metallic);
   appendScalar(stream, "roughness", material.roughness);
   appendScalar(stream, "normal_scale", material.normal_scale);
+  appendScalar(stream, "normal_map_convention",
+               static_cast<uint32_t>(material.normal_map_convention));
   appendScalar(stream, "occlusion_strength", material.occlusion_strength);
   appendScalar(stream, "emissive_strength", material.emissive_strength);
+  appendScalar(stream, "specular_factor", material.specular_factor);
+  appendColor(stream, "specular_color", material.specular_color);
   appendScalar(stream, "clearcoat", material.clearcoat);
   appendScalar(stream, "clearcoat_roughness", material.clearcoat_roughness);
   appendColor(stream, "sheen_color", material.sheen_color);
@@ -367,11 +335,15 @@ struct RenderSystem::Impl {
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
+    rendering::InstanceGpuLayout cached_authored_instance_layout =
+        rendering::InstanceGpuLayout::Matrix4x4Params;
     rendering::InstanceGpuLayout cached_instance_layout =
         rendering::InstanceGpuLayout::Matrix4x4Params;
     uint64_t cached_instance_revision = UINT64_MAX;
     size_t cached_instance_count = 0;
     bool cached_instance_dynamic = false;
+    glm::mat4 cached_owner_world_transform{1.0f};
+    bool cached_owner_world_transform_valid = false;
     bool cached_instance_bounds_valid = false;
     glm::vec3 cached_instance_bounds_center{0.0f};
     float cached_instance_bounds_radius = 0.0f;
@@ -1613,6 +1585,7 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       releaseMeshBinding(record);
       bindMesh(mesh_asset_key, record);
       bindMaterial(materials, record);
+      record.cached_owner_world_transform_valid = false;
     }
     last_asset_registry_version_ = assets_->version();
   }
@@ -1976,16 +1949,27 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
     }
     const bool lod_binding_changed = syncInstancedLodBindings(instanced, it->second);
 
+    glm::mat4 owner_world_transform{1.0f};
+    if (world.has<components::TransformComponent>(entity)) {
+      owner_world_transform = toTransform(
+          world.get<components::TransformComponent>(entity), interpolation_alpha);
+    }
+    const bool owner_transform_changed =
+        !it->second.cached_owner_world_transform_valid ||
+        matrixChangedBeyondEpsilon(it->second.cached_owner_world_transform,
+                                   owner_world_transform);
+
     const size_t instance_count = authoredInstanceCount(instanced);
     const bool payload_changed =
         instanced.dynamic ||
         binding_changed ||
         lod_binding_changed ||
-        it->second.cached_instance_layout != instanced.gpu_layout ||
+        owner_transform_changed ||
+        it->second.cached_authored_instance_layout != instanced.gpu_layout ||
         it->second.cached_instance_revision != instanced.instance_revision ||
         it->second.cached_instance_count != instance_count;
     if (payload_changed) {
-      rebuildCachedInstances(instanced, it->second);
+      rebuildCachedInstances(instanced, owner_world_transform, it->second);
       ++rebuilt_instanced_payload_count;
     }
 
@@ -2009,7 +1993,7 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
           .shadow_visible = lod.shadow_visible,
       });
     }
-    item.gpu_layout = instanced.gpu_layout;
+    item.gpu_layout = it->second.cached_instance_layout;
     item.instances = it->second.cached_instances;
     item.planar_instances = it->second.cached_planar_instances;
     item.payload_changed = payload_changed;

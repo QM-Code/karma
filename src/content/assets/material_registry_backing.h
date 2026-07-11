@@ -141,10 +141,22 @@ class MaterialLibrary {
       if (const auto* f = asFloat(value)) material.roughness = *f;
     } else if (name == "normal_scale") {
       if (const auto* f = asFloat(value)) material.normal_scale = *f;
+    } else if (name == "normal_map_convention") {
+      if (const auto* convention = asString(value)) {
+        if (*convention == "opengl") {
+          material.normal_map_convention = MaterialDesc::NormalMapConvention::OpenGL;
+        } else if (*convention == "directx") {
+          material.normal_map_convention = MaterialDesc::NormalMapConvention::DirectX;
+        }
+      }
     } else if (name == "occlusion_strength") {
       if (const auto* f = asFloat(value)) material.occlusion_strength = *f;
     } else if (name == "emissive_strength") {
       if (const auto* f = asFloat(value)) material.emissive_strength = *f;
+    } else if (name == "specular_factor") {
+      if (const auto* f = asFloat(value)) material.specular_factor = *f;
+    } else if (name == "specular_color") {
+      if (const auto* color = asColor(value)) material.specular_color = *color;
     } else if (name == "clearcoat") {
       if (const auto* f = asFloat(value)) material.clearcoat = *f;
     } else if (name == "clearcoat_roughness") {

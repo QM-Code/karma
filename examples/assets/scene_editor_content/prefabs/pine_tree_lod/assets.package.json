@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "texture_rgba8",
+      "key": "scene_editor/pine_tree_lod/leaf_albedo",
+      "path": "textures/leaf_albedo.png",
+      "srgb": true,
+      "generate_mips": true,
+      "alpha_bleed": true,
+      "alpha_coverage_cutoff": 0.3
+    },
+    {
+      "type": "texture_rgba8",
+      "key": "scene_editor/pine_tree_lod/bark_albedo",
+      "path": "textures/bark_albedo.jpg",
+      "srgb": true,
+      "generate_mips": true
+    },
+    {
+      "type": "texture_rgba8",
+      "key": "scene_editor/pine_tree_lod/bark_normal",
+      "path": "textures/bark_normal.jpg",
+      "srgb": false,
+      "generate_mips": true
+    },
+    {
+      "type": "texture_rgba8",
+      "key": "scene_editor/pine_tree_lod/billboard_albedo",
+      "path": "textures/billboard_albedo.png",
+      "srgb": true,
+      "generate_mips": true,
+      "alpha_bleed": true,
+      "alpha_coverage_cutoff": 0.28
+    },
+    {
+      "type": "material",
+      "key": "scene_editor/pine_tree_lod/leaves_material",
+      "path": "materials/leaves.mat"
+    },
+    {
+      "type": "material",
+      "key": "scene_editor/pine_tree_lod/bark_material",
+      "path": "materials/bark.mat"
+    },
+    {
+      "type": "material",
+      "key": "scene_editor/pine_tree_lod/billboard_material",
+      "path": "materials/billboard.mat"
+    },
+    {
+      "type": "mesh",
+      "key": "scene_editor/pine_tree_lod/high_mesh",
+      "path": "meshes/pine_tree_high.obj"
+    },
+    {
+      "type": "mesh",
+      "key": "scene_editor/pine_tree_lod/low_mesh",
+      "path": "meshes/pine_tree_low.obj"
+    },
+    {
+      "type": "mesh",
+      "key": "scene_editor/pine_tree_lod/billboard_mesh",
+      "path": "meshes/pine_tree_billboard.obj"
+    }
+  ]
+}

@@ -815,7 +815,7 @@ void EngineApp::shutdownSubsystems() {
   for (auto it = startup_asset_package_handles_.rbegin();
        it != startup_asset_package_handles_.rend();
        ++it) {
-    assets::unloadAssetPackage(assets_, *it);
+    assets_.sharedPackageStore().releasePackage(*it);
   }
   startup_asset_package_handles_.clear();
   render_system_.reset();
@@ -1284,7 +1284,8 @@ void EngineApp::start(GameInterface& game, const EngineConfig& config) {
   for (const std::filesystem::path& package_path : config_.startup_asset_packages) {
     const std::filesystem::path resolved_package_path = resolveStartupPath(package_path);
     std::string diagnostic;
-    auto package = assets::importAssetPackage(assets_, resolved_package_path, &diagnostic);
+    auto package =
+        assets_.sharedPackageStore().acquirePackage(resolved_package_path, &diagnostic);
     if (!package.has_value()) {
       throw std::runtime_error(
           "Failed to import startup asset package '" + resolved_package_path.string() +

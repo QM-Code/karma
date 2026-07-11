@@ -1,0 +1,94 @@
+{
+  "version": 2,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Pine Tree LOD",
+      "parent": null,
+      "components": {
+        "TagComponent": {
+          "name": "Pine Tree LOD"
+        },
+        "TransformComponent": {
+          "position": [0.0, 0.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "StaticComponent": {
+          "enabled": true,
+          "include_descendants": true,
+          "flags": 31
+        },
+        "InstancedMeshComponent": {
+          "mesh_asset_key": "scene_editor/pine_tree_lod/high_mesh",
+          "materials": [
+            {
+              "slot": 0,
+              "material_key": "scene_editor/pine_tree_lod/bark_material"
+            },
+            {
+              "slot": 1,
+              "material_key": "scene_editor/pine_tree_lod/leaves_material"
+            }
+          ],
+          "lods": [
+            {
+              "start_distance": 35.0,
+              "mesh_asset_key": "scene_editor/pine_tree_lod/low_mesh",
+              "materials": [
+                {
+                  "slot": 0,
+                  "material_key": "scene_editor/pine_tree_lod/leaves_material"
+                },
+                {
+                  "slot": 1,
+                  "material_key": "scene_editor/pine_tree_lod/bark_material"
+                }
+              ],
+              "render_mode": "mesh",
+              "shadow_visible": true
+            },
+            {
+              "start_distance": 90.0,
+              "mesh_asset_key": "scene_editor/pine_tree_lod/billboard_mesh",
+              "materials": [
+                {
+                  "slot": 0,
+                  "material_key": "scene_editor/pine_tree_lod/billboard_material"
+                }
+              ],
+              "render_mode": "upright_billboard",
+              "shadow_visible": false
+            }
+          ],
+          "gpu_layout": "matrix4x4_params",
+          "instances": [
+            {
+              "position": [0.0, 0.0, 0.0],
+              "rotation": [0.0, 0.0, 0.0, 1.0],
+              "scale": [1.0, 1.0, 1.0],
+              "params": [0.0, 0.0, 0.0, 0.0]
+            }
+          ],
+          "planar_instances": [],
+          "instance_revision": 1,
+          "dynamic": false,
+          "visible": true,
+          "shadow_visible": true
+        },
+        "ColliderComponent": {
+          "type": "cylinder",
+          "is_trigger": false,
+          "debug_draw": false,
+          "shape": {
+            "center": [0.0, 1.4, 0.0],
+            "radius": 0.185,
+            "height": 2.8,
+            "convex_radius": 0.02
+          }
+        }
+      }
+    }
+  ]
+}

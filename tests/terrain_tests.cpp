@@ -266,6 +266,36 @@ void testR32ScalarHeightLoading() {
   std::filesystem::remove_all(dir);
 }
 
+void testRawScalarHeightLoadingRejectsUnsafeDimensions() {
+  const std::filesystem::path dir = makeTempDir();
+  const std::filesystem::path path = dir / "height.r32";
+  writeR32Le(path, {0.5f});
+
+  karma::assets::ScalarImageLoadOptions options{};
+  options.format = karma::assets::ScalarImageFormat::R32Float;
+  options.raw_width = std::numeric_limits<uint32_t>::max();
+  options.raw_height = std::numeric_limits<uint32_t>::max();
+  assert(!karma::assets::loadScalarImage(path, options).has_value());
+
+  options.raw_width = 2u;
+  options.raw_height = 2u;
+  assert(!karma::assets::loadScalarImage(path, options).has_value());
+
+  options.raw_width = 1u;
+  options.raw_height = 1u;
+  assert(karma::assets::loadScalarImage(path, options).has_value());
+
+  writeR32Le(path, {std::numeric_limits<float>::quiet_NaN()});
+  const auto sanitized = karma::assets::loadScalarImage(path, options);
+  assert(sanitized.has_value());
+  assert(sanitized->values == std::vector<float>{0.0f});
+
+  options.value_min = std::numeric_limits<float>::quiet_NaN();
+  assert(!karma::assets::loadScalarImage(path, options).has_value());
+
+  std::filesystem::remove_all(dir);
+}
+
 void testTerrainDescClamping() {
   karma::components::TerrainComponent terrain{};
   terrain.tile_size = -10.0f;
@@ -411,11 +441,19 @@ void testTerrainMaterialLayerLoading() {
       200, 220, 240, 255,
   };
   writeRgbaTga(dir / "rock_albedo.tga", 2u, 2u, albedo_rgba);
+  const std::vector<uint8_t> roughness_rgba{
+      32u, 0u, 0u, 255u,
+      64u, 0u, 0u, 255u,
+      128u, 0u, 0u, 255u,
+      224u, 0u, 0u, 255u,
+  };
+  writeRgbaTga(dir / "rock_roughness.tga", 2u, 2u, roughness_rgba);
 
   const auto layer = karma::visual::terrain::loadTerrainMaterialLayer(
       karma::components::TerrainMaterialLayer{
           .name = "rock",
           .albedo_image = dir / "rock_albedo.tga",
+          .roughness_image = dir / "rock_roughness.tga",
           .uv_scale = 12.0f,
       },
       1u);
@@ -427,6 +465,10 @@ void testTerrainMaterialLayerLoading() {
   assert(layer->albedo.width == 2u);
   assert(layer->albedo.height == 2u);
   assert(layer->albedo.rgba8 == albedo_rgba);
+  assert(nearly(layer->material.metallic, 0.0f));
+  assert(layer->metallic_roughness.valid());
+  assert(layer->metallic_roughness.rgba8[1] == 32u);
+  assert(layer->metallic_roughness.rgba8[2] == 255u);
 
   std::filesystem::remove_all(dir);
 }
@@ -453,10 +495,12 @@ void testTerrainMaterialLayerResolvesMaterialKey() {
   assert(nearly(layer->uv_scale, 18.0f));
   assert(layer->albedo.width == 1u);
   assert(layer->albedo.height == 1u);
-  assert((layer->albedo.rgba8 == std::vector<uint8_t>{64u, 128u, 191u, 255u}));
-  assert(layer->roughness.width == 1u);
-  assert(layer->roughness.height == 1u);
-  assert((layer->roughness.rgba8 == std::vector<uint8_t>{153u, 153u, 153u, 255u}));
+  assert((layer->albedo.rgba8 == std::vector<uint8_t>{255u, 255u, 255u, 255u}));
+  assert(nearly(layer->material.base_color.r, 0.25f));
+  assert(nearly(layer->material.base_color.g, 0.5f));
+  assert(nearly(layer->material.base_color.b, 0.75f));
+  assert(nearly(layer->material.roughness, 0.6f));
+  assert(nearly(layer->material.metallic, 0.0f));
 }
 
 void testTerrainMaterialLayerResolvesAssetRegistryMaterialKey() {
@@ -481,10 +525,148 @@ void testTerrainMaterialLayerResolvesAssetRegistryMaterialKey() {
   assert(nearly(layer->uv_scale, 9.0f));
   assert(layer->albedo.width == 1u);
   assert(layer->albedo.height == 1u);
-  assert((layer->albedo.rgba8 == std::vector<uint8_t>{128u, 64u, 32u, 255u}));
-  assert(layer->roughness.width == 1u);
-  assert(layer->roughness.height == 1u);
-  assert((layer->roughness.rgba8 == std::vector<uint8_t>{64u, 64u, 64u, 255u}));
+  assert((layer->albedo.rgba8 == std::vector<uint8_t>{255u, 255u, 255u, 255u}));
+  assert(nearly(layer->material.base_color.r, 0.5f));
+  assert(nearly(layer->material.base_color.g, 0.25f));
+  assert(nearly(layer->material.base_color.b, 0.125f));
+  assert(nearly(layer->material.roughness, 0.25f));
+}
+
+void testTerrainMaterialLayerResolvesTextureAssetKeys() {
+  karma::assets::AssetRegistry assets;
+  const std::vector<uint8_t> albedo_rgba{
+      12u, 34u, 56u, 255u,
+      78u, 90u, 123u, 200u,
+  };
+  karma::assets::TextureAsset texture{};
+  texture.desc.width = 2;
+  texture.desc.height = 1;
+  texture.desc.format = karma::rendering::TextureFormat::RGBA8;
+  texture.desc.mip_levels = 1u;
+  texture.payload_format = karma::assets::TextureAsset::PayloadFormat::RGBA8;
+  texture.bytes = albedo_rgba;
+  texture.subresources.push_back(karma::rendering::TextureUploadSubresource{
+      .mip_level = 0u,
+      .array_layer = 0u,
+      .width = 2,
+      .height = 1,
+      .offset = 0u,
+      .size = albedo_rgba.size(),
+      .row_stride = 8u,
+  });
+  assert(assets.registerTextureAsset("terrain/textured_albedo", std::move(texture)));
+
+  karma::rendering::MaterialAssetDesc material{};
+  material.surface.base_color = karma::math::Color{1.0f, 0.0f, 1.0f, 1.0f};
+  material.textures["base_color"] = "terrain/textured_albedo";
+  assert(assets.registerMaterialAsset("terrain/textured", std::move(material)));
+
+  const auto layer = karma::visual::terrain::loadTerrainMaterialLayer(
+      karma::components::TerrainMaterialLayer{
+          .material_key = "terrain/textured",
+      },
+      0u,
+      &assets);
+  assert(layer.has_value());
+  assert(layer->valid());
+  assert(layer->albedo.width == 2u);
+  assert(layer->albedo.height == 1u);
+  assert(layer->albedo.rgba8 == albedo_rgba);
+  assert(nearly(layer->material.base_color.r, 1.0f));
+  assert(nearly(layer->material.base_color.g, 0.0f));
+  assert(nearly(layer->material.base_color.b, 1.0f));
+}
+
+void testTerrainMaterialLayerResolvesPbrFactorsAndMaps() {
+  karma::assets::AssetRegistry assets;
+  const auto register_texture = [&](const std::string& key,
+                                    std::vector<uint8_t> rgba,
+                                    bool srgb) {
+    karma::assets::TextureAsset texture{};
+    texture.desc.width = 1;
+    texture.desc.height = 1;
+    texture.desc.format = karma::rendering::TextureFormat::RGBA8;
+    texture.desc.srgb = srgb;
+    texture.desc.mip_levels = 1u;
+    texture.payload_format = karma::assets::TextureAsset::PayloadFormat::RGBA8;
+    texture.bytes = std::move(rgba);
+    texture.subresources.push_back(karma::rendering::TextureUploadSubresource{
+        .mip_level = 0u,
+        .array_layer = 0u,
+        .width = 1,
+        .height = 1,
+        .offset = 0u,
+        .size = 4u,
+        .row_stride = 4u,
+    });
+    assert(assets.registerTextureAsset(key, std::move(texture)));
+  };
+
+  register_texture("terrain/pbr/albedo", {10u, 20u, 30u, 255u}, true);
+  register_texture("terrain/pbr/normal", {120u, 200u, 250u, 255u}, false);
+  register_texture("terrain/pbr/mr", {255u, 64u, 128u, 255u}, false);
+  register_texture("terrain/pbr/ao", {192u, 192u, 192u, 255u}, false);
+  register_texture("terrain/pbr/emissive", {4u, 8u, 16u, 255u}, true);
+  register_texture("terrain/pbr/specular", {255u, 255u, 255u, 96u}, false);
+  register_texture("terrain/pbr/specular_color", {32u, 64u, 128u, 255u}, true);
+
+  karma::rendering::MaterialAssetDesc material{};
+  material.surface.base_color = {0.7f, 0.6f, 0.5f, 1.0f};
+  material.surface.metallic = 0.4f;
+  material.surface.roughness = 0.35f;
+  material.surface.normal_scale = 0.65f;
+  material.surface.normal_map_convention =
+      karma::rendering::MaterialDesc::NormalMapConvention::DirectX;
+  material.surface.occlusion_strength = 0.75f;
+  material.surface.emissive_color = {0.1f, 0.2f, 0.3f, 1.0f};
+  material.surface.emissive_strength = 2.0f;
+  material.surface.specular_factor = 0.45f;
+  material.surface.specular_color = {0.25f, 0.5f, 0.75f, 1.0f};
+  material.textures = {
+      {"base_color", "terrain/pbr/albedo"},
+      {"normal", "terrain/pbr/normal"},
+      {"metallic_roughness", "terrain/pbr/mr"},
+      {"occlusion", "terrain/pbr/ao"},
+      {"emissive", "terrain/pbr/emissive"},
+      {"specular", "terrain/pbr/specular"},
+      {"specular_color", "terrain/pbr/specular_color"},
+  };
+  assert(assets.registerMaterialAsset("terrain/pbr/material", std::move(material)));
+
+  const auto layer = karma::visual::terrain::loadTerrainMaterialLayer(
+      karma::components::TerrainMaterialLayer{
+          .material_key = "terrain/pbr/material",
+          .uv_scale = 22.0f,
+      },
+      3u,
+      &assets);
+  assert(layer.has_value());
+  assert(layer->valid());
+  assert(layer->layer == 3u);
+  assert(nearly(layer->uv_scale, 22.0f));
+  assert(layer->albedo.rgba8 ==
+         (std::vector<uint8_t>{10u, 20u, 30u, 255u}));
+  assert(layer->normal.rgba8 ==
+         (std::vector<uint8_t>{120u, 200u, 250u, 255u}));
+  assert(layer->metallic_roughness.rgba8 ==
+         (std::vector<uint8_t>{255u, 64u, 128u, 255u}));
+  assert(layer->occlusion.rgba8 ==
+         (std::vector<uint8_t>{192u, 192u, 192u, 255u}));
+  assert(layer->emissive.rgba8 ==
+         (std::vector<uint8_t>{4u, 8u, 16u, 255u}));
+  assert(layer->specular.rgba8 ==
+         (std::vector<uint8_t>{255u, 255u, 255u, 96u}));
+  assert(layer->specular_color.rgba8 ==
+         (std::vector<uint8_t>{32u, 64u, 128u, 255u}));
+  assert(nearly(layer->material.metallic, 0.4f));
+  assert(nearly(layer->material.roughness, 0.35f));
+  assert(nearly(layer->material.normal_scale, 0.65f));
+  assert(layer->material.normal_map_convention ==
+         karma::rendering::MaterialDesc::NormalMapConvention::DirectX);
+  assert(nearly(layer->material.occlusion_strength, 0.75f));
+  assert(nearly(layer->material.emissive_strength, 2.0f));
+  assert(nearly(layer->material.specular_factor, 0.45f));
+  assert(nearly(layer->material.specular_color.b, 0.75f));
 }
 
 void testTerrainColliderSyncCreatesHeightField() {
@@ -731,6 +913,7 @@ int main() {
   testImageHeightConversion();
   testRaw16ScalarHeightLoading();
   testR32ScalarHeightLoading();
+  testRawScalarHeightLoadingRejectsUnsafeDimensions();
   testTerrainDescClamping();
   testSingleImageTerrainDescUsesTerrainSize();
   testSingleImageTerrainTileLoadsHeatmapAndColor();
@@ -738,6 +921,8 @@ int main() {
   testTerrainMaterialLayerLoading();
   testTerrainMaterialLayerResolvesMaterialKey();
   testTerrainMaterialLayerResolvesAssetRegistryMaterialKey();
+  testTerrainMaterialLayerResolvesTextureAssetKeys();
+  testTerrainMaterialLayerResolvesPbrFactorsAndMaps();
   testTerrainColliderSyncCreatesHeightField();
   testTerrainTilePatternFormatting();
   testGaeaSingleImageImportDetectsOutputs();

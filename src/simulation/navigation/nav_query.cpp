@@ -8,7 +8,6 @@
 #include <DetourNavMesh.h>
 #include <DetourNavMeshQuery.h>
 
-#include "karma/rendering.h"
 #include "detail/detour_utils.h"
 #include "detail/nav_mesh_access.h"
 
@@ -130,18 +129,6 @@ bool NavQuery::findNearestPoly(const math::Vec3& point,
   }
   out_poly_ref = static_cast<uint64_t>(ref);
   return true;
-}
-
-void NavQuery::debugDrawPath(rendering::GraphicsDevice& graphics,
-                             const NavPath& path,
-                             const math::Color& color,
-                             bool depth_test) {
-  if (path.points.size() < 2) {
-    return;
-  }
-  for (size_t i = 1; i < path.points.size(); ++i) {
-    graphics.drawLine(path.points[i - 1], path.points[i], color, depth_test, 2.0f);
-  }
 }
 
 }  // namespace karma::navigation

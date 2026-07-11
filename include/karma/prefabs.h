@@ -7,6 +7,7 @@
 
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -17,6 +18,18 @@
 
 namespace karma::prefabs {
 
+/// Stable entity-reference hooks supplied by the owning document format.
+///
+/// Prefabs encode references as `{ "scope": "prefab", "node": N }` while
+/// scenes encode `{ "scope": "scene", "id": "stable-id" }`. Component
+/// serializers stay independent of either document's identifier type.
+struct ComponentSerializationContext {
+  std::function<std::optional<nlohmann::json>(world::Entity)>
+      serialize_entity_reference;
+  std::function<std::optional<world::Entity>(const nlohmann::json&)>
+      resolve_entity_reference;
+};
+
 /// \ingroup karma_prefabs
 /// Serialization hooks for one ECS component type.
 struct ComponentSerializer {
@@ -24,7 +37,33 @@ struct ComponentSerializer {
   std::function<bool(const world::World&, world::Entity)> has;
   std::function<nlohmann::json(const world::World&, world::Entity)> serialize;
   std::function<bool(world::World&, world::Entity, const nlohmann::json&)> deserialize;
+  /// Optional document-aware hooks. Legacy callbacks above remain available to
+  /// existing integrations and are used when these are absent.
+  std::function<nlohmann::json(const world::World&,
+                               world::Entity,
+                               const ComponentSerializationContext&)>
+      serialize_with_context;
+  std::function<bool(world::World&,
+                     world::Entity,
+                     const nlohmann::json&,
+                     const ComponentSerializationContext&)>
+      deserialize_with_context;
 };
+
+/// Invokes a contextual serializer when available, otherwise its legacy hook.
+nlohmann::json serializeComponentPayload(
+    const ComponentSerializer& serializer,
+    const world::World& world,
+    world::Entity entity,
+    const ComponentSerializationContext& context = {});
+
+/// Invokes a contextual deserializer when available, otherwise its legacy hook.
+bool deserializeComponentPayload(
+    const ComponentSerializer& serializer,
+    world::World& world,
+    world::Entity entity,
+    const nlohmann::json& payload,
+    const ComponentSerializationContext& context = {});
 
 /// \ingroup karma_prefabs
 /// Registry mapping component type names to JSON serializers.
@@ -88,6 +127,23 @@ struct PrefabDocument {
   nlohmann::json variables = nlohmann::json::object();
   std::vector<PrefabNode> nodes;
 };
+
+/// \ingroup karma_prefabs
+/// Result of non-mutating prefab parsing and validation.
+struct PrefabLoadResult {
+  std::optional<PrefabDocument> document;
+  std::filesystem::path source_path;
+  std::vector<std::string> diagnostics;
+
+  bool success() const { return document.has_value() && diagnostics.empty(); }
+  explicit operator bool() const { return success(); }
+};
+
+/// \ingroup karma_prefabs
+/// Loads and validates a prefab document without creating runtime state.
+///
+/// A directory or extensionless path resolves to its `prefab.json` child.
+PrefabLoadResult loadPrefabDocument(const std::filesystem::path& path);
 
 /// \ingroup karma_prefabs
 /// Options controlling prefab save traversal.

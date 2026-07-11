@@ -224,6 +224,7 @@ struct TagComponent : world::ComponentTag {
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -242,18 +243,99 @@ namespace karma::world {
 /// systems query and mutate components directly, while higher-level runtime
 /// code decides update order. Component storage is allocated lazily per type.
 class World {
+ private:
+  struct LifetimeState {
+    std::mutex mutex;
+    std::atomic<bool> retiring = false;
+    World* world = nullptr;
+  };
+
  public:
-  World() : instance_id_(allocateInstanceId()) {}
+  /// Move-stable, non-owning access to a live `World` object.
+  ///
+  /// Locking the handle prevents the object from being moved or destroyed
+  /// until the returned lease is released. The lease only protects object
+  /// lifetime: ECS access remains owner-thread affine and is not made safe for
+  /// concurrent mutation.
+  class LifetimeHandle {
+   public:
+    class Lease {
+     public:
+      Lease() = default;
+      Lease(const Lease&) = delete;
+      Lease& operator=(const Lease&) = delete;
+      Lease(Lease&& other) noexcept
+          : state_(std::move(other.state_)), lock_(std::move(other.lock_)) {}
+
+      Lease& operator=(Lease&& other) noexcept {
+        if (this == &other) {
+          return *this;
+        }
+        // Release the target lock before its shared state. In the lifecycle
+        // race where the World has just retired, this lease can own the final
+        // strong reference to the mutex that `lock_` still holds.
+        lock_ = std::move(other.lock_);
+        state_ = std::move(other.state_);
+        return *this;
+      }
+
+      World* get() const { return state_ != nullptr ? state_->world : nullptr; }
+      explicit operator bool() const { return get() != nullptr; }
+
+     private:
+      friend class LifetimeHandle;
+
+      explicit Lease(std::shared_ptr<LifetimeState> state)
+          : state_(std::move(state)) {
+        if (state_ != nullptr) {
+          lock_ = std::unique_lock<std::mutex>(state_->mutex);
+          if (state_->retiring.load(std::memory_order_acquire)) {
+            lock_.unlock();
+            state_.reset();
+          }
+        }
+      }
+
+      std::shared_ptr<LifetimeState> state_;
+      std::unique_lock<std::mutex> lock_;
+    };
+
+    LifetimeHandle() = default;
+
+    [[nodiscard]] Lease lock() const { return Lease(state_.lock()); }
+
+   private:
+    friend class World;
+
+    explicit LifetimeHandle(const std::shared_ptr<LifetimeState>& state)
+        : state_(state) {}
+
+    std::weak_ptr<LifetimeState> state_;
+  };
+
+  World() : instance_id_(allocateInstanceId()) { ensureLifetimeState(); }
+  ~World() { retireLifetimeState(); }
   World(const World&) = delete;
   World& operator=(const World&) = delete;
 
   /// Moves ECS state while preserving its stable world identity.
   ///
   /// The moved-from world remains usable with a newly allocated identity.
-  World(World&& other) noexcept
-      : registry_(std::move(other.registry_)),
-        storages_(std::move(other.storages_)),
-        instance_id_(std::exchange(other.instance_id_, allocateInstanceId())) {}
+  World(World&& other) noexcept : instance_id_(allocateInstanceId()) {
+    const std::shared_ptr<LifetimeState> lifetime = other.lifetime_state_;
+    std::unique_lock<std::mutex> lifetime_lock;
+    if (lifetime != nullptr) {
+      lifetime_lock = std::unique_lock<std::mutex>(lifetime->mutex);
+    }
+
+    registry_ = std::move(other.registry_);
+    storages_ = std::move(other.storages_);
+    instance_id_ = std::exchange(other.instance_id_, instance_id_);
+    lifetime_state_ = std::move(other.lifetime_state_);
+    if (lifetime_state_ != nullptr) {
+      lifetime_state_->world = this;
+    }
+  }
 
   /// Move assignment is disabled because replacing a live world's identity
   /// would invalidate external ownership records associated with it.
@@ -265,6 +347,14 @@ class World {
   /// `World` object's address. It is suitable for ownership/cache keys that
   /// also include an entity generation.
   uint64_t instanceId() const { return instance_id_; }
+
+  /// Returns a handle that follows this ECS state across move construction.
+  ///
+  /// A moved-from world receives a fresh lifetime state on its next call.
+  LifetimeHandle lifetimeHandle() {
+    ensureLifetimeState();
+    return LifetimeHandle(lifetime_state_);
+  }
 
   /// Creates a live entity.
   Entity createEntity() { return registry_.create(); }
@@ -458,6 +548,26 @@ class World {
   }
 
  private:
+  void ensureLifetimeState() {
+    if (lifetime_state_ == nullptr) {
+      lifetime_state_ = std::make_shared<LifetimeState>();
+      lifetime_state_->world = this;
+    }
+  }
+
+  void retireLifetimeState() {
+    if (lifetime_state_ == nullptr) return;
+    // Close admission before waiting for existing leases. Otherwise fresh
+    // callers could observe a World whose destructor has already begun and
+    // could indefinitely delay teardown by repeatedly taking the mutex.
+    lifetime_state_->retiring.store(true, std::memory_order_release);
+    std::shared_ptr<LifetimeState> lifetime = std::move(lifetime_state_);
+    std::lock_guard lock(lifetime->mutex);
+    if (lifetime->world == this) {
+      lifetime->world = nullptr;
+    }
+  }
+
   static uint64_t allocateInstanceId() {
     static std::atomic<uint64_t> next_id{1u};
     uint64_t id = next_id.fetch_add(1u, std::memory_order_relaxed);
@@ -519,6 +629,7 @@ class World {
   EntityRegistry registry_;
   std::unordered_map<core::TypeId, std::unique_ptr<IStorage>> storages_;
   uint64_t instance_id_ = 0u;
+  std::shared_ptr<LifetimeState> lifetime_state_;
 };
 
 }  // namespace karma::world
@@ -665,6 +776,36 @@ namespace karma::world {
 /// `updateWorldTransforms(...)`.
 class Scene {
  public:
+  Scene() : instance_id_(allocateInstanceId()) {}
+
+  /// Copies hierarchy data into a distinct scene identity.
+  Scene(const Scene& other)
+      : nodes_(other.nodes_),
+        free_list_(other.free_list_),
+        entity_to_node_(other.entity_to_node_),
+        instance_id_(allocateInstanceId()) {}
+
+  /// Assignment could silently replace the identity owned by a live scene
+  /// instance, making that instance impossible to tear down safely.
+  Scene& operator=(const Scene&) = delete;
+
+  /// Moves hierarchy data while preserving the source scene's identity.
+  ///
+  /// The moved-from scene remains usable with a fresh identity.
+  Scene(Scene&& other) noexcept
+      : nodes_(std::move(other.nodes_)),
+        free_list_(std::move(other.free_list_)),
+        entity_to_node_(std::move(other.entity_to_node_)),
+        instance_id_(
+            std::exchange(other.instance_id_, allocateInstanceId())) {}
+
+  Scene& operator=(Scene&&) = delete;
+
+  /// Process-unique identity for this hierarchy state.
+  ///
+  /// The identity survives moves and changes when a scene is replaced by copy.
+  uint64_t instanceId() const { return instance_id_; }
+
   /// Creates a node, reusing an existing node for `entity` when one exists.
   NodeId createNode(core::EntityId entity = {}) {
     if (entity.isValid()) {
@@ -774,6 +915,15 @@ class Scene {
   const std::vector<Node>& nodes() const { return nodes_; }
 
  private:
+  static uint64_t allocateInstanceId() {
+    static std::atomic<uint64_t> next_id{1u};
+    uint64_t id = next_id.fetch_add(1u, std::memory_order_relaxed);
+    if (id == 0u) {
+      id = next_id.fetch_add(1u, std::memory_order_relaxed);
+    }
+    return id;
+  }
+
   static uint64_t entityKey(core::EntityId entity) {
     return (static_cast<uint64_t>(entity.index) << 32) |
            static_cast<uint64_t>(entity.generation);
@@ -810,6 +960,7 @@ class Scene {
   std::vector<Node> nodes_;
   std::vector<NodeId> free_list_;
   std::unordered_map<uint64_t, NodeId> entity_to_node_;
+  uint64_t instance_id_ = 0u;
 };
 
 }  // namespace karma::world

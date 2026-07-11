@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "root": 0,
+  "nodes": [
+    {
+      "id": 0,
+      "name": "Grass LOD Fixture",
+      "parent": null,
+      "components": {
+        "TagComponent": {
+          "name": "Grass LOD Fixture"
+        },
+        "TransformComponent": {
+          "position": [0.0, 0.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "StaticComponent": {
+          "enabled": true,
+          "include_descendants": true,
+          "flags": 31
+        },
+        "InstancedMeshComponent": {
+          "mesh_asset_key": "scene_editor/grass_lod/cluster_mesh",
+          "materials": [
+            {
+              "slot": 0,
+              "material_key": "scene_editor/grass_lod/grass_material"
+            }
+          ],
+          "lods": [
+            {
+              "start_distance": 28.0,
+              "mesh_asset_key": "scene_editor/grass_lod/billboard_mesh",
+              "materials": [
+                {
+                  "slot": 0,
+                  "material_key": "scene_editor/grass_lod/grass_billboard_material"
+                }
+              ],
+              "render_mode": "upright_billboard",
+              "shadow_visible": false
+            }
+          ],
+          "gpu_layout": "matrix4x4_params",
+          "instances": [
+            {
+              "position": [0.0, 0.0, 0.0],
+              "rotation": [0.0, 0.0, 0.0, 1.0],
+              "scale": [1.0, 1.0, 1.0],
+              "params": [0.0, 0.0, 0.0, 0.0]
+            }
+          ],
+          "planar_instances": [],
+          "instance_revision": 1,
+          "dynamic": false,
+          "visible": true,
+          "shadow_visible": false
+        }
+      }
+    }
+  ]
+}

@@ -9,7 +9,6 @@
 #include <DebugDraw.h>
 #include <RecastDebugDraw.h>
 
-#include "karma/rendering.h"
 #include "karma/navigation.h"
 #include "detail/detour_utils.h"
 
@@ -266,7 +265,6 @@ namespace karma::navigation {
 using detail::buildDebugEdges;
 using detail::captureDetourDebugLines;
 using detail::debugModeIndex;
-using detail::failed;
 using detail::validDebugMode;
 
 bool NavMesh::hasDebugDrawMode(NavMeshDebugDrawMode mode) const {
@@ -290,73 +288,6 @@ void NavMesh::refreshDetourDebugDraw() {
   }
   debug_edges_ = buildDebugEdges(*nav_mesh_);
   captureDetourDebugLines(*nav_mesh_, debug_draw_lines_);
-}
-
-void NavMesh::debugDraw(rendering::GraphicsDevice& graphics,
-                        const math::Color& color,
-                        bool depth_test) const {
-  if (nav_mesh_ == nullptr) {
-    return;
-  }
-
-  for (size_t i = 1; i < debug_edges_.size(); i += 2) {
-    graphics.drawLine(debug_edges_[i - 1], debug_edges_[i], color, depth_test, 1.0f);
-  }
-}
-
-void NavMesh::debugDraw(rendering::GraphicsDevice& graphics,
-                        NavMeshDebugDrawMode mode,
-                        bool depth_test,
-                        const math::Color& fallback_color) const {
-  if (mode == NavMeshDebugDrawMode::NavMeshEdges || !hasDebugDrawMode(mode)) {
-    debugDraw(graphics, fallback_color, depth_test);
-    return;
-  }
-
-  for (const NavDebugLine& line : debug_draw_lines_[debugModeIndex(mode)]) {
-    graphics.drawLine(line.start,
-                      line.end,
-                      line.color,
-                      depth_test,
-                      std::max(1.0f, line.thickness));
-  }
-}
-
-void NavMesh::debugDrawPolygons(rendering::GraphicsDevice& graphics,
-                                const std::vector<uint64_t>& poly_refs,
-                                const math::Color& color,
-                                bool depth_test) const {
-  if (nav_mesh_ == nullptr) {
-    return;
-  }
-  for (uint64_t poly_ref : poly_refs) {
-    if (poly_ref == 0) {
-      continue;
-    }
-    const dtMeshTile* tile = nullptr;
-    const dtPoly* poly = nullptr;
-    if (failed(nav_mesh_->getTileAndPolyByRef(static_cast<dtPolyRef>(poly_ref), &tile, &poly)) ||
-        tile == nullptr ||
-        poly == nullptr ||
-        poly->vertCount == 0) {
-      continue;
-    }
-
-    math::Vec3 center{};
-    if (!polyCenter(poly_ref, center)) {
-      continue;
-    }
-    center.y += 0.06f;
-    for (int i = 0; i < static_cast<int>(poly->vertCount); ++i) {
-      const int next = (i + 1) % static_cast<int>(poly->vertCount);
-      const float* a = &tile->verts[poly->verts[i] * 3];
-      const float* b = &tile->verts[poly->verts[next] * 3];
-      const math::Vec3 va{a[0], a[1] + 0.06f, a[2]};
-      const math::Vec3 vb{b[0], b[1] + 0.06f, b[2]};
-      graphics.drawLine(va, vb, color, depth_test, 2.0f);
-      graphics.drawLine(center, va, color, depth_test, 1.0f);
-    }
-  }
 }
 
 }  // namespace karma::navigation

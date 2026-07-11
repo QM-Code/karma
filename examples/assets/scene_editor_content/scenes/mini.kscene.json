@@ -1,0 +1,346 @@
+{
+  "asset_packages": [],
+  "bakes": [
+    {
+      "enabled": true,
+      "id": "bake_ef5a65c9ba0f0839241358af7467a1b1",
+      "lighting": {
+        "ao_max_distance": 10.0,
+        "dilation": 8,
+        "directional": true,
+        "enabled": true,
+        "generate_uv1": true,
+        "max_atlas_size": 2048,
+        "padding": 4,
+        "sky_samples": 64,
+        "texels_per_unit": 16.0
+      },
+      "load_at_runtime": true,
+      "nav_cache": [],
+      "navigation": {
+        "enabled": true
+      },
+      "path": "bakes/bake_ef5a65c9ba0f0839241358af7467a1b1.kbake.json",
+      "static": []
+    }
+  ],
+  "cameras": [],
+  "entities": [
+    {
+      "components": {},
+      "id": "scene_root",
+      "name": "Scene",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "components": {},
+      "id": "sun_entity",
+      "name": "Sun",
+      "parent": "scene_root",
+      "transform": {
+        "position": [
+          0.0,
+          50.0,
+          0.0
+        ],
+        "rotation": [
+          -0.7382549047470093,
+          -0.2214764952659607,
+          0.0,
+          0.6371247172355652
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "components": {},
+      "id": "point_light_entity",
+      "name": "Movable Point Light",
+      "parent": "scene_root",
+      "transform": {
+        "position": [
+          -4.346299648284912,
+          1.912351131439209,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "components": {},
+      "id": "environment_entity",
+      "name": "Environment",
+      "parent": "scene_root",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "components": {
+        "TerrainComponent": {
+          "base_patch_size": 16,
+          "color_image": "",
+          "color_pattern": "color_{x}_{z}.png",
+          "control_image": "scenes/mini.scene-assets/terrain_b7fd9d681412e3ae4a415c0b2a10da2d-control-f60757e3cf17ff72.tga",
+          "control_pattern": "control_{x}_{z}.png",
+          "cpu_fallback_enabled": true,
+          "data_maps": [],
+          "flip_y": false,
+          "heatmap_image": "",
+          "height_format": "r32_float",
+          "height_image": "scenes/mini.scene-assets/terrain_b7fd9d681412e3ae4a415c0b2a10da2d-height-fb3e35435323c60d.r32",
+          "height_offset": -32.0,
+          "height_pattern": "height_{x}_{z}.png",
+          "height_scale": 128.0,
+          "height_value_max": 1.0,
+          "height_value_min": 0.0,
+          "layer": 0,
+          "material_layers": [
+            {
+              "albedo_image": "",
+              "enabled": false,
+              "material_key": "",
+              "name": "Layer 1",
+              "normal_image": "",
+              "roughness_image": "",
+              "uv_scale": 16.0
+            },
+            {
+              "albedo_image": "",
+              "enabled": false,
+              "material_key": "",
+              "name": "Layer 2",
+              "normal_image": "",
+              "roughness_image": "",
+              "uv_scale": 16.0
+            },
+            {
+              "albedo_image": "",
+              "enabled": false,
+              "material_key": "",
+              "name": "Layer 3",
+              "normal_image": "",
+              "roughness_image": "",
+              "uv_scale": 16.0
+            },
+            {
+              "albedo_image": "",
+              "enabled": false,
+              "material_key": "",
+              "name": "Layer 4",
+              "normal_image": "",
+              "roughness_image": "",
+              "uv_scale": 16.0
+            }
+          ],
+          "origin_tile_x": 0,
+          "origin_tile_z": 0,
+          "raw_height": 513,
+          "raw_little_endian": true,
+          "raw_width": 513,
+          "source": "single_image",
+          "source_revision": 1,
+          "target_tessellated_edge_size": 12.0,
+          "terrain_size": 512.0,
+          "tessellation_factor": 16.0,
+          "tile_directory": "",
+          "tile_index_base": 0,
+          "tile_resolution": 513,
+          "tile_size": 1000.0,
+          "view_distance": 1024.0,
+          "visible": true
+        }
+      },
+      "id": "terrain_b7fd9d681412e3ae4a415c0b2a10da2d",
+      "name": "Terrain",
+      "parent": "scene_root",
+      "transform": {
+        "position": [
+          -256.0,
+          0.0,
+          -256.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "environment": {
+    "draw_skybox": false,
+    "enabled": true,
+    "entity": "environment_entity",
+    "id": "environment",
+    "intensity": 0.3499999940395355
+  },
+  "gltf_scenes": [],
+  "lights": [
+    {
+      "bake_mode": "realtime",
+      "casts_shadows": true,
+      "color": [
+        1.0,
+        0.9599999785423279,
+        0.8799999952316284,
+        1.0
+      ],
+      "entity": "sun_entity",
+      "id": "sun",
+      "inner_cone_degrees": 20.0,
+      "intensity": 1.2000000476837158,
+      "outer_cone_degrees": 35.0,
+      "range": 10.0,
+      "shadow_extent": 250.0,
+      "type": "directional"
+    },
+    {
+      "bake_mode": "realtime",
+      "casts_shadows": false,
+      "color": [
+        0.3499999940395355,
+        0.6499999761581421,
+        1.0,
+        1.0
+      ],
+      "entity": "point_light_entity",
+      "id": "movable_point_light",
+      "inner_cone_degrees": 20.0,
+      "intensity": 20.0,
+      "outer_cone_degrees": 35.0,
+      "range": 12.0,
+      "shadow_extent": 30.0,
+      "type": "point"
+    }
+  ],
+  "name": "Mini Scene Editor Example",
+  "prefab_instances": [
+    {
+      "id": "warm_light_rig_instance",
+      "parent_entity": "scene_root",
+      "prefab": "prefabs/warm_light_rig/prefab.json",
+      "transform": {
+        "position": [
+          5.0,
+          1.2119007110595703,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "id": "grass_lod_instance",
+      "parent_entity": "scene_root",
+      "prefab": "prefabs/grass_lod/prefab.json",
+      "transform": {
+        "position": [
+          -2.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "id": "pine_tree_lod_instance",
+      "parent_entity": "scene_root",
+      "prefab": "prefabs/pine_tree_lod/prefab.json",
+      "transform": {
+        "position": [
+          2.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "variables": {}
+    }
+  ],
+  "static": [],
+  "version": 1
+}

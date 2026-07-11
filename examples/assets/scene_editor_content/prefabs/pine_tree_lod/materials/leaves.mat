@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "pipeline": {
+    "name": "foliage"
+  },
+  "surface": {
+    "base_color": [1.0, 1.0, 1.0, 1.0],
+    "metallic": 0.0,
+    "roughness": 0.82
+  },
+  "render_state": {
+    "alpha_mode": "masked",
+    "alpha_cutoff": 0.3,
+    "alpha_softness": 0.12,
+    "alpha_dither": true,
+    "alpha_to_coverage": true,
+    "depth_write": true,
+    "double_sided": true
+  },
+  "textures": {
+    "base_color": "scene_editor/pine_tree_lod/leaf_albedo"
+  }
+}

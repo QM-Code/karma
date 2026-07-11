@@ -1,5 +1,6 @@
 #include "scene_document_parser.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -25,7 +26,8 @@ bool isPortableRelativePath(std::string_view value) {
   if (value.empty()) {
     return false;
   }
-  if (value.find('\\') != std::string_view::npos) {
+  if (value.find('\\') != std::string_view::npos ||
+      value.find('\0') != std::string_view::npos) {
     return false;
   }
   if (value.front() == '/') {
@@ -133,6 +135,37 @@ bool readFloatField(const Json& object,
     return fail(result, "scene field '" + std::string(field) + "' must be finite");
   }
   out = static_cast<float>(value);
+  return true;
+}
+
+bool readUint32Field(const Json& object,
+                     std::string_view field,
+                     uint32_t& out,
+                     SceneLoadResult& result) {
+  const auto it = object.find(std::string(field));
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_number_unsigned() && !it->is_number_integer()) {
+    return fail(result, "scene field '" + std::string(field) +
+                            "' must be a non-negative integer");
+  }
+  uint64_t value = 0u;
+  if (it->is_number_unsigned()) {
+    value = it->get<uint64_t>();
+  } else {
+    const int64_t signed_value = it->get<int64_t>();
+    if (signed_value < 0) {
+      return fail(result, "scene field '" + std::string(field) +
+                              "' is outside the uint32 range");
+    }
+    value = static_cast<uint64_t>(signed_value);
+  }
+  if (value > std::numeric_limits<uint32_t>::max()) {
+    return fail(result, "scene field '" + std::string(field) +
+                            "' is outside the uint32 range");
+  }
+  out = static_cast<uint32_t>(value);
   return true;
 }
 
@@ -303,6 +336,54 @@ bool readColorField(const Json& object,
   return true;
 }
 
+bool readCameraAntiAliasing(const Json& camera_json,
+                            rendering::AntiAliasingSettings& out,
+                            SceneLoadResult& result) {
+  const auto it = camera_json.find("anti_aliasing");
+  if (it == camera_json.end()) return true;
+  if (!it->is_object()) {
+    return fail(result, "scene camera anti_aliasing must be an object");
+  }
+  std::string mode;
+  if (!readStringField(*it, "mode", mode, result) ||
+      !readUint32Field(*it, "msaa_samples", out.msaa_samples, result) ||
+      !readFloatField(*it, "ssaa_scale", out.ssaa_scale, result)) {
+    return false;
+  }
+  if (mode.empty() || mode == "none") {
+    out.mode = rendering::AntiAliasingMode::None;
+  } else if (mode == "msaa") {
+    out.mode = rendering::AntiAliasingMode::MSAA;
+  } else if (mode == "ssaa") {
+    out.mode = rendering::AntiAliasingMode::SSAA;
+  } else {
+    return fail(result,
+                "scene camera anti_aliasing mode must be none, msaa, or ssaa");
+  }
+  return true;
+}
+
+bool readCameraShaderParams(
+    const Json& camera_json,
+    std::unordered_map<std::string, math::Color>& out,
+    SceneLoadResult& result) {
+  const auto it = camera_json.find("shader_user_params");
+  if (it == camera_json.end()) return true;
+  if (!it->is_object()) {
+    return fail(result, "scene camera shader_user_params must be an object");
+  }
+  for (auto parameter = it->begin(); parameter != it->end(); ++parameter) {
+    math::Color color{};
+    if (parameter.key().empty() || !readColorValue(parameter.value(), color)) {
+      return fail(result,
+                  "scene camera shader_user_params entries require a non-empty "
+                  "name and finite color array");
+    }
+    out[parameter.key()] = color;
+  }
+  return true;
+}
+
 bool readTransform(const Json& object, SceneTransform& out, SceneLoadResult& result) {
   const Json* transform = &object;
   const auto transform_it = object.find("transform");
@@ -453,6 +534,27 @@ bool readPrefabInstances(const Json& root,
       }
       instance.variables = *variables_it;
     }
+    const auto static_it = instance_json.find("static");
+    if (static_it != instance_json.end() && !static_it->is_null()) {
+      if (!static_it->is_object()) {
+        return fail(result,
+                    "scene prefab instance static membership must be an object");
+      }
+      components::StaticComponent membership{};
+      if (!readBoolField(*static_it, "enabled", membership.enabled, result) ||
+          !readBoolField(*static_it,
+                         "include_descendants",
+                         membership.include_descendants,
+                         result) ||
+          !readUint32Field(*static_it, "flags", membership.flags, result)) {
+        return false;
+      }
+      if (!components::validStaticComponentFlags(membership.flags)) {
+        return fail(result,
+                    "scene prefab instance static flags contain unsupported bits");
+      }
+      instance.static_component = membership;
+    }
     if (!registerId(all_ids, "prefab instance", instance.id, result)) {
       return false;
     }
@@ -526,12 +628,26 @@ bool readCameras(const Json& root,
         !readFloatField(camera_json, "ortho_bottom", camera.component.ortho_bottom, result) ||
         !readBoolField(camera_json, "primary", camera.component.is_primary, result) ||
         !readBoolField(camera_json, "is_primary", camera.component.is_primary, result) ||
+        !readBoolField(camera_json,
+                       "render_to_texture",
+                       camera.component.render_to_texture,
+                       result) ||
+        !readStringField(camera_json,
+                         "render_target_key",
+                         camera.component.render_target_key,
+                         result) ||
         !readStringField(camera_json,
                          "frame_graph_key",
                          camera.component.frame_graph_key,
                          result) ||
         !readRelativePathField(camera_json, "shader_override_vertex_path", vertex_path, result) ||
-        !readRelativePathField(camera_json, "shader_override_fragment_path", fragment_path, result)) {
+        !readRelativePathField(camera_json, "shader_override_fragment_path", fragment_path, result) ||
+        !readCameraAntiAliasing(camera_json,
+                                camera.component.anti_aliasing,
+                                result) ||
+        !readCameraShaderParams(camera_json,
+                                camera.component.shader_user_params,
+                                result)) {
       return false;
     }
     camera.component.shader_override_vertex_path = std::move(vertex_path);
@@ -562,6 +678,25 @@ bool readLightType(std::string_view value,
   return fail(result, "scene light type must be directional, point, or spot");
 }
 
+bool readLightBakeMode(std::string_view value,
+                       components::LightComponent::BakeMode& out,
+                       SceneLoadResult& result) {
+  if (value == "realtime") {
+    out = components::LightComponent::BakeMode::Realtime;
+    return true;
+  }
+  if (value == "mixed") {
+    out = components::LightComponent::BakeMode::Mixed;
+    return true;
+  }
+  if (value == "baked") {
+    out = components::LightComponent::BakeMode::Baked;
+    return true;
+  }
+  return fail(result,
+              "scene light bake_mode must be realtime, mixed, or baked");
+}
+
 bool readLights(const Json& root,
                 std::unordered_set<std::string>& all_ids,
                 std::vector<SceneLight>& out,
@@ -579,9 +714,11 @@ bool readLights(const Json& root,
     }
     SceneLight light{};
     std::string type;
+    std::string bake_mode;
     if (!readStringField(light_json, "id", light.id, result, true) ||
         !readStringAliasField(light_json, {"entity", "entity_id"}, light.entity_id, result, true) ||
         !readStringField(light_json, "type", type, result) ||
+        !readStringField(light_json, "bake_mode", bake_mode, result) ||
         !readColorField(light_json, "color", light.component.color, result) ||
         !readFloatField(light_json, "intensity", light.component.intensity, result) ||
         !readFloatField(light_json, "range", light.component.range, result) ||
@@ -592,6 +729,10 @@ bool readLights(const Json& root,
       return false;
     }
     if (!type.empty() && !readLightType(type, light.component.type, result)) {
+      return false;
+    }
+    if (!bake_mode.empty() &&
+        !readLightBakeMode(bake_mode, light.component.bake_mode, result)) {
       return false;
     }
     if (!registerId(all_ids, "light", light.id, result)) {
@@ -718,6 +859,26 @@ bool readBakedLighting(const Json& object,
   return true;
 }
 
+bool readLightmapBakeSettings(const Json& object,
+                              SceneLightmapBakeSettings& out,
+                              SceneLoadResult& result) {
+  return readBoolField(object, "enabled", out.enabled, result) &&
+         readBoolField(object, "generate_uv1", out.generate_uv1, result) &&
+         readFloatField(object, "texels_per_unit", out.texels_per_unit, result) &&
+         readUint32Field(object, "max_atlas_size", out.max_atlas_size, result) &&
+         readUint32Field(object, "padding", out.padding, result) &&
+         readUint32Field(object, "dilation", out.dilation, result) &&
+         readUint32Field(object, "sky_samples", out.sky_samples, result) &&
+         readFloatField(object, "ao_max_distance", out.ao_max_distance, result) &&
+         readBoolField(object, "directional", out.directional, result);
+}
+
+bool readNavigationBakeSettings(const Json& object,
+                                SceneNavigationBakeSettings& out,
+                                SceneLoadResult& result) {
+  return readBoolField(object, "enabled", out.enabled, result);
+}
+
 bool readBakes(const Json& root,
                std::unordered_set<std::string>& all_ids,
                std::vector<SceneBakeDesc>& out,
@@ -737,6 +898,11 @@ bool readBakes(const Json& root,
     std::filesystem::path nav_cache_path;
     if (!readStringField(bake_json, "id", bake.id, result, true) ||
         !readRelativePathField(bake_json, "path", bake.path, result) ||
+        !readBoolField(bake_json, "enabled", bake.enabled, result) ||
+        !readBoolField(bake_json,
+                       "load_at_runtime",
+                       bake.load_at_runtime,
+                       result) ||
         !readStringArray(bake_json, "static", bake.static_component_ids, result) ||
         !readStringArray(bake_json, "static_components", bake.static_component_ids, result) ||
         !readRelativePathField(bake_json,
@@ -746,6 +912,29 @@ bool readBakes(const Json& root,
         !readRelativePathArray(bake_json, "nav_cache", bake.nav_cache_paths, result) ||
         !readRelativePathArray(bake_json, "nav_caches", bake.nav_cache_paths, result)) {
       return false;
+    }
+    const auto settings_lighting_it = bake_json.find("lighting");
+    if (settings_lighting_it != bake_json.end()) {
+      if (!settings_lighting_it->is_object()) {
+        return fail(result, "scene bake lighting settings must be an object");
+      }
+      if (!readLightmapBakeSettings(*settings_lighting_it,
+                                    bake.lighting,
+                                    result)) {
+        return false;
+      }
+    }
+    const auto settings_navigation_it = bake_json.find("navigation");
+    if (settings_navigation_it != bake_json.end()) {
+      if (!settings_navigation_it->is_object()) {
+        return fail(result,
+                    "scene bake navigation settings must be an object");
+      }
+      if (!readNavigationBakeSettings(*settings_navigation_it,
+                                      bake.navigation,
+                                      result)) {
+        return false;
+      }
     }
     if (!nav_cache_path.empty()) {
       bake.nav_cache_paths.push_back(std::move(nav_cache_path));

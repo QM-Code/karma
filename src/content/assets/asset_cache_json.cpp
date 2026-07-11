@@ -463,8 +463,12 @@ Json materialDescJson(const rendering::MaterialDesc& material) {
       {"metallic", floatJson(material.metallic)},
       {"roughness", floatJson(material.roughness)},
       {"normal_scale", floatJson(material.normal_scale)},
+      {"normal_map_convention",
+       static_cast<uint32_t>(material.normal_map_convention)},
       {"occlusion_strength", floatJson(material.occlusion_strength)},
       {"emissive_strength", floatJson(material.emissive_strength)},
+      {"specular_factor", floatJson(material.specular_factor)},
+      {"specular_color", colorJson(material.specular_color)},
       {"clearcoat", floatJson(material.clearcoat)},
       {"clearcoat_roughness", floatJson(material.clearcoat_roughness)},
       {"sheen_color", colorJson(material.sheen_color)},
@@ -509,6 +513,8 @@ bool readMaterialDescJson(const Json& json, rendering::MaterialDesc& material) {
       !read_float_field("normal_scale", parsed.normal_scale) ||
       !read_float_field("occlusion_strength", parsed.occlusion_strength) ||
       !read_float_field("emissive_strength", parsed.emissive_strength) ||
+      !read_float_field("specular_factor", parsed.specular_factor) ||
+      !read_color_field("specular_color", parsed.specular_color) ||
       !read_float_field("clearcoat", parsed.clearcoat) ||
       !read_float_field("clearcoat_roughness", parsed.clearcoat_roughness) ||
       !read_color_field("sheen_color", parsed.sheen_color) ||
@@ -521,6 +527,16 @@ bool readMaterialDescJson(const Json& json, rendering::MaterialDesc& material) {
       !read_color_field("attenuation_color", parsed.attenuation_color)) {
     return false;
   }
+  const uint32_t normal_map_convention = json.value(
+      "normal_map_convention",
+      static_cast<uint32_t>(parsed.normal_map_convention));
+  if (normal_map_convention >
+      static_cast<uint32_t>(rendering::MaterialDesc::NormalMapConvention::DirectX)) {
+    return false;
+  }
+  parsed.normal_map_convention =
+      static_cast<rendering::MaterialDesc::NormalMapConvention>(
+          normal_map_convention);
   parsed.analytic_sphere_normals = json.value("analytic_sphere_normals", parsed.analytic_sphere_normals);
   parsed.unlit = json.value("unlit", parsed.unlit);
   parsed.alpha_mode = static_cast<rendering::MaterialDesc::AlphaMode>(
@@ -730,12 +746,13 @@ Json importedTexcoordRowsJson(
 bool readImportedTexcoordRowsJson(
     const Json& json,
     std::array<glm::vec4, rendering::kImportedMaterialTextureCoordSlotCount>& rows) {
-  if (!json.is_array() ||
-      json.size() != rendering::kImportedMaterialTextureCoordSlotCount) {
+  constexpr std::size_t kLegacyTextureCoordSlotCount = 12u;
+  if (!json.is_array() || json.size() < kLegacyTextureCoordSlotCount ||
+      json.size() > rendering::kImportedMaterialTextureCoordSlotCount) {
     return false;
   }
-  std::array<glm::vec4, rendering::kImportedMaterialTextureCoordSlotCount> parsed{};
-  for (std::size_t i = 0u; i < parsed.size(); ++i) {
+  auto parsed = rows;
+  for (std::size_t i = 0u; i < json.size(); ++i) {
     if (!readVec4Json(json[i], parsed[i])) {
       return false;
     }

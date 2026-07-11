@@ -16,6 +16,8 @@
 #include "karma/audio.h"
 #include "karma/app.h"
 #include "karma/visual.h"
+#include "karma/foliage.h"
 #include "karma/network.h"
 #include "karma/prefabs.h"
+#include "karma/scene_authoring.h"
 #include "karma/scenes.h"

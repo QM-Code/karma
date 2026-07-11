@@ -258,7 +258,8 @@ class DiligentBackend final : public Backend {
   void refreshSubmeshesFromMeshData(MeshRecord& record);
 
   struct MaterialRecord {
-    static constexpr size_t kTextureCoordSlotCount = 12;
+    static constexpr size_t kTextureCoordSlotCount =
+        rendering::kImportedMaterialTextureCoordSlotCount;
 
     rendering::MaterialPipelineDesc pipeline;
     rendering::MaterialDesc desc;
@@ -269,6 +270,13 @@ class DiligentBackend final : public Backend {
     float normal_scale = 1.0f;
     float occlusion_strength = 1.0f;
     float emissive_strength = 1.0f;
+    float specular_factor = 1.0f;
+    glm::vec3 specular_color_factor{1.0f, 1.0f, 1.0f};
+    bool lightmap_enabled = false;
+    float lightmap_intensity = 1.0f;
+    glm::vec4 lightmap_uv_scale_offset{1.0f, 1.0f, 0.0f, 0.0f};
+    uint32_t lightmap_mixed_mask_low = 0u;
+    uint32_t lightmap_mixed_mask_high = 0u;
     float clearcoat_factor = 0.0f;
     float clearcoat_roughness_factor = 0.0f;
     glm::vec3 sheen_color_factor{0.0f, 0.0f, 0.0f};
@@ -325,6 +333,10 @@ class DiligentBackend final : public Backend {
     Diligent::RefCntAutoPtr<Diligent::ITextureView> sheen_roughness_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> transmission_srv;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> thickness_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> specular_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> specular_color_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> lightmap_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> lightmap_direction_srv;
     std::array<glm::vec4, kTextureCoordSlotCount> texcoord_row0{};
     std::array<glm::vec4, kTextureCoordSlotCount> texcoord_row1{};
     static constexpr size_t kForwardSrbSlotCount = 14u;
@@ -343,6 +355,8 @@ class DiligentBackend final : public Backend {
         layout_srbs;
     std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>, kForwardSrbSlotCount>
         layout_custom_srbs;
+    std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>, kForwardSrbSlotCount>
+        editor_wireframe_srbs;
   };
 
   struct ImportedMaterialTemplateCacheEntry {
@@ -485,12 +499,21 @@ class DiligentBackend final : public Backend {
     std::string name;
     float uv_scale = 16.0f;
     bool enabled = false;
+    rendering::MaterialDesc material{};
     Diligent::RefCntAutoPtr<Diligent::ITexture> albedo_texture;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> albedo_srv;
     Diligent::RefCntAutoPtr<Diligent::ITexture> normal_texture;
     Diligent::RefCntAutoPtr<Diligent::ITextureView> normal_srv;
-    Diligent::RefCntAutoPtr<Diligent::ITexture> roughness_texture;
-    Diligent::RefCntAutoPtr<Diligent::ITextureView> roughness_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> metallic_roughness_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> metallic_roughness_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> occlusion_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> occlusion_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> emissive_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> emissive_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> specular_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> specular_srv;
+    Diligent::RefCntAutoPtr<Diligent::ITexture> specular_color_texture;
+    Diligent::RefCntAutoPtr<Diligent::ITextureView> specular_color_srv;
   };
 
   struct TerrainRecord {
@@ -720,11 +743,14 @@ class DiligentBackend final : public Backend {
   void ensureParticleBeamResources();
   TerrainPipelineSet* ensureTerrainResources(Diligent::TEXTURE_FORMAT rtv_format,
                                              Diligent::TEXTURE_FORMAT dsv_format);
+  void bindTerrainFrameResourcesToSrb(
+      Diligent::IShaderResourceBinding* srb) const;
   void ensureParticleResources();
   Diligent::TEXTURE_FORMAT sceneColorFormat() const noexcept {
     return scene_color_format_;
   }
   uint32_t activeRasterSampleCount() const;
+  bool editorWireframeViewEnabled() const;
   void setActiveRasterSampleCount(uint32_t sample_count);
   void releaseRasterSampleDependentResources();
   uint32_t effectiveMsaaSampleCount(Diligent::TEXTURE_FORMAT color_format,
@@ -987,7 +1013,7 @@ class DiligentBackend final : public Backend {
   bool shader_cache_enabled_ = true;
   bool pipeline_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 30;
+  std::uint32_t shader_cache_version_ = 34;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_vs_;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_ps_;
@@ -1000,6 +1026,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> additive_double_sided_pipeline_state_;
   std::array<Diligent::RefCntAutoPtr<Diligent::IPipelineState>, kForwardPipelineVariantCount>
       compact_forward_pipeline_states_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IPipelineState>, kForwardSrbSlotCount>
+      editor_wireframe_forward_pipeline_states_;
   std::unordered_map<std::string, CustomForwardPipeline> custom_forward_pipelines_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> camera_override_pipeline_state_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> camera_override_srb_;
@@ -1022,6 +1050,9 @@ class DiligentBackend final : public Backend {
   std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>,
              kForwardPipelineVariantCount>
       compact_default_material_srbs_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>,
+             kForwardSrbSlotCount>
+      editor_wireframe_default_material_srbs_;
   Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> shadow_srb_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> constants_;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> deformation_constants_;
@@ -1395,6 +1426,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_brdf_lut_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_occlusion_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_emissive_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> default_lightmap_tex_;
+  Diligent::RefCntAutoPtr<Diligent::ITexture> default_lightmap_direction_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> default_env_tex_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_base_color_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_normal_;
@@ -1402,6 +1435,8 @@ class DiligentBackend final : public Backend {
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_brdf_lut_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_occlusion_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_emissive_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> default_lightmap_;
+  Diligent::RefCntAutoPtr<Diligent::ITextureView> default_lightmap_direction_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> default_env_;
   Diligent::RefCntAutoPtr<Diligent::ITextureView> env_srv_;
   Diligent::RefCntAutoPtr<Diligent::ITexture> env_equirect_tex_;
@@ -1457,6 +1492,8 @@ class DiligentBackend final : public Backend {
   std::vector<LineVertex> line_vertices_no_depth_;
 
   rendering::CameraData camera_{};
+  uint32_t editor_view_mode_ = 0u;
+  bool warned_editor_wireframe_unsupported_ = false;
   bool camera_active_ = true;
   float clear_color_[4] = {0.2f, 0.6f, 1.0f, 1.0f};
   rendering::DirectionalLightData directional_light_{};
@@ -1492,7 +1529,9 @@ class DiligentBackend final : public Backend {
   float lighting_exposure_ = 1.0f;
   rendering::PostProcessSettings post_process_settings_{};
   int point_shadow_map_size_ = 1024;
-  int point_shadow_max_lights_ = 2;
+  // Shared point + spot cubemap-shadow budget. Spots use the same six-face
+  // representation; their cone attenuation masks samples outside the cone.
+  int point_shadow_max_lights_ = 4;
   size_t ui_vb_size_ = 0;
   size_t ui_ib_size_ = 0;
   size_t instance_vb_capacity_ = 0;

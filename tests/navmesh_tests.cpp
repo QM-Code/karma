@@ -12,6 +12,7 @@ int main() {
   testWorldSurfaceCollectionUsesNavMeshSurfaceArea();
   testWorldSurfaceCollectionResolvesMeshAssetKey();
   testWorldSurfaceCollectionHonorsLayerMasks();
+  testInstancedWorldSurfaceCollectionUsesActiveLayoutAndStaticFlags();
   testAreaFlagsFilterQueries();
   testConvexVolumeMarksArea();
   testPartitionModesAndTiledSnapshot();
@@ -30,6 +31,8 @@ int main() {
   testNavigationSystemTileCacheObstacleComponent();
   testNavigationSystemNavMeshCacheHitAndInvalidation();
   testNavigationSystemTileCacheCacheHitAndObstacleResync();
+  testSceneRuntimeLoadsBakedNavigationAndFallsBack();
+  testStaticMembershipInheritanceControlsNavigation();
   testNavigationSystemBuildDebugDrawBypassesCacheOnce();
   testNavigationSystemCrowdAgentComponent();
   testCrowdAgentCharacterControllerVelocityMode();

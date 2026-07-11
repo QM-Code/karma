@@ -13,56 +13,17 @@
 #include <DetourStatus.h>
 
 #include "karma/math.h"
-#include "karma/rendering.h"
 #include "detail/detour_utils.h"
 #include "detail/nav_mesh_access.h"
 
 namespace karma::navigation {
 namespace {
 
-constexpr float kPi = 3.14159265358979323846f;
-
 using detail::applyDetourFilter;
 using detail::failed;
 using detail::mapStraightPathFlags;
 using detail::ptr;
 using detail::toVec3;
-
-void drawCircle(rendering::GraphicsDevice& graphics,
-                const math::Vec3& center,
-                float radius,
-                const math::Color& color,
-                bool depth_test) {
-  constexpr int kSegments = 28;
-  math::Vec3 prev{center.x + radius, center.y, center.z};
-  for (int i = 1; i <= kSegments; ++i) {
-    const float angle = (static_cast<float>(i) / static_cast<float>(kSegments)) * kPi * 2.0f;
-    const math::Vec3 next{
-        center.x + std::cos(angle) * radius,
-        center.y,
-        center.z + std::sin(angle) * radius,
-    };
-    graphics.drawLine(prev, next, color, depth_test, 1.0f);
-    prev = next;
-  }
-}
-
-void drawCross(rendering::GraphicsDevice& graphics,
-               const math::Vec3& center,
-               float size,
-               const math::Color& color,
-               bool depth_test) {
-  graphics.drawLine({center.x - size, center.y, center.z},
-                    {center.x + size, center.y, center.z},
-                    color,
-                    depth_test,
-                    1.0f);
-  graphics.drawLine({center.x, center.y, center.z - size},
-                    {center.x, center.y, center.z + size},
-                    color,
-                    depth_test,
-                    1.0f);
-}
 
 void setResult(NavCrowdBuildResult* result,
                NavStatus status,
@@ -511,31 +472,6 @@ bool NavCrowd::setObstacleAvoidanceParams(uint8_t slot,
 const NavCrowdBuildResult& NavCrowd::lastBuildResult() const {
   static const NavCrowdBuildResult empty{};
   return impl_ != nullptr ? impl_->last_result : empty;
-}
-
-void NavCrowd::debugDraw(rendering::GraphicsDevice& graphics,
-                         const math::Color& agent_color,
-                         const math::Color& velocity_color,
-                         bool depth_test) const {
-  for (const NavCrowdAgentInfo& agent : agents()) {
-    const float radius = std::max(agent.radius, 0.1f);
-    drawCircle(graphics, agent.position, radius, agent_color, depth_test);
-    drawCircle(graphics,
-               {agent.position.x, agent.position.y + std::max(agent.height, 0.0f), agent.position.z},
-               radius,
-               agent_color,
-               depth_test);
-
-    const math::Vec3 velocity_end =
-        math::add(agent.position, math::scale(agent.velocity, 0.35f));
-    graphics.drawLine(agent.position, velocity_end, velocity_color, depth_test, 1.5f);
-
-    if (agent.target_state != NavCrowdTargetState::None &&
-        agent.target_state != NavCrowdTargetState::Failed) {
-      drawCross(graphics, agent.target_position, radius * 1.4f, velocity_color, depth_test);
-      graphics.drawLine(agent.position, agent.target_position, velocity_color, depth_test, 1.0f);
-    }
-  }
 }
 
 }  // namespace karma::navigation

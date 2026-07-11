@@ -4,6 +4,7 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include <string>
 #include <utility>
 
 namespace karma::assets {
@@ -75,6 +76,27 @@ std::vector<world::MeshData> importMeshes(const std::filesystem::path& path) {
       data.indices.push_back(face.mIndices[0]);
       data.indices.push_back(face.mIndices[1]);
       data.indices.push_back(face.mIndices[2]);
+    }
+
+    if (!data.indices.empty()) {
+      std::string material_name = "Material " + std::to_string(mesh->mMaterialIndex);
+      if (mesh->mMaterialIndex < scene->mNumMaterials) {
+        aiString source_name;
+        if (scene->mMaterials[mesh->mMaterialIndex] != nullptr &&
+            scene->mMaterials[mesh->mMaterialIndex]->Get(AI_MATKEY_NAME, source_name) ==
+                AI_SUCCESS &&
+            source_name.length > 0u) {
+          material_name = source_name.C_Str();
+        }
+      }
+      data.material_slots.push_back(world::MeshMaterialSlot{
+          .name = std::move(material_name),
+      });
+      data.submeshes.push_back(world::MeshSubmesh{
+          .index_offset = 0u,
+          .index_count = static_cast<uint32_t>(data.indices.size()),
+          .material_slot = 0u,
+      });
     }
 
     meshes.push_back(std::move(data));

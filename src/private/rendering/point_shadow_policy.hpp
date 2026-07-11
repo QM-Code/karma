@@ -5,7 +5,9 @@
 namespace karma::rendering::detail {
 
 inline bool isPointShadowAllocationCandidate(const LightData& light) noexcept {
-  return light.type == LightType::Point && light.casts_shadows &&
+  const bool local_cubemap_light =
+      light.type == LightType::Point || light.type == LightType::Spot;
+  return local_cubemap_light && light.casts_shadows &&
          light.intensity > 0.0f && light.range > 0.0f;
 }
 

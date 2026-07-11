@@ -2,7 +2,10 @@
 
 #include "karma/assets.h"
 #include "karma/assets.h"
+#include "karma/prefabs.h"
+#include "karma/scenes.h"
 
+#include <algorithm>
 #include <fstream>
 
 namespace karma::tests::navigation {
@@ -67,6 +70,287 @@ std::vector<std::filesystem::path> navCacheFiles(const std::filesystem::path& ro
 }
 
 }  // namespace
+
+void testSceneRuntimeLoadsBakedNavigationAndFallsBack() {
+  static const bool serializer_registered = [] {
+    karma::prefabs::ensureBuiltinComponentSerializers();
+    return karma::prefabs::componentSerializerRegistry().registerSerializer(
+        karma::prefabs::ComponentSerializer{
+            .type_name = "SceneBakeTestNavOwner",
+            .has = [](const karma::world::World& world,
+                      karma::world::Entity entity) {
+              return world.has<karma::components::NavMeshComponent>(entity);
+            },
+            .serialize = [](const karma::world::World&,
+                            karma::world::Entity) {
+              return nlohmann::json::object();
+            },
+            .deserialize = [](karma::world::World& world,
+                              karma::world::Entity entity,
+                              const nlohmann::json& json) {
+              if (!json.is_object()) {
+                return false;
+              }
+              karma::components::NavMeshComponent component{};
+              component.build_on_start = false;
+              component.rebuild_requested = false;
+              world.add(entity, std::move(component));
+              return true;
+            },
+        });
+  }();
+  assert(serializer_registered);
+
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() /
+      ("karma-scene-baked-nav-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  const std::filesystem::path artifact = root / "bakes/plane.knav";
+  const std::filesystem::path manifest = root / "bakes/main.kbake.json";
+  std::filesystem::create_directories(manifest.parent_path());
+
+  karma::navigation::NavMesh source;
+  karma::navigation::NavMeshBuildConfig config{};
+  config.agent_radius = 0.2f;
+  assert(source.build(makePlaneGeometry(), config));
+  const auto source_snapshot = source.snapshot();
+  assert(source_snapshot != nullptr && source_snapshot->valid());
+  assert(karma::assets::saveNavMeshSnapshot(artifact, *source_snapshot));
+
+  auto write_manifest = [&](const nlohmann::json& json) {
+    std::ofstream stream(manifest, std::ios::trunc);
+    stream << json.dump(2);
+    assert(static_cast<bool>(stream));
+  };
+
+  karma::scenes::SceneDocument document{};
+  document.name = "Baked navigation runtime";
+  document.source_path = root / "scene.kscene.json";
+  document.entities.push_back(karma::scenes::SceneEntity{
+      .id = "root",
+      .components = nlohmann::json{
+          {"SceneBakeTestNavOwner", nlohmann::json::object()},
+      },
+  });
+  document.bakes.push_back(karma::scenes::SceneBakeDesc{
+      .id = "main",
+      .path = "bakes/main.kbake.json",
+  });
+  const std::string scene_fingerprint = karma::scenes::sceneBakeFingerprint(
+      document, document.bakes.front());
+  const std::string binding_fingerprint = karma::assets::hashString(
+      scene_fingerprint + "\nentity:root\nnavmesh");
+  write_manifest(nlohmann::json{
+      {"schema", "karma.scene_bake"},
+      {"version", 2},
+      {"scene_fingerprint", scene_fingerprint},
+      {"navigation_bindings",
+       nlohmann::json::array({nlohmann::json{
+           {"owner_id", "entity:root"},
+           {"kind", "navmesh"},
+           {"path", "bakes/plane.knav"},
+           {"source_fingerprint", binding_fingerprint},
+       }})},
+  });
+
+  {
+    karma::world::World world;
+    karma::world::Scene scene;
+    karma::assets::AssetRegistry assets;
+    karma::scenes::SceneInstantiateResult instance =
+        karma::scenes::instantiateScene(world, scene, assets, document);
+    assert(instance.success);
+    const karma::world::Entity owner = instance.find("root");
+    assert(instance.navigation_owners_by_id.at("entity:root") == owner);
+    const auto& component =
+        world.get<karma::components::NavMeshComponent>(owner);
+    assert(component.built);
+    assert(!component.rebuild_requested);
+    karma::navigation::NavQuery query(component.nav_mesh);
+    assert(query.findPath({-4.0f, 0.1f, -4.0f},
+                          {4.0f, 0.1f, 4.0f}).success());
+    assert(karma::scenes::destroyScene(world, scene, instance));
+  }
+
+  {
+    std::ofstream stream(artifact, std::ios::binary | std::ios::trunc);
+    stream << "corrupt";
+  }
+  {
+    karma::world::World world;
+    karma::world::Scene scene;
+    karma::assets::AssetRegistry assets;
+    karma::scenes::SceneInstantiateResult instance =
+        karma::scenes::instantiateScene(world, scene, assets, document);
+    assert(instance.success);
+    const auto& component = world.get<karma::components::NavMeshComponent>(
+        instance.find("root"));
+    assert(!component.built);
+    assert(component.rebuild_requested);
+    assert(!instance.diagnostics.empty());
+    assert(karma::scenes::destroyScene(world, scene, instance));
+  }
+
+  write_manifest(nlohmann::json{
+      {"schema", "karma.scene_bake"},
+      {"version", 1},
+      {"scene_fingerprint", "legacy"},
+      {"nav_cache_files", nlohmann::json::array()},
+  });
+  {
+    karma::world::World world;
+    karma::world::Scene scene;
+    karma::assets::AssetRegistry assets;
+    karma::scenes::SceneInstantiateResult instance =
+        karma::scenes::instantiateScene(world, scene, assets, document);
+    assert(instance.success);
+    const auto& component = world.get<karma::components::NavMeshComponent>(
+        instance.find("root"));
+    assert(!component.built);
+    assert(component.rebuild_requested);
+    assert(karma::scenes::destroyScene(world, scene, instance));
+  }
+  std::filesystem::remove_all(root);
+}
+
+void testStaticMembershipInheritanceControlsNavigation() {
+  static const bool serializer_registered = [] {
+    karma::prefabs::ensureBuiltinComponentSerializers();
+    return karma::prefabs::componentSerializerRegistry().registerSerializer(
+        karma::prefabs::ComponentSerializer{
+            .type_name = "SceneBakeTestStaticSurface",
+            .has = [](const karma::world::World& world,
+                      karma::world::Entity entity) {
+              return world.has<karma::components::StaticComponent>(entity) ||
+                     world.has<karma::components::NavMeshSurfaceComponent>(
+                         entity) ||
+                     world.has<karma::components::InstancedMeshComponent>(
+                         entity);
+            },
+            .serialize = [](const karma::world::World&,
+                            karma::world::Entity) {
+              return nlohmann::json::object();
+            },
+            .deserialize = [](karma::world::World& world,
+                              karma::world::Entity entity,
+                              const nlohmann::json& json) {
+              if (!json.is_object()) {
+                return false;
+              }
+              if (json.contains("static_enabled")) {
+                if (!json["static_enabled"].is_boolean()) {
+                  return false;
+                }
+                karma::components::StaticComponent membership{};
+                membership.enabled = json["static_enabled"].get<bool>();
+                membership.include_descendants = true;
+                membership.flags = karma::components::StaticComponentNavigation;
+                world.add(entity, membership);
+              }
+              if (json.value("surface", false)) {
+                world.add(entity,
+                          karma::components::NavMeshSurfaceComponent{
+                              .mesh_data =
+                                  std::make_shared<karma::world::MeshData>(
+                                      makePlaneMesh(2.0f)),
+                          });
+              }
+              if (json.value("instanced", false)) {
+                karma::components::InstancedMeshComponent instanced{};
+                instanced.instances.push_back(
+                    karma::components::MeshInstance{
+                        .position = {7.0f, 0.0f, 0.0f},
+                    });
+                world.add(entity, std::move(instanced));
+              }
+              return true;
+            },
+        });
+  }();
+  assert(serializer_registered);
+
+  karma::scenes::SceneDocument document{};
+  document.name = "Static inheritance";
+  document.entities = {
+      karma::scenes::SceneEntity{
+          .id = "group",
+          .components = nlohmann::json{
+              {"SceneBakeTestStaticSurface",
+               nlohmann::json{{"static_enabled", true}}},
+          },
+      },
+      karma::scenes::SceneEntity{
+          .id = "included",
+          .parent_id = "group",
+          .components = nlohmann::json{
+              {"SceneBakeTestStaticSurface",
+               nlohmann::json{{"surface", true}, {"instanced", true}}},
+          },
+      },
+      karma::scenes::SceneEntity{
+          .id = "opt_out",
+          .parent_id = "group",
+          .components = nlohmann::json{
+              {"SceneBakeTestStaticSurface",
+               nlohmann::json{{"static_enabled", false}, {"surface", true}}},
+          },
+      },
+      karma::scenes::SceneEntity{
+          .id = "under_opt_out",
+          .parent_id = "opt_out",
+          .components = nlohmann::json{
+              {"SceneBakeTestStaticSurface",
+               nlohmann::json{{"surface", true}}},
+          },
+      },
+  };
+
+  karma::world::World world;
+  karma::world::Scene scene;
+  karma::assets::AssetRegistry assets;
+  karma::scenes::SceneInstantiateResult instance =
+      karma::scenes::instantiateScene(world, scene, assets, document);
+  assert(instance.success);
+  assert(world.has<karma::components::StaticComponent>(
+      instance.find("included")));
+  assert(!world.get<karma::components::StaticComponent>(
+                    instance.find("opt_out"))
+              .enabled);
+  assert(world.has<karma::components::StaticComponent>(
+      instance.find("under_opt_out")));
+  assert(!world.get<karma::components::StaticComponent>(
+                    instance.find("under_opt_out"))
+              .enabled);
+
+  const karma::navigation::NavMeshInputGeometry geometry =
+      karma::navigation::collectNavMeshGeometry(world, &assets);
+  assert(geometry.vertices.size() == 4u);
+  assert(geometry.triangleCount() == 2u);
+  assert(std::abs(geometry.vertices.front().x - 5.0f) < 0.001f);
+
+  const karma::scenes::SceneStaticBuildResult metadata =
+      karma::scenes::buildSceneStaticMetadata(
+          document,
+          instance,
+          world,
+          scene,
+          assets,
+          karma::scenes::SceneStaticBuildDesc{.build_mesh_bounds = false});
+  assert(metadata.success);
+  std::vector<std::string> ids;
+  for (const auto& transform : metadata.transforms) {
+    ids.push_back(transform.static_component_id);
+  }
+  std::sort(ids.begin(), ids.end());
+  assert(std::find(ids.begin(), ids.end(), "entity:group") != ids.end());
+  assert(std::find(ids.begin(), ids.end(), "entity:included") != ids.end());
+  assert(std::find(ids.begin(), ids.end(), "entity:opt_out") == ids.end());
+  assert(std::find(ids.begin(), ids.end(), "entity:under_opt_out") ==
+         ids.end());
+  assert(karma::scenes::destroyScene(world, scene, instance));
+}
 
 void testNavigationSystemBuildsAndMovesAgent() {
   karma::world::World world;

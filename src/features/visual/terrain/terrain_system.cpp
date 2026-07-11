@@ -1,6 +1,7 @@
 #include "karma/visual.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -19,9 +20,6 @@
 
 #include "karma/assets.h"
 #include "karma/rendering.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
 #include "karma/components.h"
 
 namespace karma::visual::terrain {
@@ -159,6 +157,7 @@ std::size_t terrainColliderSignature(const components::TerrainComponent& terrain
   hashCombine(seed, terrain.height_value_min);
   hashCombine(seed, terrain.height_value_max);
   hashCombine(seed, terrain.tile_index_base);
+  hashCombine(seed, terrain.source_revision);
   hashCombine(seed, terrain.terrain_size);
   hashCombine(seed, terrain.tile_size);
   hashCombine(seed, terrain.tile_resolution);
@@ -705,6 +704,26 @@ rendering::TerrainTextureData solidTextureData(uint8_t r,
   return texture;
 }
 
+rendering::TerrainTextureData packTerrainRoughnessTexture(
+    const rendering::TerrainTextureData& roughness) {
+  rendering::TerrainTextureData packed{};
+  if (!roughness.valid()) {
+    return packed;
+  }
+  packed.width = roughness.width;
+  packed.height = roughness.height;
+  packed.rgba8.resize(roughness.rgba8.size(), 255u);
+  for (std::size_t pixel = 0u; pixel < roughness.rgba8.size(); pixel += 4u) {
+    // Standard metallic-roughness sampling uses B for metallic and G for
+    // roughness. A legacy roughness image stores its scalar in R.
+    packed.rgba8[pixel + 0u] = 255u;
+    packed.rgba8[pixel + 1u] = roughness.rgba8[pixel + 0u];
+    packed.rgba8[pixel + 2u] = 255u;
+    packed.rgba8[pixel + 3u] = roughness.rgba8[pixel + 3u];
+  }
+  return packed;
+}
+
 std::optional<rendering::TerrainTextureData> loadTerrainTexture(
     const std::filesystem::path& path) {
   if (path.empty()) {
@@ -714,6 +733,84 @@ std::optional<rendering::TerrainTextureData> loadTerrainTexture(
     return textureDataFromImage(std::move(*image));
   }
   return std::nullopt;
+}
+
+std::optional<rendering::TerrainTextureData> terrainTextureFromAsset(
+    const assets::TextureAsset& texture) {
+  const std::optional<assets::PreparedTextureUpload> prepared =
+      assets::prepareTextureUpload(texture);
+  if (!prepared || !prepared->valid() ||
+      prepared->upload.format != rendering::TextureFormat::RGBA8) {
+    return std::nullopt;
+  }
+
+  const rendering::TextureUploadSubresource* base = nullptr;
+  for (const rendering::TextureUploadSubresource& subresource :
+       prepared->upload.subresources) {
+    if (subresource.mip_level == 0u && subresource.array_layer == 0u) {
+      base = &subresource;
+      break;
+    }
+  }
+
+  const int width = base != nullptr ? base->width : prepared->desc.width;
+  const int height = base != nullptr ? base->height : prepared->desc.height;
+  std::size_t byte_count = 0u;
+  if (!rendering::tryTextureDataSize(width, height, 4u, byte_count)) {
+    return std::nullopt;
+  }
+
+  const std::size_t row_bytes = static_cast<std::size_t>(width) * 4u;
+  const std::size_t source_offset = base != nullptr ? base->offset : 0u;
+  const std::size_t source_stride =
+      base != nullptr && base->row_stride != 0u ? base->row_stride : row_bytes;
+  if (source_stride < row_bytes || source_offset > prepared->upload.bytes.size()) {
+    return std::nullopt;
+  }
+  const std::size_t source_size = prepared->upload.bytes.size() - source_offset;
+  if (static_cast<std::size_t>(height - 1) >
+          (std::numeric_limits<std::size_t>::max() - row_bytes) / source_stride ||
+      static_cast<std::size_t>(height - 1) * source_stride + row_bytes > source_size) {
+    return std::nullopt;
+  }
+
+  rendering::TerrainTextureData out{};
+  out.width = static_cast<uint32_t>(width);
+  out.height = static_cast<uint32_t>(height);
+  out.rgba8.resize(byte_count);
+  for (int row = 0; row < height; ++row) {
+    const std::size_t input = source_offset +
+                              static_cast<std::size_t>(row) * source_stride;
+    const std::size_t output = static_cast<std::size_t>(row) * row_bytes;
+    std::copy_n(prepared->upload.bytes.begin() +
+                    static_cast<std::ptrdiff_t>(input),
+                row_bytes,
+                out.rgba8.begin() + static_cast<std::ptrdiff_t>(output));
+  }
+  return out.valid()
+             ? std::optional<rendering::TerrainTextureData>{std::move(out)}
+             : std::nullopt;
+}
+
+std::optional<rendering::TerrainTextureData> loadTerrainMaterialTexture(
+    std::string_view texture_reference,
+    const assets::AssetRegistry* registry) {
+  if (texture_reference.empty()) {
+    return std::nullopt;
+  }
+  if (registry != nullptr) {
+    if (const assets::TextureAsset* texture =
+            registry->findTextureAsset(texture_reference)) {
+      return terrainTextureFromAsset(*texture);
+    }
+    // Material texture fields are asset keys. Do not pass an unresolved key to
+    // the filesystem decoder, which would produce a misleading image-load
+    // error for every terrain preview rebuild.
+    if (assets::AssetRegistry::isValidAssetKey(texture_reference)) {
+      return std::nullopt;
+    }
+  }
+  return loadTerrainTexture(std::filesystem::path(texture_reference));
 }
 
 std::optional<std::filesystem::path> findResolvedTexture(
@@ -1076,6 +1173,10 @@ std::optional<rendering::TerrainMaterialLayerData> loadTerrainMaterialLayer(
   data.name = layer.name;
   data.uv_scale = std::max(layer.uv_scale, 0.001f);
   data.enabled = layer.enabled;
+  // Image-only terrain layers historically behaved as non-metallic diffuse
+  // surfaces. Keep that visual default while using the standard PBR factors.
+  data.material.metallic = 0.0f;
+  data.material.roughness = 1.0f;
   data.albedo = std::move(*albedo);
 
   if (auto normal = loadTerrainTexture(layer.normal_image)) {
@@ -1083,6 +1184,7 @@ std::optional<rendering::TerrainMaterialLayerData> loadTerrainMaterialLayer(
   }
   if (auto roughness = loadTerrainTexture(layer.roughness_image)) {
     data.roughness = std::move(*roughness);
+    data.metallic_roughness = packTerrainRoughnessTexture(data.roughness);
   }
 
   return data.valid() ? std::optional<rendering::TerrainMaterialLayerData>{std::move(data)}
@@ -1108,33 +1210,62 @@ std::optional<rendering::TerrainMaterialLayerData> loadTerrainMaterialLayer(
       data.name = !layer.name.empty() ? layer.name : layer.material_key;
       data.uv_scale = std::max(layer.uv_scale, 0.001f);
       data.enabled = layer.enabled;
+      data.material = material->surface;
 
       if (auto path = findResolvedTexture(
               *material, {"base_color", "baseColor", "albedo", "diffuse"})) {
-        if (auto texture = loadTerrainTexture(*path)) {
+        if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
           data.albedo = std::move(*texture);
         }
       }
       if (!data.albedo.valid()) {
-        const rendering::Color color = material->surface.base_color;
-        data.albedo = solidTextureData(
-            toByte(color.r), toByte(color.g), toByte(color.b), toByte(color.a));
+        data.albedo = solidTextureData(255u, 255u, 255u, 255u);
       }
 
       if (auto path = findResolvedTexture(
               *material, {"normal", "normal_map", "normalMap"})) {
-        if (auto texture = loadTerrainTexture(*path)) {
+        if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
           data.normal = std::move(*texture);
         }
       }
-      if (auto path = findResolvedTexture(*material, {"roughness", "roughness_map"})) {
-        if (auto texture = loadTerrainTexture(*path)) {
-          data.roughness = std::move(*texture);
+      if (auto path = findResolvedTexture(
+              *material,
+              {"metallic_roughness", "metallicRoughness", "orm", "arm"})) {
+        if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
+          data.metallic_roughness = std::move(*texture);
         }
       }
-      if (!data.roughness.valid()) {
-        const uint8_t roughness = toByte(material->surface.roughness);
-        data.roughness = solidTextureData(roughness, roughness, roughness, 255u);
+      if (!data.metallic_roughness.valid()) {
+        if (auto path = findResolvedTexture(
+                *material, {"roughness", "roughness_map"})) {
+          if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
+            data.roughness = std::move(*texture);
+            data.metallic_roughness =
+                packTerrainRoughnessTexture(data.roughness);
+          }
+        }
+      }
+      if (auto path = findResolvedTexture(*material, {"occlusion", "ao"})) {
+        if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
+          data.occlusion = std::move(*texture);
+        }
+      }
+      if (auto path = findResolvedTexture(*material, {"emissive"})) {
+        if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
+          data.emissive = std::move(*texture);
+        }
+      }
+      if (auto path = findResolvedTexture(
+              *material, {"specular", "specular_factor", "specularFactor"})) {
+        if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
+          data.specular = std::move(*texture);
+        }
+      }
+      if (auto path = findResolvedTexture(
+              *material, {"specular_color", "specularColor"})) {
+        if (auto texture = loadTerrainMaterialTexture(path->generic_string(), assets)) {
+          data.specular_color = std::move(*texture);
+        }
       }
 
       if (data.valid()) {
@@ -1485,7 +1616,9 @@ std::optional<rendering::TerrainTileData> loadImageTerrainTile(
 
 TerrainSystem::TerrainSystem(rendering::GraphicsDevice* device,
                              const assets::AssetRegistry* assets)
-    : device_(device), assets_(assets) {
+    : device_(device),
+      assets_(assets),
+      owner_thread_(std::this_thread::get_id()) {
   worker_ = std::thread([this] { workerLoop(); });
 }
 
@@ -1497,7 +1630,216 @@ TerrainSystem::~TerrainSystem() {
   }
 }
 
+void TerrainSystem::assertThreadAffinity() const {
+  assert(owner_thread_ == std::this_thread::get_id() &&
+         "TerrainSystem must be accessed from its owning thread");
+}
+
+TerrainSystem::SingleImageTileOverride*
+TerrainSystem::findSingleImageTileOverride(uint64_t world_id,
+                                           uint64_t entity_key) {
+  const auto world_it = single_image_tile_overrides_by_world_.find(world_id);
+  if (world_it == single_image_tile_overrides_by_world_.end()) {
+    return nullptr;
+  }
+  const auto override_it = world_it->second.find(entity_key);
+  return override_it == world_it->second.end() ? nullptr : &override_it->second;
+}
+
+const TerrainSystem::SingleImageTileOverride*
+TerrainSystem::findSingleImageTileOverride(uint64_t world_id,
+                                           uint64_t entity_key) const {
+  const auto world_it = single_image_tile_overrides_by_world_.find(world_id);
+  if (world_it == single_image_tile_overrides_by_world_.end()) {
+    return nullptr;
+  }
+  const auto override_it = world_it->second.find(entity_key);
+  return override_it == world_it->second.end() ? nullptr : &override_it->second;
+}
+
+bool TerrainSystem::storeSingleImageTileOverride(
+    uint64_t world_id,
+    world::Entity entity,
+    rendering::TerrainTileData tile) {
+  if (!entity.isValid() || !tile.valid()) {
+    return false;
+  }
+  uint64_t revision = next_single_image_override_revision_++;
+  if (revision == 0u) {
+    revision = next_single_image_override_revision_++;
+  }
+  SingleImageTileOverrideMap& overrides =
+      world_id == 0u ? pending_single_image_tile_overrides_
+                     : single_image_tile_overrides_by_world_[world_id];
+  overrides[entityKey(entity)] = SingleImageTileOverride{
+      .tile = std::make_shared<const rendering::TerrainTileData>(std::move(tile)),
+      .revision = revision,
+  };
+  return true;
+}
+
+bool TerrainSystem::setSingleImageTileOverride(
+    const world::World& world,
+    world::Entity entity,
+    rendering::TerrainTileData tile) {
+  assertThreadAffinity();
+  if (!world.isAlive(entity) ||
+      !world.has<components::TerrainComponent>(entity) ||
+      world.get<components::TerrainComponent>(entity).source !=
+          components::TerrainSourceType::SingleImage) {
+    return false;
+  }
+  const auto& terrain = world.get<components::TerrainComponent>(entity);
+  tile.coord = TileCoord{.x = terrain.origin_tile_x,
+                         .z = terrain.origin_tile_z};
+  return storeSingleImageTileOverride(world.instanceId(), entity, std::move(tile));
+}
+
+bool TerrainSystem::setSingleImageTileOverride(
+    world::Entity entity,
+    rendering::TerrainTileData tile) {
+  assertThreadAffinity();
+  if (last_world_id_ != 0u) {
+    const auto state_it = states_.find(entityKey(entity));
+    if (state_it != states_.end() && state_it->second.terrain_snapshot != nullptr &&
+        state_it->second.terrain_snapshot->source ==
+            components::TerrainSourceType::SingleImage) {
+      tile.coord = TileCoord{
+          .x = state_it->second.terrain_snapshot->origin_tile_x,
+          .z = state_it->second.terrain_snapshot->origin_tile_z};
+    }
+  }
+  return storeSingleImageTileOverride(last_world_id_, entity, std::move(tile));
+}
+
+void TerrainSystem::clearSingleImageTileOverride(
+    const world::World& world,
+    world::Entity entity) {
+  assertThreadAffinity();
+  if (!entity.isValid()) {
+    return;
+  }
+  const auto world_it =
+      single_image_tile_overrides_by_world_.find(world.instanceId());
+  if (world_it == single_image_tile_overrides_by_world_.end()) {
+    return;
+  }
+  world_it->second.erase(entityKey(entity));
+  if (world_it->second.empty()) {
+    single_image_tile_overrides_by_world_.erase(world_it);
+  }
+}
+
+void TerrainSystem::clearSingleImageTileOverride(world::Entity entity) {
+  assertThreadAffinity();
+  if (entity.isValid()) {
+    pending_single_image_tile_overrides_.erase(entityKey(entity));
+    if (last_world_id_ != 0u) {
+      const auto world_it =
+          single_image_tile_overrides_by_world_.find(last_world_id_);
+      if (world_it != single_image_tile_overrides_by_world_.end()) {
+        world_it->second.erase(entityKey(entity));
+        if (world_it->second.empty()) {
+          single_image_tile_overrides_by_world_.erase(world_it);
+        }
+      }
+    }
+  }
+}
+
+bool TerrainSystem::hasSingleImageTileOverride(
+    const world::World& world,
+    world::Entity entity) const {
+  assertThreadAffinity();
+  return entity.isValid() &&
+         findSingleImageTileOverride(world.instanceId(), entityKey(entity)) !=
+             nullptr;
+}
+
+bool TerrainSystem::hasSingleImageTileOverride(world::Entity entity) const {
+  assertThreadAffinity();
+  if (!entity.isValid()) {
+    return false;
+  }
+  if (last_world_id_ == 0u) {
+    return pending_single_image_tile_overrides_.contains(entityKey(entity));
+  }
+  return findSingleImageTileOverride(last_world_id_, entityKey(entity)) !=
+         nullptr;
+}
+
+uint64_t TerrainSystem::nextStateGeneration() {
+  ++state_generation_sequence_;
+  if (state_generation_sequence_ == 0u) {
+    ++state_generation_sequence_;
+  }
+  return state_generation_sequence_;
+}
+
+void TerrainSystem::bindPendingTileOverrides(uint64_t world_id) {
+  if (world_id == 0u || pending_single_image_tile_overrides_.empty()) {
+    return;
+  }
+  SingleImageTileOverrideMap& target =
+      single_image_tile_overrides_by_world_[world_id];
+  for (auto& [entity_key, pending] : pending_single_image_tile_overrides_) {
+    const auto current = target.find(entity_key);
+    if (current == target.end() || current->second.revision < pending.revision) {
+      target[entity_key] = std::move(pending);
+    }
+  }
+  pending_single_image_tile_overrides_.clear();
+}
+
+void TerrainSystem::pruneDeadTileOverrides(const world::World& world) {
+  const auto world_it =
+      single_image_tile_overrides_by_world_.find(world.instanceId());
+  if (world_it == single_image_tile_overrides_by_world_.end()) {
+    return;
+  }
+  for (auto it = world_it->second.begin(); it != world_it->second.end();) {
+    if (!world.isAlive(entityFromKey(it->first))) {
+      it = world_it->second.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (world_it->second.empty()) {
+    single_image_tile_overrides_by_world_.erase(world_it);
+  }
+}
+
+void TerrainSystem::resetForWorldSwitch(uint64_t previous_world_id) {
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    requests_.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(completed_mutex_);
+    completed_.clear();
+  }
+  for (auto& [key, state] : states_) {
+    (void)key;
+    destroyState(state);
+  }
+  states_.clear();
+  generated_collider_signatures_.clear();
+  single_image_tile_overrides_by_world_.erase(previous_world_id);
+}
+
+void TerrainSystem::prepareWorld(world::World& world) {
+  assertThreadAffinity();
+  const uint64_t world_id = world.instanceId();
+  if (last_world_id_ != 0u && last_world_id_ != world_id) {
+    resetForWorldSwitch(last_world_id_);
+  }
+  last_world_id_ = world_id;
+  bindPendingTileOverrides(world_id);
+  pruneDeadTileOverrides(world);
+}
+
 void TerrainSystem::syncTerrainColliders(world::World& world) {
+  prepareWorld(world);
   std::unordered_set<uint64_t> seen;
   world.forEach<components::TerrainComponent>(
       [&](const world::Entity entity) {
@@ -1509,7 +1851,15 @@ void TerrainSystem::syncTerrainColliders(world::World& world) {
     seen.insert(key);
     const auto& terrain = world.get<components::TerrainComponent>(entity);
     const components::ColliderComponent marker = terrainColliderMarker(world, entity);
-    const std::size_t signature = terrainColliderSignature(terrain, marker);
+    std::size_t signature = terrainColliderSignature(terrain, marker);
+    const SingleImageTileOverride* tile_override =
+        findSingleImageTileOverride(last_world_id_, key);
+    const bool has_override =
+        terrain.source == components::TerrainSourceType::SingleImage &&
+        tile_override != nullptr && tile_override->tile != nullptr;
+    if (has_override) {
+      hashCombine(signature, tile_override->revision);
+    }
     const auto signature_it = generated_collider_signatures_.find(key);
     if (signature_it != generated_collider_signatures_.end() &&
         signature_it->second == signature &&
@@ -1519,7 +1869,14 @@ void TerrainSystem::syncTerrainColliders(world::World& world) {
       return true;
     }
 
-    std::optional<rendering::TerrainTileData> tile = loadTerrainColliderTile(terrain);
+    std::optional<rendering::TerrainTileData> tile;
+    if (has_override) {
+      tile = *tile_override->tile;
+      tile->coord = TileCoord{.x = terrain.origin_tile_x,
+                              .z = terrain.origin_tile_z};
+    } else {
+      tile = loadTerrainColliderTile(terrain);
+    }
     if (!tile || !tile->valid()) {
       if (signature_it != generated_collider_signatures_.end() &&
           world.has<components::ColliderComponent>(entity) &&
@@ -1558,6 +1915,14 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
     const components::TerrainComponent& terrain) {
   TerrainState& state = states_[key];
   const rendering::TerrainDesc desc = terrainDescFromComponent(terrain);
+  uint64_t single_image_override_revision = 0u;
+  if (terrain.source == components::TerrainSourceType::SingleImage) {
+    const SingleImageTileOverride* tile_override =
+        findSingleImageTileOverride(last_world_id_, key);
+    if (tile_override != nullptr) {
+      single_image_override_revision = tile_override->revision;
+    }
+  }
   const TerrainSourceSettings source_settings{
       .source = terrain.source,
       .tile_directory = terrain.tile_directory,
@@ -1576,7 +1941,9 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
       .height_value_min = terrain.height_value_min,
       .height_value_max = terrain.height_value_max,
       .tile_index_base = terrain.tile_index_base,
+      .source_revision = terrain.source_revision,
       .asset_registry_version = assets_ != nullptr ? assets_->version() : 0u,
+      .single_image_override_revision = single_image_override_revision,
       .material_layers = terrain.material_layers,
       .data_maps = terrain.data_maps,
   };
@@ -1602,7 +1969,7 @@ TerrainSystem::TerrainState& TerrainSystem::ensureState(
         }
       }
     }
-    state.generation += 1u;
+    state.generation = nextStateGeneration();
     state.desired.clear();
     state.loaded.clear();
     state.queued.clear();
@@ -1636,6 +2003,14 @@ void TerrainSystem::cleanupStaleStates(world::World& world) {
         }
       }
       destroyState(it->second);
+      const auto world_it =
+          single_image_tile_overrides_by_world_.find(last_world_id_);
+      if (world_it != single_image_tile_overrides_by_world_.end()) {
+        world_it->second.erase(it->first);
+        if (world_it->second.empty()) {
+          single_image_tile_overrides_by_world_.erase(world_it);
+        }
+      }
       it = states_.erase(it);
       continue;
     }
@@ -1652,12 +2027,28 @@ void TerrainSystem::queueTile(uint64_t key,
     return;
   }
   state.queued.insert(coord);
+  std::shared_ptr<const rendering::TerrainTileData> tile_override;
+  if (state.terrain_snapshot->source == components::TerrainSourceType::SingleImage) {
+    SingleImageTileOverride* stored_override =
+        findSingleImageTileOverride(last_world_id_, key);
+    if (stored_override != nullptr) {
+      if (stored_override->tile != nullptr &&
+          stored_override->tile->coord != coord) {
+        auto adjusted =
+            std::make_shared<rendering::TerrainTileData>(*stored_override->tile);
+        adjusted->coord = coord;
+        stored_override->tile = std::move(adjusted);
+      }
+      tile_override = stored_override->tile;
+    }
+  }
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
     requests_.push_back(TileRequest{
         .entity_key = key,
         .generation = state.generation,
         .terrain = state.terrain_snapshot,
+        .single_image_tile_override = std::move(tile_override),
         .coord = coord,
     });
   }
@@ -1680,14 +2071,18 @@ void TerrainSystem::drainCompleted() {
       continue;
     }
     state.queued.erase(tile.coord);
+    const rendering::TerrainTileData* data =
+        tile.shared_data != nullptr
+            ? tile.shared_data.get()
+            : (tile.data.has_value() ? &*tile.data : nullptr);
     if (state.terrain == rendering::kInvalidTerrain ||
-        !tile.data.has_value() ||
-        !tile.data->valid() ||
+        data == nullptr ||
+        !data->valid() ||
         !state.desired.contains(tile.coord)) {
       continue;
     }
     if (device_ != nullptr) {
-      device_->uploadTerrainTile(state.terrain, *tile.data);
+      device_->uploadTerrainTile(state.terrain, *data);
       state.loaded.insert(tile.coord);
     }
   }
@@ -1804,6 +2199,10 @@ void TerrainSystem::update(world::World& world, float, float interpolation_alpha
 }
 
 void TerrainSystem::workerLoop() {
+  const auto publish = [this](CompletedTile tile) {
+    std::lock_guard<std::mutex> lock(completed_mutex_);
+    completed_.push_back(std::move(tile));
+  };
   for (;;) {
     TileRequest request{};
     {
@@ -1816,30 +2215,45 @@ void TerrainSystem::workerLoop() {
       requests_.pop_front();
     }
 
-    std::optional<rendering::TerrainTileData> data;
     if (request.terrain == nullptr) {
       continue;
     }
-    switch (request.terrain->source) {
-      case components::TerrainSourceType::Procedural:
-        data = generateProceduralTerrainTile(*request.terrain, request.coord);
-        break;
-      case components::TerrainSourceType::ImageTileDirectory:
-        data = loadImageTerrainTile(*request.terrain, request.coord);
-        break;
-      case components::TerrainSourceType::SingleImage:
-        data = loadSingleImageTerrainTile(*request.terrain);
-        break;
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(completed_mutex_);
-      completed_.push_back(CompletedTile{
+    try {
+      CompletedTile completed{
           .entity_key = request.entity_key,
           .generation = request.generation,
           .coord = request.coord,
-          .data = std::move(data),
-      });
+      };
+      switch (request.terrain->source) {
+        case components::TerrainSourceType::Procedural:
+          completed.data =
+              generateProceduralTerrainTile(*request.terrain, request.coord);
+          break;
+        case components::TerrainSourceType::ImageTileDirectory:
+          completed.data = loadImageTerrainTile(*request.terrain, request.coord);
+          break;
+        case components::TerrainSourceType::SingleImage:
+          if (request.single_image_tile_override != nullptr) {
+            completed.shared_data = request.single_image_tile_override;
+          } else {
+            completed.data = loadSingleImageTerrainTile(*request.terrain);
+          }
+          break;
+      }
+      publish(std::move(completed));
+    } catch (...) {
+      // Worker failures are reported as empty completions so the main thread
+      // can clear the queued marker and retry without terminating the process.
+      try {
+        publish(CompletedTile{
+            .entity_key = request.entity_key,
+            .generation = request.generation,
+            .coord = request.coord,
+        });
+      } catch (...) {
+        // Under sustained allocation failure there may be no capacity to
+        // report the failure. The worker must still remain alive.
+      }
     }
   }
 }

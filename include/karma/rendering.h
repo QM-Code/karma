@@ -12,6 +12,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -702,6 +703,8 @@ struct DirectionalLightData {
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   float shadow_extent = 0.0f;
   bool casts_shadows = false;
+  /// Runtime-only index into the active bake's Mixed-light mask.
+  uint32_t mixed_bake_mask_bit = UINT32_MAX;
 };
 
 /// \ingroup karma_rendering
@@ -724,6 +727,8 @@ struct LightData {
   float inner_cone_cos = 0.9659258f;
   float outer_cone_cos = 0.8660254f;
   bool casts_shadows = false;
+  /// Runtime-only index into the active bake's Mixed-light mask.
+  uint32_t mixed_bake_mask_bit = UINT32_MAX;
 };
 
 }  // namespace karma::rendering
@@ -909,13 +914,28 @@ struct MaterialDesc {
     Blend = 2,
   };
 
+  /// Tangent-space normal-map channel convention.
+  ///
+  /// glTF and OpenGL-style normal maps encode +Y (green) as up. DirectX-style
+  /// maps encode the opposite sign and are converted by the material shader at
+  /// sample time so texture payloads can remain untouched.
+  enum class NormalMapConvention : uint32_t {
+    OpenGL = 0,
+    DirectX = 1,
+  };
+
   math::Color base_color{1.0f, 1.0f, 1.0f, 1.0f};
   math::Color emissive_color{0.0f, 0.0f, 0.0f, 1.0f};
   float metallic = 1.0f;
   float roughness = 1.0f;
   float normal_scale = 1.0f;
+  NormalMapConvention normal_map_convention = NormalMapConvention::OpenGL;
   float occlusion_strength = 1.0f;
   float emissive_strength = 1.0f;
+  /// KHR_materials_specular dielectric specular strength in [0, 1].
+  float specular_factor = 1.0f;
+  /// KHR_materials_specular dielectric F0 tint. RGB is used by lighting.
+  math::Color specular_color{1.0f, 1.0f, 1.0f, 1.0f};
   float clearcoat = 0.0f;
   float clearcoat_roughness = 0.0f;
   math::Color sheen_color{0.0f, 0.0f, 0.0f, 1.0f};
@@ -942,7 +962,7 @@ struct MaterialDesc {
 };
 
 /// Texture transform slot count used by imported glTF-style materials.
-inline constexpr size_t kImportedMaterialTextureCoordSlotCount = 12u;
+inline constexpr size_t kImportedMaterialTextureCoordSlotCount = 14u;
 
 /// Renderer-facing semantic for an imported material texture.
 enum class ImportedMaterialTextureSemantic : uint32_t {
@@ -958,6 +978,8 @@ enum class ImportedMaterialTextureSemantic : uint32_t {
   SheenRoughness,
   Transmission,
   Thickness,
+  Specular,
+  SpecularColor,
 };
 
 /// Source texture reference captured by a content importer for renderer upload.
@@ -2617,6 +2639,13 @@ struct TerrainDesc {
   bool cpu_fallback_enabled = true;
 };
 
+/// Largest terrain height-field extent accepted by the renderer.
+///
+/// This is shared by runtime streaming and public upload validation so a
+/// caller cannot bypass the runtime's allocation limit with a direct tile
+/// upload.
+inline constexpr uint32_t kMaxTerrainTileResolution = 4097u;
+
 /// Decoded RGBA8 terrain texture payload.
 struct TerrainTextureData {
   uint32_t width = 0u;
@@ -2624,9 +2653,16 @@ struct TerrainTextureData {
   std::vector<uint8_t> rgba8;
 
   bool valid() const {
-    const std::size_t byte_count =
-        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
-    return width > 0u && height > 0u && rgba8.size() == byte_count;
+    if (width == 0u || height == 0u ||
+        static_cast<std::size_t>(width) >
+            std::numeric_limits<std::size_t>::max() /
+                static_cast<std::size_t>(height)) {
+      return false;
+    }
+    const std::size_t pixel_count =
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    return pixel_count <= std::numeric_limits<std::size_t>::max() / 4u &&
+           rgba8.size() == pixel_count * 4u;
   }
 };
 
@@ -2636,9 +2672,18 @@ struct TerrainMaterialLayerData {
   std::string name;
   float uv_scale = 16.0f;
   bool enabled = true;
+  /// Standard material factors applied to this layer before splat blending.
+  MaterialDesc material{};
   TerrainTextureData albedo;
   TerrainTextureData normal;
+  /// Legacy single-channel roughness input. New material assets should use
+  /// `metallic_roughness` with glTF B/G channel packing.
   TerrainTextureData roughness;
+  TerrainTextureData metallic_roughness;
+  TerrainTextureData occlusion;
+  TerrainTextureData emissive;
+  TerrainTextureData specular;
+  TerrainTextureData specular_color;
 
   bool valid() const {
     return enabled && layer < 4u && uv_scale > 0.0f && albedo.valid();
@@ -2653,9 +2698,18 @@ struct TerrainDataMapTileData {
   std::vector<float> values;
 
   bool valid() const {
-    return width > 0u && height > 0u &&
-           values.size() == static_cast<std::size_t>(width) *
-                                static_cast<std::size_t>(height);
+    if (width == 0u || height == 0u ||
+        static_cast<std::size_t>(width) >
+            std::numeric_limits<std::size_t>::max() /
+                static_cast<std::size_t>(height)) {
+      return false;
+    }
+    const std::size_t sample_count =
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    return values.size() == sample_count &&
+           std::all_of(values.begin(), values.end(), [](float value) {
+             return std::isfinite(value);
+           });
   }
 };
 
@@ -2678,24 +2732,46 @@ struct TerrainTileData {
   std::vector<TerrainDataMapTileData> data_maps;
 
   bool valid() const {
+    if (resolution < 2u || resolution > kMaxTerrainTileResolution ||
+        static_cast<std::size_t>(resolution) >
+            std::numeric_limits<std::size_t>::max() /
+                static_cast<std::size_t>(resolution)) {
+      return false;
+    }
     const std::size_t sample_count =
         static_cast<std::size_t>(resolution) * static_cast<std::size_t>(resolution);
-    const std::size_t color_count =
-        static_cast<std::size_t>(color_width) * static_cast<std::size_t>(color_height) * 4u;
-    const std::size_t control_count =
-        static_cast<std::size_t>(control_width) *
-        static_cast<std::size_t>(control_height) * 4u;
+    const auto rgbaByteCount = [](uint32_t width,
+                                  uint32_t height) -> std::optional<std::size_t> {
+      if (width == 0u || height == 0u ||
+          static_cast<std::size_t>(width) >
+              std::numeric_limits<std::size_t>::max() /
+                  static_cast<std::size_t>(height)) {
+        return std::nullopt;
+      }
+      const std::size_t pixel_count =
+          static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+      if (pixel_count > std::numeric_limits<std::size_t>::max() / 4u) {
+        return std::nullopt;
+      }
+      return pixel_count * 4u;
+    };
+    const std::optional<std::size_t> color_count =
+        rgbaByteCount(color_width, color_height);
+    const std::optional<std::size_t> control_count =
+        control_rgba8.empty() ? std::optional<std::size_t>{0u}
+                              : rgbaByteCount(control_width, control_height);
     const bool control_valid =
-        control_rgba8.empty() ||
-        (control_width > 0u &&
-         control_height > 0u &&
-         control_rgba8.size() == control_count);
-    return resolution >= 2u &&
-           heights.size() == sample_count &&
-           color_width > 0u &&
-           color_height > 0u &&
-           color_rgba8.size() == color_count &&
-           control_valid;
+        control_count.has_value() && control_rgba8.size() == *control_count;
+    return heights.size() == sample_count &&
+           std::all_of(heights.begin(), heights.end(), [](float value) {
+             return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
+           }) &&
+           color_count.has_value() && color_rgba8.size() == *color_count &&
+           control_valid &&
+           std::all_of(data_maps.begin(), data_maps.end(),
+                       [](const TerrainDataMapTileData& map) {
+                         return map.valid();
+                       });
   }
 };
 

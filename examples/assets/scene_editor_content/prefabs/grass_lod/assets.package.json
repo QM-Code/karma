@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "type": "texture_rgba8",
+      "key": "scene_editor/grass_lod/grass_texture",
+      "path": "textures/grass.png",
+      "srgb": true,
+      "generate_mips": true,
+      "alpha_bleed": true,
+      "alpha_coverage_cutoff": 0.28
+    },
+    {
+      "type": "material",
+      "key": "scene_editor/grass_lod/grass_material",
+      "path": "materials/grass.mat"
+    },
+    {
+      "type": "material",
+      "key": "scene_editor/grass_lod/grass_billboard_material",
+      "path": "materials/grass_billboard.mat"
+    },
+    {
+      "type": "mesh",
+      "key": "scene_editor/grass_lod/cluster_mesh",
+      "path": "meshes/grass_cluster.obj"
+    },
+    {
+      "type": "mesh",
+      "key": "scene_editor/grass_lod/billboard_mesh",
+      "path": "meshes/grass_billboard.obj"
+    }
+  ]
+}

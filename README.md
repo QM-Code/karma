@@ -82,6 +82,7 @@ cmake --build --preset portable
 Useful focused targets:
 
 ```bash
+cmake --build build/portable --target karma_scene_editor --parallel
 cmake --build build --target navigation_navmesh --parallel
 cmake --build build --target prefabs_gallery --parallel
 cmake --build build --target particles_explosion_stress --parallel
@@ -201,6 +202,10 @@ before `find_package(karma)` to allow package-time fetching.
 - Content pipeline for glTF/GLB scene import, materials, lights, node animation,
   skeletal animation, GPU skinning with CPU fallback, morph target deformation,
   JSON prefabs, and prefab-local `assets.package.json` registrations.
+- Standalone [scene editor](docs/SCENE_EDITOR.md) for linked prefab assembly,
+  lights/environment, typed scene and physics components, terrain sculpting and
+  four-layer splat paint, and chunked grass/tree foliage with distance LODs,
+  backed by reusable headless authoring APIs.
 - Particle tooling with `.kpeffect` files, constrained `*.kpspec.json`
   generation, hot reload, emitter overrides, flipbooks, distortion,
   ground-aligned particles, soft particles, runtime beam diagnostics, and

@@ -2,6 +2,8 @@
 
 #include "karma/assets.h"
 
+#include <atomic>
+#include <chrono>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -88,6 +90,9 @@ std::filesystem::path defaultOutputPath(const std::filesystem::path& scene_path)
 }
 
 std::filesystem::path documentBasePath(const karma::scenes::SceneDocument& document) {
+  if (!document.reference_root.empty()) {
+    return document.reference_root;
+  }
   const std::filesystem::path parent = document.source_path.parent_path();
   return parent.empty() ? std::filesystem::path(".") : parent;
 }
@@ -150,16 +155,135 @@ bool readJsonFile(const std::filesystem::path& path, nlohmann::json& out) {
   return out.is_object();
 }
 
-bool writeJsonFile(const std::filesystem::path& path, const nlohmann::json& json) {
+bool writeJsonFile(const std::filesystem::path& path,
+                   const nlohmann::json& json) {
+  std::error_code error;
   if (!path.parent_path().empty()) {
-    std::filesystem::create_directories(path.parent_path());
+    std::filesystem::create_directories(path.parent_path(), error);
+    if (error) return false;
   }
-  std::ofstream stream(path);
-  if (!stream) {
+  static std::atomic<uint64_t> sequence{0u};
+  const std::string token = std::to_string(
+                                std::chrono::steady_clock::now()
+                                    .time_since_epoch()
+                                    .count()) +
+                            "." +
+                            std::to_string(sequence.fetch_add(1u));
+  const std::filesystem::path temporary =
+      path.parent_path() /
+      (path.filename().string() + ".tmp." + token);
+  {
+    std::ofstream stream(temporary, std::ios::trunc);
+    if (!stream) return false;
+    stream << json.dump(2) << '\n';
+    stream.flush();
+    if (!stream) {
+      std::filesystem::remove(temporary, error);
+      return false;
+    }
+  }
+  std::filesystem::rename(temporary, path, error);
+  if (!error) return true;
+
+  error.clear();
+  const std::filesystem::path backup =
+      path.parent_path() /
+      (path.filename().string() + ".backup." + token);
+  const bool had_previous = std::filesystem::exists(path, error);
+  error.clear();
+  if (had_previous) {
+    std::filesystem::rename(path, backup, error);
+    if (error) {
+      std::filesystem::remove(temporary, error);
+      return false;
+    }
+  }
+  std::filesystem::rename(temporary, path, error);
+  if (error) {
+    std::filesystem::remove(temporary, error);
+    error.clear();
+    if (had_previous) std::filesystem::rename(backup, path, error);
     return false;
   }
-  stream << json.dump(2) << '\n';
-  return static_cast<bool>(stream);
+  if (had_previous) std::filesystem::remove(backup, error);
+  return true;
+}
+
+bool portableArtifactPath(const std::filesystem::path& path) {
+  if (path.empty() || path.is_absolute() || path.has_root_path()) return false;
+  const std::filesystem::path normalized = path.lexically_normal();
+  if (normalized.empty() || normalized == ".") return false;
+  for (const auto& part : normalized) {
+    if (part == "..") return false;
+  }
+  return true;
+}
+
+bool checkProducedArtifacts(
+    const karma::scenes::SceneDocument& document,
+    const nlohmann::json& manifest) {
+  const auto produced = manifest.find("produced_assets");
+  if (produced == manifest.end()) return true;
+  if (!produced->is_array()) {
+    std::cerr << "scene bake produced_assets must be an array\n";
+    return false;
+  }
+  for (const nlohmann::json& asset : *produced) {
+    if (!asset.is_object() || !asset.contains("path") ||
+        !asset["path"].is_string() || !asset.contains("type") ||
+        !asset["type"].is_string()) {
+      std::cerr << "scene bake contains an invalid produced asset record\n";
+      return false;
+    }
+    const std::filesystem::path relative_path =
+        asset["path"].get<std::string>();
+    if (!portableArtifactPath(relative_path)) {
+      std::cerr << "scene bake artifact path is not portable: "
+                << relative_path << '\n';
+      return false;
+    }
+    const std::filesystem::path path =
+        resolveDocumentPath(document, relative_path);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) {
+      std::cerr << "scene bake artifact is missing: " << path << '\n';
+      return false;
+    }
+    const std::string type = asset["type"].get<std::string>();
+    std::string diagnostic;
+    if (type == "baked_mesh") {
+      if (!karma::assets::loadBakedMeshArtifact(path, &diagnostic)) {
+        std::cerr << "scene bake mesh artifact is unreadable: " << path
+                  << ": " << diagnostic << '\n';
+        return false;
+      }
+    } else if (type == "baked_irradiance_rgba8" ||
+               type == "baked_direction_rgba8") {
+      if (!karma::assets::loadBakedRgba8Artifact(path, &diagnostic)) {
+        std::cerr << "scene bake image artifact is unreadable: " << path
+                  << ": " << diagnostic << '\n';
+        return false;
+      }
+#if defined(KARMA_ENABLE_NAVIGATION)
+    } else if (type == "navigation_navmesh") {
+      if (!karma::assets::loadNavMeshSnapshot(path).valid()) {
+        std::cerr << "scene bake navmesh artifact is unreadable: " << path
+                  << '\n';
+        return false;
+      }
+    } else if (type == "navigation_tile_cache") {
+      if (!karma::assets::loadNavTileCacheSnapshot(path).valid()) {
+        std::cerr << "scene bake tile-cache artifact is unreadable: " << path
+                  << '\n';
+        return false;
+      }
+#endif
+    } else if (std::filesystem::file_size(path, error) == 0u || error) {
+      std::cerr << "scene bake artifact is empty: " << path << '\n';
+      return false;
+    }
+  }
+  return true;
 }
 
 bool bakeAssetPackages(const karma::scenes::SceneDocument& document,
@@ -235,14 +359,12 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  karma::scenes::SceneBakeResult result = karma::scenes::bakeScene(*load.document, bake);
-  if (!result.success) {
-    std::cerr << result.diagnostic << '\n';
-    return 1;
-  }
-
   const std::filesystem::path output_path =
-      options.output_path.empty() ? defaultOutputPath(options.scene_path) : options.output_path;
+      !options.output_path.empty()
+          ? options.output_path
+          : (!bake.path.empty()
+                 ? resolveDocumentPath(*load.document, bake.path)
+                 : defaultOutputPath(options.scene_path));
 
   if (options.check) {
     nlohmann::json existing;
@@ -250,19 +372,29 @@ int main(int argc, char** argv) {
       std::cerr << "failed to read existing scene bake: " << output_path << '\n';
       return 1;
     }
+    const std::string expected_fingerprint =
+        karma::scenes::sceneBakeFingerprint(*load.document, bake);
     const std::string existing_fingerprint =
         existing.value("scene_fingerprint", std::string{});
-    if (existing_fingerprint != result.scene_fingerprint) {
+    if (existing_fingerprint != expected_fingerprint) {
       std::cerr << "scene bake is stale: " << output_path << '\n'
-                << "expected fingerprint: " << result.scene_fingerprint << '\n'
+                << "expected fingerprint: " << expected_fingerprint << '\n'
                 << "existing fingerprint: " << existing_fingerprint << '\n';
       return 2;
     }
+    if (!checkProducedArtifacts(*load.document, existing)) return 2;
     if (options.bake_packages &&
-        !checkAssetPackages(*load.document, options, result.scene_fingerprint)) {
+        !checkAssetPackages(*load.document, options, expected_fingerprint)) {
       return 2;
     }
     return 0;
+  }
+
+  karma::scenes::SceneBakeResult result =
+      karma::scenes::bakeScene(*load.document, bake);
+  if (!result.success) {
+    std::cerr << result.diagnostic << '\n';
+    return 1;
   }
 
   if (options.bake_packages &&

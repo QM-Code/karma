@@ -12,7 +12,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace karma::assets {
@@ -84,6 +86,26 @@ std::optional<Rgba8Image> loadRgba8ImageFromMemory(const std::uint8_t* data,
 std::optional<ScalarImage> loadScalarImage(
     const std::filesystem::path& path,
     const ScalarImageLoadOptions& options = {});
+
+/// Atomically saves a versioned portable derived-mesh bake artifact.
+bool saveBakedMeshArtifact(const std::filesystem::path& path,
+                           const world::MeshData& mesh,
+                           std::string* diagnostic = nullptr);
+
+/// Loads a derived-mesh bake artifact written by `saveBakedMeshArtifact`.
+std::optional<world::MeshData> loadBakedMeshArtifact(
+    const std::filesystem::path& path,
+    std::string* diagnostic = nullptr);
+
+/// Atomically saves a versioned portable RGBA8 bake artifact.
+bool saveBakedRgba8Artifact(const std::filesystem::path& path,
+                            const Rgba8Image& image,
+                            std::string* diagnostic = nullptr);
+
+/// Loads an RGBA8 bake artifact written by `saveBakedRgba8Artifact`.
+std::optional<Rgba8Image> loadBakedRgba8Artifact(
+    const std::filesystem::path& path,
+    std::string* diagnostic = nullptr);
 
 }  // namespace karma::assets
 
@@ -256,6 +278,7 @@ struct GltfSceneAsset {
 };
 
 struct SceneAsset;
+class AssetPackageStore;
 
 /// \ingroup karma_content
 /// Explicit registry for normalized runtime assets.
@@ -266,8 +289,10 @@ class AssetRegistry {
  public:
   AssetRegistry();
   ~AssetRegistry();
-  AssetRegistry(AssetRegistry&&) noexcept;
-  AssetRegistry& operator=(AssetRegistry&&) noexcept;
+  /// Registry addresses are used by package/prefab ownership records, so a
+  /// live registry is intentionally immovable.
+  AssetRegistry(AssetRegistry&&) = delete;
+  AssetRegistry& operator=(AssetRegistry&&) = delete;
   AssetRegistry(const AssetRegistry&) = delete;
   AssetRegistry& operator=(const AssetRegistry&) = delete;
 
@@ -352,6 +377,10 @@ class AssetRegistry {
   uint64_t meshVersion() const;
   uint64_t textureVersion() const;
 
+  /// Registry-owned, ref-counted package lifetime shared by startup content,
+  /// scene instances, and prefab auto-loading.
+  AssetPackageStore& sharedPackageStore();
+
  private:
   void bumpVersion();
   void bumpMeshVersion();
@@ -359,6 +388,8 @@ class AssetRegistry {
 
   struct Impl;
   std::unique_ptr<Impl> impl_;
+  std::mutex package_store_mutex_;
+  std::unique_ptr<AssetPackageStore> package_store_;
 };
 
 }  // namespace karma::assets
@@ -618,6 +649,13 @@ class AssetPackageStore {
   std::optional<AssetPackageHandle> acquireBakedPackage(
       const std::filesystem::path& baked_cache_path,
       std::string* diagnostic = nullptr);
+  /// Acquires a baked package under the same ownership identity as its source
+  /// manifest. This lets source-prefab auto-loading share a package restored by
+  /// a scene bake instead of attempting to register the same asset keys twice.
+  std::optional<AssetPackageHandle> acquireBakedPackage(
+      const std::filesystem::path& baked_cache_path,
+      const std::filesystem::path& source_package_path,
+      std::string* diagnostic = nullptr);
   bool releasePackage(const AssetPackageHandle& package);
   void clear();
 
@@ -634,6 +672,7 @@ class AssetPackageStore {
   uint64_t next_instance_id_ = 1u;
   std::unordered_map<std::string, Record> records_;
   std::unordered_map<uint64_t, std::string> keys_by_instance_id_;
+  std::mutex mutex_;
 };
 
 }  // namespace karma::assets
@@ -656,6 +695,15 @@ struct MaterialLoadResult {
   std::string diagnostic;
 };
 
+/// Result of validating and atomically replacing a JSON `.mat` file.
+struct MaterialSaveResult {
+  std::filesystem::path path;
+  std::string diagnostic;
+
+  bool success() const { return diagnostic.empty(); }
+  explicit operator bool() const { return success(); }
+};
+
 /// Parses a shared material asset from a JSON `.mat` file.
 std::optional<rendering::MaterialAssetDesc> loadMaterialAssetDesc(
     const std::filesystem::path& path,
@@ -665,6 +713,16 @@ std::optional<rendering::MaterialAssetDesc> loadMaterialAssetDesc(
 std::optional<rendering::MaterialVariantDesc> loadMaterialVariantDesc(
     const std::filesystem::path& path,
     std::string* diagnostic = nullptr);
+
+/// Validates, canonically serializes, and atomically saves a material asset.
+MaterialSaveResult saveMaterialAssetDesc(
+    const rendering::MaterialAssetDesc& material,
+    const std::filesystem::path& path);
+
+/// Validates, canonically serializes, and atomically saves a material variant.
+MaterialSaveResult saveMaterialVariantDesc(
+    const rendering::MaterialVariantDesc& material,
+    const std::filesystem::path& path);
 
 /// Loads a JSON `.mat` file and registers it in the asset registry.
 MaterialLoadResult loadMaterialFile(AssetRegistry& assets,
@@ -678,6 +736,15 @@ MaterialLoadResult loadMaterialFile(AssetRegistry& assets,
 
 
 namespace karma::assets {
+
+/// \ingroup karma_content
+/// Loads an opaque navigation-mesh snapshot from disk.
+navigation::NavMeshSnapshot loadNavMeshSnapshot(const std::filesystem::path& path);
+
+/// \ingroup karma_content
+/// Saves an opaque navigation-mesh snapshot to disk.
+bool saveNavMeshSnapshot(const std::filesystem::path& path,
+                         const navigation::NavMeshSnapshot& snapshot);
 
 /// \ingroup karma_content
 /// Loads an opaque navigation tile-cache snapshot from disk.

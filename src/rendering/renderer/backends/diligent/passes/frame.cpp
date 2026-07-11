@@ -405,6 +405,9 @@ void DiligentBackend::releaseRasterSampleDependentResources() {
   for (auto& pso : compact_forward_pipeline_states_) {
     pso.Release();
   }
+  for (auto& pso : editor_wireframe_forward_pipeline_states_) {
+    pso.Release();
+  }
   custom_forward_pipelines_.clear();
 
   camera_override_pipeline_state_.Release();
@@ -423,6 +426,9 @@ void DiligentBackend::releaseRasterSampleDependentResources() {
   for (auto& srb : compact_default_material_srbs_) {
     srb.Release();
   }
+  for (auto& srb : editor_wireframe_default_material_srbs_) {
+    srb.Release();
+  }
   for (auto& [id, material] : materials_) {
     (void)id;
     material.srb.Release();
@@ -439,6 +445,9 @@ void DiligentBackend::releaseRasterSampleDependentResources() {
       srb.Release();
     }
     for (auto& srb : material.layout_custom_srbs) {
+      srb.Release();
+    }
+    for (auto& srb : material.editor_wireframe_srbs) {
       srb.Release();
     }
   }

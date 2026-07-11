@@ -21,7 +21,8 @@ bool appendDiagnostic(SceneInstantiateResult& result, std::string message) {
 bool deserializeAuthoredComponents(world::World& world,
                                    world::Entity entity,
                                    const nlohmann::json& components,
-                                   SceneInstantiateResult& result) {
+                                   SceneInstantiateResult& result,
+                                   const prefabs::ComponentSerializationContext& context) {
   if (!components.is_object() || components.empty()) {
     return true;
   }
@@ -37,7 +38,8 @@ bool deserializeAuthoredComponents(world::World& world,
       continue;
     }
     try {
-      if (!serializer.deserialize(world, entity, *component_it)) {
+      if (!prefabs::deserializeComponentPayload(
+              serializer, world, entity, *component_it, context)) {
         return appendDiagnostic(result,
                                 "scene entity has invalid component payload: " +
                                     serializer.type_name);

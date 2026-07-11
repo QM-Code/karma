@@ -1,6 +1,7 @@
 #include "karma/prefabs.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "karma/components.h"
+#include "karma/foliage.h"
 #include "karma/components.h"
 #include "karma/components.h"
 #include "karma/components.h"
@@ -32,6 +34,34 @@ namespace karma::prefabs {
 namespace {
 
 using Json = nlohmann::json;
+
+bool isPortableRelativePath(std::string_view value) {
+  if (value.empty() || value.find('\\') != std::string_view::npos ||
+      value.find('\0') != std::string_view::npos || value.front() == '/') {
+    return false;
+  }
+  if (value.size() >= 2u &&
+      std::isalpha(static_cast<unsigned char>(value[0])) != 0 &&
+      value[1] == ':') {
+    return false;
+  }
+
+  std::size_t start = 0u;
+  while (start <= value.size()) {
+    const std::size_t end = value.find('/', start);
+    const std::string_view segment =
+        end == std::string_view::npos ? value.substr(start)
+                                      : value.substr(start, end - start);
+    if (segment == "..") {
+      return false;
+    }
+    if (end == std::string_view::npos) {
+      break;
+    }
+    start = end + 1u;
+  }
+  return true;
+}
 
 Json toJson(const math::Vec3& value) {
   return Json::array({value.x, value.y, value.z});
@@ -247,6 +277,143 @@ bool readInt32(const Json& object, std::string_view key, int32_t& out) {
   return true;
 }
 
+bool readUint16(const Json& object, std::string_view key, uint16_t& out) {
+  uint32_t value = out;
+  if (!readUint32(object, key, value) || value > UINT16_MAX) {
+    return false;
+  }
+  out = static_cast<uint16_t>(value);
+  return true;
+}
+
+bool readUint8(const Json& object, std::string_view key, uint8_t& out) {
+  uint32_t value = out;
+  if (!readUint32(object, key, value) || value > UINT8_MAX) {
+    return false;
+  }
+  out = static_cast<uint8_t>(value);
+  return true;
+}
+
+bool readSize(const Json& object, std::string_view key, size_t& out) {
+  uint64_t value = static_cast<uint64_t>(out);
+  if (!readUint64(object, key, value) ||
+      value > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return false;
+  }
+  out = static_cast<size_t>(value);
+  return true;
+}
+
+bool readFloatVector(const Json& object,
+                     std::string_view key,
+                     std::vector<float>& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_array()) {
+    return false;
+  }
+  std::vector<float> values;
+  values.reserve(it->size());
+  for (const Json& entry : *it) {
+    float value = 0.0f;
+    if (!readFloatValue(entry, value)) {
+      return false;
+    }
+    values.push_back(value);
+  }
+  out = std::move(values);
+  return true;
+}
+
+Json floatVectorJson(const std::vector<float>& values) {
+  Json out = Json::array();
+  for (float value : values) {
+    out.push_back(value);
+  }
+  return out;
+}
+
+bool readVec3Value(const Json& value, math::Vec3& out);
+
+Json vec3VectorJson(const std::vector<math::Vec3>& values) {
+  Json out = Json::array();
+  for (const math::Vec3& value : values) {
+    out.push_back(toJson(value));
+  }
+  return out;
+}
+
+bool readVec3Vector(const Json& object,
+                    std::string_view key,
+                    std::vector<math::Vec3>& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_array()) {
+    return false;
+  }
+  std::vector<math::Vec3> values;
+  values.reserve(it->size());
+  for (const Json& entry : *it) {
+    math::Vec3 value{};
+    if (!readVec3Value(entry, value)) {
+      return false;
+    }
+    values.push_back(value);
+  }
+  out = std::move(values);
+  return true;
+}
+
+Json serializeEntityReference(
+    world::Entity entity,
+    const ComponentSerializationContext& context) {
+  if (!entity.isValid()) {
+    return nullptr;
+  }
+  if (!context.serialize_entity_reference) {
+    // A legacy caller has no stable document identity. Never persist a raw ECS
+    // index/generation pair because it is process-local and unsafe to reload.
+    return nullptr;
+  }
+  const std::optional<Json> encoded =
+      context.serialize_entity_reference(entity);
+  return encoded.has_value() ? *encoded : Json(nullptr);
+}
+
+bool resolveEntityReferenceValue(
+    const Json& value,
+    world::Entity& out,
+    const ComponentSerializationContext& context) {
+  if (value.is_null()) {
+    out = {};
+    return true;
+  }
+  if (!context.resolve_entity_reference) {
+    return false;
+  }
+  const std::optional<world::Entity> resolved =
+      context.resolve_entity_reference(value);
+  if (!resolved.has_value() || !resolved->isValid()) {
+    return false;
+  }
+  out = *resolved;
+  return true;
+}
+
+bool readEntityReference(const Json& object,
+                         std::string_view key,
+                         world::Entity& out,
+                         const ComponentSerializationContext& context) {
+  const auto it = object.find(key);
+  return it == object.end() ||
+         resolveEntityReferenceValue(*it, out, context);
+}
+
 bool readVec3Value(const Json& value, math::Vec3& out) {
   if (!value.is_array() || value.size() != 3u) {
     return false;
@@ -331,6 +498,43 @@ bool readLightType(const Json& object, components::LightComponent::Type& out) {
   }
   if (value == "spot") {
     out = components::LightComponent::Type::Spot;
+    return true;
+  }
+  return false;
+}
+
+std::string lightBakeModeName(components::LightComponent::BakeMode mode) {
+  switch (mode) {
+    case components::LightComponent::BakeMode::Realtime:
+      return "realtime";
+    case components::LightComponent::BakeMode::Mixed:
+      return "mixed";
+    case components::LightComponent::BakeMode::Baked:
+      return "baked";
+  }
+  return "realtime";
+}
+
+bool readLightBakeMode(const Json& object,
+                       components::LightComponent::BakeMode& out) {
+  const auto it = object.find("bake_mode");
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "realtime") {
+    out = components::LightComponent::BakeMode::Realtime;
+    return true;
+  }
+  if (value == "mixed") {
+    out = components::LightComponent::BakeMode::Mixed;
+    return true;
+  }
+  if (value == "baked") {
+    out = components::LightComponent::BakeMode::Baked;
     return true;
   }
   return false;
@@ -1008,6 +1212,145 @@ std::optional<components::InstancedMeshComponent> deserializeInstancedMesh(const
   return component;
 }
 
+Json serializeFoliage(const components::FoliageComponent& component) {
+  Json materials = Json::array();
+  for (const auto& binding : component.materials) {
+    materials.push_back(Json{
+        {"slot", binding.slot},
+        {"material_key", binding.material_key},
+    });
+  }
+
+  Json lods = Json::array();
+  for (const auto& lod : component.lods) {
+    Json lod_materials = Json::array();
+    for (const auto& binding : lod.materials) {
+      lod_materials.push_back(Json{
+          {"slot", binding.slot},
+          {"material_key", binding.material_key},
+      });
+    }
+    lods.push_back(Json{
+        {"start_distance", lod.start_distance},
+        {"mesh_asset_key", lod.mesh_asset_key},
+        {"materials", std::move(lod_materials)},
+        {"render_mode", instanceLodRenderModeName(lod.render_mode)},
+        {"shadow_visible", lod.shadow_visible},
+    });
+  }
+
+  return Json{
+      {"sidecar_path", component.sidecar_path.generic_string()},
+      {"mesh_asset_key", component.mesh_asset_key},
+      {"materials", std::move(materials)},
+      {"lods", std::move(lods)},
+      {"chunk_size", component.chunk_size},
+      {"view_distance", component.view_distance},
+      {"max_resident_instances", component.max_resident_instances},
+      {"source_revision", component.source_revision},
+      {"visible", component.visible},
+      {"shadow_visible", component.shadow_visible},
+  };
+}
+
+std::optional<components::FoliageComponent> deserializeFoliage(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+
+  components::FoliageComponent component{};
+  std::string sidecar_path;
+  if (!readString(json, "sidecar_path", sidecar_path) ||
+      !readString(json, "mesh_asset_key", component.mesh_asset_key) ||
+      !readFloat(json, "chunk_size", component.chunk_size) ||
+      !readFloat(json, "view_distance", component.view_distance) ||
+      !readUint32(json, "max_resident_instances", component.max_resident_instances) ||
+      !readUint64(json, "source_revision", component.source_revision) ||
+      !readBool(json, "visible", component.visible) ||
+      !readBool(json, "shadow_visible", component.shadow_visible)) {
+    return std::nullopt;
+  }
+  if (!isPortableRelativePath(sidecar_path) ||
+      component.mesh_asset_key.empty() ||
+      !std::isfinite(component.chunk_size) ||
+      !std::isfinite(component.view_distance) ||
+      component.chunk_size <= 0.0f || component.view_distance <= 0.0f ||
+      component.max_resident_instances == 0u) {
+    return std::nullopt;
+  }
+  component.sidecar_path = std::filesystem::path(std::move(sidecar_path));
+
+  if (const auto materials_it = json.find("materials"); materials_it != json.end()) {
+    if (!materials_it->is_array()) {
+      return std::nullopt;
+    }
+    component.materials.reserve(materials_it->size());
+    for (const Json& material_json : *materials_it) {
+      if (!material_json.is_object()) {
+        return std::nullopt;
+      }
+      components::MeshMaterialAssignment binding{};
+      if (!readUint32(material_json, "slot", binding.slot) ||
+          !readString(material_json, "material_key", binding.material_key) ||
+          binding.material_key.empty()) {
+        return std::nullopt;
+      }
+      component.materials.push_back(std::move(binding));
+    }
+  }
+
+  if (const auto lods_it = json.find("lods"); lods_it != json.end()) {
+    if (!lods_it->is_array() ||
+        lods_it->size() > components::kMaxInstancedMeshLodLevels) {
+      return std::nullopt;
+    }
+    component.lods.reserve(lods_it->size());
+    float previous_start_distance = 0.0f;
+    for (const Json& lod_json : *lods_it) {
+      if (!lod_json.is_object()) {
+        return std::nullopt;
+      }
+      components::InstancedMeshLodLevel lod{};
+      if (!readFloat(lod_json, "start_distance", lod.start_distance) ||
+          !readString(lod_json, "mesh_asset_key", lod.mesh_asset_key) ||
+          !readInstanceLodRenderMode(lod_json, "render_mode", lod.render_mode) ||
+          !readBool(lod_json, "shadow_visible", lod.shadow_visible) ||
+          !std::isfinite(lod.start_distance) ||
+          lod.start_distance <= previous_start_distance || lod.mesh_asset_key.empty()) {
+        return std::nullopt;
+      }
+      previous_start_distance = lod.start_distance;
+
+      if (const auto lod_materials_it = lod_json.find("materials");
+          lod_materials_it != lod_json.end()) {
+        if (!lod_materials_it->is_array()) {
+          return std::nullopt;
+        }
+        lod.materials.reserve(lod_materials_it->size());
+        for (const Json& material_json : *lod_materials_it) {
+          if (!material_json.is_object()) {
+            return std::nullopt;
+          }
+          components::MeshMaterialAssignment binding{};
+          if (!readUint32(material_json, "slot", binding.slot) ||
+              !readString(material_json, "material_key", binding.material_key) ||
+              binding.material_key.empty()) {
+            return std::nullopt;
+          }
+          lod.materials.push_back(std::move(binding));
+        }
+      }
+      component.lods.push_back(std::move(lod));
+    }
+  }
+
+  std::string validation_error;
+  if (!foliage::validateFoliageComponent(component, &validation_error)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
 Json serializeAnimator(const components::AnimatorComponent& component) {
   Json clip_refs = Json::array();
   for (const auto& clip : component.clips) {
@@ -1257,6 +1600,7 @@ std::optional<components::AnimatorComponent> deserializeAnimator(const Json& jso
 Json serializeLight(const components::LightComponent& component) {
   return Json{
       {"type", lightTypeName(component.type)},
+      {"bake_mode", lightBakeModeName(component.bake_mode)},
       {"color", toJson(component.color)},
       {"intensity", component.intensity},
       {"range", component.range},
@@ -1273,6 +1617,7 @@ std::optional<components::LightComponent> deserializeLight(const Json& json) {
   }
   components::LightComponent component{};
   if (!readLightType(json, component.type) ||
+      !readLightBakeMode(json, component.bake_mode) ||
       !readColor(json, "color", component.color) ||
       !readFloat(json, "intensity", component.intensity) ||
       !readFloat(json, "range", component.range) ||
@@ -1474,9 +1819,9 @@ Json serializeTerrainMaterialLayers(
     array.push_back(Json{
         {"name", layer.name},
         {"material_key", layer.material_key},
-        {"albedo_image", layer.albedo_image.string()},
-        {"normal_image", layer.normal_image.string()},
-        {"roughness_image", layer.roughness_image.string()},
+        {"albedo_image", layer.albedo_image.generic_string()},
+        {"normal_image", layer.normal_image.generic_string()},
+        {"roughness_image", layer.roughness_image.generic_string()},
         {"uv_scale", layer.uv_scale},
         {"enabled", layer.enabled},
     });
@@ -1530,7 +1875,7 @@ Json serializeTerrainDataMaps(
     array.push_back(Json{
         {"name", map.name},
         {"kind", terrainDataMapKindName(map.kind)},
-        {"image", map.image.string()},
+        {"image", map.image.generic_string()},
         {"pattern", map.pattern},
         {"format", terrainHeightFormatName(map.format)},
         {"raw_width", map.raw_width},
@@ -1580,14 +1925,14 @@ bool readTerrainDataMaps(const Json& object,
 Json serializeTerrain(const components::TerrainComponent& component) {
   return Json{
       {"source", terrainSourceName(component.source)},
-      {"tile_directory", component.tile_directory.string()},
+      {"tile_directory", component.tile_directory.generic_string()},
       {"height_pattern", component.height_pattern},
       {"color_pattern", component.color_pattern},
       {"control_pattern", component.control_pattern},
-      {"height_image", component.height_image.string()},
-      {"heatmap_image", component.heatmap_image.string()},
-      {"color_image", component.color_image.string()},
-      {"control_image", component.control_image.string()},
+      {"height_image", component.height_image.generic_string()},
+      {"heatmap_image", component.heatmap_image.generic_string()},
+      {"color_image", component.color_image.generic_string()},
+      {"control_image", component.control_image.generic_string()},
       {"height_format", terrainHeightFormatName(component.height_format)},
       {"raw_width", component.raw_width},
       {"raw_height", component.raw_height},
@@ -1596,6 +1941,7 @@ Json serializeTerrain(const components::TerrainComponent& component) {
       {"height_value_min", component.height_value_min},
       {"height_value_max", component.height_value_max},
       {"tile_index_base", component.tile_index_base},
+      {"source_revision", component.source_revision},
       {"material_layers", serializeTerrainMaterialLayers(component.material_layers)},
       {"data_maps", serializeTerrainDataMaps(component.data_maps)},
       {"terrain_size", component.terrain_size},
@@ -1642,6 +1988,7 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
       !readFloat(json, "height_value_min", component.height_value_min) ||
       !readFloat(json, "height_value_max", component.height_value_max) ||
       !readInt32(json, "tile_index_base", component.tile_index_base) ||
+      !readUint64(json, "source_revision", component.source_revision) ||
       !readTerrainMaterialLayers(json, component.material_layers) ||
       !readTerrainDataMaps(json, component.data_maps) ||
       !readFloat(json, "terrain_size", component.terrain_size) ||
@@ -1661,6 +2008,19 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
       !readBool(json, "cpu_fallback_enabled", component.cpu_fallback_enabled)) {
     return std::nullopt;
   }
+  const auto portable_or_empty = [](std::string_view value) {
+    return value.empty() || isPortableRelativePath(value);
+  };
+  if (!portable_or_empty(tile_directory) ||
+      !portable_or_empty(component.height_pattern) ||
+      !portable_or_empty(component.color_pattern) ||
+      !portable_or_empty(component.control_pattern) ||
+      !portable_or_empty(height_image) ||
+      !portable_or_empty(heatmap_image) ||
+      !portable_or_empty(color_image) ||
+      !portable_or_empty(control_image)) {
+    return std::nullopt;
+  }
   component.tile_directory = std::move(tile_directory);
   component.height_image = std::move(height_image);
   component.heatmap_image = std::move(heatmap_image);
@@ -1671,6 +2031,7 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
   const bool is_tile_directory =
       component.source == components::TerrainSourceType::ImageTileDirectory;
   if (component.tile_resolution < 2u ||
+      component.tile_resolution > rendering::kMaxTerrainTileResolution ||
       component.view_distance < 0.0f ||
       component.base_patch_size == 0u ||
       component.tessellation_factor < 1.0f ||
@@ -1678,13 +2039,19 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
       component.height_value_max <= component.height_value_min) {
     return std::nullopt;
   }
-  if ((component.height_format == components::TerrainHeightFormat::Raw16Unsigned ||
-       component.height_format == components::TerrainHeightFormat::R32Float) &&
-      (component.raw_width == 0u || component.raw_height == 0u)) {
-    return std::nullopt;
+  if (component.height_format == components::TerrainHeightFormat::Raw16Unsigned ||
+      component.height_format == components::TerrainHeightFormat::R32Float) {
+    if (component.raw_width == 0u || component.raw_height == 0u ||
+        component.raw_width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+        component.raw_height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+      return std::nullopt;
+    }
   }
   for (const auto& layer : component.material_layers) {
-    if (layer.uv_scale <= 0.0f ||
+    if (!portable_or_empty(layer.albedo_image.generic_string()) ||
+        !portable_or_empty(layer.normal_image.generic_string()) ||
+        !portable_or_empty(layer.roughness_image.generic_string()) ||
+        layer.uv_scale <= 0.0f ||
         (layer.enabled &&
          layer.material_key.empty() &&
          layer.albedo_image.empty())) {
@@ -1692,15 +2059,20 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
     }
   }
   for (const auto& map : component.data_maps) {
-    if (map.channel > 3u ||
+    if (!portable_or_empty(map.image.generic_string()) ||
+        !portable_or_empty(map.pattern) || map.channel > 3u ||
         (map.enabled && map.image.empty() && map.pattern.empty())) {
       return std::nullopt;
     }
-    if ((map.format == components::TerrainHeightFormat::Raw16Unsigned ||
-         map.format == components::TerrainHeightFormat::R32Float) &&
-        ((map.raw_width == 0u && component.raw_width == 0u) ||
-         (map.raw_height == 0u && component.raw_height == 0u))) {
-      return std::nullopt;
+    if (map.format == components::TerrainHeightFormat::Raw16Unsigned ||
+        map.format == components::TerrainHeightFormat::R32Float) {
+      const uint32_t width = map.raw_width != 0u ? map.raw_width : component.raw_width;
+      const uint32_t height = map.raw_height != 0u ? map.raw_height : component.raw_height;
+      if (width == 0u || height == 0u ||
+          width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+          height > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+        return std::nullopt;
+      }
     }
   }
   if (component.material_layers.size() > 4u) {
@@ -1720,14 +2092,103 @@ std::optional<components::TerrainComponent> deserializeTerrain(const Json& json)
   return component;
 }
 
+const char* rigidbodyMotionTypeName(components::RigidbodyMotionType type) {
+  switch (type) {
+    case components::RigidbodyMotionType::Dynamic:
+      return "dynamic";
+    case components::RigidbodyMotionType::Kinematic:
+      return "kinematic";
+    case components::RigidbodyMotionType::Static:
+      return "static";
+  }
+  return "dynamic";
+}
+
+bool readRigidbodyMotionType(const Json& object,
+                             std::string_view key,
+                             components::RigidbodyMotionType& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "dynamic") {
+    out = components::RigidbodyMotionType::Dynamic;
+    return true;
+  }
+  if (value == "kinematic") {
+    out = components::RigidbodyMotionType::Kinematic;
+    return true;
+  }
+  if (value == "static") {
+    out = components::RigidbodyMotionType::Static;
+    return true;
+  }
+  return false;
+}
+
+const char* rigidbodyMotionQualityName(components::RigidbodyMotionQuality quality) {
+  switch (quality) {
+    case components::RigidbodyMotionQuality::Discrete:
+      return "discrete";
+    case components::RigidbodyMotionQuality::LinearCast:
+      return "linear_cast";
+  }
+  return "discrete";
+}
+
+bool readRigidbodyMotionQuality(const Json& object,
+                                std::string_view key,
+                                components::RigidbodyMotionQuality& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "discrete") {
+    out = components::RigidbodyMotionQuality::Discrete;
+    return true;
+  }
+  if (value == "linear_cast") {
+    out = components::RigidbodyMotionQuality::LinearCast;
+    return true;
+  }
+  return false;
+}
+
 Json serializeRigidbody(const components::RigidbodyComponent& component) {
   return Json{
+      {"motion_type", rigidbodyMotionTypeName(component.motion_type)},
+      {"motion_quality", rigidbodyMotionQualityName(component.motion_quality)},
+      {"allowed_dofs", component.allowed_dofs},
       {"mass", component.mass},
       {"velocity", toJson(component.velocity)},
       {"angular_velocity", toJson(component.angular_velocity)},
       {"is_kinematic", component.is_kinematic},
       {"use_gravity", component.use_gravity},
       {"is_trigger", component.is_trigger},
+      {"gravity_factor", component.gravity_factor},
+      {"linear_damping", component.linear_damping},
+      {"angular_damping", component.angular_damping},
+      {"max_linear_velocity", component.max_linear_velocity},
+      {"max_angular_velocity", component.max_angular_velocity},
+      {"inertia_multiplier", component.inertia_multiplier},
+      {"velocity_solver_steps", component.velocity_solver_steps},
+      {"position_solver_steps", component.position_solver_steps},
+      {"allow_sleeping", component.allow_sleeping},
+      {"allow_dynamic_or_kinematic", component.allow_dynamic_or_kinematic},
+      {"collide_kinematic_vs_non_dynamic",
+       component.collide_kinematic_vs_non_dynamic},
+      {"use_manifold_reduction", component.use_manifold_reduction},
+      {"apply_gyroscopic_force", component.apply_gyroscopic_force},
+      {"enhanced_internal_edge_removal",
+       component.enhanced_internal_edge_removal},
   };
 }
 
@@ -1736,12 +2197,87 @@ std::optional<components::RigidbodyComponent> deserializeRigidbody(const Json& j
     return std::nullopt;
   }
   components::RigidbodyComponent component{};
-  if (!readFloat(json, "mass", component.mass) ||
+  uint32_t allowed_dofs = component.allowed_dofs;
+  if (!readRigidbodyMotionType(json, "motion_type", component.motion_type) ||
+      !readRigidbodyMotionQuality(json, "motion_quality", component.motion_quality) ||
+      !readUint32(json, "allowed_dofs", allowed_dofs) ||
+      !readFloat(json, "mass", component.mass) ||
       !readVec3(json, "velocity", component.velocity) ||
       !readVec3(json, "angular_velocity", component.angular_velocity) ||
       !readBool(json, "is_kinematic", component.is_kinematic) ||
       !readBool(json, "use_gravity", component.use_gravity) ||
-      !readBool(json, "is_trigger", component.is_trigger)) {
+      !readBool(json, "is_trigger", component.is_trigger) ||
+      !readFloat(json, "gravity_factor", component.gravity_factor) ||
+      !readFloat(json, "linear_damping", component.linear_damping) ||
+      !readFloat(json, "angular_damping", component.angular_damping) ||
+      !readFloat(json, "max_linear_velocity", component.max_linear_velocity) ||
+      !readFloat(json, "max_angular_velocity", component.max_angular_velocity) ||
+      !readFloat(json, "inertia_multiplier", component.inertia_multiplier) ||
+      !readUint32(json, "velocity_solver_steps", component.velocity_solver_steps) ||
+      !readUint32(json, "position_solver_steps", component.position_solver_steps) ||
+      !readBool(json, "allow_sleeping", component.allow_sleeping) ||
+      !readBool(json,
+                "allow_dynamic_or_kinematic",
+                component.allow_dynamic_or_kinematic) ||
+      !readBool(json,
+                "collide_kinematic_vs_non_dynamic",
+                component.collide_kinematic_vs_non_dynamic) ||
+      !readBool(json, "use_manifold_reduction", component.use_manifold_reduction) ||
+      !readBool(json, "apply_gyroscopic_force", component.apply_gyroscopic_force) ||
+      !readBool(json,
+                "enhanced_internal_edge_removal",
+                component.enhanced_internal_edge_removal)) {
+    return std::nullopt;
+  }
+  if (allowed_dofs > components::RigidbodyDofAll || component.mass < 0.0f ||
+      component.linear_damping < 0.0f || component.angular_damping < 0.0f ||
+      component.max_linear_velocity <= 0.0f ||
+      component.max_angular_velocity <= 0.0f ||
+      component.inertia_multiplier <= 0.0f) {
+    return std::nullopt;
+  }
+  component.allowed_dofs = static_cast<uint8_t>(allowed_dofs);
+  return component;
+}
+
+Json serializePhysicsMaterial(const components::PhysicsMaterialComponent& component) {
+  return Json{
+      {"friction", component.friction},
+      {"restitution", component.restitution},
+  };
+}
+
+std::optional<components::PhysicsMaterialComponent> deserializePhysicsMaterial(
+    const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::PhysicsMaterialComponent component{};
+  if (!readFloat(json, "friction", component.friction) ||
+      !readFloat(json, "restitution", component.restitution) ||
+      component.friction < 0.0f || component.restitution < 0.0f ||
+      component.restitution > 1.0f) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializePhysicsCollisionFilter(
+    const components::PhysicsCollisionFilterComponent& component) {
+  return Json{
+      {"layers", component.layers},
+      {"collides_with", component.collides_with},
+  };
+}
+
+std::optional<components::PhysicsCollisionFilterComponent>
+deserializePhysicsCollisionFilter(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::PhysicsCollisionFilterComponent component{};
+  if (!readUint32(json, "layers", component.layers) ||
+      !readUint32(json, "collides_with", component.collides_with)) {
     return std::nullopt;
   }
   return component;
@@ -2530,6 +3066,2333 @@ std::optional<components::VolumetricComponent> deserializeVolumetric(const Json&
   return component;
 }
 
+Json serializeAudioListener(const components::AudioListenerComponent&) {
+  return Json::object();
+}
+
+std::optional<components::AudioListenerComponent> deserializeAudioListener(
+    const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  return components::AudioListenerComponent{};
+}
+
+Json serializeAudioSource(const components::AudioSourceComponent& component) {
+  return Json{
+      {"clip_key", component.clip_key},
+      {"gain", component.gain},
+      {"pitch", component.pitch},
+      {"min_distance", component.min_distance},
+      {"max_distance", component.max_distance},
+      {"looping", component.looping},
+      {"play_on_start", component.play_on_start},
+      {"spatialized", component.spatialized},
+      {"max_instances", component.max_instances},
+  };
+}
+
+std::optional<components::AudioSourceComponent> deserializeAudioSource(
+    const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::AudioSourceComponent component{};
+  int32_t max_instances = component.max_instances;
+  if (!readString(json, "clip_key", component.clip_key) ||
+      !readFloat(json, "gain", component.gain) ||
+      !readFloat(json, "pitch", component.pitch) ||
+      !readFloat(json, "min_distance", component.min_distance) ||
+      !readFloat(json, "max_distance", component.max_distance) ||
+      !readBool(json, "looping", component.looping) ||
+      !readBool(json, "play_on_start", component.play_on_start) ||
+      !readBool(json, "spatialized", component.spatialized) ||
+      !readInt32(json, "max_instances", max_instances) ||
+      component.gain < 0.0f || component.pitch <= 0.0f ||
+      component.min_distance < 0.0f ||
+      component.max_distance < component.min_distance || max_instances <= 0) {
+    return std::nullopt;
+  }
+  component.max_instances = max_instances;
+  return component;
+}
+
+const char* antiAliasingModeName(rendering::AntiAliasingMode mode) {
+  switch (mode) {
+    case rendering::AntiAliasingMode::None:
+      return "none";
+    case rendering::AntiAliasingMode::MSAA:
+      return "msaa";
+    case rendering::AntiAliasingMode::SSAA:
+      return "ssaa";
+  }
+  return "none";
+}
+
+bool readAntiAliasing(const Json& json,
+                      rendering::AntiAliasingSettings& out) {
+  const auto it = json.find("anti_aliasing");
+  if (it == json.end()) {
+    return true;
+  }
+  if (!it->is_object()) {
+    return false;
+  }
+  std::string mode = antiAliasingModeName(out.mode);
+  if (!readString(*it, "mode", mode) ||
+      !readUint32(*it, "msaa_samples", out.msaa_samples) ||
+      !readFloat(*it, "ssaa_scale", out.ssaa_scale)) {
+    return false;
+  }
+  if (mode == "none") {
+    out.mode = rendering::AntiAliasingMode::None;
+  } else if (mode == "msaa") {
+    out.mode = rendering::AntiAliasingMode::MSAA;
+  } else if (mode == "ssaa") {
+    out.mode = rendering::AntiAliasingMode::SSAA;
+  } else {
+    return false;
+  }
+  return out.msaa_samples > 0u && out.ssaa_scale >= 1.0f &&
+         out.ssaa_scale <= 4.0f;
+}
+
+Json serializeCamera(const components::CameraComponent& component) {
+  Json params = Json::object();
+  for (const auto& [name, value] : component.shader_user_params) {
+    params[name] = toJson(value);
+  }
+  return Json{
+      {"perspective", component.perspective},
+      {"render_shadows", component.render_shadows},
+      {"fov_y_degrees", component.fov_y_degrees},
+      {"near_clip", component.near_clip},
+      {"far_clip", component.far_clip},
+      {"ortho_left", component.ortho_left},
+      {"ortho_right", component.ortho_right},
+      {"ortho_top", component.ortho_top},
+      {"ortho_bottom", component.ortho_bottom},
+      {"is_primary", component.is_primary},
+      {"render_to_texture", component.render_to_texture},
+      {"render_target_key", component.render_target_key},
+      {"frame_graph_key", component.frame_graph_key},
+      {"shader_override_vertex_path",
+       component.shader_override_vertex_path.generic_string()},
+      {"shader_override_fragment_path",
+       component.shader_override_fragment_path.generic_string()},
+      {"anti_aliasing",
+       Json{{"mode", antiAliasingModeName(component.anti_aliasing.mode)},
+            {"msaa_samples", component.anti_aliasing.msaa_samples},
+            {"ssaa_scale", component.anti_aliasing.ssaa_scale}}},
+      {"shader_user_params", std::move(params)},
+  };
+}
+
+std::optional<components::CameraComponent> deserializeCamera(const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::CameraComponent component{};
+  std::string vertex_path;
+  std::string fragment_path;
+  if (!readBool(json, "perspective", component.perspective) ||
+      !readBool(json, "render_shadows", component.render_shadows) ||
+      !readFloat(json, "fov_y_degrees", component.fov_y_degrees) ||
+      !readFloat(json, "near_clip", component.near_clip) ||
+      !readFloat(json, "far_clip", component.far_clip) ||
+      !readFloat(json, "ortho_left", component.ortho_left) ||
+      !readFloat(json, "ortho_right", component.ortho_right) ||
+      !readFloat(json, "ortho_top", component.ortho_top) ||
+      !readFloat(json, "ortho_bottom", component.ortho_bottom) ||
+      !readBool(json, "is_primary", component.is_primary) ||
+      !readBool(json, "primary", component.is_primary) ||
+      !readBool(json, "render_to_texture", component.render_to_texture) ||
+      !readString(json, "render_target_key", component.render_target_key) ||
+      !readString(json, "frame_graph_key", component.frame_graph_key) ||
+      !readString(json, "shader_override_vertex_path", vertex_path) ||
+      !readString(json, "shader_override_fragment_path", fragment_path) ||
+      !readAntiAliasing(json, component.anti_aliasing) ||
+      component.near_clip <= 0.0f || component.far_clip <= component.near_clip ||
+      (component.perspective &&
+       (component.fov_y_degrees < 1.0f || component.fov_y_degrees > 179.0f)) ||
+      (!component.perspective &&
+       (std::abs(component.ortho_right - component.ortho_left) <= 1.0e-5f ||
+        std::abs(component.ortho_top - component.ortho_bottom) <= 1.0e-5f)) ||
+      (!vertex_path.empty() && !isPortableRelativePath(vertex_path)) ||
+      (!fragment_path.empty() && !isPortableRelativePath(fragment_path))) {
+    return std::nullopt;
+  }
+  component.shader_override_vertex_path = vertex_path;
+  component.shader_override_fragment_path = fragment_path;
+  if (const auto params_it = json.find("shader_user_params");
+      params_it != json.end()) {
+    if (!params_it->is_object()) {
+      return std::nullopt;
+    }
+    for (auto it = params_it->begin(); it != params_it->end(); ++it) {
+      math::Color value{};
+      if (it.key().empty() || !readColorValue(it.value(), value)) {
+        return std::nullopt;
+      }
+      component.shader_user_params[it.key()] = value;
+    }
+  }
+  return component;
+}
+
+Json serializeEnvironment(const components::EnvironmentComponent& component) {
+  return Json{
+      {"environment_map_asset_key", component.environment_map_asset_key},
+      {"intensity", component.intensity},
+      {"draw_skybox", component.draw_skybox},
+      {"enabled", component.enabled},
+  };
+}
+
+std::optional<components::EnvironmentComponent> deserializeEnvironment(
+    const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::EnvironmentComponent component{};
+  if (!readString(json,
+                  "environment_map_asset_key",
+                  component.environment_map_asset_key) ||
+      !readFloat(json, "intensity", component.intensity) ||
+      !readBool(json, "draw_skybox", component.draw_skybox) ||
+      !readBool(json, "enabled", component.enabled) ||
+      component.intensity < 0.0f) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeRootMotion(const components::RootMotionComponent& component) {
+  return Json{
+      {"root_motion_mode", rootMotionModeName(component.mode)},
+      {"root_motion_node_index", component.root_motion_node_index},
+  };
+}
+
+std::optional<components::RootMotionComponent> deserializeRootMotion(
+    const Json& json) {
+  if (!json.is_object()) {
+    return std::nullopt;
+  }
+  components::RootMotionComponent component{};
+  if (!readRootMotionMode(json, component.mode) ||
+      !readUint32(json,
+                  "root_motion_node_index",
+                  component.root_motion_node_index)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+const char* collisionListenModeName(components::CollisionListenMode mode) {
+  switch (mode) {
+    case components::CollisionListenMode::All:
+      return "all";
+    case components::CollisionListenMode::TriggersOnly:
+      return "triggers_only";
+    case components::CollisionListenMode::SolidsOnly:
+      return "solids_only";
+  }
+  return "all";
+}
+
+bool readCollisionListenMode(const Json& json,
+                             components::CollisionListenMode& out) {
+  const auto it = json.find("mode");
+  if (it == json.end()) {
+    return true;
+  }
+  if (!it->is_string()) {
+    return false;
+  }
+  const std::string value = it->get<std::string>();
+  if (value == "all") out = components::CollisionListenMode::All;
+  else if (value == "triggers_only") out = components::CollisionListenMode::TriggersOnly;
+  else if (value == "solids_only") out = components::CollisionListenMode::SolidsOnly;
+  else return false;
+  return true;
+}
+
+Json serializeCollisionListener(
+    const components::CollisionListenerComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"mode", collisionListenModeName(component.mode)},
+              {"emit_stay", component.emit_stay},
+              {"collision_layer_mask", component.collision_layer_mask}};
+}
+
+std::optional<components::CollisionListenerComponent>
+deserializeCollisionListener(const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::CollisionListenerComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readCollisionListenMode(json, component.mode) ||
+      !readBool(json, "emit_stay", component.emit_stay) ||
+      !readUint32(json,
+                  "collision_layer_mask",
+                  component.collision_layer_mask)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeContactListener(
+    const components::ContactListenerComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"emit_stay", component.emit_stay},
+              {"collision_layer_mask", component.collision_layer_mask}};
+}
+
+std::optional<components::ContactListenerComponent> deserializeContactListener(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::ContactListenerComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readBool(json, "emit_stay", component.emit_stay) ||
+      !readUint32(json,
+                  "collision_layer_mask",
+                  component.collision_layer_mask)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeGroundContact(const components::GroundContactComponent&) {
+  // All contact fields are runtime outputs; component presence is authored.
+  return Json::object();
+}
+
+std::optional<components::GroundContactComponent> deserializeGroundContact(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  return components::GroundContactComponent{};
+}
+
+const char* deformationPathName(components::DeformationPath path) {
+  return path == components::DeformationPath::CpuReference ? "cpu_reference"
+                                                           : "gpu";
+}
+
+bool readDeformationPath(const Json& json, components::DeformationPath& out) {
+  const auto it = json.find("path");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  if (value == "gpu") out = components::DeformationPath::Gpu;
+  else if (value == "cpu_reference") out = components::DeformationPath::CpuReference;
+  else return false;
+  return true;
+}
+
+Json serializeDeformableMesh(
+    const components::DeformableMeshComponent& component,
+    const ComponentSerializationContext& context) {
+  Json joints = Json::array();
+  for (world::Entity joint : component.joint_entities) {
+    joints.push_back(serializeEntityReference(joint, context));
+  }
+  return Json{
+      {"joint_entities", std::move(joints)},
+      {"base_morph_weights", floatVectorJson(component.base_morph_weights)},
+      {"morph_weights", floatVectorJson(component.morph_weights)},
+      {"render_transform_entity",
+       serializeEntityReference(component.render_transform_entity, context)},
+      {"skin_index", component.skin_index},
+      {"path", deformationPathName(component.path)},
+      {"override_render_transform", component.override_render_transform},
+      {"enabled", component.enabled},
+  };
+}
+
+std::optional<components::DeformableMeshComponent> deserializeDeformableMesh(
+    const Json& json,
+    const ComponentSerializationContext& context) {
+  if (!json.is_object()) return std::nullopt;
+  components::DeformableMeshComponent component{};
+  if (!readFloatVector(json,
+                       "base_morph_weights",
+                       component.base_morph_weights) ||
+      !readFloatVector(json, "morph_weights", component.morph_weights) ||
+      !readEntityReference(json,
+                           "render_transform_entity",
+                           component.render_transform_entity,
+                           context) ||
+      !readUint32(json, "skin_index", component.skin_index) ||
+      !readDeformationPath(json, component.path) ||
+      !readBool(json,
+                "override_render_transform",
+                component.override_render_transform) ||
+      !readBool(json, "enabled", component.enabled)) {
+    return std::nullopt;
+  }
+  if (const auto joints_it = json.find("joint_entities");
+      joints_it != json.end()) {
+    if (!joints_it->is_array()) return std::nullopt;
+    component.joint_entities.reserve(joints_it->size());
+    for (const Json& entry : *joints_it) {
+      world::Entity joint{};
+      if (!resolveEntityReferenceValue(entry, joint, context) ||
+          !joint.isValid()) {
+        return std::nullopt;
+      }
+      component.joint_entities.push_back(joint);
+    }
+  }
+  if (!component.base_morph_weights.empty() &&
+      !component.morph_weights.empty() &&
+      component.base_morph_weights.size() != component.morph_weights.size()) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+const char* authorityModeName(components::AuthorityMode mode) {
+  switch (mode) {
+    case components::AuthorityMode::Server: return "server";
+    case components::AuthorityMode::Owner: return "owner";
+    case components::AuthorityMode::Client: return "client";
+    case components::AuthorityMode::Custom: return "custom";
+  }
+  return "server";
+}
+
+bool readAuthorityMode(const Json& json, components::AuthorityMode& out) {
+  const auto it = json.find("mode");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  if (value == "server") out = components::AuthorityMode::Server;
+  else if (value == "owner") out = components::AuthorityMode::Owner;
+  else if (value == "client") out = components::AuthorityMode::Client;
+  else if (value == "custom") out = components::AuthorityMode::Custom;
+  else return false;
+  return true;
+}
+
+const char* replicationPolicyName(components::ReplicationPolicy policy) {
+  switch (policy) {
+    case components::ReplicationPolicy::Snapshot: return "snapshot";
+    case components::ReplicationPolicy::Delta: return "delta";
+    case components::ReplicationPolicy::OwnerInput: return "owner_input";
+  }
+  return "snapshot";
+}
+
+bool parseReplicationPolicy(std::string_view value,
+                            components::ReplicationPolicy& out) {
+  if (value == "snapshot") out = components::ReplicationPolicy::Snapshot;
+  else if (value == "delta") out = components::ReplicationPolicy::Delta;
+  else if (value == "owner_input") out = components::ReplicationPolicy::OwnerInput;
+  else return false;
+  return true;
+}
+
+Json serializeNetworkIdentity(
+    const components::NetworkIdentityComponent& component) {
+  return Json{{"id", component.id}};
+}
+
+std::optional<components::NetworkIdentityComponent> deserializeNetworkIdentity(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NetworkIdentityComponent component{};
+  if (!readUint64(json, "id", component.id)) return std::nullopt;
+  return component;
+}
+
+Json serializeNetworkAuthority(
+    const components::NetworkAuthorityComponent& component) {
+  return Json{{"mode", authorityModeName(component.mode)},
+              {"owner_peer", component.owner_peer},
+              {"server_can_override", component.server_can_override}};
+}
+
+std::optional<components::NetworkAuthorityComponent>
+deserializeNetworkAuthority(const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NetworkAuthorityComponent component{};
+  if (!readAuthorityMode(json, component.mode) ||
+      !readUint32(json, "owner_peer", component.owner_peer) ||
+      !readBool(json,
+                "server_can_override",
+                component.server_can_override)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeNetworkReplicated(
+    const components::NetworkReplicatedComponent& component) {
+  Json entries = Json::array();
+  for (const auto& entry : component.components) {
+    entries.push_back(Json{{"component_type", entry.component_type},
+                           {"policy", replicationPolicyName(entry.policy)}});
+  }
+  return Json{{"components", std::move(entries)},
+              {"visible_by_default", component.visible_by_default}};
+}
+
+std::optional<components::NetworkReplicatedComponent>
+deserializeNetworkReplicated(const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NetworkReplicatedComponent component{};
+  if (!readBool(json,
+                "visible_by_default",
+                component.visible_by_default)) {
+    return std::nullopt;
+  }
+  if (const auto entries_it = json.find("components");
+      entries_it != json.end()) {
+    if (!entries_it->is_array()) return std::nullopt;
+    for (const Json& entry_json : *entries_it) {
+      if (!entry_json.is_object()) return std::nullopt;
+      components::ReplicatedComponentEntry entry{};
+      std::string policy = replicationPolicyName(entry.policy);
+      if (!readUint32(entry_json, "component_type", entry.component_type) ||
+          !readString(entry_json, "policy", policy) ||
+          !parseReplicationPolicy(policy, entry.policy)) {
+        return std::nullopt;
+      }
+      component.components.push_back(entry);
+    }
+  }
+  return component;
+}
+
+Json serializeScript(const components::ScriptComponent& component) {
+  return Json{{"script_key", component.script_key},
+              {"enabled", component.enabled}};
+}
+
+std::optional<components::ScriptComponent> deserializeScript(const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::ScriptComponent component{};
+  if (!readString(json, "script_key", component.script_key) ||
+      !readBool(json, "enabled", component.enabled)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeStatic(const components::StaticComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"include_descendants", component.include_descendants},
+              {"flags", component.flags}};
+}
+
+std::optional<components::StaticComponent> deserializeStatic(const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::StaticComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readBool(json,
+                "include_descendants",
+                component.include_descendants) ||
+      !readUint32(json, "flags", component.flags) ||
+      !components::validStaticComponentFlags(component.flags)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+#if defined(KARMA_ENABLE_NAVIGATION)
+
+Json serializeNavQueryFilter(const navigation::NavQueryFilter& filter) {
+  Json costs = Json::array();
+  for (float cost : filter.area_costs) costs.push_back(cost);
+  return Json{{"include_flags", filter.include_flags},
+              {"exclude_flags", filter.exclude_flags},
+              {"area_costs", std::move(costs)}};
+}
+
+bool deserializeNavQueryFilter(const Json& json,
+                               navigation::NavQueryFilter& out) {
+  if (!json.is_object() ||
+      !readUint16(json, "include_flags", out.include_flags) ||
+      !readUint16(json, "exclude_flags", out.exclude_flags)) {
+    return false;
+  }
+  if (const auto costs_it = json.find("area_costs"); costs_it != json.end()) {
+    if (!costs_it->is_array() ||
+        costs_it->size() != out.area_costs.size()) {
+      return false;
+    }
+    for (size_t index = 0; index < out.area_costs.size(); ++index) {
+      if (!readFloatValue((*costs_it)[index], out.area_costs[index]) ||
+          out.area_costs[index] <= 0.0f) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+const char* navBuildModeName(navigation::NavMeshBuildMode mode) {
+  return mode == navigation::NavMeshBuildMode::Tiled ? "tiled" : "solo";
+}
+
+const char* navPartitionName(navigation::NavMeshPartitionType partition) {
+  switch (partition) {
+    case navigation::NavMeshPartitionType::Watershed: return "watershed";
+    case navigation::NavMeshPartitionType::Monotone: return "monotone";
+    case navigation::NavMeshPartitionType::Layers: return "layers";
+  }
+  return "watershed";
+}
+
+Json serializeNavBuildConfig(const navigation::NavMeshBuildConfig& config) {
+  Json areas = Json::array();
+  for (const auto& area : config.area_configs) {
+    areas.push_back(Json{{"area", area.area},
+                         {"flags", area.flags},
+                         {"cost", area.cost}});
+  }
+  return Json{
+      {"build_mode", navBuildModeName(config.build_mode)},
+      {"partition_type", navPartitionName(config.partition_type)},
+      {"cell_size", config.cell_size},
+      {"cell_height", config.cell_height},
+      {"agent_height", config.agent_height},
+      {"agent_radius", config.agent_radius},
+      {"agent_max_climb", config.agent_max_climb},
+      {"agent_max_slope_degrees", config.agent_max_slope_degrees},
+      {"edge_max_len", config.edge_max_len},
+      {"edge_max_error", config.edge_max_error},
+      {"region_min_size", config.region_min_size},
+      {"region_merge_size", config.region_merge_size},
+      {"verts_per_poly", config.verts_per_poly},
+      {"detail_sample_dist", config.detail_sample_dist},
+      {"detail_sample_max_error", config.detail_sample_max_error},
+      {"default_poly_flags", config.default_poly_flags},
+      {"off_mesh_poly_flags", config.off_mesh_poly_flags},
+      {"tile_size", config.tile_size},
+      {"max_tiles", config.max_tiles},
+      {"max_polys_per_tile", config.max_polys_per_tile},
+      {"collect_build_debug_draw", config.collect_build_debug_draw},
+      {"area_configs", std::move(areas)},
+  };
+}
+
+bool deserializeNavBuildConfig(const Json& json,
+                               navigation::NavMeshBuildConfig& out) {
+  if (!json.is_object()) return false;
+  std::string build_mode = navBuildModeName(out.build_mode);
+  std::string partition = navPartitionName(out.partition_type);
+  int32_t verts_per_poly = out.verts_per_poly;
+  int32_t tile_size = out.tile_size;
+  int32_t max_tiles = out.max_tiles;
+  int32_t max_polys = out.max_polys_per_tile;
+  if (!readString(json, "build_mode", build_mode) ||
+      !readString(json, "partition_type", partition) ||
+      !readFloat(json, "cell_size", out.cell_size) ||
+      !readFloat(json, "cell_height", out.cell_height) ||
+      !readFloat(json, "agent_height", out.agent_height) ||
+      !readFloat(json, "agent_radius", out.agent_radius) ||
+      !readFloat(json, "agent_max_climb", out.agent_max_climb) ||
+      !readFloat(json,
+                 "agent_max_slope_degrees",
+                 out.agent_max_slope_degrees) ||
+      !readFloat(json, "edge_max_len", out.edge_max_len) ||
+      !readFloat(json, "edge_max_error", out.edge_max_error) ||
+      !readFloat(json, "region_min_size", out.region_min_size) ||
+      !readFloat(json, "region_merge_size", out.region_merge_size) ||
+      !readInt32(json, "verts_per_poly", verts_per_poly) ||
+      !readFloat(json, "detail_sample_dist", out.detail_sample_dist) ||
+      !readFloat(json,
+                 "detail_sample_max_error",
+                 out.detail_sample_max_error) ||
+      !readUint16(json, "default_poly_flags", out.default_poly_flags) ||
+      !readUint16(json, "off_mesh_poly_flags", out.off_mesh_poly_flags) ||
+      !readInt32(json, "tile_size", tile_size) ||
+      !readInt32(json, "max_tiles", max_tiles) ||
+      !readInt32(json, "max_polys_per_tile", max_polys) ||
+      !readBool(json,
+                "collect_build_debug_draw",
+                out.collect_build_debug_draw)) {
+    return false;
+  }
+  if (build_mode == "solo") out.build_mode = navigation::NavMeshBuildMode::Solo;
+  else if (build_mode == "tiled") out.build_mode = navigation::NavMeshBuildMode::Tiled;
+  else return false;
+  if (partition == "watershed") out.partition_type = navigation::NavMeshPartitionType::Watershed;
+  else if (partition == "monotone") out.partition_type = navigation::NavMeshPartitionType::Monotone;
+  else if (partition == "layers") out.partition_type = navigation::NavMeshPartitionType::Layers;
+  else return false;
+  out.verts_per_poly = verts_per_poly;
+  out.tile_size = tile_size;
+  out.max_tiles = max_tiles;
+  out.max_polys_per_tile = max_polys;
+  if (out.cell_size <= 0.0f || out.cell_height <= 0.0f ||
+      out.agent_height <= 0.0f || out.agent_radius < 0.0f ||
+      out.verts_per_poly < 3 || out.tile_size <= 0 || out.max_tiles < 0 ||
+      out.max_polys_per_tile < 0) {
+    return false;
+  }
+  if (const auto areas_it = json.find("area_configs");
+      areas_it != json.end()) {
+    if (!areas_it->is_array()) return false;
+    out.area_configs.clear();
+    for (const Json& area_json : *areas_it) {
+      if (!area_json.is_object()) return false;
+      navigation::NavAreaConfig area{};
+      if (!readUint8(area_json, "area", area.area) ||
+          !readUint16(area_json, "flags", area.flags) ||
+          !readFloat(area_json, "cost", area.cost) || area.cost <= 0.0f) {
+        return false;
+      }
+      out.area_configs.push_back(area);
+    }
+  }
+  return true;
+}
+
+Json serializeNavCrowdConfig(const navigation::NavCrowdConfig& config) {
+  Json filters = Json::array();
+  for (const auto& filter : config.query_filters) {
+    filters.push_back(serializeNavQueryFilter(filter));
+  }
+  Json avoidance = Json::array();
+  for (const auto& value : config.avoidance_params) {
+    avoidance.push_back(Json{
+        {"velocity_bias", value.velocity_bias},
+        {"weight_desired_velocity", value.weight_desired_velocity},
+        {"weight_current_velocity", value.weight_current_velocity},
+        {"weight_side", value.weight_side},
+        {"weight_time_of_impact", value.weight_time_of_impact},
+        {"horizontal_time", value.horizontal_time},
+        {"grid_size", value.grid_size},
+        {"adaptive_divisions", value.adaptive_divisions},
+        {"adaptive_rings", value.adaptive_rings},
+        {"adaptive_depth", value.adaptive_depth},
+    });
+  }
+  return Json{{"max_agents", config.max_agents},
+              {"max_agent_radius", config.max_agent_radius},
+              {"query_extents", toJson(config.query_extents)},
+              {"query_filters", std::move(filters)},
+              {"avoidance_params", std::move(avoidance)}};
+}
+
+bool deserializeNavCrowdConfig(const Json& json,
+                               navigation::NavCrowdConfig& out) {
+  if (!json.is_object()) return false;
+  int32_t max_agents = out.max_agents;
+  if (!readInt32(json, "max_agents", max_agents) ||
+      !readFloat(json, "max_agent_radius", out.max_agent_radius) ||
+      !readVec3(json, "query_extents", out.query_extents) ||
+      max_agents <= 0 || out.max_agent_radius <= 0.0f) {
+    return false;
+  }
+  out.max_agents = max_agents;
+  if (const auto filters_it = json.find("query_filters");
+      filters_it != json.end()) {
+    if (!filters_it->is_array()) return false;
+    out.query_filters.clear();
+    for (const Json& entry : *filters_it) {
+      navigation::NavQueryFilter filter{};
+      if (!deserializeNavQueryFilter(entry, filter)) return false;
+      out.query_filters.push_back(filter);
+    }
+  }
+  if (const auto values_it = json.find("avoidance_params");
+      values_it != json.end()) {
+    if (!values_it->is_array()) return false;
+    out.avoidance_params.clear();
+    for (const Json& entry : *values_it) {
+      if (!entry.is_object()) return false;
+      navigation::NavCrowdObstacleAvoidanceParams value{};
+      if (!readFloat(entry, "velocity_bias", value.velocity_bias) ||
+          !readFloat(entry,
+                     "weight_desired_velocity",
+                     value.weight_desired_velocity) ||
+          !readFloat(entry,
+                     "weight_current_velocity",
+                     value.weight_current_velocity) ||
+          !readFloat(entry, "weight_side", value.weight_side) ||
+          !readFloat(entry,
+                     "weight_time_of_impact",
+                     value.weight_time_of_impact) ||
+          !readFloat(entry, "horizontal_time", value.horizontal_time) ||
+          !readUint8(entry, "grid_size", value.grid_size) ||
+          !readUint8(entry,
+                     "adaptive_divisions",
+                     value.adaptive_divisions) ||
+          !readUint8(entry, "adaptive_rings", value.adaptive_rings) ||
+          !readUint8(entry, "adaptive_depth", value.adaptive_depth)) {
+        return false;
+      }
+      out.avoidance_params.push_back(value);
+    }
+  }
+  return true;
+}
+
+Json serializeNavCrowdAgentParams(
+    const navigation::NavCrowdAgentParams& params) {
+  return Json{
+      {"radius", params.radius},
+      {"height", params.height},
+      {"max_acceleration", params.max_acceleration},
+      {"max_speed", params.max_speed},
+      {"collision_query_range", params.collision_query_range},
+      {"path_optimization_range", params.path_optimization_range},
+      {"separation_weight", params.separation_weight},
+      {"update_flags", params.update_flags},
+      {"obstacle_avoidance_type", params.obstacle_avoidance_type},
+      {"query_filter_type", params.query_filter_type},
+  };
+}
+
+bool deserializeNavCrowdAgentParams(
+    const Json& json,
+    navigation::NavCrowdAgentParams& out) {
+  return json.is_object() &&
+         readFloat(json, "radius", out.radius) &&
+         readFloat(json, "height", out.height) &&
+         readFloat(json, "max_acceleration", out.max_acceleration) &&
+         readFloat(json, "max_speed", out.max_speed) &&
+         readFloat(json,
+                   "collision_query_range",
+                   out.collision_query_range) &&
+         readFloat(json,
+                   "path_optimization_range",
+                   out.path_optimization_range) &&
+         readFloat(json, "separation_weight", out.separation_weight) &&
+         readUint8(json, "update_flags", out.update_flags) &&
+         readUint8(json,
+                   "obstacle_avoidance_type",
+                   out.obstacle_avoidance_type) &&
+         readUint8(json, "query_filter_type", out.query_filter_type) &&
+         out.radius > 0.0f && out.height > 0.0f &&
+         out.max_acceleration >= 0.0f && out.max_speed >= 0.0f;
+}
+
+Json serializeNavMeshSurface(
+    const components::NavMeshSurfaceComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"layer_mask", component.layer_mask},
+              {"area", component.area},
+              {"walkable", component.walkable},
+              {"mesh_asset_key", component.mesh_asset_key}};
+}
+
+std::optional<components::NavMeshSurfaceComponent> deserializeNavMeshSurface(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavMeshSurfaceComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readUint32(json, "layer_mask", component.layer_mask) ||
+      !readUint8(json, "area", component.area) ||
+      !readBool(json, "walkable", component.walkable) ||
+      !readString(json, "mesh_asset_key", component.mesh_asset_key)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeNavOffMeshLink(
+    const components::NavOffMeshLinkComponent& component,
+    const ComponentSerializationContext& context) {
+  return Json{{"enabled", component.enabled},
+              {"layer_mask", component.layer_mask},
+              {"end_entity",
+               serializeEntityReference(component.end_entity, context)},
+              {"start_offset", toJson(component.start_offset)},
+              {"end_offset", toJson(component.end_offset)},
+              {"radius", component.radius},
+              {"area", component.area},
+              {"flags", component.flags},
+              {"bidirectional", component.bidirectional},
+              {"user_id", component.user_id}};
+}
+
+std::optional<components::NavOffMeshLinkComponent> deserializeNavOffMeshLink(
+    const Json& json,
+    const ComponentSerializationContext& context) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavOffMeshLinkComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readUint32(json, "layer_mask", component.layer_mask) ||
+      !readEntityReference(json, "end_entity", component.end_entity, context) ||
+      !readVec3(json, "start_offset", component.start_offset) ||
+      !readVec3(json, "end_offset", component.end_offset) ||
+      !readFloat(json, "radius", component.radius) ||
+      !readUint8(json, "area", component.area) ||
+      !readUint16(json, "flags", component.flags) ||
+      !readBool(json, "bidirectional", component.bidirectional) ||
+      !readUint32(json, "user_id", component.user_id) ||
+      component.radius <= 0.0f) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeNavConvexVolume(
+    const components::NavConvexVolumeComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"layer_mask", component.layer_mask},
+              {"vertices", vec3VectorJson(component.vertices)},
+              {"min_y", component.min_y},
+              {"max_y", component.max_y},
+              {"area", component.area}};
+}
+
+std::optional<components::NavConvexVolumeComponent>
+deserializeNavConvexVolume(const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavConvexVolumeComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readUint32(json, "layer_mask", component.layer_mask) ||
+      !readVec3Vector(json, "vertices", component.vertices) ||
+      !readFloat(json, "min_y", component.min_y) ||
+      !readFloat(json, "max_y", component.max_y) ||
+      !readUint8(json, "area", component.area) ||
+      component.min_y > component.max_y) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+bool readNavDebugMode(const Json& json,
+                      navigation::NavMeshDebugDrawMode& out) {
+  const auto it = json.find("debug_draw_mode");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  for (size_t index = 0; index < navigation::kNavMeshDebugDrawModeCount;
+       ++index) {
+    const auto candidate =
+        static_cast<navigation::NavMeshDebugDrawMode>(index);
+    if (value == navigation::navMeshDebugDrawModeName(candidate)) {
+      out = candidate;
+      return true;
+    }
+  }
+  return false;
+}
+
+Json serializeNavMesh(const components::NavMeshComponent& component) {
+  return Json{
+      {"enabled", component.enabled},
+      {"build_on_start", component.build_on_start},
+      {"debug_draw", component.debug_draw},
+      {"debug_draw_mode",
+       navigation::navMeshDebugDrawModeName(component.debug_draw_mode)},
+      {"source_mask", component.source_mask},
+      {"cache", Json{{"enabled", component.cache.enabled},
+                      {"read", component.cache.read},
+                      {"write", component.cache.write}}},
+      {"build_config", serializeNavBuildConfig(component.build_config)},
+  };
+}
+
+std::optional<components::NavMeshComponent> deserializeNavMesh(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavMeshComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readBool(json, "build_on_start", component.build_on_start) ||
+      !readBool(json, "debug_draw", component.debug_draw) ||
+      !readNavDebugMode(json, component.debug_draw_mode) ||
+      !readUint32(json, "source_mask", component.source_mask)) {
+    return std::nullopt;
+  }
+  if (const auto cache_it = json.find("cache"); cache_it != json.end()) {
+    if (!cache_it->is_object() ||
+        !readBool(*cache_it, "enabled", component.cache.enabled) ||
+        !readBool(*cache_it, "read", component.cache.read) ||
+        !readBool(*cache_it, "write", component.cache.write)) {
+      return std::nullopt;
+    }
+  }
+  if (const auto config_it = json.find("build_config");
+      config_it != json.end() &&
+      !deserializeNavBuildConfig(*config_it, component.build_config)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+const char* navCrowdMovementModeName(components::NavCrowdMovementMode mode) {
+  return mode == components::NavCrowdMovementMode::CharacterControllerVelocity
+             ? "character_controller_velocity"
+             : "transform";
+}
+
+bool readNavCrowdMovementMode(const Json& json,
+                              components::NavCrowdMovementMode& out) {
+  const auto it = json.find("movement_mode");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  if (value == "transform") out = components::NavCrowdMovementMode::Transform;
+  else if (value == "character_controller_velocity") {
+    out = components::NavCrowdMovementMode::CharacterControllerVelocity;
+  } else return false;
+  return true;
+}
+
+Json serializeNavCrowd(const components::NavCrowdComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"build_on_start", component.build_on_start},
+              {"simulation_paused", component.simulation_paused},
+              {"step_dt", component.step_dt},
+              {"time_scale", component.time_scale},
+              {"config", serializeNavCrowdConfig(component.config)}};
+}
+
+std::optional<components::NavCrowdComponent> deserializeNavCrowd(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavCrowdComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readBool(json, "build_on_start", component.build_on_start) ||
+      !readBool(json, "simulation_paused", component.simulation_paused) ||
+      !readFloat(json, "step_dt", component.step_dt) ||
+      !readFloat(json, "time_scale", component.time_scale) ||
+      component.step_dt <= 0.0f || component.time_scale < 0.0f) {
+    return std::nullopt;
+  }
+  if (const auto config_it = json.find("config");
+      config_it != json.end() &&
+      !deserializeNavCrowdConfig(*config_it, component.config)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+Json serializeNavCrowdAgent(
+    const components::NavCrowdAgentComponent& component,
+    const ComponentSerializationContext& context) {
+  return Json{
+      {"enabled", component.enabled},
+      {"crowd_entity",
+       serializeEntityReference(component.crowd_entity, context)},
+      {"params", serializeNavCrowdAgentParams(component.params)},
+      {"destination", toJson(component.destination)},
+      {"requested_velocity", toJson(component.requested_velocity)},
+      {"search_extents", toJson(component.search_extents)},
+      {"height_offset", component.height_offset},
+      {"stopping_distance", component.stopping_distance},
+      {"has_destination", component.has_destination},
+      {"movement_mode", navCrowdMovementModeName(component.movement_mode)},
+  };
+}
+
+std::optional<components::NavCrowdAgentComponent> deserializeNavCrowdAgent(
+    const Json& json,
+    const ComponentSerializationContext& context) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavCrowdAgentComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readEntityReference(json,
+                           "crowd_entity",
+                           component.crowd_entity,
+                           context) ||
+      !readVec3(json, "destination", component.destination) ||
+      !readVec3(json, "requested_velocity", component.requested_velocity) ||
+      !readVec3(json, "search_extents", component.search_extents) ||
+      !readFloat(json, "height_offset", component.height_offset) ||
+      !readFloat(json, "stopping_distance", component.stopping_distance) ||
+      !readBool(json, "has_destination", component.has_destination) ||
+      !readNavCrowdMovementMode(json, component.movement_mode) ||
+      component.stopping_distance < 0.0f) {
+    return std::nullopt;
+  }
+  if (const auto params_it = json.find("params");
+      params_it != json.end() &&
+      !deserializeNavCrowdAgentParams(*params_it, component.params)) {
+    return std::nullopt;
+  }
+  component.destination_requested = component.has_destination;
+  return component;
+}
+
+Json serializeNavMeshAgent(
+    const components::NavMeshAgentComponent& component,
+    const ComponentSerializationContext& context) {
+  return Json{
+      {"enabled", component.enabled},
+      {"speed", component.speed},
+      {"stopping_distance", component.stopping_distance},
+      {"height_offset", component.height_offset},
+      {"update_vertical_position", component.update_vertical_position},
+      {"accept_partial_paths", component.accept_partial_paths},
+      {"destination", toJson(component.destination)},
+      {"search_extents", toJson(component.search_extents)},
+      {"nav_mesh_entity",
+       serializeEntityReference(component.nav_mesh_entity, context)},
+      {"query_filter", serializeNavQueryFilter(component.query_filter)},
+      {"has_destination", component.has_destination},
+  };
+}
+
+std::optional<components::NavMeshAgentComponent> deserializeNavMeshAgent(
+    const Json& json,
+    const ComponentSerializationContext& context) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavMeshAgentComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readFloat(json, "speed", component.speed) ||
+      !readFloat(json, "stopping_distance", component.stopping_distance) ||
+      !readFloat(json, "height_offset", component.height_offset) ||
+      !readBool(json,
+                "update_vertical_position",
+                component.update_vertical_position) ||
+      !readBool(json,
+                "accept_partial_paths",
+                component.accept_partial_paths) ||
+      !readVec3(json, "destination", component.destination) ||
+      !readVec3(json, "search_extents", component.search_extents) ||
+      !readEntityReference(json,
+                           "nav_mesh_entity",
+                           component.nav_mesh_entity,
+                           context) ||
+      !readBool(json, "has_destination", component.has_destination) ||
+      component.speed < 0.0f || component.stopping_distance < 0.0f) {
+    return std::nullopt;
+  }
+  if (const auto filter_it = json.find("query_filter");
+      filter_it != json.end() &&
+      !deserializeNavQueryFilter(*filter_it, component.query_filter)) {
+    return std::nullopt;
+  }
+  component.path_requested = component.has_destination;
+  component.status = component.has_destination
+                         ? components::NavMeshAgentStatus::Requested
+                         : components::NavMeshAgentStatus::Idle;
+  return component;
+}
+
+const char* navTileCompressionName(
+    navigation::NavTileCacheCompression compression) {
+  return compression == navigation::NavTileCacheCompression::None ? "none"
+                                                                   : "fast_lz";
+}
+
+bool readNavTileBuildConfig(const Json& json,
+                            navigation::NavTileCacheBuildConfig& out) {
+  if (!json.is_object()) return false;
+  int32_t expected_layers = out.expected_layers_per_tile;
+  int32_t max_obstacles = out.max_obstacles;
+  int32_t max_layers = out.max_layers_per_tile;
+  std::string compression = navTileCompressionName(out.compression);
+  if (!readInt32(json, "expected_layers_per_tile", expected_layers) ||
+      !readInt32(json, "max_obstacles", max_obstacles) ||
+      !readInt32(json, "max_layers_per_tile", max_layers) ||
+      !readSize(json, "allocator_size", out.allocator_size) ||
+      !readString(json, "compression", compression) ||
+      expected_layers <= 0 || max_obstacles <= 0 || max_layers <= 0 ||
+      out.allocator_size == 0u) {
+    return false;
+  }
+  out.expected_layers_per_tile = expected_layers;
+  out.max_obstacles = max_obstacles;
+  out.max_layers_per_tile = max_layers;
+  if (compression == "none") out.compression = navigation::NavTileCacheCompression::None;
+  else if (compression == "fast_lz") out.compression = navigation::NavTileCacheCompression::FastLz;
+  else return false;
+  return true;
+}
+
+Json serializeNavTileBuildConfig(
+    const navigation::NavTileCacheBuildConfig& config) {
+  return Json{{"expected_layers_per_tile", config.expected_layers_per_tile},
+              {"max_obstacles", config.max_obstacles},
+              {"max_layers_per_tile", config.max_layers_per_tile},
+              {"allocator_size", config.allocator_size},
+              {"compression", navTileCompressionName(config.compression)}};
+}
+
+Json serializeNavTileCache(
+    const components::NavTileCacheComponent& component) {
+  return Json{{"enabled", component.enabled},
+              {"build_on_start", component.build_on_start},
+              {"build_config",
+               serializeNavTileBuildConfig(component.build_config)}};
+}
+
+std::optional<components::NavTileCacheComponent> deserializeNavTileCache(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavTileCacheComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readBool(json, "build_on_start", component.build_on_start)) {
+    return std::nullopt;
+  }
+  if (const auto config_it = json.find("build_config");
+      config_it != json.end() &&
+      !readNavTileBuildConfig(*config_it, component.build_config)) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+const char* navObstacleShapeName(
+    navigation::NavTileCacheObstacleShape shape) {
+  switch (shape) {
+    case navigation::NavTileCacheObstacleShape::Cylinder: return "cylinder";
+    case navigation::NavTileCacheObstacleShape::Box: return "box";
+    case navigation::NavTileCacheObstacleShape::OrientedBox: return "oriented_box";
+  }
+  return "cylinder";
+}
+
+bool readNavObstacleShape(const Json& json,
+                          navigation::NavTileCacheObstacleShape& out) {
+  const auto it = json.find("shape");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  if (value == "cylinder") out = navigation::NavTileCacheObstacleShape::Cylinder;
+  else if (value == "box") out = navigation::NavTileCacheObstacleShape::Box;
+  else if (value == "oriented_box") out = navigation::NavTileCacheObstacleShape::OrientedBox;
+  else return false;
+  return true;
+}
+
+Json serializeNavTileCacheObstacle(
+    const components::NavTileCacheObstacleComponent& component,
+    const ComponentSerializationContext& context) {
+  return Json{
+      {"enabled", component.enabled},
+      {"nav_mesh_entity",
+       serializeEntityReference(component.nav_mesh_entity, context)},
+      {"shape", navObstacleShapeName(component.shape)},
+      {"offset", toJson(component.offset)},
+      {"half_extents", toJson(component.half_extents)},
+      {"bounds_min", toJson(component.bounds_min)},
+      {"bounds_max", toJson(component.bounds_max)},
+      {"radius", component.radius},
+      {"height", component.height},
+      {"yaw_radians", component.yaw_radians},
+  };
+}
+
+std::optional<components::NavTileCacheObstacleComponent>
+deserializeNavTileCacheObstacle(
+    const Json& json,
+    const ComponentSerializationContext& context) {
+  if (!json.is_object()) return std::nullopt;
+  components::NavTileCacheObstacleComponent component{};
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readEntityReference(json,
+                           "nav_mesh_entity",
+                           component.nav_mesh_entity,
+                           context) ||
+      !readNavObstacleShape(json, component.shape) ||
+      !readVec3(json, "offset", component.offset) ||
+      !readVec3(json, "half_extents", component.half_extents) ||
+      !readVec3(json, "bounds_min", component.bounds_min) ||
+      !readVec3(json, "bounds_max", component.bounds_max) ||
+      !readFloat(json, "radius", component.radius) ||
+      !readFloat(json, "height", component.height) ||
+      !readFloat(json, "yaw_radians", component.yaw_radians) ||
+      component.radius <= 0.0f || component.height <= 0.0f) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+#endif  // defined(KARMA_ENABLE_NAVIGATION)
+
+const char* constraintKindName(components::PhysicsConstraintKind kind) {
+  switch (kind) {
+    case components::PhysicsConstraintKind::Fixed: return "fixed";
+    case components::PhysicsConstraintKind::Point: return "point";
+    case components::PhysicsConstraintKind::Distance: return "distance";
+    case components::PhysicsConstraintKind::Hinge: return "hinge";
+    case components::PhysicsConstraintKind::Slider: return "slider";
+    case components::PhysicsConstraintKind::Cone: return "cone";
+    case components::PhysicsConstraintKind::SwingTwist: return "swing_twist";
+    case components::PhysicsConstraintKind::SixDof: return "six_dof";
+  }
+  return "fixed";
+}
+
+bool readConstraintKind(const Json& json,
+                        components::PhysicsConstraintKind& out) {
+  const auto it = json.find("kind");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  if (value == "fixed") out = components::PhysicsConstraintKind::Fixed;
+  else if (value == "point") out = components::PhysicsConstraintKind::Point;
+  else if (value == "distance") out = components::PhysicsConstraintKind::Distance;
+  else if (value == "hinge") out = components::PhysicsConstraintKind::Hinge;
+  else if (value == "slider") out = components::PhysicsConstraintKind::Slider;
+  else if (value == "cone") out = components::PhysicsConstraintKind::Cone;
+  else if (value == "swing_twist") out = components::PhysicsConstraintKind::SwingTwist;
+  else if (value == "six_dof") out = components::PhysicsConstraintKind::SixDof;
+  else return false;
+  return true;
+}
+
+const char* constraintSpaceName(
+    components::PhysicsConstraintFrameSpace space) {
+  return space == components::PhysicsConstraintFrameSpace::LocalToBodyCenterOfMass
+             ? "local_to_body_center_of_mass"
+             : "world";
+}
+
+bool readConstraintSpace(const Json& json,
+                         components::PhysicsConstraintFrameSpace& out) {
+  const auto it = json.find("space");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  if (value == "world") out = components::PhysicsConstraintFrameSpace::World;
+  else if (value == "local_to_body_center_of_mass") {
+    out = components::PhysicsConstraintFrameSpace::LocalToBodyCenterOfMass;
+  } else return false;
+  return true;
+}
+
+const char* constraintSpringModeName(
+    components::PhysicsConstraintSpringMode mode) {
+  return mode == components::PhysicsConstraintSpringMode::StiffnessAndDamping
+             ? "stiffness_and_damping"
+             : "frequency_and_damping";
+}
+
+Json serializeConstraintSpring(
+    const components::PhysicsConstraintSpring& spring) {
+  return Json{{"mode", constraintSpringModeName(spring.mode)},
+              {"frequency_or_stiffness", spring.frequency_or_stiffness},
+              {"damping", spring.damping}};
+}
+
+bool deserializeConstraintSpring(
+    const Json& json,
+    components::PhysicsConstraintSpring& out) {
+  if (!json.is_object()) return false;
+  std::string mode = constraintSpringModeName(out.mode);
+  if (!readString(json, "mode", mode) ||
+      !readFloat(json,
+                 "frequency_or_stiffness",
+                 out.frequency_or_stiffness) ||
+      !readFloat(json, "damping", out.damping) ||
+      out.frequency_or_stiffness < 0.0f || out.damping < 0.0f) {
+    return false;
+  }
+  if (mode == "frequency_and_damping") {
+    out.mode = components::PhysicsConstraintSpringMode::FrequencyAndDamping;
+  } else if (mode == "stiffness_and_damping") {
+    out.mode = components::PhysicsConstraintSpringMode::StiffnessAndDamping;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+template <size_t Size>
+Json floatArrayJson(const std::array<float, Size>& values) {
+  Json out = Json::array();
+  for (float value : values) out.push_back(value);
+  return out;
+}
+
+template <size_t Size>
+bool readFloatArray(const Json& object,
+                    std::string_view key,
+                    std::array<float, Size>& out) {
+  const auto it = object.find(key);
+  if (it == object.end()) return true;
+  if (!it->is_array() || it->size() != Size) return false;
+  for (size_t index = 0; index < Size; ++index) {
+    if (!readFloatValue((*it)[index], out[index])) return false;
+  }
+  return true;
+}
+
+Json serializePhysicsConstraint(
+    const components::PhysicsConstraintComponent& component,
+    const ComponentSerializationContext& context) {
+  return Json{
+      {"body_a", serializeEntityReference(component.body_a, context)},
+      {"body_b", serializeEntityReference(component.body_b, context)},
+      {"kind", constraintKindName(component.kind)},
+      {"space", constraintSpaceName(component.space)},
+      {"enabled", component.enabled},
+      {"priority", component.priority},
+      {"velocity_solver_steps", component.velocity_solver_steps},
+      {"position_solver_steps", component.position_solver_steps},
+      {"draw_size", component.draw_size},
+      {"user_data", component.user_data},
+      {"auto_detect_point", component.auto_detect_point},
+      {"point1", toJson(component.point1)},
+      {"point2", toJson(component.point2)},
+      {"axis1", toJson(component.axis1)},
+      {"axis2", toJson(component.axis2)},
+      {"normal1", toJson(component.normal1)},
+      {"normal2", toJson(component.normal2)},
+      {"plane_axis1", toJson(component.plane_axis1)},
+      {"plane_axis2", toJson(component.plane_axis2)},
+      {"min_distance", component.min_distance},
+      {"max_distance", component.max_distance},
+      {"limits_min", component.limits_min},
+      {"limits_max", component.limits_max},
+      {"half_cone_angle", component.half_cone_angle},
+      {"normal_half_cone_angle", component.normal_half_cone_angle},
+      {"plane_half_cone_angle", component.plane_half_cone_angle},
+      {"twist_min_angle", component.twist_min_angle},
+      {"twist_max_angle", component.twist_max_angle},
+      {"max_friction_force", component.max_friction_force},
+      {"max_friction_torque", component.max_friction_torque},
+      {"limit_spring", serializeConstraintSpring(component.limit_spring)},
+      {"six_dof_min_limits", floatArrayJson(component.six_dof_min_limits)},
+      {"six_dof_max_limits", floatArrayJson(component.six_dof_max_limits)},
+      {"six_dof_max_friction", floatArrayJson(component.six_dof_max_friction)},
+  };
+}
+
+std::optional<components::PhysicsConstraintComponent>
+deserializePhysicsConstraint(
+    const Json& json,
+    const ComponentSerializationContext& context) {
+  if (!json.is_object()) return std::nullopt;
+  components::PhysicsConstraintComponent component{};
+  if (!readEntityReference(json, "body_a", component.body_a, context) ||
+      !readEntityReference(json, "body_b", component.body_b, context) ||
+      !readConstraintKind(json, component.kind) ||
+      !readConstraintSpace(json, component.space) ||
+      !readBool(json, "enabled", component.enabled) ||
+      !readUint32(json, "priority", component.priority) ||
+      !readUint32(json,
+                  "velocity_solver_steps",
+                  component.velocity_solver_steps) ||
+      !readUint32(json,
+                  "position_solver_steps",
+                  component.position_solver_steps) ||
+      !readFloat(json, "draw_size", component.draw_size) ||
+      !readUint64(json, "user_data", component.user_data) ||
+      !readBool(json, "auto_detect_point", component.auto_detect_point) ||
+      !readVec3(json, "point1", component.point1) ||
+      !readVec3(json, "point2", component.point2) ||
+      !readVec3(json, "axis1", component.axis1) ||
+      !readVec3(json, "axis2", component.axis2) ||
+      !readVec3(json, "normal1", component.normal1) ||
+      !readVec3(json, "normal2", component.normal2) ||
+      !readVec3(json, "plane_axis1", component.plane_axis1) ||
+      !readVec3(json, "plane_axis2", component.plane_axis2) ||
+      !readFloat(json, "min_distance", component.min_distance) ||
+      !readFloat(json, "max_distance", component.max_distance) ||
+      !readFloat(json, "limits_min", component.limits_min) ||
+      !readFloat(json, "limits_max", component.limits_max) ||
+      !readFloat(json, "half_cone_angle", component.half_cone_angle) ||
+      !readFloat(json,
+                 "normal_half_cone_angle",
+                 component.normal_half_cone_angle) ||
+      !readFloat(json,
+                 "plane_half_cone_angle",
+                 component.plane_half_cone_angle) ||
+      !readFloat(json, "twist_min_angle", component.twist_min_angle) ||
+      !readFloat(json, "twist_max_angle", component.twist_max_angle) ||
+      !readFloat(json,
+                 "max_friction_force",
+                 component.max_friction_force) ||
+      !readFloat(json,
+                 "max_friction_torque",
+                 component.max_friction_torque) ||
+      !readFloatArray(json,
+                      "six_dof_min_limits",
+                      component.six_dof_min_limits) ||
+      !readFloatArray(json,
+                      "six_dof_max_limits",
+                      component.six_dof_max_limits) ||
+      !readFloatArray(json,
+                      "six_dof_max_friction",
+                      component.six_dof_max_friction) ||
+      component.draw_size < 0.0f ||
+      component.max_friction_force < 0.0f ||
+      component.max_friction_torque < 0.0f) {
+    return std::nullopt;
+  }
+  if (const auto spring_it = json.find("limit_spring");
+      spring_it != json.end() &&
+      !deserializeConstraintSpring(*spring_it, component.limit_spring)) {
+    return std::nullopt;
+  }
+  for (size_t index = 0; index < component.six_dof_min_limits.size(); ++index) {
+    if (component.six_dof_min_limits[index] >
+            component.six_dof_max_limits[index] ||
+        component.six_dof_max_friction[index] < 0.0f) {
+      return std::nullopt;
+    }
+  }
+  return component;
+}
+
+const char* softBodyPresetName(components::PhysicsSoftBodyPresetKind preset) {
+  switch (preset) {
+    case components::PhysicsSoftBodyPresetKind::Custom: return "custom";
+    case components::PhysicsSoftBodyPresetKind::Cloth: return "cloth";
+    case components::PhysicsSoftBodyPresetKind::Cube: return "cube";
+    case components::PhysicsSoftBodyPresetKind::Sphere: return "sphere";
+  }
+  return "custom";
+}
+
+bool readSoftBodyPreset(const Json& json,
+                        components::PhysicsSoftBodyPresetKind& out) {
+  const auto it = json.find("preset");
+  if (it == json.end()) return true;
+  if (!it->is_string()) return false;
+  const std::string value = it->get<std::string>();
+  if (value == "custom") out = components::PhysicsSoftBodyPresetKind::Custom;
+  else if (value == "cloth") out = components::PhysicsSoftBodyPresetKind::Cloth;
+  else if (value == "cube") out = components::PhysicsSoftBodyPresetKind::Cube;
+  else if (value == "sphere") out = components::PhysicsSoftBodyPresetKind::Sphere;
+  else return false;
+  return true;
+}
+
+const char* softBodyBendName(components::PhysicsSoftBodyBendKind kind) {
+  switch (kind) {
+    case components::PhysicsSoftBodyBendKind::None: return "none";
+    case components::PhysicsSoftBodyBendKind::Distance: return "distance";
+    case components::PhysicsSoftBodyBendKind::Dihedral: return "dihedral";
+  }
+  return "distance";
+}
+
+const char* softBodyLraName(components::PhysicsSoftBodyLraKind kind) {
+  switch (kind) {
+    case components::PhysicsSoftBodyLraKind::None: return "none";
+    case components::PhysicsSoftBodyLraKind::EuclideanDistance: return "euclidean_distance";
+    case components::PhysicsSoftBodyLraKind::GeodesicDistance: return "geodesic_distance";
+  }
+  return "none";
+}
+
+Json serializePhysicsSoftBody(
+    const components::PhysicsSoftBodyComponent& component) {
+  Json vertices = Json::array();
+  for (const auto& vertex : component.vertices) {
+    vertices.push_back(Json{{"position", toJson(vertex.position)},
+                            {"velocity", toJson(vertex.velocity)},
+                            {"inverse_mass", vertex.inverse_mass}});
+  }
+  Json faces = Json::array();
+  for (const auto& face : component.faces) {
+    faces.push_back(Json{{"vertex0", face.vertex0},
+                         {"vertex1", face.vertex1},
+                         {"vertex2", face.vertex2},
+                         {"material_index", face.material_index}});
+  }
+  Json edges = Json::array();
+  for (const auto& edge : component.edges) {
+    edges.push_back(Json{{"vertex0", edge.vertex0},
+                         {"vertex1", edge.vertex1},
+                         {"compliance", edge.compliance}});
+  }
+  Json volumes = Json::array();
+  for (const auto& volume : component.volumes) {
+    volumes.push_back(Json{{"vertex0", volume.vertex0},
+                           {"vertex1", volume.vertex1},
+                           {"vertex2", volume.vertex2},
+                           {"vertex3", volume.vertex3},
+                           {"compliance", volume.compliance}});
+  }
+  Json pinned = Json::array();
+  for (uint32_t vertex : component.pinned_vertices) pinned.push_back(vertex);
+  return Json{
+      {"enabled", component.enabled},
+      {"preset", softBodyPresetName(component.preset)},
+      {"user_data", component.user_data},
+      {"vertices", std::move(vertices)},
+      {"faces", std::move(faces)},
+      {"edges", std::move(edges)},
+      {"volumes", std::move(volumes)},
+      {"pinned_vertices", std::move(pinned)},
+      {"grid_size_x", component.grid_size_x},
+      {"grid_size_y", component.grid_size_y},
+      {"grid_size_z", component.grid_size_z},
+      {"grid_spacing", component.grid_spacing},
+      {"radius", component.radius},
+      {"sphere_theta", component.sphere_theta},
+      {"sphere_phi", component.sphere_phi},
+      {"pin_cloth_corners", component.pin_cloth_corners},
+      {"create_constraints", component.create_constraints},
+      {"optimize", component.optimize},
+      {"bend_type", softBodyBendName(component.bend_type)},
+      {"vertex_attributes",
+       Json{{"compliance", component.vertex_attributes.compliance},
+            {"shear_compliance",
+             component.vertex_attributes.shear_compliance},
+            {"bend_compliance",
+             component.vertex_attributes.bend_compliance},
+            {"lra_type",
+             softBodyLraName(component.vertex_attributes.lra_type)},
+            {"lra_max_distance_multiplier",
+             component.vertex_attributes.lra_max_distance_multiplier}}},
+      {"angle_tolerance", component.angle_tolerance},
+      {"vertex_radius", component.vertex_radius},
+      {"friction", component.friction},
+      {"restitution", component.restitution},
+      {"collision_layers", component.collision_layers},
+      {"collides_with", component.collides_with},
+      {"solver_iterations", component.solver_iterations},
+      {"linear_damping", component.linear_damping},
+      {"max_linear_velocity", component.max_linear_velocity},
+      {"pressure", component.pressure},
+      {"gravity_factor", component.gravity_factor},
+      {"update_position", component.update_position},
+      {"make_rotation_identity", component.make_rotation_identity},
+      {"allow_sleeping", component.allow_sleeping},
+      {"activate", component.activate},
+  };
+}
+
+std::optional<components::PhysicsSoftBodyComponent>
+deserializePhysicsSoftBody(const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::PhysicsSoftBodyComponent component{};
+  std::string bend_type = softBodyBendName(component.bend_type);
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readSoftBodyPreset(json, component.preset) ||
+      !readUint64(json, "user_data", component.user_data) ||
+      !readUint32(json, "grid_size_x", component.grid_size_x) ||
+      !readUint32(json, "grid_size_y", component.grid_size_y) ||
+      !readUint32(json, "grid_size_z", component.grid_size_z) ||
+      !readFloat(json, "grid_spacing", component.grid_spacing) ||
+      !readFloat(json, "radius", component.radius) ||
+      !readUint32(json, "sphere_theta", component.sphere_theta) ||
+      !readUint32(json, "sphere_phi", component.sphere_phi) ||
+      !readBool(json, "pin_cloth_corners", component.pin_cloth_corners) ||
+      !readBool(json,
+                "create_constraints",
+                component.create_constraints) ||
+      !readBool(json, "optimize", component.optimize) ||
+      !readString(json, "bend_type", bend_type) ||
+      !readFloat(json, "angle_tolerance", component.angle_tolerance) ||
+      !readFloat(json, "vertex_radius", component.vertex_radius) ||
+      !readFloat(json, "friction", component.friction) ||
+      !readFloat(json, "restitution", component.restitution) ||
+      !readUint32(json, "collision_layers", component.collision_layers) ||
+      !readUint32(json, "collides_with", component.collides_with) ||
+      !readUint32(json, "solver_iterations", component.solver_iterations) ||
+      !readFloat(json, "linear_damping", component.linear_damping) ||
+      !readFloat(json,
+                 "max_linear_velocity",
+                 component.max_linear_velocity) ||
+      !readFloat(json, "pressure", component.pressure) ||
+      !readFloat(json, "gravity_factor", component.gravity_factor) ||
+      !readBool(json, "update_position", component.update_position) ||
+      !readBool(json,
+                "make_rotation_identity",
+                component.make_rotation_identity) ||
+      !readBool(json, "allow_sleeping", component.allow_sleeping) ||
+      !readBool(json, "activate", component.activate)) {
+    return std::nullopt;
+  }
+  if (bend_type == "none") component.bend_type = components::PhysicsSoftBodyBendKind::None;
+  else if (bend_type == "distance") component.bend_type = components::PhysicsSoftBodyBendKind::Distance;
+  else if (bend_type == "dihedral") component.bend_type = components::PhysicsSoftBodyBendKind::Dihedral;
+  else return std::nullopt;
+
+  if (const auto attrs_it = json.find("vertex_attributes");
+      attrs_it != json.end()) {
+    if (!attrs_it->is_object()) return std::nullopt;
+    std::string lra_type = softBodyLraName(component.vertex_attributes.lra_type);
+    if (!readFloat(*attrs_it,
+                   "compliance",
+                   component.vertex_attributes.compliance) ||
+        !readFloat(*attrs_it,
+                   "shear_compliance",
+                   component.vertex_attributes.shear_compliance) ||
+        !readFloat(*attrs_it,
+                   "bend_compliance",
+                   component.vertex_attributes.bend_compliance) ||
+        !readString(*attrs_it, "lra_type", lra_type) ||
+        !readFloat(*attrs_it,
+                   "lra_max_distance_multiplier",
+                   component.vertex_attributes.lra_max_distance_multiplier)) {
+      return std::nullopt;
+    }
+    if (lra_type == "none") component.vertex_attributes.lra_type = components::PhysicsSoftBodyLraKind::None;
+    else if (lra_type == "euclidean_distance") component.vertex_attributes.lra_type = components::PhysicsSoftBodyLraKind::EuclideanDistance;
+    else if (lra_type == "geodesic_distance") component.vertex_attributes.lra_type = components::PhysicsSoftBodyLraKind::GeodesicDistance;
+    else return std::nullopt;
+  }
+  if (const auto vertices_it = json.find("vertices");
+      vertices_it != json.end()) {
+    if (!vertices_it->is_array()) return std::nullopt;
+    for (const Json& entry : *vertices_it) {
+      if (!entry.is_object()) return std::nullopt;
+      components::PhysicsSoftBodyVertex vertex{};
+      if (!readVec3(entry, "position", vertex.position) ||
+          !readVec3(entry, "velocity", vertex.velocity) ||
+          !readFloat(entry, "inverse_mass", vertex.inverse_mass) ||
+          vertex.inverse_mass < 0.0f) {
+        return std::nullopt;
+      }
+      component.vertices.push_back(vertex);
+    }
+  }
+  auto valid_vertex = [&](uint32_t index) {
+    return component.vertices.empty() || index < component.vertices.size();
+  };
+  if (const auto faces_it = json.find("faces"); faces_it != json.end()) {
+    if (!faces_it->is_array()) return std::nullopt;
+    for (const Json& entry : *faces_it) {
+      if (!entry.is_object()) return std::nullopt;
+      components::PhysicsSoftBodyFace face{};
+      if (!readUint32(entry, "vertex0", face.vertex0) ||
+          !readUint32(entry, "vertex1", face.vertex1) ||
+          !readUint32(entry, "vertex2", face.vertex2) ||
+          !readUint32(entry, "material_index", face.material_index) ||
+          !valid_vertex(face.vertex0) || !valid_vertex(face.vertex1) ||
+          !valid_vertex(face.vertex2)) {
+        return std::nullopt;
+      }
+      component.faces.push_back(face);
+    }
+  }
+  if (const auto edges_it = json.find("edges"); edges_it != json.end()) {
+    if (!edges_it->is_array()) return std::nullopt;
+    for (const Json& entry : *edges_it) {
+      if (!entry.is_object()) return std::nullopt;
+      components::PhysicsSoftBodyEdge edge{};
+      if (!readUint32(entry, "vertex0", edge.vertex0) ||
+          !readUint32(entry, "vertex1", edge.vertex1) ||
+          !readFloat(entry, "compliance", edge.compliance) ||
+          !valid_vertex(edge.vertex0) || !valid_vertex(edge.vertex1) ||
+          edge.compliance < 0.0f) {
+        return std::nullopt;
+      }
+      component.edges.push_back(edge);
+    }
+  }
+  if (const auto volumes_it = json.find("volumes");
+      volumes_it != json.end()) {
+    if (!volumes_it->is_array()) return std::nullopt;
+    for (const Json& entry : *volumes_it) {
+      if (!entry.is_object()) return std::nullopt;
+      components::PhysicsSoftBodyVolume volume{};
+      if (!readUint32(entry, "vertex0", volume.vertex0) ||
+          !readUint32(entry, "vertex1", volume.vertex1) ||
+          !readUint32(entry, "vertex2", volume.vertex2) ||
+          !readUint32(entry, "vertex3", volume.vertex3) ||
+          !readFloat(entry, "compliance", volume.compliance) ||
+          !valid_vertex(volume.vertex0) || !valid_vertex(volume.vertex1) ||
+          !valid_vertex(volume.vertex2) || !valid_vertex(volume.vertex3) ||
+          volume.compliance < 0.0f) {
+        return std::nullopt;
+      }
+      component.volumes.push_back(volume);
+    }
+  }
+  if (const auto pinned_it = json.find("pinned_vertices");
+      pinned_it != json.end()) {
+    if (!pinned_it->is_array()) return std::nullopt;
+    for (const Json& entry : *pinned_it) {
+      Json holder{{"value", entry}};
+      uint32_t index = 0u;
+      if (!readUint32(holder, "value", index) || !valid_vertex(index)) {
+        return std::nullopt;
+      }
+      component.pinned_vertices.push_back(index);
+    }
+  }
+  if (component.grid_size_x == 0u || component.grid_size_y == 0u ||
+      component.grid_size_z == 0u || component.grid_spacing <= 0.0f ||
+      component.radius <= 0.0f || component.sphere_theta < 3u ||
+      component.sphere_phi < 2u || component.vertex_radius < 0.0f ||
+      component.friction < 0.0f || component.restitution < 0.0f ||
+      component.solver_iterations == 0u || component.linear_damping < 0.0f ||
+      component.max_linear_velocity <= 0.0f ||
+      component.vertex_attributes.lra_max_distance_multiplier < 0.0f) {
+    return std::nullopt;
+  }
+  return component;
+}
+
+const char* vehicleControllerName(
+    components::PhysicsVehicleControllerKind kind) {
+  switch (kind) {
+    case components::PhysicsVehicleControllerKind::Wheeled: return "wheeled";
+    case components::PhysicsVehicleControllerKind::Motorcycle: return "motorcycle";
+    case components::PhysicsVehicleControllerKind::Tracked: return "tracked";
+  }
+  return "wheeled";
+}
+
+const char* vehicleCollisionTesterName(
+    components::PhysicsVehicleCollisionTesterKind kind) {
+  switch (kind) {
+    case components::PhysicsVehicleCollisionTesterKind::Ray: return "ray";
+    case components::PhysicsVehicleCollisionTesterKind::SphereCast: return "sphere_cast";
+    case components::PhysicsVehicleCollisionTesterKind::CylinderCast: return "cylinder_cast";
+  }
+  return "ray";
+}
+
+const char* vehicleSpringName(components::PhysicsVehicleSpringKind kind) {
+  return kind == components::PhysicsVehicleSpringKind::StiffnessAndDamping
+             ? "stiffness_and_damping"
+             : "frequency_and_damping";
+}
+
+Json serializeVehicleCurve(
+    const std::vector<components::PhysicsVehicleCurvePoint>& curve) {
+  Json out = Json::array();
+  for (const auto& point : curve) {
+    out.push_back(Json{{"x", point.x}, {"y", point.y}});
+  }
+  return out;
+}
+
+bool deserializeVehicleCurve(
+    const Json& json,
+    std::vector<components::PhysicsVehicleCurvePoint>& out) {
+  if (!json.is_array()) return false;
+  std::vector<components::PhysicsVehicleCurvePoint> curve;
+  curve.reserve(json.size());
+  for (const Json& entry : json) {
+    if (!entry.is_object()) return false;
+    components::PhysicsVehicleCurvePoint point{};
+    if (!readFloat(entry, "x", point.x) ||
+        !readFloat(entry, "y", point.y)) {
+      return false;
+    }
+    curve.push_back(point);
+  }
+  out = std::move(curve);
+  return true;
+}
+
+Json serializeVehicleSpring(const components::PhysicsVehicleSpring& spring) {
+  return Json{{"mode", vehicleSpringName(spring.mode)},
+              {"frequency_or_stiffness", spring.frequency_or_stiffness},
+              {"damping", spring.damping}};
+}
+
+bool deserializeVehicleSpring(const Json& json,
+                              components::PhysicsVehicleSpring& out) {
+  if (!json.is_object()) return false;
+  std::string mode = vehicleSpringName(out.mode);
+  if (!readString(json, "mode", mode) ||
+      !readFloat(json,
+                 "frequency_or_stiffness",
+                 out.frequency_or_stiffness) ||
+      !readFloat(json, "damping", out.damping) ||
+      out.frequency_or_stiffness < 0.0f || out.damping < 0.0f) {
+    return false;
+  }
+  if (mode == "frequency_and_damping") {
+    out.mode = components::PhysicsVehicleSpringKind::FrequencyAndDamping;
+  } else if (mode == "stiffness_and_damping") {
+    out.mode = components::PhysicsVehicleSpringKind::StiffnessAndDamping;
+  } else return false;
+  return true;
+}
+
+Json serializeVehicleWheel(const components::PhysicsVehicleWheel& wheel) {
+  return Json{
+      {"position", toJson(wheel.position)},
+      {"suspension_force_point", toJson(wheel.suspension_force_point)},
+      {"suspension_direction", toJson(wheel.suspension_direction)},
+      {"steering_axis", toJson(wheel.steering_axis)},
+      {"wheel_up", toJson(wheel.wheel_up)},
+      {"wheel_forward", toJson(wheel.wheel_forward)},
+      {"suspension_min_length", wheel.suspension_min_length},
+      {"suspension_max_length", wheel.suspension_max_length},
+      {"suspension_preload_length", wheel.suspension_preload_length},
+      {"suspension_spring", serializeVehicleSpring(wheel.suspension_spring)},
+      {"radius", wheel.radius},
+      {"width", wheel.width},
+      {"enable_suspension_force_point", wheel.enable_suspension_force_point},
+      {"inertia", wheel.inertia},
+      {"angular_damping", wheel.angular_damping},
+      {"max_steer_angle", wheel.max_steer_angle},
+      {"longitudinal_friction",
+       serializeVehicleCurve(wheel.longitudinal_friction)},
+      {"lateral_friction", serializeVehicleCurve(wheel.lateral_friction)},
+      {"max_brake_torque", wheel.max_brake_torque},
+      {"max_hand_brake_torque", wheel.max_hand_brake_torque},
+      {"tracked_longitudinal_friction", wheel.tracked_longitudinal_friction},
+      {"tracked_lateral_friction", wheel.tracked_lateral_friction},
+  };
+}
+
+bool deserializeVehicleWheel(const Json& json,
+                             components::PhysicsVehicleWheel& wheel) {
+  if (!json.is_object() ||
+      !readVec3(json, "position", wheel.position) ||
+      !readVec3(json,
+                "suspension_force_point",
+                wheel.suspension_force_point) ||
+      !readVec3(json,
+                "suspension_direction",
+                wheel.suspension_direction) ||
+      !readVec3(json, "steering_axis", wheel.steering_axis) ||
+      !readVec3(json, "wheel_up", wheel.wheel_up) ||
+      !readVec3(json, "wheel_forward", wheel.wheel_forward) ||
+      !readFloat(json,
+                 "suspension_min_length",
+                 wheel.suspension_min_length) ||
+      !readFloat(json,
+                 "suspension_max_length",
+                 wheel.suspension_max_length) ||
+      !readFloat(json,
+                 "suspension_preload_length",
+                 wheel.suspension_preload_length) ||
+      !readFloat(json, "radius", wheel.radius) ||
+      !readFloat(json, "width", wheel.width) ||
+      !readBool(json,
+                "enable_suspension_force_point",
+                wheel.enable_suspension_force_point) ||
+      !readFloat(json, "inertia", wheel.inertia) ||
+      !readFloat(json, "angular_damping", wheel.angular_damping) ||
+      !readFloat(json, "max_steer_angle", wheel.max_steer_angle) ||
+      !readFloat(json, "max_brake_torque", wheel.max_brake_torque) ||
+      !readFloat(json,
+                 "max_hand_brake_torque",
+                 wheel.max_hand_brake_torque) ||
+      !readFloat(json,
+                 "tracked_longitudinal_friction",
+                 wheel.tracked_longitudinal_friction) ||
+      !readFloat(json,
+                 "tracked_lateral_friction",
+                 wheel.tracked_lateral_friction)) {
+    return false;
+  }
+  if (const auto spring_it = json.find("suspension_spring");
+      spring_it != json.end() &&
+      !deserializeVehicleSpring(*spring_it, wheel.suspension_spring)) {
+    return false;
+  }
+  if (const auto curve_it = json.find("longitudinal_friction");
+      curve_it != json.end() &&
+      !deserializeVehicleCurve(*curve_it, wheel.longitudinal_friction)) {
+    return false;
+  }
+  if (const auto curve_it = json.find("lateral_friction");
+      curve_it != json.end() &&
+      !deserializeVehicleCurve(*curve_it, wheel.lateral_friction)) {
+    return false;
+  }
+  return wheel.suspension_min_length >= 0.0f &&
+         wheel.suspension_max_length >= wheel.suspension_min_length &&
+         wheel.radius > 0.0f && wheel.width > 0.0f && wheel.inertia > 0.0f &&
+         wheel.angular_damping >= 0.0f && wheel.max_brake_torque >= 0.0f &&
+         wheel.max_hand_brake_torque >= 0.0f;
+}
+
+Json serializeVehicleEngine(const components::PhysicsVehicleEngine& engine) {
+  return Json{{"max_torque", engine.max_torque},
+              {"min_rpm", engine.min_rpm},
+              {"max_rpm", engine.max_rpm},
+              {"inertia", engine.inertia},
+              {"angular_damping", engine.angular_damping},
+              {"normalized_torque",
+               serializeVehicleCurve(engine.normalized_torque)}};
+}
+
+bool deserializeVehicleEngine(const Json& json,
+                              components::PhysicsVehicleEngine& engine) {
+  if (!json.is_object() ||
+      !readFloat(json, "max_torque", engine.max_torque) ||
+      !readFloat(json, "min_rpm", engine.min_rpm) ||
+      !readFloat(json, "max_rpm", engine.max_rpm) ||
+      !readFloat(json, "inertia", engine.inertia) ||
+      !readFloat(json, "angular_damping", engine.angular_damping)) {
+    return false;
+  }
+  if (const auto curve_it = json.find("normalized_torque");
+      curve_it != json.end() &&
+      !deserializeVehicleCurve(*curve_it, engine.normalized_torque)) {
+    return false;
+  }
+  return engine.max_torque >= 0.0f && engine.min_rpm >= 0.0f &&
+         engine.max_rpm > engine.min_rpm && engine.inertia > 0.0f &&
+         engine.angular_damping >= 0.0f;
+}
+
+const char* transmissionModeName(
+    components::PhysicsVehicleTransmissionKind mode) {
+  return mode == components::PhysicsVehicleTransmissionKind::Manual ? "manual"
+                                                                     : "automatic";
+}
+
+Json serializeVehicleTransmission(
+    const components::PhysicsVehicleTransmission& transmission) {
+  return Json{
+      {"mode", transmissionModeName(transmission.mode)},
+      {"gear_ratios", floatVectorJson(transmission.gear_ratios)},
+      {"reverse_gear_ratios",
+       floatVectorJson(transmission.reverse_gear_ratios)},
+      {"switch_time", transmission.switch_time},
+      {"clutch_release_time", transmission.clutch_release_time},
+      {"switch_latency", transmission.switch_latency},
+      {"shift_up_rpm", transmission.shift_up_rpm},
+      {"shift_down_rpm", transmission.shift_down_rpm},
+      {"clutch_strength", transmission.clutch_strength},
+  };
+}
+
+bool deserializeVehicleTransmission(
+    const Json& json,
+    components::PhysicsVehicleTransmission& transmission) {
+  if (!json.is_object()) return false;
+  std::string mode = transmissionModeName(transmission.mode);
+  if (!readString(json, "mode", mode) ||
+      !readFloatVector(json, "gear_ratios", transmission.gear_ratios) ||
+      !readFloatVector(json,
+                       "reverse_gear_ratios",
+                       transmission.reverse_gear_ratios) ||
+      !readFloat(json, "switch_time", transmission.switch_time) ||
+      !readFloat(json,
+                 "clutch_release_time",
+                 transmission.clutch_release_time) ||
+      !readFloat(json, "switch_latency", transmission.switch_latency) ||
+      !readFloat(json, "shift_up_rpm", transmission.shift_up_rpm) ||
+      !readFloat(json, "shift_down_rpm", transmission.shift_down_rpm) ||
+      !readFloat(json, "clutch_strength", transmission.clutch_strength)) {
+    return false;
+  }
+  if (mode == "automatic") transmission.mode = components::PhysicsVehicleTransmissionKind::Automatic;
+  else if (mode == "manual") transmission.mode = components::PhysicsVehicleTransmissionKind::Manual;
+  else return false;
+  return !transmission.gear_ratios.empty() &&
+         !transmission.reverse_gear_ratios.empty() &&
+         transmission.switch_time >= 0.0f &&
+         transmission.clutch_release_time >= 0.0f &&
+         transmission.switch_latency >= 0.0f &&
+         transmission.shift_up_rpm >= transmission.shift_down_rpm &&
+         transmission.clutch_strength >= 0.0f;
+}
+
+Json serializeVehicleDifferential(
+    const components::PhysicsVehicleDifferential& value) {
+  return Json{{"left_wheel", value.left_wheel},
+              {"right_wheel", value.right_wheel},
+              {"differential_ratio", value.differential_ratio},
+              {"left_right_split", value.left_right_split},
+              {"limited_slip_ratio", value.limited_slip_ratio},
+              {"engine_torque_ratio", value.engine_torque_ratio}};
+}
+
+bool deserializeVehicleDifferential(
+    const Json& json,
+    components::PhysicsVehicleDifferential& value) {
+  int32_t left = value.left_wheel;
+  int32_t right = value.right_wheel;
+  if (!json.is_object() || !readInt32(json, "left_wheel", left) ||
+      !readInt32(json, "right_wheel", right) ||
+      !readFloat(json, "differential_ratio", value.differential_ratio) ||
+      !readFloat(json, "left_right_split", value.left_right_split) ||
+      !readFloat(json, "limited_slip_ratio", value.limited_slip_ratio) ||
+      !readFloat(json, "engine_torque_ratio", value.engine_torque_ratio) ||
+      value.differential_ratio <= 0.0f || value.left_right_split < 0.0f ||
+      value.left_right_split > 1.0f || value.limited_slip_ratio < 0.0f ||
+      value.engine_torque_ratio < 0.0f) {
+    return false;
+  }
+  value.left_wheel = left;
+  value.right_wheel = right;
+  return true;
+}
+
+Json serializeVehicleTrack(const components::PhysicsVehicleTrack& track) {
+  Json wheels = Json::array();
+  for (uint32_t wheel : track.wheels) wheels.push_back(wheel);
+  return Json{{"driven_wheel", track.driven_wheel},
+              {"wheels", std::move(wheels)},
+              {"inertia", track.inertia},
+              {"angular_damping", track.angular_damping},
+              {"max_brake_torque", track.max_brake_torque},
+              {"differential_ratio", track.differential_ratio}};
+}
+
+bool deserializeVehicleTrack(const Json& json,
+                             components::PhysicsVehicleTrack& track) {
+  if (!json.is_object() ||
+      !readUint32(json, "driven_wheel", track.driven_wheel) ||
+      !readFloat(json, "inertia", track.inertia) ||
+      !readFloat(json, "angular_damping", track.angular_damping) ||
+      !readFloat(json, "max_brake_torque", track.max_brake_torque) ||
+      !readFloat(json, "differential_ratio", track.differential_ratio)) {
+    return false;
+  }
+  if (const auto wheels_it = json.find("wheels"); wheels_it != json.end()) {
+    if (!wheels_it->is_array()) return false;
+    track.wheels.clear();
+    for (const Json& entry : *wheels_it) {
+      Json holder{{"value", entry}};
+      uint32_t wheel = 0u;
+      if (!readUint32(holder, "value", wheel)) return false;
+      track.wheels.push_back(wheel);
+    }
+  }
+  return track.inertia > 0.0f && track.angular_damping >= 0.0f &&
+         track.max_brake_torque >= 0.0f && track.differential_ratio > 0.0f;
+}
+
+Json serializePhysicsVehicle(
+    const components::PhysicsVehicleComponent& component) {
+  Json wheels = Json::array();
+  for (const auto& wheel : component.wheels) {
+    wheels.push_back(serializeVehicleWheel(wheel));
+  }
+  Json anti_roll_bars = Json::array();
+  for (const auto& bar : component.anti_roll_bars) {
+    anti_roll_bars.push_back(Json{{"left_wheel", bar.left_wheel},
+                                  {"right_wheel", bar.right_wheel},
+                                  {"stiffness", bar.stiffness}});
+  }
+  Json differentials = Json::array();
+  for (const auto& differential : component.differentials) {
+    differentials.push_back(serializeVehicleDifferential(differential));
+  }
+  Json tracks = Json::array();
+  for (const auto& track : component.tracks) {
+    tracks.push_back(serializeVehicleTrack(track));
+  }
+  return Json{
+      {"enabled", component.enabled},
+      {"controller", vehicleControllerName(component.controller)},
+      {"collision_tester",
+       vehicleCollisionTesterName(component.collision_tester)},
+      {"up", toJson(component.up)},
+      {"forward", toJson(component.forward)},
+      {"max_pitch_roll_angle", component.max_pitch_roll_angle},
+      {"collision_test_sphere_radius",
+       component.collision_test_sphere_radius},
+      {"collision_test_cylinder_convex_radius_fraction",
+       component.collision_test_cylinder_convex_radius_fraction},
+      {"collision_test_max_slope_angle",
+       component.collision_test_max_slope_angle},
+      {"collision_test_layer", component.collision_test_layer},
+      {"num_steps_between_collision_test_active",
+       component.num_steps_between_collision_test_active},
+      {"num_steps_between_collision_test_inactive",
+       component.num_steps_between_collision_test_inactive},
+      {"override_gravity", component.override_gravity},
+      {"gravity", toJson(component.gravity)},
+      {"priority", component.priority},
+      {"velocity_solver_steps", component.velocity_solver_steps},
+      {"position_solver_steps", component.position_solver_steps},
+      {"draw_size", component.draw_size},
+      {"user_data", component.user_data},
+      {"wheels", std::move(wheels)},
+      {"anti_roll_bars", std::move(anti_roll_bars)},
+      {"engine", serializeVehicleEngine(component.engine)},
+      {"transmission", serializeVehicleTransmission(component.transmission)},
+      {"differentials", std::move(differentials)},
+      {"differential_limited_slip_ratio",
+       component.differential_limited_slip_ratio},
+      {"motorcycle",
+       Json{{"max_lean_angle", component.motorcycle.max_lean_angle},
+            {"lean_spring_constant",
+             component.motorcycle.lean_spring_constant},
+            {"lean_spring_damping",
+             component.motorcycle.lean_spring_damping},
+            {"lean_spring_integration_coefficient",
+             component.motorcycle.lean_spring_integration_coefficient},
+            {"lean_spring_integration_decay",
+             component.motorcycle.lean_spring_integration_decay},
+            {"lean_smoothing_factor",
+             component.motorcycle.lean_smoothing_factor},
+            {"enable_lean_controller",
+             component.motorcycle.enable_lean_controller},
+            {"enable_lean_steering_limit",
+             component.motorcycle.enable_lean_steering_limit}}},
+      {"tracks", std::move(tracks)},
+  };
+}
+
+std::optional<components::PhysicsVehicleComponent> deserializePhysicsVehicle(
+    const Json& json) {
+  if (!json.is_object()) return std::nullopt;
+  components::PhysicsVehicleComponent component{};
+  std::string controller = vehicleControllerName(component.controller);
+  std::string collision_tester =
+      vehicleCollisionTesterName(component.collision_tester);
+  if (!readBool(json, "enabled", component.enabled) ||
+      !readString(json, "controller", controller) ||
+      !readString(json, "collision_tester", collision_tester) ||
+      !readVec3(json, "up", component.up) ||
+      !readVec3(json, "forward", component.forward) ||
+      !readFloat(json,
+                 "max_pitch_roll_angle",
+                 component.max_pitch_roll_angle) ||
+      !readFloat(json,
+                 "collision_test_sphere_radius",
+                 component.collision_test_sphere_radius) ||
+      !readFloat(json,
+                 "collision_test_cylinder_convex_radius_fraction",
+                 component.collision_test_cylinder_convex_radius_fraction) ||
+      !readFloat(json,
+                 "collision_test_max_slope_angle",
+                 component.collision_test_max_slope_angle) ||
+      !readUint32(json,
+                  "collision_test_layer",
+                  component.collision_test_layer) ||
+      !readUint32(json,
+                  "num_steps_between_collision_test_active",
+                  component.num_steps_between_collision_test_active) ||
+      !readUint32(json,
+                  "num_steps_between_collision_test_inactive",
+                  component.num_steps_between_collision_test_inactive) ||
+      !readBool(json, "override_gravity", component.override_gravity) ||
+      !readVec3(json, "gravity", component.gravity) ||
+      !readUint32(json, "priority", component.priority) ||
+      !readUint32(json,
+                  "velocity_solver_steps",
+                  component.velocity_solver_steps) ||
+      !readUint32(json,
+                  "position_solver_steps",
+                  component.position_solver_steps) ||
+      !readFloat(json, "draw_size", component.draw_size) ||
+      !readUint64(json, "user_data", component.user_data) ||
+      !readFloat(json,
+                 "differential_limited_slip_ratio",
+                 component.differential_limited_slip_ratio)) {
+    return std::nullopt;
+  }
+  if (controller == "wheeled") component.controller = components::PhysicsVehicleControllerKind::Wheeled;
+  else if (controller == "motorcycle") component.controller = components::PhysicsVehicleControllerKind::Motorcycle;
+  else if (controller == "tracked") component.controller = components::PhysicsVehicleControllerKind::Tracked;
+  else return std::nullopt;
+  if (collision_tester == "ray") component.collision_tester = components::PhysicsVehicleCollisionTesterKind::Ray;
+  else if (collision_tester == "sphere_cast") component.collision_tester = components::PhysicsVehicleCollisionTesterKind::SphereCast;
+  else if (collision_tester == "cylinder_cast") component.collision_tester = components::PhysicsVehicleCollisionTesterKind::CylinderCast;
+  else return std::nullopt;
+
+  if (const auto wheels_it = json.find("wheels"); wheels_it != json.end()) {
+    if (!wheels_it->is_array()) return std::nullopt;
+    component.wheels.clear();
+    for (const Json& entry : *wheels_it) {
+      components::PhysicsVehicleWheel wheel{};
+      if (!deserializeVehicleWheel(entry, wheel)) return std::nullopt;
+      component.wheels.push_back(std::move(wheel));
+    }
+  }
+  if (const auto bars_it = json.find("anti_roll_bars");
+      bars_it != json.end()) {
+    if (!bars_it->is_array()) return std::nullopt;
+    component.anti_roll_bars.clear();
+    for (const Json& entry : *bars_it) {
+      if (!entry.is_object()) return std::nullopt;
+      components::PhysicsVehicleAntiRollBar bar{};
+      int32_t left = bar.left_wheel;
+      int32_t right = bar.right_wheel;
+      if (!readInt32(entry, "left_wheel", left) ||
+          !readInt32(entry, "right_wheel", right) ||
+          !readFloat(entry, "stiffness", bar.stiffness) ||
+          left < 0 || right < 0 || bar.stiffness < 0.0f) {
+        return std::nullopt;
+      }
+      bar.left_wheel = left;
+      bar.right_wheel = right;
+      component.anti_roll_bars.push_back(bar);
+    }
+  }
+  if (const auto engine_it = json.find("engine");
+      engine_it != json.end() &&
+      !deserializeVehicleEngine(*engine_it, component.engine)) {
+    return std::nullopt;
+  }
+  if (const auto transmission_it = json.find("transmission");
+      transmission_it != json.end() &&
+      !deserializeVehicleTransmission(*transmission_it,
+                                      component.transmission)) {
+    return std::nullopt;
+  }
+  if (const auto differentials_it = json.find("differentials");
+      differentials_it != json.end()) {
+    if (!differentials_it->is_array()) return std::nullopt;
+    component.differentials.clear();
+    for (const Json& entry : *differentials_it) {
+      components::PhysicsVehicleDifferential differential{};
+      if (!deserializeVehicleDifferential(entry, differential)) {
+        return std::nullopt;
+      }
+      component.differentials.push_back(differential);
+    }
+  }
+  if (const auto motorcycle_it = json.find("motorcycle");
+      motorcycle_it != json.end()) {
+    if (!motorcycle_it->is_object() ||
+        !readFloat(*motorcycle_it,
+                   "max_lean_angle",
+                   component.motorcycle.max_lean_angle) ||
+        !readFloat(*motorcycle_it,
+                   "lean_spring_constant",
+                   component.motorcycle.lean_spring_constant) ||
+        !readFloat(*motorcycle_it,
+                   "lean_spring_damping",
+                   component.motorcycle.lean_spring_damping) ||
+        !readFloat(*motorcycle_it,
+                   "lean_spring_integration_coefficient",
+                   component.motorcycle.lean_spring_integration_coefficient) ||
+        !readFloat(*motorcycle_it,
+                   "lean_spring_integration_decay",
+                   component.motorcycle.lean_spring_integration_decay) ||
+        !readFloat(*motorcycle_it,
+                   "lean_smoothing_factor",
+                   component.motorcycle.lean_smoothing_factor) ||
+        !readBool(*motorcycle_it,
+                  "enable_lean_controller",
+                  component.motorcycle.enable_lean_controller) ||
+        !readBool(*motorcycle_it,
+                  "enable_lean_steering_limit",
+                  component.motorcycle.enable_lean_steering_limit)) {
+      return std::nullopt;
+    }
+  }
+  if (const auto tracks_it = json.find("tracks"); tracks_it != json.end()) {
+    if (!tracks_it->is_array() || tracks_it->size() != component.tracks.size()) {
+      return std::nullopt;
+    }
+    for (size_t index = 0; index < component.tracks.size(); ++index) {
+      if (!deserializeVehicleTrack((*tracks_it)[index],
+                                   component.tracks[index])) {
+        return std::nullopt;
+      }
+    }
+  }
+  if (component.max_pitch_roll_angle < 0.0f ||
+      component.collision_test_sphere_radius <= 0.0f ||
+      component.collision_test_cylinder_convex_radius_fraction < 0.0f ||
+      component.collision_test_cylinder_convex_radius_fraction > 1.0f ||
+      component.collision_test_max_slope_angle < 0.0f ||
+      component.num_steps_between_collision_test_active == 0u ||
+      component.num_steps_between_collision_test_inactive == 0u ||
+      component.draw_size < 0.0f ||
+      component.differential_limited_slip_ratio < 0.0f ||
+      component.motorcycle.max_lean_angle < 0.0f ||
+      component.motorcycle.lean_smoothing_factor < 0.0f ||
+      component.motorcycle.lean_smoothing_factor > 1.0f) {
+    return std::nullopt;
+  }
+  const auto valid_wheel_index = [&](int index) {
+    return index < 0 || static_cast<size_t>(index) < component.wheels.size();
+  };
+  for (const auto& bar : component.anti_roll_bars) {
+    if (!valid_wheel_index(bar.left_wheel) ||
+        !valid_wheel_index(bar.right_wheel)) return std::nullopt;
+  }
+  for (const auto& differential : component.differentials) {
+    if (!valid_wheel_index(differential.left_wheel) ||
+        !valid_wheel_index(differential.right_wheel)) return std::nullopt;
+  }
+  for (const auto& track : component.tracks) {
+    if (!component.wheels.empty() &&
+        track.driven_wheel >= component.wheels.size()) return std::nullopt;
+    for (uint32_t wheel : track.wheels) {
+      if (wheel >= component.wheels.size()) return std::nullopt;
+    }
+  }
+  return component;
+}
+
 template <typename Component, typename SerializeFn, typename DeserializeFn>
 void registerComponent(ComponentSerializerRegistry& registry,
                        std::string type_name,
@@ -2558,7 +5421,75 @@ void registerComponent(ComponentSerializerRegistry& registry,
   });
 }
 
+template <typename Component, typename SerializeFn, typename DeserializeFn>
+void registerContextualComponent(ComponentSerializerRegistry& registry,
+                                 std::string type_name,
+                                 SerializeFn serialize,
+                                 DeserializeFn deserialize) {
+  registry.registerSerializer(ComponentSerializer{
+      .type_name = std::move(type_name),
+      .has =
+          [](const world::World& world, world::Entity entity) {
+            return world.has<Component>(entity);
+          },
+      .serialize =
+          [serialize](const world::World& world, world::Entity entity) {
+            return serialize(world.get<Component>(entity),
+                             ComponentSerializationContext{});
+          },
+      .deserialize =
+          [deserialize](world::World& world,
+                        world::Entity entity,
+                        const Json& json) {
+            std::optional<Component> component =
+                deserialize(json, ComponentSerializationContext{});
+            if (!component.has_value()) return false;
+            world.add(entity, std::move(*component));
+            return true;
+          },
+      .serialize_with_context =
+          [serialize](const world::World& world,
+                      world::Entity entity,
+                      const ComponentSerializationContext& context) {
+            return serialize(world.get<Component>(entity), context);
+          },
+      .deserialize_with_context =
+          [deserialize](world::World& world,
+                        world::Entity entity,
+                        const Json& json,
+                        const ComponentSerializationContext& context) {
+            std::optional<Component> component = deserialize(json, context);
+            if (!component.has_value()) return false;
+            world.add(entity, std::move(*component));
+            return true;
+          },
+  });
+}
+
 }  // namespace
+
+nlohmann::json serializeComponentPayload(
+    const ComponentSerializer& serializer,
+    const world::World& world,
+    world::Entity entity,
+    const ComponentSerializationContext& context) {
+  if (serializer.serialize_with_context) {
+    return serializer.serialize_with_context(world, entity, context);
+  }
+  return serializer.serialize(world, entity);
+}
+
+bool deserializeComponentPayload(
+    const ComponentSerializer& serializer,
+    world::World& world,
+    world::Entity entity,
+    const nlohmann::json& payload,
+    const ComponentSerializationContext& context) {
+  if (serializer.deserialize_with_context) {
+    return serializer.deserialize_with_context(world, entity, payload, context);
+  }
+  return serializer.deserialize(world, entity, payload);
+}
 
 bool ComponentSerializerRegistry::registerSerializer(ComponentSerializer serializer) {
   if (serializer.type_name.empty() || !serializer.has || !serializer.serialize ||
@@ -2600,12 +5531,43 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "TagComponent", serializeTag, deserializeTag);
   registerComponent<components::TransformComponent>(
       registry, "TransformComponent", serializeTransform, deserializeTransform);
+  registerComponent<components::StaticComponent>(
+      registry, "StaticComponent", serializeStatic, deserializeStatic);
+  registerComponent<components::AudioListenerComponent>(
+      registry,
+      "AudioListenerComponent",
+      serializeAudioListener,
+      deserializeAudioListener);
+  registerComponent<components::AudioSourceComponent>(
+      registry,
+      "AudioSourceComponent",
+      serializeAudioSource,
+      deserializeAudioSource);
+  registerComponent<components::CameraComponent>(
+      registry, "CameraComponent", serializeCamera, deserializeCamera);
+  registerComponent<components::EnvironmentComponent>(
+      registry,
+      "EnvironmentComponent",
+      serializeEnvironment,
+      deserializeEnvironment);
   registerComponent<components::MeshComponent>(
       registry, "MeshComponent", serializeMesh, deserializeMesh);
   registerComponent<components::InstancedMeshComponent>(
       registry, "InstancedMeshComponent", serializeInstancedMesh, deserializeInstancedMesh);
+  registerComponent<components::FoliageComponent>(
+      registry, "FoliageComponent", serializeFoliage, deserializeFoliage);
   registerComponent<components::AnimatorComponent>(
       registry, "AnimatorComponent", serializeAnimator, deserializeAnimator);
+  registerComponent<components::RootMotionComponent>(
+      registry,
+      "RootMotionComponent",
+      serializeRootMotion,
+      deserializeRootMotion);
+  registerContextualComponent<components::DeformableMeshComponent>(
+      registry,
+      "DeformableMeshComponent",
+      serializeDeformableMesh,
+      deserializeDeformableMesh);
   registerComponent<components::LightComponent>(
       registry, "LightComponent", serializeLight, deserializeLight);
   registerComponent<components::LightPulseComponent>(
@@ -2620,11 +5582,109 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       registry, "ColliderComponent", serializeCollider, deserializeCollider);
   registerComponent<components::RigidbodyComponent>(
       registry, "RigidbodyComponent", serializeRigidbody, deserializeRigidbody);
+  registerComponent<components::PhysicsMaterialComponent>(
+      registry,
+      "PhysicsMaterialComponent",
+      serializePhysicsMaterial,
+      deserializePhysicsMaterial);
+  registerComponent<components::PhysicsCollisionFilterComponent>(
+      registry,
+      "PhysicsCollisionFilterComponent",
+      serializePhysicsCollisionFilter,
+      deserializePhysicsCollisionFilter);
   registerComponent<components::CharacterControllerComponent>(
       registry,
       "CharacterControllerComponent",
       serializeCharacterController,
       deserializeCharacterController);
+  registerComponent<components::CollisionListenerComponent>(
+      registry,
+      "CollisionListenerComponent",
+      serializeCollisionListener,
+      deserializeCollisionListener);
+  registerComponent<components::ContactListenerComponent>(
+      registry,
+      "ContactListenerComponent",
+      serializeContactListener,
+      deserializeContactListener);
+  registerComponent<components::GroundContactComponent>(
+      registry,
+      "GroundContactComponent",
+      serializeGroundContact,
+      deserializeGroundContact);
+  registerContextualComponent<components::PhysicsConstraintComponent>(
+      registry,
+      "PhysicsConstraintComponent",
+      serializePhysicsConstraint,
+      deserializePhysicsConstraint);
+  registerComponent<components::PhysicsSoftBodyComponent>(
+      registry,
+      "PhysicsSoftBodyComponent",
+      serializePhysicsSoftBody,
+      deserializePhysicsSoftBody);
+  registerComponent<components::PhysicsVehicleComponent>(
+      registry,
+      "PhysicsVehicleComponent",
+      serializePhysicsVehicle,
+      deserializePhysicsVehicle);
+#if defined(KARMA_ENABLE_NAVIGATION)
+  registerComponent<components::NavMeshSurfaceComponent>(
+      registry,
+      "NavMeshSurfaceComponent",
+      serializeNavMeshSurface,
+      deserializeNavMeshSurface);
+  registerContextualComponent<components::NavOffMeshLinkComponent>(
+      registry,
+      "NavOffMeshLinkComponent",
+      serializeNavOffMeshLink,
+      deserializeNavOffMeshLink);
+  registerComponent<components::NavConvexVolumeComponent>(
+      registry,
+      "NavConvexVolumeComponent",
+      serializeNavConvexVolume,
+      deserializeNavConvexVolume);
+  registerComponent<components::NavMeshComponent>(
+      registry, "NavMeshComponent", serializeNavMesh, deserializeNavMesh);
+  registerComponent<components::NavCrowdComponent>(
+      registry, "NavCrowdComponent", serializeNavCrowd, deserializeNavCrowd);
+  registerContextualComponent<components::NavCrowdAgentComponent>(
+      registry,
+      "NavCrowdAgentComponent",
+      serializeNavCrowdAgent,
+      deserializeNavCrowdAgent);
+  registerContextualComponent<components::NavMeshAgentComponent>(
+      registry,
+      "NavMeshAgentComponent",
+      serializeNavMeshAgent,
+      deserializeNavMeshAgent);
+  registerComponent<components::NavTileCacheComponent>(
+      registry,
+      "NavTileCacheComponent",
+      serializeNavTileCache,
+      deserializeNavTileCache);
+  registerContextualComponent<components::NavTileCacheObstacleComponent>(
+      registry,
+      "NavTileCacheObstacleComponent",
+      serializeNavTileCacheObstacle,
+      deserializeNavTileCacheObstacle);
+#endif  // defined(KARMA_ENABLE_NAVIGATION)
+  registerComponent<components::NetworkIdentityComponent>(
+      registry,
+      "NetworkIdentityComponent",
+      serializeNetworkIdentity,
+      deserializeNetworkIdentity);
+  registerComponent<components::NetworkAuthorityComponent>(
+      registry,
+      "NetworkAuthorityComponent",
+      serializeNetworkAuthority,
+      deserializeNetworkAuthority);
+  registerComponent<components::NetworkReplicatedComponent>(
+      registry,
+      "NetworkReplicatedComponent",
+      serializeNetworkReplicated,
+      deserializeNetworkReplicated);
+  registerComponent<components::ScriptComponent>(
+      registry, "ScriptComponent", serializeScript, deserializeScript);
   registerComponent<components::ParticleEffectComponent>(
       registry, "ParticleEffectComponent", serializeParticleEffect, deserializeParticleEffect);
   registerComponent<components::ParticleEffectOverrideComponent>(

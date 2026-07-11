@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -39,6 +40,12 @@ void writeJson(const std::filesystem::path& path, const Json& json) {
   stream << json.dump(2) << '\n';
 }
 
+std::string readText(const std::filesystem::path& path) {
+  std::ifstream stream(path);
+  return std::string(std::istreambuf_iterator<char>(stream),
+                     std::istreambuf_iterator<char>());
+}
+
 Json validSceneJson() {
   return Json{
       {"version", 1},
@@ -60,7 +67,14 @@ Json validSceneJson() {
                           Json{{"position", Json::array({1.0f, 2.0f, 3.0f})},
                                {"rotation", Json::array({0.0f, 0.0f, 0.0f, 1.0f})},
                                {"scale", Json::array({1.0f, 1.0f, 1.0f})}}},
-                         {"variables", Json{{"variant", "warm"}}}}})},
+                         {"variables", Json{{"variant", "warm"}}},
+                         {"static",
+                          Json{{"enabled", true},
+                               {"include_descendants", true},
+                               {"flags",
+                                karma::components::StaticComponentLighting |
+                                    karma::components::StaticComponentShadows |
+                                    karma::components::StaticComponentCollision}}}}})},
       {"entities",
        Json::array({Json{{"id", "root"},
                          {"name", "Root"},
@@ -146,6 +160,15 @@ void testValidSceneDocument() {
   KARMA_REQUIRE(document.gltf_scenes[0].asset_package_id == "base_assets");
   KARMA_REQUIRE(document.prefab_instances.size() == 1);
   KARMA_REQUIRE(document.prefab_instances[0].parent_entity_id == "root");
+  KARMA_REQUIRE(document.prefab_instances[0].static_component.has_value());
+  KARMA_REQUIRE(document.prefab_instances[0].static_component->enabled);
+  KARMA_REQUIRE(
+      document.prefab_instances[0].static_component->include_descendants);
+  KARMA_REQUIRE(
+      document.prefab_instances[0].static_component->flags ==
+      (karma::components::StaticComponentLighting |
+       karma::components::StaticComponentShadows |
+       karma::components::StaticComponentCollision));
   KARMA_REQUIRE(document.entities.size() == 3);
   KARMA_REQUIRE(document.environment.has_value());
   KARMA_REQUIRE(document.environment->environment_map_path.generic_string() ==
@@ -167,6 +190,39 @@ void testValidSceneDocument() {
   KARMA_REQUIRE(document.bakes[0].static_component_ids.size() == 1);
   KARMA_REQUIRE(document.bakes[0].baked_lighting.lightmap_path.generic_string() ==
                 "bakes/city_lightmap.ktx2");
+}
+
+void testPrefabInstanceStaticMembershipCompatibilityAndValidation() {
+  const karma::scenes::SceneLoadResult parsed =
+      loadTempScene(validSceneJson());
+  KARMA_REQUIRE(parsed.success());
+  const Json canonical =
+      karma::scenes::sceneDocumentToJson(*parsed.document);
+  KARMA_REQUIRE(canonical["prefab_instances"][0]["static"] ==
+                validSceneJson()["prefab_instances"][0]["static"]);
+
+  Json legacy = validSceneJson();
+  legacy["prefab_instances"][0].erase("static");
+  const karma::scenes::SceneLoadResult legacy_result = loadTempScene(legacy);
+  KARMA_REQUIRE(legacy_result.success());
+  KARMA_REQUIRE(
+      !legacy_result.document->prefab_instances[0].static_component.has_value());
+  KARMA_REQUIRE(!karma::scenes::sceneDocumentToJson(*legacy_result.document)
+                     ["prefab_instances"][0]
+                         .contains("static"));
+
+  Json invalid_type = validSceneJson();
+  invalid_type["prefab_instances"][0]["static"] = true;
+  requireFailed(invalid_type);
+
+  Json invalid_flags = validSceneJson();
+  invalid_flags["prefab_instances"][0]["static"]["flags"] = 1u << 31u;
+  requireFailed(invalid_flags);
+
+  karma::scenes::SceneDocument invalid_document = *parsed.document;
+  invalid_document.prefab_instances[0].static_component->flags = 1u << 31u;
+  KARMA_REQUIRE(
+      !karma::scenes::validateSceneDocument(invalid_document).success());
 }
 
 void testBadVersionRejected() {
@@ -282,6 +338,18 @@ void testHierarchyAndNumericValidation() {
   }
   {
     Json json = validSceneJson();
+    json["cameras"][0]["anti_aliasing"] =
+        Json{{"mode", "temporal"}, {"msaa_samples", 4}, {"ssaa_scale", 1.0f}};
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
+    json["cameras"][0]["shader_user_params"] =
+        Json{{"tint", "not a color"}};
+    requireFailed(json);
+  }
+  {
+    Json json = validSceneJson();
     json["cameras"][0]["perspective"] = false;
     json["cameras"][0]["ortho_left"] = -20.0f;
     json["cameras"][0]["ortho_right"] = 20.0f;
@@ -291,6 +359,83 @@ void testHierarchyAndNumericValidation() {
     KARMA_REQUIRE(result.success());
     KARMA_REQUIRE(result.document->cameras[0].component.ortho_left == -20.0f);
     KARMA_REQUIRE(result.document->cameras[0].component.ortho_right == 20.0f);
+  }
+}
+
+void testCanonicalSaveRoundTripAndAtomicValidation() {
+  const karma::scenes::SceneLoadResult parsed = loadTempScene(validSceneJson());
+  KARMA_REQUIRE(parsed.success());
+  karma::scenes::SceneDocument document = *parsed.document;
+  document.source_path = "/machine-specific/original.kscene.json";
+  document.reference_root = "/machine-specific/content";
+  auto& authored_camera = document.cameras.front().component;
+  authored_camera.render_to_texture = true;
+  authored_camera.render_target_key = "editor/cinematic";
+  authored_camera.anti_aliasing =
+      karma::rendering::AntiAliasingSettings::ssaa(2.5f);
+  authored_camera.shader_user_params["tint"] =
+      karma::math::Color{0.25f, 0.5f, 0.75f, 1.0f};
+
+  const Json canonical = karma::scenes::sceneDocumentToJson(document);
+  KARMA_REQUIRE(!canonical.contains("source_path"));
+  KARMA_REQUIRE(!canonical.contains("reference_root"));
+  KARMA_REQUIRE(canonical["prefab_instances"][0].contains("prefab"));
+  KARMA_REQUIRE(!canonical["prefab_instances"][0].contains("path"));
+
+  const std::filesystem::path dir = makeTempDir();
+  const std::filesystem::path path = dir / "nested/saved.kscene.json";
+  karma::scenes::SceneSaveResult saved =
+      karma::scenes::saveSceneDocument(document, path);
+  KARMA_REQUIRE(saved.success());
+  KARMA_REQUIRE(saved.path == path);
+
+  Json disk_json;
+  {
+    std::ifstream stream(path);
+    stream >> disk_json;
+  }
+  KARMA_REQUIRE(disk_json == canonical);
+
+  const std::filesystem::path load_root = dir / "content-root";
+  const karma::scenes::SceneLoadResult round_trip =
+      karma::scenes::loadSceneDocument(karma::scenes::SceneLoadDesc{
+          .path = path,
+          .reference_root = load_root,
+      });
+  KARMA_REQUIRE(round_trip.success());
+  KARMA_REQUIRE(round_trip.document->reference_root == load_root);
+  KARMA_REQUIRE(karma::scenes::sceneDocumentToJson(*round_trip.document) ==
+                canonical);
+  const auto& loaded_camera = round_trip.document->cameras.front().component;
+  KARMA_REQUIRE(loaded_camera.render_to_texture);
+  KARMA_REQUIRE(loaded_camera.render_target_key == "editor/cinematic");
+  KARMA_REQUIRE(loaded_camera.anti_aliasing.mode ==
+                karma::rendering::AntiAliasingMode::SSAA);
+  KARMA_REQUIRE(loaded_camera.anti_aliasing.ssaa_scale == 2.5f);
+  const karma::math::Color& loaded_tint =
+      loaded_camera.shader_user_params.at("tint");
+  KARMA_REQUIRE(loaded_tint.r == 0.25f && loaded_tint.g == 0.5f &&
+                loaded_tint.b == 0.75f && loaded_tint.a == 1.0f);
+
+  const std::string original_contents = readText(path);
+  document.asset_packages[0].path = "/machine-specific/assets.package.json";
+  const karma::scenes::SceneSaveResult non_portable =
+      karma::scenes::saveSceneDocument(document, path);
+  KARMA_REQUIRE(!non_portable.success());
+  KARMA_REQUIRE(!non_portable.diagnostics.empty());
+  KARMA_REQUIRE(readText(path) == original_contents);
+  document.asset_packages[0].path = "packages/base.assets.package.json";
+
+  document.entities.push_back(document.entities.front());
+  const karma::scenes::SceneSaveResult rejected =
+      karma::scenes::saveSceneDocument(document, path);
+  KARMA_REQUIRE(!rejected.success());
+  KARMA_REQUIRE(!rejected.diagnostics.empty());
+  KARMA_REQUIRE(readText(path) == original_contents);
+
+  for (const auto& entry : std::filesystem::directory_iterator(path.parent_path())) {
+    KARMA_REQUIRE(entry.path().filename().string().find("saved.kscene.json.tmp.") !=
+                  0u);
   }
 }
 
@@ -333,11 +478,13 @@ void testSceneAssetPackageImportRegistersAndUnloadsScene() {
 
 int main() {
   testValidSceneDocument();
+  testPrefabInstanceStaticMembershipCompatibilityAndValidation();
   testBadVersionRejected();
   testBadPathsRejected();
   testDuplicateIdsRejected();
   testMissingRefsRejected();
   testHierarchyAndNumericValidation();
+  testCanonicalSaveRoundTripAndAtomicValidation();
   testSceneAssetPackageImportRegistersAndUnloadsScene();
   return 0;
 }

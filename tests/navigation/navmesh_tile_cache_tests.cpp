@@ -98,6 +98,30 @@ void testTileCacheSnapshotAndContentRoundTrip() {
   config.tile_size = 16;
   config.agent_radius = 0.2f;
 
+  {
+    karma::navigation::NavMesh source;
+    assert(source.build(makePlaneGeometry(), config));
+    const std::shared_ptr<const karma::navigation::NavMeshSnapshot> snapshot =
+        source.snapshot();
+    assert(snapshot != nullptr && snapshot->valid());
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "karma_nav_snapshot_nested" / "plane.knav";
+    std::filesystem::remove_all(path.parent_path());
+    assert(karma::assets::saveNavMeshSnapshot(path, *snapshot));
+    const karma::navigation::NavMeshSnapshot loaded_snapshot =
+        karma::assets::loadNavMeshSnapshot(path);
+    assert(loaded_snapshot.valid());
+    karma::navigation::NavMesh loaded;
+    assert(loaded.loadSnapshot(loaded_snapshot));
+    karma::navigation::NavQuery query(loaded);
+    assert(query.findPath({-4.0f, 0.1f, -4.0f},
+                          {4.0f, 0.1f, 4.0f}).success());
+    assert(!karma::assets::saveNavMeshSnapshot(
+        path, karma::navigation::NavMeshSnapshot{}));
+    std::filesystem::remove_all(path.parent_path());
+  }
+
   for (const karma::navigation::NavTileCacheCompression compression :
        {karma::navigation::NavTileCacheCompression::None,
         karma::navigation::NavTileCacheCompression::FastLz}) {

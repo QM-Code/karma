@@ -71,6 +71,11 @@ Shared example helpers live in `examples/common/`.
 
 ## Scene And Animation
 
+- `assets/scene_editor_content/`: self-contained content root for the
+  standalone scene editor, with a launchable scene and linked light, grass-LOD,
+  and pine-tree-LOD prefabs.
+  See [its README](assets/scene_editor_content/README.md) for the command.
+
 - `scene/gltf_import.cpp`: target `scene_gltf_import`, output
   `examples/scene/gltf_import`. Static FBX and GLB package-import comparison,
   normalized and displayed side by side without animation playback.

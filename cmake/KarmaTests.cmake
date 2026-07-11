@@ -103,6 +103,59 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     )
     target_link_libraries(karma_terrain_tests PRIVATE karma::headless)
     add_test(NAME karma_terrain_tests COMMAND karma_terrain_tests)
+
+    add_executable(karma_foliage_tests
+      tests/foliage_tests.cpp
+    )
+    target_link_libraries(karma_foliage_tests PRIVATE karma::headless)
+    add_test(NAME karma_foliage_tests COMMAND karma_foliage_tests)
+
+    add_executable(karma_scene_authoring_tests
+      tests/scene_authoring_tests.cpp
+    )
+    target_link_libraries(karma_scene_authoring_tests PRIVATE karma::headless)
+    add_test(NAME karma_scene_authoring_tests COMMAND karma_scene_authoring_tests)
+
+    if (TARGET karma_scene_editor_model)
+      add_executable(karma_scene_editor_model_tests
+        tests/scene_editor_model_tests.cpp
+      )
+      target_link_libraries(karma_scene_editor_model_tests
+        PRIVATE karma::headless karma_scene_editor_model)
+      add_test(NAME karma_scene_editor_model_tests COMMAND karma_scene_editor_model_tests)
+
+      add_executable(karma_scene_editor_gizmo_tests
+        tests/scene_editor_gizmo_tests.cpp
+      )
+      target_link_libraries(karma_scene_editor_gizmo_tests
+        PRIVATE karma_scene_editor_model karma::headless)
+      add_test(NAME karma_scene_editor_gizmo_tests
+        COMMAND karma_scene_editor_gizmo_tests)
+
+      add_executable(karma_scene_editor_viewport_tests
+        tests/scene_editor_viewport_tests.cpp
+      )
+      target_link_libraries(karma_scene_editor_viewport_tests
+        PRIVATE karma_scene_editor_model karma::headless)
+      add_test(NAME karma_scene_editor_viewport_tests
+        COMMAND karma_scene_editor_viewport_tests)
+
+      add_executable(karma_scene_editor_collider_tests
+        tests/scene_editor_collider_tests.cpp
+      )
+      target_link_libraries(karma_scene_editor_collider_tests
+        PRIVATE karma_scene_editor_model karma::headless)
+      add_test(NAME karma_scene_editor_collider_tests
+        COMMAND karma_scene_editor_collider_tests)
+
+      add_executable(karma_scene_editor_placement_tests
+        tests/scene_editor_placement_tests.cpp
+      )
+      target_link_libraries(karma_scene_editor_placement_tests
+        PRIVATE karma_scene_editor_model karma::headless)
+      add_test(NAME karma_scene_editor_placement_tests
+        COMMAND karma_scene_editor_placement_tests)
+    endif()
   endif()
 
   if (TARGET karma_media_graphical AND KARMA_AUDIO_BACKEND_SDL)
@@ -177,6 +230,13 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     karma_particle_generation_tests
     karma_physics_tests
     karma_terrain_tests
+    karma_foliage_tests
+    karma_scene_authoring_tests
+    karma_scene_editor_model_tests
+    karma_scene_editor_gizmo_tests
+    karma_scene_editor_viewport_tests
+    karma_scene_editor_collider_tests
+    karma_scene_editor_placement_tests
     karma_audio_sdl_tests
     karma_window_sdl_tests
     karma_network_tests

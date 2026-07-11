@@ -19,8 +19,9 @@
 #include <spdlog/spdlog.h>
 
 #include "karma/assets.h"
-#include "karma/math.h"
 #include "karma/components.h"
+#include "karma/foliage.h"
+#include "karma/math.h"
 #include "karma/world.h"
 
 namespace karma::prefabs {
@@ -28,6 +29,15 @@ namespace karma::prefabs {
 namespace {
 
 using Json = nlohmann::json;
+using PrefabDiagnostics = std::vector<std::string>;
+
+bool prefabError(PrefabDiagnostics* diagnostics, std::string message) {
+  spdlog::error("{}", message);
+  if (diagnostics != nullptr) {
+    diagnostics->push_back(std::move(message));
+  }
+  return false;
+}
 
 components::TransformComponent composeTransform(
     const components::TransformComponent& parent,
@@ -55,11 +65,13 @@ std::filesystem::path resolvePrefabPath(const std::filesystem::path& path) {
 bool readRequiredUint32(const Json& object,
                         std::string_view key,
                         uint32_t& out_value,
-                        const std::filesystem::path& path) {
+                        const std::filesystem::path& path,
+                        PrefabDiagnostics* diagnostics = nullptr) {
   const auto it = object.find(key);
   if (it == object.end() || (!it->is_number_unsigned() && !it->is_number_integer())) {
-    spdlog::error("Prefab '{}' is missing numeric '{}' field", path.string(), key);
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() + "' is missing numeric '" +
+                           std::string(key) + "' field");
   }
   uint64_t value = 0;
   if (it->is_number_unsigned()) {
@@ -67,14 +79,16 @@ bool readRequiredUint32(const Json& object,
   } else {
     const int64_t signed_value = it->get<int64_t>();
     if (signed_value < 0) {
-      spdlog::error("Prefab '{}' has out-of-range '{}' field", path.string(), key);
-      return false;
+      return prefabError(diagnostics,
+                         "Prefab '" + path.string() + "' has out-of-range '" +
+                             std::string(key) + "' field");
     }
     value = static_cast<uint64_t>(signed_value);
   }
   if (value > static_cast<uint64_t>(UINT32_MAX)) {
-    spdlog::error("Prefab '{}' has out-of-range '{}' field", path.string(), key);
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() + "' has out-of-range '" +
+                           std::string(key) + "' field");
   }
   out_value = static_cast<uint32_t>(value);
   return true;
@@ -83,11 +97,13 @@ bool readRequiredUint32(const Json& object,
 bool readRequiredSize(const Json& object,
                       std::string_view key,
                       size_t& out_value,
-                      const std::filesystem::path& path) {
+                      const std::filesystem::path& path,
+                      PrefabDiagnostics* diagnostics = nullptr) {
   const auto it = object.find(key);
   if (it == object.end() || (!it->is_number_unsigned() && !it->is_number_integer())) {
-    spdlog::error("Prefab '{}' is missing numeric '{}' field", path.string(), key);
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() + "' is missing numeric '" +
+                           std::string(key) + "' field");
   }
   uint64_t value = 0;
   if (it->is_number_unsigned()) {
@@ -95,14 +111,16 @@ bool readRequiredSize(const Json& object,
   } else {
     const int64_t signed_value = it->get<int64_t>();
     if (signed_value < 0) {
-      spdlog::error("Prefab '{}' has negative '{}' field", path.string(), key);
-      return false;
+      return prefabError(diagnostics,
+                         "Prefab '" + path.string() + "' has negative '" +
+                             std::string(key) + "' field");
     }
     value = static_cast<uint64_t>(signed_value);
   }
   if (value > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-    spdlog::error("Prefab '{}' has out-of-range '{}' field", path.string(), key);
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() + "' has out-of-range '" +
+                           std::string(key) + "' field");
   }
   out_value = static_cast<size_t>(value);
   return true;
@@ -111,11 +129,13 @@ bool readRequiredSize(const Json& object,
 bool readRequiredString(const Json& object,
                         std::string_view key,
                         std::string& out_value,
-                        const std::filesystem::path& path) {
+                        const std::filesystem::path& path,
+                        PrefabDiagnostics* diagnostics = nullptr) {
   const auto it = object.find(key);
   if (it == object.end() || !it->is_string()) {
-    spdlog::error("Prefab '{}' is missing string '{}' field", path.string(), key);
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() + "' is missing string '" +
+                           std::string(key) + "' field");
   }
   out_value = it->get<std::string>();
   return true;
@@ -504,10 +524,13 @@ class ExpressionParser {
 std::optional<PrefabVariableMap> buildResolvedVariables(
     const PrefabDocument& document,
     const PrefabInstantiateDesc& desc,
-    const std::filesystem::path& path) {
+    const std::filesystem::path& path,
+    PrefabDiagnostics* diagnostics = nullptr) {
   PrefabVariableMap variables;
   if (!document.variables.is_object()) {
-    spdlog::error("Prefab '{}' has non-object 'variables' field", path.string());
+    prefabError(diagnostics,
+                "Prefab '" + path.string() +
+                    "' has non-object 'variables' field");
     return std::nullopt;
   }
 
@@ -516,42 +539,41 @@ std::optional<PrefabVariableMap> buildResolvedVariables(
     const std::string name = it.key();
     const Json& declaration = it.value();
     if (!declaration.is_object()) {
-      spdlog::error("Prefab '{}' variable '{}' must be an object",
-                    path.string(),
-                    name);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' variable '" + name +
+                      "' must be an object");
       return std::nullopt;
     }
 
     const auto type_it = declaration.find("type");
     if (type_it == declaration.end() || !type_it->is_string()) {
-      spdlog::error("Prefab '{}' variable '{}' is missing string 'type'",
-                    path.string(),
-                    name);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' variable '" + name +
+                      "' is missing string 'type'");
       return std::nullopt;
     }
     const std::string type_name = type_it->get<std::string>();
     const std::optional<PrefabVariableType> type = parseVariableType(type_name);
     if (!type.has_value()) {
-      spdlog::error("Prefab '{}' variable '{}' has unsupported type '{}'",
-                    path.string(),
-                    name,
-                    type_name);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' variable '" + name +
+                      "' has unsupported type '" + type_name + "'");
       return std::nullopt;
     }
 
     const auto default_it = declaration.find("default");
     if (default_it == declaration.end()) {
-      spdlog::error("Prefab '{}' variable '{}' is missing 'default'",
-                    path.string(),
-                    name);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' variable '" + name +
+                      "' is missing 'default'");
       return std::nullopt;
     }
     Json normalized_default;
     if (!normalizeVariableValue(*type, *default_it, normalized_default)) {
-      spdlog::error("Prefab '{}' variable '{}' default does not match type '{}'",
-                    path.string(),
-                    name,
-                    variableTypeName(*type));
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' variable '" + name +
+                      "' default does not match type '" +
+                      variableTypeName(*type) + "'");
       return std::nullopt;
     }
 
@@ -561,19 +583,19 @@ std::optional<PrefabVariableMap> buildResolvedVariables(
   for (const auto& [name, override_value] : desc.variables) {
     const auto variable_it = variables.find(name);
     if (variable_it == variables.end()) {
-      spdlog::error("Prefab '{}' received unknown variable override '{}'",
-                    path.string(),
-                    name);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() +
+                      "' received unknown variable override '" + name + "'");
       return std::nullopt;
     }
     Json normalized_override;
     if (!normalizeVariableValue(variable_it->second.type,
                                 override_value,
                                 normalized_override)) {
-      spdlog::error("Prefab '{}' variable override '{}' does not match type '{}'",
-                    path.string(),
-                    name,
-                    variableTypeName(variable_it->second.type));
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' variable override '" + name +
+                      "' does not match type '" +
+                      variableTypeName(variable_it->second.type) + "'");
       return std::nullopt;
     }
     variable_it->second.value = std::move(normalized_override);
@@ -585,10 +607,11 @@ std::optional<PrefabVariableMap> buildResolvedVariables(
 bool resolveJsonMarkers(Json& value,
                         const PrefabVariableMap& variables,
                         const std::filesystem::path& path,
-                        std::string_view context) {
+                        std::string_view context,
+                        PrefabDiagnostics* diagnostics = nullptr) {
   if (value.is_array()) {
     for (Json& element : value) {
-      if (!resolveJsonMarkers(element, variables, path, context)) {
+      if (!resolveJsonMarkers(element, variables, path, context, diagnostics)) {
         return false;
       }
     }
@@ -603,27 +626,26 @@ bool resolveJsonMarkers(Json& value,
   const bool has_expr = value.contains("$expr");
   if (has_var || has_expr) {
     if (value.size() != 1u || (has_var && has_expr)) {
-      spdlog::error("Prefab '{}' {} has invalid variable marker",
-                    path.string(),
-                    context);
-      return false;
+      return prefabError(diagnostics,
+                         "Prefab '" + path.string() + "' " +
+                             std::string(context) +
+                             " has invalid variable marker");
     }
     if (has_var) {
       const Json& marker = value["$var"];
       if (!marker.is_string()) {
-        spdlog::error("Prefab '{}' {} has non-string $var marker",
-                      path.string(),
-                      context);
-        return false;
+        return prefabError(diagnostics,
+                           "Prefab '" + path.string() + "' " +
+                               std::string(context) +
+                               " has non-string $var marker");
       }
       const std::string name = marker.get<std::string>();
       const auto variable_it = variables.find(name);
       if (variable_it == variables.end()) {
-        spdlog::error("Prefab '{}' {} references unknown variable '{}'",
-                      path.string(),
-                      context,
-                      name);
-        return false;
+        return prefabError(diagnostics,
+                           "Prefab '" + path.string() + "' " +
+                               std::string(context) +
+                               " references unknown variable '" + name + "'");
       }
       value = variable_it->second.value;
       return true;
@@ -631,29 +653,27 @@ bool resolveJsonMarkers(Json& value,
 
     const Json& marker = value["$expr"];
     if (!marker.is_string()) {
-      spdlog::error("Prefab '{}' {} has non-string $expr marker",
-                    path.string(),
-                    context);
-      return false;
+      return prefabError(diagnostics,
+                         "Prefab '" + path.string() + "' " +
+                             std::string(context) +
+                             " has non-string $expr marker");
     }
     const std::string expression = marker.get<std::string>();
     ExpressionParser parser(expression, variables);
     double result = 0.0;
     std::string error;
     if (!parser.parse(result, error)) {
-      spdlog::error("Prefab '{}' {} has invalid expression '{}': {}",
-                    path.string(),
-                    context,
-                    expression,
-                    error);
-      return false;
+      return prefabError(diagnostics,
+                         "Prefab '" + path.string() + "' " +
+                             std::string(context) + " has invalid expression '" +
+                             expression + "': " + error);
     }
     value = result;
     return true;
   }
 
   for (auto it = value.begin(); it != value.end(); ++it) {
-    if (!resolveJsonMarkers(it.value(), variables, path, context)) {
+    if (!resolveJsonMarkers(it.value(), variables, path, context, diagnostics)) {
       return false;
     }
   }
@@ -663,9 +683,10 @@ bool resolveJsonMarkers(Json& value,
 std::optional<PrefabDocument> resolvePrefabVariables(
     const PrefabDocument& document,
     const PrefabInstantiateDesc& desc,
-    const std::filesystem::path& path) {
+    const std::filesystem::path& path,
+    PrefabDiagnostics* diagnostics = nullptr) {
   std::optional<PrefabVariableMap> variables =
-      buildResolvedVariables(document, desc, path);
+      buildResolvedVariables(document, desc, path, diagnostics);
   if (!variables.has_value()) {
     return std::nullopt;
   }
@@ -674,7 +695,11 @@ std::optional<PrefabDocument> resolvePrefabVariables(
   for (PrefabNode& node : resolved.nodes) {
     const std::string context =
         node.name.empty() ? "node '<unnamed>'" : "node '" + node.name + "'";
-    if (!resolveJsonMarkers(node.components, *variables, path, context)) {
+    if (!resolveJsonMarkers(node.components,
+                            *variables,
+                            path,
+                            context,
+                            diagnostics)) {
       return std::nullopt;
     }
   }
@@ -682,18 +707,21 @@ std::optional<PrefabDocument> resolvePrefabVariables(
 }
 
 bool validateParents(const PrefabDocument& document,
-                     const std::filesystem::path& path) {
+                     const std::filesystem::path& path,
+                     PrefabDiagnostics* diagnostics = nullptr) {
   if (document.nodes.empty()) {
-    spdlog::error("Prefab '{}' contains no nodes", path.string());
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() + "' contains no nodes");
   }
   if (document.root >= document.nodes.size()) {
-    spdlog::error("Prefab '{}' root index is out of range", path.string());
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() +
+                           "' root index is out of range");
   }
   if (document.nodes[document.root].parent.has_value()) {
-    spdlog::error("Prefab '{}' root node must not have a parent", path.string());
-    return false;
+    return prefabError(diagnostics,
+                       "Prefab '" + path.string() +
+                           "' root node must not have a parent");
   }
 
   std::vector<uint8_t> visit_state(document.nodes.size(), 0u);
@@ -701,10 +729,10 @@ bool validateParents(const PrefabDocument& document,
   for (size_t index = 0; index < document.nodes.size(); ++index) {
     const std::optional<size_t> parent = document.nodes[index].parent;
     if (parent.has_value() && *parent >= document.nodes.size()) {
-      spdlog::error("Prefab '{}' node {} parent index is out of range",
-                    path.string(),
-                    index);
-      return false;
+      return prefabError(diagnostics,
+                         "Prefab '" + path.string() + "' node " +
+                             std::to_string(index) +
+                             " parent index is out of range");
     }
 
     std::vector<size_t> path_nodes;
@@ -714,18 +742,18 @@ bool validateParents(const PrefabDocument& document,
         break;
       }
       if (visit_state[cursor] == 1u) {
-        spdlog::error("Prefab '{}' contains a parent cycle at node {}",
-                      path.string(),
-                      index);
-        return false;
+        return prefabError(diagnostics,
+                           "Prefab '" + path.string() +
+                               "' contains a parent cycle at node " +
+                               std::to_string(index));
       }
       visit_state[cursor] = 1u;
       path_nodes.push_back(cursor);
       if (!document.nodes[cursor].parent.has_value()) {
-        spdlog::error("Prefab '{}' node {} is outside the declared root subtree",
-                      path.string(),
-                      index);
-        return false;
+        return prefabError(diagnostics,
+                           "Prefab '" + path.string() + "' node " +
+                               std::to_string(index) +
+                               " is outside the declared root subtree");
       }
       cursor = *document.nodes[cursor].parent;
     }
@@ -738,27 +766,38 @@ bool validateParents(const PrefabDocument& document,
 }
 
 std::optional<PrefabDocument> parseDocument(const Json& json,
-                                            const std::filesystem::path& path) {
+                                            const std::filesystem::path& path,
+                                            PrefabDiagnostics* diagnostics = nullptr) {
   if (!json.is_object()) {
-    spdlog::error("Prefab '{}' root JSON value must be an object", path.string());
+    prefabError(diagnostics,
+                "Prefab '" + path.string() +
+                    "' root JSON value must be an object");
     return std::nullopt;
   }
 
   PrefabDocument document{};
-  if (!readRequiredUint32(json, "version", document.version, path)) {
+  if (!readRequiredUint32(json,
+                          "version",
+                          document.version,
+                          path,
+                          diagnostics)) {
     return std::nullopt;
   }
   if (document.version != 2u) {
-    spdlog::error("Prefab '{}' has unsupported version {}", path.string(), document.version);
+    prefabError(diagnostics,
+                "Prefab '" + path.string() + "' has unsupported version " +
+                    std::to_string(document.version));
     return std::nullopt;
   }
-  if (!readRequiredSize(json, "root", document.root, path)) {
+  if (!readRequiredSize(json, "root", document.root, path, diagnostics)) {
     return std::nullopt;
   }
   const auto variables_it = json.find("variables");
   if (variables_it != json.end()) {
     if (!variables_it->is_object()) {
-      spdlog::error("Prefab '{}' has non-object 'variables' field", path.string());
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() +
+                      "' has non-object 'variables' field");
       return std::nullopt;
     }
     document.variables = *variables_it;
@@ -766,7 +805,9 @@ std::optional<PrefabDocument> parseDocument(const Json& json,
 
   const auto nodes_it = json.find("nodes");
   if (nodes_it == json.end() || !nodes_it->is_array()) {
-    spdlog::error("Prefab '{}' is missing array 'nodes' field", path.string());
+    prefabError(diagnostics,
+                "Prefab '" + path.string() +
+                    "' is missing array 'nodes' field");
     return std::nullopt;
   }
 
@@ -775,23 +816,37 @@ std::optional<PrefabDocument> parseDocument(const Json& json,
   for (size_t index = 0; index < nodes_it->size(); ++index) {
     const Json& node_json = (*nodes_it)[index];
     if (!node_json.is_object()) {
-      spdlog::error("Prefab '{}' node {} must be an object", path.string(), index);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' node " +
+                      std::to_string(index) + " must be an object");
       return std::nullopt;
     }
 
     PrefabNode node{};
-    if (!readRequiredUint32(node_json, "id", node.id, path) ||
-        !readRequiredString(node_json, "name", node.name, path)) {
+    if (!readRequiredUint32(node_json,
+                            "id",
+                            node.id,
+                            path,
+                            diagnostics) ||
+        !readRequiredString(node_json,
+                            "name",
+                            node.name,
+                            path,
+                            diagnostics)) {
       return std::nullopt;
     }
     if (!ids.insert(node.id).second) {
-      spdlog::error("Prefab '{}' contains duplicate node id {}", path.string(), node.id);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' contains duplicate node id " +
+                      std::to_string(node.id));
       return std::nullopt;
     }
 
     const auto parent_it = node_json.find("parent");
     if (parent_it == node_json.end()) {
-      spdlog::error("Prefab '{}' node {} is missing 'parent' field", path.string(), index);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' node " +
+                      std::to_string(index) + " is missing 'parent' field");
       return std::nullopt;
     }
     if (parent_it->is_null()) {
@@ -803,61 +858,46 @@ std::optional<PrefabDocument> parseDocument(const Json& json,
       } else {
         const int64_t signed_parent = parent_it->get<int64_t>();
         if (signed_parent < 0) {
-          spdlog::error("Prefab '{}' node {} has negative parent index",
-                        path.string(),
-                        index);
+          prefabError(diagnostics,
+                      "Prefab '" + path.string() + "' node " +
+                          std::to_string(index) +
+                          " has negative parent index");
           return std::nullopt;
         }
         parent = static_cast<uint64_t>(signed_parent);
       }
       if (parent > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-        spdlog::error("Prefab '{}' node {} has out-of-range parent index",
-                      path.string(),
-                      index);
+        prefabError(diagnostics,
+                    "Prefab '" + path.string() + "' node " +
+                        std::to_string(index) +
+                        " has out-of-range parent index");
         return std::nullopt;
       }
       node.parent = static_cast<size_t>(parent);
     } else {
-      spdlog::error("Prefab '{}' node {} parent must be null or numeric",
-                    path.string(),
-                    index);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' node " +
+                      std::to_string(index) +
+                      " parent must be null or numeric");
       return std::nullopt;
     }
 
     const auto components_it = node_json.find("components");
     if (components_it == node_json.end() || !components_it->is_object()) {
-      spdlog::error("Prefab '{}' node {} is missing object 'components' field",
-                    path.string(),
-                    index);
+      prefabError(diagnostics,
+                  "Prefab '" + path.string() + "' node " +
+                      std::to_string(index) +
+                      " is missing object 'components' field");
       return std::nullopt;
     }
     node.components = *components_it;
     document.nodes.push_back(std::move(node));
   }
 
-  if (!validateParents(document, path)) {
+  if (!validateParents(document, path, diagnostics)) {
     return std::nullopt;
   }
   return document;
-}
-
-std::optional<PrefabDocument> loadDocument(const std::filesystem::path& input_path) {
-  const std::filesystem::path path = resolvePrefabPath(input_path);
-  std::ifstream stream(path);
-  if (!stream) {
-    spdlog::error("Failed to open prefab '{}'", path.string());
-    return std::nullopt;
-  }
-
-  Json json;
-  try {
-    stream >> json;
-  } catch (const std::exception& e) {
-    spdlog::error("Failed to parse prefab '{}': {}", path.string(), e.what());
-    return std::nullopt;
-  }
-
-  return parseDocument(json, path);
 }
 
 Json toJson(const PrefabDocument& document) {
@@ -966,19 +1006,23 @@ PackageAcquireResult acquirePrefabPackage(assets::AssetRegistry* assets,
   }
 
   result.cache_key = packageCacheKey(assets, manifest_path);
-  {
-    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
-    auto cached_it = g_cached_prefab_packages.find(result.cache_key);
-    if (cached_it != g_cached_prefab_packages.end()) {
-      cached_it->second.ref_count += 1u;
-      result.handle = cached_it->second.handle;
+  std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
+  auto cached_it = g_cached_prefab_packages.find(result.cache_key);
+  if (cached_it != g_cached_prefab_packages.end()) {
+    if (cached_it->second.ref_count == std::numeric_limits<uint32_t>::max()) {
+      spdlog::error("Prefab asset package reference count overflow: {}",
+                    manifest_path.string());
+      result.success = false;
       return result;
     }
+    cached_it->second.ref_count += 1u;
+    result.handle = cached_it->second.handle;
+    return result;
   }
 
   std::string diagnostic;
   std::optional<assets::AssetPackageHandle> package =
-      assets::importAssetPackage(*assets, manifest_path, &diagnostic);
+      assets->sharedPackageStore().acquirePackage(manifest_path, &diagnostic);
   if (!package.has_value()) {
     spdlog::error("Failed to import prefab asset package '{}': {}",
                   manifest_path.string(),
@@ -991,10 +1035,7 @@ PackageAcquireResult acquirePrefabPackage(assets::AssetRegistry* assets,
   cached.assets = assets;
   cached.handle = *package;
   cached.ref_count = 1u;
-  {
-    std::lock_guard<std::mutex> lock(g_prefab_state_mutex);
-    g_cached_prefab_packages[result.cache_key] = cached;
-  }
+  g_cached_prefab_packages[result.cache_key] = cached;
   result.handle = std::move(package);
   return result;
 }
@@ -1019,7 +1060,7 @@ void releasePrefabPackageByKey(const std::string& cache_key) {
     }
   }
   if (released.has_value() && released->assets != nullptr) {
-    assets::unloadAssetPackage(*released->assets, released->handle);
+    released->assets->sharedPackageStore().releasePackage(released->handle);
   }
 }
 
@@ -1066,11 +1107,25 @@ PrefabDocument buildDocument(const world::World& world,
   document.root = 0;
 
   std::unordered_map<world::NodeId, size_t> index_by_node;
+  std::unordered_map<uint64_t, uint32_t> node_id_by_entity;
   if (!scene_nodes.empty()) {
     document.nodes.reserve(scene_nodes.size());
     for (size_t index = 0; index < scene_nodes.size(); ++index) {
       index_by_node[scene_nodes[index]] = index;
+      node_id_by_entity[entityKey(scene.get(scene_nodes[index]).entity)] =
+          static_cast<uint32_t>(index);
     }
+    const ComponentSerializationContext context{
+        .serialize_entity_reference =
+            [&](world::Entity entity) -> std::optional<Json> {
+          const auto it = node_id_by_entity.find(entityKey(entity));
+          if (it == node_id_by_entity.end()) {
+            throw std::runtime_error(
+                "component references an entity outside the saved prefab subtree");
+          }
+          return Json{{"scope", "prefab"}, {"node", it->second}};
+        },
+    };
     for (size_t index = 0; index < scene_nodes.size(); ++index) {
       const world::Node& scene_node = scene.get(scene_nodes[index]);
       PrefabNode prefab_node{};
@@ -1089,7 +1144,8 @@ PrefabDocument buildDocument(const world::World& world,
           continue;
         }
         prefab_node.components[serializer.type_name] =
-            serializer.serialize(world, scene_node.entity);
+            serializeComponentPayload(
+                serializer, world, scene_node.entity, context);
       }
       document.nodes.push_back(std::move(prefab_node));
     }
@@ -1100,14 +1156,106 @@ PrefabDocument buildDocument(const world::World& world,
   prefab_node.id = 0u;
   prefab_node.name = entityName(world, root);
   prefab_node.components = Json::object();
+  node_id_by_entity[entityKey(root)] = 0u;
+  const ComponentSerializationContext context{
+      .serialize_entity_reference =
+          [&](world::Entity entity) -> std::optional<Json> {
+        const auto it = node_id_by_entity.find(entityKey(entity));
+        if (it == node_id_by_entity.end()) {
+          throw std::runtime_error(
+              "component references an entity outside the saved prefab");
+        }
+        return Json{{"scope", "prefab"}, {"node", it->second}};
+      },
+  };
   for (const ComponentSerializer& serializer : registry.serializers()) {
     if (!serializer.has(world, root)) {
       continue;
     }
-    prefab_node.components[serializer.type_name] = serializer.serialize(world, root);
+    prefab_node.components[serializer.type_name] =
+        serializeComponentPayload(serializer, world, root, context);
   }
   document.nodes.push_back(std::move(prefab_node));
   return document;
+}
+
+void makeAbsoluteJsonPathRelative(Json& object,
+                                  std::string_view key,
+                                  const std::filesystem::path& prefab_directory) {
+  const auto it = object.find(std::string(key));
+  if (it == object.end() || !it->is_string()) {
+    return;
+  }
+
+  const std::filesystem::path serialized_path = it->get<std::string>();
+  if (serialized_path.empty() || serialized_path.is_relative()) {
+    return;
+  }
+
+  const std::filesystem::path relative_path =
+      serialized_path.lexically_normal().lexically_relative(prefab_directory);
+  if (!relative_path.empty() && relative_path.is_relative()) {
+    *it = relative_path.generic_string();
+  }
+}
+
+void makeFileBackedComponentPathsRelative(
+    PrefabDocument& document,
+    const std::filesystem::path& prefab_path) {
+  std::error_code ec;
+  std::filesystem::path prefab_directory =
+      std::filesystem::absolute(prefab_path.parent_path(), ec);
+  if (ec) {
+    prefab_directory = prefab_path.parent_path();
+  }
+  prefab_directory = prefab_directory.lexically_normal();
+
+  for (PrefabNode& node : document.nodes) {
+    auto terrain_it = node.components.find("TerrainComponent");
+    if (terrain_it != node.components.end() && terrain_it->is_object()) {
+      Json& terrain = *terrain_it;
+      makeAbsoluteJsonPathRelative(terrain, "tile_directory", prefab_directory);
+      makeAbsoluteJsonPathRelative(terrain, "height_image", prefab_directory);
+      makeAbsoluteJsonPathRelative(terrain, "heatmap_image", prefab_directory);
+      makeAbsoluteJsonPathRelative(terrain, "color_image", prefab_directory);
+      makeAbsoluteJsonPathRelative(terrain, "control_image", prefab_directory);
+
+      const auto layers_it = terrain.find("material_layers");
+      if (layers_it != terrain.end() && layers_it->is_array()) {
+        for (Json& layer : *layers_it) {
+          if (!layer.is_object()) {
+            continue;
+          }
+          makeAbsoluteJsonPathRelative(layer, "albedo_image", prefab_directory);
+          makeAbsoluteJsonPathRelative(layer, "normal_image", prefab_directory);
+          makeAbsoluteJsonPathRelative(layer, "roughness_image", prefab_directory);
+        }
+      }
+
+      const auto maps_it = terrain.find("data_maps");
+      if (maps_it != terrain.end() && maps_it->is_array()) {
+        for (Json& map : *maps_it) {
+          if (map.is_object()) {
+            makeAbsoluteJsonPathRelative(map, "image", prefab_directory);
+          }
+        }
+      }
+    }
+
+    auto foliage_it = node.components.find("FoliageComponent");
+    if (foliage_it != node.components.end() && foliage_it->is_object()) {
+      makeAbsoluteJsonPathRelative(
+          *foliage_it, "sidecar_path", prefab_directory);
+    }
+
+    auto camera_it = node.components.find("CameraComponent");
+    if (camera_it != node.components.end() && camera_it->is_object()) {
+      makeAbsoluteJsonPathRelative(
+          *camera_it, "shader_override_vertex_path", prefab_directory);
+      makeAbsoluteJsonPathRelative(
+          *camera_it, "shader_override_fragment_path", prefab_directory);
+    }
+  }
 }
 
 void destroyCreated(world::World& world,
@@ -1165,7 +1313,8 @@ class PrefabInstantiationRollback {
 bool deserializeComponents(world::World& world,
                            world::Entity entity,
                            const PrefabNode& node,
-                           const std::filesystem::path& path) {
+                           const std::filesystem::path& path,
+                           const ComponentSerializationContext& context = {}) {
   ComponentSerializerRegistry& registry = componentSerializerRegistry();
   std::unordered_set<std::string> consumed;
   consumed.reserve(node.components.size());
@@ -1176,7 +1325,8 @@ bool deserializeComponents(world::World& world,
       continue;
     }
     try {
-      if (!serializer.deserialize(world, entity, *component_it)) {
+      if (!deserializeComponentPayload(
+              serializer, world, entity, *component_it, context)) {
         spdlog::error("Prefab '{}' node '{}' has invalid '{}' component payload",
                       path.string(),
                       node.name,
@@ -1205,6 +1355,106 @@ bool deserializeComponents(world::World& world,
     }
   }
   return true;
+}
+
+std::optional<uint32_t> prefabNodeReference(const Json& reference) {
+  const Json* node = nullptr;
+  if (reference.is_number_integer() || reference.is_number_unsigned()) {
+    node = &reference;
+  } else if (reference.is_object()) {
+    const auto scope_it = reference.find("scope");
+    if (scope_it != reference.end() &&
+        (!scope_it->is_string() || scope_it->get<std::string>() != "prefab")) {
+      return std::nullopt;
+    }
+    auto node_it = reference.find("node");
+    if (node_it == reference.end()) {
+      node_it = reference.find("node_id");
+    }
+    if (node_it != reference.end()) node = &*node_it;
+  }
+  if (node == nullptr ||
+      (!node->is_number_integer() && !node->is_number_unsigned())) {
+    return std::nullopt;
+  }
+  uint64_t value = 0u;
+  if (node->is_number_unsigned()) {
+    value = node->get<uint64_t>();
+  } else {
+    const int64_t signed_value = node->get<int64_t>();
+    if (signed_value < 0) return std::nullopt;
+    value = static_cast<uint64_t>(signed_value);
+  }
+  if (value > UINT32_MAX) return std::nullopt;
+  return static_cast<uint32_t>(value);
+}
+
+bool validateDocumentComponents(const PrefabDocument& document,
+                                const std::filesystem::path& path) {
+  world::World validation_world;
+  std::vector<world::Entity> entities;
+  entities.reserve(document.nodes.size());
+  std::unordered_map<uint32_t, world::Entity> entities_by_id;
+  entities_by_id.reserve(document.nodes.size());
+  for (const PrefabNode& node : document.nodes) {
+    const world::Entity entity = validation_world.createEntity();
+    entities.push_back(entity);
+    entities_by_id.emplace(node.id, entity);
+  }
+  const ComponentSerializationContext context{
+      .resolve_entity_reference =
+          [&](const Json& reference) -> std::optional<world::Entity> {
+        const std::optional<uint32_t> node_id = prefabNodeReference(reference);
+        if (!node_id.has_value()) return std::nullopt;
+        const auto it = entities_by_id.find(*node_id);
+        return it == entities_by_id.end()
+                   ? std::nullopt
+                   : std::optional<world::Entity>(it->second);
+      },
+  };
+  for (size_t index = 0; index < document.nodes.size(); ++index) {
+    if (!deserializeComponents(validation_world,
+                               entities[index],
+                               document.nodes[index],
+                               path,
+                               context)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void resolveFileBackedComponentPaths(world::World& world,
+                                     world::Entity entity,
+                                     const std::filesystem::path& prefab_path) {
+  const std::filesystem::path base = prefab_path.parent_path();
+  auto resolve = [&](std::filesystem::path& path) {
+    if (!path.empty() && path.is_relative()) {
+      path = (base / path).lexically_normal();
+    }
+  };
+  if (world.has<components::TerrainComponent>(entity)) {
+    auto& terrain = world.get<components::TerrainComponent>(entity);
+    resolve(terrain.tile_directory);
+    resolve(terrain.height_image);
+    resolve(terrain.heatmap_image);
+    resolve(terrain.color_image);
+    resolve(terrain.control_image);
+    for (auto& layer : terrain.material_layers) {
+      resolve(layer.albedo_image);
+      resolve(layer.normal_image);
+      resolve(layer.roughness_image);
+    }
+    for (auto& map : terrain.data_maps) resolve(map.image);
+  }
+  if (world.has<components::FoliageComponent>(entity)) {
+    resolve(world.get<components::FoliageComponent>(entity).sidecar_path);
+  }
+  if (world.has<components::CameraComponent>(entity)) {
+    auto& camera = world.get<components::CameraComponent>(entity);
+    resolve(camera.shader_override_vertex_path);
+    resolve(camera.shader_override_fragment_path);
+  }
 }
 
 void applyRootTransform(world::World& world,
@@ -1272,6 +1522,62 @@ bool validateVolumetricMaterials(const world::World& world,
 
 }  // namespace
 
+PrefabLoadResult loadPrefabDocument(const std::filesystem::path& input_path) {
+  PrefabLoadResult result{};
+  result.source_path = resolvePrefabPath(input_path);
+
+  std::ifstream stream(result.source_path);
+  if (!stream) {
+    prefabError(&result.diagnostics,
+                "Failed to open prefab '" + result.source_path.string() + "'");
+    return result;
+  }
+
+  Json json;
+  try {
+    stream >> json;
+  } catch (const std::exception& error) {
+    prefabError(&result.diagnostics,
+                "Failed to parse prefab '" + result.source_path.string() +
+                    "': " + error.what());
+    return result;
+  }
+
+  std::optional<PrefabDocument> document =
+      parseDocument(json, result.source_path, &result.diagnostics);
+  if (!document.has_value()) {
+    return result;
+  }
+
+  const PrefabInstantiateDesc default_variables{};
+  std::optional<PrefabDocument> resolved = resolvePrefabVariables(
+      *document,
+      default_variables,
+      result.source_path,
+      &result.diagnostics);
+  if (!resolved.has_value()) {
+    return result;
+  }
+
+  try {
+    ensureBuiltinComponentSerializers();
+    if (!validateDocumentComponents(*resolved, result.source_path)) {
+      prefabError(&result.diagnostics,
+                  "Prefab '" + result.source_path.string() +
+                      "' has unknown, invalid, or unresolved components");
+      return result;
+    }
+  } catch (const std::exception& error) {
+    prefabError(&result.diagnostics,
+                "Prefab '" + result.source_path.string() +
+                    "' component validation failed: " + error.what());
+    return result;
+  }
+
+  result.document = std::move(document);
+  return result;
+}
+
 bool savePrefab(const world::World& world,
                 const world::Scene& scene,
                 world::Entity root,
@@ -1282,13 +1588,33 @@ bool savePrefab(const world::World& world,
     return false;
   }
 
-  const PrefabDocument document = buildDocument(world, scene, root, options);
+  PrefabDocument document{};
+  try {
+    document = buildDocument(world, scene, root, options);
+  } catch (const std::exception& error) {
+    spdlog::error("Cannot serialize prefab components: {}", error.what());
+    return false;
+  }
   if (document.nodes.empty()) {
     spdlog::error("Cannot save prefab: no serializable nodes found");
     return false;
   }
 
   const std::filesystem::path path = resolvePrefabPath(input_path);
+  makeFileBackedComponentPathsRelative(document, path);
+  try {
+    ensureBuiltinComponentSerializers();
+    if (!validateDocumentComponents(document, path)) {
+      spdlog::error(
+          "Cannot save prefab '{}': it has non-portable, invalid, or unresolved components",
+          path.string());
+      return false;
+    }
+  } catch (const std::exception& error) {
+    spdlog::error("Cannot validate prefab '{}': {}", path.string(), error.what());
+    return false;
+  }
+
   std::error_code ec;
   if (!path.parent_path().empty()) {
     std::filesystem::create_directories(path.parent_path(), ec);
@@ -1316,10 +1642,11 @@ std::optional<PrefabInstance> instantiatePrefab(
     const PrefabInstantiateDesc& desc) {
   ensureBuiltinComponentSerializers();
   const std::filesystem::path path = resolvePrefabPath(input_path);
-  std::optional<PrefabDocument> document = loadDocument(path);
-  if (!document.has_value()) {
+  PrefabLoadResult load = loadPrefabDocument(path);
+  if (!load.success()) {
     return std::nullopt;
   }
+  std::optional<PrefabDocument> document = std::move(load.document);
   document = resolvePrefabVariables(*document, desc, path);
   if (!document.has_value()) {
     return std::nullopt;
@@ -1366,10 +1693,28 @@ std::optional<PrefabInstance> instantiatePrefab(
       }
     }
 
+    const ComponentSerializationContext component_context{
+        .resolve_entity_reference =
+            [&](const Json& reference) -> std::optional<world::Entity> {
+          const std::optional<uint32_t> node_id =
+              prefabNodeReference(reference);
+          if (!node_id.has_value()) return std::nullopt;
+          const auto it = instance.entities_by_id.find(*node_id);
+          return it == instance.entities_by_id.end()
+                     ? std::nullopt
+                     : std::optional<world::Entity>(it->second);
+        },
+    };
+
     for (size_t index = 0; index < document->nodes.size(); ++index) {
-      if (!deserializeComponents(world, created_entities[index], document->nodes[index], path)) {
+      if (!deserializeComponents(world,
+                                 created_entities[index],
+                                 document->nodes[index],
+                                 path,
+                                 component_context)) {
         return std::nullopt;
       }
+      resolveFileBackedComponentPaths(world, created_entities[index], path);
       ensureTransformsForHierarchy(world, created_entities[index]);
     }
 
@@ -1486,7 +1831,7 @@ void clearPrefabAssetPackages() {
   }
   for (CachedPrefabPackage& cached : released) {
     if (cached.assets != nullptr) {
-      assets::unloadAssetPackage(*cached.assets, cached.handle);
+      cached.assets->sharedPackageStore().releasePackage(cached.handle);
     }
   }
 }

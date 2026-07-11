@@ -1055,7 +1055,7 @@ struct RenderTagsComponent : world::ComponentTag {
 
 namespace karma::components {
 
-/// One authored instance inside an `InstancedMeshComponent`.
+/// One authored owner-local instance inside an `InstancedMeshComponent`.
 struct MeshInstance {
   math::Vec3 position{};
   math::Quat rotation{};
@@ -1063,7 +1063,7 @@ struct MeshInstance {
   std::array<float, 4> params{0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-/// One planar/yaw-only authored instance for compact GPU instancing.
+/// One owner-local planar/yaw-only instance for compact GPU instancing.
 struct PlanarMeshInstance {
   math::Vec3 position{};
   float yaw_radians = 0.0f;
@@ -1159,7 +1159,14 @@ struct LightComponent : world::ComponentTag {
     Spot
   };
 
+  enum class BakeMode {
+    Realtime,
+    Mixed,
+    Baked,
+  };
+
   Type type = Type::Point;
+  BakeMode bake_mode = BakeMode::Realtime;
   math::Color color{1.0f, 1.0f, 1.0f, 1.0f};
   /// Non-negative radiant intensity multiplier.
   float intensity = 1.0f;
@@ -1171,7 +1178,39 @@ struct LightComponent : world::ComponentTag {
   bool casts_shadows = false;
   /// Non-negative directional shadow extent; zero selects the renderer default.
   float shadow_extent = 0.0f;
+  /// Runtime-only index into the active bake's Mixed-light mask.
+  /// UINT32_MAX means this light has no loaded Mixed bake contribution.
+  uint32_t mixed_bake_mask_bit = UINT32_MAX;
 };
+
+}  // namespace karma::components
+
+
+namespace karma::components {
+
+/// Static authoring participation flags shared by runtime tools and scene
+/// compatibility records.
+enum StaticComponentFlag : uint32_t {
+  StaticComponentRender = 1u << 0u,
+  StaticComponentLighting = 1u << 1u,
+  StaticComponentShadows = 1u << 2u,
+  StaticComponentCollision = 1u << 3u,
+  StaticComponentNavigation = 1u << 4u,
+  StaticComponentAll = StaticComponentRender | StaticComponentLighting |
+                       StaticComponentShadows | StaticComponentCollision |
+                       StaticComponentNavigation,
+};
+
+/// First-class static membership authored directly on an entity.
+struct StaticComponent : world::ComponentTag {
+  bool enabled = true;
+  bool include_descendants = true;
+  uint32_t flags = StaticComponentAll;
+};
+
+inline bool validStaticComponentFlags(uint32_t flags) {
+  return (flags & ~static_cast<uint32_t>(StaticComponentAll)) == 0u;
+}
 
 }  // namespace karma::components
 
@@ -2346,6 +2385,8 @@ struct TerrainComponent : world::ComponentTag {
   float height_value_min = 0.0f;
   float height_value_max = 1.0f;
   int32_t tile_index_base = 0;
+  /// Explicit content revision used to reload unchanged source paths.
+  uint64_t source_revision = 0u;
   std::vector<TerrainMaterialLayer> material_layers;
   std::vector<TerrainDataMapBinding> data_maps;
   float terrain_size = 1000.0f;

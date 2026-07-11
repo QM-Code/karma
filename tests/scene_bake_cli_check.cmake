@@ -70,6 +70,31 @@ if (NOT fresh_check_result EQUAL 0)
   message(FATAL_ERROR "karma_scene_bake --check rejected fresh bake (${fresh_check_result}): ${fresh_check_stdout}${fresh_check_stderr}")
 endif()
 
+set(authored_output_path "${fixture_dir}/bakes/main.kbake.json")
+execute_process(
+  COMMAND "${KARMA_SCENE_BAKE}" "${scene_path}"
+  RESULT_VARIABLE authored_bake_result
+  OUTPUT_VARIABLE authored_bake_stdout
+  ERROR_VARIABLE authored_bake_stderr
+)
+if (NOT authored_bake_result EQUAL 0 OR NOT EXISTS "${authored_output_path}")
+  message(FATAL_ERROR "karma_scene_bake did not use the authored bake path (${authored_bake_result}): ${authored_bake_stdout}${authored_bake_stderr}")
+endif()
+file(SHA256 "${authored_output_path}" authored_hash_before_check)
+execute_process(
+  COMMAND "${KARMA_SCENE_BAKE}" --check "${scene_path}"
+  RESULT_VARIABLE authored_check_result
+  OUTPUT_VARIABLE authored_check_stdout
+  ERROR_VARIABLE authored_check_stderr
+)
+if (NOT authored_check_result EQUAL 0)
+  message(FATAL_ERROR "karma_scene_bake --check rejected the authored output path (${authored_check_result}): ${authored_check_stdout}${authored_check_stderr}")
+endif()
+file(SHA256 "${authored_output_path}" authored_hash_after_check)
+if (NOT authored_hash_before_check STREQUAL authored_hash_after_check)
+  message(FATAL_ERROR "karma_scene_bake --check modified the manifest")
+endif()
+
 write_scene("${scene_path}" "CLI Bake Changed")
 
 execute_process(

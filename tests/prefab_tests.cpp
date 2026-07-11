@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "karma/assets.h"
+#include "karma/foliage.h"
 #include "karma/prefabs.h"
 #include "karma/visual.h"
 #include "karma/visual.h"
@@ -73,6 +74,25 @@ Json readJson(const std::filesystem::path& path) {
 bool nearly(float a, float b) {
   const float diff = a > b ? a - b : b - a;
   return diff < 0.0001f;
+}
+
+template <typename Component, typename Verify>
+void requireSerializerRoundTrip(std::string_view type_name,
+                                Component component,
+                                Verify verify) {
+  karma::prefabs::ensureBuiltinComponentSerializers();
+  const auto* serializer =
+      karma::prefabs::componentSerializerRegistry().find(type_name);
+  KARMA_REQUIRE(serializer != nullptr);
+  karma::world::World authored;
+  const karma::world::Entity authored_entity = authored.createEntity();
+  authored.add(authored_entity, std::move(component));
+  const Json payload = serializer->serialize(authored, authored_entity);
+  karma::world::World loaded;
+  const karma::world::Entity loaded_entity = loaded.createEntity();
+  KARMA_REQUIRE(serializer->deserialize(loaded, loaded_entity, payload));
+  KARMA_REQUIRE(loaded.has<Component>(loaded_entity));
+  verify(loaded.get<Component>(loaded_entity), payload);
 }
 
 bool nearlyVec3(const karma::math::Vec3& a, const karma::math::Vec3& b) {
@@ -603,6 +623,183 @@ void testColliderComponentPrefabRoundTrips(const std::filesystem::path& dir) {
   }
 }
 
+void testPhysicsAuthoringComponentsPrefabRoundTrip(
+    const std::filesystem::path& dir) {
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
+  scene.createNode(root);
+  world.setName(root, "PhysicsAuthoring");
+  world.add(root, karma::components::TransformComponent{});
+  world.add(root,
+            karma::components::ColliderComponent::box(
+                karma::components::BoxColliderShape{
+                    .center = {0.0f, 1.0f, 0.0f},
+                    .half_extents = {0.5f, 1.0f, 0.5f},
+                }));
+
+  karma::components::RigidbodyComponent body{};
+  body.motion_type = karma::components::RigidbodyMotionType::Kinematic;
+  body.motion_quality = karma::components::RigidbodyMotionQuality::LinearCast;
+  body.allowed_dofs = karma::components::RigidbodyDofPlane2D;
+  body.mass = 7.5f;
+  body.velocity = {1.0f, 2.0f, 3.0f};
+  body.angular_velocity = {4.0f, 5.0f, 6.0f};
+  body.is_kinematic = true;
+  body.use_gravity = false;
+  body.is_trigger = true;
+  body.gravity_factor = 0.35f;
+  body.linear_damping = 0.15f;
+  body.angular_damping = 0.25f;
+  body.max_linear_velocity = 125.0f;
+  body.max_angular_velocity = 32.0f;
+  body.inertia_multiplier = 1.75f;
+  body.velocity_solver_steps = 9u;
+  body.position_solver_steps = 4u;
+  body.allow_sleeping = false;
+  body.allow_dynamic_or_kinematic = true;
+  body.collide_kinematic_vs_non_dynamic = true;
+  body.use_manifold_reduction = false;
+  body.apply_gyroscopic_force = true;
+  body.enhanced_internal_edge_removal = true;
+  world.add(root, body);
+  world.add(root,
+            karma::components::PhysicsMaterialComponent{
+                .friction = 0.7f,
+                .restitution = 0.4f,
+            });
+  world.add(root,
+            karma::components::PhysicsCollisionFilterComponent{
+                .layers = 0x12u,
+                .collides_with = 0xA5A5A5A5u,
+            });
+
+  const std::filesystem::path path = dir / "physics_authoring.json";
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+
+  const Json saved = readJson(path);
+  const Json& components = saved["nodes"][0]["components"];
+  const Json& body_json = components["RigidbodyComponent"];
+  KARMA_REQUIRE(body_json["motion_type"] == "kinematic");
+  KARMA_REQUIRE(body_json["motion_quality"] == "linear_cast");
+  KARMA_REQUIRE(body_json["allowed_dofs"] ==
+                karma::components::RigidbodyDofPlane2D);
+  KARMA_REQUIRE(body_json["gravity_factor"] == body.gravity_factor);
+  KARMA_REQUIRE(body_json["velocity_solver_steps"] ==
+                body.velocity_solver_steps);
+  KARMA_REQUIRE(body_json["enhanced_internal_edge_removal"] == true);
+  KARMA_REQUIRE(components["PhysicsMaterialComponent"]["friction"] == 0.7f);
+  KARMA_REQUIRE(
+      components["PhysicsCollisionFilterComponent"]["collides_with"] ==
+      0xA5A5A5A5u);
+
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
+  const auto instance =
+      karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  const auto& loaded =
+      loaded_world.get<karma::components::RigidbodyComponent>(instance->root);
+  KARMA_REQUIRE(loaded.motion_type == body.motion_type);
+  KARMA_REQUIRE(loaded.motion_quality == body.motion_quality);
+  KARMA_REQUIRE(loaded.allowed_dofs == body.allowed_dofs);
+  KARMA_REQUIRE(nearly(loaded.mass, body.mass));
+  KARMA_REQUIRE(nearlyVec3(loaded.velocity, body.velocity));
+  KARMA_REQUIRE(nearlyVec3(loaded.angular_velocity, body.angular_velocity));
+  KARMA_REQUIRE(loaded.is_kinematic == body.is_kinematic);
+  KARMA_REQUIRE(loaded.use_gravity == body.use_gravity);
+  KARMA_REQUIRE(loaded.is_trigger == body.is_trigger);
+  KARMA_REQUIRE(nearly(loaded.gravity_factor, body.gravity_factor));
+  KARMA_REQUIRE(nearly(loaded.linear_damping, body.linear_damping));
+  KARMA_REQUIRE(nearly(loaded.angular_damping, body.angular_damping));
+  KARMA_REQUIRE(nearly(loaded.max_linear_velocity, body.max_linear_velocity));
+  KARMA_REQUIRE(nearly(loaded.max_angular_velocity, body.max_angular_velocity));
+  KARMA_REQUIRE(nearly(loaded.inertia_multiplier, body.inertia_multiplier));
+  KARMA_REQUIRE(loaded.velocity_solver_steps == body.velocity_solver_steps);
+  KARMA_REQUIRE(loaded.position_solver_steps == body.position_solver_steps);
+  KARMA_REQUIRE(loaded.allow_sleeping == body.allow_sleeping);
+  KARMA_REQUIRE(loaded.allow_dynamic_or_kinematic ==
+                body.allow_dynamic_or_kinematic);
+  KARMA_REQUIRE(loaded.collide_kinematic_vs_non_dynamic ==
+                body.collide_kinematic_vs_non_dynamic);
+  KARMA_REQUIRE(loaded.use_manifold_reduction == body.use_manifold_reduction);
+  KARMA_REQUIRE(loaded.apply_gyroscopic_force == body.apply_gyroscopic_force);
+  KARMA_REQUIRE(loaded.enhanced_internal_edge_removal ==
+                body.enhanced_internal_edge_removal);
+
+  const auto& material =
+      loaded_world.get<karma::components::PhysicsMaterialComponent>(
+          instance->root);
+  KARMA_REQUIRE(nearly(material.friction, 0.7f));
+  KARMA_REQUIRE(nearly(material.restitution, 0.4f));
+  const auto& filter =
+      loaded_world.get<karma::components::PhysicsCollisionFilterComponent>(
+          instance->root);
+  KARMA_REQUIRE(filter.layers == 0x12u);
+  KARMA_REQUIRE(filter.collides_with == 0xA5A5A5A5u);
+}
+
+void testLegacyRigidbodyPayloadKeepsAdvancedDefaults(
+    const std::filesystem::path& dir) {
+  const std::filesystem::path path = dir / "legacy_rigidbody.json";
+  writeText(path,
+            R"({
+  "version": 2,
+  "root": 0,
+  "nodes": [{
+    "id": 0,
+    "name": "Legacy Body",
+    "parent": null,
+    "components": {
+      "TransformComponent": {
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0, 1],
+        "scale": [1, 1, 1]
+      },
+      "ColliderComponent": {
+        "type": "box",
+        "is_trigger": false,
+        "debug_draw": false,
+        "shape": {"center": [0, 0, 0], "half_extents": [0.5, 0.5, 0.5]}
+      },
+      "RigidbodyComponent": {
+        "mass": 3.0,
+        "velocity": [1, 0, 0],
+        "angular_velocity": [0, 2, 0],
+        "is_kinematic": false,
+        "use_gravity": true,
+        "is_trigger": false
+      }
+    }
+  }]
+})");
+
+  karma::world::World world;
+  karma::world::Scene scene;
+  const auto instance = karma::prefabs::instantiatePrefab(world, scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  const auto& body =
+      world.get<karma::components::RigidbodyComponent>(instance->root);
+  const karma::components::RigidbodyComponent defaults{};
+  KARMA_REQUIRE(nearly(body.mass, 3.0f));
+  KARMA_REQUIRE(nearlyVec3(body.velocity, {1.0f, 0.0f, 0.0f}));
+  KARMA_REQUIRE(body.motion_type == defaults.motion_type);
+  KARMA_REQUIRE(body.motion_quality == defaults.motion_quality);
+  KARMA_REQUIRE(body.allowed_dofs == defaults.allowed_dofs);
+  KARMA_REQUIRE(nearly(body.gravity_factor, defaults.gravity_factor));
+  KARMA_REQUIRE(nearly(body.linear_damping, defaults.linear_damping));
+  KARMA_REQUIRE(nearly(body.angular_damping, defaults.angular_damping));
+  KARMA_REQUIRE(nearly(body.max_linear_velocity,
+                       defaults.max_linear_velocity));
+  KARMA_REQUIRE(nearly(body.max_angular_velocity,
+                       defaults.max_angular_velocity));
+  KARMA_REQUIRE(nearly(body.inertia_multiplier, defaults.inertia_multiplier));
+  KARMA_REQUIRE(body.velocity_solver_steps == defaults.velocity_solver_steps);
+  KARMA_REQUIRE(body.position_solver_steps == defaults.position_solver_steps);
+  KARMA_REQUIRE(body.allow_sleeping == defaults.allow_sleeping);
+  KARMA_REQUIRE(body.use_manifold_reduction == defaults.use_manifold_reduction);
+}
+
 void testHierarchyRoundTrip(const std::filesystem::path& dir) {
   karma::world::World world;
   karma::world::Scene scene;
@@ -645,6 +842,311 @@ void testHierarchyRoundTrip(const std::filesystem::path& dir) {
       loaded_world.get<karma::components::TransformComponent>(loaded_child);
   KARMA_REQUIRE(nearly(child_transform.localPosition().x, 2.0f));
   KARMA_REQUIRE(nearly(child_transform.getPosition().x, 12.0f));
+}
+
+void testPersistentComponentRegistryCoverage() {
+  karma::prefabs::ensureBuiltinComponentSerializers();
+  const auto& registry = karma::prefabs::componentSerializerRegistry();
+  const std::vector<std::string_view> required{
+      "TagComponent",
+      "TransformComponent",
+      "StaticComponent",
+      "AudioListenerComponent",
+      "AudioSourceComponent",
+      "CameraComponent",
+      "EnvironmentComponent",
+      "MeshComponent",
+      "InstancedMeshComponent",
+      "FoliageComponent",
+      "AnimatorComponent",
+      "RootMotionComponent",
+      "DeformableMeshComponent",
+      "LightComponent",
+      "LightPulseComponent",
+      "VisibilityComponent",
+      "RenderTagsComponent",
+      "TerrainComponent",
+      "ColliderComponent",
+      "RigidbodyComponent",
+      "PhysicsMaterialComponent",
+      "PhysicsCollisionFilterComponent",
+      "CharacterControllerComponent",
+      "CollisionListenerComponent",
+      "ContactListenerComponent",
+      "GroundContactComponent",
+      "PhysicsConstraintComponent",
+      "PhysicsSoftBodyComponent",
+      "PhysicsVehicleComponent",
+#if defined(KARMA_ENABLE_NAVIGATION)
+      "NavMeshSurfaceComponent",
+      "NavOffMeshLinkComponent",
+      "NavConvexVolumeComponent",
+      "NavMeshComponent",
+      "NavCrowdComponent",
+      "NavCrowdAgentComponent",
+      "NavMeshAgentComponent",
+      "NavTileCacheComponent",
+      "NavTileCacheObstacleComponent",
+#endif
+      "NetworkIdentityComponent",
+      "NetworkAuthorityComponent",
+      "NetworkReplicatedComponent",
+      "ScriptComponent",
+      "ParticleEffectComponent",
+      "ParticleEffectOverrideComponent",
+      "ParticleEmitterComponent",
+      "ParticleBeamComponent",
+      "VolumetricComponent",
+  };
+#if defined(KARMA_ENABLE_NAVIGATION)
+  KARMA_REQUIRE(required.size() == 47u);
+#else
+  KARMA_REQUIRE(required.size() == 38u);
+#endif
+  KARMA_REQUIRE(registry.serializers().size() == required.size());
+  for (std::string_view name : required) {
+    const auto* serializer = registry.find(name);
+    KARMA_REQUIRE(serializer != nullptr);
+    KARMA_REQUIRE(serializer->serialize);
+    KARMA_REQUIRE(serializer->deserialize);
+  }
+  const std::array<std::string_view, 4> runtime_only{
+      "AnimationEventBufferComponent",
+      "CollisionEventsComponent",
+      "ContactEventsComponent",
+      "PhysicsBodyForcesComponent",
+  };
+  for (std::string_view name : runtime_only) {
+    KARMA_REQUIRE(registry.find(name) == nullptr);
+  }
+  KARMA_REQUIRE(
+      registry.find("PhysicsConstraintComponent")->serialize_with_context);
+  KARMA_REQUIRE(
+      registry.find("PhysicsConstraintComponent")->deserialize_with_context);
+
+  const auto* static_serializer = registry.find("StaticComponent");
+  karma::world::World world;
+  const karma::world::Entity entity = world.createEntity();
+  KARMA_REQUIRE(!static_serializer->deserialize(
+      world,
+      entity,
+      Json{{"enabled", true},
+           {"include_descendants", true},
+           {"flags", 0x80000000u}}));
+  KARMA_REQUIRE(!world.has<karma::components::StaticComponent>(entity));
+}
+
+void testPersistentAuthoringSubsetRoundTrips() {
+  karma::components::AudioSourceComponent audio{};
+  audio.clip_key = "audio/wind";
+  audio.gain = 0.75f;
+  audio.looping = true;
+  requireSerializerRoundTrip(
+      "AudioSourceComponent",
+      std::move(audio),
+      [](const auto& loaded, const Json&) {
+        KARMA_REQUIRE(loaded.clip_key == "audio/wind");
+        KARMA_REQUIRE(nearly(loaded.gain, 0.75f));
+        KARMA_REQUIRE(loaded.looping);
+      });
+
+  karma::components::CameraComponent camera{};
+  camera.perspective = false;
+  camera.ortho_left = -4.0f;
+  camera.ortho_right = 4.0f;
+  camera.ortho_bottom = -3.0f;
+  camera.ortho_top = 3.0f;
+  camera.frame_graph_key = "editor/camera";
+  camera.shader_override_fragment_path = "shaders/camera.frag";
+  camera.anti_aliasing = karma::rendering::AntiAliasingSettings::ssaa(1.5f);
+  requireSerializerRoundTrip(
+      "CameraComponent",
+      std::move(camera),
+      [](const auto& loaded, const Json&) {
+        KARMA_REQUIRE(!loaded.perspective);
+        KARMA_REQUIRE(loaded.frame_graph_key == "editor/camera");
+        KARMA_REQUIRE(loaded.shader_override_fragment_path ==
+                      "shaders/camera.frag");
+        KARMA_REQUIRE(loaded.anti_aliasing.mode ==
+                      karma::rendering::AntiAliasingMode::SSAA);
+      });
+
+  karma::components::LightComponent light{};
+  light.type = karma::components::LightComponent::Type::Directional;
+  light.bake_mode = karma::components::LightComponent::BakeMode::Mixed;
+  light.intensity = 2.5f;
+  light.mixed_bake_mask_bit = 7u;
+  requireSerializerRoundTrip(
+      "LightComponent",
+      light,
+      [](const auto& loaded, const Json& payload) {
+        KARMA_REQUIRE(loaded.bake_mode ==
+                      karma::components::LightComponent::BakeMode::Mixed);
+        KARMA_REQUIRE(payload["bake_mode"] == "mixed");
+        KARMA_REQUIRE(!payload.contains("mixed_bake_mask_bit"));
+        KARMA_REQUIRE(loaded.mixed_bake_mask_bit == UINT32_MAX);
+      });
+
+  karma::components::DeformableMeshComponent deformable{};
+  deformable.base_morph_weights = {0.1f, 0.9f};
+  deformable.morph_weights = {0.25f, 0.75f};
+  deformable.path = karma::components::DeformationPath::CpuReference;
+  requireSerializerRoundTrip(
+      "DeformableMeshComponent",
+      std::move(deformable),
+      [](const auto& loaded, const Json& payload) {
+        KARMA_REQUIRE(loaded.morph_weights.size() == 2u);
+        KARMA_REQUIRE(loaded.path ==
+                      karma::components::DeformationPath::CpuReference);
+        KARMA_REQUIRE(payload.find("joint_palette") == payload.end());
+        KARMA_REQUIRE(payload.find("deformation") == payload.end());
+      });
+
+#if defined(KARMA_ENABLE_NAVIGATION)
+  karma::components::NavMeshComponent nav_mesh{};
+  nav_mesh.source_mask = 0x42u;
+  nav_mesh.build_config.build_mode = karma::navigation::NavMeshBuildMode::Tiled;
+  nav_mesh.build_config.tile_size = 48;
+  requireSerializerRoundTrip(
+      "NavMeshComponent",
+      std::move(nav_mesh),
+      [](const auto& loaded, const Json& payload) {
+        KARMA_REQUIRE(loaded.source_mask == 0x42u);
+        KARMA_REQUIRE(loaded.build_config.build_mode ==
+                      karma::navigation::NavMeshBuildMode::Tiled);
+        KARMA_REQUIRE(loaded.build_config.tile_size == 48);
+        KARMA_REQUIRE(payload.find("built") == payload.end());
+        KARMA_REQUIRE(payload.find("build_version") == payload.end());
+      });
+#endif
+
+  karma::components::NetworkAuthorityComponent authority{};
+  authority.mode = karma::components::AuthorityMode::Owner;
+  authority.owner_peer = 17u;
+  requireSerializerRoundTrip(
+      "NetworkAuthorityComponent",
+      authority,
+      [](const auto& loaded, const Json&) {
+        KARMA_REQUIRE(loaded.mode == karma::components::AuthorityMode::Owner);
+        KARMA_REQUIRE(loaded.owner_peer == 17u);
+      });
+
+  karma::components::PhysicsSoftBodyComponent soft_body{};
+  soft_body.preset = karma::components::PhysicsSoftBodyPresetKind::Custom;
+  soft_body.vertices.push_back(karma::components::PhysicsSoftBodyVertex{
+      .position = {1.0f, 2.0f, 3.0f},
+      .inverse_mass = 0.5f,
+  });
+  soft_body.pinned_vertices.push_back(0u);
+  soft_body.pressure = 0.4f;
+  requireSerializerRoundTrip(
+      "PhysicsSoftBodyComponent",
+      std::move(soft_body),
+      [](const auto& loaded, const Json& payload) {
+        KARMA_REQUIRE(loaded.vertices.size() == 1u);
+        KARMA_REQUIRE(loaded.pinned_vertices == std::vector<uint32_t>{0u});
+        KARMA_REQUIRE(nearly(loaded.pressure, 0.4f));
+        KARMA_REQUIRE(payload.find("recreate") == payload.end());
+      });
+
+  karma::components::PhysicsVehicleComponent vehicle{};
+  vehicle.controller =
+      karma::components::PhysicsVehicleControllerKind::Motorcycle;
+  vehicle.wheels.push_back(karma::components::PhysicsVehicleWheel{});
+  vehicle.differentials.push_back(
+      karma::components::PhysicsVehicleDifferential{
+          .left_wheel = 0,
+          .right_wheel = -1,
+      });
+  vehicle.motorcycle.max_lean_angle = 0.6f;
+  requireSerializerRoundTrip(
+      "PhysicsVehicleComponent",
+      std::move(vehicle),
+      [](const auto& loaded, const Json& payload) {
+        KARMA_REQUIRE(loaded.controller ==
+                      karma::components::PhysicsVehicleControllerKind::Motorcycle);
+        KARMA_REQUIRE(loaded.wheels.size() == 1u);
+        KARMA_REQUIRE(loaded.differentials.size() == 1u);
+        KARMA_REQUIRE(nearly(loaded.motorcycle.max_lean_angle, 0.6f));
+        KARMA_REQUIRE(payload.find("input") == payload.end());
+      });
+}
+
+void testContextualPrefabEntityReferences(const std::filesystem::path& dir) {
+  const std::filesystem::path path = dir / "contextual_refs/prefab.json";
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
+  const karma::world::Entity body_a = world.createEntity();
+  const karma::world::Entity body_b = world.createEntity();
+  world.setName(root, "Constraint");
+  world.setName(body_a, "Body A");
+  world.setName(body_b, "Body B");
+  world.add(root, karma::components::TransformComponent{});
+  world.add(body_a, karma::components::TransformComponent{});
+  world.add(body_b, karma::components::TransformComponent{});
+  world.add(root,
+            karma::components::StaticComponent{
+                .enabled = true,
+                .include_descendants = false,
+                .flags = karma::components::StaticComponentRender |
+                         karma::components::StaticComponentCollision,
+            });
+  world.add(root,
+            karma::components::PhysicsConstraintComponent{
+                .body_a = body_a,
+                .body_b = body_b,
+                .kind = karma::components::PhysicsConstraintKind::Hinge,
+                .max_friction_torque = 4.0f,
+            });
+  const karma::world::NodeId root_node = scene.createNode(root);
+  const karma::world::NodeId body_a_node = scene.createNode(body_a);
+  const karma::world::NodeId body_b_node = scene.createNode(body_b);
+  KARMA_REQUIRE(scene.reparent(body_a_node, root_node));
+  KARMA_REQUIRE(scene.reparent(body_b_node, root_node));
+
+  KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
+  Json json = readJson(path);
+  const Json& constraint =
+      json["nodes"][0]["components"]["PhysicsConstraintComponent"];
+  KARMA_REQUIRE(constraint["body_a"] ==
+                Json({{"scope", "prefab"}, {"node", 1u}}));
+  KARMA_REQUIRE(constraint["body_b"] ==
+                Json({{"scope", "prefab"}, {"node", 2u}}));
+
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
+  const auto instance =
+      karma::prefabs::instantiatePrefab(loaded_world, loaded_scene, path);
+  KARMA_REQUIRE(instance.has_value());
+  const auto& loaded_constraint =
+      loaded_world.get<karma::components::PhysicsConstraintComponent>(
+          instance->root);
+  KARMA_REQUIRE(loaded_constraint.body_a == instance->find("Body A"));
+  KARMA_REQUIRE(loaded_constraint.body_b == instance->find("Body B"));
+  KARMA_REQUIRE(loaded_world.has<karma::components::StaticComponent>(
+      instance->root));
+
+  json["nodes"][0]["components"]["PhysicsConstraintComponent"]["body_a"] =
+      Json{{"node_id", 1u}};
+  const std::filesystem::path alias_path =
+      dir / "contextual_refs/alias.prefab.json";
+  writeText(alias_path, json.dump(2));
+  karma::world::World alias_world;
+  karma::world::Scene alias_scene;
+  const auto alias_instance = karma::prefabs::instantiatePrefab(
+      alias_world, alias_scene, alias_path);
+  KARMA_REQUIRE(alias_instance.has_value());
+  KARMA_REQUIRE(
+      alias_world.get<karma::components::PhysicsConstraintComponent>(
+          alias_instance->root).body_a == alias_instance->find("Body A"));
+
+  json["nodes"][0]["components"]["PhysicsConstraintComponent"]["body_a"] =
+      Json{{"scope", "prefab"}, {"node", 99u}};
+  const std::filesystem::path invalid_path =
+      dir / "contextual_refs/invalid.prefab.json";
+  writeText(invalid_path, json.dump(2));
+  KARMA_REQUIRE(!karma::prefabs::loadPrefabDocument(invalid_path).success());
 }
 
 void testUnknownComponentFails(const std::filesystem::path& dir) {
@@ -838,6 +1340,71 @@ Json variableFeaturePrefabJson() {
             }},
        }})},
   };
+}
+
+void testPublicPrefabDocumentLoading(const std::filesystem::path& dir) {
+  const std::filesystem::path path = dir / "catalog/variables.prefab.json";
+  std::filesystem::create_directories(path.parent_path());
+  writeText(path, variableFeaturePrefabJson().dump(2));
+
+  const karma::prefabs::PrefabLoadResult loaded =
+      karma::prefabs::loadPrefabDocument(path);
+  KARMA_REQUIRE(loaded.success());
+  KARMA_REQUIRE(loaded.source_path == path);
+  KARMA_REQUIRE(loaded.document->variables.contains("height"));
+  KARMA_REQUIRE(loaded.document->variables["height"]["type"] == "float");
+  KARMA_REQUIRE(loaded.document->nodes.size() == 1u);
+  KARMA_REQUIRE(loaded.document->nodes[0].name == "VariableRoot");
+  KARMA_REQUIRE(loaded.document->nodes[0]
+                    .components["TransformComponent"]["position"]
+                    .contains("$var"));
+
+  const std::filesystem::path directory_prefab = dir / "catalog/directory";
+  std::filesystem::create_directories(directory_prefab);
+  writeText(directory_prefab / "prefab.json", simplePrefabJson());
+  const karma::prefabs::PrefabLoadResult directory_loaded =
+      karma::prefabs::loadPrefabDocument(directory_prefab);
+  KARMA_REQUIRE(directory_loaded.success());
+  KARMA_REQUIRE(directory_loaded.source_path == directory_prefab / "prefab.json");
+
+  Json invalid_variables = variableFeaturePrefabJson();
+  invalid_variables["variables"]["height"].erase("default");
+  const std::filesystem::path invalid_path = dir / "catalog/invalid.prefab.json";
+  writeText(invalid_path, invalid_variables.dump(2));
+  const karma::prefabs::PrefabLoadResult invalid =
+      karma::prefabs::loadPrefabDocument(invalid_path);
+  KARMA_REQUIRE(!invalid.success());
+  KARMA_REQUIRE(!invalid.document.has_value());
+  KARMA_REQUIRE(!invalid.diagnostics.empty());
+
+  const std::filesystem::path malformed_path = dir / "catalog/malformed.prefab.json";
+  writeText(malformed_path, "{ malformed");
+  const karma::prefabs::PrefabLoadResult malformed =
+      karma::prefabs::loadPrefabDocument(malformed_path);
+  KARMA_REQUIRE(!malformed.success());
+  KARMA_REQUIRE(!malformed.diagnostics.empty());
+
+  Json unknown_component = variableFeaturePrefabJson();
+  unknown_component["nodes"][0]["components"]["UnknownGameplayComponent"] =
+      Json::object();
+  const std::filesystem::path unknown_path =
+      dir / "catalog/unknown-component.prefab.json";
+  writeText(unknown_path, unknown_component.dump(2));
+  const karma::prefabs::PrefabLoadResult unknown =
+      karma::prefabs::loadPrefabDocument(unknown_path);
+  KARMA_REQUIRE(!unknown.success());
+  KARMA_REQUIRE(!unknown.diagnostics.empty());
+
+  Json invalid_component = variableFeaturePrefabJson();
+  invalid_component["nodes"][0]["components"]["TransformComponent"]
+                   ["scale"] = Json::array({1.0f, "large", 1.0f});
+  const std::filesystem::path invalid_component_path =
+      dir / "catalog/invalid-component.prefab.json";
+  writeText(invalid_component_path, invalid_component.dump(2));
+  const karma::prefabs::PrefabLoadResult invalid_component_result =
+      karma::prefabs::loadPrefabDocument(invalid_component_path);
+  KARMA_REQUIRE(!invalid_component_result.success());
+  KARMA_REQUIRE(!invalid_component_result.diagnostics.empty());
 }
 
 void testPrefabVariablesResolveDefaultsAndOverrides(const std::filesystem::path& dir) {
@@ -1232,6 +1799,7 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   authored.raw_height = 513u;
   authored.flip_y = true;
   authored.tile_index_base = 1;
+  authored.source_revision = 42u;
   authored.material_layers.push_back(karma::components::TerrainMaterialLayer{
       .name = "grass",
       .material_key = "terrain/grass",
@@ -1268,6 +1836,7 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(terrain_json["source"] == "image_tile_directory");
   KARMA_REQUIRE(terrain_json["height_pattern"] == "dem_{x}_{z}.r32");
   KARMA_REQUIRE(terrain_json["height_format"] == "r32_float");
+  KARMA_REQUIRE(terrain_json["source_revision"] == 42u);
   KARMA_REQUIRE(terrain_json["material_layers"].size() == 1u);
   KARMA_REQUIRE(terrain_json["material_layers"][0]["material_key"] == "terrain/grass");
   KARMA_REQUIRE(terrain_json["data_maps"].size() == 1u);
@@ -1281,7 +1850,8 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   const auto& loaded =
       loaded_world.get<karma::components::TerrainComponent>(instance->root);
   KARMA_REQUIRE(loaded.source == karma::components::TerrainSourceType::ImageTileDirectory);
-  KARMA_REQUIRE(loaded.tile_directory == std::filesystem::path("terrain_tiles"));
+  KARMA_REQUIRE(loaded.tile_directory ==
+                (dir / "terrain_tiles").lexically_normal());
   KARMA_REQUIRE(loaded.height_pattern == "dem_{x}_{z}.r32");
   KARMA_REQUIRE(loaded.color_pattern == "ortho_{x}_{z}.png");
   KARMA_REQUIRE(loaded.control_pattern == "splat_{x}_{y}.png");
@@ -1290,11 +1860,16 @@ void testTerrainComponentPrefabRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(loaded.raw_height == 513u);
   KARMA_REQUIRE(loaded.flip_y);
   KARMA_REQUIRE(loaded.tile_index_base == 1);
+  KARMA_REQUIRE(loaded.source_revision == 42u);
   KARMA_REQUIRE(loaded.material_layers.size() == 1u);
   KARMA_REQUIRE(loaded.material_layers[0].name == "grass");
   KARMA_REQUIRE(loaded.material_layers[0].material_key == "terrain/grass");
   KARMA_REQUIRE(loaded.material_layers[0].albedo_image ==
-                std::filesystem::path("terrain/materials/grass_albedo.png"));
+                (dir / "terrain/materials/grass_albedo.png").lexically_normal());
+  KARMA_REQUIRE(loaded.material_layers[0].normal_image ==
+                (dir / "terrain/materials/grass_normal.png").lexically_normal());
+  KARMA_REQUIRE(loaded.material_layers[0].roughness_image ==
+                (dir / "terrain/materials/grass_roughness.png").lexically_normal());
   KARMA_REQUIRE(nearly(loaded.material_layers[0].uv_scale, 24.0f));
   KARMA_REQUIRE(loaded.data_maps.size() == 1u);
   KARMA_REQUIRE(loaded.data_maps[0].kind ==
@@ -1337,6 +1912,10 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   authored.height_offset = 3.5f;
   authored.layer = 3u;
   world.add(root, authored);
+  karma::components::FoliageComponent foliage{};
+  foliage.sidecar_path = "foliage/trees.kfoliage";
+  foliage.mesh_asset_key = "trees/mesh";
+  world.add(root, foliage);
   world.add(root, karma::components::ColliderComponent{
                       .is_trigger = true,
                       .debug_draw = true,
@@ -1364,10 +1943,17 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
   const auto& loaded =
       loaded_world.get<karma::components::TerrainComponent>(instance->root);
   KARMA_REQUIRE(loaded.source == karma::components::TerrainSourceType::SingleImage);
-  KARMA_REQUIRE(loaded.height_image == std::filesystem::path("terrain/fixed_height.png"));
-  KARMA_REQUIRE(loaded.heatmap_image == std::filesystem::path("terrain/fixed_heatmap.png"));
-  KARMA_REQUIRE(loaded.color_image == std::filesystem::path("terrain/fixed_color.png"));
-  KARMA_REQUIRE(loaded.control_image == std::filesystem::path("terrain/fixed_splat.png"));
+  KARMA_REQUIRE(loaded.height_image ==
+                (dir / "terrain/fixed_height.png").lexically_normal());
+  KARMA_REQUIRE(loaded.heatmap_image ==
+                (dir / "terrain/fixed_heatmap.png").lexically_normal());
+  KARMA_REQUIRE(loaded.color_image ==
+                (dir / "terrain/fixed_color.png").lexically_normal());
+  KARMA_REQUIRE(loaded.control_image ==
+                (dir / "terrain/fixed_splat.png").lexically_normal());
+  KARMA_REQUIRE(loaded_world.get<karma::components::FoliageComponent>(
+                    instance->root).sidecar_path ==
+                (dir / "foliage/trees.kfoliage").lexically_normal());
   KARMA_REQUIRE(nearly(loaded.terrain_size, 2048.0f));
   KARMA_REQUIRE(loaded.tile_resolution == 513u);
   KARMA_REQUIRE(loaded.origin_tile_x == 5);
@@ -1380,6 +1966,166 @@ void testSingleImageTerrainComponentPrefabRoundTrip(const std::filesystem::path&
       loaded_world.get<karma::components::ColliderComponent>(instance->root);
   KARMA_REQUIRE(collider.is_trigger);
   KARMA_REQUIRE(collider.debug_draw);
+
+  world.get<karma::components::TerrainComponent>(root).height_image =
+      "/machine-specific/terrain.r32";
+  KARMA_REQUIRE(!karma::prefabs::savePrefab(
+      world, scene, root, dir / "unsafe-terrain-prefab.json"));
+  KARMA_REQUIRE(
+      !std::filesystem::exists(dir / "unsafe-terrain-prefab.json"));
+}
+
+void testInstantiatedFileBackedComponentsCanBeResaved(
+    const std::filesystem::path& dir) {
+  const std::filesystem::path prefab_dir = dir / "resaved_file_components";
+  const std::filesystem::path source_path = prefab_dir / "source.json";
+  const std::filesystem::path resaved_path = prefab_dir / "resaved.json";
+
+  karma::world::World authored_world;
+  karma::world::Scene authored_scene;
+  const karma::world::Entity root = authored_world.createEntity();
+  authored_scene.createNode(root);
+  authored_world.setName(root, "FileBackedTerrain");
+
+  karma::components::TerrainComponent terrain{};
+  terrain.source = karma::components::TerrainSourceType::SingleImage;
+  terrain.height_image = "terrain/height.r32";
+  terrain.heatmap_image = "terrain/heat.png";
+  terrain.color_image = "terrain/color.png";
+  terrain.control_image = "terrain/control.png";
+  terrain.height_format = karma::components::TerrainHeightFormat::R32Float;
+  terrain.raw_width = 513u;
+  terrain.raw_height = 513u;
+  terrain.tile_resolution = 513u;
+  terrain.material_layers.push_back(karma::components::TerrainMaterialLayer{
+      .name = "ground",
+      .albedo_image = "terrain/materials/albedo.png",
+      .normal_image = "terrain/materials/normal.png",
+      .roughness_image = "terrain/materials/roughness.png",
+  });
+  terrain.data_maps.push_back(karma::components::TerrainDataMapBinding{
+      .name = "flow",
+      .kind = karma::components::TerrainDataMapKind::Flow,
+      .image = "terrain/data/flow.png",
+  });
+  authored_world.add(root, terrain);
+
+  karma::components::FoliageComponent foliage{};
+  foliage.sidecar_path = "foliage/trees.kfoliage";
+  foliage.mesh_asset_key = "trees/mesh";
+  authored_world.add(root, foliage);
+
+  KARMA_REQUIRE(karma::prefabs::savePrefab(
+      authored_world, authored_scene, root, source_path));
+
+  karma::world::World instance_world;
+  karma::world::Scene instance_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(
+      instance_world, instance_scene, source_path);
+  KARMA_REQUIRE(instance.has_value());
+
+  auto& instance_terrain =
+      instance_world.get<karma::components::TerrainComponent>(instance->root);
+  auto& instance_foliage =
+      instance_world.get<karma::components::FoliageComponent>(instance->root);
+  KARMA_REQUIRE(instance_terrain.height_image.is_absolute());
+  KARMA_REQUIRE(instance_terrain.material_layers[0].albedo_image.is_absolute());
+  KARMA_REQUIRE(instance_terrain.data_maps[0].image.is_absolute());
+  KARMA_REQUIRE(instance_foliage.sidecar_path.is_absolute());
+  instance_terrain.height_scale = 321.0f;
+  instance_foliage.view_distance = 512.0f;
+
+  KARMA_REQUIRE(karma::prefabs::savePrefab(
+      instance_world, instance_scene, instance->root, resaved_path));
+  const Json resaved = readJson(resaved_path);
+  const Json& terrain_json =
+      resaved["nodes"][0]["components"]["TerrainComponent"];
+  KARMA_REQUIRE(terrain_json["height_image"] == "terrain/height.r32");
+  KARMA_REQUIRE(terrain_json["heatmap_image"] == "terrain/heat.png");
+  KARMA_REQUIRE(terrain_json["color_image"] == "terrain/color.png");
+  KARMA_REQUIRE(terrain_json["control_image"] == "terrain/control.png");
+  KARMA_REQUIRE(terrain_json["material_layers"][0]["albedo_image"] ==
+                "terrain/materials/albedo.png");
+  KARMA_REQUIRE(terrain_json["material_layers"][0]["normal_image"] ==
+                "terrain/materials/normal.png");
+  KARMA_REQUIRE(terrain_json["material_layers"][0]["roughness_image"] ==
+                "terrain/materials/roughness.png");
+  KARMA_REQUIRE(terrain_json["data_maps"][0]["image"] ==
+                "terrain/data/flow.png");
+  KARMA_REQUIRE(resaved["nodes"][0]["components"]["FoliageComponent"]
+                       ["sidecar_path"] == "foliage/trees.kfoliage");
+
+  const auto loaded = karma::prefabs::loadPrefabDocument(resaved_path);
+  KARMA_REQUIRE(loaded.success());
+  karma::world::World reloaded_world;
+  karma::world::Scene reloaded_scene;
+  const auto reloaded = karma::prefabs::instantiatePrefab(
+      reloaded_world, reloaded_scene, resaved_path);
+  KARMA_REQUIRE(reloaded.has_value());
+  const auto& reloaded_terrain =
+      reloaded_world.get<karma::components::TerrainComponent>(reloaded->root);
+  const auto& reloaded_foliage =
+      reloaded_world.get<karma::components::FoliageComponent>(reloaded->root);
+  KARMA_REQUIRE(reloaded_terrain.height_image ==
+                (prefab_dir / "terrain/height.r32").lexically_normal());
+  KARMA_REQUIRE(nearly(reloaded_terrain.height_scale, 321.0f));
+  KARMA_REQUIRE(reloaded_foliage.sidecar_path ==
+                (prefab_dir / "foliage/trees.kfoliage").lexically_normal());
+  KARMA_REQUIRE(nearly(reloaded_foliage.view_distance, 512.0f));
+}
+
+void testTerrainComponentRejectsUnsafeDimensions() {
+  karma::prefabs::ensureBuiltinComponentSerializers();
+  const auto* serializer =
+      karma::prefabs::componentSerializerRegistry().find("TerrainComponent");
+  KARMA_REQUIRE(serializer != nullptr);
+
+  karma::world::World authored_world;
+  const karma::world::Entity authored_entity = authored_world.createEntity();
+  authored_world.add(authored_entity,
+                     karma::components::TerrainComponent{
+                         .source = karma::components::TerrainSourceType::SingleImage,
+                         .height_image = "height.r32",
+                         .height_format =
+                             karma::components::TerrainHeightFormat::R32Float,
+                         .raw_width = 513u,
+                         .raw_height = 513u,
+                         .terrain_size = 512.0f,
+                         .tile_resolution = 513u,
+                     });
+  const Json valid = serializer->serialize(authored_world, authored_entity);
+
+  const auto rejected = [&](Json payload) {
+    karma::world::World world;
+    const karma::world::Entity entity = world.createEntity();
+    KARMA_REQUIRE(!serializer->deserialize(world, entity, payload));
+    KARMA_REQUIRE(!world.has<karma::components::TerrainComponent>(entity));
+  };
+
+  Json excessive_tile = valid;
+  excessive_tile["tile_resolution"] =
+      karma::rendering::kMaxTerrainTileResolution + 1u;
+  rejected(std::move(excessive_tile));
+
+  Json excessive_raw_width = valid;
+  excessive_raw_width["raw_width"] = std::numeric_limits<uint32_t>::max();
+  rejected(std::move(excessive_raw_width));
+
+  Json excessive_raw_height = valid;
+  excessive_raw_height["raw_height"] = std::numeric_limits<uint32_t>::max();
+  rejected(std::move(excessive_raw_height));
+
+  Json absolute_height = valid;
+  absolute_height["height_image"] = "/outside/height.r32";
+  rejected(std::move(absolute_height));
+
+  Json parent_traversal = valid;
+  parent_traversal["height_image"] = "../../outside/height.r32";
+  rejected(std::move(parent_traversal));
+
+  Json escaped_pattern = valid;
+  escaped_pattern["height_pattern"] = "../tiles/{x}_{y}.r32";
+  rejected(std::move(escaped_pattern));
 }
 
 void testMigratedPrefabAssetsDoNotUseLegacyComponentNames() {
@@ -1542,6 +2288,41 @@ void testAssetPackageParsingSuccessAndFailure(const std::filesystem::path& dir) 
     KARMA_REQUIRE(assets.findParticleEffect("test/effect") != nullptr);
     karma::prefabs::clearPrefabAssetPackages();
     KARMA_REQUIRE(assets.findParticleEffect("test/effect") == nullptr);
+  }
+
+  {
+    const std::filesystem::path prefab_dir = dir / "package_shared_with_scene";
+    std::filesystem::create_directories(prefab_dir / "particles");
+    writeText(prefab_dir / "prefab.json", simplePrefabJson());
+    writeText(prefab_dir / "particles/test.kpeffect", validParticleEffectJson().dump(2));
+    writeText(prefab_dir / "assets.package.json",
+              R"({
+  "version": 1,
+  "assets": [
+    { "type": "particle_effect", "key": "shared/effect", "path": "particles/test.kpeffect" }
+  ]
+})");
+
+    karma::assets::AssetRegistry assets;
+    std::string diagnostic;
+    const auto scene_package =
+        assets.sharedPackageStore().acquirePackage(prefab_dir, &diagnostic);
+    KARMA_REQUIRE(scene_package.has_value());
+    KARMA_REQUIRE(diagnostic.empty());
+    karma::prefabs::bindPrefabAssetRegistry(&assets);
+
+    karma::world::World world;
+    karma::world::Scene scene;
+    const auto instance = karma::prefabs::instantiatePrefab(world, scene, prefab_dir);
+    KARMA_REQUIRE(instance.has_value());
+    KARMA_REQUIRE(assets.findParticleEffect("shared/effect") != nullptr);
+    KARMA_REQUIRE(karma::prefabs::destroyPrefab(world, scene, instance->root));
+    KARMA_REQUIRE(assets.findParticleEffect("shared/effect") != nullptr);
+
+    KARMA_REQUIRE(
+        assets.sharedPackageStore().releasePackage(*scene_package));
+    KARMA_REQUIRE(assets.findParticleEffect("shared/effect") == nullptr);
+    karma::prefabs::clearPrefabAssetPackages();
   }
 
   {
@@ -2626,18 +3407,26 @@ void testParticleStatsReportFormatting() {
 int main() {
   const std::filesystem::path dir = makeTempDir();
   testBuiltinRegistryRepairPreservesOverrides();
+  testPersistentComponentRegistryCoverage();
+  testPersistentAuthoringSubsetRoundTrips();
   testSaveLoadSingleEntity(dir);
   testInstancedMeshLodPrefabRoundTrip(dir);
   testColliderComponentPrefabRoundTrips(dir);
+  testPhysicsAuthoringComponentsPrefabRoundTrip(dir);
+  testLegacyRigidbodyPayloadKeepsAdvancedDefaults(dir);
   testHierarchyRoundTrip(dir);
+  testContextualPrefabEntityReferences(dir);
   testUnknownComponentFails(dir);
   testMalformedAndInvalidPayloads(dir);
+  testPublicPrefabDocumentLoading(dir);
   testPrefabVariablesResolveDefaultsAndOverrides(dir);
   testPrefabVariableFailures(dir);
   testVolumetricComponentPrefabRoundTrip(dir);
   testVolumetricComponentValidation(dir);
   testTerrainComponentPrefabRoundTrip(dir);
   testSingleImageTerrainComponentPrefabRoundTrip(dir);
+  testInstantiatedFileBackedComponentsCanBeResaved(dir);
+  testTerrainComponentRejectsUnsafeDimensions();
   testMigratedPrefabAssetsDoNotUseLegacyComponentNames();
   testDestroyPrefab(dir);
   testWorldIdentityAndCrossWorldPrefabOwnership(dir);

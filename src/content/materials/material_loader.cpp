@@ -1,12 +1,24 @@
 #include "karma/assets.h"
 
+#include <atomic>
+#include <chrono>
+#include <cmath>
 #include <fstream>
 #include <initializer_list>
+#include <limits>
+#include <system_error>
+#include <type_traits>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
 #include "karma/assets.h"
+
+#if defined(_WIN32)
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace karma::assets {
 
@@ -268,8 +280,11 @@ bool parseSurface(const Json& root, rendering::MaterialDesc& out, std::string* d
                      "metallic",
                      "roughness",
                      "normal_scale",
+                     "normal_map_convention",
                      "occlusion_strength",
                      "emissive_strength",
+                     "specular_factor",
+                     "specular_color",
                      "clearcoat",
                      "clearcoat_roughness",
                      "sheen_color",
@@ -293,6 +308,8 @@ bool parseSurface(const Json& root, rendering::MaterialDesc& out, std::string* d
       !readFloat(surface, "normal_scale", out.normal_scale, diagnostic) ||
       !readFloat(surface, "occlusion_strength", out.occlusion_strength, diagnostic) ||
       !readFloat(surface, "emissive_strength", out.emissive_strength, diagnostic) ||
+      !readFloat(surface, "specular_factor", out.specular_factor, diagnostic) ||
+      !readColor(surface, "specular_color", out.specular_color, diagnostic) ||
       !readFloat(surface, "clearcoat", out.clearcoat, diagnostic) ||
       !readFloat(surface, "clearcoat_roughness", out.clearcoat_roughness, diagnostic) ||
       !readColor(surface, "sheen_color", out.sheen_color, diagnostic) ||
@@ -306,6 +323,36 @@ bool parseSurface(const Json& root, rendering::MaterialDesc& out, std::string* d
       !readBool(surface, "unlit", out.unlit, diagnostic) ||
       !readBool(surface, "analytic_sphere_normals", out.analytic_sphere_normals, diagnostic)) {
     return false;
+  }
+  if (const auto convention_it = surface.find("normal_map_convention");
+      convention_it != surface.end()) {
+    if (!convention_it->is_string()) {
+      return fail(diagnostic, "surface.normal_map_convention must be a string");
+    }
+    const std::string convention = convention_it->get<std::string>();
+    if (convention == "opengl") {
+      out.normal_map_convention =
+          rendering::MaterialDesc::NormalMapConvention::OpenGL;
+    } else if (convention == "directx") {
+      out.normal_map_convention =
+          rendering::MaterialDesc::NormalMapConvention::DirectX;
+    } else {
+      return fail(diagnostic,
+                  "surface.normal_map_convention must be 'opengl' or 'directx'");
+    }
+  }
+  if (!std::isfinite(out.specular_factor) || out.specular_factor < 0.0f ||
+      out.specular_factor > 1.0f) {
+    return fail(diagnostic, "surface.specular_factor must be finite and in [0, 1]");
+  }
+  const auto valid_specular_channel = [](float value) {
+    return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
+  };
+  if (!valid_specular_channel(out.specular_color.r) ||
+      !valid_specular_channel(out.specular_color.g) ||
+      !valid_specular_channel(out.specular_color.b) ||
+      !valid_specular_channel(out.specular_color.a)) {
+    return fail(diagnostic, "surface.specular_color channels must be finite and in [0, 1]");
   }
   return true;
 }
@@ -497,6 +544,214 @@ bool isVariantDocument(const Json& root) {
   return root.contains("base");
 }
 
+Json colorJson(const rendering::Color& color) {
+  return Json::array({color.r, color.g, color.b, color.a});
+}
+
+Json parameterJson(const rendering::MaterialParameterValue& value) {
+  return std::visit(
+      [](const auto& typed) -> Json {
+        using T = std::decay_t<decltype(typed)>;
+        if constexpr (std::is_same_v<T, rendering::Color>) {
+          return colorJson(typed);
+        } else if constexpr (std::is_same_v<T, glm::vec2>) {
+          return Json::array({typed.x, typed.y});
+        } else if constexpr (std::is_same_v<T, glm::vec3>) {
+          return Json::array({typed.x, typed.y, typed.z});
+        } else if constexpr (std::is_same_v<T, glm::vec4>) {
+          return Json::array({typed.x, typed.y, typed.z, typed.w});
+        } else {
+          return Json(typed);
+        }
+      },
+      value);
+}
+
+Json parametersJson(
+    const std::unordered_map<std::string, rendering::MaterialParameterValue>& params) {
+  Json json = Json::object();
+  for (const auto& [name, value] : params) {
+    json[name] = parameterJson(value);
+  }
+  return json;
+}
+
+Json texturesJson(const std::unordered_map<std::string, std::string>& textures) {
+  Json json = Json::object();
+  for (const auto& [name, key] : textures) {
+    json[name] = key;
+  }
+  return json;
+}
+
+std::string portableShaderPath(const std::filesystem::path& path,
+                               const std::filesystem::path& base_dir) {
+  if (path.empty()) {
+    return {};
+  }
+  if (path.is_relative()) {
+    return path.generic_string();
+  }
+  const std::filesystem::path relative = path.lexically_relative(base_dir);
+  return relative.empty() ? path.generic_string() : relative.generic_string();
+}
+
+Json materialAssetFileJson(const rendering::MaterialAssetDesc& material,
+                           const std::filesystem::path& base_dir) {
+  const auto convention = material.surface.normal_map_convention ==
+                                  rendering::MaterialDesc::NormalMapConvention::DirectX
+                              ? "directx"
+                              : "opengl";
+  Json pipeline{
+      {"name", material.pipeline.name},
+      {"vertex_entry", material.pipeline.vertex_entry_point},
+      {"fragment_entry", material.pipeline.fragment_entry_point},
+      {"defines", material.pipeline.defines},
+  };
+  if (!material.pipeline.vertex_shader_path.empty()) {
+    pipeline["vertex"] =
+        portableShaderPath(material.pipeline.vertex_shader_path, base_dir);
+  }
+  if (!material.pipeline.fragment_shader_path.empty()) {
+    pipeline["fragment"] =
+        portableShaderPath(material.pipeline.fragment_shader_path, base_dir);
+  }
+
+  Json json{
+      {"version", 2},
+      {"pipeline", std::move(pipeline)},
+      {"surface",
+       Json{{"base_color", colorJson(material.surface.base_color)},
+            {"emissive_color", colorJson(material.surface.emissive_color)},
+            {"metallic", material.surface.metallic},
+            {"roughness", material.surface.roughness},
+            {"normal_scale", material.surface.normal_scale},
+            {"normal_map_convention", convention},
+            {"occlusion_strength", material.surface.occlusion_strength},
+            {"emissive_strength", material.surface.emissive_strength},
+            {"specular_factor", material.surface.specular_factor},
+            {"specular_color", colorJson(material.surface.specular_color)},
+            {"clearcoat", material.surface.clearcoat},
+            {"clearcoat_roughness", material.surface.clearcoat_roughness},
+            {"sheen_color", colorJson(material.surface.sheen_color)},
+            {"sheen_roughness", material.surface.sheen_roughness},
+            {"anisotropy", material.surface.anisotropy},
+            {"transmission", material.surface.transmission},
+            {"ior", material.surface.ior},
+            {"thickness", material.surface.thickness},
+            {"attenuation_distance", material.surface.attenuation_distance},
+            {"attenuation_color", colorJson(material.surface.attenuation_color)},
+            {"unlit", material.surface.unlit},
+            {"analytic_sphere_normals", material.surface.analytic_sphere_normals}}},
+      {"render_state",
+       Json{{"transparent", material.surface.transparent},
+            {"alpha_mode",
+             material.surface.alpha_mode == rendering::MaterialDesc::AlphaMode::Masked
+                 ? "masked"
+                 : material.surface.alpha_mode == rendering::MaterialDesc::AlphaMode::Blend
+                       ? "blend"
+                       : "opaque"},
+            {"alpha_cutoff", material.surface.alpha_cutoff},
+            {"alpha_softness", material.surface.alpha_softness},
+            {"alpha_dither", material.surface.alpha_dither},
+            {"alpha_to_coverage", material.surface.alpha_to_coverage},
+            {"depth_test", material.surface.depth_test},
+            {"depth_write", material.surface.depth_write},
+            {"wireframe", material.surface.wireframe},
+            {"double_sided", material.surface.double_sided},
+            {"blend_mode",
+             material.surface.blend_mode == rendering::MaterialDesc::BlendMode::Additive
+                 ? "additive"
+                 : "alpha"}}},
+      {"params", parametersJson(material.params)},
+      {"textures", texturesJson(material.textures)},
+  };
+  if (!std::isfinite(material.surface.attenuation_distance)) {
+    json["surface"].erase("attenuation_distance");
+  }
+  return json;
+}
+
+Json materialVariantFileJson(const rendering::MaterialVariantDesc& material) {
+  return Json{
+      {"version", 2},
+      {"kind", "variant"},
+      {"base", material.base_material_key},
+      {"params", parametersJson(material.params)},
+      {"textures", texturesJson(material.textures)},
+  };
+}
+
+std::filesystem::path temporaryMaterialPath(const std::filesystem::path& path) {
+  static std::atomic<uint64_t> sequence{0u};
+  const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+  return path.parent_path() /
+         (path.filename().string() + ".tmp." + std::to_string(timestamp) + "." +
+          std::to_string(sequence.fetch_add(1u, std::memory_order_relaxed)));
+}
+
+void removeTemporaryMaterial(const std::filesystem::path& path) {
+  std::error_code ignored;
+  std::filesystem::remove(path, ignored);
+}
+
+MaterialSaveResult saveMaterialJsonAtomic(const Json& json,
+                                          const std::filesystem::path& path) {
+  MaterialSaveResult result{.path = path};
+  if (path.empty()) {
+    result.diagnostic = "material save path must not be empty";
+    return result;
+  }
+  std::error_code ec;
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+      result.diagnostic = "failed to create material directory: " + ec.message();
+      return result;
+    }
+  }
+
+  const std::filesystem::path temporary = temporaryMaterialPath(path);
+  try {
+    std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+      result.diagnostic = "failed to open temporary material file: " + temporary.string();
+      return result;
+    }
+    stream << json.dump(2) << '\n';
+    stream.flush();
+    if (!stream) {
+      removeTemporaryMaterial(temporary);
+      result.diagnostic = "failed to write temporary material file: " + temporary.string();
+      return result;
+    }
+    stream.close();
+    if (!stream) {
+      removeTemporaryMaterial(temporary);
+      result.diagnostic = "failed to close temporary material file: " + temporary.string();
+      return result;
+    }
+  } catch (const std::exception& error) {
+    removeTemporaryMaterial(temporary);
+    result.diagnostic = std::string("failed to serialize material: ") + error.what();
+    return result;
+  }
+
+#if defined(_WIN32)
+  if (!MoveFileExW(temporary.c_str(), path.c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    ec = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+  }
+#else
+  std::filesystem::rename(temporary, path, ec);
+#endif
+  if (ec) {
+    removeTemporaryMaterial(temporary);
+    result.diagnostic = "failed to atomically replace material file: " + ec.message();
+  }
+  return result;
+}
+
 }  // namespace
 
 std::optional<rendering::MaterialAssetDesc> loadMaterialAssetDesc(
@@ -555,6 +810,51 @@ std::optional<rendering::MaterialVariantDesc> loadMaterialVariantDesc(
     return std::nullopt;
   }
   return desc;
+}
+
+MaterialSaveResult saveMaterialAssetDesc(
+    const rendering::MaterialAssetDesc& material,
+    const std::filesystem::path& path) {
+  MaterialSaveResult result{.path = path};
+  if (material.imported_material != nullptr ||
+      !material.material_asset_path.empty() ||
+      material.material_asset_index != std::numeric_limits<uint32_t>::max()) {
+    result.diagnostic =
+        "import-backed material descriptors cannot be saved as standalone .mat files";
+    return result;
+  }
+  const Json json = materialAssetFileJson(material, path.parent_path());
+  rendering::MaterialAssetDesc validated{};
+  std::string diagnostic;
+  if (!parsePipeline(json, path.parent_path(), validated.pipeline, &diagnostic) ||
+      !parseSurface(json, validated.surface, &diagnostic) ||
+      !parseRenderState(json, validated.surface, &diagnostic) ||
+      !parseParams(json, validated.params, &diagnostic) ||
+      !parseTextures(json, validated.textures, &diagnostic)) {
+    result.diagnostic = diagnostic.empty() ? "material validation failed" : diagnostic;
+    return result;
+  }
+  return saveMaterialJsonAtomic(json, path);
+}
+
+MaterialSaveResult saveMaterialVariantDesc(
+    const rendering::MaterialVariantDesc& material,
+    const std::filesystem::path& path) {
+  MaterialSaveResult result{.path = path};
+  const Json json = materialVariantFileJson(material);
+  if (material.base_material_key.empty() ||
+      !AssetRegistry::isValidAssetKey(material.base_material_key)) {
+    result.diagnostic = "material variant requires a valid base material key";
+    return result;
+  }
+  rendering::MaterialVariantDesc validated{};
+  std::string diagnostic;
+  if (!parseParams(json, validated.params, &diagnostic) ||
+      !parseTextures(json, validated.textures, &diagnostic)) {
+    result.diagnostic = diagnostic.empty() ? "material variant validation failed" : diagnostic;
+    return result;
+  }
+  return saveMaterialJsonAtomic(json, path);
 }
 
 MaterialLoadResult loadMaterialFile(AssetRegistry& assets,

@@ -34,6 +34,144 @@ math::Color finiteColor(math::Color value, const math::Color& fallback) {
   return value;
 }
 
+glm::vec4 instanceParams(const std::array<float, 4>& params) {
+  return {params[0], params[1], params[2], params[3]};
+}
+
+glm::mat4 meshInstanceTransform(const components::MeshInstance& instance) {
+  glm::mat4 transform = glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
+  transform *= glm::mat4_cast(math::toGlm(instance.rotation));
+  return glm::scale(transform, math::toGlm(instance.scale));
+}
+
+glm::mat4 planarInstanceTransform(const components::PlanarMeshInstance& instance) {
+  glm::mat4 transform = glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
+  transform = glm::rotate(transform,
+                          instance.yaw_radians,
+                          glm::vec3(0.0f, 1.0f, 0.0f));
+  return glm::scale(transform, math::toGlm(instance.scale));
+}
+
+bool finiteMatrix(const glm::mat4& matrix) {
+  for (int column = 0; column < 4; ++column) {
+    for (int row = 0; row < 4; ++row) {
+      if (!std::isfinite(matrix[column][row])) return false;
+    }
+  }
+  return true;
+}
+
+bool extractPlanarTransform(const glm::mat4& transform,
+                            PlanarInstanceData& out) {
+  if (!finiteMatrix(transform)) return false;
+
+  const glm::vec3 column_x(transform[0]);
+  const glm::vec3 column_y(transform[1]);
+  const glm::vec3 column_z(transform[2]);
+  const float scale_hint = std::max(
+      {1.0f, glm::length(column_x), glm::length(column_y), glm::length(column_z)});
+  const float epsilon = 1.0e-4f * scale_hint;
+  if (std::abs(transform[0][3]) > epsilon ||
+      std::abs(transform[1][3]) > epsilon ||
+      std::abs(transform[2][3]) > epsilon ||
+      std::abs(transform[3][3] - 1.0f) > epsilon ||
+      std::abs(column_x.y) > epsilon ||
+      std::abs(column_y.x) > epsilon ||
+      std::abs(column_y.z) > epsilon ||
+      std::abs(column_z.y) > epsilon) {
+    return false;
+  }
+
+  float yaw = 0.0f;
+  float scale_x = glm::length(column_x);
+  float scale_z = 0.0f;
+  if (scale_x > epsilon) {
+    const glm::vec3 x_axis = column_x / scale_x;
+    yaw = std::atan2(-x_axis.z, x_axis.x);
+    const glm::vec3 z_axis(std::sin(yaw), 0.0f, std::cos(yaw));
+    scale_z = glm::dot(column_z, z_axis);
+    if (glm::length(column_z - z_axis * scale_z) > epsilon) return false;
+  } else {
+    scale_x = 0.0f;
+    const float z_length = glm::length(column_z);
+    if (z_length > epsilon) {
+      const glm::vec3 z_axis = column_z / z_length;
+      yaw = std::atan2(z_axis.x, z_axis.z);
+      scale_z = z_length;
+    }
+  }
+
+  out.position_yaw = glm::vec4(glm::vec3(transform[3]), yaw);
+  out.scale_pad = glm::vec4(scale_x, column_y.y, scale_z, 0.0f);
+  return true;
+}
+
+float conservativeTransformScale(const glm::mat4& transform) {
+  const glm::vec3 column_x(transform[0]);
+  const glm::vec3 column_y(transform[1]);
+  const glm::vec3 column_z(transform[2]);
+  const float x2 = glm::dot(column_x, column_x);
+  const float y2 = glm::dot(column_y, column_y);
+  const float z2 = glm::dot(column_z, column_z);
+  const float largest = std::sqrt(std::max({x2, y2, z2, 0.0f}));
+  const float orthogonal_epsilon =
+      1.0e-5f * std::max({1.0f, std::sqrt(x2 * y2), std::sqrt(x2 * z2),
+                          std::sqrt(y2 * z2)});
+  const bool orthogonal =
+      std::abs(glm::dot(column_x, column_y)) <= orthogonal_epsilon &&
+      std::abs(glm::dot(column_x, column_z)) <= orthogonal_epsilon &&
+      std::abs(glm::dot(column_y, column_z)) <= orthogonal_epsilon;
+  return orthogonal ? largest : std::sqrt(std::max(x2 + y2 + z2, 0.0f));
+}
+
+void mergeSphere(glm::vec3& center,
+                 float& radius,
+                 bool& valid,
+                 const glm::vec3& next_center,
+                 float next_radius) {
+  if (next_radius <= 0.0f || !std::isfinite(next_radius) ||
+      !finiteVec3(next_center)) {
+    return;
+  }
+  if (!valid) {
+    center = next_center;
+    radius = next_radius;
+    valid = true;
+    return;
+  }
+  const glm::vec3 delta = next_center - center;
+  const float distance = glm::length(delta);
+  if (!std::isfinite(distance)) return;
+  if (distance + next_radius <= radius) return;
+  if (distance + radius <= next_radius) {
+    center = next_center;
+    radius = next_radius;
+    return;
+  }
+  if (distance <= 1.0e-5f) {
+    radius = std::max(radius, next_radius);
+    return;
+  }
+  const float new_radius = (radius + distance + next_radius) * 0.5f;
+  center += delta * ((new_radius - radius) / distance);
+  radius = new_radius;
+}
+
+void mergeTransformedBounds(ExtractedInstancedMesh& out,
+                            const glm::mat4& transform,
+                            const glm::vec3& mesh_bounds_center,
+                            float mesh_bounds_radius,
+                            bool mesh_bounds_valid) {
+  if (!mesh_bounds_valid) return;
+  const glm::vec3 center =
+      glm::vec3(transform * glm::vec4(mesh_bounds_center, 1.0f));
+  mergeSphere(out.bounds_center,
+              out.bounds_radius,
+              out.bounds_valid,
+              center,
+              mesh_bounds_radius * conservativeTransformScale(transform));
+}
+
 }  // namespace
 
 glm::vec3 toGlm(const math::Vec3& v) {
@@ -64,6 +202,79 @@ glm::mat4 toTransform(const components::TransformComponent& transform,
   matrix *= glm::mat4_cast(rot);
   matrix = glm::scale(matrix, scale);
   return matrix;
+}
+
+ExtractedInstancedMesh extractInstancedMesh(
+    const components::InstancedMeshComponent& component,
+    const glm::mat4& owner_world_transform,
+    const glm::vec3& mesh_bounds_center,
+    float mesh_bounds_radius,
+    bool mesh_bounds_valid) {
+  ExtractedInstancedMesh out{};
+  if (component.gpu_layout == InstanceGpuLayout::PositionYawScaleParams) {
+    std::vector<glm::mat4> composed_transforms;
+    composed_transforms.reserve(component.planar_instances.size());
+    out.planar_instances.reserve(component.planar_instances.size());
+    bool compact = true;
+    for (const components::PlanarMeshInstance& instance : component.planar_instances) {
+      const glm::mat4 composed =
+          owner_world_transform * planarInstanceTransform(instance);
+      composed_transforms.push_back(composed);
+      if (compact) {
+        PlanarInstanceData extracted{};
+        compact = extractPlanarTransform(composed, extracted);
+        if (compact) {
+          extracted.params = instanceParams(instance.params);
+          out.planar_instances.push_back(extracted);
+        } else {
+          out.planar_instances.clear();
+        }
+      }
+    }
+
+    if (compact) {
+      out.gpu_layout = InstanceGpuLayout::PositionYawScaleParams;
+      for (const glm::mat4& transform : composed_transforms) {
+        mergeTransformedBounds(out,
+                               transform,
+                               mesh_bounds_center,
+                               mesh_bounds_radius,
+                               mesh_bounds_valid);
+      }
+      return out;
+    }
+
+    out.gpu_layout = InstanceGpuLayout::Matrix4x4Params;
+    out.instances.reserve(component.planar_instances.size());
+    for (std::size_t index = 0; index < component.planar_instances.size(); ++index) {
+      out.instances.push_back(InstanceData{
+          .transform = composed_transforms[index],
+          .params = instanceParams(component.planar_instances[index].params),
+      });
+      mergeTransformedBounds(out,
+                             composed_transforms[index],
+                             mesh_bounds_center,
+                             mesh_bounds_radius,
+                             mesh_bounds_valid);
+    }
+    return out;
+  }
+
+  out.gpu_layout = InstanceGpuLayout::Matrix4x4Params;
+  out.instances.reserve(component.instances.size());
+  for (const components::MeshInstance& instance : component.instances) {
+    InstanceData extracted{
+        .transform = owner_world_transform * meshInstanceTransform(instance),
+        .params = instanceParams(instance.params),
+    };
+    mergeTransformedBounds(out,
+                           extracted.transform,
+                           mesh_bounds_center,
+                           mesh_bounds_radius,
+                           mesh_bounds_valid);
+    out.instances.push_back(extracted);
+  }
+  return out;
 }
 
 CameraData toCameraData(const components::CameraComponent& camera,
@@ -162,6 +373,7 @@ DirectionalLightData toDirectionalLight(const components::LightComponent& light,
   }
   out.shadow_extent = std::max(finiteOr(light.shadow_extent, 0.0f), 0.0f);
   out.casts_shadows = light.casts_shadows;
+  out.mixed_bake_mask_bit = light.mixed_bake_mask_bit;
   return out;
 }
 
@@ -186,6 +398,7 @@ LightData toLightData(const components::LightComponent& light,
   out.intensity = std::max(finiteOr(light.intensity, 0.0f), 0.0f);
   out.range = std::max(finiteOr(light.range, 0.0f), 0.0f);
   out.casts_shadows = light.casts_shadows;
+  out.mixed_bake_mask_bit = light.mixed_bake_mask_bit;
 
   const float inner_rad = glm::radians(
       std::clamp(finiteOr(light.inner_cone_degrees, 15.0f), 0.0f, 179.0f));

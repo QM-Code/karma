@@ -4,6 +4,8 @@
 #include "karma/rendering.h"
 #include "karma/world.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -43,7 +45,7 @@ struct SubmeshInfo {
   unsigned int material_index = 0;
 };
 
-struct DrawConstants {
+struct alignas(16) DrawConstants {
   float mvp[16];
   float model[16];
   float light_view_proj[16];
@@ -87,9 +89,28 @@ struct DrawConstants {
   float volume_params2[4];
   float volume_params3[4];
   float volume_params4[4];
-  float texcoord_row0[12][4];
-  float texcoord_row1[12][4];
+  float texcoord_row0[rendering::kImportedMaterialTextureCoordSlotCount][4];
+  float texcoord_row1[rendering::kImportedMaterialTextureCoordSlotCount][4];
+  /// Appended to preserve the offsets consumed by existing custom shaders.
+  float material_params7[4];
+  /// Lightmap state is appended so existing custom shader constant offsets stay stable.
+  float lightmap_params[4];
+  float lightmap_uv_scale_offset[4];
+  uint32_t lightmap_mixed_mask[4];
 };
+
+static_assert(alignof(DrawConstants) >= 16u);
+static_assert(sizeof(DrawConstants) % 16u == 0u);
+static_assert(sizeof(uint32_t) == sizeof(float));
+static_assert(offsetof(DrawConstants, lightmap_params) ==
+              offsetof(DrawConstants, material_params7) +
+                  sizeof(float) * 4u);
+static_assert(offsetof(DrawConstants, lightmap_uv_scale_offset) ==
+              offsetof(DrawConstants, lightmap_params) +
+                  sizeof(float) * 4u);
+static_assert(offsetof(DrawConstants, lightmap_mixed_mask) ==
+              offsetof(DrawConstants, lightmap_uv_scale_offset) +
+                  sizeof(float) * 4u);
 
 struct DeformationConstants {
   float params[4];

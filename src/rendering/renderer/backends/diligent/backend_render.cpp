@@ -161,7 +161,9 @@ ForwardPlusGpuLight packForwardPlusLight(const rendering::LightData& light,
   gpu.spot_params[0] = light.inner_cone_cos;
   gpu.spot_params[1] = light.outer_cone_cos;
   gpu.spot_params[2] = -1.0f;
-  gpu.spot_params[3] = light.casts_shadows ? 1.0f : 0.0f;
+  gpu.spot_params[3] = light.mixed_bake_mask_bit < 64u
+                           ? static_cast<float>(light.mixed_bake_mask_bit)
+                           : -1.0f;
   gpu.screen_rect[0] = screen_rect.x;
   gpu.screen_rect[1] = screen_rect.y;
   gpu.screen_rect[2] = screen_rect.z;
@@ -1499,7 +1501,10 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   base_constants.light_dir[0] = light_dir.x;
   base_constants.light_dir[1] = light_dir.y;
   base_constants.light_dir[2] = light_dir.z;
-  base_constants.light_dir[3] = 0.0f;
+  base_constants.light_dir[3] = directional_light_.mixed_bake_mask_bit < 64u
+                                    ? static_cast<float>(
+                                          directional_light_.mixed_bake_mask_bit)
+                                    : -1.0f;
   base_constants.light_color[0] = directional_light_.color.r * directional_light_.intensity;
   base_constants.light_color[1] = directional_light_.color.g * directional_light_.intensity;
   base_constants.light_color[2] = directional_light_.color.b * directional_light_.intensity;
@@ -1522,7 +1527,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   base_constants.camera_clip_params[1] =
       std::max(camera_.far_clip, base_constants.camera_clip_params[0] + 0.001f);
   base_constants.camera_clip_params[2] = camera_.perspective ? 1.0f : 0.0f;
-  base_constants.camera_clip_params[3] = debug_glossy_off_ ? 1.0f : 0.0f;
+  base_constants.camera_clip_params[3] =
+      editor_view_mode_ != 0u ? static_cast<float>(editor_view_mode_)
+                              : (debug_glossy_off_ ? 1.0f : 0.0f);
   if (cpu_forward_plus_ready) {
     base_constants.forward_plus_params[0] = 1.0f;
     base_constants.forward_plus_params[1] = 1.0f;

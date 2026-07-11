@@ -5,9 +5,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,6 +20,34 @@
 namespace karma::assets {
 
 namespace {
+
+struct StbiImageDeleter {
+  template <typename T>
+  void operator()(T* value) const {
+    stbi_image_free(value);
+  }
+};
+
+template <typename T>
+using StbiImagePtr = std::unique_ptr<T, StbiImageDeleter>;
+
+std::optional<std::size_t> checkedImageElementCount(uint64_t width,
+                                                    uint64_t height,
+                                                    std::size_t channels) {
+  if (width == 0u || height == 0u || channels == 0u ||
+      width > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
+      height > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
+      width > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max()) /
+                  height) {
+    return std::nullopt;
+  }
+  const std::size_t pixel_count =
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  if (pixel_count > std::numeric_limits<std::size_t>::max() / channels) {
+    return std::nullopt;
+  }
+  return pixel_count * channels;
+}
 
 std::string lowercaseExtension(const std::filesystem::path& path) {
   std::string extension = path.extension().string();
@@ -40,7 +72,9 @@ ScalarImageFormat inferScalarFormat(const std::filesystem::path& path,
   return ScalarImageFormat::ImageFile;
 }
 
-std::optional<std::vector<uint8_t>> readBinaryFile(const std::filesystem::path& path) {
+std::optional<std::vector<uint8_t>> readBinaryFile(
+    const std::filesystem::path& path,
+    std::optional<std::size_t> expected_size = std::nullopt) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) {
     spdlog::error("Image load failed: {} (could not open file)", path.string());
@@ -50,6 +84,14 @@ std::optional<std::vector<uint8_t>> readBinaryFile(const std::filesystem::path& 
   const std::streamoff size = stream.tellg();
   if (size < 0) {
     spdlog::error("Image load failed: {} (could not determine file size)", path.string());
+    return std::nullopt;
+  }
+  if (expected_size.has_value() &&
+      static_cast<uintmax_t>(size) != static_cast<uintmax_t>(*expected_size)) {
+    spdlog::error("Image load failed: {} (file size {} does not match expected {})",
+                  path.string(),
+                  size,
+                  *expected_size);
     return std::nullopt;
   }
   stream.seekg(0, std::ios::beg);
@@ -65,6 +107,9 @@ std::optional<std::vector<uint8_t>> readBinaryFile(const std::filesystem::path& 
 }
 
 float normalizeScalar(float value, const ScalarImageLoadOptions& options) {
+  if (!std::isfinite(value)) {
+    return 0.0f;
+  }
   if (options.value_max <= options.value_min) {
     return value;
   }
@@ -99,32 +144,24 @@ uint32_t readU32(const uint8_t* bytes, bool little_endian) {
 std::optional<ScalarImage> loadRaw16ScalarImage(
     const std::filesystem::path& path,
     const ScalarImageLoadOptions& options) {
-  if (options.raw_width == 0u || options.raw_height == 0u) {
-    spdlog::error("Image load failed: {} (RAW16 requires raw_width/raw_height)",
+  const auto sample_count = checkedImageElementCount(
+      options.raw_width, options.raw_height, 1u);
+  if (!sample_count.has_value() ||
+      *sample_count > std::numeric_limits<std::size_t>::max() / sizeof(uint16_t)) {
+    spdlog::error("Image load failed: {} (RAW16 dimensions are invalid or too large)",
                   path.string());
     return std::nullopt;
   }
-  auto bytes = readBinaryFile(path);
+  const std::size_t expected_bytes = *sample_count * sizeof(uint16_t);
+  auto bytes = readBinaryFile(path, expected_bytes);
   if (!bytes) {
-    return std::nullopt;
-  }
-  const std::size_t sample_count =
-      static_cast<std::size_t>(options.raw_width) *
-      static_cast<std::size_t>(options.raw_height);
-  const std::size_t expected_bytes = sample_count * sizeof(uint16_t);
-  if (bytes->size() != expected_bytes) {
-    spdlog::error("Image load failed: {} (RAW16 size {} does not match {}x{})",
-                  path.string(),
-                  bytes->size(),
-                  options.raw_width,
-                  options.raw_height);
     return std::nullopt;
   }
 
   ScalarImage image{};
   image.width = static_cast<int>(options.raw_width);
   image.height = static_cast<int>(options.raw_height);
-  image.values.resize(sample_count);
+  image.values.resize(*sample_count);
   for (uint32_t y = 0u; y < options.raw_height; ++y) {
     const uint32_t dst_y = options.flip_y ? options.raw_height - 1u - y : y;
     for (uint32_t x = 0u; x < options.raw_width; ++x) {
@@ -144,32 +181,24 @@ std::optional<ScalarImage> loadRaw16ScalarImage(
 std::optional<ScalarImage> loadR32ScalarImage(
     const std::filesystem::path& path,
     const ScalarImageLoadOptions& options) {
-  if (options.raw_width == 0u || options.raw_height == 0u) {
-    spdlog::error("Image load failed: {} (R32 requires raw_width/raw_height)",
+  const auto sample_count = checkedImageElementCount(
+      options.raw_width, options.raw_height, 1u);
+  if (!sample_count.has_value() ||
+      *sample_count > std::numeric_limits<std::size_t>::max() / sizeof(float)) {
+    spdlog::error("Image load failed: {} (R32 dimensions are invalid or too large)",
                   path.string());
     return std::nullopt;
   }
-  auto bytes = readBinaryFile(path);
+  const std::size_t expected_bytes = *sample_count * sizeof(float);
+  auto bytes = readBinaryFile(path, expected_bytes);
   if (!bytes) {
-    return std::nullopt;
-  }
-  const std::size_t sample_count =
-      static_cast<std::size_t>(options.raw_width) *
-      static_cast<std::size_t>(options.raw_height);
-  const std::size_t expected_bytes = sample_count * sizeof(float);
-  if (bytes->size() != expected_bytes) {
-    spdlog::error("Image load failed: {} (R32 size {} does not match {}x{})",
-                  path.string(),
-                  bytes->size(),
-                  options.raw_width,
-                  options.raw_height);
     return std::nullopt;
   }
 
   ScalarImage image{};
   image.width = static_cast<int>(options.raw_width);
   image.height = static_cast<int>(options.raw_height);
-  image.values.resize(sample_count);
+  image.values.resize(*sample_count);
   for (uint32_t y = 0u; y < options.raw_height; ++y) {
     const uint32_t dst_y = options.flip_y ? options.raw_height - 1u - y : y;
     for (uint32_t x = 0u; x < options.raw_width; ++x) {
@@ -203,74 +232,90 @@ std::optional<ScalarImage> loadImageFileScalarImage(
   }
 
   if (stbi_is_16_bit(path.string().c_str())) {
-    stbi_us* decoded =
-        stbi_load_16(path.string().c_str(), &width, &height, &components, 0);
-    if (decoded == nullptr || width <= 0 || height <= 0 || components <= 0) {
+    StbiImagePtr<stbi_us> decoded(
+        stbi_load_16(path.string().c_str(), &width, &height, &components, 0));
+    if (!decoded || width <= 0 || height <= 0 || components <= 0) {
       if (const char* reason = stbi_failure_reason()) {
         spdlog::error("Image load failed: {} ({})", path.string(), reason);
       } else {
         spdlog::error("Image load failed: {}", path.string());
       }
-      if (decoded != nullptr) {
-        stbi_image_free(decoded);
-      }
+      return std::nullopt;
+    }
+    const auto decoded_count = checkedImageElementCount(
+        static_cast<uint64_t>(width),
+        static_cast<uint64_t>(height),
+        static_cast<std::size_t>(components));
+    if (!decoded_count.has_value()) {
+      spdlog::error("Image load failed: {} (decoded dimensions overflow)",
+                    path.string());
       return std::nullopt;
     }
     ScalarImage image{};
     image.width = width;
     image.height = height;
     const std::size_t sample_count =
-        static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+        *decoded_count / static_cast<std::size_t>(components);
     image.values.resize(sample_count);
     for (std::size_t i = 0u; i < sample_count; ++i) {
       const float normalized =
-          static_cast<float>(decoded[i * static_cast<std::size_t>(components)]) /
+          static_cast<float>(decoded.get()[i * static_cast<std::size_t>(components)]) /
           static_cast<float>(std::numeric_limits<stbi_us>::max());
       image.values[i] = normalizeScalar(normalized, options);
     }
-    stbi_image_free(decoded);
     return image.valid() ? std::optional<ScalarImage>{std::move(image)} : std::nullopt;
   }
 
   if (extension == ".hdr") {
-    float* decoded =
-        stbi_loadf(path.string().c_str(), &width, &height, &components, 0);
-    if (decoded == nullptr || width <= 0 || height <= 0 || components <= 0) {
+    StbiImagePtr<float> decoded(
+        stbi_loadf(path.string().c_str(), &width, &height, &components, 0));
+    if (!decoded || width <= 0 || height <= 0 || components <= 0) {
       if (const char* reason = stbi_failure_reason()) {
         spdlog::error("Image load failed: {} ({})", path.string(), reason);
       } else {
         spdlog::error("Image load failed: {}", path.string());
       }
-      if (decoded != nullptr) {
-        stbi_image_free(decoded);
-      }
+      return std::nullopt;
+    }
+    const auto decoded_count = checkedImageElementCount(
+        static_cast<uint64_t>(width),
+        static_cast<uint64_t>(height),
+        static_cast<std::size_t>(components));
+    if (!decoded_count.has_value()) {
+      spdlog::error("Image load failed: {} (decoded dimensions overflow)",
+                    path.string());
       return std::nullopt;
     }
     ScalarImage image{};
     image.width = width;
     image.height = height;
     const std::size_t sample_count =
-        static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+        *decoded_count / static_cast<std::size_t>(components);
     image.values.resize(sample_count);
     for (std::size_t i = 0u; i < sample_count; ++i) {
       image.values[i] =
-          normalizeScalar(decoded[i * static_cast<std::size_t>(components)], options);
+          normalizeScalar(decoded.get()[i * static_cast<std::size_t>(components)], options);
     }
-    stbi_image_free(decoded);
     return image.valid() ? std::optional<ScalarImage>{std::move(image)} : std::nullopt;
   }
 
-  stbi_uc* decoded =
-      stbi_load(path.string().c_str(), &width, &height, &components, 0);
-  if (decoded == nullptr || width <= 0 || height <= 0 || components <= 0) {
+  StbiImagePtr<stbi_uc> decoded(
+      stbi_load(path.string().c_str(), &width, &height, &components, 0));
+  if (!decoded || width <= 0 || height <= 0 || components <= 0) {
     if (const char* reason = stbi_failure_reason()) {
       spdlog::error("Image load failed: {} ({})", path.string(), reason);
     } else {
       spdlog::error("Image load failed: {}", path.string());
     }
-    if (decoded != nullptr) {
-      stbi_image_free(decoded);
-    }
+    return std::nullopt;
+  }
+  const auto decoded_count = checkedImageElementCount(
+      static_cast<uint64_t>(width),
+      static_cast<uint64_t>(height),
+      static_cast<std::size_t>(components));
+  if (!decoded_count.has_value()) {
+    spdlog::error("Image load failed: {} (decoded dimensions overflow)",
+                  path.string());
     return std::nullopt;
   }
 
@@ -278,14 +323,13 @@ std::optional<ScalarImage> loadImageFileScalarImage(
   image.width = width;
   image.height = height;
   const std::size_t sample_count =
-      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+      *decoded_count / static_cast<std::size_t>(components);
   image.values.resize(sample_count);
   for (std::size_t i = 0u; i < sample_count; ++i) {
     const float normalized =
-        static_cast<float>(decoded[i * static_cast<std::size_t>(components)]) / 255.0f;
+        static_cast<float>(decoded.get()[i * static_cast<std::size_t>(components)]) / 255.0f;
     image.values[i] = normalizeScalar(normalized, options);
   }
-  stbi_image_free(decoded);
   return image.valid() ? std::optional<ScalarImage>{std::move(image)} : std::nullopt;
 }
 
@@ -298,8 +342,9 @@ std::optional<Rgba8Image> loadRgba8Image(
   int height = 0;
   int components = 0;
   stbi_set_flip_vertically_on_load_thread(options.flip_y ? 1 : 0);
-  stbi_uc* decoded = stbi_load(path.string().c_str(), &width, &height, &components, 4);
-  if (decoded == nullptr || width <= 0 || height <= 0) {
+  StbiImagePtr<stbi_uc> decoded(
+      stbi_load(path.string().c_str(), &width, &height, &components, 4));
+  if (!decoded || width <= 0 || height <= 0) {
     if (lowercaseExtension(path) == ".exr") {
       spdlog::error(
           "Image load failed: {} (OpenEXR is not supported by the RGBA8 image loader)",
@@ -309,19 +354,25 @@ std::optional<Rgba8Image> loadRgba8Image(
     } else {
       spdlog::error("Image load failed: {}", path.string());
     }
-    if (decoded != nullptr) {
-      stbi_image_free(decoded);
-    }
+    return std::nullopt;
+  }
+  const auto byte_count = checkedImageElementCount(
+      static_cast<uint64_t>(width), static_cast<uint64_t>(height), 4u);
+  if (!byte_count.has_value()) {
+    spdlog::error("Image load failed: {} (decoded dimensions overflow)",
+                  path.string());
     return std::nullopt;
   }
 
   Rgba8Image image{};
   image.width = width;
   image.height = height;
-  const std::size_t byte_count =
-      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
-  image.pixels.assign(decoded, decoded + byte_count);
-  stbi_image_free(decoded);
+  try {
+    image.pixels.assign(decoded.get(), decoded.get() + *byte_count);
+  } catch (const std::exception& error) {
+    spdlog::error("Image load failed: {} ({})", path.string(), error.what());
+    return std::nullopt;
+  }
   return image;
 }
 
@@ -337,40 +388,53 @@ std::optional<Rgba8Image> loadRgba8ImageFromMemory(const std::uint8_t* data,
   int height = 0;
   int components = 0;
   stbi_set_flip_vertically_on_load_thread(options.flip_y ? 1 : 0);
-  stbi_uc* decoded = stbi_load_from_memory(data,
-                                           static_cast<int>(size),
-                                           &width,
-                                           &height,
-                                           &components,
-                                           4);
-  if (decoded == nullptr || width <= 0 || height <= 0) {
-    if (decoded != nullptr) {
-      stbi_image_free(decoded);
-    }
+  StbiImagePtr<stbi_uc> decoded(stbi_load_from_memory(data,
+                                                      static_cast<int>(size),
+                                                      &width,
+                                                      &height,
+                                                      &components,
+                                                      4));
+  if (!decoded || width <= 0 || height <= 0) {
+    return std::nullopt;
+  }
+  const auto byte_count = checkedImageElementCount(
+      static_cast<uint64_t>(width), static_cast<uint64_t>(height), 4u);
+  if (!byte_count.has_value()) {
     return std::nullopt;
   }
 
   Rgba8Image image{};
   image.width = width;
   image.height = height;
-  const std::size_t byte_count =
-      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
-  image.pixels.assign(decoded, decoded + byte_count);
-  stbi_image_free(decoded);
+  try {
+    image.pixels.assign(decoded.get(), decoded.get() + *byte_count);
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
   return image;
 }
 
 std::optional<ScalarImage> loadScalarImage(const std::filesystem::path& path,
                                            const ScalarImageLoadOptions& options) {
-  switch (inferScalarFormat(path, options.format)) {
-    case ScalarImageFormat::ImageFile:
-      return loadImageFileScalarImage(path, options);
-    case ScalarImageFormat::Raw16Unsigned:
-      return loadRaw16ScalarImage(path, options);
-    case ScalarImageFormat::R32Float:
-      return loadR32ScalarImage(path, options);
-    case ScalarImageFormat::Auto:
-      break;
+  if (!std::isfinite(options.value_min) ||
+      !std::isfinite(options.value_max)) {
+    spdlog::error("Image load failed: {} (scalar range must be finite)",
+                  path.string());
+    return std::nullopt;
+  }
+  try {
+    switch (inferScalarFormat(path, options.format)) {
+      case ScalarImageFormat::ImageFile:
+        return loadImageFileScalarImage(path, options);
+      case ScalarImageFormat::Raw16Unsigned:
+        return loadRaw16ScalarImage(path, options);
+      case ScalarImageFormat::R32Float:
+        return loadR32ScalarImage(path, options);
+      case ScalarImageFormat::Auto:
+        break;
+    }
+  } catch (const std::exception& error) {
+    spdlog::error("Image load failed: {} ({})", path.string(), error.what());
   }
   return std::nullopt;
 }

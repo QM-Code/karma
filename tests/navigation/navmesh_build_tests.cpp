@@ -201,6 +201,137 @@ void testWorldSurfaceCollectionHonorsLayerMasks() {
   assert(found_landing_height);
 }
 
+void testInstancedWorldSurfaceCollectionUsesActiveLayoutAndStaticFlags() {
+  const auto nav_static = [] {
+    karma::components::StaticComponent membership{};
+    membership.enabled = true;
+    membership.include_descendants = true;
+    membership.flags = karma::components::StaticComponentNavigation;
+    return membership;
+  };
+  const auto contains_vertex = [](const karma::navigation::NavMeshInputGeometry& geometry,
+                                  float x,
+                                  float y,
+                                  float z) {
+    for (const karma::math::Vec3& vertex : geometry.vertices) {
+      if (std::abs(vertex.x - x) < 0.001f &&
+          std::abs(vertex.y - y) < 0.001f &&
+          std::abs(vertex.z - z) < 0.001f) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  karma::world::World world;
+
+  const auto matrix_surface = world.createEntity();
+  karma::components::TransformComponent matrix_transform{};
+  matrix_transform.setPosition({1.0f, 0.0f, 2.0f});
+  world.add(matrix_surface, matrix_transform);
+  world.add(matrix_surface, nav_static());
+  karma::components::InstancedMeshComponent matrix_instances{};
+  matrix_instances.gpu_layout =
+      karma::rendering::InstanceGpuLayout::Matrix4x4Params;
+  matrix_instances.instances = {
+      karma::components::MeshInstance{
+          .position = {10.0f, 2.0f, -3.0f},
+          .scale = {2.0f, 1.0f, 3.0f},
+      },
+      karma::components::MeshInstance{
+          .position = {-5.0f, 1.0f, 4.0f},
+      },
+  };
+  matrix_instances.planar_instances = {
+      karma::components::PlanarMeshInstance{
+          .position = {400.0f, 400.0f, 400.0f},
+      },
+  };
+  world.add(matrix_surface, std::move(matrix_instances));
+  world.add(matrix_surface,
+            karma::components::NavMeshSurfaceComponent{
+                .area = 2,
+                .mesh_data = std::make_shared<karma::world::MeshData>(
+                    makePlaneMesh(1.0f)),
+            });
+
+  const auto planar_surface = world.createEntity();
+  karma::components::TransformComponent planar_transform{};
+  planar_transform.setPosition({2.0f, 1.0f, -1.0f});
+  world.add(planar_surface, planar_transform);
+  world.add(planar_surface, nav_static());
+  karma::components::InstancedMeshComponent planar_instances{};
+  planar_instances.gpu_layout =
+      karma::rendering::InstanceGpuLayout::PositionYawScaleParams;
+  planar_instances.instances = {
+      karma::components::MeshInstance{
+          .position = {-400.0f, -400.0f, -400.0f},
+      },
+  };
+  planar_instances.planar_instances = {
+      karma::components::PlanarMeshInstance{
+          .position = {20.0f, 4.0f, 10.0f},
+          .yaw_radians = 1.57079632679f,
+          .scale = {1.0f, 1.0f, 2.0f},
+      },
+  };
+  world.add(planar_surface, std::move(planar_instances));
+  world.add(planar_surface,
+            karma::components::NavMeshSurfaceComponent{
+                .area = 3,
+                .mesh_data = std::make_shared<karma::world::MeshData>(
+                    makePlaneMesh(1.0f)),
+            });
+
+  const auto disabled_surface = world.createEntity();
+  world.add(disabled_surface, karma::components::TransformComponent{});
+  karma::components::StaticComponent disabled_membership = nav_static();
+  disabled_membership.flags = karma::components::StaticComponentLighting;
+  world.add(disabled_surface, disabled_membership);
+  karma::components::InstancedMeshComponent disabled_instances{};
+  disabled_instances.instances.push_back(karma::components::MeshInstance{});
+  world.add(disabled_surface, std::move(disabled_instances));
+  world.add(disabled_surface,
+            karma::components::NavMeshSurfaceComponent{
+                .area = 4,
+                .mesh_data = std::make_shared<karma::world::MeshData>(
+                    makePlaneMesh(1.0f)),
+            });
+
+  // Explicit surfaces retain precedence over the legacy mesh-collider path.
+  const auto legacy_fallback = world.createEntity();
+  world.add(legacy_fallback, karma::components::TransformComponent{});
+  world.add(legacy_fallback,
+            karma::components::ColliderComponent::mesh(
+                karma::components::MeshColliderShape{
+                    .vertices = {
+                        {-10.0f, 0.0f, -10.0f},
+                        {10.0f, 0.0f, -10.0f},
+                        {10.0f, 0.0f, 10.0f},
+                        {-10.0f, 0.0f, 10.0f},
+                    },
+                    .indices = {0u, 2u, 1u, 0u, 3u, 2u},
+                }));
+  world.add(legacy_fallback, karma::components::MeshComponent{});
+
+  const karma::navigation::NavMeshInputGeometry geometry =
+      karma::navigation::collectNavMeshGeometry(world);
+  assert(geometry.vertices.size() == 12u);
+  assert(geometry.triangleCount() == 6u);
+  assert(contains_vertex(geometry, 9.0f, 2.0f, -4.0f));
+  assert(contains_vertex(geometry, -5.0f, 1.0f, 5.0f));
+  assert(contains_vertex(geometry, 20.0f, 5.0f, 10.0f));
+
+  size_t matrix_area_count = 0u;
+  size_t planar_area_count = 0u;
+  for (const unsigned char area : geometry.triangle_areas) {
+    matrix_area_count += area == 2 ? 1u : 0u;
+    planar_area_count += area == 3 ? 1u : 0u;
+  }
+  assert(matrix_area_count == 4u);
+  assert(planar_area_count == 2u);
+}
+
 void testAreaFlagsFilterQueries() {
   karma::navigation::NavMeshInputGeometry geometry;
   karma::navigation::appendGeometry(geometry,

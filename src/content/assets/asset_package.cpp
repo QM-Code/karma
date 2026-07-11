@@ -14,6 +14,7 @@
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -1736,8 +1737,11 @@ std::string importerVersionForType(std::string_view type) {
   if (type == "texture_rgba8" || type == "texture") {
     return std::string(detail::textureImporterVersion());
   }
-  if (type == "mesh" || type == "gltf_scene") {
-    return "assimp-gltf-scene-v14-packed-metallic-roughness:" + assimpVersionString();
+  if (type == "mesh") {
+    return "assimp-mesh-v15-submesh-material-slots:" + assimpVersionString();
+  }
+  if (type == "gltf_scene") {
+    return "assimp-gltf-scene-v15-specular-normal-convention:" + assimpVersionString();
   }
   if (type == "animation_clip") {
     return "assimp-animation-clip-v4-full-pose-hierarchy:" + assimpVersionString();
@@ -3121,6 +3125,8 @@ AssetPackageStore::AssetPackageStore(AssetRegistry& assets,
                                      AssetPackageOptions options)
     : assets_(&assets), options_(std::move(options)) {}
 
+static_assert(std::is_nothrow_move_constructible_v<AssetPackageHandle>);
+
 AssetPackageStore::~AssetPackageStore() {
   clear();
 }
@@ -3132,6 +3138,7 @@ std::string AssetPackageStore::packageKey(const std::filesystem::path& manifest_
 std::optional<AssetPackageHandle> AssetPackageStore::acquirePackage(
     const std::filesystem::path& path,
     std::string* diagnostic) {
+  const std::lock_guard lock(mutex_);
   if (assets_ == nullptr) {
     return std::nullopt;
   }
@@ -3139,59 +3146,183 @@ std::optional<AssetPackageHandle> AssetPackageStore::acquirePackage(
   const std::string key = packageKey(manifest_path);
   auto existing = records_.find(key);
   if (existing != records_.end()) {
+    if (existing->second.ref_count == std::numeric_limits<uint32_t>::max()) {
+      fail(diagnostic, "asset package reference count overflow: " + key);
+      return std::nullopt;
+    }
+    // Copy first: a handle allocation failure must not increment the store's
+    // ownership count without returning a releasable token to the caller.
+    AssetPackageHandle acquired = existing->second.handle;
     existing->second.ref_count += 1u;
-    return existing->second.handle;
+    return std::optional<AssetPackageHandle>(std::move(acquired));
   }
 
   auto imported = importAssetPackage(*assets_, manifest_path, options_, diagnostic);
   if (!imported.has_value()) {
     return std::nullopt;
   }
-  imported->instance_id = next_instance_id_++;
-  Record record{};
-  record.handle = *imported;
-  record.ref_count = 1u;
-  records_[key] = record;
-  keys_by_instance_id_[record.handle.instance_id] = key;
-  return imported;
+  uint64_t instance_id = next_instance_id_;
+  while (instance_id == 0u || keys_by_instance_id_.contains(instance_id)) {
+    ++instance_id;
+  }
+  imported->instance_id = instance_id;
+
+  AssetPackageHandle returned;
+  bool record_inserted = false;
+  bool id_inserted = false;
+  try {
+    returned = *imported;
+    Record record{};
+    record.handle = std::move(*imported);
+    record.ref_count = 1u;
+    const auto [record_it, inserted] =
+        records_.emplace(key, std::move(record));
+    (void)record_it;
+    if (!inserted) {
+      throw std::logic_error("duplicate asset package store key");
+    }
+    record_inserted = true;
+    const auto [id_it, inserted_id] =
+        keys_by_instance_id_.emplace(instance_id, key);
+    (void)id_it;
+    if (!inserted_id) {
+      throw std::logic_error("duplicate asset package instance id");
+    }
+    id_inserted = true;
+    next_instance_id_ = instance_id + 1u;
+    if (next_instance_id_ == 0u) next_instance_id_ = 1u;
+    return std::optional<AssetPackageHandle>(std::move(returned));
+  } catch (...) {
+    if (id_inserted) keys_by_instance_id_.erase(instance_id);
+    if (record_inserted) {
+      const auto record_it = records_.find(key);
+      if (record_it != records_.end()) {
+        unloadAssetPackage(*assets_, record_it->second.handle);
+        records_.erase(record_it);
+      }
+    } else if (imported->valid()) {
+      unloadAssetPackage(*assets_, *imported);
+    } else if (returned.valid()) {
+      unloadAssetPackage(*assets_, returned);
+    }
+    throw;
+  }
 }
 
 std::optional<AssetPackageHandle> AssetPackageStore::acquireBakedPackage(
     const std::filesystem::path& baked_cache_path,
     std::string* diagnostic) {
+  return acquireBakedPackage(baked_cache_path, {}, diagnostic);
+}
+
+std::optional<AssetPackageHandle> AssetPackageStore::acquireBakedPackage(
+    const std::filesystem::path& baked_cache_path,
+    const std::filesystem::path& source_package_path,
+    std::string* diagnostic) {
+  const std::lock_guard lock(mutex_);
   if (assets_ == nullptr) {
     return std::nullopt;
   }
   const std::filesystem::path descriptor_path = bakedDescriptorPath(baked_cache_path);
-  const std::string key = packageKey(descriptor_path);
+  std::filesystem::path source_manifest_path;
+  if (!source_package_path.empty()) {
+    source_manifest_path = resolveAssetPackagePath(source_package_path);
+  } else {
+    // Baked descriptors retain the source manifest locator specifically so a
+    // source request and a baked request can participate in one ownership
+    // record. Failure to inspect it is non-fatal here: the normal baked import
+    // below owns descriptor validation and its user-facing diagnostic.
+    Json descriptor;
+    std::string ignored_diagnostic;
+    if (readJsonObjectFile(descriptor_path, descriptor, &ignored_diagnostic)) {
+      const auto source_it = descriptor.find("source_package_path");
+      if (source_it != descriptor.end() && source_it->is_string()) {
+        const std::filesystem::path embedded_source =
+            source_it->get<std::string>();
+        if (!embedded_source.empty()) {
+          source_manifest_path = resolveAssetPackagePath(embedded_source);
+        }
+      }
+    }
+  }
+  const std::string key = packageKey(source_manifest_path.empty()
+                                         ? descriptor_path
+                                         : source_manifest_path);
   auto existing = records_.find(key);
   if (existing != records_.end()) {
+    if (existing->second.ref_count == std::numeric_limits<uint32_t>::max()) {
+      fail(diagnostic, "baked asset package reference count overflow: " + key);
+      return std::nullopt;
+    }
+    AssetPackageHandle acquired = existing->second.handle;
     existing->second.ref_count += 1u;
-    return existing->second.handle;
+    return std::optional<AssetPackageHandle>(std::move(acquired));
   }
 
   auto imported = importBakedAssetPackage(*assets_, descriptor_path, diagnostic);
   if (!imported.has_value()) {
     return std::nullopt;
   }
-  imported->instance_id = next_instance_id_++;
-  Record record{};
-  record.handle = *imported;
-  record.ref_count = 1u;
-  records_[key] = record;
-  keys_by_instance_id_[record.handle.instance_id] = key;
-  return imported;
+  uint64_t instance_id = next_instance_id_;
+  while (instance_id == 0u || keys_by_instance_id_.contains(instance_id)) {
+    ++instance_id;
+  }
+  imported->instance_id = instance_id;
+
+  AssetPackageHandle returned;
+  bool record_inserted = false;
+  bool id_inserted = false;
+  try {
+    returned = *imported;
+    Record record{};
+    record.handle = std::move(*imported);
+    record.ref_count = 1u;
+    const auto [record_it, inserted] =
+        records_.emplace(key, std::move(record));
+    (void)record_it;
+    if (!inserted) {
+      throw std::logic_error("duplicate baked asset package store key");
+    }
+    record_inserted = true;
+    const auto [id_it, inserted_id] =
+        keys_by_instance_id_.emplace(instance_id, key);
+    (void)id_it;
+    if (!inserted_id) {
+      throw std::logic_error("duplicate baked asset package instance id");
+    }
+    id_inserted = true;
+    next_instance_id_ = instance_id + 1u;
+    if (next_instance_id_ == 0u) next_instance_id_ = 1u;
+    return std::optional<AssetPackageHandle>(std::move(returned));
+  } catch (...) {
+    if (id_inserted) keys_by_instance_id_.erase(instance_id);
+    if (record_inserted) {
+      const auto record_it = records_.find(key);
+      if (record_it != records_.end()) {
+        unloadAssetPackage(*assets_, record_it->second.handle);
+        records_.erase(record_it);
+      }
+    } else if (imported->valid()) {
+      unloadAssetPackage(*assets_, *imported);
+    } else if (returned.valid()) {
+      unloadAssetPackage(*assets_, returned);
+    }
+    throw;
+  }
 }
 
 bool AssetPackageStore::releasePackage(const AssetPackageHandle& package) {
+  const std::lock_guard lock(mutex_);
   std::string key;
   if (package.instance_id != 0u) {
     const auto id_it = keys_by_instance_id_.find(package.instance_id);
-    if (id_it != keys_by_instance_id_.end()) {
-      key = id_it->second;
+    if (id_it == keys_by_instance_id_.end()) {
+      // A nonzero id is an exact ownership generation. Falling back to its
+      // path would let a stale token release a newly reacquired package.
+      return false;
     }
-  }
-  if (key.empty()) {
+    key = id_it->second;
+  } else {
     key = packageKey(resolveAssetPackagePath(package.manifest_path));
   }
   auto it = records_.find(key);
@@ -3212,6 +3343,7 @@ bool AssetPackageStore::releasePackage(const AssetPackageHandle& package) {
 }
 
 void AssetPackageStore::clear() {
+  const std::lock_guard lock(mutex_);
   if (assets_ != nullptr) {
     for (auto& [key, record] : records_) {
       (void)key;

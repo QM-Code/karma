@@ -1694,12 +1694,38 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       constants.material_params5[1] = mat ? mat->thickness_factor : 0.0f;
       constants.material_params5[2] =
           (mat && std::isfinite(mat->attenuation_distance)) ? mat->attenuation_distance : 0.0f;
-      constants.material_params5[3] = 0.0f;
+      constants.material_params5[3] =
+          (mat && mat->desc.normal_map_convention ==
+                      rendering::MaterialDesc::NormalMapConvention::DirectX)
+              ? -1.0f
+              : 1.0f;
       const glm::vec3 attenuation_color = mat ? mat->attenuation_color : glm::vec3(1.0f);
       constants.material_params6[0] = attenuation_color.r;
       constants.material_params6[1] = attenuation_color.g;
       constants.material_params6[2] = attenuation_color.b;
       constants.material_params6[3] = 0.0f;
+      const glm::vec3 specular_color = mat ? mat->specular_color_factor : glm::vec3(1.0f);
+      constants.material_params7[0] = specular_color.r;
+      constants.material_params7[1] = specular_color.g;
+      constants.material_params7[2] = specular_color.b;
+      constants.material_params7[3] = mat ? mat->specular_factor : 1.0f;
+      const bool lightmap_ready =
+          mat && mat->lightmap_enabled && mat->lightmap_srv &&
+          mat->lightmap_srv.RawPtr() != default_lightmap_.RawPtr();
+      constants.lightmap_params[0] = lightmap_ready ? 1.0f : 0.0f;
+      constants.lightmap_params[1] = mat ? mat->lightmap_intensity : 1.0f;
+      constants.lightmap_params[2] = 0.0f;
+      constants.lightmap_params[3] = 0.0f;
+      const glm::vec4 lightmap_uv =
+          mat ? mat->lightmap_uv_scale_offset : glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+      constants.lightmap_uv_scale_offset[0] = lightmap_uv.x;
+      constants.lightmap_uv_scale_offset[1] = lightmap_uv.y;
+      constants.lightmap_uv_scale_offset[2] = lightmap_uv.z;
+      constants.lightmap_uv_scale_offset[3] = lightmap_uv.w;
+      constants.lightmap_mixed_mask[0] = mat ? mat->lightmap_mixed_mask_low : 0u;
+      constants.lightmap_mixed_mask[1] = mat ? mat->lightmap_mixed_mask_high : 0u;
+      constants.lightmap_mixed_mask[2] = 0u;
+      constants.lightmap_mixed_mask[3] = 0u;
       if (mat) {
         for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
           constants.texcoord_row0[slot][0] = mat->texcoord_row0[slot].x;
@@ -1803,6 +1829,13 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
               ensureMaterialForwardSrb(*mat, variant, custom_pipeline, layout)) {
         return srb;
       }
+    }
+    if (editorWireframeViewEnabled()) {
+      const size_t slot =
+          forwardPipelineVariantIndex(variant) * kInstanceGpuLayoutCount +
+          instanceGpuLayoutIndex(layout);
+      auto& wireframe_srb = editor_wireframe_default_material_srbs_[slot];
+      return wireframe_srb ? wireframe_srb.RawPtr() : shader_resources_.RawPtr();
     }
     if (layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
       auto& compact_srb = compact_default_material_srbs_[forwardPipelineVariantIndex(variant)];
@@ -3192,13 +3225,39 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.material_params5[1] = mat ? mat->thickness_factor : 0.0f;
       constants.material_params5[2] =
           (mat && std::isfinite(mat->attenuation_distance)) ? mat->attenuation_distance : 0.0f;
-      constants.material_params5[3] = 0.0f;
+      constants.material_params5[3] =
+          (mat && mat->desc.normal_map_convention ==
+                      rendering::MaterialDesc::NormalMapConvention::DirectX)
+              ? -1.0f
+              : 1.0f;
       const glm::vec3 attenuation_color = mat ? mat->attenuation_color : glm::vec3(1.0f);
       constants.material_params6[0] = attenuation_color.r;
       constants.material_params6[1] = attenuation_color.g;
       constants.material_params6[2] = attenuation_color.b;
       constants.material_params6[3] =
           static_cast<float>(static_cast<uint32_t>(scene_sample_mode));
+      const glm::vec3 specular_color = mat ? mat->specular_color_factor : glm::vec3(1.0f);
+      constants.material_params7[0] = specular_color.r;
+      constants.material_params7[1] = specular_color.g;
+      constants.material_params7[2] = specular_color.b;
+      constants.material_params7[3] = mat ? mat->specular_factor : 1.0f;
+      const bool lightmap_ready =
+          mat && mat->lightmap_enabled && mat->lightmap_srv &&
+          mat->lightmap_srv.RawPtr() != default_lightmap_.RawPtr();
+      constants.lightmap_params[0] = lightmap_ready ? 1.0f : 0.0f;
+      constants.lightmap_params[1] = mat ? mat->lightmap_intensity : 1.0f;
+      constants.lightmap_params[2] = 0.0f;
+      constants.lightmap_params[3] = 0.0f;
+      const glm::vec4 lightmap_uv =
+          mat ? mat->lightmap_uv_scale_offset : glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+      constants.lightmap_uv_scale_offset[0] = lightmap_uv.x;
+      constants.lightmap_uv_scale_offset[1] = lightmap_uv.y;
+      constants.lightmap_uv_scale_offset[2] = lightmap_uv.z;
+      constants.lightmap_uv_scale_offset[3] = lightmap_uv.w;
+      constants.lightmap_mixed_mask[0] = mat ? mat->lightmap_mixed_mask_low : 0u;
+      constants.lightmap_mixed_mask[1] = mat ? mat->lightmap_mixed_mask_high : 0u;
+      constants.lightmap_mixed_mask[2] = 0u;
+      constants.lightmap_mixed_mask[3] = 0u;
       if (mat) {
         for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
           constants.texcoord_row0[slot][0] = mat->texcoord_row0[slot].x;
@@ -3296,27 +3355,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       }
     }
 
-    if (additive) {
-      if (double_sided) {
-        ensureForwardPipeline(ForwardPipelineVariant::AdditiveDoubleSided);
-        if (additive_double_sided_pipeline_state_) {
-          return additive_double_sided_pipeline_state_;
-        }
-      }
-      ensureForwardPipeline(ForwardPipelineVariant::Additive);
-      if (additive_pipeline_state_) {
-        return additive_pipeline_state_;
-      }
-    }
-    if (double_sided) {
-      ensureForwardPipeline(ForwardPipelineVariant::TransparentDoubleSided);
-      if (transparent_double_sided_pipeline_state_) {
-        return transparent_double_sided_pipeline_state_;
-      }
-    }
-    ensureForwardPipeline(ForwardPipelineVariant::Transparent);
-    if (transparent_pipeline_state_) {
-      return transparent_pipeline_state_;
+    if (Diligent::IPipelineState* pipeline = ensureForwardPipeline(variant)) {
+      return pipeline;
     }
     return active_forward_pipeline;
   };
@@ -3332,6 +3372,14 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
               ensureMaterialForwardSrb(*mat, variant, custom_pipeline)) {
         return srb;
       }
+    }
+
+    if (editorWireframeViewEnabled()) {
+      const size_t slot =
+          forwardPipelineVariantIndex(variant) * kInstanceGpuLayoutCount +
+          instanceGpuLayoutIndex(rendering::InstanceGpuLayout::Matrix4x4Params);
+      auto& wireframe_srb = editor_wireframe_default_material_srbs_[slot];
+      return wireframe_srb ? wireframe_srb.RawPtr() : shader_resources_.RawPtr();
     }
 
     switch (variant) {

@@ -920,6 +920,10 @@ std::string importedTextureAlias(rendering::ImportedMaterialTextureSemantic sema
       return "transmission";
     case Semantic::Thickness:
       return "thickness";
+    case Semantic::Specular:
+      return "specular";
+    case Semantic::SpecularColor:
+      return "specular_color";
   }
   return sanitizeTextureKeySegment(fallback);
 }
@@ -935,7 +939,7 @@ TextureAsset::Semantic importedTextureSemantic(rendering::ImportedMaterialTextur
     return TextureAsset::Semantic::Color;
   }
   if (semantic == Semantic::BaseColor || semantic == Semantic::Emissive ||
-      semantic == Semantic::SheenColor) {
+      semantic == Semantic::SheenColor || semantic == Semantic::SpecularColor) {
     return TextureAsset::Semantic::Linear;
   }
   return TextureAsset::Semantic::Data;

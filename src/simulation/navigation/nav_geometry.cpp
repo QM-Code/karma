@@ -15,9 +15,6 @@
 #include "karma/assets.h"
 #include "karma/math.h"
 #include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
 #include "karma/world.h"
 
 namespace karma::navigation {
@@ -39,6 +36,16 @@ glm::vec3 toGeometryVertex(const glm::vec3& vertex) {
 
 glm::vec3 toGeometryVertex(const math::Vec3& vertex) {
   return math::toGlm(vertex);
+}
+
+bool navigationStaticEligible(const world::World& world,
+                              world::Entity entity) {
+  if (!world.has<components::StaticComponent>(entity)) {
+    return true;
+  }
+  const auto& membership = world.get<components::StaticComponent>(entity);
+  return membership.enabled &&
+         (membership.flags & components::StaticComponentNavigation) != 0u;
 }
 
 template <class Mesh>
@@ -68,13 +75,47 @@ void appendMesh(NavMeshInputGeometry& out,
   }
 }
 
+template <class Mesh>
+void appendInstancedMesh(NavMeshInputGeometry& geometry,
+                         const Mesh& mesh,
+                         const components::InstancedMeshComponent& instanced,
+                         const glm::mat4& owner_transform,
+                         unsigned char area) {
+  switch (instanced.gpu_layout) {
+    case rendering::InstanceGpuLayout::Matrix4x4Params:
+      for (const components::MeshInstance& instance : instanced.instances) {
+        appendMesh(geometry,
+                   mesh,
+                   owner_transform *
+                       makeTransform(instance.position,
+                                     instance.rotation,
+                                     instance.scale),
+                   area);
+      }
+      break;
+    case rendering::InstanceGpuLayout::PositionYawScaleParams:
+      for (const components::PlanarMeshInstance& instance :
+           instanced.planar_instances) {
+        glm::mat4 transform = glm::translate(
+            glm::mat4(1.0f), math::toGlm(instance.position));
+        transform = glm::rotate(transform,
+                                instance.yaw_radians,
+                                glm::vec3(0.0f, 1.0f, 0.0f));
+        transform = glm::scale(transform, math::toGlm(instance.scale));
+        appendMesh(geometry, mesh, owner_transform * transform, area);
+      }
+      break;
+  }
+}
+
 void appendOffMeshLinks(NavMeshInputGeometry& geometry,
                         const world::World& world,
                         uint32_t source_mask) {
   world.forEach<components::NavOffMeshLinkComponent, components::TransformComponent>(
       [&](const world::Entity entity) {
         const auto& link = world.get<components::NavOffMeshLinkComponent>(entity);
-        if (!link.enabled || (link.layer_mask & source_mask) == 0u) {
+        if (!link.enabled || (link.layer_mask & source_mask) == 0u ||
+            !navigationStaticEligible(world, entity)) {
           return;
         }
 
@@ -112,7 +153,8 @@ void appendConvexVolumes(NavMeshInputGeometry& geometry,
         if (!volume.enabled ||
             volume.vertices.size() < 3 ||
             volume.area == kNavAreaNull ||
-            (volume.layer_mask & source_mask) == 0u) {
+            (volume.layer_mask & source_mask) == 0u ||
+            !navigationStaticEligible(world, entity)) {
           return;
         }
 
@@ -160,7 +202,8 @@ NavMeshInputGeometry collectNavMeshGeometry(const world::World& world,
   world.forEach<components::NavMeshSurfaceComponent, components::TransformComponent>(
       [&](const world::Entity entity) {
         const auto& surface = world.get<components::NavMeshSurfaceComponent>(entity);
-        if (!surface.enabled || (surface.layer_mask & source_mask) == 0u) {
+        if (!surface.enabled || (surface.layer_mask & source_mask) == 0u ||
+            !navigationStaticEligible(world, entity)) {
           return;
         }
         has_explicit_surfaces = true;
@@ -170,15 +213,27 @@ NavMeshInputGeometry collectNavMeshGeometry(const world::World& world,
                                                         transform.getRotation(),
                                                         transform.getScale());
         const unsigned char area = surface.walkable ? surface.area : kNavAreaNull;
+        const auto append_surface_mesh = [&](const auto& mesh) {
+          if (world.has<components::InstancedMeshComponent>(entity)) {
+            appendInstancedMesh(
+                geometry,
+                mesh,
+                world.get<components::InstancedMeshComponent>(entity),
+                world_transform,
+                area);
+          } else {
+            appendMesh(geometry, mesh, world_transform, area);
+          }
+        };
         if (surface.mesh_data) {
-          appendMesh(geometry, *surface.mesh_data, world_transform, area);
+          append_surface_mesh(*surface.mesh_data);
           return;
         }
 
         if (!surface.mesh_asset_key.empty()) {
           if (const world::MeshData* mesh =
                   assets != nullptr ? assets->findMeshAsset(surface.mesh_asset_key) : nullptr) {
-            appendMesh(geometry, *mesh, world_transform, area);
+            append_surface_mesh(*mesh);
           } else {
             spdlog::warn("NavMeshSurface mesh asset key '{}' was not registered",
                          surface.mesh_asset_key);
@@ -194,6 +249,9 @@ NavMeshInputGeometry collectNavMeshGeometry(const world::World& world,
 
   world.forEach<components::ColliderComponent, components::MeshComponent, components::TransformComponent>(
       [&](const world::Entity entity) {
+        if (!navigationStaticEligible(world, entity)) {
+          return;
+        }
         const auto& collider = world.get<components::ColliderComponent>(entity);
         const auto* mesh_shape = std::get_if<components::MeshColliderShape>(&collider.shape);
         if (mesh_shape == nullptr) {

@@ -1,6 +1,7 @@
 #include "../backend.hpp"
 
 #include "../backend_internal.h"
+#include "private/rendering/editor_view_mode.hpp"
 
 #include <Graphics/GraphicsEngine/interface/DeviceContext.h>
 #include <Graphics/GraphicsEngine/interface/RenderDevice.h>
@@ -116,6 +117,39 @@ void DiligentBackend::setCamera(const rendering::CameraData& camera) {
     sanitized.ortho_top = sanitized.ortho_bottom + 1.0f;
   }
 
+  static const uint32_t kEditorViewModeKey =
+      rendering::cameraShaderParamKeyHash("karma_editor_view_mode");
+  uint32_t requested_editor_view_mode =
+      rendering::detail::kRenderedEditorViewMode;
+  const uint32_t parameter_count = std::min<uint32_t>(
+      sanitized.shader_user_param_count,
+      static_cast<uint32_t>(sanitized.shader_user_params.size()));
+  for (uint32_t index = 0u; index < parameter_count; ++index) {
+    const rendering::CameraShaderUserParam& parameter =
+        sanitized.shader_user_params[index];
+    if (parameter.key_hash != kEditorViewModeKey) {
+      continue;
+    }
+    requested_editor_view_mode =
+        rendering::detail::decodeEditorViewMode(parameter.value.r);
+    break;
+  }
+
+  const bool wireframe_fill_supported =
+      device_ != nullptr &&
+      device_->GetDeviceInfo().Features.WireframeFill ==
+          Diligent::DEVICE_FEATURE_STATE_ENABLED;
+  editor_view_mode_ = rendering::detail::effectiveEditorViewMode(
+      requested_editor_view_mode, wireframe_fill_supported);
+  if (requested_editor_view_mode == rendering::detail::kWireEditorViewMode &&
+      editor_view_mode_ == rendering::detail::kRenderedEditorViewMode &&
+      !warned_editor_wireframe_unsupported_) {
+    spdlog::warn(
+        "Wire viewport mode requested, but this graphics device does not "
+        "support WireframeFill; falling back to Rendered. Update the graphics "
+        "driver or use an adapter with non-solid fill support.");
+    warned_editor_wireframe_unsupported_ = true;
+  }
   camera_ = std::move(sanitized);
 }
 

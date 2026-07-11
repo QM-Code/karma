@@ -21,6 +21,8 @@
 #include <cstring>
 #include <initializer_list>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -38,7 +40,33 @@ struct alignas(16) TerrainConstants {
   float render_params[4];
   float material_scales[4];
   float exposure_params[4];
+  float camera_forward[4];
+  float env_params[4];
+  float shadow_params[4];
+  float point_shadow_params[4];
+  float local_light_params[4];
+  float point_shadow_tuning[4];
+  float shadow_bias_params[4];
+  float shadow_cascade_splits[4];
+  float shadow_cascade_world_texel[4];
+  float shadow_cascade_params[4];
+  float forward_plus_params[4];
+  float local_light_position_range[64][4];
+  float local_light_direction_type[64][4];
+  float local_light_color_intensity[64][4];
+  float local_light_spot_params[64][4];
+  float local_light_meta[4];
+  float shadow_cascade_uv_proj[4][16];
+  float point_shadow_uv_proj[96][16];
+  float layer_base_color[4][4];
+  float layer_emissive[4][4];
+  float layer_pbr[4][4];
+  float layer_specular[4][4];
+  float layer_flags[4][4];
 };
+
+static_assert(alignof(TerrainConstants) >= 16u);
+static_assert(sizeof(TerrainConstants) % 16u == 0u);
 
 struct TerrainVertex {
   float position[3] = {0.0f, 0.0f, 0.0f};
@@ -278,6 +306,29 @@ cbuffer TerrainConstants
     float4 g_RenderParams;
     float4 g_MaterialScales;
     float4 g_ExposureParams;
+    float4 g_CameraForward;
+    float4 g_EnvParams;
+    float4 g_ShadowParams;
+    float4 g_PointShadowParams;
+    float4 g_LocalLightParams;
+    float4 g_PointShadowTuning;
+    float4 g_ShadowBiasParams;
+    float4 g_ShadowCascadeSplits;
+    float4 g_ShadowCascadeWorldTexel;
+    float4 g_ShadowCascadeParams;
+    float4 g_ForwardPlusParams;
+    float4 g_LocalLightPositionRange[64];
+    float4 g_LocalLightDirectionType[64];
+    float4 g_LocalLightColorIntensity[64];
+    float4 g_LocalLightSpotParams[64];
+    float4 g_LocalLightMeta;
+    float4x4 g_ShadowCascadeUVProj[4];
+    float4x4 g_PointShadowUVProj[96];
+    float4 g_LayerBaseColor[4];
+    float4 g_LayerEmissive[4];
+    float4 g_LayerPbr[4];
+    float4 g_LayerSpecular[4];
+    float4 g_LayerFlags[4];
 };
 
 Texture2D<float4> g_ColorTexture;
@@ -290,12 +341,46 @@ Texture2D<float4> g_MaterialNormal0;
 Texture2D<float4> g_MaterialNormal1;
 Texture2D<float4> g_MaterialNormal2;
 Texture2D<float4> g_MaterialNormal3;
-Texture2D<float4> g_MaterialRoughness0;
-Texture2D<float4> g_MaterialRoughness1;
-Texture2D<float4> g_MaterialRoughness2;
-Texture2D<float4> g_MaterialRoughness3;
+Texture2D<float4> g_MaterialMetallicRoughness0;
+Texture2D<float4> g_MaterialMetallicRoughness1;
+Texture2D<float4> g_MaterialMetallicRoughness2;
+Texture2D<float4> g_MaterialMetallicRoughness3;
+Texture2D<float4> g_MaterialOcclusion0;
+Texture2D<float4> g_MaterialOcclusion1;
+Texture2D<float4> g_MaterialOcclusion2;
+Texture2D<float4> g_MaterialOcclusion3;
+Texture2D<float4> g_MaterialEmissive0;
+Texture2D<float4> g_MaterialEmissive1;
+Texture2D<float4> g_MaterialEmissive2;
+Texture2D<float4> g_MaterialEmissive3;
+Texture2D<float4> g_MaterialSpecular0;
+Texture2D<float4> g_MaterialSpecular1;
+Texture2D<float4> g_MaterialSpecular2;
+Texture2D<float4> g_MaterialSpecular3;
+Texture2D<float4> g_MaterialSpecularColor0;
+Texture2D<float4> g_MaterialSpecularColor1;
+Texture2D<float4> g_MaterialSpecularColor2;
+Texture2D<float4> g_MaterialSpecularColor3;
+TextureCube g_IrradianceTex;
+TextureCube g_PrefilterTex;
+Texture2D g_BRDFLUT;
+Texture2DArray<float> g_ShadowMap;
+Texture2DArray<float> g_PointShadowMap;
 SamplerState g_ColorSampler;
 SamplerState g_MaterialSampler;
+SamplerComparisonState g_ShadowSampler;
+
+struct ForwardPlusLight
+{
+    float4 position_range;
+    float4 direction_type;
+    float4 color_intensity;
+    float4 spot_params;
+};
+
+StructuredBuffer<ForwardPlusLight> g_ForwardPlusLights;
+StructuredBuffer<uint> g_ForwardPlusTileLightCounts;
+StructuredBuffer<uint> g_ForwardPlusTileLightIndices;
 
 struct PSInput
 {
@@ -305,18 +390,294 @@ struct PSInput
     float3 WorldNormal : TEXCOORD2;
 };
 
+float DistributionGGX(float3 n, float3 h, float roughness)
+{
+    const float PI = 3.14159265;
+    float a = max(roughness * roughness, 0.001);
+    float a2 = a * a;
+    float ndoth = max(dot(n, h), 0.0);
+    float denom = ndoth * ndoth * (a2 - 1.0) + 1.0;
+    return a2 / max(PI * denom * denom, 1.0e-5);
+}
+
+float GeometrySchlickGGX(float ndotv, float roughness)
+{
+    float r = roughness + 1.0;
+    float k = r * r * 0.125;
+    return ndotv / max(ndotv * (1.0 - k) + k, 1.0e-5);
+}
+
+float GeometrySmith(float3 n, float3 v, float3 l, float roughness)
+{
+    return GeometrySchlickGGX(max(dot(n, v), 0.0), roughness) *
+           GeometrySchlickGGX(max(dot(n, l), 0.0), roughness);
+}
+
+float3 FresnelSchlick(float cos_theta, float3 f0)
+{
+    return f0 + (1.0 - f0) * pow(saturate(1.0 - cos_theta), 5.0);
+}
+
+float3 FresnelSchlickRoughness(float cos_theta, float3 f0, float roughness)
+{
+    float3 grazing = max(float3(1.0 - roughness, 1.0 - roughness, 1.0 - roughness), f0);
+    return f0 + (grazing - f0) * pow(saturate(1.0 - cos_theta), 5.0);
+}
+
+float3 EvaluatePbrLight(float3 n,
+                        float3 v,
+                        float3 l,
+                        float3 radiance,
+                        float3 base_color,
+                        float metallic,
+                        float roughness,
+                        float3 dielectric_f0,
+                        bool glossy_off)
+{
+    const float PI = 3.14159265;
+    float ndotl = max(dot(n, l), 0.0);
+    float ndotv = max(dot(n, v), 0.0);
+    if (ndotl <= 0.0 || ndotv <= 0.0)
+    {
+        return float3(0.0, 0.0, 0.0);
+    }
+
+    float3 h = normalize(v + l);
+    float3 f0 = lerp(dielectric_f0, base_color, metallic);
+    float3 fresnel = glossy_off ? float3(0.0, 0.0, 0.0)
+                                : FresnelSchlick(max(dot(h, v), 0.0), f0);
+    float3 specular = float3(0.0, 0.0, 0.0);
+    if (!glossy_off)
+    {
+        float distribution = DistributionGGX(n, h, roughness);
+        float geometry = GeometrySmith(n, v, l, roughness);
+        specular = distribution * geometry * fresnel /
+                   max(4.0 * ndotv * ndotl, 1.0e-4);
+    }
+    float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) * base_color / PI;
+    return (diffuse + specular) * radiance * ndotl;
+}
+
+float SampleCascadeShadow(uint cascade_idx,
+                          float3 world_pos,
+                          float3 geom_n,
+                          float3 light_dir,
+                          float slope)
+{
+    float world_texel = max(g_ShadowCascadeWorldTexel[cascade_idx], 0.0);
+    float normal_scale = max(g_ShadowBiasParams.y, 0.0);
+    float receiver_scale = max(g_ShadowBiasParams.x, 0.0);
+    float3 shadow_world_pos =
+        world_pos + geom_n * world_texel * normal_scale * (0.4 + 1.2 * slope) +
+        light_dir * world_texel * receiver_scale * (0.03 + 0.07 * slope);
+    float4 shadow_uv_depth =
+        mul(g_ShadowCascadeUVProj[cascade_idx], float4(shadow_world_pos, 1.0));
+    shadow_uv_depth.xyz /= max(shadow_uv_depth.w, 1.0e-7);
+    float2 uv = shadow_uv_depth.xy;
+    float depth = max(shadow_uv_depth.z, 1.0e-7);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 ||
+        depth < 0.0 || depth > 1.0)
+    {
+        return 1.0;
+    }
+
+    int radius = clamp((int)g_ShadowParams.z, 0, 4);
+    float receiver_plane_bias = abs(ddx(depth)) + abs(ddy(depth));
+    float bias = max(g_ShadowParams.y, 0.0) +
+                 receiver_plane_bias * (0.5 * receiver_scale) +
+                 max(g_ShadowParams.w, 0.0) * normal_scale * (0.45 + 0.9 * slope);
+    bias = min(bias, 0.01);
+    if (radius == 0)
+    {
+        return g_ShadowMap.SampleCmpLevelZero(
+            g_ShadowSampler, float3(uv, (float)cascade_idx), depth - bias);
+    }
+
+    float sum = 0.0;
+    float weight_sum = 0.0;
+    float2 texel = g_ShadowParams.ww;
+    [loop]
+    for (int y = -radius; y <= radius; ++y)
+    {
+        [loop]
+        for (int x = -radius; x <= radius; ++x)
+        {
+            float weight = (float)(radius + 1 - abs(x)) *
+                           (float)(radius + 1 - abs(y));
+            sum += weight * g_ShadowMap.SampleCmpLevelZero(
+                                g_ShadowSampler,
+                                float3(uv + float2((float)x, (float)y) * texel,
+                                       (float)cascade_idx),
+                                depth - bias);
+            weight_sum += weight;
+        }
+    }
+    return weight_sum > 0.0 ? sum / weight_sum : 1.0;
+}
+
+uint SelectPointShadowFace(float3 direction)
+{
+    float3 a = abs(direction);
+    if (a.x >= a.y && a.x >= a.z) return direction.x >= 0.0 ? 0u : 1u;
+    if (a.y >= a.x && a.y >= a.z) return direction.y >= 0.0 ? 2u : 3u;
+    return direction.z >= 0.0 ? 4u : 5u;
+}
+
+float SampleLocalShadow(ForwardPlusLight light,
+                        float3 world_pos,
+                        float3 geom_n,
+                        float3 light_dir)
+{
+    if (g_PointShadowParams.x < 0.5 ||
+        light.direction_type.w < 0.5 || light.direction_type.w > 2.5 ||
+        light.spot_params.z < 0.0)
+    {
+        return 1.0;
+    }
+    uint slot = (uint)(light.spot_params.z + 0.5);
+    uint active_slots = (uint)max(g_PointShadowParams.w, 0.0);
+    if (slot >= active_slots || slot >= 16u)
+    {
+        return 1.0;
+    }
+
+    float texel_size = max(g_PointShadowParams.y, 0.0);
+    float slope = 1.0 - saturate(dot(geom_n, light_dir));
+    float3 shadow_world_pos =
+        world_pos + geom_n * texel_size * max(g_PointShadowTuning.z, 0.0) *
+                        (0.5 + slope);
+    float3 to_sample = shadow_world_pos - light.position_range.xyz;
+    uint face = SelectPointShadowFace(to_sample);
+    uint matrix_idx = slot * 6u + face;
+    float4 shadow_uv_depth =
+        mul(g_PointShadowUVProj[matrix_idx], float4(shadow_world_pos, 1.0));
+    shadow_uv_depth.xyz /= max(shadow_uv_depth.w, 1.0e-7);
+    float2 uv = shadow_uv_depth.xy;
+    float depth = max(shadow_uv_depth.z, 1.0e-7);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 ||
+        depth < 0.0 || depth > 1.0)
+    {
+        return 1.0;
+    }
+
+    float bias = max(g_PointShadowTuning.x, 0.0) +
+                 texel_size * max(g_PointShadowTuning.y, 0.0) * (0.4 + slope) +
+                 (abs(ddx(depth)) + abs(ddy(depth))) *
+                     max(g_PointShadowTuning.w, 0.0);
+    bias = min(bias, 0.04);
+    float sum = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            sum += g_PointShadowMap.SampleCmpLevelZero(
+                g_ShadowSampler,
+                float3(uv + float2((float)x, (float)y) * texel_size,
+                       (float)matrix_idx),
+                depth - bias);
+        }
+    }
+    return sum / 9.0;
+}
+
+void AccumulateLocalLight(ForwardPlusLight light,
+                          float3 world_pos,
+                          float3 geom_n,
+                          float3 n,
+                          float3 v,
+                          float3 base_color,
+                          float metallic,
+                          float roughness,
+                          float3 dielectric_f0,
+                          bool glossy_off,
+                          inout float3 lit,
+                          inout float shadow_lift_energy)
+{
+    float3 to_light = light.position_range.xyz - world_pos;
+    float distance = length(to_light);
+    if (distance <= 1.0e-4 || distance >= light.position_range.w)
+    {
+        return;
+    }
+    float3 l = to_light / distance;
+    float ndotl = max(dot(n, l), 0.0);
+    if (ndotl <= 0.0)
+    {
+        return;
+    }
+
+    float range_t = saturate(distance / light.position_range.w);
+    float range_falloff = saturate(1.0 - range_t);
+    range_falloff = range_falloff * range_falloff *
+                    (3.0 - 2.0 * range_falloff);
+    range_falloff = pow(range_falloff, max(g_LocalLightParams.y, 0.1));
+    float attenuation = range_falloff /
+                        max(dot(to_light, to_light) + max(g_LocalLightParams.x, 0.0),
+                            1.0e-4);
+    if (light.direction_type.w > 1.5)
+    {
+        float3 spot_direction = normalize(-light.direction_type.xyz);
+        float cone = dot(spot_direction, l);
+        float cone_width = max(light.spot_params.x - light.spot_params.y, 1.0e-4);
+        attenuation *= saturate((cone - light.spot_params.y) / cone_width);
+    }
+    if (attenuation <= 0.0)
+    {
+        return;
+    }
+
+    float shadow = SampleLocalShadow(light, world_pos, geom_n, l);
+    float3 radiance =
+        light.color_intensity.rgb * light.color_intensity.w * attenuation * shadow;
+    lit += EvaluatePbrLight(n,
+                            v,
+                            l,
+                            radiance,
+                            base_color,
+                            metallic,
+                            roughness,
+                            dielectric_f0,
+                            glossy_off);
+    shadow_lift_energy += dot(radiance, float3(0.2126, 0.7152, 0.0722)) * ndotl;
+}
+
+float3 LayerNormal(float3 sample_value, float normal_scale, float normal_y_sign)
+{
+    float3 mapped = sample_value * 2.0 - 1.0;
+    mapped.xy *= max(normal_scale, 0.0);
+    mapped.y *= normal_y_sign < 0.0 ? -1.0 : 1.0;
+    float length_sq = dot(mapped, mapped);
+    return length_sq > 1.0e-8
+        ? mapped * rsqrt(length_sq)
+        : float3(0.0, 0.0, 1.0);
+}
+
 float4 main(PSInput input) : SV_TARGET
 {
+    uint editor_view_mode = min((uint)round(max(g_ExposureParams.y, 0.0)), 3u);
+    if (editor_view_mode == 3u)
+    {
+        return float4(0.22, 0.82, 1.0, 1.0);
+    }
+
     float4 macro = g_ColorTexture.Sample(g_ColorSampler, input.UV);
     float4 albedo = macro;
+    float metallic = 0.0;
     float roughness = 1.0;
-    float3 normal = dot(input.WorldNormal, input.WorldNormal) > 1.0e-6
+    float occlusion = 1.0;
+    float3 emissive = float3(0.0, 0.0, 0.0);
+    float specular_weight = 1.0;
+    float3 specular_color = float3(1.0, 1.0, 1.0);
+    float3 geom_normal = dot(input.WorldNormal, input.WorldNormal) > 1.0e-6
         ? normalize(input.WorldNormal)
         : normalize(cross(ddy(input.WorldPos), ddx(input.WorldPos)));
-    if (normal.y < 0.0)
+    if (geom_normal.y < 0.0)
     {
-        normal = -normal;
+        geom_normal = -geom_normal;
     }
+    float3 normal = geom_normal;
 
     float layer_count = floor(g_RenderParams.w + 0.5);
     if (layer_count > 0.5)
@@ -325,8 +686,10 @@ float4 main(PSInput input) : SV_TARGET
         if (layer_count < 3.5) weights.a = 0.0;
         if (layer_count < 2.5) weights.b = 0.0;
         if (layer_count < 1.5) weights.g = 0.0;
-        float weight_sum = max(weights.r + weights.g + weights.b + weights.a, 0.0001);
-        weights /= weight_sum;
+        float weight_sum = weights.r + weights.g + weights.b + weights.a;
+        weights = weight_sum > 1.0e-5
+            ? weights / weight_sum
+            : float4(1.0, 0.0, 0.0, 0.0);
 
         float2 detail_uv = (input.WorldPos.xz / max(g_TileInfo.x, 0.001));
         float2 uv0 = detail_uv * max(g_MaterialScales.x, 0.001);
@@ -338,51 +701,239 @@ float4 main(PSInput input) : SV_TARGET
         float4 a1 = g_MaterialAlbedo1.Sample(g_MaterialSampler, uv1);
         float4 a2 = g_MaterialAlbedo2.Sample(g_MaterialSampler, uv2);
         float4 a3 = g_MaterialAlbedo3.Sample(g_MaterialSampler, uv3);
-        albedo = a0 * weights.r + a1 * weights.g + a2 * weights.b + a3 * weights.a;
+        albedo = a0 * g_LayerBaseColor[0] * weights.r +
+                 a1 * g_LayerBaseColor[1] * weights.g +
+                 a2 * g_LayerBaseColor[2] * weights.b +
+                 a3 * g_LayerBaseColor[3] * weights.a;
         albedo.rgb *= macro.rgb;
         albedo.a *= macro.a;
 
-        float3 n0 = g_MaterialNormal0.Sample(g_MaterialSampler, uv0).xyz * 2.0 - 1.0;
-        float3 n1 = g_MaterialNormal1.Sample(g_MaterialSampler, uv1).xyz * 2.0 - 1.0;
-        float3 n2 = g_MaterialNormal2.Sample(g_MaterialSampler, uv2).xyz * 2.0 - 1.0;
-        float3 n3 = g_MaterialNormal3.Sample(g_MaterialSampler, uv3).xyz * 2.0 - 1.0;
-        float3 blended_tangent_normal =
-            normalize(n0 * weights.r + n1 * weights.g + n2 * weights.b + n3 * weights.a);
+        float3 n0 = LayerNormal(g_MaterialNormal0.Sample(g_MaterialSampler, uv0).xyz,
+                                g_LayerPbr[0].z, g_LayerFlags[0].x);
+        float3 n1 = LayerNormal(g_MaterialNormal1.Sample(g_MaterialSampler, uv1).xyz,
+                                g_LayerPbr[1].z, g_LayerFlags[1].x);
+        float3 n2 = LayerNormal(g_MaterialNormal2.Sample(g_MaterialSampler, uv2).xyz,
+                                g_LayerPbr[2].z, g_LayerFlags[2].x);
+        float3 n3 = LayerNormal(g_MaterialNormal3.Sample(g_MaterialSampler, uv3).xyz,
+                                g_LayerPbr[3].z, g_LayerFlags[3].x);
+        float3 tangent_normal =
+            n0 * weights.r + n1 * weights.g + n2 * weights.b + n3 * weights.a;
+        tangent_normal = dot(tangent_normal, tangent_normal) > 1.0e-8
+            ? normalize(tangent_normal)
+            : float3(0.0, 0.0, 1.0);
         float3 tangent_candidate = float3(1.0, 0.0, 0.0) -
-                                   normal * normal.x;
+                                   geom_normal * geom_normal.x;
         if (dot(tangent_candidate, tangent_candidate) <= 1.0e-6)
         {
             tangent_candidate = float3(0.0, 0.0, 1.0) -
-                                normal * normal.z;
+                                geom_normal * geom_normal.z;
         }
         float3 tangent = normalize(tangent_candidate);
-        float3 bitangent = normalize(cross(tangent, normal));
-        normal = normalize(blended_tangent_normal.x * tangent +
-                           blended_tangent_normal.y * bitangent +
-                           blended_tangent_normal.z * normal);
+        float3 bitangent = normalize(cross(tangent, geom_normal));
+        normal = normalize(tangent_normal.x * tangent +
+                           tangent_normal.y * bitangent +
+                           tangent_normal.z * geom_normal);
 
-        float r0 = g_MaterialRoughness0.Sample(g_MaterialSampler, uv0).r;
-        float r1 = g_MaterialRoughness1.Sample(g_MaterialSampler, uv1).r;
-        float r2 = g_MaterialRoughness2.Sample(g_MaterialSampler, uv2).r;
-        float r3 = g_MaterialRoughness3.Sample(g_MaterialSampler, uv3).r;
-        roughness = saturate(r0 * weights.r + r1 * weights.g + r2 * weights.b + r3 * weights.a);
+        float4 mr0 = g_MaterialMetallicRoughness0.Sample(g_MaterialSampler, uv0);
+        float4 mr1 = g_MaterialMetallicRoughness1.Sample(g_MaterialSampler, uv1);
+        float4 mr2 = g_MaterialMetallicRoughness2.Sample(g_MaterialSampler, uv2);
+        float4 mr3 = g_MaterialMetallicRoughness3.Sample(g_MaterialSampler, uv3);
+        metallic = saturate(mr0.b * g_LayerPbr[0].x * weights.r +
+                            mr1.b * g_LayerPbr[1].x * weights.g +
+                            mr2.b * g_LayerPbr[2].x * weights.b +
+                            mr3.b * g_LayerPbr[3].x * weights.a);
+        roughness = saturate(mr0.g * g_LayerPbr[0].y * weights.r +
+                            mr1.g * g_LayerPbr[1].y * weights.g +
+                            mr2.g * g_LayerPbr[2].y * weights.b +
+                            mr3.g * g_LayerPbr[3].y * weights.a);
+
+        float ao0 = lerp(1.0, g_MaterialOcclusion0.Sample(g_MaterialSampler, uv0).r,
+                         saturate(g_LayerPbr[0].w));
+        float ao1 = lerp(1.0, g_MaterialOcclusion1.Sample(g_MaterialSampler, uv1).r,
+                         saturate(g_LayerPbr[1].w));
+        float ao2 = lerp(1.0, g_MaterialOcclusion2.Sample(g_MaterialSampler, uv2).r,
+                         saturate(g_LayerPbr[2].w));
+        float ao3 = lerp(1.0, g_MaterialOcclusion3.Sample(g_MaterialSampler, uv3).r,
+                         saturate(g_LayerPbr[3].w));
+        occlusion = saturate(ao0 * weights.r + ao1 * weights.g +
+                             ao2 * weights.b + ao3 * weights.a);
+
+        emissive =
+            g_MaterialEmissive0.Sample(g_MaterialSampler, uv0).rgb *
+                g_LayerEmissive[0].rgb * weights.r +
+            g_MaterialEmissive1.Sample(g_MaterialSampler, uv1).rgb *
+                g_LayerEmissive[1].rgb * weights.g +
+            g_MaterialEmissive2.Sample(g_MaterialSampler, uv2).rgb *
+                g_LayerEmissive[2].rgb * weights.b +
+            g_MaterialEmissive3.Sample(g_MaterialSampler, uv3).rgb *
+                g_LayerEmissive[3].rgb * weights.a;
+
+        specular_weight = saturate(
+            g_MaterialSpecular0.Sample(g_MaterialSampler, uv0).a *
+                g_LayerSpecular[0].a * weights.r +
+            g_MaterialSpecular1.Sample(g_MaterialSampler, uv1).a *
+                g_LayerSpecular[1].a * weights.g +
+            g_MaterialSpecular2.Sample(g_MaterialSampler, uv2).a *
+                g_LayerSpecular[2].a * weights.b +
+            g_MaterialSpecular3.Sample(g_MaterialSampler, uv3).a *
+                g_LayerSpecular[3].a * weights.a);
+        specular_color = saturate(
+            g_MaterialSpecularColor0.Sample(g_MaterialSampler, uv0).rgb *
+                g_LayerSpecular[0].rgb * weights.r +
+            g_MaterialSpecularColor1.Sample(g_MaterialSampler, uv1).rgb *
+                g_LayerSpecular[1].rgb * weights.g +
+            g_MaterialSpecularColor2.Sample(g_MaterialSampler, uv2).rgb *
+                g_LayerSpecular[2].rgb * weights.b +
+            g_MaterialSpecularColor3.Sample(g_MaterialSampler, uv3).rgb *
+                g_LayerSpecular[3].rgb * weights.a);
     }
 
-    float3 light_dir = normalize(-g_LightDir.xyz);
-    float light = saturate(dot(normal, light_dir));
+    if (editor_view_mode == 2u)
+    {
+        return float4(saturate(albedo.rgb), albedo.a);
+    }
+
+    bool glossy_off = editor_view_mode == 1u;
+    if (glossy_off)
+    {
+        metallic = 0.0;
+        roughness = 1.0;
+    }
+    roughness = clamp(roughness, 0.045, 1.0);
+    float3 dielectric_f0 = saturate(
+        float3(0.04, 0.04, 0.04) * specular_color * specular_weight);
+    float3 specular_f0 = lerp(dielectric_f0, albedo.rgb, metallic);
     float3 view_dir = normalize(g_CameraPos.xyz - input.WorldPos);
-    float3 half_dir = normalize(light_dir + view_dir);
-    float spec_power = lerp(96.0, 8.0, roughness);
-    float specular = pow(saturate(dot(normal, half_dir)), spec_power) *
-                     (1.0 - roughness) * 0.18;
-    float3 color = albedo.rgb * (0.30 + light * g_LightColor.rgb * 0.70) +
-                   specular * g_LightColor.rgb;
+    float3 light_dir = normalize(-g_LightDir.xyz);
+
+    float directional_shadow = 1.0;
+    if (g_ShadowParams.x > 0.5)
+    {
+        float view_depth = max(dot(input.WorldPos - g_CameraPos.xyz,
+                                   g_CameraForward.xyz), 0.0);
+        uint cascade = 0u;
+        if (view_depth > g_ShadowCascadeSplits.x) cascade = 1u;
+        if (view_depth > g_ShadowCascadeSplits.y) cascade = 2u;
+        if (view_depth > g_ShadowCascadeSplits.z) cascade = 3u;
+        float slope = 1.0 - saturate(dot(geom_normal, light_dir));
+        directional_shadow =
+            SampleCascadeShadow(cascade, input.WorldPos, geom_normal, light_dir, slope);
+        if (cascade < 3u)
+        {
+            float split_depth = g_ShadowCascadeSplits[cascade];
+            float transition = max(split_depth * max(g_ShadowCascadeParams.x, 0.0), 0.25);
+            float blend = saturate((view_depth - (split_depth - transition)) /
+                                   max(transition, 1.0e-4));
+            if (blend > 0.0)
+            {
+                float next_shadow = SampleCascadeShadow(
+                    cascade + 1u, input.WorldPos, geom_normal, light_dir, slope);
+                directional_shadow = lerp(directional_shadow, next_shadow, blend);
+            }
+        }
+    }
+
+    float3 local_lighting = float3(0.0, 0.0, 0.0);
+    float shadow_lift_energy = 0.0;
+    uint cb_light_count = min((uint)max(g_LocalLightMeta.x, 0.0), 64u);
+    uint total_light_count = (uint)max(g_LocalLightMeta.y, 0.0);
+    if (cb_light_count > 0u)
+    {
+        [loop]
+        for (uint i = 0u; i < cb_light_count; ++i)
+        {
+            ForwardPlusLight light;
+            light.position_range = g_LocalLightPositionRange[i];
+            light.direction_type = g_LocalLightDirectionType[i];
+            light.color_intensity = g_LocalLightColorIntensity[i];
+            light.spot_params = g_LocalLightSpotParams[i];
+            AccumulateLocalLight(light, input.WorldPos, geom_normal, normal, view_dir,
+                                 albedo.rgb, metallic, roughness, dielectric_f0,
+                                 glossy_off, local_lighting, shadow_lift_energy);
+        }
+    }
+    else if (g_ForwardPlusParams.w > 0.0)
+    {
+        uint tile_size = (uint)max(g_ForwardPlusParams.x, 1.0);
+        uint tiles_x = (uint)max(g_ForwardPlusParams.y, 1.0);
+        uint tiles_y = (uint)max(g_ForwardPlusParams.z, 1.0);
+        uint max_lights_per_tile = (uint)max(g_ForwardPlusParams.w, 0.0);
+        uint2 pixel = uint2(input.Pos.xy);
+        uint tile_x = min(pixel.x / tile_size, max(tiles_x, 1u) - 1u);
+        uint tile_y = min(pixel.y / tile_size, max(tiles_y, 1u) - 1u);
+        uint tile_index = tile_y * max(tiles_x, 1u) + tile_x;
+        uint light_count = min(g_ForwardPlusTileLightCounts[tile_index],
+                               max_lights_per_tile);
+        light_count = min(light_count, total_light_count);
+        uint base_index = tile_index * max_lights_per_tile;
+        [loop]
+        for (uint i = 0u; i < light_count; ++i)
+        {
+            uint light_index = g_ForwardPlusTileLightIndices[base_index + i];
+            if (light_index < total_light_count)
+            {
+                ForwardPlusLight light = g_ForwardPlusLights[light_index];
+                AccumulateLocalLight(light, input.WorldPos, geom_normal, normal, view_dir,
+                                     albedo.rgb, metallic, roughness, dielectric_f0,
+                                     glossy_off, local_lighting, shadow_lift_energy);
+            }
+        }
+    }
+
+    float shadow_lift = 1.0 - exp(-shadow_lift_energy *
+                                  max(g_LocalLightParams.w, 0.0));
+    float lifted_shadow = lerp(directional_shadow, 1.0, saturate(shadow_lift));
+    float3 directional_radiance = g_LightColor.rgb * lifted_shadow;
+    float3 lit = EvaluatePbrLight(normal,
+                                  view_dir,
+                                  light_dir,
+                                  directional_radiance,
+                                  albedo.rgb,
+                                  metallic,
+                                  roughness,
+                                  dielectric_f0,
+                                  glossy_off) * occlusion;
+    float local_ao = lerp(1.0, occlusion, saturate(g_LocalLightParams.z));
+    lit += local_lighting * local_ao;
+
+    float3 env_diffuse = float3(0.0, 0.0, 0.0);
+    if (g_EnvParams.x > 0.0 || g_EnvParams.z > 0.5)
+    {
+        env_diffuse = g_IrradianceTex.Sample(g_ColorSampler, normal).rgb *
+                      g_EnvParams.x;
+        float ndotv = max(dot(normal, view_dir), 0.0);
+        float3 ibl_fresnel = glossy_off
+            ? float3(0.0, 0.0, 0.0)
+            : FresnelSchlickRoughness(ndotv, specular_f0, roughness);
+        float3 ibl_diffuse_weight = (1.0 - ibl_fresnel) * (1.0 - metallic);
+        lit += env_diffuse * albedo.rgb * ibl_diffuse_weight * occlusion;
+        if (!glossy_off)
+        {
+            float3 reflection = reflect(-view_dir, normal);
+            float mip = roughness * g_EnvParams.y;
+            float3 prefiltered =
+                g_PrefilterTex.SampleLevel(g_ColorSampler, reflection, mip).rgb;
+            float2 brdf =
+                g_BRDFLUT.Sample(g_ColorSampler, float2(ndotv, roughness)).rg;
+            lit += prefiltered * (specular_f0 * brdf.x + brdf.y) * g_EnvParams.x;
+        }
+    }
+
+    if (glossy_off)
+    {
+        float direct_matte = max(dot(normal, light_dir), 0.0);
+        float3 matte_direct = g_LightColor.rgb * lifted_shadow * direct_matte;
+        lit = albedo.rgb * (env_diffuse * occlusion + matte_direct) +
+              local_lighting * local_ao;
+    }
+    lit += emissive;
+
     float exposure = abs(g_ExposureParams.x);
-    color = max(color, float3(0.0, 0.0, 0.0));
-    color = g_ExposureParams.x < 0.0
-        ? color * exposure
-        : 1.0 - exp(-color * exposure);
-    return float4(color, albedo.a);
+    lit = max(lit, float3(0.0, 0.0, 0.0));
+    lit = g_ExposureParams.x < 0.0
+        ? lit * exposure
+        : 1.0 - exp(-lit * exposure);
+    return float4(lit, albedo.a);
 }
 )";
 
@@ -554,8 +1105,10 @@ Diligent::RefCntAutoPtr<Diligent::IBuffer> createStaticBuffer(
 
 uint64_t terrainPipelineKey(Diligent::TEXTURE_FORMAT rtv_format,
                             Diligent::TEXTURE_FORMAT dsv_format,
-                            uint32_t sample_count) {
-  return (static_cast<uint64_t>(static_cast<uint32_t>(rtv_format)) << 32u) |
+                            uint32_t sample_count,
+                            bool wireframe) {
+  return (wireframe ? (uint64_t{1} << 63u) : 0u) |
+         (static_cast<uint64_t>(static_cast<uint32_t>(rtv_format)) << 32u) |
          (static_cast<uint64_t>(static_cast<uint32_t>(dsv_format) & 0xffffu) << 8u) |
          static_cast<uint64_t>(std::max(sample_count, 1u));
 }
@@ -567,6 +1120,21 @@ Diligent::TEXTURE_FORMAT textureViewFormat(Diligent::ITextureView* view,
   }
   const Diligent::TEXTURE_FORMAT format = view->GetDesc().Format;
   return format == Diligent::TEX_FORMAT_UNKNOWN ? fallback : format;
+}
+
+std::vector<uint8_t> packTerrainRoughnessRgba(
+    const rendering::TerrainTextureData& roughness) {
+  if (!roughness.valid()) {
+    return {};
+  }
+  std::vector<uint8_t> packed(roughness.rgba8.size(), 255u);
+  for (std::size_t pixel = 0u; pixel < roughness.rgba8.size(); pixel += 4u) {
+    packed[pixel + 0u] = 255u;
+    packed[pixel + 1u] = roughness.rgba8[pixel + 0u];
+    packed[pixel + 2u] = 255u;
+    packed[pixel + 3u] = roughness.rgba8[pixel + 3u];
+  }
+  return packed;
 }
 
 }  // namespace
@@ -732,6 +1300,7 @@ void DiligentBackend::uploadTerrainMaterialLayer(
   record.name = layer.name;
   record.uv_scale = std::max(layer.uv_scale, 0.001f);
   record.enabled = true;
+  record.material = layer.material;
 
   if (device_) {
     record.albedo_srv =
@@ -752,15 +1321,65 @@ void DiligentBackend::uploadTerrainMaterialLayer(
                            "Karma Terrain Material Normal",
                            record.normal_texture);
     }
-    if (layer.roughness.valid()) {
-      record.roughness_srv =
-          createTextureSRV(layer.roughness.rgba8.data(),
+    if (layer.metallic_roughness.valid()) {
+      record.metallic_roughness_srv =
+          createTextureSRV(layer.metallic_roughness.rgba8.data(),
+                           static_cast<int>(layer.metallic_roughness.width),
+                           static_cast<int>(layer.metallic_roughness.height),
+                           false,
+                           true,
+                           "Karma Terrain Material Metallic Roughness",
+                           record.metallic_roughness_texture);
+    } else if (layer.roughness.valid()) {
+      const std::vector<uint8_t> packed = packTerrainRoughnessRgba(layer.roughness);
+      record.metallic_roughness_srv =
+          createTextureSRV(packed.data(),
                            static_cast<int>(layer.roughness.width),
                            static_cast<int>(layer.roughness.height),
                            false,
                            true,
-                           "Karma Terrain Material Roughness",
-                           record.roughness_texture);
+                           "Karma Terrain Material Packed Roughness",
+                           record.metallic_roughness_texture);
+    }
+    if (layer.occlusion.valid()) {
+      record.occlusion_srv =
+          createTextureSRV(layer.occlusion.rgba8.data(),
+                           static_cast<int>(layer.occlusion.width),
+                           static_cast<int>(layer.occlusion.height),
+                           false,
+                           true,
+                           "Karma Terrain Material Occlusion",
+                           record.occlusion_texture);
+    }
+    if (layer.emissive.valid()) {
+      record.emissive_srv =
+          createTextureSRV(layer.emissive.rgba8.data(),
+                           static_cast<int>(layer.emissive.width),
+                           static_cast<int>(layer.emissive.height),
+                           true,
+                           true,
+                           "Karma Terrain Material Emissive",
+                           record.emissive_texture);
+    }
+    if (layer.specular.valid()) {
+      record.specular_srv =
+          createTextureSRV(layer.specular.rgba8.data(),
+                           static_cast<int>(layer.specular.width),
+                           static_cast<int>(layer.specular.height),
+                           false,
+                           true,
+                           "Karma Terrain Material Specular",
+                           record.specular_texture);
+    }
+    if (layer.specular_color.valid()) {
+      record.specular_color_srv =
+          createTextureSRV(layer.specular_color.rgba8.data(),
+                           static_cast<int>(layer.specular_color.width),
+                           static_cast<int>(layer.specular_color.height),
+                           true,
+                           true,
+                           "Karma Terrain Material Specular Color",
+                           record.specular_color_texture);
     }
   }
 
@@ -832,6 +1451,54 @@ rendering::TerrainStats DiligentBackend::getTerrainStats() const {
   return stats;
 }
 
+void DiligentBackend::bindTerrainFrameResourcesToSrb(
+    Diligent::IShaderResourceBinding* srb) const {
+  if (srb == nullptr) {
+    return;
+  }
+  constexpr auto overwrite =
+      Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE;
+  auto set_texture = [&](const char* name, Diligent::ITextureView* view) {
+    if (view == nullptr) {
+      return;
+    }
+    if (auto* var =
+            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, name)) {
+      var->Set(view, overwrite);
+    }
+  };
+  auto set_buffer = [&](const char* name, Diligent::IBufferView* view) {
+    if (view == nullptr) {
+      return;
+    }
+    if (auto* var =
+            srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, name)) {
+      var->Set(view, overwrite);
+    }
+  };
+
+  set_texture("g_IrradianceTex",
+              env_irradiance_srv_ ? env_irradiance_srv_.RawPtr()
+                                  : default_env_.RawPtr());
+  set_texture("g_PrefilterTex",
+              env_prefilter_srv_ ? env_prefilter_srv_.RawPtr()
+                                 : default_env_.RawPtr());
+  set_texture("g_BRDFLUT", brdfLutSrv());
+  set_buffer("g_ForwardPlusLights",
+             active_forward_plus_light_srv_
+                 ? active_forward_plus_light_srv_
+                 : forward_plus_light_srv_.RawPtr());
+  set_buffer("g_ForwardPlusTileLightCounts",
+             active_forward_plus_tile_count_srv_
+                 ? active_forward_plus_tile_count_srv_
+                 : forward_plus_tile_count_srv_.RawPtr());
+  set_buffer("g_ForwardPlusTileLightIndices",
+             active_forward_plus_tile_index_srv_
+                 ? active_forward_plus_tile_index_srv_
+                 : forward_plus_tile_index_srv_.RawPtr());
+  bindShadowResourcesToSrb(srb);
+}
+
 DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
     Diligent::TEXTURE_FORMAT rtv_format,
     Diligent::TEXTURE_FORMAT dsv_format) {
@@ -886,14 +1553,15 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
     terrain_default_control_ = createSolidTextureSRV(255,
                                                      0,
                                                      0,
-                                                     255,
+                                                     0,
                                                      false,
                                                      "Karma Terrain Default Control",
                                                      terrain_default_control_tex_);
   }
 
-  const uint64_t pipeline_key =
-      terrainPipelineKey(rtv_format, dsv_format, activeRasterSampleCount());
+  const bool editor_wireframe = editorWireframeViewEnabled();
+  const uint64_t pipeline_key = terrainPipelineKey(
+      rtv_format, dsv_format, activeRasterSampleCount(), editor_wireframe);
   TerrainPipelineSet& pipelines = terrain_pipeline_sets_[pipeline_key];
   pipelines.rtv_format = rtv_format;
   pipelines.dsv_format = dsv_format;
@@ -949,6 +1617,9 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
       graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
       graphics.RasterizerDesc.FrontCounterClockwise = true;
+      if (editor_wireframe) {
+        graphics.RasterizerDesc.FillMode = Diligent::FILL_MODE_WIREFRAME;
+      }
       graphics.DepthStencilDesc.DepthEnable = depth_enabled;
       graphics.DepthStencilDesc.DepthWriteEnable = depth_enabled;
       graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
@@ -980,17 +1651,67 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal3",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness0",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness0",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness1",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness1",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness2",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness2",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness3",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightIndices",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSampler",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       };
       pso.PSODesc.ResourceLayout.Variables = vars;
@@ -1048,6 +1769,9 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       graphics.PrimitiveTopology = Diligent::PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
       graphics.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
       graphics.RasterizerDesc.FrontCounterClockwise = true;
+      if (editor_wireframe) {
+        graphics.RasterizerDesc.FillMode = Diligent::FILL_MODE_WIREFRAME;
+      }
       graphics.DepthStencilDesc.DepthEnable = depth_enabled;
       graphics.DepthStencilDesc.DepthWriteEnable = depth_enabled;
       graphics.DepthStencilDesc.DepthFunc = Diligent::COMPARISON_FUNC_LESS_EQUAL;
@@ -1087,17 +1811,67 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_MaterialNormal3",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness0",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness0",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness1",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness1",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness2",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness2",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
-          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialRoughness3",
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialMetallicRoughness3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialOcclusion3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialEmissive3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecular3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor0",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor1",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor2",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSpecularColor3",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_PrefilterTex",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_BRDFLUT",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ShadowMap",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_PointShadowMap",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusLights",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightCounts",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ForwardPlusTileLightIndices",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
           {Diligent::SHADER_TYPE_PIXEL, "g_MaterialSampler",
+           Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
+          {Diligent::SHADER_TYPE_PIXEL, "g_ShadowSampler",
            Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE},
       };
       pso.PSODesc.ResourceLayout.Variables = vars;
@@ -1144,42 +1918,38 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       Diligent::ITextureView* const value = (layer.*member).RawPtr();
       return layer.enabled && value != nullptr ? value : fallback;
     };
-    set_texture("g_MaterialAlbedo0",
-                layer_srv(0u, &TerrainMaterialLayerRecord::albedo_srv,
-                          default_base_color_.RawPtr()));
-    set_texture("g_MaterialAlbedo1",
-                layer_srv(1u, &TerrainMaterialLayerRecord::albedo_srv,
-                          default_base_color_.RawPtr()));
-    set_texture("g_MaterialAlbedo2",
-                layer_srv(2u, &TerrainMaterialLayerRecord::albedo_srv,
-                          default_base_color_.RawPtr()));
-    set_texture("g_MaterialAlbedo3",
-                layer_srv(3u, &TerrainMaterialLayerRecord::albedo_srv,
-                          default_base_color_.RawPtr()));
-    set_texture("g_MaterialNormal0",
-                layer_srv(0u, &TerrainMaterialLayerRecord::normal_srv,
-                          default_normal_.RawPtr()));
-    set_texture("g_MaterialNormal1",
-                layer_srv(1u, &TerrainMaterialLayerRecord::normal_srv,
-                          default_normal_.RawPtr()));
-    set_texture("g_MaterialNormal2",
-                layer_srv(2u, &TerrainMaterialLayerRecord::normal_srv,
-                          default_normal_.RawPtr()));
-    set_texture("g_MaterialNormal3",
-                layer_srv(3u, &TerrainMaterialLayerRecord::normal_srv,
-                          default_normal_.RawPtr()));
-    set_texture("g_MaterialRoughness0",
-                layer_srv(0u, &TerrainMaterialLayerRecord::roughness_srv,
-                          default_base_color_.RawPtr()));
-    set_texture("g_MaterialRoughness1",
-                layer_srv(1u, &TerrainMaterialLayerRecord::roughness_srv,
-                          default_base_color_.RawPtr()));
-    set_texture("g_MaterialRoughness2",
-                layer_srv(2u, &TerrainMaterialLayerRecord::roughness_srv,
-                          default_base_color_.RawPtr()));
-    set_texture("g_MaterialRoughness3",
-                layer_srv(3u, &TerrainMaterialLayerRecord::roughness_srv,
-                          default_base_color_.RawPtr()));
+    const auto bind_layer_family =
+        [&](std::string_view prefix,
+            Diligent::RefCntAutoPtr<Diligent::ITextureView>
+                TerrainMaterialLayerRecord::*member,
+            Diligent::ITextureView* fallback) {
+          for (uint32_t index = 0u; index < 4u; ++index) {
+            const std::string name =
+                std::string(prefix) + std::to_string(index);
+            set_texture(name.c_str(), layer_srv(index, member, fallback));
+          }
+        };
+    bind_layer_family("g_MaterialAlbedo",
+                      &TerrainMaterialLayerRecord::albedo_srv,
+                      default_base_color_.RawPtr());
+    bind_layer_family("g_MaterialNormal",
+                      &TerrainMaterialLayerRecord::normal_srv,
+                      default_normal_.RawPtr());
+    bind_layer_family("g_MaterialMetallicRoughness",
+                      &TerrainMaterialLayerRecord::metallic_roughness_srv,
+                      default_base_color_.RawPtr());
+    bind_layer_family("g_MaterialOcclusion",
+                      &TerrainMaterialLayerRecord::occlusion_srv,
+                      default_occlusion_.RawPtr());
+    bind_layer_family("g_MaterialEmissive",
+                      &TerrainMaterialLayerRecord::emissive_srv,
+                      default_emissive_.RawPtr());
+    bind_layer_family("g_MaterialSpecular",
+                      &TerrainMaterialLayerRecord::specular_srv,
+                      default_base_color_.RawPtr());
+    bind_layer_family("g_MaterialSpecularColor",
+                      &TerrainMaterialLayerRecord::specular_color_srv,
+                      default_base_color_.RawPtr());
 
     if (auto* var =
             srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ColorSampler")) {
@@ -1191,6 +1961,7 @@ DiligentBackend::TerrainPipelineSet* DiligentBackend::ensureTerrainResources(
       var->Set(terrain_material_sampler_ ? terrain_material_sampler_.RawPtr()
                                          : sampler_color_.RawPtr());
     }
+    bindTerrainFrameResourcesToSrb(srb);
   };
 
   auto initialize_tile_srb = [&](TerrainRecord& terrain, TerrainTileRecord& tile) {
@@ -1255,8 +2026,11 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
       (!pipelines->cpu_pipeline_state && !pipelines->tess_pipeline_state)) {
     return 0u;
   }
-  const uint64_t pipeline_key =
-      terrainPipelineKey(rtv_format, dsv_format, activeRasterSampleCount());
+  const uint64_t pipeline_key = terrainPipelineKey(
+      rtv_format,
+      dsv_format,
+      activeRasterSampleCount(),
+      editorWireframeViewEnabled());
 
   auto* rtv = active_rtv;
   auto* dsv = active_dsv;
@@ -1349,6 +2123,60 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
     std::memcpy(constants.light_dir, base_constants.light_dir, sizeof(constants.light_dir));
     std::memcpy(constants.light_color, base_constants.light_color, sizeof(constants.light_color));
     std::memcpy(constants.camera_pos, base_constants.camera_pos, sizeof(constants.camera_pos));
+    std::memcpy(constants.camera_forward,
+                base_constants.camera_forward,
+                sizeof(constants.camera_forward));
+    std::memcpy(constants.env_params,
+                base_constants.env_params,
+                sizeof(constants.env_params));
+    std::memcpy(constants.shadow_params,
+                base_constants.shadow_params,
+                sizeof(constants.shadow_params));
+    std::memcpy(constants.point_shadow_params,
+                base_constants.point_shadow_params,
+                sizeof(constants.point_shadow_params));
+    std::memcpy(constants.local_light_params,
+                base_constants.local_light_params,
+                sizeof(constants.local_light_params));
+    std::memcpy(constants.point_shadow_tuning,
+                base_constants.point_shadow_tuning,
+                sizeof(constants.point_shadow_tuning));
+    std::memcpy(constants.shadow_bias_params,
+                base_constants.shadow_bias_params,
+                sizeof(constants.shadow_bias_params));
+    std::memcpy(constants.shadow_cascade_splits,
+                base_constants.shadow_cascade_splits,
+                sizeof(constants.shadow_cascade_splits));
+    std::memcpy(constants.shadow_cascade_world_texel,
+                base_constants.shadow_cascade_world_texel,
+                sizeof(constants.shadow_cascade_world_texel));
+    std::memcpy(constants.shadow_cascade_params,
+                base_constants.shadow_cascade_params,
+                sizeof(constants.shadow_cascade_params));
+    std::memcpy(constants.forward_plus_params,
+                base_constants.forward_plus_params,
+                sizeof(constants.forward_plus_params));
+    std::memcpy(constants.local_light_position_range,
+                base_constants.local_light_position_range,
+                sizeof(constants.local_light_position_range));
+    std::memcpy(constants.local_light_direction_type,
+                base_constants.local_light_direction_type,
+                sizeof(constants.local_light_direction_type));
+    std::memcpy(constants.local_light_color_intensity,
+                base_constants.local_light_color_intensity,
+                sizeof(constants.local_light_color_intensity));
+    std::memcpy(constants.local_light_spot_params,
+                base_constants.local_light_spot_params,
+                sizeof(constants.local_light_spot_params));
+    std::memcpy(constants.local_light_meta,
+                base_constants.local_light_meta,
+                sizeof(constants.local_light_meta));
+    std::memcpy(constants.shadow_cascade_uv_proj,
+                base_constants.shadow_cascade_uv_proj,
+                sizeof(constants.shadow_cascade_uv_proj));
+    std::memcpy(constants.point_shadow_uv_proj,
+                base_constants.point_shadow_uv_proj,
+                sizeof(constants.point_shadow_uv_proj));
     constants.tile_info[0] = terrain.desc.tile_size;
     constants.tile_info[1] = terrain.desc.height_scale;
     constants.tile_info[2] = terrain.desc.height_offset;
@@ -1359,12 +2187,66 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
     constants.render_params[3] = static_cast<float>(std::min<uint32_t>(
         terrain.material_layer_count, static_cast<uint32_t>(terrain.material_layers.size())));
     for (uint32_t i = 0u; i < terrain.material_layers.size(); ++i) {
-      constants.material_scales[i] =
-          terrain.material_layers[i].enabled
-              ? std::max(terrain.material_layers[i].uv_scale, 0.001f)
+      const TerrainMaterialLayerRecord& layer_record = terrain.material_layers[i];
+      constants.material_scales[i] = layer_record.enabled
+                                          ? std::max(layer_record.uv_scale, 0.001f)
+                                          : 1.0f;
+      const auto finite_or = [](float value, float fallback) {
+        return std::isfinite(value) ? value : fallback;
+      };
+      const auto unit = [&](float value, float fallback) {
+        return std::clamp(finite_or(value, fallback), 0.0f, 1.0f);
+      };
+      if (!layer_record.enabled) {
+        constants.layer_base_color[i][0] = 1.0f;
+        constants.layer_base_color[i][1] = 1.0f;
+        constants.layer_base_color[i][2] = 1.0f;
+        constants.layer_base_color[i][3] = 1.0f;
+        constants.layer_pbr[i][0] = 0.0f;
+        constants.layer_pbr[i][1] = 1.0f;
+        constants.layer_pbr[i][2] = 1.0f;
+        constants.layer_pbr[i][3] = 1.0f;
+        constants.layer_specular[i][0] = 1.0f;
+        constants.layer_specular[i][1] = 1.0f;
+        constants.layer_specular[i][2] = 1.0f;
+        constants.layer_specular[i][3] = 1.0f;
+        constants.layer_flags[i][0] = 1.0f;
+        continue;
+      }
+
+      const rendering::MaterialDesc& material = layer_record.material;
+      constants.layer_base_color[i][0] = unit(material.base_color.r, 1.0f);
+      constants.layer_base_color[i][1] = unit(material.base_color.g, 1.0f);
+      constants.layer_base_color[i][2] = unit(material.base_color.b, 1.0f);
+      constants.layer_base_color[i][3] = unit(material.base_color.a, 1.0f);
+      const float emissive_strength =
+          std::max(finite_or(material.emissive_strength, 1.0f), 0.0f);
+      constants.layer_emissive[i][0] =
+          std::max(finite_or(material.emissive_color.r, 0.0f), 0.0f) *
+          emissive_strength;
+      constants.layer_emissive[i][1] =
+          std::max(finite_or(material.emissive_color.g, 0.0f), 0.0f) *
+          emissive_strength;
+      constants.layer_emissive[i][2] =
+          std::max(finite_or(material.emissive_color.b, 0.0f), 0.0f) *
+          emissive_strength;
+      constants.layer_pbr[i][0] = unit(material.metallic, 0.0f);
+      constants.layer_pbr[i][1] = unit(material.roughness, 1.0f);
+      constants.layer_pbr[i][2] =
+          std::max(finite_or(material.normal_scale, 1.0f), 0.0f);
+      constants.layer_pbr[i][3] = unit(material.occlusion_strength, 1.0f);
+      constants.layer_specular[i][0] = unit(material.specular_color.r, 1.0f);
+      constants.layer_specular[i][1] = unit(material.specular_color.g, 1.0f);
+      constants.layer_specular[i][2] = unit(material.specular_color.b, 1.0f);
+      constants.layer_specular[i][3] = unit(material.specular_factor, 1.0f);
+      constants.layer_flags[i][0] =
+          material.normal_map_convention ==
+                  rendering::MaterialDesc::NormalMapConvention::DirectX
+              ? -1.0f
               : 1.0f;
     }
     constants.exposure_params[0] = base_constants.env_params[3];
+    constants.exposure_params[1] = static_cast<float>(editor_view_mode_);
     {
       Diligent::MapHelper<TerrainConstants> mapped(
           context_, terrain_cb_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
@@ -1376,6 +2258,7 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
     }
 
     if (use_tessellation) {
+      bindTerrainFrameResourcesToSrb(tess_srb);
       context_->SetPipelineState(pipelines->tess_pipeline_state);
       context_->CommitShaderResources(tess_srb,
                                       Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
@@ -1393,6 +2276,7 @@ Diligent::Uint32 DiligentBackend::renderTerrainLayer(rendering::LayerId layer,
       context_->Draw(draw);
       terrain_stats_.tessellated_tiles += 1u;
     } else {
+      bindTerrainFrameResourcesToSrb(cpu_srb);
       context_->SetPipelineState(pipelines->cpu_pipeline_state);
       context_->CommitShaderResources(cpu_srb,
                                       Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);

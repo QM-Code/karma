@@ -461,7 +461,8 @@ using TileCoord = rendering::TerrainTileCoord;
 
 /// Hard limits that keep code-authored terrain settings from causing unbounded allocations.
 inline constexpr int kMaxTerrainStreamingTileRadius = 64;
-inline constexpr uint32_t kMaxTerrainTileResolution = 4097u;
+inline constexpr uint32_t kMaxTerrainTileResolution =
+    rendering::kMaxTerrainTileResolution;
 inline constexpr std::size_t kMaxTerrainOutstandingTileRequests = 64u;
 
 struct TileCoordHash {
@@ -555,14 +556,41 @@ class TerrainSystem {
   TerrainSystem(const TerrainSystem&) = delete;
   TerrainSystem& operator=(const TerrainSystem&) = delete;
 
+  /// Replaces one SingleImage entity's file-backed tile with an in-memory
+  /// snapshot. The next update recreates that terrain resource and uploads the
+  /// supplied tile without touching disk. All override mutation and update
+  /// calls must run on the thread that constructed this system.
+  bool setSingleImageTileOverride(const world::World& world,
+                                  world::Entity entity,
+                                  rendering::TerrainTileData tile);
+  void clearSingleImageTileOverride(const world::World& world,
+                                    world::Entity entity);
+  [[nodiscard]] bool hasSingleImageTileOverride(
+      const world::World& world,
+      world::Entity entity) const;
+
+  /// Compatibility overload that binds to the active world, or to the first
+  /// world updated after the call. Prefer the world-aware overload whenever
+  /// more than one World can be alive.
+  bool setSingleImageTileOverride(world::Entity entity,
+                                  rendering::TerrainTileData tile);
+  void clearSingleImageTileOverride(world::Entity entity);
+  [[nodiscard]] bool hasSingleImageTileOverride(world::Entity entity) const;
+
   void syncTerrainColliders(world::World& world);
   void update(world::World& world, float dt, float interpolation_alpha);
 
  private:
+  struct SingleImageTileOverride {
+    std::shared_ptr<const rendering::TerrainTileData> tile;
+    uint64_t revision = 0u;
+  };
+
   struct TileRequest {
     uint64_t entity_key = 0u;
     uint64_t generation = 0u;
     std::shared_ptr<const components::TerrainComponent> terrain;
+    std::shared_ptr<const rendering::TerrainTileData> single_image_tile_override;
     TileCoord coord{};
   };
 
@@ -571,6 +599,7 @@ class TerrainSystem {
     uint64_t generation = 0u;
     TileCoord coord{};
     std::optional<rendering::TerrainTileData> data;
+    std::shared_ptr<const rendering::TerrainTileData> shared_data;
   };
 
   struct TerrainSourceSettings {
@@ -591,7 +620,9 @@ class TerrainSystem {
     float height_value_min = 0.0f;
     float height_value_max = 1.0f;
     int32_t tile_index_base = 0;
+    uint64_t source_revision = 0u;
     uint64_t asset_registry_version = 0u;
+    uint64_t single_image_override_revision = 0u;
     std::vector<components::TerrainMaterialLayer> material_layers;
     std::vector<components::TerrainDataMapBinding> data_maps;
 
@@ -604,7 +635,7 @@ class TerrainSystem {
     rendering::TerrainDesc desc{};
     TerrainSourceSettings source_settings{};
     std::shared_ptr<const components::TerrainComponent> terrain_snapshot;
-    uint64_t generation = 1u;
+    uint64_t generation = 0u;
     std::unordered_set<TileCoord, TileCoordHash> desired;
     std::unordered_set<TileCoord, TileCoordHash> loaded;
     std::unordered_set<TileCoord, TileCoordHash> queued;
@@ -622,6 +653,22 @@ class TerrainSystem {
   }
 
   TerrainState& ensureState(uint64_t key, const components::TerrainComponent& terrain);
+  using SingleImageTileOverrideMap =
+      std::unordered_map<uint64_t, SingleImageTileOverride>;
+  bool storeSingleImageTileOverride(uint64_t world_id,
+                                    world::Entity entity,
+                                    rendering::TerrainTileData tile);
+  SingleImageTileOverride* findSingleImageTileOverride(uint64_t world_id,
+                                                       uint64_t entity_key);
+  const SingleImageTileOverride* findSingleImageTileOverride(
+      uint64_t world_id,
+      uint64_t entity_key) const;
+  void bindPendingTileOverrides(uint64_t world_id);
+  void assertThreadAffinity() const;
+  uint64_t nextStateGeneration();
+  void prepareWorld(world::World& world);
+  void pruneDeadTileOverrides(const world::World& world);
+  void resetForWorldSwitch(uint64_t previous_world_id);
   void destroyState(TerrainState& state);
   void cleanupStaleStates(world::World& world);
   void queueTile(uint64_t key,
@@ -634,6 +681,13 @@ class TerrainSystem {
   rendering::GraphicsDevice* device_ = nullptr;
   const assets::AssetRegistry* assets_ = nullptr;
   std::unordered_map<uint64_t, TerrainState> states_;
+  std::unordered_map<uint64_t, SingleImageTileOverrideMap>
+      single_image_tile_overrides_by_world_;
+  SingleImageTileOverrideMap pending_single_image_tile_overrides_;
+  uint64_t next_single_image_override_revision_ = 1u;
+  uint64_t state_generation_sequence_ = 0u;
+  uint64_t last_world_id_ = 0u;
+  std::thread::id owner_thread_{};
   std::unordered_map<uint64_t, std::size_t> generated_collider_signatures_;
   std::mutex queue_mutex_;
   std::mutex completed_mutex_;
@@ -663,13 +717,40 @@ class TerrainRuntimeModule final : public app::RuntimeModule {
   TerrainRuntimeModule(const TerrainRuntimeModule&) = delete;
   TerrainRuntimeModule& operator=(const TerrainRuntimeModule&) = delete;
 
+  /// Installs or removes a live single-image terrain tile. These methods may
+  /// be called before the module is transferred into `EngineApp`; pre-attach
+  /// overrides are applied when the runtime context becomes available.
+  /// Pre-attach calls must be externally serialized; once attached, all calls
+  /// must run on the runtime thread.
+  bool setSingleImageTileOverride(const world::World& world,
+                                  world::Entity entity,
+                                  rendering::TerrainTileData tile);
+  void clearSingleImageTileOverride(const world::World& world,
+                                    world::Entity entity);
+  bool setSingleImageTileOverride(world::Entity entity,
+                                  rendering::TerrainTileData tile);
+  void clearSingleImageTileOverride(world::Entity entity);
+
   void onAttach(const app::RuntimeModuleContext& context) override;
   void onDetach() override;
   void onFrameBegin(world::World& world, float dt) override;
   void onUpdate(world::World& world, float dt, float interpolation_alpha) override;
 
  private:
+  struct PendingTileOverride {
+    world::Entity entity{};
+    rendering::TerrainTileData tile;
+  };
+
+  using PendingTileOverrideMap =
+      std::unordered_map<uint64_t, PendingTileOverride>;
+  void applyPendingTileOverrides(world::World& world);
+  void assertThreadAffinity() const;
+
   std::unique_ptr<TerrainSystem> system_;
+  std::unordered_map<uint64_t, PendingTileOverrideMap>
+      pending_tile_overrides_by_world_;
+  std::thread::id attached_thread_{};
 };
 
 }  // namespace karma::visual::terrain

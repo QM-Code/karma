@@ -25,11 +25,15 @@
 #include "karma/app.h"
 #include <glm/common.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "karma/assets.h"
 #include "karma/platform.h"
+#include "karma/prefabs.h"
 #include "karma/rendering.h"
 #include "karma/components.h"
+#include "karma/visual.h"
 #include "karma/world.h"
 #include "karma/world.h"
 
@@ -38,8 +42,11 @@
 #include "../src/content/importers/gltf_scene_import_internal.h"
 #include "../src/private/rendering/ktx_cube_orientation.hpp"
 #include "../src/private/rendering/point_shadow_policy.hpp"
+#include "../src/private/rendering/editor_view_mode.hpp"
 
 namespace {
+
+std::filesystem::path findRepoRoot();
 
 bool diagnosticsContain(const karma::rendering::FrameGraphValidationResult& result,
                         std::string_view needle) {
@@ -133,6 +140,47 @@ void testTerrainHeadlessNoopApi() {
   tile.color_height = 1u;
   tile.color_rgba8 = {255u, 255u, 255u, 255u};
   assert(tile.valid());
+
+  karma::rendering::TerrainTileData invalid = tile;
+  invalid.heights.front() = std::numeric_limits<float>::quiet_NaN();
+  assert(!invalid.valid());
+  invalid = tile;
+  invalid.heights.front() = -0.001f;
+  assert(!invalid.valid());
+  invalid = tile;
+  invalid.heights.front() = 1.001f;
+  assert(!invalid.valid());
+  invalid = tile;
+  invalid.heights.front() = std::numeric_limits<float>::max();
+  assert(!invalid.valid());
+  invalid = tile;
+  invalid.resolution = karma::rendering::kMaxTerrainTileResolution + 1u;
+  assert(!invalid.valid());
+  invalid = tile;
+  invalid.color_width = std::numeric_limits<uint32_t>::max();
+  invalid.color_height = std::numeric_limits<uint32_t>::max();
+  invalid.color_rgba8 = {255u, 255u, 255u, 255u};
+  assert(!invalid.valid());
+  invalid = tile;
+  invalid.control_width = std::numeric_limits<uint32_t>::max();
+  invalid.control_height = std::numeric_limits<uint32_t>::max();
+  invalid.control_rgba8 = {255u, 0u, 0u, 0u};
+  assert(!invalid.valid());
+  invalid = tile;
+  invalid.data_maps.push_back(karma::rendering::TerrainDataMapTileData{
+      .name = "invalid",
+      .width = 1u,
+      .height = 1u,
+      .values = {std::numeric_limits<float>::infinity()},
+  });
+  assert(!invalid.valid());
+
+  karma::rendering::TerrainTextureData overflow_texture{
+      .width = std::numeric_limits<uint32_t>::max(),
+      .height = std::numeric_limits<uint32_t>::max(),
+      .rgba8 = {255u, 255u, 255u, 255u},
+  };
+  assert(!overflow_texture.valid());
   device.uploadTerrainTile(terrain, tile);
   device.submitTerrain(karma::rendering::TerrainDrawItem{
       .instance = 7u,
@@ -161,6 +209,25 @@ void testTerrainHeadlessNoopApi() {
 
 bool nearly(float a, float b) {
   return std::abs(a - b) < 0.0001f;
+}
+
+bool matricesNearlyEqual(const glm::mat4& lhs,
+                         const glm::mat4& rhs,
+                         float epsilon = 0.0001f) {
+  for (int column = 0; column < 4; ++column) {
+    for (int row = 0; row < 4; ++row) {
+      if (std::abs(lhs[column][row] - rhs[column][row]) > epsilon) return false;
+    }
+  }
+  return true;
+}
+
+glm::mat4 planarInstanceMatrix(const karma::rendering::PlanarInstanceData& instance) {
+  glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(instance.position_yaw));
+  transform = glm::rotate(transform,
+                          instance.position_yaw.w,
+                          glm::vec3(0.0f, 1.0f, 0.0f));
+  return glm::scale(transform, glm::vec3(instance.scale_pad));
 }
 
 void testSkyboxShaderPreservesGeneratedCubemapOrientation() {
@@ -716,6 +783,50 @@ void testCameraDataCarriesAntiAliasingSettings() {
   assert(nearly(default_data.anti_aliasing.ssaa_scale, 1.0f));
 }
 
+void testEditorViewModeDecodingAndFallback() {
+  using karma::rendering::detail::decodeEditorViewMode;
+  using karma::rendering::detail::effectiveEditorViewMode;
+
+  assert(decodeEditorViewMode(-std::numeric_limits<float>::max()) == 0u);
+  assert(decodeEditorViewMode(-0.5f) == 0u);
+  assert(decodeEditorViewMode(0.49f) == 0u);
+  assert(decodeEditorViewMode(0.5f) == 1u);
+  assert(decodeEditorViewMode(1.49f) == 1u);
+  assert(decodeEditorViewMode(1.5f) == 2u);
+  assert(decodeEditorViewMode(2.49f) == 2u);
+  assert(decodeEditorViewMode(2.5f) == 3u);
+  assert(decodeEditorViewMode(std::numeric_limits<float>::max()) == 3u);
+  assert(decodeEditorViewMode(std::numeric_limits<float>::quiet_NaN()) == 0u);
+  assert(decodeEditorViewMode(std::numeric_limits<float>::infinity()) == 0u);
+
+  assert(effectiveEditorViewMode(0u, false) == 0u);
+  assert(effectiveEditorViewMode(1u, false) == 1u);
+  assert(effectiveEditorViewMode(2u, false) == 2u);
+  assert(effectiveEditorViewMode(3u, true) == 3u);
+  assert(effectiveEditorViewMode(3u, false) == 0u);
+  assert(effectiveEditorViewMode(4u, true) == 0u);
+}
+
+void testEditorViewModeBackendFallbackContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string state = read_source(
+      "src/rendering/renderer/backends/diligent/passes/render_state.cpp");
+  assert(state.find("decodeEditorViewMode(parameter.value.r)") !=
+         std::string::npos);
+  assert(state.find("effectiveEditorViewMode(") != std::string::npos);
+  assert(state.find("falling back to Rendered") != std::string::npos);
+  assert(state.find("warned_editor_wireframe_unsupported_") !=
+         std::string::npos);
+}
+
 void testCameraAndLightExtractionSanitizesRuntimeData() {
   karma::components::CameraComponent camera{};
   camera.fov_y_degrees = std::numeric_limits<float>::quiet_NaN();
@@ -766,12 +877,122 @@ void testCameraAndLightExtractionSanitizesRuntimeData() {
   light.intensity = std::numeric_limits<float>::quiet_NaN();
   light.range = -1.0f;
   light.inner_cone_degrees = std::numeric_limits<float>::infinity();
+  light.mixed_bake_mask_bit = 37u;
   const auto light_data =
       karma::rendering::render_system::toLightData(light, transform, 1.0f);
   assert(nearly(light_data.intensity, 0.0f));
   assert(nearly(light_data.range, 0.0f));
   assert(std::isfinite(light_data.inner_cone_cos));
   assert(std::isfinite(light_data.outer_cone_cos));
+  assert(light_data.mixed_bake_mask_bit == 37u);
+
+  const auto directional_data =
+      karma::rendering::render_system::toDirectionalLight(light, transform, 1.0f);
+  assert(directional_data.mixed_bake_mask_bit == 37u);
+  assert(karma::rendering::LightData{}.mixed_bake_mask_bit == UINT32_MAX);
+  assert(karma::rendering::DirectionalLightData{}.mixed_bake_mask_bit == UINT32_MAX);
+}
+
+void testInstancedMeshExtractionComposesOwnerTransform() {
+  using karma::rendering::InstanceGpuLayout;
+  using karma::rendering::render_system::extractInstancedMesh;
+  using karma::rendering::render_system::toTransform;
+
+  const glm::quat owner_yaw =
+      glm::angleAxis(0.6f, glm::vec3(0.0f, 1.0f, 0.0f));
+  karma::components::TransformComponent owner(
+      {10.0f, 3.0f, -4.0f},
+      karma::math::fromGlm(owner_yaw),
+      {2.0f, 2.0f, 2.0f});
+  const glm::mat4 owner_matrix = toTransform(owner, 1.0f);
+
+  karma::components::InstancedMeshComponent matrix_component{};
+  matrix_component.gpu_layout = InstanceGpuLayout::Matrix4x4Params;
+  matrix_component.instances.push_back(karma::components::MeshInstance{
+      .position = {1.0f, 2.0f, 3.0f},
+      .rotation = karma::math::fromGlm(
+          glm::angleAxis(0.25f, glm::vec3(0.0f, 1.0f, 0.0f))),
+      .scale = {1.0f, 2.0f, 0.5f},
+      .params = {1.0f, 2.0f, 3.0f, 4.0f},
+  });
+  glm::mat4 local_matrix =
+      glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 2.0f, 3.0f));
+  local_matrix *= glm::mat4_cast(
+      glm::angleAxis(0.25f, glm::vec3(0.0f, 1.0f, 0.0f)));
+  local_matrix = glm::scale(local_matrix, glm::vec3(1.0f, 2.0f, 0.5f));
+  const glm::mat4 expected_matrix = owner_matrix * local_matrix;
+
+  const auto matrix_extracted = extractInstancedMesh(
+      matrix_component, owner_matrix, glm::vec3(0.0f), 1.0f, true);
+  assert(matrix_extracted.gpu_layout == InstanceGpuLayout::Matrix4x4Params);
+  assert(matrix_extracted.instances.size() == 1u);
+  assert(matrix_extracted.planar_instances.empty());
+  assert(matricesNearlyEqual(matrix_extracted.instances[0].transform,
+                             expected_matrix));
+  assert(glm::length(matrix_extracted.instances[0].params -
+                     glm::vec4(1.0f, 2.0f, 3.0f, 4.0f)) < 0.0001f);
+  assert(matrix_extracted.bounds_valid);
+  assert(glm::length(matrix_extracted.bounds_center - glm::vec3(expected_matrix[3])) <
+         0.0001f);
+  assert(nearly(matrix_extracted.bounds_radius, 4.0f));
+
+  karma::components::InstancedMeshComponent planar_component{};
+  planar_component.gpu_layout = InstanceGpuLayout::PositionYawScaleParams;
+  planar_component.planar_instances.push_back(
+      karma::components::PlanarMeshInstance{
+          .position = {2.0f, 1.0f, -3.0f},
+          .yaw_radians = 0.4f,
+          .scale = {1.0f, 0.5f, 2.0f},
+          .params = {5.0f, 6.0f, 7.0f, 8.0f},
+      });
+  glm::mat4 planar_local =
+      glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 1.0f, -3.0f));
+  planar_local = glm::rotate(planar_local,
+                             0.4f,
+                             glm::vec3(0.0f, 1.0f, 0.0f));
+  planar_local = glm::scale(planar_local, glm::vec3(1.0f, 0.5f, 2.0f));
+
+  const auto identity_extracted = extractInstancedMesh(
+      planar_component, glm::mat4(1.0f), glm::vec3(0.0f), 1.0f, true);
+  assert(identity_extracted.gpu_layout ==
+         InstanceGpuLayout::PositionYawScaleParams);
+  assert(identity_extracted.planar_instances.size() == 1u);
+  assert(identity_extracted.instances.empty());
+  assert(matricesNearlyEqual(
+      planarInstanceMatrix(identity_extracted.planar_instances[0]),
+      planar_local));
+
+  karma::components::TransformComponent planar_owner(
+      {-7.0f, 4.0f, 9.0f},
+      karma::math::fromGlm(
+          glm::angleAxis(-0.3f, glm::vec3(0.0f, 1.0f, 0.0f))),
+      {2.0f, 3.0f, 2.0f});
+  const glm::mat4 planar_owner_matrix = toTransform(planar_owner, 1.0f);
+  const auto compact_extracted = extractInstancedMesh(
+      planar_component, planar_owner_matrix, glm::vec3(0.0f), 1.0f, true);
+  assert(compact_extracted.gpu_layout ==
+         InstanceGpuLayout::PositionYawScaleParams);
+  assert(compact_extracted.planar_instances.size() == 1u);
+  assert(matricesNearlyEqual(
+      planarInstanceMatrix(compact_extracted.planar_instances[0]),
+      planar_owner_matrix * planar_local));
+  assert(glm::length(compact_extracted.planar_instances[0].params -
+                     glm::vec4(5.0f, 6.0f, 7.0f, 8.0f)) < 0.0001f);
+
+  karma::components::TransformComponent tilted_owner(
+      {4.0f, -2.0f, 1.0f},
+      karma::math::fromGlm(
+          glm::angleAxis(0.35f, glm::vec3(1.0f, 0.0f, 0.0f))),
+      {1.0f, 2.0f, 1.0f});
+  const glm::mat4 tilted_owner_matrix = toTransform(tilted_owner, 1.0f);
+  const auto promoted_extracted = extractInstancedMesh(
+      planar_component, tilted_owner_matrix, glm::vec3(0.0f), 1.0f, true);
+  assert(promoted_extracted.gpu_layout == InstanceGpuLayout::Matrix4x4Params);
+  assert(promoted_extracted.instances.size() == 1u);
+  assert(promoted_extracted.planar_instances.empty());
+  assert(matricesNearlyEqual(promoted_extracted.instances[0].transform,
+                             tilted_owner_matrix * planar_local));
+  assert(promoted_extracted.bounds_valid);
 }
 
 void testFrameGraphCopyAndSceneMaskContractsForAaCameras() {
@@ -1183,6 +1404,67 @@ void writeAlphaBlendGltf(const std::filesystem::path& dir) {
 })");
 }
 
+void writeSpecularExtensionGltf(const std::filesystem::path& dir) {
+  writeAlphaBlendGltf(dir);
+  std::ifstream input(dir / "alpha.gltf");
+  assert(input);
+  std::string source{std::istreambuf_iterator<char>(input),
+                     std::istreambuf_iterator<char>()};
+
+  const std::size_t asset_line = source.find("\"asset\"");
+  const std::size_t asset_line_end = source.find('\n', asset_line);
+  assert(asset_line != std::string::npos);
+  assert(asset_line_end != std::string::npos);
+  source.insert(asset_line_end + 1u,
+                "  \"extensionsUsed\": [\"KHR_materials_specular\", "
+                "\"KHR_texture_transform\"],\n");
+
+  const std::size_t materials_begin = source.find("  \"materials\": [{");
+  const std::size_t textures_begin = source.find("  \"textures\":", materials_begin);
+  assert(materials_begin != std::string::npos);
+  assert(textures_begin != std::string::npos);
+  source.replace(
+      materials_begin,
+      textures_begin - materials_begin,
+      R"(  "materials": [{
+    "name": "specular-extension",
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [0.7, 0.6, 0.5, 1.0],
+      "metallicFactor": 0.0,
+      "roughnessFactor": 0.5
+    },
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularFactor": 0.35,
+        "specularColorFactor": [0.2, 0.4, 0.8],
+        "specularTexture": {
+          "index": 0,
+          "texCoord": 0,
+          "extensions": {
+            "KHR_texture_transform": {
+              "offset": [0.1, 0.2],
+              "scale": [0.5, 0.25],
+              "texCoord": 1
+            }
+          }
+        },
+        "specularColorTexture": {
+          "index": 0,
+          "texCoord": 0,
+          "extensions": {
+            "KHR_texture_transform": {
+              "offset": [0.3, 0.4],
+              "scale": [0.75, 0.5]
+            }
+          }
+        }
+      }
+    }
+  }],
+)");
+  writeText(dir / "specular.gltf", source);
+}
+
 bool rgbaNear(const std::vector<uint8_t>& bytes,
               int width,
               int x,
@@ -1495,6 +1777,238 @@ void testNormalMapMinificationFilteringContract() {
   assert(source.find("clearcoat_normal_sample.w") != std::string::npos);
 }
 
+void testSpecularAndNormalConventionRendererContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string shader = read_source(
+      "src/rendering/renderer/backends/diligent/backend_init.cpp");
+  assert(shader.find("Texture2D g_SpecularTex;") != std::string::npos);
+  assert(shader.find("Texture2D g_SpecularColorTex;") != std::string::npos);
+  assert(shader.find("g_SpecularTex.Sample(g_SamplerData, specular_uv).a") !=
+         std::string::npos);
+  assert(shader.find(
+             "g_SpecularColorTex.Sample(g_SamplerColor, specular_color_uv).rgb") !=
+         std::string::npos);
+  assert(shader.find("float3 f0 = lerp(dielectric_f0, base_color, metallic);") !=
+         std::string::npos);
+  assert(shader.find("normal_tex.y *= normal_y_sign;") != std::string::npos);
+  assert(shader.find("clearcoat_normal_tex.y *= normal_y_sign;") !=
+         std::string::npos);
+
+  const std::string forward = read_source(
+      "src/rendering/renderer/backends/diligent/passes/forward.cpp");
+  assert(forward.find("MaterialDesc::NormalMapConvention::DirectX") !=
+         std::string::npos);
+  assert(forward.find("constants.material_params7[3] = mat ? "
+                      "mat->specular_factor : 1.0f;") != std::string::npos);
+
+  const std::string materials = read_source(
+      "src/rendering/renderer/backends/diligent/resources/materials.cpp");
+  assert(materials.find("\"g_SpecularTex\"") != std::string::npos);
+  assert(materials.find("\"g_SpecularColorTex\"") != std::string::npos);
+  assert(materials.find("record.editor_wireframe_srbs") != std::string::npos);
+
+  const std::string render_system = read_source(
+      "src/rendering/renderer/render_system.cpp");
+  assert(render_system.find("\"normal_map_convention\"") !=
+         std::string::npos);
+  assert(render_system.find("\"specular_factor\"") != std::string::npos);
+  assert(render_system.find("\"specular_color\"") != std::string::npos);
+}
+
+void testRuntimeLightmapPbrContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+  auto count_occurrences = [](std::string_view text, std::string_view needle) {
+    size_t count = 0u;
+    size_t offset = 0u;
+    while ((offset = text.find(needle, offset)) != std::string_view::npos) {
+      ++count;
+      offset += needle.size();
+    }
+    return count;
+  };
+
+  const std::string shader = read_source(
+      "src/rendering/renderer/backends/diligent/backend_init.cpp");
+  assert(count_occurrences(shader, "cbuffer Constants") == 3u);
+  assert(count_occurrences(shader, "float4 g_LightmapParams;") == 3u);
+  assert(count_occurrences(shader, "float4 g_LightmapUVScaleOffset;") == 3u);
+  assert(count_occurrences(shader, "uint4 g_LightmapMixedMask;") == 3u);
+  assert(count_occurrences(
+             shader,
+             "float4 g_MaterialParams7;\n"
+             "    float4 g_LightmapParams;\n"
+             "    float4 g_LightmapUVScaleOffset;\n"
+             "    uint4 g_LightmapMixedMask;") == 3u);
+  assert(count_occurrences(
+             shader,
+             "{Diligent::SHADER_TYPE_PIXEL, \"g_LightmapTex\"") == 1u);
+  assert(count_occurrences(
+             shader,
+             "{Diligent::SHADER_TYPE_PIXEL, \"g_LightmapDirectionTex\"") == 1u);
+  assert(shader.find("Texture2D g_LightmapTex;") != std::string::npos);
+  assert(shader.find("Texture2D g_LightmapDirectionTex;") != std::string::npos);
+  assert(shader.find("uv1 * g_LightmapUVScaleOffset.xy") != std::string::npos);
+  assert(shader.find("g_LightmapTex.Sample(g_SamplerData, lightmap_uv).rgb") !=
+         std::string::npos);
+  assert(shader.find("irradiance * base_color * (1.0 - saturate(metallic))") !=
+         std::string::npos);
+  assert(shader.find("directional_share") != std::string::npos);
+  assert(shader.find("mapped_response") != std::string::npos);
+  assert(shader.find("float environment_diffuse_weight = lightmap_active ? 0.0 : 1.0;") !=
+         std::string::npos);
+  assert(shader.find("base_layer_ibl_weight * environment_diffuse_weight") !=
+         std::string::npos);
+  assert(shader.find("matte_env = env_diffuse * occlusion * environment_diffuse_weight") !=
+         std::string::npos);
+  assert(shader.find("editor_view_mode != 2u") != std::string::npos);
+  assert(shader.find("editor_view_mode == 3u") != std::string::npos);
+  assert(shader.find("MixedLightIsBaked(light.spot_params.w)") !=
+         std::string::npos);
+  assert(shader.find("MixedLightIsBaked(g_LightDir.w)") != std::string::npos);
+  assert(shader.find("g_LightmapParams.x <= 0.5") != std::string::npos);
+  assert(shader.find("createSolidTextureSRV(0, 0, 0, 255, false, \"DefaultLightmap\"") !=
+         std::string::npos);
+  assert(shader.find(
+             "initializeDefaultMaterialBinding(out_pso->RawPtr(), shader_resources_);") !=
+         std::string::npos);
+  assert(shader.find(
+             "initializeDefaultMaterialBinding(pipeline_state_.RawPtr(), shader_resources_);") !=
+         std::string::npos);
+
+  const std::string constants = read_source(
+      "src/rendering/renderer/backends/diligent/backend_internal.h");
+  assert(constants.find("struct alignas(16) DrawConstants") != std::string::npos);
+  const size_t material_params7 = constants.find("float material_params7[4];");
+  const size_t lightmap_params = constants.find("float lightmap_params[4];");
+  const size_t lightmap_uv = constants.find("float lightmap_uv_scale_offset[4];");
+  const size_t lightmap_mask = constants.find("uint32_t lightmap_mixed_mask[4];");
+  assert(material_params7 < lightmap_params);
+  assert(lightmap_params < lightmap_uv);
+  assert(lightmap_uv < lightmap_mask);
+  assert(constants.find("sizeof(DrawConstants) % 16u == 0u") !=
+         std::string::npos);
+
+  const std::string materials = read_source(
+      "src/rendering/renderer/backends/diligent/resources/materials.cpp");
+  assert(materials.find("parameterBool(resolved.params, \"lightmap_enabled\")") !=
+         std::string::npos);
+  assert(materials.find("parameterVec4(resolved.params, \"lightmap_uv_scale_offset\")") !=
+         std::string::npos);
+  assert(materials.find("lightmap_mixed_mask_low") != std::string::npos);
+  assert(materials.find("assign_texture_handle({\"lightmap\"}, record.lightmap_srv)") !=
+         std::string::npos);
+  assert(materials.find("assign_texture_handle({\"lightmap_direction\"}") !=
+         std::string::npos);
+  assert(count_occurrences(materials, "\"g_LightmapTex\"") == 2u);
+  assert(count_occurrences(materials, "\"g_LightmapDirectionTex\"") == 2u);
+
+  const std::string forward = read_source(
+      "src/rendering/renderer/backends/diligent/passes/forward.cpp");
+  assert(count_occurrences(forward,
+                           "constants.lightmap_params[0] = lightmap_ready ? 1.0f : 0.0f;") ==
+         2u);
+  assert(count_occurrences(forward, "constants.lightmap_mixed_mask[0]") == 2u);
+  assert(forward.find("mat->lightmap_srv.RawPtr() != default_lightmap_.RawPtr()") !=
+         std::string::npos);
+
+  const std::string render = read_source(
+      "src/rendering/renderer/backends/diligent/backend_render.cpp");
+  assert(render.find("gpu.spot_params[3] = light.mixed_bake_mask_bit < 64u") !=
+         std::string::npos);
+  assert(render.find("directional_light_.mixed_bake_mask_bit < 64u") !=
+         std::string::npos);
+
+  const std::string extractors = read_source(
+      "src/rendering/renderer/render_system/extractors.cpp");
+  assert(count_occurrences(extractors,
+                           "out.mixed_bake_mask_bit = light.mixed_bake_mask_bit;") == 2u);
+}
+
+void testTerrainPbrLightingParityContract() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  std::ifstream stream(
+      root / "src/rendering/renderer/backends/diligent/passes/terrain.cpp");
+  assert(stream);
+  const std::string source{std::istreambuf_iterator<char>(stream),
+                           std::istreambuf_iterator<char>()};
+  auto count_occurrences = [](std::string_view text, std::string_view needle) {
+    size_t count = 0u;
+    size_t offset = 0u;
+    while ((offset = text.find(needle, offset)) != std::string_view::npos) {
+      ++count;
+      offset += needle.size();
+    }
+    return count;
+  };
+
+  assert(count_occurrences(source, "cbuffer TerrainConstants") == 4u);
+  assert(source.find("struct alignas(16) TerrainConstants") != std::string::npos);
+  assert(source.find("sizeof(TerrainConstants) % 16u == 0u") !=
+         std::string::npos);
+  assert(source.find("g_MaterialMetallicRoughness0") != std::string::npos);
+  assert(source.find("g_MaterialOcclusion0") != std::string::npos);
+  assert(source.find("g_MaterialEmissive0") != std::string::npos);
+  assert(source.find("g_MaterialSpecular0") != std::string::npos);
+  assert(source.find("g_MaterialSpecularColor0") != std::string::npos);
+  assert(source.find("g_LayerBaseColor[4]") != std::string::npos);
+  assert(source.find("g_LayerPbr[4]") != std::string::npos);
+  assert(source.find("g_LayerSpecular[4]") != std::string::npos);
+  assert(source.find("normal_y_sign < 0.0 ? -1.0 : 1.0") !=
+         std::string::npos);
+  assert(source.find("weights / weight_sum") != std::string::npos);
+  assert(source.find("EvaluatePbrLight(") != std::string::npos);
+  assert(source.find("AccumulateLocalLight(") != std::string::npos);
+  assert(source.find("g_ForwardPlusTileLightCounts[tile_index]") !=
+         std::string::npos);
+  assert(source.find("SampleCascadeShadow(") != std::string::npos);
+  assert(source.find("SampleLocalShadow(") != std::string::npos);
+  assert(source.find("g_IrradianceTex.Sample") != std::string::npos);
+  assert(source.find("g_PrefilterTex.SampleLevel") != std::string::npos);
+  assert(source.find("g_BRDFLUT.Sample") != std::string::npos);
+  assert(source.find("editor_view_mode == 2u") != std::string::npos);
+  assert(source.find("editor_view_mode == 3u") != std::string::npos);
+  assert(source.find("float spec_power = lerp") == std::string::npos);
+  assert(source.find("base_constants.shadow_cascade_uv_proj") !=
+         std::string::npos);
+  assert(source.find("bindTerrainFrameResourcesToSrb") !=
+         std::string::npos);
+
+  for (std::string_view family : {"g_MaterialAlbedo",
+                                  "g_MaterialNormal",
+                                  "g_MaterialMetallicRoughness",
+                                  "g_MaterialOcclusion",
+                                  "g_MaterialEmissive",
+                                  "g_MaterialSpecular",
+                                  "g_MaterialSpecularColor"}) {
+    for (uint32_t layer = 0u; layer < 4u; ++layer) {
+      const std::string name = std::string(family) + std::to_string(layer);
+      assert(source.find("Texture2D<float4> " + name + ";") !=
+             std::string::npos);
+      assert(count_occurrences(source, "\"" + name + "\"") == 2u);
+    }
+  }
+  assert(count_occurrences(source, "editor_view_mode == 2u") == 1u);
+  assert(count_occurrences(source, "editor_view_mode == 3u") == 1u);
+  assert(source.find("graphics.RasterizerDesc.FillMode = Diligent::FILL_MODE_WIREFRAME") !=
+         std::string::npos);
+}
+
 void testRenderCopyUnbindContract() {
   const std::filesystem::path root = findRepoRoot();
   assert(!root.empty());
@@ -1644,6 +2158,11 @@ void testRenderingCacheInvalidationContracts() {
   const std::string render_system =
       read_source("src/rendering/renderer/render_system.cpp");
   assert(render_system.find("lod_binding_changed ||") != std::string::npos);
+  assert(render_system.find("owner_transform_changed ||") != std::string::npos);
+  assert(render_system.find("cached_owner_world_transform_valid") !=
+         std::string::npos);
+  assert(render_system.find("item.gpu_layout = it->second.cached_instance_layout") !=
+         std::string::npos);
 
   const std::string meshes = read_source(
       "src/rendering/renderer/backends/diligent/resources/meshes.cpp");
@@ -1666,6 +2185,8 @@ void testRenderingCacheInvalidationContracts() {
   assert(backend_init.find("RasterizerDesc.DepthClipEnable = false;") ==
          std::string::npos);
   assert(backend_init.find("replacement_dsv_faces") != std::string::npos);
+  assert(backend_init.find("light.direction_type.w > 2.5") !=
+         std::string::npos);
   const size_t initialize_device =
       backend_init.find("void DiligentBackend::initializeDevice()");
   assert(initialize_device != std::string::npos);
@@ -1701,7 +2222,10 @@ void testPointShadowAllocationPolicy() {
 
   light.range = 10.0f;
   light.type = karma::rendering::LightType::Spot;
+  assert(karma::rendering::detail::isPointShadowAllocationCandidate(light));
+  light.casts_shadows = false;
   assert(!karma::rendering::detail::isPointShadowAllocationCandidate(light));
+  light.casts_shadows = true;
   light.type = karma::rendering::LightType::Directional;
   assert(!karma::rendering::detail::isPointShadowAllocationCandidate(light));
 }
@@ -1837,6 +2361,85 @@ void testMaterialFileLoading() {
   std::filesystem::remove_all(dir);
 }
 
+void testMaterialAtomicSaveRoundTripAndValidation() {
+  const std::filesystem::path dir =
+      makeTempDir("karma_material_atomic_save_tests");
+  const std::filesystem::path path = dir / "nested" / "surface.mat";
+
+  karma::rendering::MaterialAssetDesc material{};
+  material.surface.base_color = {0.1f, 0.2f, 0.3f, 1.0f};
+  material.surface.normal_map_convention =
+      karma::rendering::MaterialDesc::NormalMapConvention::DirectX;
+  material.surface.specular_factor = 0.35f;
+  material.surface.specular_color = {0.2f, 0.4f, 0.8f, 1.0f};
+  material.textures["specular"] = "textures/specular_weight";
+  material.textures["specular_color"] = "textures/specular_tint";
+  material.params["detail_strength"] = 0.75f;
+
+  const karma::assets::MaterialSaveResult first_save =
+      karma::assets::saveMaterialAssetDesc(material, path);
+  assert(first_save);
+  assert(first_save.path == path);
+  assert(std::filesystem::is_regular_file(path));
+
+  std::string diagnostic;
+  auto loaded = karma::assets::loadMaterialAssetDesc(path, &diagnostic);
+  assert(loaded.has_value());
+  assert(diagnostic.empty());
+  assert(loaded->surface.normal_map_convention ==
+         karma::rendering::MaterialDesc::NormalMapConvention::DirectX);
+  assert(nearly(loaded->surface.specular_factor, 0.35f));
+  assert(nearly(loaded->surface.specular_color.r, 0.2f));
+  assert(nearly(loaded->surface.specular_color.g, 0.4f));
+  assert(nearly(loaded->surface.specular_color.b, 0.8f));
+  assert(loaded->textures.at("specular") == "textures/specular_weight");
+  assert(loaded->textures.at("specular_color") == "textures/specular_tint");
+
+  auto read_file = [](const std::filesystem::path& file) {
+    std::ifstream stream(file, std::ios::binary);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string valid_contents = read_file(path);
+  material.surface.specular_factor = 1.25f;
+  const karma::assets::MaterialSaveResult rejected =
+      karma::assets::saveMaterialAssetDesc(material, path);
+  assert(!rejected);
+  assert(rejected.diagnostic.find("specular_factor") != std::string::npos);
+  assert(read_file(path) == valid_contents);
+
+  for (const auto& entry : std::filesystem::directory_iterator(path.parent_path())) {
+    assert(entry.path().filename().string().find("surface.mat.tmp.") != 0u);
+  }
+
+  karma::rendering::MaterialVariantDesc variant{};
+  variant.base_material_key = "materials/base";
+  variant.params["specular_factor"] = 0.6f;
+  variant.params["normal_map_convention"] = std::string("opengl");
+  variant.textures["specular_color"] = "textures/variant_specular";
+  const std::filesystem::path variant_path = dir / "variant.mat";
+  assert(karma::assets::saveMaterialVariantDesc(variant, variant_path));
+  auto loaded_variant =
+      karma::assets::loadMaterialVariantDesc(variant_path, &diagnostic);
+  assert(loaded_variant.has_value());
+  assert(loaded_variant->base_material_key == variant.base_material_key);
+  assert(loaded_variant->textures == variant.textures);
+  assert(nearly(std::get<float>(loaded_variant->params.at("specular_factor")), 0.6f));
+  assert(std::get<std::string>(
+             loaded_variant->params.at("normal_map_convention")) == "opengl");
+
+  karma::rendering::MaterialAssetDesc imported{};
+  imported.imported_material =
+      std::make_shared<karma::rendering::ImportedMaterialData>();
+  const auto imported_result =
+      karma::assets::saveMaterialAssetDesc(imported, dir / "imported.mat");
+  assert(!imported_result);
+  assert(!std::filesystem::exists(dir / "imported.mat"));
+
+  std::filesystem::remove_all(dir);
+}
+
 void testAssetKeyValidationAndPackages() {
   assert(karma::assets::AssetRegistry::isValidAssetKey("examples/mesh/world"));
   assert(karma::assets::AssetRegistry::isValidAssetKey("default"));
@@ -1945,6 +2548,209 @@ void testAssetKeyValidationAndPackages() {
   assert(assets.findEnvironmentMap("package/dupe_env") != nullptr);
 
   std::filesystem::remove_all(dir);
+}
+
+void testRawMeshMaterialSlotsAndSceneEditorLodAssets() {
+  const std::filesystem::path raw_dir =
+      makeTempDir("karma_raw_mesh_material_slot_tests");
+  writeText(raw_dir / "split.mtl",
+            R"(newmtl Leaves
+Kd 0.2 0.8 0.2
+newmtl Bark
+Kd 0.4 0.2 0.1
+)");
+  writeText(raw_dir / "split.obj",
+            R"(mtllib split.mtl
+o SplitMesh
+v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+v 1 0 1
+v 0 1 1
+usemtl Leaves
+f 1 2 3
+usemtl Bark
+f 4 5 6
+)");
+  writeText(raw_dir / "assets.package.json",
+            R"({
+  "version": 1,
+  "assets": [
+    {"type": "mesh", "key": "tests/raw/split", "path": "split.obj"}
+  ]
+})");
+
+  karma::assets::AssetRegistry raw_assets;
+  std::string diagnostic;
+  const auto raw_package =
+      karma::assets::importAssetPackage(raw_assets, raw_dir, &diagnostic);
+  assert(raw_package.has_value());
+  assert(diagnostic.empty());
+  const karma::world::MeshData* split =
+      raw_assets.findMeshAsset("tests/raw/split");
+  assert(split != nullptr);
+  assert(split->submeshes.size() == 2u);
+  assert(split->material_slots.size() == 2u);
+  assert(split->submeshes[0].material_slot == 0u);
+  assert(split->submeshes[1].material_slot == 1u);
+  assert(split->material_slots[0].name == "Leaves");
+  assert(split->material_slots[1].name == "Bark");
+  std::filesystem::remove_all(raw_dir);
+
+  const std::filesystem::path repo_root = findRepoRoot();
+  assert(!repo_root.empty());
+  const std::filesystem::path content_root =
+      repo_root / "examples/assets/scene_editor_content/prefabs";
+  const std::filesystem::path tree_dir = content_root / "pine_tree_lod";
+  const std::filesystem::path grass_dir = content_root / "grass_lod";
+
+  karma::assets::AssetRegistry assets;
+  diagnostic.clear();
+  const auto tree_package =
+      karma::assets::importAssetPackage(assets, tree_dir, &diagnostic);
+  assert(tree_package.has_value());
+  assert(diagnostic.empty());
+  const auto grass_package =
+      karma::assets::importAssetPackage(assets, grass_dir, &diagnostic);
+  assert(grass_package.has_value());
+  assert(diagnostic.empty());
+
+  const karma::world::MeshData* high =
+      assets.findMeshAsset("scene_editor/pine_tree_lod/high_mesh");
+  const karma::world::MeshData* low =
+      assets.findMeshAsset("scene_editor/pine_tree_lod/low_mesh");
+  const karma::world::MeshData* tree_billboard =
+      assets.findMeshAsset("scene_editor/pine_tree_lod/billboard_mesh");
+  assert(high != nullptr && low != nullptr && tree_billboard != nullptr);
+  assert(high->submeshes.size() == 2u && high->material_slots.size() == 2u);
+  assert(low->submeshes.size() == 2u && low->material_slots.size() == 2u);
+  assert(tree_billboard->submeshes.size() == 1u &&
+         tree_billboard->material_slots.size() == 1u);
+  assert(high->material_slots[0].name == "Bark");
+  assert(high->material_slots[1].name == "Leaves");
+  assert(low->material_slots[0].name == "Leaves");
+  assert(low->material_slots[1].name == "Bark");
+
+  const auto high_y = std::minmax_element(
+      high->vertices.begin(),
+      high->vertices.end(),
+      [](const glm::vec3& lhs, const glm::vec3& rhs) { return lhs.y < rhs.y; });
+  assert(high_y.first != high->vertices.end());
+  assert(std::abs(high_y.second->y - high_y.first->y - 10.5f) < 0.01f);
+  assert(assets.findTextureAsset("scene_editor/pine_tree_lod/leaf_albedo") != nullptr);
+  assert(assets.findTextureAsset("scene_editor/pine_tree_lod/bark_albedo") != nullptr);
+  assert(assets.findTextureAsset("scene_editor/pine_tree_lod/bark_normal") != nullptr);
+  assert(assets.findTextureAsset("scene_editor/pine_tree_lod/billboard_albedo") != nullptr);
+  assert(assets.findMaterialAsset("scene_editor/pine_tree_lod/leaves_material") != nullptr);
+  assert(assets.findMaterialAsset("scene_editor/pine_tree_lod/bark_material") != nullptr);
+  assert(assets.findMaterialAsset("scene_editor/pine_tree_lod/billboard_material") != nullptr);
+
+  const auto bark_terrain_layer =
+      karma::visual::terrain::loadTerrainMaterialLayer(
+          karma::components::TerrainMaterialLayer{
+              .material_key = "scene_editor/pine_tree_lod/bark_material",
+          },
+          0u,
+          &assets);
+  assert(bark_terrain_layer.has_value());
+  assert(bark_terrain_layer->valid());
+  assert(bark_terrain_layer->albedo.width == 1024u);
+  assert(bark_terrain_layer->albedo.height == 1024u);
+  assert(bark_terrain_layer->normal.width == 1024u);
+  assert(bark_terrain_layer->normal.height == 1024u);
+
+  const karma::world::MeshData* grass_cluster =
+      assets.findMeshAsset("scene_editor/grass_lod/cluster_mesh");
+  const karma::world::MeshData* grass_billboard =
+      assets.findMeshAsset("scene_editor/grass_lod/billboard_mesh");
+  assert(grass_cluster != nullptr && grass_billboard != nullptr);
+  assert(grass_cluster->indices.size() == 12u);
+  assert(grass_billboard->indices.size() == 6u);
+  assert(grass_cluster->material_slots.size() == 1u);
+  assert(grass_billboard->material_slots.size() == 1u);
+  const auto grass_terrain_layer =
+      karma::visual::terrain::loadTerrainMaterialLayer(
+          karma::components::TerrainMaterialLayer{
+              .material_key = "scene_editor/grass_lod/grass_material",
+          },
+          1u,
+          &assets);
+  assert(grass_terrain_layer.has_value());
+  assert(grass_terrain_layer->valid());
+  assert(grass_terrain_layer->albedo.width == 1083u);
+  assert(grass_terrain_layer->albedo.height == 978u);
+
+  const karma::prefabs::PrefabLoadResult tree_document =
+      karma::prefabs::loadPrefabDocument(tree_dir / "prefab.json");
+  const karma::prefabs::PrefabLoadResult grass_document =
+      karma::prefabs::loadPrefabDocument(grass_dir / "prefab.json");
+  assert(tree_document.success());
+  assert(grass_document.success());
+
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::prefabs::PrefabInstantiateDesc instantiate_desc{
+      .assets = &assets,
+      .auto_load_package = false,
+  };
+  const auto tree = karma::prefabs::instantiatePrefab(
+      world, scene, tree_dir / "prefab.json", instantiate_desc);
+  assert(tree.has_value());
+  assert(world.has<karma::components::InstancedMeshComponent>(tree->root));
+  assert(world.has<karma::components::ColliderComponent>(tree->root));
+  assert(world.has<karma::components::StaticComponent>(tree->root));
+  const auto& tree_static =
+      world.get<karma::components::StaticComponent>(tree->root);
+  assert(tree_static.enabled && tree_static.include_descendants);
+  assert(tree_static.flags == karma::components::StaticComponentAll);
+  const auto& tree_instances =
+      world.get<karma::components::InstancedMeshComponent>(tree->root);
+  assert(tree_instances.instances.size() == 1u);
+  assert(tree_instances.lods.size() == 2u);
+  assert(nearly(tree_instances.lods[0].start_distance, 35.0f));
+  assert(nearly(tree_instances.lods[1].start_distance, 90.0f));
+  assert(tree_instances.lods[1].render_mode ==
+         karma::rendering::InstanceLodRenderMode::UprightBillboard);
+  assert(world.get<karma::components::ColliderComponent>(tree->root).type ==
+         karma::components::ColliderShapeType::Cylinder);
+
+  auto& tree_transform =
+      world.get<karma::components::TransformComponent>(tree->root);
+  tree_transform.setPosition({12.0f, 1.5f, -8.0f});
+  tree_transform.setRotation(karma::math::fromGlm(
+      glm::angleAxis(0.45f, glm::vec3(0.0f, 1.0f, 0.0f))));
+  tree_transform.setScale({1.5f, 1.5f, 1.5f});
+  const glm::mat4 tree_owner =
+      karma::rendering::render_system::toTransform(tree_transform, 1.0f);
+  const auto transformed_tree =
+      karma::rendering::render_system::extractInstancedMesh(
+          tree_instances, tree_owner, glm::vec3(0.0f), 1.0f, true);
+  assert(transformed_tree.gpu_layout ==
+         karma::rendering::InstanceGpuLayout::Matrix4x4Params);
+  assert(transformed_tree.instances.size() == 1u);
+  assert(matricesNearlyEqual(transformed_tree.instances[0].transform,
+                             tree_owner));
+  assert(transformed_tree.bounds_valid);
+  assert(glm::length(transformed_tree.bounds_center - glm::vec3(12.0f, 1.5f, -8.0f)) <
+         0.0001f);
+  assert(nearly(transformed_tree.bounds_radius, 1.5f));
+
+  const auto grass = karma::prefabs::instantiatePrefab(
+      world, scene, grass_dir / "prefab.json", instantiate_desc);
+  assert(grass.has_value());
+  assert(world.has<karma::components::StaticComponent>(grass->root));
+  const auto& grass_static =
+      world.get<karma::components::StaticComponent>(grass->root);
+  assert(grass_static.enabled && grass_static.include_descendants);
+  assert(grass_static.flags == karma::components::StaticComponentAll);
+  const auto& grass_instances =
+      world.get<karma::components::InstancedMeshComponent>(grass->root);
+  assert(grass_instances.instances.size() == 1u);
+  assert(grass_instances.lods.size() == 1u);
+  assert(nearly(grass_instances.lods[0].start_distance, 28.0f));
+  assert(grass_instances.lods[0].render_mode ==
+         karma::rendering::InstanceLodRenderMode::UprightBillboard);
 }
 
 void testFrameGraphValidationAndRegistryFallback() {
@@ -2437,8 +3243,14 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(read_mesh->material_slots[0].default_material_key == "material/a");
 
   auto imported_material = std::make_shared<karma::rendering::ImportedMaterialData>();
+  imported_material->material.normal_map_convention =
+      karma::rendering::MaterialDesc::NormalMapConvention::DirectX;
+  imported_material->material.specular_factor = 0.45f;
+  imported_material->material.specular_color = {0.2f, 0.3f, 0.4f, 1.0f};
   imported_material->texcoord_row0[0] = glm::vec4(1.0f, 0.0f, 0.25f, 0.0f);
   imported_material->texcoord_row1[0] = glm::vec4(0.0f, -1.0f, 0.75f, 0.0f);
+  imported_material->texcoord_row0[12] = glm::vec4(0.5f, 0.0f, 0.1f, 1.0f);
+  imported_material->texcoord_row1[12] = glm::vec4(0.0f, 0.25f, 0.55f, 0.0f);
   karma::rendering::ImportedMaterialTexture import_only_texture{};
   import_only_texture.source_key = "embedded/0";
   import_only_texture.source_bytes = {1u, 2u, 3u, 4u};
@@ -2457,9 +3269,16 @@ void testAssetCacheV2AndPackageWarmRestore() {
   assert(read_material->material_asset_index == 3u);
   assert(read_material->imported_material != nullptr);
   assert(read_material->imported_material->textures.empty());
+  assert(read_material->imported_material->material.normal_map_convention ==
+         karma::rendering::MaterialDesc::NormalMapConvention::DirectX);
+  assert(nearly(read_material->imported_material->material.specular_factor, 0.45f));
+  assert(nearly(read_material->imported_material->material.specular_color.b, 0.4f));
   assert(nearly(read_material->imported_material->texcoord_row0[0].z, 0.25f));
   assert(nearly(read_material->imported_material->texcoord_row1[0].y, -1.0f));
   assert(nearly(read_material->imported_material->texcoord_row1[0].z, 0.75f));
+  assert(nearly(read_material->imported_material->texcoord_row0[12].x, 0.5f));
+  assert(nearly(read_material->imported_material->texcoord_row0[12].w, 1.0f));
+  assert(nearly(read_material->imported_material->texcoord_row1[12].z, 0.55f));
 
   std::filesystem::create_directories(cache_dir / "blobs");
   {
@@ -2828,6 +3647,79 @@ void testImportedMaterialTextureMatchesRendererOrigin() {
   std::filesystem::remove_all(dir);
 }
 
+void testGltfSpecularExtensionImportAndTextureColorSpaces() {
+  const std::filesystem::path dir =
+      makeTempDir("karma_gltf_specular_extension_tests");
+  writeSpecularExtensionGltf(dir);
+
+  const karma::world::GltfScenePrefab prefab =
+      karma::world::loadGltfScenePrefab(dir / "specular.gltf");
+  assert(prefab.valid());
+  const auto imported_material_it = std::find_if(
+      prefab.imported_materials.begin(), prefab.imported_materials.end(),
+      [](const auto& candidate) {
+        return candidate != nullptr &&
+               nearly(candidate->material.specular_factor, 0.35f);
+      });
+  assert(imported_material_it != prefab.imported_materials.end());
+  const auto& imported = **imported_material_it;
+  assert(imported.material.normal_map_convention ==
+         karma::rendering::MaterialDesc::NormalMapConvention::OpenGL);
+  assert(nearly(imported.material.specular_factor, 0.35f));
+  assert(nearly(imported.material.specular_color.r, 0.2f));
+  assert(nearly(imported.material.specular_color.g, 0.4f));
+  assert(nearly(imported.material.specular_color.b, 0.8f));
+
+  const auto find_texture = [&](auto semantic) {
+    return std::find_if(imported.textures.begin(), imported.textures.end(),
+                        [&](const auto& texture) {
+                          return texture.semantic == semantic;
+                        });
+  };
+  const auto specular = find_texture(
+      karma::rendering::ImportedMaterialTextureSemantic::Specular);
+  const auto specular_color = find_texture(
+      karma::rendering::ImportedMaterialTextureSemantic::SpecularColor);
+  assert(specular != imported.textures.end());
+  assert(specular_color != imported.textures.end());
+  assert(!specular->srgb);
+  assert(specular_color->srgb);
+  assert(specular->source_bytes == specular_color->source_bytes);
+
+  constexpr std::size_t kSpecularSlot = 12u;
+  constexpr std::size_t kSpecularColorSlot = 13u;
+  assert(nearly(imported.texcoord_row0[kSpecularSlot].x, 0.5f));
+  assert(nearly(imported.texcoord_row0[kSpecularSlot].z, 0.1f));
+  assert(nearly(imported.texcoord_row0[kSpecularSlot].w, 1.0f));
+  assert(nearly(imported.texcoord_row1[kSpecularSlot].y, 0.25f));
+  assert(nearly(imported.texcoord_row1[kSpecularSlot].z, 0.55f));
+  assert(nearly(imported.texcoord_row0[kSpecularColorSlot].x, 0.75f));
+  assert(nearly(imported.texcoord_row0[kSpecularColorSlot].z, 0.3f));
+  assert(nearly(imported.texcoord_row0[kSpecularColorSlot].w, 0.0f));
+  assert(nearly(imported.texcoord_row1[kSpecularColorSlot].y, 0.5f));
+  assert(nearly(imported.texcoord_row1[kSpecularColorSlot].z, 0.1f));
+
+  karma::rendering::MaterialAssetDesc material{};
+  material.imported_material = *imported_material_it;
+  karma::assets::AssetRegistry assets;
+  const std::vector<std::string> keys =
+      assets.registerImportedMaterialTextures("tests/material/specular", material);
+  assert(keys.size() == 2u);
+  assert(keys[0] != keys[1]);
+  assert(material.textures.at("specular") !=
+         material.textures.at("specular_color"));
+  const auto* weight_asset =
+      assets.findTextureAsset(material.textures.at("specular"));
+  const auto* color_asset =
+      assets.findTextureAsset(material.textures.at("specular_color"));
+  assert(weight_asset != nullptr);
+  assert(color_asset != nullptr);
+  assert(!weight_asset->desc.srgb);
+  assert(color_asset->desc.srgb);
+
+  std::filesystem::remove_all(dir);
+}
+
 void testGltfSceneImportsTextureAlphaMode() {
   const std::filesystem::path dir =
       makeTempDir("karma_gltf_alpha_material_tests");
@@ -3036,6 +3928,15 @@ void testAssetPackageAsyncCommitAndStore() {
   assert(store.releasePackage(*second));
   assert(assets.findEnvironmentMap("package/async_env") == nullptr);
 
+  auto reacquired = store.acquirePackage(dir, &diagnostic);
+  assert(reacquired.has_value());
+  assert(reacquired->instance_id != first->instance_id);
+  assert(assets.findEnvironmentMap("package/async_env") != nullptr);
+  assert(!store.releasePackage(*first));
+  assert(assets.findEnvironmentMap("package/async_env") != nullptr);
+  assert(store.releasePackage(*reacquired));
+  assert(assets.findEnvironmentMap("package/async_env") == nullptr);
+
   std::filesystem::remove_all(dir);
 }
 
@@ -3206,6 +4107,9 @@ int main() {
   testSkyboxShaderPreservesGeneratedCubemapOrientation();
   testHdrSceneColorPipelineContract();
   testNormalMapMinificationFilteringContract();
+  testSpecularAndNormalConventionRendererContract();
+  testRuntimeLightmapPbrContract();
+  testTerrainPbrLightingParityContract();
   testPerRenderTargetTemporalHistoryContract();
   testRenderCopyUnbindContract();
   testParticleShaderFallbackContracts();
@@ -3221,12 +4125,17 @@ int main() {
   testRendererSettingsClampNonFiniteValues();
   testUIDrawDataValidation();
   testCameraDataCarriesAntiAliasingSettings();
+  testEditorViewModeDecodingAndFallback();
+  testEditorViewModeBackendFallbackContract();
   testCameraAndLightExtractionSanitizesRuntimeData();
+  testInstancedMeshExtractionComposesOwnerTransform();
   testFrameGraphCopyAndSceneMaskContractsForAaCameras();
   testPrimitiveMeshAndDiffuseMaterialHelpers();
   testAssetRegistryMaterialInheritance();
   testMaterialFileLoading();
+  testMaterialAtomicSaveRoundTripAndValidation();
   testAssetKeyValidationAndPackages();
+  testRawMeshMaterialSlotsAndSceneEditorLodAssets();
   testFrameGraphValidationAndRegistryFallback();
   testFrameGraphStructuralEquivalence();
   testFrameGraphAssetPackageLoadCacheAndUnload();
@@ -3234,6 +4143,7 @@ int main() {
   testPreparedTextureCachePreservesGeneratedMips();
   testTexturePreparedUploadPreservesRowOrder();
   testImportedMaterialTextureMatchesRendererOrigin();
+  testGltfSpecularExtensionImportAndTextureColorSpaces();
   testGltfSceneImportsTextureAlphaMode();
   testGltfSceneMaterialOverrideCastsShadows();
   testAssetPackageAsyncCommitAndStore();

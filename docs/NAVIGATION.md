@@ -140,6 +140,15 @@ fallback for entities with a mesh `ColliderComponent`, `MeshComponent`, and
 `TransformComponent`, using vertices and indices embedded in the mesh collider
 shape.
 
+Pair `NavMeshSurfaceComponent` with `InstancedMeshComponent` to use the
+surface's mesh as explicit navigation input at every authored instance. The
+collector follows the active matrix or planar instance layout, matching the
+renderer by composing the owning entity's world transform with each local
+instance; it does not use camera-dependent LOD meshes. Static navigation
+membership and its inherited opt-outs apply normally. Visual-only instancing,
+including foliage proxies, remains excluded unless it has an explicit
+navigation surface.
+
 Procedural or renderer-owned mesh data can be appended directly:
 
 ```cpp

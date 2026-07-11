@@ -659,6 +659,18 @@ rendering::MaterialDesc buildMaterialDesc(const aiMaterial& material) {
     desc.double_sided = two_sided != 0;
   }
 
+  if (float specular_factor = desc.specular_factor;
+      material.Get(AI_MATKEY_SPECULAR_FACTOR, specular_factor) == AI_SUCCESS) {
+    desc.specular_factor = std::clamp(specular_factor, 0.0f, 1.0f);
+  }
+  if (aiColor3D specular_color(1.0f, 1.0f, 1.0f);
+      material.Get(AI_MATKEY_COLOR_SPECULAR, specular_color) == AI_SUCCESS) {
+    desc.specular_color = {
+        std::clamp(specular_color.r, 0.0f, 1.0f),
+        std::clamp(specular_color.g, 0.0f, 1.0f),
+        std::clamp(specular_color.b, 0.0f, 1.0f), 1.0f};
+  }
+
   if (float alpha_cutoff = desc.alpha_cutoff;
       material.Get(AI_MATKEY_GLTF_ALPHACUTOFF, alpha_cutoff) == AI_SUCCESS) {
     desc.alpha_cutoff = alpha_cutoff;
@@ -706,6 +718,8 @@ enum ImportedTextureCoordSlot : size_t {
   kTexCoordSheenRoughness = 9,
   kTexCoordTransmission = 10,
   kTexCoordThickness = 11,
+  kTexCoordSpecular = 12,
+  kTexCoordSpecularColor = 13,
 };
 
 int embeddedTextureIndex(const std::string& raw_key) {
@@ -834,6 +848,240 @@ bool populateImportedTextureSource(rendering::ImportedMaterialTexture& texture,
       texture.width,
       texture.height,
       texture.source_bytes);
+}
+
+int base64Value(char value) {
+  if (value >= 'A' && value <= 'Z') return value - 'A';
+  if (value >= 'a' && value <= 'z') return value - 'a' + 26;
+  if (value >= '0' && value <= '9') return value - '0' + 52;
+  if (value == '+') return 62;
+  if (value == '/') return 63;
+  return -1;
+}
+
+std::vector<uint8_t> decodeBase64(std::string_view encoded) {
+  std::vector<uint8_t> bytes;
+  int value = 0;
+  int bits = -8;
+  for (const char character : encoded) {
+    if (std::isspace(static_cast<unsigned char>(character)) != 0) continue;
+    if (character == '=') break;
+    const int digit = base64Value(character);
+    if (digit < 0) return {};
+    value = (value << 6) | digit;
+    bits += 6;
+    if (bits >= 0) {
+      bytes.push_back(static_cast<uint8_t>((value >> bits) & 0xff));
+      bits -= 8;
+    }
+  }
+  return bytes;
+}
+
+std::vector<uint8_t> decodeDataUri(std::string_view uri) {
+  const size_t comma = uri.find(',');
+  if (!uri.starts_with("data:") || comma == std::string_view::npos) return {};
+  const std::string_view metadata = uri.substr(0u, comma);
+  const std::string_view payload = uri.substr(comma + 1u);
+  if (metadata.find(";base64") != std::string_view::npos) {
+    return decodeBase64(payload);
+  }
+  std::vector<uint8_t> bytes;
+  bytes.reserve(payload.size());
+  const auto hex = [](char value) {
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+    return -1;
+  };
+  for (size_t index = 0u; index < payload.size(); ++index) {
+    if (payload[index] == '%' && index + 2u < payload.size()) {
+      const int high = hex(payload[index + 1u]);
+      const int low = hex(payload[index + 2u]);
+      if (high >= 0 && low >= 0) {
+        bytes.push_back(static_cast<uint8_t>((high << 4) | low));
+        index += 2u;
+        continue;
+      }
+    }
+    bytes.push_back(static_cast<uint8_t>(payload[index]));
+  }
+  return bytes;
+}
+
+std::string decodeUriPath(std::string_view uri) {
+  const std::vector<uint8_t> decoded = decodeDataUri(
+      std::string("data:," + std::string(uri)));
+  return std::string(decoded.begin(), decoded.end());
+}
+
+void setGltfTextureCoordTransform(rendering::ImportedMaterialData& data,
+                                  const Json& texture_info,
+                                  size_t slot) {
+  if (slot >= rendering::kImportedMaterialTextureCoordSlotCount) return;
+  uint32_t uv_index = texture_info.value("texCoord", 0u);
+  glm::vec2 offset{0.0f};
+  glm::vec2 scale{1.0f};
+  float rotation = 0.0f;
+  if (const auto extensions = texture_info.find("extensions");
+      extensions != texture_info.end() && extensions->is_object()) {
+    if (const auto transform = extensions->find("KHR_texture_transform");
+        transform != extensions->end() && transform->is_object()) {
+      const auto read_vec2 = [](const Json& object, const char* key, glm::vec2& out) {
+        const auto value = object.find(key);
+        if (value == object.end() || !value->is_array() || value->size() != 2u ||
+            !(*value)[0].is_number() || !(*value)[1].is_number()) {
+          return;
+        }
+        out = {(*value)[0].get<float>(), (*value)[1].get<float>()};
+      };
+      read_vec2(*transform, "offset", offset);
+      read_vec2(*transform, "scale", scale);
+      if (const auto value = transform->find("rotation");
+          value != transform->end() && value->is_number()) {
+        rotation = value->get<float>();
+      }
+      uv_index = transform->value("texCoord", uv_index);
+    }
+  }
+  const float cosine = std::cos(rotation);
+  const float sine = std::sin(rotation);
+  // Imported glTF mesh UVs are V-flipped. Conjugating the authored glTF
+  // transform by that flip keeps KHR_texture_transform in the same image
+  // orientation seen by the renderer.
+  data.texcoord_row0[slot] =
+      {cosine * scale.x, sine * scale.y, offset.x - sine * scale.y,
+       uv_index > 0u ? 1.0f : 0.0f};
+  data.texcoord_row1[slot] =
+      {-sine * scale.x, cosine * scale.y,
+       1.0f - offset.y - cosine * scale.y, 0.0f};
+}
+
+bool appendGltfMaterialTexture(
+    rendering::ImportedMaterialData& data,
+    const GltfDocument& document,
+    const Json& texture_info,
+    rendering::ImportedMaterialTextureSemantic semantic,
+    bool srgb,
+    const char* label,
+    size_t texcoord_slot) {
+  if (!document.valid() || !texture_info.is_object() ||
+      !texture_info.contains("index") || !texture_info["index"].is_number_unsigned() ||
+      !document.json.contains("textures") || !document.json["textures"].is_array() ||
+      !document.json.contains("images") || !document.json["images"].is_array()) {
+    return false;
+  }
+  const uint32_t texture_index = texture_info["index"].get<uint32_t>();
+  if (texture_index >= document.json["textures"].size()) return false;
+  const Json& texture_json = document.json["textures"][texture_index];
+  uint32_t image_index = texture_json.value("source", std::numeric_limits<uint32_t>::max());
+  if (const auto extensions = texture_json.find("extensions");
+      extensions != texture_json.end() && extensions->is_object()) {
+    if (const auto basis = extensions->find("KHR_texture_basisu");
+        basis != extensions->end() && basis->is_object()) {
+      image_index = basis->value("source", image_index);
+    }
+  }
+  if (image_index >= document.json["images"].size()) return false;
+  const Json& image = document.json["images"][image_index];
+
+  rendering::ImportedMaterialTexture imported{};
+  imported.semantic = semantic;
+  imported.srgb = srgb;
+  imported.label = label != nullptr ? label : "gltfTexture";
+  imported.raw_name = image.value("name", std::string{});
+  const std::string uri = image.value("uri", std::string{});
+  if (!uri.empty()) {
+    if (uri.starts_with("data:")) {
+      imported.source_bytes = decodeDataUri(uri);
+      imported.embedded = true;
+      imported.compressed = true;
+      imported.source_key = document.source_path.string() + "#image=" +
+                            std::to_string(image_index);
+    } else {
+      const std::string decoded_uri = decodeUriPath(uri);
+      imported.resolved_path =
+          (document.source_path.parent_path() / decoded_uri).lexically_normal();
+      imported.source_key = imported.resolved_path.string();
+      imported.raw_name = uri;
+    }
+  } else if (image.contains("bufferView") && image["bufferView"].is_number_unsigned() &&
+             document.json.contains("bufferViews") &&
+             document.json["bufferViews"].is_array()) {
+    const uint32_t view_index = image["bufferView"].get<uint32_t>();
+    if (view_index >= document.json["bufferViews"].size()) return false;
+    const Json& view = document.json["bufferViews"][view_index];
+    const std::vector<uint8_t>* buffer =
+        documentBuffer(document, view.value("buffer", 0u));
+    if (buffer == nullptr) return false;
+    const size_t offset = view.value("byteOffset", size_t{0});
+    const size_t length = view.value("byteLength", size_t{0});
+    if (offset > buffer->size() || length > buffer->size() - offset) return false;
+    imported.source_bytes.assign(
+        buffer->begin() + static_cast<std::ptrdiff_t>(offset),
+        buffer->begin() + static_cast<std::ptrdiff_t>(offset + length));
+    imported.embedded = true;
+    imported.compressed = true;
+    imported.source_key = document.source_path.string() + "#image=" +
+                          std::to_string(image_index);
+  } else {
+    return false;
+  }
+  if (imported.source_key.empty() ||
+      (imported.embedded && imported.source_bytes.empty())) {
+    return false;
+  }
+  setGltfTextureCoordTransform(data, texture_info, texcoord_slot);
+  data.textures.push_back(std::move(imported));
+  return true;
+}
+
+void applyGltfSpecularMaterial(rendering::ImportedMaterialData& data,
+                               const GltfDocument& document,
+                               uint32_t material_index) {
+  data.material.normal_map_convention =
+      rendering::MaterialDesc::NormalMapConvention::OpenGL;
+  if (!document.valid() || !document.json.contains("materials") ||
+      !document.json["materials"].is_array() ||
+      material_index >= document.json["materials"].size()) {
+    return;
+  }
+  const Json& material = document.json["materials"][material_index];
+  const auto extensions = material.find("extensions");
+  if (extensions == material.end() || !extensions->is_object()) return;
+  const auto specular = extensions->find("KHR_materials_specular");
+  if (specular == extensions->end() || !specular->is_object()) return;
+
+  const auto finite_unit = [](float value, float fallback) {
+    return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : fallback;
+  };
+  if (const auto factor = specular->find("specularFactor");
+      factor != specular->end() && factor->is_number()) {
+    data.material.specular_factor =
+        finite_unit(factor->get<float>(), data.material.specular_factor);
+  }
+  if (const auto color = specular->find("specularColorFactor");
+      color != specular->end() && color->is_array() && color->size() == 3u &&
+      (*color)[0].is_number() && (*color)[1].is_number() && (*color)[2].is_number()) {
+    data.material.specular_color = {
+        finite_unit((*color)[0].get<float>(), 1.0f),
+        finite_unit((*color)[1].get<float>(), 1.0f),
+        finite_unit((*color)[2].get<float>(), 1.0f), 1.0f};
+  }
+  if (const auto texture = specular->find("specularTexture");
+      texture != specular->end()) {
+    appendGltfMaterialTexture(
+        data, document, *texture,
+        rendering::ImportedMaterialTextureSemantic::Specular,
+        false, "specular", kTexCoordSpecular);
+  }
+  if (const auto texture = specular->find("specularColorTexture");
+      texture != specular->end()) {
+    appendGltfMaterialTexture(
+        data, document, *texture,
+        rendering::ImportedMaterialTextureSemantic::SpecularColor,
+        true, "specularColor", kTexCoordSpecularColor);
+  }
 }
 
 bool appendImportedTexture(rendering::ImportedMaterialData& data,
@@ -1896,6 +2144,12 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
     return prefab;
   }
 
+  // Material extensions are read from the source document because Assimp maps
+  // both KHR_materials_specular textures onto one legacy texture slot. Keeping
+  // the original document also preserves external-image paths when a temporary
+  // meshopt-decoded GLB was used for geometry import.
+  const GltfDocument source_gltf = loadGltfDocument(path);
+
   stage_start = core::SteadyClock::now();
   prefab.imported_materials.reserve(scene->mNumMaterials);
   for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
@@ -1905,6 +2159,7 @@ GltfScenePrefab loadGltfScenePrefab(const std::filesystem::path& path,
     }
     rendering::ImportedMaterialData material =
         buildImportedMaterialData(*scene, *scene->mMaterials[i], load_path);
+    applyGltfSpecularMaterial(material, source_gltf, i);
     applyAlphaModePolicy(material, options);
     applyMaterialOverrides(material,
                            i,

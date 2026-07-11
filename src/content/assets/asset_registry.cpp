@@ -125,9 +125,13 @@ AssetRegistry::AssetRegistry() : impl_(std::make_unique<Impl>()) {}
 
 AssetRegistry::~AssetRegistry() = default;
 
-AssetRegistry::AssetRegistry(AssetRegistry&&) noexcept = default;
-
-AssetRegistry& AssetRegistry::operator=(AssetRegistry&&) noexcept = default;
+AssetPackageStore& AssetRegistry::sharedPackageStore() {
+  const std::lock_guard lock(package_store_mutex_);
+  if (!package_store_) {
+    package_store_ = std::make_unique<AssetPackageStore>(*this);
+  }
+  return *package_store_;
+}
 
 void AssetRegistry::bumpVersion() {
   impl_->version += 1;
@@ -182,6 +186,9 @@ std::string AssetRegistry::assetKeyValidationError(std::string_view key) {
 }
 
 void AssetRegistry::clear() {
+  if (package_store_) {
+    package_store_->clear();
+  }
   impl_->meshes.clear();
   impl_->textures.clear();
   impl_->mesh_payloads_by_hash.clear();
@@ -462,8 +469,14 @@ std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(
       continue;
     }
     const std::string source_hash = detail::importedTextureSourceHash(imported);
+    // The same source image may legally feed both color and data slots. Those
+    // require different GPU formats and must not alias merely because their
+    // encoded bytes are identical.
+    const std::string source_variant =
+        source_hash + (imported.srgb ? ":srgb" : ":linear");
     std::string texture_key;
-    if (const auto existing = impl_->imported_texture_keys_by_source_hash.find(source_hash);
+    if (const auto existing =
+            impl_->imported_texture_keys_by_source_hash.find(source_variant);
         existing != impl_->imported_texture_keys_by_source_hash.end()) {
       texture_key = existing->second;
     } else {
@@ -474,9 +487,11 @@ std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(
 
       const std::string label = detail::sanitizeTextureKeySegment(
           imported.label.empty() ? imported.raw_name : imported.label);
-      texture_key = "gltf/textures/" + source_hash + "/" + label;
+      texture_key = "gltf/textures/" + source_hash +
+                    (imported.srgb ? "/srgb/" : "/linear/") + label;
       if (!AssetRegistry::isValidAssetKey(texture_key)) {
-        texture_key = "gltf/textures/" + source_hash;
+        texture_key = "gltf/textures/" + source_hash +
+                      (imported.srgb ? "/srgb" : "/linear");
       }
 
       const TextureAsset::Semantic texture_semantic =
@@ -495,7 +510,7 @@ std::vector<std::string> AssetRegistry::registerImportedMaterialTextures(
       if (!registerTextureAsset(texture_key, std::move(texture))) {
         continue;
       }
-      impl_->imported_texture_keys_by_source_hash[source_hash] = texture_key;
+      impl_->imported_texture_keys_by_source_hash[source_variant] = texture_key;
     }
 
     const std::string alias = detail::importedTextureAlias(imported.semantic, imported.label);

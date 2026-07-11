@@ -37,6 +37,7 @@ install(FILES
   ${PROJECT_SOURCE_DIR}/include/karma/audio.h
   ${PROJECT_SOURCE_DIR}/include/karma/components.h
   ${PROJECT_SOURCE_DIR}/include/karma/core.h
+  ${PROJECT_SOURCE_DIR}/include/karma/foliage.h
   ${PROJECT_SOURCE_DIR}/include/karma/headless.h
   ${PROJECT_SOURCE_DIR}/include/karma/karma.h
   ${PROJECT_SOURCE_DIR}/include/karma/math.h
@@ -46,6 +47,7 @@ install(FILES
   ${PROJECT_SOURCE_DIR}/include/karma/platform.h
   ${PROJECT_SOURCE_DIR}/include/karma/prefabs.h
   ${PROJECT_SOURCE_DIR}/include/karma/rendering.h
+  ${PROJECT_SOURCE_DIR}/include/karma/scene_authoring.h
   ${PROJECT_SOURCE_DIR}/include/karma/scenes.h
   ${PROJECT_SOURCE_DIR}/include/karma/server.h
   ${PROJECT_SOURCE_DIR}/include/karma/ui.h

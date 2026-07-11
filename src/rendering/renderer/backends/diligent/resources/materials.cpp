@@ -88,6 +88,8 @@ enum TextureCoordSlot : size_t {
   kTexCoordSheenRoughness = 9,
   kTexCoordTransmission = 10,
   kTexCoordThickness = 11,
+  kTexCoordSpecular = 12,
+  kTexCoordSpecularColor = 13,
 };
 
 rendering::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
@@ -112,6 +114,18 @@ rendering::MaterialDesc buildImportedMaterialDesc(const aiMaterial& material) {
   int two_sided = 0;
   if (material.Get(AI_MATKEY_TWOSIDED, two_sided) == AI_SUCCESS) {
     desc.double_sided = two_sided != 0;
+  }
+
+  if (float specular_factor = desc.specular_factor;
+      material.Get(AI_MATKEY_SPECULAR_FACTOR, specular_factor) == AI_SUCCESS) {
+    desc.specular_factor = std::clamp(specular_factor, 0.0f, 1.0f);
+  }
+  if (aiColor3D specular_color(1.0f, 1.0f, 1.0f);
+      material.Get(AI_MATKEY_COLOR_SPECULAR, specular_color) == AI_SUCCESS) {
+    desc.specular_color = {
+        std::clamp(specular_color.r, 0.0f, 1.0f),
+        std::clamp(specular_color.g, 0.0f, 1.0f),
+        std::clamp(specular_color.b, 0.0f, 1.0f), 1.0f};
   }
 
   if (float alpha_cutoff = desc.alpha_cutoff;
@@ -282,6 +296,10 @@ void collectAssimpMaterialTextureRefs(const aiMaterial& material,
   collect_texture(aiTextureType_SHEEN, 1, false, "sheenRoughness");
   collect_texture(aiTextureType_TRANSMISSION, 0, false, "transmission");
   collect_texture(aiTextureType_TRANSMISSION, 1, false, "thickness");
+  // Assimp currently collapses both KHR_materials_specular textures into this
+  // slot. The imported glTF payload path recovers the two textures distinctly;
+  // this fallback at least preserves the scalar specular texture.
+  collect_texture(aiTextureType_SPECULAR, 0, false, "specular");
 }
 
 MaterialPipelineKind pipelineKind(std::string_view name) {
@@ -337,6 +355,16 @@ const glm::vec3* parameterVec3(
     return nullptr;
   }
   return std::get_if<glm::vec3>(&it->second);
+}
+
+const glm::vec4* parameterVec4(
+    const std::unordered_map<std::string, rendering::MaterialParameterValue>& params,
+    std::string_view name) {
+  const auto it = params.find(std::string(name));
+  if (it == params.end()) {
+    return nullptr;
+  }
+  return std::get_if<glm::vec4>(&it->second);
 }
 
 uint32_t parameterUint(
@@ -515,6 +543,20 @@ void DiligentBackend::initializeMaterialBindingForPipeline(
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ThicknessTex")) {
     var->Set(record.thickness_srv);
   }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SpecularTex")) {
+    var->Set(record.specular_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                         "g_SpecularColorTex")) {
+    var->Set(record.specular_color_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_LightmapTex")) {
+    var->Set(record.lightmap_srv);
+  }
+  if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                         "g_LightmapDirectionTex")) {
+    var->Set(record.lightmap_direction_srv);
+  }
   if (auto* var = srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
     var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
   }
@@ -582,6 +624,18 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
   if (!record.thickness_srv) {
     record.thickness_srv = default_base_color_;
   }
+  if (!record.specular_srv) {
+    record.specular_srv = default_base_color_;
+  }
+  if (!record.specular_color_srv) {
+    record.specular_color_srv = default_base_color_;
+  }
+  if (!record.lightmap_srv) {
+    record.lightmap_srv = default_lightmap_;
+  }
+  if (!record.lightmap_direction_srv) {
+    record.lightmap_direction_srv = default_lightmap_direction_;
+  }
   mark_stage("default texture assignment");
 
   record.srb.Release();
@@ -599,6 +653,9 @@ void DiligentBackend::initializeMaterialBindings(MaterialRecord& record) {
     srb.Release();
   }
   for (auto& srb : record.layout_custom_srbs) {
+    srb.Release();
+  }
+  for (auto& srb : record.editor_wireframe_srbs) {
     srb.Release();
   }
   mark_stage("binding invalidation");
@@ -631,6 +688,10 @@ void DiligentBackend::replaceMaterialTextureView(Diligent::ITextureView* previou
     replace(record.sheen_roughness_srv);
     replace(record.transmission_srv);
     replace(record.thickness_srv);
+    replace(record.specular_srv);
+    replace(record.specular_color_srv);
+    replace(record.lightmap_srv);
+    replace(record.lightmap_direction_srv);
     if (changed) {
       initializeMaterialBindings(record);
     }
@@ -653,7 +714,7 @@ void DiligentBackend::replaceMaterialTextureView(Diligent::ITextureView* previou
 }
 
 bool DiligentBackend::materialUsesCustomForwardPipeline(const MaterialRecord& material) const {
-  return material.pipeline.name == "custom" &&
+  return editor_view_mode_ == 0u && material.pipeline.name == "custom" &&
          !material.pipeline.vertex_shader_path.empty() &&
          !material.pipeline.fragment_shader_path.empty();
 }
@@ -668,7 +729,10 @@ Diligent::IShaderResourceBinding* DiligentBackend::ensureMaterialForwardSrb(
   const size_t layout_slot = forwardPipelineVariantIndex(variant) * kInstanceGpuLayoutCount +
                              instanceGpuLayoutIndex(layout);
 
-  if (custom_pipeline) {
+  if (!custom_pipeline && editorWireframeViewEnabled()) {
+    pso = ensureForwardPipeline(variant, layout);
+    target = std::addressof(material.editor_wireframe_srbs[layout_slot]);
+  } else if (custom_pipeline) {
     pso = ensureCustomForwardPipeline(material, variant, layout);
     if (layout != rendering::InstanceGpuLayout::Matrix4x4Params ||
         variant == ForwardPipelineVariant::OpaqueDoubleSided) {
@@ -815,6 +879,20 @@ void DiligentBackend::initializeDefaultMaterialBinding(
   }
   if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_ThicknessTex")) {
     var->Set(default_base_color_);
+  }
+  if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_SpecularTex")) {
+    var->Set(default_base_color_);
+  }
+  if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                              "g_SpecularColorTex")) {
+    var->Set(default_base_color_);
+  }
+  if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_LightmapTex")) {
+    var->Set(default_lightmap_);
+  }
+  if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL,
+                                              "g_LightmapDirectionTex")) {
+    var->Set(default_lightmap_direction_);
   }
   if (auto* var = out_srb->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "g_IrradianceTex")) {
     var->Set(env_irradiance_srv_ ? env_irradiance_srv_ : default_env_);
@@ -1237,6 +1315,10 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
   record.occlusion_strength = record.desc.occlusion_strength;
   record.emissive_strength = record.desc.emissive_strength;
   record.emissive_factor *= record.emissive_strength;
+  record.specular_factor = record.desc.specular_factor;
+  record.specular_color_factor = glm::vec3(record.desc.specular_color.r,
+                                            record.desc.specular_color.g,
+                                            record.desc.specular_color.b);
   record.clearcoat_factor = record.desc.clearcoat;
   record.clearcoat_roughness_factor = record.desc.clearcoat_roughness;
   record.sheen_color_factor = glm::vec3(record.desc.sheen_color.r,
@@ -1304,6 +1386,12 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
       case rendering::ImportedMaterialTextureSemantic::Thickness:
         record.thickness_srv = srv;
         break;
+      case rendering::ImportedMaterialTextureSemantic::Specular:
+        record.specular_srv = srv;
+        break;
+      case rendering::ImportedMaterialTextureSemantic::SpecularColor:
+        record.specular_color_srv = srv;
+        break;
     }
   }
 
@@ -1326,6 +1414,10 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
                                        record.desc.base_color.g,
                                        record.desc.base_color.b,
                                        record.desc.base_color.a);
+  record.specular_factor = record.desc.specular_factor;
+  record.specular_color_factor = glm::vec3(record.desc.specular_color.r,
+                                            record.desc.specular_color.g,
+                                            record.desc.specular_color.b);
 
   aiColor3D emissive(0.0f, 0.0f, 0.0f);
   if (material.Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == AI_SUCCESS) {
@@ -1573,6 +1665,17 @@ DiligentBackend::MaterialRecord DiligentBackend::buildImportedMaterialRecord(
                              kTexCoordThickness);
   }
 
+  mapping = aiTextureMapping_UV;
+  uv_index = 0;
+  blend = 1.0f;
+  if (material.GetTexture(aiTextureType_SPECULAR, 0, &tex_path,
+                          &mapping, &uv_index, &blend, &op, mapmode) == AI_SUCCESS) {
+    record.specular_srv =
+        loadTextureFromAssimp(scene, model_key, base_dir, tex_path, false, "specular");
+    setTextureCoordTransform(record, material, aiTextureType_SPECULAR, 0, uv_index,
+                             kTexCoordSpecular);
+  }
+
   logRenderResourceDiag("imported_material", "build record total", total_start, core::SteadyClock::now());
   return record;
 }
@@ -1632,6 +1735,13 @@ void DiligentBackend::applyResolvedMaterial(
     MaterialRecord& record,
     const rendering::ResolvedMaterialDesc& resolved) {
   const rendering::MaterialDesc& material = resolved.surface;
+  record.lightmap_enabled = false;
+  record.lightmap_intensity = 1.0f;
+  record.lightmap_uv_scale_offset = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+  record.lightmap_mixed_mask_low = 0u;
+  record.lightmap_mixed_mask_high = 0u;
+  record.lightmap_srv.Release();
+  record.lightmap_direction_srv.Release();
   record.pipeline = resolved.pipeline;
   record.desc = material;
   if (record.desc.transparent &&
@@ -1648,6 +1758,10 @@ void DiligentBackend::applyResolvedMaterial(
   record.metallic_factor = material.metallic;
   record.roughness_factor = material.roughness;
   record.normal_scale = material.normal_scale;
+  record.specular_factor = material.specular_factor;
+  record.specular_color_factor = glm::vec3(material.specular_color.r,
+                                            material.specular_color.g,
+                                            material.specular_color.b);
   record.occlusion_strength = material.occlusion_strength;
   record.emissive_strength = material.emissive_strength;
   record.emissive_factor *= record.emissive_strength;
@@ -1666,6 +1780,23 @@ void DiligentBackend::applyResolvedMaterial(
                                        material.attenuation_color.b);
   record.shading_model = pipelineKind(resolved.pipeline.name);
   record.analytic_sphere_normals = material.analytic_sphere_normals;
+  if (const bool* value = parameterBool(resolved.params, "lightmap_enabled")) {
+    record.lightmap_enabled = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "lightmap_intensity");
+      value != nullptr && std::isfinite(*value)) {
+    record.lightmap_intensity = std::max(*value, 0.0f);
+  }
+  if (const glm::vec4* value =
+          parameterVec4(resolved.params, "lightmap_uv_scale_offset");
+      value != nullptr && std::isfinite(value->x) && std::isfinite(value->y) &&
+      std::isfinite(value->z) && std::isfinite(value->w)) {
+    record.lightmap_uv_scale_offset = *value;
+  }
+  record.lightmap_mixed_mask_low =
+      parameterUint(resolved.params, "lightmap_mixed_mask_low", 0u);
+  record.lightmap_mixed_mask_high =
+      parameterUint(resolved.params, "lightmap_mixed_mask_high", 0u);
   if (const float* value = parameterFloat(resolved.params, "shell_fresnel_power")) {
     record.shell_fresnel_power = *value;
   }
@@ -1820,6 +1951,12 @@ void DiligentBackend::applyResolvedMaterial(
                         record.sheen_roughness_srv);
   assign_texture_handle({"transmission"}, record.transmission_srv);
   assign_texture_handle({"thickness"}, record.thickness_srv);
+  assign_texture_handle({"specular", "specular_factor", "specularFactor"},
+                        record.specular_srv);
+  assign_texture_handle({"specular_color", "specularColor"},
+                        record.specular_color_srv);
+  assign_texture_handle({"lightmap"}, record.lightmap_srv);
+  assign_texture_handle({"lightmap_direction"}, record.lightmap_direction_srv);
   initializeMaterialBindings(record);
 }
 
@@ -1873,6 +2010,10 @@ rendering::MaterialId DiligentBackend::createMaterial(const rendering::ResolvedM
   record.metallic_factor = material.metallic;
   record.roughness_factor = material.roughness;
   record.normal_scale = material.normal_scale;
+  record.specular_factor = material.specular_factor;
+  record.specular_color_factor = glm::vec3(material.specular_color.r,
+                                            material.specular_color.g,
+                                            material.specular_color.b);
   record.occlusion_strength = material.occlusion_strength;
   record.emissive_strength = material.emissive_strength;
   record.emissive_factor *= record.emissive_strength;
@@ -1891,6 +2032,23 @@ rendering::MaterialId DiligentBackend::createMaterial(const rendering::ResolvedM
                                        material.attenuation_color.b);
   record.shading_model = pipelineKind(resolved.pipeline.name);
   record.analytic_sphere_normals = material.analytic_sphere_normals;
+  if (const bool* value = parameterBool(resolved.params, "lightmap_enabled")) {
+    record.lightmap_enabled = *value;
+  }
+  if (const float* value = parameterFloat(resolved.params, "lightmap_intensity");
+      value != nullptr && std::isfinite(*value)) {
+    record.lightmap_intensity = std::max(*value, 0.0f);
+  }
+  if (const glm::vec4* value =
+          parameterVec4(resolved.params, "lightmap_uv_scale_offset");
+      value != nullptr && std::isfinite(value->x) && std::isfinite(value->y) &&
+      std::isfinite(value->z) && std::isfinite(value->w)) {
+    record.lightmap_uv_scale_offset = *value;
+  }
+  record.lightmap_mixed_mask_low =
+      parameterUint(resolved.params, "lightmap_mixed_mask_low", 0u);
+  record.lightmap_mixed_mask_high =
+      parameterUint(resolved.params, "lightmap_mixed_mask_high", 0u);
   if (const float* value = parameterFloat(resolved.params, "shell_fresnel_power")) {
     record.shell_fresnel_power = *value;
   }
@@ -2045,6 +2203,12 @@ rendering::MaterialId DiligentBackend::createMaterial(const rendering::ResolvedM
                         record.sheen_roughness_srv);
   assign_texture_handle({"transmission"}, record.transmission_srv);
   assign_texture_handle({"thickness"}, record.thickness_srv);
+  assign_texture_handle({"specular", "specular_factor", "specularFactor"},
+                        record.specular_srv);
+  assign_texture_handle({"specular_color", "specularColor"},
+                        record.specular_color_srv);
+  assign_texture_handle({"lightmap"}, record.lightmap_srv);
+  assign_texture_handle({"lightmap_direction"}, record.lightmap_direction_srv);
   if (materialUsesCustomForwardPipeline(record)) {
     const bool transparent =
         record.desc.transparent ||
@@ -2189,6 +2353,10 @@ void DiligentBackend::updateMaterial(rendering::MaterialId material,
   it->second.metallic_factor = desc.metallic;
   it->second.roughness_factor = desc.roughness;
   it->second.normal_scale = desc.normal_scale;
+  it->second.specular_factor = desc.specular_factor;
+  it->second.specular_color_factor = glm::vec3(desc.specular_color.r,
+                                                desc.specular_color.g,
+                                                desc.specular_color.b);
   it->second.occlusion_strength = desc.occlusion_strength;
   it->second.emissive_strength = desc.emissive_strength;
   it->second.emissive_factor *= it->second.emissive_strength;

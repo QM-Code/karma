@@ -1,7 +1,6 @@
 #include "karma/prefabs.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -11,22 +10,8 @@
 #include <variant>
 #include <vector>
 
-#include "karma/components.h"
-#include "karma/foliage.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
-#include "karma/components.h"
+#include "component_serializer_rendering.h"
+#include "component_serializer_utilities.h"
 #include "karma/components.h"
 
 namespace karma::prefabs {
@@ -34,146 +19,26 @@ namespace karma::prefabs {
 namespace {
 
 using Json = nlohmann::json;
-
-bool isPortableRelativePath(std::string_view value) {
-  if (value.empty() || value.find('\\') != std::string_view::npos ||
-      value.find('\0') != std::string_view::npos || value.front() == '/') {
-    return false;
-  }
-  if (value.size() >= 2u &&
-      std::isalpha(static_cast<unsigned char>(value[0])) != 0 &&
-      value[1] == ':') {
-    return false;
-  }
-
-  std::size_t start = 0u;
-  while (start <= value.size()) {
-    const std::size_t end = value.find('/', start);
-    const std::string_view segment =
-        end == std::string_view::npos ? value.substr(start)
-                                      : value.substr(start, end - start);
-    if (segment == "..") {
-      return false;
-    }
-    if (end == std::string_view::npos) {
-      break;
-    }
-    start = end + 1u;
-  }
-  return true;
-}
-
-Json toJson(const math::Vec3& value) {
-  return Json::array({value.x, value.y, value.z});
-}
-
-Json toJson(const math::Quat& value) {
-  return Json::array({value.x, value.y, value.z, value.w});
-}
+using component_serializer_detail::isPortableRelativePath;
+using component_serializer_detail::readBool;
+using component_serializer_detail::readEntityReference;
+using component_serializer_detail::readFloat;
+using component_serializer_detail::readFloatValue;
+using component_serializer_detail::readQuat;
+using component_serializer_detail::readQuatValue;
+using component_serializer_detail::resolveEntityReferenceValue;
+using component_serializer_detail::readString;
+using component_serializer_detail::readUint32;
+using component_serializer_detail::readUint64;
+using component_serializer_detail::readVec3;
+using component_serializer_detail::readVec3Value;
+using component_serializer_detail::registerComponent;
+using component_serializer_detail::registerContextualComponent;
+using component_serializer_detail::serializeEntityReference;
+using component_serializer_detail::toJson;
 
 Json toJson(const math::Color& value) {
   return Json::array({value.r, value.g, value.b, value.a});
-}
-
-const char* instanceLayoutName(rendering::InstanceGpuLayout layout) {
-  switch (layout) {
-    case rendering::InstanceGpuLayout::Matrix4x4Params:
-      return "matrix4x4_params";
-    case rendering::InstanceGpuLayout::PositionYawScaleParams:
-      return "position_yaw_scale_params";
-  }
-  return "matrix4x4_params";
-}
-
-bool readInstanceLayout(const Json& object,
-                        std::string_view key,
-                        rendering::InstanceGpuLayout& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  if (!it->is_string()) {
-    return false;
-  }
-  const std::string value = it->get<std::string>();
-  if (value == "matrix4x4_params") {
-    out = rendering::InstanceGpuLayout::Matrix4x4Params;
-    return true;
-  }
-  if (value == "position_yaw_scale_params") {
-    out = rendering::InstanceGpuLayout::PositionYawScaleParams;
-    return true;
-  }
-  return false;
-}
-
-const char* instanceLodRenderModeName(rendering::InstanceLodRenderMode mode) {
-  switch (mode) {
-    case rendering::InstanceLodRenderMode::Mesh:
-      return "mesh";
-    case rendering::InstanceLodRenderMode::UprightBillboard:
-      return "upright_billboard";
-  }
-  return "mesh";
-}
-
-bool readInstanceLodRenderMode(const Json& object,
-                               std::string_view key,
-                               rendering::InstanceLodRenderMode& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  if (!it->is_string()) {
-    return false;
-  }
-  const std::string value = it->get<std::string>();
-  if (value == "mesh") {
-    out = rendering::InstanceLodRenderMode::Mesh;
-    return true;
-  }
-  if (value == "upright_billboard") {
-    out = rendering::InstanceLodRenderMode::UprightBillboard;
-    return true;
-  }
-  return false;
-}
-
-bool readFloatValue(const Json& value, float& out) {
-  if (!value.is_number()) {
-    return false;
-  }
-  const double scalar = value.get<double>();
-  if (!std::isfinite(scalar) ||
-      std::abs(scalar) > static_cast<double>(std::numeric_limits<float>::max())) {
-    return false;
-  }
-  out = static_cast<float>(scalar);
-  return true;
-}
-
-bool readBool(const Json& object, std::string_view key, bool& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  if (!it->is_boolean()) {
-    return false;
-  }
-  out = it->get<bool>();
-  return true;
-}
-
-bool readString(const Json& object, std::string_view key, std::string& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  if (!it->is_string()) {
-    return false;
-  }
-  out = it->get<std::string>();
-  return true;
 }
 
 bool readStringVector(const Json& object, std::string_view key, std::vector<std::string>& out) {
@@ -196,59 +61,6 @@ bool readStringVector(const Json& object, std::string_view key, std::vector<std:
     }
     out.push_back(std::move(value));
   }
-  return true;
-}
-
-bool readFloat(const Json& object, std::string_view key, float& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  return readFloatValue(*it, out);
-}
-
-bool readUint32(const Json& object, std::string_view key, uint32_t& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  if (!it->is_number_unsigned() && !it->is_number_integer()) {
-    return false;
-  }
-  uint64_t value = 0u;
-  if (it->is_number_unsigned()) {
-    value = it->get<uint64_t>();
-  } else {
-    const int64_t signed_value = it->get<int64_t>();
-    if (signed_value < 0) {
-      return false;
-    }
-    value = static_cast<uint64_t>(signed_value);
-  }
-  if (value > static_cast<uint64_t>(UINT32_MAX)) {
-    return false;
-  }
-  out = static_cast<uint32_t>(value);
-  return true;
-}
-
-bool readUint64(const Json& object, std::string_view key, uint64_t& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  if (!it->is_number_unsigned() && !it->is_number_integer()) {
-    return false;
-  }
-  if (it->is_number_unsigned()) {
-    out = it->get<uint64_t>();
-    return true;
-  }
-  const int64_t value = it->get<int64_t>();
-  if (value < 0) {
-    return false;
-  }
-  out = static_cast<uint64_t>(value);
   return true;
 }
 
@@ -336,8 +148,6 @@ Json floatVectorJson(const std::vector<float>& values) {
   return out;
 }
 
-bool readVec3Value(const Json& value, math::Vec3& out);
-
 Json vec3VectorJson(const std::vector<math::Vec3>& values) {
   Json out = Json::array();
   for (const math::Vec3& value : values) {
@@ -369,70 +179,6 @@ bool readVec3Vector(const Json& object,
   return true;
 }
 
-Json serializeEntityReference(
-    world::Entity entity,
-    const ComponentSerializationContext& context) {
-  if (!entity.isValid()) {
-    return nullptr;
-  }
-  if (!context.serialize_entity_reference) {
-    // A legacy caller has no stable document identity. Never persist a raw ECS
-    // index/generation pair because it is process-local and unsafe to reload.
-    return nullptr;
-  }
-  const std::optional<Json> encoded =
-      context.serialize_entity_reference(entity);
-  return encoded.has_value() ? *encoded : Json(nullptr);
-}
-
-bool resolveEntityReferenceValue(
-    const Json& value,
-    world::Entity& out,
-    const ComponentSerializationContext& context) {
-  if (value.is_null()) {
-    out = {};
-    return true;
-  }
-  if (!context.resolve_entity_reference) {
-    return false;
-  }
-  const std::optional<world::Entity> resolved =
-      context.resolve_entity_reference(value);
-  if (!resolved.has_value() || !resolved->isValid()) {
-    return false;
-  }
-  out = *resolved;
-  return true;
-}
-
-bool readEntityReference(const Json& object,
-                         std::string_view key,
-                         world::Entity& out,
-                         const ComponentSerializationContext& context) {
-  const auto it = object.find(key);
-  return it == object.end() ||
-         resolveEntityReferenceValue(*it, out, context);
-}
-
-bool readVec3Value(const Json& value, math::Vec3& out) {
-  if (!value.is_array() || value.size() != 3u) {
-    return false;
-  }
-  return readFloatValue(value[0], out.x) &&
-         readFloatValue(value[1], out.y) &&
-         readFloatValue(value[2], out.z);
-}
-
-bool readQuatValue(const Json& value, math::Quat& out) {
-  if (!value.is_array() || value.size() != 4u) {
-    return false;
-  }
-  return readFloatValue(value[0], out.x) &&
-         readFloatValue(value[1], out.y) &&
-         readFloatValue(value[2], out.z) &&
-         readFloatValue(value[3], out.w);
-}
-
 bool readColorValue(const Json& value, math::Color& out) {
   if (!value.is_array() || value.size() != 4u) {
     return false;
@@ -441,22 +187,6 @@ bool readColorValue(const Json& value, math::Color& out) {
          readFloatValue(value[1], out.g) &&
          readFloatValue(value[2], out.b) &&
          readFloatValue(value[3], out.a);
-}
-
-bool readVec3(const Json& object, std::string_view key, math::Vec3& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  return readVec3Value(*it, out);
-}
-
-bool readQuat(const Json& object, std::string_view key, math::Quat& out) {
-  const auto it = object.find(key);
-  if (it == object.end()) {
-    return true;
-  }
-  return readQuatValue(*it, out);
 }
 
 bool readColor(const Json& object, std::string_view key, math::Color& out) {
@@ -943,409 +673,6 @@ std::optional<components::TagComponent> deserializeTag(const Json& json) {
   }
   components::TagComponent component{};
   if (!readString(json, "name", component.name)) {
-    return std::nullopt;
-  }
-  return component;
-}
-
-Json serializeMesh(const components::MeshComponent& component) {
-  Json materials = Json::array();
-  for (const auto& binding : component.materials) {
-    materials.push_back(Json{
-        {"slot", binding.slot},
-        {"material_key", binding.material_key},
-    });
-  }
-  return Json{
-      {"mesh_asset_key", component.mesh_asset_key},
-      {"materials", std::move(materials)},
-      {"visible", component.visible},
-      {"shadow_visible", component.shadow_visible},
-  };
-}
-
-std::optional<components::MeshComponent> deserializeMesh(const Json& json) {
-  if (!json.is_object()) {
-    return std::nullopt;
-  }
-  if (json.contains("mesh_key") ||
-      json.contains("material_key") ||
-      json.contains("texture_key") ||
-      json.contains("mesh_id") ||
-      json.contains("material_id") ||
-      json.contains("owns_mesh_id") ||
-      json.contains("owns_material_id")) {
-    return std::nullopt;
-  }
-  components::MeshComponent component{};
-  if (!readString(json, "mesh_asset_key", component.mesh_asset_key) ||
-      !readBool(json, "visible", component.visible) ||
-      !readBool(json, "shadow_visible", component.shadow_visible)) {
-    return std::nullopt;
-  }
-
-  if (const auto materials_it = json.find("materials"); materials_it != json.end()) {
-    if (!materials_it->is_array()) {
-      return std::nullopt;
-    }
-    component.materials.reserve(materials_it->size());
-    for (const Json& material_json : *materials_it) {
-      if (!material_json.is_object()) {
-        return std::nullopt;
-      }
-      components::MeshMaterialAssignment binding{};
-      if (!readUint32(material_json, "slot", binding.slot) ||
-          !readString(material_json, "material_key", binding.material_key)) {
-        return std::nullopt;
-      }
-      if (!binding.material_key.empty()) {
-        component.materials.push_back(std::move(binding));
-      }
-    }
-  }
-  return component;
-}
-
-Json serializeInstancedMesh(const components::InstancedMeshComponent& component) {
-  Json materials = Json::array();
-  for (const auto& binding : component.materials) {
-    materials.push_back(Json{
-        {"slot", binding.slot},
-        {"material_key", binding.material_key},
-    });
-  }
-
-  Json lods = Json::array();
-  for (const auto& lod : component.lods) {
-    Json lod_materials = Json::array();
-    for (const auto& binding : lod.materials) {
-      lod_materials.push_back(Json{
-          {"slot", binding.slot},
-          {"material_key", binding.material_key},
-      });
-    }
-    lods.push_back(Json{
-        {"start_distance", lod.start_distance},
-        {"mesh_asset_key", lod.mesh_asset_key},
-        {"materials", std::move(lod_materials)},
-        {"render_mode", instanceLodRenderModeName(lod.render_mode)},
-        {"shadow_visible", lod.shadow_visible},
-    });
-  }
-
-  Json instances = Json::array();
-  for (const auto& instance : component.instances) {
-    instances.push_back(Json{
-        {"position", toJson(instance.position)},
-        {"rotation", toJson(instance.rotation)},
-        {"scale", toJson(instance.scale)},
-        {"params", Json::array({instance.params[0],
-                                instance.params[1],
-                                instance.params[2],
-                                instance.params[3]})},
-    });
-  }
-
-  Json planar_instances = Json::array();
-  for (const auto& instance : component.planar_instances) {
-    planar_instances.push_back(Json{
-        {"position", toJson(instance.position)},
-        {"yaw_radians", instance.yaw_radians},
-        {"scale", toJson(instance.scale)},
-        {"params", Json::array({instance.params[0],
-                                instance.params[1],
-                                instance.params[2],
-                                instance.params[3]})},
-    });
-  }
-
-  Json out = Json{
-      {"mesh_asset_key", component.mesh_asset_key},
-      {"materials", std::move(materials)},
-      {"gpu_layout", instanceLayoutName(component.gpu_layout)},
-      {"instances", std::move(instances)},
-      {"planar_instances", std::move(planar_instances)},
-      {"instance_revision", component.instance_revision},
-      {"dynamic", component.dynamic},
-      {"visible", component.visible},
-      {"shadow_visible", component.shadow_visible},
-  };
-  if (!lods.empty()) {
-    out["lods"] = std::move(lods);
-  }
-  return out;
-}
-
-std::optional<components::InstancedMeshComponent> deserializeInstancedMesh(const Json& json) {
-  if (!json.is_object()) {
-    return std::nullopt;
-  }
-  components::InstancedMeshComponent component{};
-  if (!readString(json, "mesh_asset_key", component.mesh_asset_key) ||
-      !readInstanceLayout(json, "gpu_layout", component.gpu_layout) ||
-      !readUint64(json, "instance_revision", component.instance_revision) ||
-      !readBool(json, "dynamic", component.dynamic) ||
-      !readBool(json, "visible", component.visible) ||
-      !readBool(json, "shadow_visible", component.shadow_visible)) {
-    return std::nullopt;
-  }
-
-  if (const auto materials_it = json.find("materials"); materials_it != json.end()) {
-    if (!materials_it->is_array()) {
-      return std::nullopt;
-    }
-    component.materials.reserve(materials_it->size());
-    for (const Json& material_json : *materials_it) {
-      if (!material_json.is_object()) {
-        return std::nullopt;
-      }
-      components::MeshMaterialAssignment binding{};
-      if (!readUint32(material_json, "slot", binding.slot) ||
-          !readString(material_json, "material_key", binding.material_key)) {
-        return std::nullopt;
-      }
-      if (!binding.material_key.empty()) {
-        component.materials.push_back(std::move(binding));
-      }
-    }
-  }
-
-  if (const auto lods_it = json.find("lods"); lods_it != json.end()) {
-    if (!lods_it->is_array() ||
-        lods_it->size() > components::kMaxInstancedMeshLodLevels) {
-      return std::nullopt;
-    }
-    component.lods.reserve(lods_it->size());
-    for (const Json& lod_json : *lods_it) {
-      if (!lod_json.is_object()) {
-        return std::nullopt;
-      }
-      components::InstancedMeshLodLevel lod{};
-      if (!readFloat(lod_json, "start_distance", lod.start_distance) ||
-          !readString(lod_json, "mesh_asset_key", lod.mesh_asset_key) ||
-          !readInstanceLodRenderMode(lod_json, "render_mode", lod.render_mode) ||
-          !readBool(lod_json, "shadow_visible", lod.shadow_visible)) {
-        return std::nullopt;
-      }
-      if (const auto lod_materials_it = lod_json.find("materials");
-          lod_materials_it != lod_json.end()) {
-        if (!lod_materials_it->is_array()) {
-          return std::nullopt;
-        }
-        lod.materials.reserve(lod_materials_it->size());
-        for (const Json& material_json : *lod_materials_it) {
-          if (!material_json.is_object()) {
-            return std::nullopt;
-          }
-          components::MeshMaterialAssignment binding{};
-          if (!readUint32(material_json, "slot", binding.slot) ||
-              !readString(material_json, "material_key", binding.material_key)) {
-            return std::nullopt;
-          }
-          if (!binding.material_key.empty()) {
-            lod.materials.push_back(std::move(binding));
-          }
-        }
-      }
-      component.lods.push_back(std::move(lod));
-    }
-  }
-
-  if (const auto instances_it = json.find("instances"); instances_it != json.end()) {
-    if (!instances_it->is_array()) {
-      return std::nullopt;
-    }
-    component.instances.reserve(instances_it->size());
-    for (const Json& instance_json : *instances_it) {
-      if (!instance_json.is_object()) {
-        return std::nullopt;
-      }
-      components::MeshInstance instance{};
-      if (!readVec3(instance_json, "position", instance.position) ||
-          !readQuat(instance_json, "rotation", instance.rotation) ||
-          !readVec3(instance_json, "scale", instance.scale)) {
-        return std::nullopt;
-      }
-      if (const auto params_it = instance_json.find("params"); params_it != instance_json.end()) {
-        if (!params_it->is_array() || params_it->size() != instance.params.size()) {
-          return std::nullopt;
-        }
-        for (size_t i = 0; i < instance.params.size(); ++i) {
-          if (!readFloatValue((*params_it)[i], instance.params[i])) {
-            return std::nullopt;
-          }
-        }
-      }
-      component.instances.push_back(instance);
-    }
-  }
-
-  if (const auto instances_it = json.find("planar_instances"); instances_it != json.end()) {
-    if (!instances_it->is_array()) {
-      return std::nullopt;
-    }
-    component.planar_instances.reserve(instances_it->size());
-    for (const Json& instance_json : *instances_it) {
-      if (!instance_json.is_object()) {
-        return std::nullopt;
-      }
-      components::PlanarMeshInstance instance{};
-      if (!readVec3(instance_json, "position", instance.position) ||
-          !readFloat(instance_json, "yaw_radians", instance.yaw_radians) ||
-          !readVec3(instance_json, "scale", instance.scale)) {
-        return std::nullopt;
-      }
-      if (const auto params_it = instance_json.find("params"); params_it != instance_json.end()) {
-        if (!params_it->is_array() || params_it->size() != instance.params.size()) {
-          return std::nullopt;
-        }
-        for (size_t i = 0; i < instance.params.size(); ++i) {
-          if (!readFloatValue((*params_it)[i], instance.params[i])) {
-            return std::nullopt;
-          }
-        }
-      }
-      component.planar_instances.push_back(instance);
-    }
-  }
-
-  return component;
-}
-
-Json serializeFoliage(const components::FoliageComponent& component) {
-  Json materials = Json::array();
-  for (const auto& binding : component.materials) {
-    materials.push_back(Json{
-        {"slot", binding.slot},
-        {"material_key", binding.material_key},
-    });
-  }
-
-  Json lods = Json::array();
-  for (const auto& lod : component.lods) {
-    Json lod_materials = Json::array();
-    for (const auto& binding : lod.materials) {
-      lod_materials.push_back(Json{
-          {"slot", binding.slot},
-          {"material_key", binding.material_key},
-      });
-    }
-    lods.push_back(Json{
-        {"start_distance", lod.start_distance},
-        {"mesh_asset_key", lod.mesh_asset_key},
-        {"materials", std::move(lod_materials)},
-        {"render_mode", instanceLodRenderModeName(lod.render_mode)},
-        {"shadow_visible", lod.shadow_visible},
-    });
-  }
-
-  return Json{
-      {"sidecar_path", component.sidecar_path.generic_string()},
-      {"mesh_asset_key", component.mesh_asset_key},
-      {"materials", std::move(materials)},
-      {"lods", std::move(lods)},
-      {"chunk_size", component.chunk_size},
-      {"view_distance", component.view_distance},
-      {"max_resident_instances", component.max_resident_instances},
-      {"source_revision", component.source_revision},
-      {"visible", component.visible},
-      {"shadow_visible", component.shadow_visible},
-  };
-}
-
-std::optional<components::FoliageComponent> deserializeFoliage(const Json& json) {
-  if (!json.is_object()) {
-    return std::nullopt;
-  }
-
-  components::FoliageComponent component{};
-  std::string sidecar_path;
-  if (!readString(json, "sidecar_path", sidecar_path) ||
-      !readString(json, "mesh_asset_key", component.mesh_asset_key) ||
-      !readFloat(json, "chunk_size", component.chunk_size) ||
-      !readFloat(json, "view_distance", component.view_distance) ||
-      !readUint32(json, "max_resident_instances", component.max_resident_instances) ||
-      !readUint64(json, "source_revision", component.source_revision) ||
-      !readBool(json, "visible", component.visible) ||
-      !readBool(json, "shadow_visible", component.shadow_visible)) {
-    return std::nullopt;
-  }
-  if (!isPortableRelativePath(sidecar_path) ||
-      component.mesh_asset_key.empty() ||
-      !std::isfinite(component.chunk_size) ||
-      !std::isfinite(component.view_distance) ||
-      component.chunk_size <= 0.0f || component.view_distance <= 0.0f ||
-      component.max_resident_instances == 0u) {
-    return std::nullopt;
-  }
-  component.sidecar_path = std::filesystem::path(std::move(sidecar_path));
-
-  if (const auto materials_it = json.find("materials"); materials_it != json.end()) {
-    if (!materials_it->is_array()) {
-      return std::nullopt;
-    }
-    component.materials.reserve(materials_it->size());
-    for (const Json& material_json : *materials_it) {
-      if (!material_json.is_object()) {
-        return std::nullopt;
-      }
-      components::MeshMaterialAssignment binding{};
-      if (!readUint32(material_json, "slot", binding.slot) ||
-          !readString(material_json, "material_key", binding.material_key) ||
-          binding.material_key.empty()) {
-        return std::nullopt;
-      }
-      component.materials.push_back(std::move(binding));
-    }
-  }
-
-  if (const auto lods_it = json.find("lods"); lods_it != json.end()) {
-    if (!lods_it->is_array() ||
-        lods_it->size() > components::kMaxInstancedMeshLodLevels) {
-      return std::nullopt;
-    }
-    component.lods.reserve(lods_it->size());
-    float previous_start_distance = 0.0f;
-    for (const Json& lod_json : *lods_it) {
-      if (!lod_json.is_object()) {
-        return std::nullopt;
-      }
-      components::InstancedMeshLodLevel lod{};
-      if (!readFloat(lod_json, "start_distance", lod.start_distance) ||
-          !readString(lod_json, "mesh_asset_key", lod.mesh_asset_key) ||
-          !readInstanceLodRenderMode(lod_json, "render_mode", lod.render_mode) ||
-          !readBool(lod_json, "shadow_visible", lod.shadow_visible) ||
-          !std::isfinite(lod.start_distance) ||
-          lod.start_distance <= previous_start_distance || lod.mesh_asset_key.empty()) {
-        return std::nullopt;
-      }
-      previous_start_distance = lod.start_distance;
-
-      if (const auto lod_materials_it = lod_json.find("materials");
-          lod_materials_it != lod_json.end()) {
-        if (!lod_materials_it->is_array()) {
-          return std::nullopt;
-        }
-        lod.materials.reserve(lod_materials_it->size());
-        for (const Json& material_json : *lod_materials_it) {
-          if (!material_json.is_object()) {
-            return std::nullopt;
-          }
-          components::MeshMaterialAssignment binding{};
-          if (!readUint32(material_json, "slot", binding.slot) ||
-              !readString(material_json, "material_key", binding.material_key) ||
-              binding.material_key.empty()) {
-            return std::nullopt;
-          }
-          lod.materials.push_back(std::move(binding));
-        }
-      }
-      component.lods.push_back(std::move(lod));
-    }
-  }
-
-  std::string validation_error;
-  if (!foliage::validateFoliageComponent(component, &validation_error)) {
     return std::nullopt;
   }
   return component;
@@ -5393,79 +4720,6 @@ std::optional<components::PhysicsVehicleComponent> deserializePhysicsVehicle(
   return component;
 }
 
-template <typename Component, typename SerializeFn, typename DeserializeFn>
-void registerComponent(ComponentSerializerRegistry& registry,
-                       std::string type_name,
-                       SerializeFn serialize,
-                       DeserializeFn deserialize) {
-  registry.registerSerializer(ComponentSerializer{
-      .type_name = std::move(type_name),
-      .has =
-          [](const world::World& world, world::Entity entity) {
-            return world.has<Component>(entity);
-          },
-      .serialize =
-          [serialize = std::move(serialize)](const world::World& world, world::Entity entity) {
-            return serialize(world.get<Component>(entity));
-          },
-      .deserialize =
-          [deserialize = std::move(deserialize)](
-              world::World& world, world::Entity entity, const Json& json) {
-            std::optional<Component> component = deserialize(json);
-            if (!component.has_value()) {
-              return false;
-            }
-            world.add(entity, std::move(*component));
-            return true;
-          },
-  });
-}
-
-template <typename Component, typename SerializeFn, typename DeserializeFn>
-void registerContextualComponent(ComponentSerializerRegistry& registry,
-                                 std::string type_name,
-                                 SerializeFn serialize,
-                                 DeserializeFn deserialize) {
-  registry.registerSerializer(ComponentSerializer{
-      .type_name = std::move(type_name),
-      .has =
-          [](const world::World& world, world::Entity entity) {
-            return world.has<Component>(entity);
-          },
-      .serialize =
-          [serialize](const world::World& world, world::Entity entity) {
-            return serialize(world.get<Component>(entity),
-                             ComponentSerializationContext{});
-          },
-      .deserialize =
-          [deserialize](world::World& world,
-                        world::Entity entity,
-                        const Json& json) {
-            std::optional<Component> component =
-                deserialize(json, ComponentSerializationContext{});
-            if (!component.has_value()) return false;
-            world.add(entity, std::move(*component));
-            return true;
-          },
-      .serialize_with_context =
-          [serialize](const world::World& world,
-                      world::Entity entity,
-                      const ComponentSerializationContext& context) {
-            return serialize(world.get<Component>(entity), context);
-          },
-      .deserialize_with_context =
-          [deserialize](world::World& world,
-                        world::Entity entity,
-                        const Json& json,
-                        const ComponentSerializationContext& context) {
-            std::optional<Component> component = deserialize(json, context);
-            if (!component.has_value()) return false;
-            world.add(entity, std::move(*component));
-            return true;
-          },
-  });
-}
-
 }  // namespace
 
 nlohmann::json serializeComponentPayload(
@@ -5550,12 +4804,7 @@ void registerBuiltinComponentSerializers(ComponentSerializerRegistry& registry) 
       "EnvironmentComponent",
       serializeEnvironment,
       deserializeEnvironment);
-  registerComponent<components::MeshComponent>(
-      registry, "MeshComponent", serializeMesh, deserializeMesh);
-  registerComponent<components::InstancedMeshComponent>(
-      registry, "InstancedMeshComponent", serializeInstancedMesh, deserializeInstancedMesh);
-  registerComponent<components::FoliageComponent>(
-      registry, "FoliageComponent", serializeFoliage, deserializeFoliage);
+  registerRenderingAuthoringComponentSerializers(registry);
   registerComponent<components::AnimatorComponent>(
       registry, "AnimatorComponent", serializeAnimator, deserializeAnimator);
   registerComponent<components::RootMotionComponent>(

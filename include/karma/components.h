@@ -471,6 +471,7 @@ struct CameraComponent : world::ComponentTag {
 
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -1055,7 +1056,7 @@ struct RenderTagsComponent : world::ComponentTag {
 
 namespace karma::components {
 
-/// One authored owner-local instance inside an `InstancedMeshComponent`.
+/// One authored owner-local instance inside an `InstanceSetComponent`.
 struct MeshInstance {
   math::Vec3 position{};
   math::Quat rotation{};
@@ -1071,32 +1072,83 @@ struct PlanarMeshInstance {
   std::array<float, 4> params{0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-inline constexpr size_t kMaxInstancedMeshLodLevels = 3u;
+inline constexpr size_t kMaxLodLevels = 3u;
 
-/// Optional alternate mesh/material used after an instance reaches a distance.
-struct InstancedMeshLodLevel {
+/// Optional alternate mesh/material used after a renderable reaches a distance.
+struct LodLevel {
   float start_distance = 0.0f;
   std::string mesh_asset_key;
   std::vector<MeshMaterialAssignment> materials;
-  rendering::InstanceLodRenderMode render_mode = rendering::InstanceLodRenderMode::Mesh;
+  rendering::LodRenderMode render_mode = rendering::LodRenderMode::Mesh;
   bool shadow_visible = false;
 };
 
-/// \ingroup karma_components
-/// Shared mesh/material binding plus many per-instance transforms.
-///
-/// Instance data is authored in world-layer types. `RenderSystem` translates it
-/// into renderer instance buffers and keeps material slot fallback behavior the
-/// same as `MeshComponent`.
-struct InstancedMeshComponent : world::ComponentTag {
-  std::string mesh_asset_key;
-  std::vector<MeshMaterialAssignment> materials;
-  std::vector<InstancedMeshLodLevel> lods;
-  rendering::InstanceGpuLayout gpu_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
+/// Generic distance-selected mesh/material levels for a renderable component.
+struct LodComponent : world::ComponentTag {
+  std::vector<LodLevel> levels;
+};
+
+inline bool validateLodComponent(const LodComponent& component,
+                                 std::string* error = nullptr) {
+  if (error != nullptr) {
+    error->clear();
+  }
+  const auto fail = [&](const char* message) {
+    if (error != nullptr) {
+      *error = message;
+    }
+    return false;
+  };
+  if (component.levels.size() > kMaxLodLevels) {
+    return fail("LOD component has too many levels");
+  }
+  float previous_start_distance = 0.0f;
+  for (const LodLevel& level : component.levels) {
+    if (!std::isfinite(level.start_distance) ||
+        level.start_distance <= previous_start_distance) {
+      return fail(
+          "LOD distances must be finite, positive, and strictly increasing");
+    }
+    if (level.mesh_asset_key.empty()) {
+      return fail("LOD mesh asset key must not be empty");
+    }
+    if (level.render_mode != rendering::LodRenderMode::Mesh &&
+        level.render_mode != rendering::LodRenderMode::UprightBillboard) {
+      return fail("LOD render mode is invalid");
+    }
+    for (const MeshMaterialAssignment& material : level.materials) {
+      if (material.material_key.empty()) {
+        return fail("LOD material key must not be empty");
+      }
+    }
+    previous_start_distance = level.start_distance;
+  }
+  return true;
+}
+
+/// Shared transforms and upload policy consumed by one or more mesh batches.
+struct InstanceSetComponent : world::ComponentTag {
+  rendering::InstanceGpuLayout gpu_layout =
+      rendering::InstanceGpuLayout::Matrix4x4Params;
   std::vector<MeshInstance> instances;
   std::vector<PlanarMeshInstance> planar_instances;
   uint64_t instance_revision = 0;
   bool dynamic = false;
+};
+
+/// \ingroup karma_components
+/// One mesh/material batch rendered using a contextual instance set.
+///
+/// An invalid `instance_source` selects the `InstanceSetComponent` on the same
+/// entity. The batch-local transform is composed on the right of each authored
+/// instance transform.
+struct InstancedMeshComponent : world::ComponentTag {
+  std::string mesh_asset_key;
+  std::vector<MeshMaterialAssignment> materials;
+  world::Entity instance_source{};
+  math::Vec3 local_position{};
+  math::Quat local_rotation{};
+  math::Vec3 local_scale{1.0f, 1.0f, 1.0f};
   bool visible = true;
   bool shadow_visible = true;
 };

@@ -623,23 +623,27 @@ class GrassFieldExample final : public app::GameInterface {
     grass_entities_.reserve(kGrassChunkCount);
     components::InstancedMeshComponent instanced_grass{};
     instanced_grass.mesh_asset_key = kGrassMeshKey;
-    instanced_grass.gpu_layout = rendering::InstanceGpuLayout::PositionYawScaleParams;
-    instanced_grass.instance_revision = 1;
-    instanced_grass.dynamic = false;
     instanced_grass.visible = true;
     instanced_grass.shadow_visible = false;
-    configureGrassLods(instanced_grass);
     grass_instance_count_ = 0u;
     for (uint32_t index = 0; index < kGrassChunkCount; ++index) {
       const world::Entity grass = world->createEntity();
       world->setName(grass, "Instanced Grass Chunk " + std::to_string(index));
       world->add(grass, components::TransformComponent{});
-      auto chunk_component = instanced_grass;
-      chunk_component.planar_instances.reserve(kGrassChunkReserve);
-      chunk_component.planar_instances.assign(grass_chunk_scratch_[index].begin(),
-                                              grass_chunk_scratch_[index].end());
-      grass_instance_count_ += static_cast<uint32_t>(chunk_component.planar_instances.size());
-      world->add(grass, std::move(chunk_component));
+      components::InstanceSetComponent instance_set{};
+      instance_set.gpu_layout =
+          rendering::InstanceGpuLayout::PositionYawScaleParams;
+      instance_set.instance_revision = 1u;
+      instance_set.dynamic = false;
+      instance_set.planar_instances.reserve(kGrassChunkReserve);
+      instance_set.planar_instances.assign(
+          grass_chunk_scratch_[index].begin(),
+          grass_chunk_scratch_[index].end());
+      grass_instance_count_ +=
+          static_cast<uint32_t>(instance_set.planar_instances.size());
+      world->add(grass, std::move(instance_set));
+      world->add(grass, instanced_grass);
+      configureGrassLods(grass);
       grass_entities_.push_back(grass);
     }
     requested_grass_instances_ = static_cast<int>(grass_instance_count_);
@@ -653,17 +657,23 @@ class GrassFieldExample final : public app::GameInterface {
       if (!world->isAlive(grass) || !world->has<components::InstancedMeshComponent>(grass)) {
         continue;
       }
-      auto& instanced_grass = world->get<components::InstancedMeshComponent>(grass);
-      instanced_grass.gpu_layout = rendering::InstanceGpuLayout::PositionYawScaleParams;
-      configureGrassLods(instanced_grass);
-      if (instanced_grass.planar_instances.capacity() < kGrassChunkReserve) {
-        instanced_grass.planar_instances.reserve(kGrassChunkReserve);
+      if (!world->has<components::InstanceSetComponent>(grass)) {
+        continue;
       }
-      instanced_grass.planar_instances.assign(grass_chunk_scratch_[index].begin(),
-                                              grass_chunk_scratch_[index].end());
-      instanced_grass.instances.clear();
-      ++instanced_grass.instance_revision;
-      grass_instance_count_ += static_cast<uint32_t>(instanced_grass.planar_instances.size());
+      auto& instance_set = world->get<components::InstanceSetComponent>(grass);
+      instance_set.gpu_layout =
+          rendering::InstanceGpuLayout::PositionYawScaleParams;
+      configureGrassLods(grass);
+      if (instance_set.planar_instances.capacity() < kGrassChunkReserve) {
+        instance_set.planar_instances.reserve(kGrassChunkReserve);
+      }
+      instance_set.planar_instances.assign(
+          grass_chunk_scratch_[index].begin(),
+          grass_chunk_scratch_[index].end());
+      instance_set.instances.clear();
+      ++instance_set.instance_revision;
+      grass_instance_count_ +=
+          static_cast<uint32_t>(instance_set.planar_instances.size());
     }
     requested_grass_instances_ = static_cast<int>(grass_instance_count_);
     spdlog::info("Grass field regenerated with {} instances across {} chunks",
@@ -671,21 +681,25 @@ class GrassFieldExample final : public app::GameInterface {
                  grass_entities_.size());
   }
 
-  void configureGrassLods(components::InstancedMeshComponent& instanced_grass) const {
-    instanced_grass.lods.clear();
+  void configureGrassLods(world::Entity grass) const {
     if (!grass_lod_enabled_) {
+      if (world->has<components::LodComponent>(grass)) {
+        world->remove<components::LodComponent>(grass);
+      }
       return;
     }
-    instanced_grass.lods.push_back(components::InstancedMeshLodLevel{
+    components::LodComponent lod{};
+    lod.levels.push_back(components::LodLevel{
         .start_distance = grass_lod_distance_,
         .mesh_asset_key = kGrassBillboardMeshKey,
         .materials = {components::MeshMaterialAssignment{
             .slot = 0u,
             .material_key = kGrassBillboardMaterialKey,
         }},
-        .render_mode = rendering::InstanceLodRenderMode::UprightBillboard,
+        .render_mode = rendering::LodRenderMode::UprightBillboard,
         .shadow_visible = false,
     });
+    world->add(grass, std::move(lod));
   }
 
   void applyGrassLodSettings() {
@@ -693,8 +707,7 @@ class GrassFieldExample final : public app::GameInterface {
       if (!world->isAlive(grass) || !world->has<components::InstancedMeshComponent>(grass)) {
         continue;
       }
-      auto& instanced_grass = world->get<components::InstancedMeshComponent>(grass);
-      configureGrassLods(instanced_grass);
+      configureGrassLods(grass);
     }
   }
 

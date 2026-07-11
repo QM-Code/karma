@@ -1,4 +1,5 @@
 #include "scene_editor_viewport.h"
+#include "scene_editor_pointer_input.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -58,6 +59,133 @@ editor::ViewportProjection navigationProjection(
           .far_clip = 1000.0f,
       },
   };
+}
+
+void testViewportInputSnapshotResolution() {
+  const editor::ViewportInputSnapshot fallback{
+      .primary_down = true,
+      .primary_pressed = true,
+      .middle_down = true,
+      .right_down = true,
+      .orbit_modifier_down = true,
+      .fast_down = true,
+      .move_forward = true,
+      .move_backward = true,
+      .move_left = true,
+      .move_right = true,
+      .move_down = true,
+      .move_up = true,
+      .delta_x = 17.0f,
+      .delta_y = -9.0f,
+      .wheel = 4.0f,
+  };
+  const editor::ViewportInputSnapshot without_imgui =
+      editor::resolveViewportInputSnapshot(std::nullopt, fallback);
+  KARMA_REQUIRE(without_imgui.primary_down);
+  KARMA_REQUIRE(without_imgui.primary_pressed);
+  KARMA_REQUIRE(without_imgui.middle_down);
+  KARMA_REQUIRE(without_imgui.right_down);
+  KARMA_REQUIRE(without_imgui.orbit_modifier_down);
+  KARMA_REQUIRE(without_imgui.fast_down);
+  KARMA_REQUIRE(without_imgui.move_forward);
+  KARMA_REQUIRE(without_imgui.move_backward);
+  KARMA_REQUIRE(without_imgui.move_left);
+  KARMA_REQUIRE(without_imgui.move_right);
+  KARMA_REQUIRE(without_imgui.move_down);
+  KARMA_REQUIRE(without_imgui.move_up);
+  KARMA_REQUIRE(nearly(without_imgui.delta_x, 17.0f));
+  KARMA_REQUIRE(nearly(without_imgui.delta_y, -9.0f));
+  KARMA_REQUIRE(nearly(without_imgui.wheel, 4.0f));
+
+  const editor::ViewportInputSnapshot imgui{
+      .primary_down = false,
+      .primary_pressed = false,
+      .middle_down = false,
+      .right_down = false,
+      .delta_x = -2.5f,
+      .delta_y = 3.5f,
+      .wheel = -1.0f,
+  };
+  const editor::ViewportInputSnapshot with_imgui =
+      editor::resolveViewportInputSnapshot(imgui, fallback);
+  KARMA_REQUIRE(!with_imgui.primary_down);
+  KARMA_REQUIRE(!with_imgui.primary_pressed);
+  KARMA_REQUIRE(!with_imgui.middle_down);
+  KARMA_REQUIRE(!with_imgui.right_down);
+  KARMA_REQUIRE(!with_imgui.orbit_modifier_down);
+  KARMA_REQUIRE(!with_imgui.fast_down);
+  KARMA_REQUIRE(!with_imgui.move_forward);
+  KARMA_REQUIRE(!with_imgui.move_backward);
+  KARMA_REQUIRE(!with_imgui.move_left);
+  KARMA_REQUIRE(!with_imgui.move_right);
+  KARMA_REQUIRE(!with_imgui.move_down);
+  KARMA_REQUIRE(!with_imgui.move_up);
+  KARMA_REQUIRE(nearly(with_imgui.delta_x, -2.5f));
+  KARMA_REQUIRE(nearly(with_imgui.delta_y, 3.5f));
+  KARMA_REQUIRE(nearly(with_imgui.wheel, -1.0f));
+
+  const editor::ViewportInputSnapshot stale_imgui{
+      .primary_down = true,
+      .primary_pressed = true,
+      .middle_down = true,
+      .right_down = true,
+      .orbit_modifier_down = true,
+      .fast_down = true,
+      .move_forward = true,
+      .move_backward = true,
+      .move_left = true,
+      .move_right = true,
+      .move_down = true,
+      .move_up = true,
+      .delta_x = 8.0f,
+      .delta_y = -6.0f,
+      .wheel = 2.0f,
+  };
+  const editor::ViewportInputSnapshot focus_lost =
+      editor::resolveViewportInputSnapshot(stale_imgui, fallback, true);
+  KARMA_REQUIRE(!focus_lost.primary_down);
+  KARMA_REQUIRE(!focus_lost.primary_pressed);
+  KARMA_REQUIRE(!focus_lost.middle_down);
+  KARMA_REQUIRE(!focus_lost.right_down);
+  KARMA_REQUIRE(!focus_lost.orbit_modifier_down);
+  KARMA_REQUIRE(!focus_lost.fast_down);
+  KARMA_REQUIRE(!focus_lost.move_forward);
+  KARMA_REQUIRE(!focus_lost.move_backward);
+  KARMA_REQUIRE(!focus_lost.move_left);
+  KARMA_REQUIRE(!focus_lost.move_right);
+  KARMA_REQUIRE(!focus_lost.move_down);
+  KARMA_REQUIRE(!focus_lost.move_up);
+  KARMA_REQUIRE(nearly(focus_lost.delta_x, 0.0f));
+  KARMA_REQUIRE(nearly(focus_lost.delta_y, 0.0f));
+  KARMA_REQUIRE(nearly(focus_lost.wheel, 0.0f));
+}
+
+void testViewportPointerRectangleHit() {
+  const editor::ViewportRect viewport{
+      .x = 100.0f, .y = 50.0f, .width = 800.0f, .height = 600.0f};
+  KARMA_REQUIRE(editor::viewportContainsPointer(viewport, 100.0f, 50.0f));
+  KARMA_REQUIRE(editor::viewportContainsPointer(viewport, 899.999f, 649.999f));
+  KARMA_REQUIRE(!editor::viewportContainsPointer(viewport, 99.999f, 50.0f));
+  KARMA_REQUIRE(!editor::viewportContainsPointer(viewport, 900.0f, 50.0f));
+  KARMA_REQUIRE(!editor::viewportContainsPointer(viewport, 100.0f, 650.0f));
+  KARMA_REQUIRE(!editor::viewportContainsPointer(
+      editor::ViewportRect{.width = 0.0f, .height = 600.0f}, 0.0f, 0.0f));
+  KARMA_REQUIRE(!editor::viewportContainsPointer(
+      viewport, std::numeric_limits<float>::quiet_NaN(), 100.0f));
+}
+
+void testViewportButtonOwnership() {
+  KARMA_REQUIRE(editor::updateViewportButtonOwnership(
+      false, true, true, true));
+  KARMA_REQUIRE(editor::updateViewportButtonOwnership(
+      true, true, false, false));
+  KARMA_REQUIRE(!editor::updateViewportButtonOwnership(
+      true, false, false, true));
+
+  KARMA_REQUIRE(!editor::updateViewportButtonOwnership(
+      false, true, true, false));
+  KARMA_REQUIRE(!editor::updateViewportButtonOwnership(
+      false, true, false, true));
 }
 
 void testProjectionOrientationAndClipping() {
@@ -408,6 +536,9 @@ void testFraming() {
 }  // namespace
 
 int main() {
+  testViewportInputSnapshotResolution();
+  testViewportPointerRectangleHit();
+  testViewportButtonOwnership();
   testProjectionOrientationAndClipping();
   testProjectionAndRayRoundTrips();
   testProjectionAcrossViewportSizes();

@@ -1,5 +1,7 @@
 #include "scene_editor_model.h"
+#include "scene_editor_foliage_prefab.h"
 #include "scene_editor_markers.h"
+#include "scene_editor_migration.h"
 #include "scene_editor_placement.h"
 
 #include "karma/assets.h"
@@ -109,6 +111,13 @@ void writeText(const std::filesystem::path& path, std::string_view text) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream stream(path);
   stream << text;
+}
+
+std::string readText(const std::filesystem::path& path) {
+  std::ifstream stream(path, std::ios::binary);
+  std::ostringstream text;
+  text << stream.rdbuf();
+  return text.str();
 }
 
 karma::scenes::SceneDocument makeSceneDocument(
@@ -331,8 +340,14 @@ void testSettingsRoundTrip() {
   saved.selected_bake_id = "production";
   saved.asset_type_filter = 3;
   saved.console_min_level = 2;
-  saved.terrain_inspector_tab = 1;
+  saved.terrain_inspector_tab = 2;
   saved.terrain_material_layer = 2;
+  saved.active_foliage_layer_id = "pine_foliage";
+  saved.component_foldouts = {
+      {"TransformComponent", true},
+      {"MeshComponent", false},
+      {"TerrainComponent", true},
+  };
   saved.bottom_panel_tab = editor::BottomPanelTab::Lighting;
   saved.viewport_render_mode = editor::ViewportRenderMode::Texture;
   std::string diagnostic;
@@ -353,8 +368,10 @@ void testSettingsRoundTrip() {
   KARMA_REQUIRE(loaded.selected_bake_id == "production");
   KARMA_REQUIRE(loaded.asset_type_filter == 3);
   KARMA_REQUIRE(loaded.console_min_level == 2);
-  KARMA_REQUIRE(loaded.terrain_inspector_tab == 1);
+  KARMA_REQUIRE(loaded.terrain_inspector_tab == 2);
   KARMA_REQUIRE(loaded.terrain_material_layer == 2);
+  KARMA_REQUIRE(loaded.active_foliage_layer_id == "pine_foliage");
+  KARMA_REQUIRE(loaded.component_foldouts == saved.component_foldouts);
   KARMA_REQUIRE(loaded.bottom_panel_tab == editor::BottomPanelTab::Lighting);
   KARMA_REQUIRE(loaded.viewport_render_mode ==
                 editor::ViewportRenderMode::Texture);
@@ -376,9 +393,26 @@ void testSettingsRoundTrip() {
   KARMA_REQUIRE(loaded.console_min_level == 0);
   KARMA_REQUIRE(loaded.terrain_inspector_tab == 0);
   KARMA_REQUIRE(loaded.terrain_material_layer == 0);
+  KARMA_REQUIRE(loaded.active_foliage_layer_id.empty());
+  KARMA_REQUIRE(loaded.component_foldouts.empty());
   KARMA_REQUIRE(loaded.bottom_panel_tab == editor::BottomPanelTab::Assets);
   KARMA_REQUIRE(loaded.viewport_render_mode ==
                 editor::ViewportRenderMode::Rendered);
+
+  writeText(editor::settingsPath(root), R"({
+    "version": 1,
+    "terrain_inspector_tab": 3
+  })");
+  KARMA_REQUIRE(!editor::loadEditorSettings(root, loaded, &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("terrain_inspector_tab") !=
+                std::string::npos);
+
+  writeText(editor::settingsPath(root), R"({
+    "version": 1,
+    "component_foldouts": {"TransformComponent": "open"}
+  })");
+  KARMA_REQUIRE(!editor::loadEditorSettings(root, loaded, &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("component_foldouts") != std::string::npos);
   std::filesystem::remove_all(root);
 }
 
@@ -454,6 +488,19 @@ void testViewportPointerInputCapture() {
   KARMA_REQUIRE(!editor::blocksViewportPointerInput(
       editor::EditorPointerCaptureState{.want_capture_mouse = true,
                                         .viewport_item_hovered = true}));
+  KARMA_REQUIRE(!editor::blocksViewportPointerInput(
+      editor::EditorPointerCaptureState{
+          .panel_item_active = true,
+          .want_capture_mouse = true,
+          .viewport_navigation_owned = true}));
+  KARMA_REQUIRE(editor::blocksViewportPointerInput(
+      editor::EditorPointerCaptureState{
+          .popup_open = true,
+          .viewport_navigation_owned = true}));
+  KARMA_REQUIRE(editor::blocksViewportPointerInput(
+      editor::EditorPointerCaptureState{
+          .drag_drop_active = true,
+          .viewport_navigation_owned = true}));
 }
 
 void testSettingsRejectMalformedFieldTypes() {
@@ -594,7 +641,7 @@ void testComponentEditorRegistryMetadataAndCoverage() {
       editor::buildComponentEditorRegistry();
   const auto& serializers =
       karma::prefabs::componentSerializerRegistry().serializers();
-  KARMA_REQUIRE(registry.descriptors().size() == serializers.size());
+  KARMA_REQUIRE(registry.descriptors().size() >= serializers.size());
   for (const karma::prefabs::ComponentSerializer& serializer : serializers) {
     const editor::ComponentEditorDescriptor* descriptor =
         registry.find(serializer.type_name);
@@ -609,6 +656,9 @@ void testComponentEditorRegistryMetadataAndCoverage() {
   const auto* material = registry.find("PhysicsMaterialComponent");
   const auto* filter = registry.find("PhysicsCollisionFilterComponent");
   const auto* foliage = registry.find("FoliageComponent");
+  const auto* lod = registry.find("LODComponent");
+  const auto* instance_set = registry.find("InstanceSetComponent");
+  const auto* instanced_mesh = registry.find("InstancedMeshComponent");
   const auto* particles = registry.find("ParticleEffectComponent");
   KARMA_REQUIRE(transform != nullptr && !transform->removable);
   KARMA_REQUIRE(transform->editor == editor::ComponentEditorKind::Transform);
@@ -627,9 +677,830 @@ void testComponentEditorRegistryMetadataAndCoverage() {
   KARMA_REQUIRE(foliage != nullptr &&
                 foliage->creation_policy ==
                     editor::ComponentCreationPolicy::ContextualWorkflow);
+  KARMA_REQUIRE(lod != nullptr &&
+                lod->category == editor::ComponentEditorCategory::Rendering &&
+                lod->editor == editor::ComponentEditorKind::Lod);
+  KARMA_REQUIRE(
+      lod->one_of_dependencies ==
+      (std::vector<std::string>{"MeshComponent", "InstancedMeshComponent",
+                                "FoliageComponent"}));
+  KARMA_REQUIRE(instance_set != nullptr &&
+                instance_set->editor ==
+                    editor::ComponentEditorKind::InstanceSet);
+  KARMA_REQUIRE(instanced_mesh != nullptr &&
+                instanced_mesh->dependencies ==
+                    std::vector<std::string>{"InstanceSetComponent"});
   KARMA_REQUIRE(particles != nullptr &&
                 particles->creation_policy ==
                     editor::ComponentCreationPolicy::ValidatedJsonDraft);
+}
+
+void testLodAndInstanceSetEditorSchemas() {
+  const editor::ComponentEditorRegistry registry =
+      editor::buildComponentEditorRegistry();
+  std::string diagnostic;
+  KARMA_REQUIRE(editor::validateLodComponentPayload(
+      editor::defaultLodComponentPayload(), &diagnostic));
+  KARMA_REQUIRE(editor::validateInstanceSetComponentPayload(
+      editor::defaultInstanceSetComponentPayload(), &diagnostic));
+
+  nlohmann::json lod = {
+      {"levels",
+       nlohmann::json::array({
+           {{"start_distance", 25.0f},
+            {"mesh_asset_key", "trees/low"},
+            {"materials",
+             nlohmann::json::array(
+                 {{{"slot", 0u}, {"material_key", "trees/bark"}}})},
+            {"render_mode", "mesh"},
+            {"shadow_visible", true}},
+           {{"start_distance", 80.0f},
+            {"mesh_asset_key", "trees/billboard"},
+            {"materials", nlohmann::json::array()},
+            {"render_mode", "upright_billboard"},
+            {"shadow_visible", false}},
+       })},
+  };
+  KARMA_REQUIRE(editor::validateLodComponentPayload(lod, &diagnostic));
+
+  nlohmann::json invalid = lod;
+  invalid["levels"][1]["start_distance"] = 25.0f;
+  KARMA_REQUIRE(!editor::validateLodComponentPayload(invalid, &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("strictly increasing") != std::string::npos);
+  invalid = lod;
+  invalid["levels"][0]["render_mode"] = "impostor";
+  KARMA_REQUIRE(!editor::validateLodComponentPayload(invalid, &diagnostic));
+  invalid = lod;
+  invalid["levels"].push_back(invalid["levels"].back());
+  invalid["levels"].push_back(invalid["levels"].back());
+  KARMA_REQUIRE(!editor::validateLodComponentPayload(invalid, &diagnostic));
+
+  karma::scenes::SceneEntity entity{.id = "tree", .name = "Tree"};
+  const nlohmann::json before = entity.components;
+  KARMA_REQUIRE(!editor::addComponentWithDependencies(
+      entity, registry, "LODComponent", lod, nullptr, &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("compatible source") != std::string::npos);
+  KARMA_REQUIRE(entity.components == before);
+
+  const nlohmann::json prefab_foliage = {
+      {"sidecar_path", "foliage/tree.kfoliage"},
+      {"prefab_path", "prefabs/tree/prefab.json"},
+      {"prefab_variables", nlohmann::json::object()},
+      {"chunk_size", 32.0f},
+      {"view_distance", 256.0f},
+      {"max_resident_instances", 100000u},
+      {"source_revision", 0u},
+      {"visible", true},
+      {"shadow_visible", true},
+  };
+  karma::scenes::SceneEntity prefab_foliage_entity{
+      .id = "prefab_foliage",
+      .name = "Prefab Foliage",
+      .components = {{"FoliageComponent", prefab_foliage}},
+  };
+  KARMA_REQUIRE(!editor::addComponentWithDependencies(prefab_foliage_entity,
+                                                        registry,
+                                                        "LODComponent",
+                                                        lod,
+                                                        nullptr,
+                                                        &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("direct-mesh Foliage") != std::string::npos);
+  KARMA_REQUIRE(
+      !prefab_foliage_entity.components.contains("LODComponent"));
+
+  const nlohmann::json direct_mesh_foliage = {
+      {"sidecar_path", "foliage/tree.kfoliage"},
+      {"mesh_asset_key", "trees/high"},
+      {"materials", nlohmann::json::array()},
+      {"chunk_size", 32.0f},
+      {"view_distance", 256.0f},
+      {"max_resident_instances", 100000u},
+      {"source_revision", 0u},
+      {"visible", true},
+      {"shadow_visible", true},
+  };
+  karma::scenes::SceneEntity direct_foliage_entity{
+      .id = "direct_foliage",
+      .name = "Direct Mesh Foliage",
+      .components = {{"FoliageComponent", direct_mesh_foliage}},
+  };
+  KARMA_REQUIRE(editor::addComponentWithDependencies(direct_foliage_entity,
+                                                       registry,
+                                                       "LODComponent",
+                                                       lod,
+                                                       nullptr,
+                                                       &diagnostic));
+  const nlohmann::json direct_before_source_switch =
+      direct_foliage_entity.components;
+  KARMA_REQUIRE(!editor::replaceComponentPayload(direct_foliage_entity,
+                                                   registry,
+                                                   "FoliageComponent",
+                                                   prefab_foliage,
+                                                   &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("direct-mesh Foliage") != std::string::npos);
+  KARMA_REQUIRE(direct_foliage_entity.components ==
+                direct_before_source_switch);
+
+  KARMA_REQUIRE(editor::addDefaultComponentWithDependencies(
+      entity, registry, "MeshComponent", nullptr, &diagnostic));
+  KARMA_REQUIRE(editor::addComponentWithDependencies(
+      entity, registry, "LODComponent", lod, nullptr, &diagnostic));
+  KARMA_REQUIRE(entity.components["LODComponent"] == lod);
+  KARMA_REQUIRE(!editor::removeComponentsTogether(
+      entity, registry, {"MeshComponent"}, &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("depends") != std::string::npos ||
+                diagnostic.find("compatible") != std::string::npos);
+  KARMA_REQUIRE(editor::removeComponentsTogether(
+      entity, registry, {"LODComponent", "MeshComponent"}, &diagnostic));
+
+  nlohmann::json planar = editor::defaultInstanceSetComponentPayload();
+  planar["gpu_layout"] = "position_yaw_scale_params";
+  planar["planar_instances"].push_back({
+      {"position", nlohmann::json::array({1.0f, 0.0f, 2.0f})},
+      {"yaw_radians", 0.5f},
+      {"scale", nlohmann::json::array({1.0f, 2.0f, 1.0f})},
+      {"params", nlohmann::json::array({0.0f, 1.0f, 0.0f, 0.0f})},
+  });
+  KARMA_REQUIRE(editor::validateInstanceSetComponentPayload(planar,
+                                                             &diagnostic));
+  planar["instances"].push_back({
+      {"position", nlohmann::json::array({0.0f, 0.0f, 0.0f})},
+      {"rotation", nlohmann::json::array({0.0f, 0.0f, 0.0f, 1.0f})},
+      {"scale", nlohmann::json::array({1.0f, 1.0f, 1.0f})},
+      {"params", nlohmann::json::array({0.0f, 0.0f, 0.0f, 0.0f})},
+  });
+  KARMA_REQUIRE(!editor::validateInstanceSetComponentPayload(planar,
+                                                              &diagnostic));
+}
+
+void testFoliagePrefabInspectionEligibility() {
+  using karma::components::DeformableMeshComponent;
+  using karma::components::InstanceSetComponent;
+  using karma::components::InstancedMeshComponent;
+  using karma::components::LodComponent;
+  using karma::components::LodLevel;
+  using karma::components::MeshComponent;
+  using karma::components::TransformComponent;
+
+  const std::filesystem::path root = tempDirectory();
+  const std::filesystem::path prefab_path = root / "mixed/prefab.json";
+  karma::world::World world;
+  karma::world::Scene scene;
+  const auto add_node = [&](std::string name,
+                            std::optional<karma::world::NodeId> parent) {
+    const karma::world::Entity entity = world.createEntity();
+    world.setName(entity, std::move(name));
+    world.add(entity, TransformComponent{});
+    const karma::world::NodeId node = scene.createNode(entity);
+    if (parent.has_value()) {
+      KARMA_REQUIRE(scene.reparent(node, *parent));
+    }
+    return std::pair{entity, node};
+  };
+
+  const auto [rigid, rigid_node] = add_node("Rigid", std::nullopt);
+  world.add(rigid, MeshComponent{
+                       .mesh_asset_key = "trees/default",
+                       .visible = true,
+                       .shadow_visible = true,
+                   });
+  world.add(rigid,
+            LodComponent{.levels = {LodLevel{
+                             .start_distance = 40.0f,
+                             .mesh_asset_key = "trees/billboard",
+                         }}});
+
+  const auto [invisible, invisible_node] =
+      add_node("Invisible", rigid_node);
+  (void)invisible_node;
+  world.add(invisible, MeshComponent{
+                           .mesh_asset_key = "trees/invisible",
+                           .visible = false,
+                       });
+
+  const auto [deformable, deformable_node] =
+      add_node("Deformable", rigid_node);
+  (void)deformable_node;
+  world.add(deformable, MeshComponent{
+                            .mesh_asset_key = "trees/deformable",
+                            .visible = true,
+                        });
+  world.add(deformable, DeformableMeshComponent{.enabled = true});
+
+  const auto [instance_source, instance_source_node] =
+      add_node("Instance Source", rigid_node);
+  (void)instance_source_node;
+  world.add(instance_source, InstanceSetComponent{});
+  const auto [instanced, instanced_node] =
+      add_node("Authored Instances", rigid_node);
+  (void)instanced_node;
+  world.add(instanced, InstancedMeshComponent{
+                         .mesh_asset_key = "trees/instanced",
+                         .instance_source = instance_source,
+                     });
+
+  KARMA_REQUIRE(karma::prefabs::savePrefab(
+      world, scene, rigid, prefab_path));
+  nlohmann::json prefab = nlohmann::json::parse(readText(prefab_path));
+  prefab["variables"] = {
+      {"rigid_mesh", {{"type", "string"},
+                       {"default", "trees/default"}}},
+  };
+  for (nlohmann::json& node : prefab["nodes"]) {
+    if (node.value("name", std::string{}) == "Rigid") {
+      node["components"]["MeshComponent"]["mesh_asset_key"] = {
+          {"$var", "rigid_mesh"},
+      };
+    }
+  }
+  writeText(prefab_path, prefab.dump(2));
+
+  editor::FoliagePrefabInspector inspector;
+  const editor::FoliagePrefabInspection inspected = inspector.inspect(
+      prefab_path, {{"rigid_mesh", "trees/override"}});
+  KARMA_REQUIRE(inspected.inspected());
+  KARMA_REQUIRE(inspected.paintable());
+  KARMA_REQUIRE(inspected.eligible_rigid_meshes == 1u);
+  const auto find_renderer = [&](std::string_view node_name,
+                                 editor::FoliagePrefabRendererDisposition
+                                     disposition) {
+    return std::find_if(
+        inspected.renderers.begin(), inspected.renderers.end(),
+        [&](const editor::FoliagePrefabRendererSummary& renderer) {
+          return renderer.node_name == node_name &&
+                 renderer.disposition == disposition;
+        });
+  };
+  const auto painted = find_renderer(
+      "Rigid",
+      editor::FoliagePrefabRendererDisposition::PaintedRigidMesh);
+  KARMA_REQUIRE(painted != inspected.renderers.end());
+  KARMA_REQUIRE(painted->mesh_asset_key == "trees/override");
+  KARMA_REQUIRE(painted->lod_level_count == 1u);
+  KARMA_REQUIRE(find_renderer(
+                    "Invisible",
+                    editor::FoliagePrefabRendererDisposition::
+                        IgnoredInvisibleMesh) != inspected.renderers.end());
+  KARMA_REQUIRE(find_renderer(
+                    "Deformable",
+                    editor::FoliagePrefabRendererDisposition::
+                        IgnoredDeformableMesh) != inspected.renderers.end());
+  KARMA_REQUIRE(find_renderer(
+                    "Authored Instances",
+                    editor::FoliagePrefabRendererDisposition::
+                        IgnoredInstancedMesh) != inspected.renderers.end());
+
+  const editor::FoliagePrefabInspection changed_override = inspector.inspect(
+      prefab_path, {{"rigid_mesh", "trees/second_override"}});
+  const auto changed_painted = std::find_if(
+      changed_override.renderers.begin(), changed_override.renderers.end(),
+      [](const editor::FoliagePrefabRendererSummary& renderer) {
+        return renderer.disposition ==
+               editor::FoliagePrefabRendererDisposition::PaintedRigidMesh;
+      });
+  KARMA_REQUIRE(changed_painted != changed_override.renderers.end());
+  KARMA_REQUIRE(changed_painted->mesh_asset_key ==
+                "trees/second_override");
+  std::string diagnostic;
+  KARMA_REQUIRE(inspector.validate(prefab_path,
+                                   {{"rigid_mesh", "trees/valid"}},
+                                   &diagnostic));
+  KARMA_REQUIRE(diagnostic.empty());
+
+  const std::filesystem::path ignored_path = root / "ignored/prefab.json";
+  for (nlohmann::json& node : prefab["nodes"]) {
+    if (node.value("name", std::string{}) == "Rigid") {
+      node["components"]["MeshComponent"]["visible"] = false;
+    }
+  }
+  writeText(ignored_path, prefab.dump(2));
+  KARMA_REQUIRE(!inspector.validate(ignored_path,
+                                    nlohmann::json::object(),
+                                    &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("visible rigid MeshComponent") !=
+                std::string::npos);
+  const editor::FoliagePrefabInspection ignored =
+      inspector.inspect(ignored_path);
+  KARMA_REQUIRE(ignored.inspected());
+  KARMA_REQUIRE(!ignored.paintable());
+  KARMA_REQUIRE(ignored.eligible_rigid_meshes == 0u);
+
+  std::filesystem::remove_all(root);
+}
+
+void testFocusedPrefabAssetDraftTransactions() {
+  const editor::ComponentEditorRegistry registry =
+      editor::buildComponentEditorRegistry();
+  const std::filesystem::path root = tempDirectory();
+  const std::filesystem::path path = root / "tree/prefab.json";
+  const nlohmann::json mesh_payload =
+      registry.find("MeshComponent")->default_payload();
+  nlohmann::json source = {
+      {"version", 2u},
+      {"asset_package", "assets.package.json"},
+      {"root", 0u},
+      {"nodes",
+       nlohmann::json::array({
+           {{"id", 0u},
+            {"name", "Tree"},
+            {"parent", nullptr},
+            {"components", {{"MeshComponent", mesh_payload}}}},
+       })},
+  };
+  writeText(path, source.dump(2));
+
+  std::string diagnostic;
+  std::optional<editor::PrefabAssetDraft> opened =
+      editor::openPrefabAssetDraft(path, &diagnostic);
+  KARMA_REQUIRE(opened.has_value());
+  editor::PrefabAssetDraft& draft = *opened;
+  KARMA_REQUIRE(!draft.dirty());
+  KARMA_REQUIRE(!draft.sourceChangedExternally());
+
+  nlohmann::json lod = {
+      {"levels",
+       nlohmann::json::array({
+           {{"start_distance", 35.0f},
+            {"mesh_asset_key", "trees/low"},
+            {"materials", nlohmann::json::array()},
+            {"render_mode", "mesh"},
+            {"shadow_visible", true}},
+       })},
+  };
+  KARMA_REQUIRE(draft.setNodeComponent(
+      0u, "LODComponent", lod, registry, "Add LOD", &diagnostic));
+  KARMA_REQUIRE(draft.dirty());
+  KARMA_REQUIRE(draft.canUndo());
+  KARMA_REQUIRE(draft.undoLabel() == "Add LOD");
+  KARMA_REQUIRE(draft.undo());
+  KARMA_REQUIRE(!draft.document().nodes[0].components.contains("LODComponent"));
+  KARMA_REQUIRE(!draft.dirty());
+  KARMA_REQUIRE(draft.redo());
+  KARMA_REQUIRE(draft.document().nodes[0].components["LODComponent"] == lod);
+
+  const nlohmann::json before_invalid =
+      draft.document().nodes[0].components;
+  nlohmann::json invalid_lod = lod;
+  invalid_lod["levels"][0]["start_distance"] = -1.0f;
+  KARMA_REQUIRE(!draft.setNodeComponent(
+      0u, "LODComponent", invalid_lod, registry, "Invalid", &diagnostic));
+  KARMA_REQUIRE(draft.document().nodes[0].components == before_invalid);
+  KARMA_REQUIRE(!draft.removeNodeComponent(
+      0u, "MeshComponent", registry, "Remove Mesh", &diagnostic));
+  KARMA_REQUIRE(draft.document().nodes[0].components.contains("MeshComponent"));
+
+  KARMA_REQUIRE(draft.save(registry, &diagnostic));
+  KARMA_REQUIRE(!draft.dirty());
+  std::ifstream saved_stream(path);
+  nlohmann::json saved;
+  saved_stream >> saved;
+  KARMA_REQUIRE(saved["asset_package"] == "assets.package.json");
+  KARMA_REQUIRE(saved["nodes"][0]["components"]["LODComponent"] == lod);
+
+  nlohmann::json changed_lod = lod;
+  changed_lod["levels"][0]["start_distance"] = 45.0f;
+  KARMA_REQUIRE(draft.setNodeComponent(
+      0u, "LODComponent", changed_lod, registry, "Move LOD", &diagnostic));
+  saved["nodes"][0]["name"] = "Externally Changed";
+  writeText(path, saved.dump(2));
+  KARMA_REQUIRE(draft.sourceChangedExternally());
+  KARMA_REQUIRE(!draft.save(registry, &diagnostic));
+  KARMA_REQUIRE(diagnostic.find("externally") != std::string::npos);
+  KARMA_REQUIRE(draft.revert(&diagnostic));
+  KARMA_REQUIRE(!draft.dirty());
+  KARMA_REQUIRE(draft.document().nodes[0].name == "Externally Changed");
+  std::filesystem::remove_all(root);
+}
+
+void testExplicitLegacyRenderMigrationReporting() {
+  const nlohmann::json legacy_instanced = {
+      {"mesh_asset_key", "trees/high"},
+      {"materials", nlohmann::json::array()},
+      {"lods",
+       nlohmann::json::array({
+           {{"start_distance", 35.0f},
+            {"mesh_asset_key", "trees/low"},
+            {"materials", nlohmann::json::array()},
+            {"render_mode", "mesh"},
+            {"shadow_visible", true}},
+       })},
+      {"gpu_layout", "matrix4x4_params"},
+      {"instances", nlohmann::json::array()},
+      {"planar_instances", nlohmann::json::array()},
+      {"instance_revision", 3u},
+      {"dynamic", false},
+      {"visible", true},
+      {"shadow_visible", true},
+  };
+
+  karma::scenes::SceneDocument scene{};
+  scene.entities.push_back({
+      .id = "trees",
+      .name = "Trees",
+      .components = {{"InstancedMeshComponent", legacy_instanced}},
+  });
+  const karma::scenes::SceneDocument raw_scene = scene;
+  const editor::LegacyRenderMigrationReport scene_result =
+      editor::migrateSceneLegacyRenderComponents(scene);
+  KARMA_REQUIRE(scene_result.success());
+  KARMA_REQUIRE(scene_result.changed);
+  KARMA_REQUIRE(scene_result.migrated_owners == 1u);
+  KARMA_REQUIRE(
+      scene.entities[0].components.contains("InstanceSetComponent"));
+  KARMA_REQUIRE(scene.entities[0].components.contains("LODComponent"));
+  KARMA_REQUIRE(!scene.entities[0]
+                     .components["InstancedMeshComponent"]
+                     .contains("lods"));
+
+  const std::filesystem::path root = tempDirectory();
+  const std::filesystem::path scene_path = root / "world.kscene.json";
+  const std::string original_scene_bytes =
+      karma::scenes::sceneDocumentToJson(raw_scene).dump(2);
+  writeText(scene_path, original_scene_bytes);
+  const editor::LegacyRenderMigrationReport scene_file_result =
+      editor::migrateSceneFileLegacyRenderComponents(scene_path, root);
+  KARMA_REQUIRE(scene_file_result.success());
+  KARMA_REQUIRE(scene_file_result.changed);
+  const std::filesystem::path scene_backup =
+      scene_path.string() + ".pre-lod-component.bak";
+  KARMA_REQUIRE(std::filesystem::exists(scene_backup));
+  KARMA_REQUIRE(readText(scene_backup) == original_scene_bytes);
+  KARMA_REQUIRE(karma::scenes::loadSceneDocument(
+                    karma::scenes::SceneLoadDesc{
+                        .path = scene_path,
+                        .reference_root = root,
+                    })
+                    .success());
+  const editor::LegacyRenderMigrationReport scene_file_second =
+      editor::migrateSceneFileLegacyRenderComponents(scene_path, root);
+  KARMA_REQUIRE(scene_file_second.success());
+  KARMA_REQUIRE(!scene_file_second.changed);
+
+  const std::filesystem::path path = root / "legacy/prefab.json";
+  nlohmann::json prefab = {
+      {"version", 2u},
+      {"asset_package", "assets.package.json"},
+      {"root", 0u},
+      {"nodes",
+       nlohmann::json::array({
+           {{"id", 0u},
+            {"name", "Trees"},
+            {"parent", nullptr},
+            {"components", {{"InstancedMeshComponent", legacy_instanced}}}},
+       })},
+  };
+  const std::string original_prefab_bytes = prefab.dump(2);
+  writeText(path, original_prefab_bytes);
+  const editor::LegacyRenderMigrationReport prefab_result =
+      editor::migratePrefabLegacyRenderComponents(path);
+  KARMA_REQUIRE(prefab_result.success());
+  KARMA_REQUIRE(prefab_result.changed);
+  KARMA_REQUIRE(prefab_result.migrated_owners == 1u);
+  const std::filesystem::path prefab_backup =
+      path.string() + ".pre-lod-component.bak";
+  KARMA_REQUIRE(std::filesystem::exists(prefab_backup));
+  KARMA_REQUIRE(readText(prefab_backup) == original_prefab_bytes);
+  std::ifstream migrated_stream(path);
+  nlohmann::json migrated;
+  migrated_stream >> migrated;
+  KARMA_REQUIRE(migrated["asset_package"] == "assets.package.json");
+  KARMA_REQUIRE(migrated["nodes"][0]["components"].contains(
+      "InstanceSetComponent"));
+  KARMA_REQUIRE(
+      karma::prefabs::loadPrefabDocument(path).success());
+  const editor::LegacyRenderMigrationReport second =
+      editor::migratePrefabLegacyRenderComponents(path);
+  KARMA_REQUIRE(second.success());
+  KARMA_REQUIRE(!second.changed);
+  std::filesystem::remove_all(root);
+}
+
+void testLegacyRenderMigrationFollowsNestedFoliagePrefabs() {
+  const std::filesystem::path root = tempDirectory();
+  const std::filesystem::path root_prefab = root / "root/prefab.json";
+  const std::filesystem::path nested_prefab =
+      root / "root/nested/prefab.json";
+  const auto foliage_payload = [](std::string prefab_path,
+                                  std::string sidecar_path) {
+    return nlohmann::json{
+        {"sidecar_path", std::move(sidecar_path)},
+        {"prefab_path", std::move(prefab_path)},
+        {"prefab_variables", nlohmann::json::object()},
+        {"chunk_size", 32.0f},
+        {"view_distance", 256.0f},
+        {"max_resident_instances", 100000u},
+        {"source_revision", 0u},
+        {"visible", true},
+        {"shadow_visible", true},
+    };
+  };
+  const nlohmann::json legacy_instanced = {
+      {"mesh_asset_key", "trees/high"},
+      {"materials", nlohmann::json::array()},
+      {"lods",
+       nlohmann::json::array({
+           {{"start_distance", 35.0f},
+            {"mesh_asset_key", "trees/low"},
+            {"materials", nlohmann::json::array()},
+            {"render_mode", "mesh"},
+            {"shadow_visible", true}},
+       })},
+      {"gpu_layout", "matrix4x4_params"},
+      {"instances", nlohmann::json::array()},
+      {"planar_instances", nlohmann::json::array()},
+      {"instance_revision", 1u},
+      {"dynamic", false},
+      {"visible", true},
+      {"shadow_visible", true},
+  };
+
+  const nlohmann::json root_document = {
+      {"version", 2u},
+      {"root", 0u},
+      {"nodes",
+       nlohmann::json::array({
+           {{"id", 0u},
+            {"name", "Paint Root"},
+            {"parent", nullptr},
+            {"components",
+             {{"FoliageComponent",
+               foliage_payload("nested/prefab.json",
+                               "foliage/root.kfoliage")}}}},
+       })},
+  };
+  const nlohmann::json nested_document = {
+      {"version", 2u},
+      {"root", 0u},
+      {"nodes",
+       nlohmann::json::array({
+           {{"id", 0u},
+            {"name", "Legacy Tree"},
+            {"parent", nullptr},
+            {"components", {{"InstancedMeshComponent", legacy_instanced}}}},
+           {{"id", 1u},
+            {"name", "Cycle Back To Root"},
+            {"parent", 0u},
+            {"components",
+             {{"FoliageComponent",
+               foliage_payload("prefab.json",
+                               "foliage/cycle.kfoliage")}}}},
+       })},
+  };
+  writeText(root_prefab, root_document.dump(2));
+  const std::string original_nested_bytes = nested_document.dump(2);
+  writeText(nested_prefab, original_nested_bytes);
+
+  const editor::LegacyRenderMigrationReport result =
+      editor::migratePrefabSourceClosure({"root/prefab.json"}, root);
+  KARMA_REQUIRE(result.success());
+  KARMA_REQUIRE(result.changed);
+  KARMA_REQUIRE(result.migrated_owners == 1u);
+  KARMA_REQUIRE(!std::filesystem::exists(
+      root_prefab.string() + ".pre-lod-component.bak"));
+  const std::filesystem::path nested_backup =
+      nested_prefab.string() + ".pre-lod-component.bak";
+  KARMA_REQUIRE(std::filesystem::exists(nested_backup));
+  KARMA_REQUIRE(readText(nested_backup) == original_nested_bytes);
+
+  std::ifstream migrated_stream(nested_prefab);
+  nlohmann::json migrated;
+  migrated_stream >> migrated;
+  const nlohmann::json& migrated_components =
+      migrated["nodes"][0]["components"];
+  KARMA_REQUIRE(migrated_components.contains("InstanceSetComponent"));
+  KARMA_REQUIRE(migrated_components.contains("LODComponent"));
+  KARMA_REQUIRE(!migrated_components["InstancedMeshComponent"].contains(
+      "lods"));
+
+  const editor::LegacyRenderMigrationReport second =
+      editor::migratePrefabSourceClosure({"root/prefab.json"}, root);
+  KARMA_REQUIRE(second.success());
+  KARMA_REQUIRE(!second.changed);
+  std::filesystem::remove_all(root);
+}
+
+void testLegacyRenderMigrationFilesystemSafety() {
+  const nlohmann::json legacy_instanced = {
+      {"mesh_asset_key", "trees/high"},
+      {"materials", nlohmann::json::array()},
+      {"lods",
+       nlohmann::json::array({
+           {{"start_distance", 35.0f},
+            {"mesh_asset_key", "trees/low"},
+            {"materials", nlohmann::json::array()},
+            {"render_mode", "mesh"},
+            {"shadow_visible", true}},
+       })},
+      {"gpu_layout", "matrix4x4_params"},
+      {"instances", nlohmann::json::array()},
+      {"planar_instances", nlohmann::json::array()},
+      {"instance_revision", 3u},
+      {"dynamic", false},
+      {"visible", true},
+      {"shadow_visible", true},
+  };
+  const auto scene_bytes = [](const nlohmann::json& components) {
+    karma::scenes::SceneDocument scene{};
+    scene.entities.push_back({
+        .id = "trees",
+        .name = "Trees",
+        .components = components,
+    });
+    return karma::scenes::sceneDocumentToJson(scene).dump(2);
+  };
+  const auto prefab_bytes = [](const nlohmann::json& components) {
+    return nlohmann::json{
+        {"version", 2u},
+        {"root", 0u},
+        {"nodes",
+         nlohmann::json::array({
+             {{"id", 0u},
+              {"name", "Trees"},
+              {"parent", nullptr},
+              {"components", components}},
+         })},
+    }.dump(2);
+  };
+  const auto backup_path = [](const std::filesystem::path& path) {
+    return std::filesystem::path(path.string() +
+                                 ".pre-lod-component.bak");
+  };
+  const auto require_unchanged_without_backup =
+      [&](const std::filesystem::path& path,
+          const std::string& original_bytes) {
+        KARMA_REQUIRE(readText(path) == original_bytes);
+        KARMA_REQUIRE(!std::filesystem::exists(backup_path(path)));
+      };
+
+  const std::filesystem::path root = tempDirectory();
+  const nlohmann::json legacy_components = {
+      {"InstancedMeshComponent", legacy_instanced},
+  };
+
+  {
+    const std::filesystem::path path =
+        root / "existing-scene-backup.kscene.json";
+    const std::string original_bytes = scene_bytes(legacy_components);
+    const std::string existing_backup_bytes =
+        "existing scene migration backup\n";
+    writeText(path, original_bytes);
+    writeText(backup_path(path), existing_backup_bytes);
+    const editor::LegacyRenderMigrationReport result =
+        editor::migrateSceneFileLegacyRenderComponents(path, root);
+    KARMA_REQUIRE(result.success());
+    KARMA_REQUIRE(result.changed);
+    KARMA_REQUIRE(readText(path) != original_bytes);
+    KARMA_REQUIRE(readText(backup_path(path)) == existing_backup_bytes);
+  }
+
+  {
+    const std::filesystem::path path =
+        root / "existing-prefab-backup/prefab.json";
+    const std::string original_bytes = prefab_bytes(legacy_components);
+    const std::string existing_backup_bytes =
+        "existing prefab migration backup\n";
+    writeText(path, original_bytes);
+    writeText(backup_path(path), existing_backup_bytes);
+    const editor::LegacyRenderMigrationReport result =
+        editor::migratePrefabLegacyRenderComponents(path);
+    KARMA_REQUIRE(result.success());
+    KARMA_REQUIRE(result.changed);
+    KARMA_REQUIRE(readText(path) != original_bytes);
+    KARMA_REQUIRE(readText(backup_path(path)) == existing_backup_bytes);
+  }
+
+  {
+    nlohmann::json conflicting_components = legacy_components;
+    conflicting_components["InstanceSetComponent"] =
+        nlohmann::json::object();
+    const std::filesystem::path path =
+        root / "conflicting-instance-set.kscene.json";
+    const std::string original_bytes = scene_bytes(conflicting_components);
+    writeText(path, original_bytes);
+    const editor::LegacyRenderMigrationReport result =
+        editor::migrateSceneFileLegacyRenderComponents(path, root);
+    KARMA_REQUIRE(!result.success());
+    KARMA_REQUIRE(!result.changed);
+    KARMA_REQUIRE(!result.diagnostics.empty());
+    require_unchanged_without_backup(path, original_bytes);
+  }
+
+  {
+    nlohmann::json conflicting_components = legacy_components;
+    conflicting_components["LODComponent"] = {
+        {"levels", nlohmann::json::array()},
+    };
+    const std::filesystem::path path =
+        root / "conflicting-lod/prefab.json";
+    const std::string original_bytes = prefab_bytes(conflicting_components);
+    writeText(path, original_bytes);
+    const editor::LegacyRenderMigrationReport result =
+        editor::migratePrefabLegacyRenderComponents(path);
+    KARMA_REQUIRE(!result.success());
+    KARMA_REQUIRE(!result.changed);
+    KARMA_REQUIRE(!result.diagnostics.empty());
+    require_unchanged_without_backup(path, original_bytes);
+  }
+
+  nlohmann::json invalid_legacy_instanced = legacy_instanced;
+  invalid_legacy_instanced["lods"][0]["start_distance"] = -1.0f;
+  const nlohmann::json invalid_components = {
+      {"InstancedMeshComponent", invalid_legacy_instanced},
+  };
+  {
+    const std::filesystem::path path =
+        root / "invalid-migrated.kscene.json";
+    const std::string original_bytes = scene_bytes(invalid_components);
+    writeText(path, original_bytes);
+    const editor::LegacyRenderMigrationReport result =
+        editor::migrateSceneFileLegacyRenderComponents(path, root);
+    KARMA_REQUIRE(!result.success());
+    KARMA_REQUIRE(!result.changed);
+    KARMA_REQUIRE(!result.diagnostics.empty());
+    require_unchanged_without_backup(path, original_bytes);
+  }
+  {
+    const std::filesystem::path path =
+        root / "invalid-migrated/prefab.json";
+    const std::string original_bytes = prefab_bytes(invalid_components);
+    writeText(path, original_bytes);
+    const editor::LegacyRenderMigrationReport result =
+        editor::migratePrefabLegacyRenderComponents(path);
+    KARMA_REQUIRE(!result.success());
+    KARMA_REQUIRE(!result.changed);
+    KARMA_REQUIRE(!result.diagnostics.empty());
+    require_unchanged_without_backup(path, original_bytes);
+  }
+
+  {
+    const std::filesystem::path path = root / "malformed.kscene.json";
+    const std::string original_bytes = "{ malformed migration source\n";
+    writeText(path, original_bytes);
+    const editor::LegacyRenderMigrationReport result =
+        editor::migrateSceneFileLegacyRenderComponents(path, root);
+    KARMA_REQUIRE(!result.success());
+    KARMA_REQUIRE(!result.changed);
+    require_unchanged_without_backup(path, original_bytes);
+  }
+
+  {
+    const std::filesystem::path path = root / "read-only.kscene.json";
+    const std::string original_bytes = scene_bytes(legacy_components);
+    writeText(path, original_bytes);
+    std::error_code permission_error;
+    const std::filesystem::perms original_permissions =
+        std::filesystem::status(path, permission_error).permissions();
+    if (!permission_error) {
+      constexpr std::filesystem::perms writable =
+          std::filesystem::perms::owner_write |
+          std::filesystem::perms::group_write |
+          std::filesystem::perms::others_write;
+      std::filesystem::permissions(path,
+                                   writable,
+                                   std::filesystem::perm_options::remove,
+                                   permission_error);
+      const std::filesystem::file_status read_only_status =
+          std::filesystem::status(path, permission_error);
+      if (!permission_error &&
+          (read_only_status.permissions() & writable) ==
+              std::filesystem::perms::none) {
+        const editor::LegacyRenderMigrationReport result =
+            editor::migrateSceneFileLegacyRenderComponents(path, root);
+        KARMA_REQUIRE(!result.success());
+        KARMA_REQUIRE(!result.changed);
+        KARMA_REQUIRE(std::any_of(
+            result.diagnostics.begin(),
+            result.diagnostics.end(),
+            [](const std::string& diagnostic) {
+              return diagnostic.find("read-only") != std::string::npos;
+            }));
+        require_unchanged_without_backup(path, original_bytes);
+      }
+      std::error_code restore_error;
+      std::filesystem::permissions(path,
+                                   original_permissions,
+                                   std::filesystem::perm_options::replace,
+                                   restore_error);
+      KARMA_REQUIRE(!restore_error);
+    }
+  }
+
+  {
+    const std::filesystem::path path =
+        root / "blocked-replacement/prefab.json";
+    const std::string original_bytes = prefab_bytes(legacy_components);
+    writeText(path, original_bytes);
+    std::filesystem::create_directories(path.string() + ".tmp");
+    const editor::LegacyRenderMigrationReport result =
+        editor::migratePrefabLegacyRenderComponents(path);
+    KARMA_REQUIRE(!result.success());
+    KARMA_REQUIRE(!result.changed);
+    KARMA_REQUIRE(readText(path) == original_bytes);
+    KARMA_REQUIRE(std::filesystem::exists(backup_path(path)));
+    KARMA_REQUIRE(readText(backup_path(path)) == original_bytes);
+  }
+
+  std::filesystem::remove_all(root);
 }
 
 void testComponentDependencyTransactionsAndDuplicatePrevention() {
@@ -864,6 +1735,54 @@ void testHierarchyBuildAndCycleHandling() {
       {editor::SelectionKind::Entity, "left"},
       &diagnostic));
   KARMA_REQUIRE(diagnostic.find("cycle") != std::string::npos);
+}
+
+void testFoliageHierarchyProjectionIsPresentationOnly() {
+  karma::scenes::SceneDocument document{};
+  document.entities = {
+      {.id = "root", .name = "Root"},
+      {.id = "group", .name = "Group", .parent_id = "root"},
+      {.id = "terrain", .name = "Terrain", .parent_id = "root"},
+      {.id = "grass", .name = "Grass", .parent_id = "group"},
+      {.id = "tree", .name = "Trees", .parent_id = "root"},
+  };
+  const karma::scenes::SceneDocument before = document;
+  const editor::HierarchyBuildResult projected =
+      editor::projectFoliageUnderTerrain(
+          editor::buildHierarchy(document), "terrain", {"grass", "tree"});
+  KARMA_REQUIRE(projected.success());
+  KARMA_REQUIRE(hierarchyItemCount(projected.roots) == 5u);
+  const auto find_node = [&](const auto& self,
+                             const std::vector<editor::HierarchyNode>& nodes,
+                             const std::string& id)
+      -> const editor::HierarchyNode* {
+    for (const editor::HierarchyNode& node : nodes) {
+      if (node.item.id == id) return &node;
+      if (const editor::HierarchyNode* child = self(self, node.children, id)) {
+        return child;
+      }
+    }
+    return nullptr;
+  };
+  const editor::HierarchyNode* terrain =
+      find_node(find_node, projected.roots, "terrain");
+  KARMA_REQUIRE(terrain != nullptr);
+  KARMA_REQUIRE(terrain->children.size() == 2u);
+  KARMA_REQUIRE(terrain->children[0].item.id == "grass");
+  KARMA_REQUIRE(terrain->children[1].item.id == "tree");
+  KARMA_REQUIRE(document.entities[3].parent_id == "group");
+  KARMA_REQUIRE(document.entities[4].parent_id == "root");
+  KARMA_REQUIRE(karma::scenes::sceneDocumentToJson(document) ==
+                karma::scenes::sceneDocumentToJson(before));
+
+  const editor::HierarchyBuildResult missing_terrain =
+      editor::projectFoliageUnderTerrain(
+          editor::buildHierarchy(document), "missing", {"grass"});
+  const editor::HierarchyNode* group =
+      find_node(find_node, missing_terrain.roots, "group");
+  KARMA_REQUIRE(group != nullptr);
+  KARMA_REQUIRE(group->children.size() == 1u);
+  KARMA_REQUIRE(group->children.front().item.id == "grass");
 }
 
 void testStaticGroupsRemainPrefabPlacementParents() {
@@ -1699,9 +2618,16 @@ int main() {
   testSettingsRejectMalformedFieldTypes();
   testHistory();
   testComponentEditorRegistryMetadataAndCoverage();
+  testLodAndInstanceSetEditorSchemas();
+  testFoliagePrefabInspectionEligibility();
+  testFocusedPrefabAssetDraftTransactions();
+  testExplicitLegacyRenderMigrationReporting();
+  testLegacyRenderMigrationFollowsNestedFoliagePrefabs();
+  testLegacyRenderMigrationFilesystemSafety();
   testComponentDependencyTransactionsAndDuplicatePrevention();
   testComponentJsonValidationIsTransactional();
   testHierarchyBuildAndCycleHandling();
+  testFoliageHierarchyProjectionIsPresentationOnly();
   testStaticGroupsRemainPrefabPlacementParents();
   testSceneTransformRoundTrips();
   testEditorOrbitCameraConvention();

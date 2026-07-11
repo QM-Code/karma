@@ -1118,6 +1118,186 @@ void testSceneContextualEntityReferencesResolveInTwoPasses() {
   KARMA_REQUIRE(karma::scenes::destroyScene(world, scene, instance));
 }
 
+void testAuthoredRenderDependenciesResolveOrRollback() {
+  const auto live_scene_node_count = [](const karma::world::Scene& scene) {
+    return static_cast<size_t>(std::count_if(
+        scene.nodes().begin(),
+        scene.nodes().end(),
+        [](const karma::world::Node& node) {
+          return node.id != karma::world::Node::kInvalidId;
+        }));
+  };
+  const Json instance_set_payload = serializeComponent(
+      karma::components::InstanceSetComponent{}, "InstanceSetComponent");
+  const Json lod_payload = serializeComponent(
+      karma::components::LodComponent{
+          .levels = {karma::components::LodLevel{
+              .start_distance = 40.0f,
+              .mesh_asset_key = "trees/far",
+          }},
+      },
+      "LODComponent");
+
+  const auto instanced_payload = [](std::string_view source_id) {
+    Json payload = serializeComponent(
+        karma::components::InstancedMeshComponent{
+            .mesh_asset_key = "grass/cluster",
+        },
+        "InstancedMeshComponent");
+    payload["instance_source"] =
+        Json{{"scope", "scene"}, {"id", source_id}};
+    return payload;
+  };
+
+  const auto expect_dependency_failure =
+      [&](const karma::scenes::SceneDocument& document,
+          std::string_view diagnostic_text) {
+    KARMA_REQUIRE(karma::scenes::validateSceneDocument(document).success());
+
+    karma::assets::AssetRegistry assets;
+    karma::world::World world;
+    karma::world::Scene scene;
+    const karma::world::Entity sentinel = world.createEntity();
+    const karma::world::NodeId sentinel_node = scene.createNode(sentinel);
+    const size_t world_size = world.entities().size();
+    const size_t scene_size = live_scene_node_count(scene);
+
+    const karma::scenes::SceneInstantiateResult result =
+        karma::scenes::instantiateScene(world, scene, assets, document);
+    KARMA_REQUIRE(!result.success);
+    KARMA_REQUIRE(std::any_of(
+        result.diagnostics.begin(),
+        result.diagnostics.end(),
+        [&](const std::string& diagnostic) {
+          return diagnostic.find(diagnostic_text) != std::string::npos;
+        }));
+    KARMA_REQUIRE(result.entities.empty());
+    KARMA_REQUIRE(result.entities_by_id.empty());
+    KARMA_REQUIRE(world.entities().size() == world_size);
+    KARMA_REQUIRE(world.isAlive(sentinel));
+    KARMA_REQUIRE(live_scene_node_count(scene) == scene_size);
+    KARMA_REQUIRE(scene.findNode(sentinel) == sentinel_node);
+  };
+
+  karma::scenes::SceneDocument unresolved_source{};
+  unresolved_source.name = "Unresolved instance source";
+  unresolved_source.entities.push_back(karma::scenes::SceneEntity{
+      .id = "batch",
+      .components = Json{{"InstancedMeshComponent",
+                          instanced_payload("source")}},
+  });
+  unresolved_source.entities.push_back(karma::scenes::SceneEntity{
+      .id = "source",
+  });
+  expect_dependency_failure(
+      unresolved_source,
+      "InstancedMeshComponent has no resolvable InstanceSetComponent source");
+
+  karma::scenes::SceneDocument orphan_lod{};
+  orphan_lod.name = "Orphan LOD";
+  orphan_lod.entities.push_back(karma::scenes::SceneEntity{
+      .id = "valid_instance_set",
+      .components = Json{{"InstanceSetComponent", instance_set_payload}},
+  });
+  orphan_lod.entities.push_back(karma::scenes::SceneEntity{
+      .id = "orphan_lod",
+      .components = Json{{"LODComponent", lod_payload}},
+  });
+  expect_dependency_failure(
+      orphan_lod,
+      "LODComponent has no sibling mesh, instanced mesh, or direct-mesh "
+      "foliage render source");
+
+  karma::components::FoliageComponent prefab_foliage{};
+  prefab_foliage.sidecar_path = "foliage/prefab.kfoliage";
+  prefab_foliage.prefab_path = "trees/tree.prefab.json";
+  karma::scenes::SceneDocument prefab_foliage_lod{};
+  prefab_foliage_lod.name = "Prefab foliage orphan LOD";
+  prefab_foliage_lod.entities.push_back(karma::scenes::SceneEntity{
+      .id = "prefab_foliage",
+      .components = Json{
+          {"FoliageComponent",
+           serializeComponent(std::move(prefab_foliage),
+                              "FoliageComponent")},
+          {"LODComponent", lod_payload},
+      },
+  });
+  expect_dependency_failure(
+      prefab_foliage_lod,
+      "LODComponent has no sibling mesh, instanced mesh, or direct-mesh "
+      "foliage render source");
+
+  karma::scenes::SceneDocument cross_entity_source{};
+  cross_entity_source.name = "Cross-entity instance source";
+  cross_entity_source.entities.push_back(karma::scenes::SceneEntity{
+      .id = "batch",
+      .components = Json{{"InstancedMeshComponent",
+                          instanced_payload("source")}},
+  });
+  cross_entity_source.entities.push_back(karma::scenes::SceneEntity{
+      .id = "source",
+      .components = Json{{"InstanceSetComponent", instance_set_payload}},
+  });
+  KARMA_REQUIRE(
+      karma::scenes::validateSceneDocument(cross_entity_source).success());
+  {
+    karma::assets::AssetRegistry assets;
+    karma::world::World world;
+    karma::world::Scene scene;
+    const karma::world::Entity sentinel = world.createEntity();
+    const karma::world::NodeId sentinel_node = scene.createNode(sentinel);
+    const size_t world_size = world.entities().size();
+    const size_t scene_size = live_scene_node_count(scene);
+    karma::scenes::SceneInstantiateResult result =
+        karma::scenes::instantiateScene(
+            world, scene, assets, cross_entity_source);
+    KARMA_REQUIRE(result.success);
+    const karma::world::Entity batch = result.find("batch");
+    const karma::world::Entity source = result.find("source");
+    KARMA_REQUIRE(world.isAlive(batch));
+    KARMA_REQUIRE(world.isAlive(source));
+    KARMA_REQUIRE(world.get<karma::components::InstancedMeshComponent>(batch)
+                      .instance_source == source);
+    KARMA_REQUIRE(world.has<karma::components::InstanceSetComponent>(source));
+    KARMA_REQUIRE(karma::scenes::destroyScene(world, scene, result));
+    KARMA_REQUIRE(world.entities().size() == world_size);
+    KARMA_REQUIRE(world.isAlive(sentinel));
+    KARMA_REQUIRE(live_scene_node_count(scene) == scene_size);
+    KARMA_REQUIRE(scene.findNode(sentinel) == sentinel_node);
+  }
+
+  karma::components::FoliageComponent direct_foliage{};
+  direct_foliage.sidecar_path = "foliage/direct.kfoliage";
+  direct_foliage.mesh_asset_key = "trees/direct";
+  karma::scenes::SceneDocument direct_foliage_lod{};
+  direct_foliage_lod.name = "Direct foliage LOD";
+  direct_foliage_lod.entities.push_back(karma::scenes::SceneEntity{
+      .id = "direct_foliage",
+      .components = Json{
+          {"FoliageComponent",
+           serializeComponent(std::move(direct_foliage),
+                              "FoliageComponent")},
+          {"LODComponent", lod_payload},
+      },
+  });
+  KARMA_REQUIRE(
+      karma::scenes::validateSceneDocument(direct_foliage_lod).success());
+  {
+    karma::assets::AssetRegistry assets;
+    karma::world::World world;
+    karma::world::Scene scene;
+    karma::scenes::SceneInstantiateResult result =
+        karma::scenes::instantiateScene(
+            world, scene, assets, direct_foliage_lod);
+    KARMA_REQUIRE(result.success);
+    KARMA_REQUIRE(world.has<karma::components::FoliageComponent>(
+        result.find("direct_foliage")));
+    KARMA_REQUIRE(world.has<karma::components::LodComponent>(
+        result.find("direct_foliage")));
+    KARMA_REQUIRE(karma::scenes::destroyScene(world, scene, result));
+  }
+}
+
 void testPrefabInstanceStaticMembershipMaterializesDescendants() {
   const std::filesystem::path dir = makeTempDir();
   writeText(dir / "prefab.json", hierarchicalPrefabJson());
@@ -1635,6 +1815,7 @@ int main() {
   testInstantiateAndDestroyRuntimeScene();
   testPhysicsAuthoringComponentsSceneRoundTrip();
   testSceneContextualEntityReferencesResolveInTwoPasses();
+  testAuthoredRenderDependenciesResolveOrRollback();
   testPrefabInstanceStaticMembershipMaterializesDescendants();
   testRuntimeV2LightmapsApplyTransactionallyAndCleanUp();
   testSceneAssetPackageLoadsFromBakedCacheAndReleases();

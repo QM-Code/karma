@@ -1,5 +1,6 @@
 #include "../backend.hpp"
 #include "../backend_internal.h"
+#include "private/rendering/lod_selection.hpp"
 
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/BufferView.h>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -247,6 +249,14 @@ void packMaskInstance(const rendering::InstanceData& instance,
   std::memcpy(packed.col3, ptr + 12, sizeof(packed.col3));
   const float* params = glm::value_ptr(instance.params);
   std::memcpy(packed.params, params, sizeof(packed.params));
+}
+
+glm::mat4 planarMaskInstanceTransform(const rendering::PlanarInstanceData& instance) {
+  glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(instance.position_yaw));
+  transform = glm::rotate(transform,
+                          instance.position_yaw.w,
+                          glm::vec3(0.0f, 1.0f, 0.0f));
+  return glm::scale(transform, glm::vec3(instance.scale_pad));
 }
 
 const rendering::ShaderPassAssetDesc* findShaderPassAsset(
@@ -1064,7 +1074,8 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
 
   auto update_mask_constants =
       [&](rendering::InstanceGpuLayout layout,
-          rendering::InstanceLodRenderMode render_mode) {
+          rendering::LodRenderMode render_mode,
+          const glm::mat4& batch_transform) {
     if (!constants_) {
       return false;
     }
@@ -1072,9 +1083,10 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
     constants.instance_params[0] =
         layout == rendering::InstanceGpuLayout::PositionYawScaleParams ? 1.0f : 0.0f;
     constants.instance_params[1] =
-        render_mode == rendering::InstanceLodRenderMode::UprightBillboard ? 1.0f : 0.0f;
+        render_mode == rendering::LodRenderMode::UprightBillboard ? 1.0f : 0.0f;
     constants.instance_params[2] = 0.0f;
     constants.instance_params[3] = 0.0f;
+    copyMat4(constants.instance_batch_transform, batch_transform);
     Diligent::MapHelper<DrawConstants> mapped(
         context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
     auto* data = static_cast<DrawConstants*>(mapped);
@@ -1258,9 +1270,10 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
 
         auto bind_mask_pipeline =
             [&](rendering::InstanceGpuLayout layout,
-                rendering::InstanceLodRenderMode render_mode,
+                rendering::LodRenderMode render_mode,
                 const MeshRecord& mesh,
-                rendering::DeformationId deformation) -> FrameGraphSceneMaskResources* {
+                rendering::DeformationId deformation,
+                const glm::mat4& batch_transform) -> FrameGraphSceneMaskResources* {
           const std::string runtime_key =
               sceneMaskPipelineCacheKey(mask_color_format, mask_depth_format, layout);
           FrameGraphSceneMaskResources& runtime =
@@ -1269,7 +1282,7 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
                                                  mask_depth_format,
                                                  layout,
                                                  runtime) ||
-              !update_mask_constants(layout, render_mode) ||
+              !update_mask_constants(layout, render_mode, batch_transform) ||
               !bindDeformationResources(runtime.srb, mesh, deformation)) {
             return nullptr;
           }
@@ -1286,15 +1299,42 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
               !tagsMatch(pass.render_tags, instance.render_tags)) {
             continue;
           }
-          const auto mesh_it = meshes_.find(instance.mesh);
+          rendering::MeshId selected_mesh = instance.mesh;
+          rendering::LodRenderMode selected_render_mode = rendering::LodRenderMode::Mesh;
+          const auto base_mesh_it = meshes_.find(instance.mesh);
+          if (base_mesh_it == meshes_.end()) {
+            continue;
+          }
+          const glm::vec3 base_center = glm::vec3(
+              instance.transform * glm::vec4(base_mesh_it->second.bounds_center, 1.0f));
+          const glm::vec3 camera_position(base_constants.camera_pos[0],
+                                          base_constants.camera_pos[1],
+                                          base_constants.camera_pos[2]);
+          const float distance_to_camera = glm::length(base_center - camera_position);
+          const auto lod_is_renderable = [&](const auto& lod) {
+            const auto candidate = meshes_.find(lod.mesh);
+            return lod.mesh != rendering::kInvalidMesh &&
+                   candidate != meshes_.end() &&
+                   candidate->second.vertex_buffer;
+          };
+          const size_t selected_lod_bucket =
+              rendering::detail::selectRenderableLodBucket(
+                  distance_to_camera, instance.lods, lod_is_renderable);
+          if (selected_lod_bucket != 0u) {
+            const auto& lod = instance.lods[selected_lod_bucket - 1u];
+            selected_mesh = lod.mesh;
+            selected_render_mode = lod.render_mode;
+          }
+          const auto mesh_it = meshes_.find(selected_mesh);
           if (mesh_it == meshes_.end() || !mesh_it->second.vertex_buffer) {
             continue;
           }
           const MeshRecord& mesh = mesh_it->second;
           if (bind_mask_pipeline(rendering::InstanceGpuLayout::Matrix4x4Params,
-                                 rendering::InstanceLodRenderMode::Mesh,
+                                 selected_render_mode,
                                  mesh,
-                                 instance.deformation) == nullptr) {
+                                 instance.deformation,
+                                 glm::mat4{1.0f}) == nullptr) {
             pass_ok = false;
             break;
           }
@@ -1318,7 +1358,11 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
         if (pass_ok) {
           for (auto& [id, record] : instanced_records_) {
             (void)id;
-            if (record.layer != layer || !record.visible || record.instanceCount() == 0u ||
+            auto source_it = instance_sets_.find(record.instance_set);
+            if (source_it == instance_sets_.end()) continue;
+            InstanceSetRecord& instance_set = source_it->second;
+            if (record.layer != layer || !record.visible ||
+                instance_set.instanceCount() == 0u ||
                 !tagsMatch(pass.render_tags, record.render_tags)) {
               continue;
             }
@@ -1327,24 +1371,106 @@ bool DiligentBackend::executeFrameGraphScreenPasses(
               continue;
             }
             MeshRecord& mesh = mesh_it->second;
-            const Diligent::Uint32 instance_count =
-                static_cast<Diligent::Uint32>(std::min<size_t>(
-                    record.instanceCount(),
-                    static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max())));
-            if (instance_count == 0u ||
-                !ensureInstancedRecordBuffer(record) ||
-                bind_mask_pipeline(record.gpu_layout,
-                                   rendering::InstanceLodRenderMode::Mesh,
-                                   mesh,
-                                   rendering::kInvalidDeformation) == nullptr ||
-                !bind_mask_geometry(mesh,
-                                    record.instance_buffer.RawPtr(),
-                                    bound_mesh_vb,
-                                    bound_instance_vb)) {
-              pass_ok = false;
+            if (record.lods.empty()) {
+              const Diligent::Uint32 instance_count =
+                  static_cast<Diligent::Uint32>(std::min<size_t>(
+                      instance_set.instanceCount(),
+                      static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max())));
+              if (instance_count == 0u ||
+                  !ensureInstanceSetBuffer(instance_set) ||
+                  bind_mask_pipeline(instance_set.gpu_layout,
+                                     rendering::LodRenderMode::Mesh,
+                                     mesh,
+                                     rendering::kInvalidDeformation,
+                                     record.batch_transform) == nullptr ||
+                  !bind_mask_geometry(mesh,
+                                      instance_set.instance_buffer.RawPtr(),
+                                      bound_mesh_vb,
+                                      bound_instance_vb)) {
+                pass_ok = false;
+                break;
+              }
+              mask_draws += draw_mask_mesh(mesh, instance_count, bound_index_buffer);
+              continue;
+            }
+
+            std::array<std::vector<MaskInstanceGpuData>, 4> lod_instances;
+            const glm::vec3 camera_position(base_constants.camera_pos[0],
+                                            base_constants.camera_pos[1],
+                                            base_constants.camera_pos[2]);
+            const auto lod_is_renderable = [&](const auto& lod) {
+              const auto candidate = meshes_.find(lod.mesh);
+              return lod.mesh != rendering::kInvalidMesh &&
+                     candidate != meshes_.end() &&
+                     candidate->second.vertex_buffer;
+            };
+            auto classify_instance = [&](const glm::mat4& source_transform,
+                                         const glm::vec4& params) {
+              const glm::mat4 transform = source_transform * record.batch_transform;
+              const glm::vec3 base_center =
+                  glm::vec3(transform * glm::vec4(mesh.bounds_center, 1.0f));
+              const float distance_to_camera = glm::length(base_center - camera_position);
+              const size_t bucket =
+                  rendering::detail::selectRenderableLodBucket(
+                      distance_to_camera, record.lods, lod_is_renderable);
+              if (bucket >= lod_instances.size()) {
+                return;
+              }
+              MaskInstanceGpuData packed{};
+              packMaskInstance(rendering::InstanceData{.transform = transform,
+                                                       .params = params},
+                               packed);
+              lod_instances[bucket].push_back(packed);
+            };
+            if (instance_set.gpu_layout ==
+                rendering::InstanceGpuLayout::PositionYawScaleParams) {
+              for (const auto& source_instance : instance_set.planar_instances) {
+                classify_instance(planarMaskInstanceTransform(source_instance),
+                                  source_instance.params);
+              }
+            } else {
+              for (const auto& source_instance : instance_set.instances) {
+                classify_instance(source_instance.transform, source_instance.params);
+              }
+            }
+            const size_t bucket_count =
+                std::min(record.lods.size() + 1u, lod_instances.size());
+            for (size_t bucket = 0u; bucket < bucket_count; ++bucket) {
+              auto& instances = lod_instances[bucket];
+              if (instances.empty()) {
+                continue;
+              }
+              const rendering::MeshId bucket_mesh_id =
+                  bucket == 0u ? record.mesh : record.lods[bucket - 1u].mesh;
+              const rendering::LodRenderMode bucket_render_mode =
+                  bucket == 0u ? rendering::LodRenderMode::Mesh
+                               : record.lods[bucket - 1u].render_mode;
+              const auto bucket_mesh_it = meshes_.find(bucket_mesh_id);
+              if (bucket_mesh_it == meshes_.end() ||
+                  !bucket_mesh_it->second.vertex_buffer ||
+                  bind_mask_pipeline(rendering::InstanceGpuLayout::Matrix4x4Params,
+                                     bucket_render_mode,
+                                     bucket_mesh_it->second,
+                                     rendering::kInvalidDeformation,
+                                     glm::mat4{1.0f}) == nullptr ||
+                  !upload_mask_instances(instances.data(), instances.size()) ||
+                  !bind_mask_geometry(bucket_mesh_it->second,
+                                      instance_vb_.RawPtr(),
+                                      bound_mesh_vb,
+                                      bound_instance_vb)) {
+                pass_ok = false;
+                break;
+              }
+              mask_draws += draw_mask_mesh(
+                  bucket_mesh_it->second,
+                  static_cast<Diligent::Uint32>(std::min<size_t>(
+                      instances.size(),
+                      static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max()))),
+                  bound_index_buffer);
+            }
+            if (!pass_ok) {
               break;
             }
-            mask_draws += draw_mask_mesh(mesh, instance_count, bound_index_buffer);
           }
         }
         instancing_stats_.draw_calls += mask_draws;

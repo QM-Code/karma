@@ -12,6 +12,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -43,6 +44,7 @@
 #include "../src/private/rendering/ktx_cube_orientation.hpp"
 #include "../src/private/rendering/point_shadow_policy.hpp"
 #include "../src/private/rendering/editor_view_mode.hpp"
+#include "../src/private/rendering/lod_selection.hpp"
 
 namespace {
 
@@ -983,7 +985,8 @@ void testCameraAndLightExtractionSanitizesRuntimeData() {
 
 void testInstancedMeshExtractionComposesOwnerTransform() {
   using karma::rendering::InstanceGpuLayout;
-  using karma::rendering::render_system::extractInstancedMesh;
+  using karma::rendering::render_system::calculateInstancedBounds;
+  using karma::rendering::render_system::extractInstanceSet;
   using karma::rendering::render_system::toTransform;
 
   const glm::quat owner_yaw =
@@ -994,7 +997,7 @@ void testInstancedMeshExtractionComposesOwnerTransform() {
       {2.0f, 2.0f, 2.0f});
   const glm::mat4 owner_matrix = toTransform(owner, 1.0f);
 
-  karma::components::InstancedMeshComponent matrix_component{};
+  karma::components::InstanceSetComponent matrix_component{};
   matrix_component.gpu_layout = InstanceGpuLayout::Matrix4x4Params;
   matrix_component.instances.push_back(karma::components::MeshInstance{
       .position = {1.0f, 2.0f, 3.0f},
@@ -1010,8 +1013,7 @@ void testInstancedMeshExtractionComposesOwnerTransform() {
   local_matrix = glm::scale(local_matrix, glm::vec3(1.0f, 2.0f, 0.5f));
   const glm::mat4 expected_matrix = owner_matrix * local_matrix;
 
-  const auto matrix_extracted = extractInstancedMesh(
-      matrix_component, owner_matrix, glm::vec3(0.0f), 1.0f, true);
+  const auto matrix_extracted = extractInstanceSet(matrix_component, owner_matrix);
   assert(matrix_extracted.gpu_layout == InstanceGpuLayout::Matrix4x4Params);
   assert(matrix_extracted.instances.size() == 1u);
   assert(matrix_extracted.planar_instances.empty());
@@ -1019,12 +1021,22 @@ void testInstancedMeshExtractionComposesOwnerTransform() {
                              expected_matrix));
   assert(glm::length(matrix_extracted.instances[0].params -
                      glm::vec4(1.0f, 2.0f, 3.0f, 4.0f)) < 0.0001f);
-  assert(matrix_extracted.bounds_valid);
-  assert(glm::length(matrix_extracted.bounds_center - glm::vec3(expected_matrix[3])) <
+  const auto matrix_bounds = calculateInstancedBounds(
+      matrix_extracted, glm::mat4(1.0f), glm::vec3(0.0f), 1.0f, true);
+  assert(matrix_bounds.valid);
+  assert(glm::length(matrix_bounds.center - glm::vec3(expected_matrix[3])) <
          0.0001f);
-  assert(nearly(matrix_extracted.bounds_radius, 4.0f));
+  assert(nearly(matrix_bounds.radius, 4.0f));
+  const glm::mat4 batch_local =
+      glm::translate(glm::mat4(1.0f), glm::vec3(5.0f, 0.0f, 0.0f));
+  const auto batch_bounds = calculateInstancedBounds(
+      matrix_extracted, batch_local, glm::vec3(0.0f), 1.0f, true);
+  const glm::vec3 expected_batch_center =
+      glm::vec3(expected_matrix * glm::vec4(5.0f, 0.0f, 0.0f, 1.0f));
+  assert(batch_bounds.valid);
+  assert(glm::length(batch_bounds.center - expected_batch_center) < 0.0001f);
 
-  karma::components::InstancedMeshComponent planar_component{};
+  karma::components::InstanceSetComponent planar_component{};
   planar_component.gpu_layout = InstanceGpuLayout::PositionYawScaleParams;
   planar_component.planar_instances.push_back(
       karma::components::PlanarMeshInstance{
@@ -1040,8 +1052,7 @@ void testInstancedMeshExtractionComposesOwnerTransform() {
                              glm::vec3(0.0f, 1.0f, 0.0f));
   planar_local = glm::scale(planar_local, glm::vec3(1.0f, 0.5f, 2.0f));
 
-  const auto identity_extracted = extractInstancedMesh(
-      planar_component, glm::mat4(1.0f), glm::vec3(0.0f), 1.0f, true);
+  const auto identity_extracted = extractInstanceSet(planar_component, glm::mat4(1.0f));
   assert(identity_extracted.gpu_layout ==
          InstanceGpuLayout::PositionYawScaleParams);
   assert(identity_extracted.planar_instances.size() == 1u);
@@ -1056,8 +1067,7 @@ void testInstancedMeshExtractionComposesOwnerTransform() {
           glm::angleAxis(-0.3f, glm::vec3(0.0f, 1.0f, 0.0f))),
       {2.0f, 3.0f, 2.0f});
   const glm::mat4 planar_owner_matrix = toTransform(planar_owner, 1.0f);
-  const auto compact_extracted = extractInstancedMesh(
-      planar_component, planar_owner_matrix, glm::vec3(0.0f), 1.0f, true);
+  const auto compact_extracted = extractInstanceSet(planar_component, planar_owner_matrix);
   assert(compact_extracted.gpu_layout ==
          InstanceGpuLayout::PositionYawScaleParams);
   assert(compact_extracted.planar_instances.size() == 1u);
@@ -1073,14 +1083,127 @@ void testInstancedMeshExtractionComposesOwnerTransform() {
           glm::angleAxis(0.35f, glm::vec3(1.0f, 0.0f, 0.0f))),
       {1.0f, 2.0f, 1.0f});
   const glm::mat4 tilted_owner_matrix = toTransform(tilted_owner, 1.0f);
-  const auto promoted_extracted = extractInstancedMesh(
-      planar_component, tilted_owner_matrix, glm::vec3(0.0f), 1.0f, true);
+  const auto promoted_extracted = extractInstanceSet(planar_component, tilted_owner_matrix);
   assert(promoted_extracted.gpu_layout == InstanceGpuLayout::Matrix4x4Params);
   assert(promoted_extracted.instances.size() == 1u);
   assert(promoted_extracted.planar_instances.empty());
   assert(matricesNearlyEqual(promoted_extracted.instances[0].transform,
                              tilted_owner_matrix * planar_local));
-  assert(promoted_extracted.bounds_valid);
+  const auto promoted_bounds = calculateInstancedBounds(
+      promoted_extracted, glm::mat4(1.0f), glm::vec3(0.0f), 1.0f, true);
+  assert(promoted_bounds.valid);
+}
+
+void testSharedInstanceSetAndGpuLodContracts() {
+  std::array<karma::rendering::InstanceData, 2> instances{};
+  karma::rendering::InstancedDrawItem first{};
+  first.instance = 101u;
+  first.instance_set = 77u;
+  first.instances = instances;
+  first.lods.push_back(karma::rendering::LodDrawDesc{
+      .start_distance = 35.0f,
+      .mesh = 9u,
+      .render_mode = karma::rendering::LodRenderMode::Mesh,
+  });
+  karma::rendering::InstancedDrawItem second = first;
+  second.instance = 102u;
+  second.batch_transform =
+      glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f));
+  assert(first.instance != second.instance);
+  assert(first.instance_set == second.instance_set);
+  assert(first.instanceCount() == 2u && second.instanceCount() == 2u);
+  assert(second.lods.size() == 1u);
+
+  karma::components::LodComponent lod{};
+  lod.levels = {
+      karma::components::LodLevel{.start_distance = 35.0f,
+                                  .mesh_asset_key = "tree/low"},
+      karma::components::LodLevel{
+          .start_distance = 90.0f,
+          .mesh_asset_key = "tree/billboard",
+          .render_mode = karma::rendering::LodRenderMode::UprightBillboard,
+          .shadow_visible = false},
+  };
+  assert(karma::components::validateLodComponent(lod));
+  lod.levels[1].start_distance = 35.0f;
+  assert(!karma::components::validateLodComponent(lod));
+
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string frame = read_source(
+      "src/rendering/renderer/backends/diligent/passes/frame.cpp");
+  assert(frame.find("instance_sets_.find(item.instance_set)") != std::string::npos);
+  assert(frame.find("ensureInstanceSetBuffer(source)") != std::string::npos);
+  assert(frame.find("void DiligentBackend::retireInstanceSet") != std::string::npos);
+  assert(frame.find("instance_sets_.erase(instance_set)") != std::string::npos);
+  assert(frame.find("it->second.instance_set != instance_set") != std::string::npos);
+  const std::string forward = read_source(
+      "src/rendering/renderer/backends/diligent/passes/forward.cpp");
+  assert(forward.find("#if KARMA_MATRIX_INSTANCE_LAYOUT") != std::string::npos);
+  assert(forward.find("copyMat4(culling_constants.batch_transform, record.batch_transform)") !=
+         std::string::npos);
+  assert(forward.find("rendering::instanceGpuLayoutStride(layout)") !=
+         std::string::npos);
+  assert(forward.find("hasUnrenderableLod(record.lods") !=
+         std::string::npos);
+  const std::string scene_mask = read_source(
+      "src/rendering/renderer/backends/diligent/passes/frame_graph_shader.cpp");
+  assert(scene_mask.find("selectRenderableLodBucket") != std::string::npos);
+  const std::string shader = read_source(
+      "src/rendering/renderer/backends/diligent/backend_init.cpp");
+  assert(shader.find("float4x4 g_InstanceBatchTransform;") != std::string::npos);
+  assert(shader.find("TransformFinalInstancePoint") != std::string::npos);
+  const std::string render_system = read_source(
+      "src/rendering/renderer/render_system.cpp");
+  assert(render_system.find("world.forEach<components::MeshComponent") !=
+         std::string::npos);
+  assert(render_system.find("world.forEach<components::InstancedMeshComponent>") !=
+         std::string::npos);
+  assert(render_system.find("syncLodBindings(lod_component, it->second)") !=
+         std::string::npos);
+  assert(render_system.find("device_.retireInstanceSet") != std::string::npos);
+  assert(render_system.find("cached_instance_set_generation != source.generation ||\n"
+                            "        source.payload_changed") !=
+         std::string::npos);
+  assert(render_system.find(
+             "lod_record.mesh_asset_key = wanted.mesh_asset_key;\n"
+             "    lod_record.component_materials = wanted.materials;") !=
+         std::string::npos);
+}
+
+void testMissingLodSelectionKeepsLastRenderableLevel() {
+  using karma::rendering::LodDrawDesc;
+  using karma::rendering::detail::hasUnrenderableLod;
+  using karma::rendering::detail::selectRenderableLodBucket;
+
+  const auto renderable = [](const LodDrawDesc& lod) {
+    return lod.mesh != karma::rendering::kInvalidMesh;
+  };
+
+  const std::vector<LodDrawDesc> missing_first{
+      {.start_distance = 35.0f, .mesh = karma::rendering::kInvalidMesh},
+      {.start_distance = 90.0f, .mesh = 9u},
+  };
+  assert(hasUnrenderableLod(missing_first, renderable));
+  assert(selectRenderableLodBucket(34.0f, missing_first, renderable) == 0u);
+  assert(selectRenderableLodBucket(50.0f, missing_first, renderable) == 0u);
+  assert(selectRenderableLodBucket(90.0f, missing_first, renderable) == 2u);
+
+  const std::vector<LodDrawDesc> missing_middle{
+      {.start_distance = 35.0f, .mesh = 8u},
+      {.start_distance = 90.0f, .mesh = karma::rendering::kInvalidMesh},
+      {.start_distance = 130.0f, .mesh = 10u},
+  };
+  assert(hasUnrenderableLod(missing_middle, renderable));
+  assert(selectRenderableLodBucket(35.0f, missing_middle, renderable) == 1u);
+  assert(selectRenderableLodBucket(100.0f, missing_middle, renderable) == 1u);
+  assert(selectRenderableLodBucket(130.0f, missing_middle, renderable) == 3u);
 }
 
 void testFrameGraphCopyAndSceneMaskContractsForAaCameras() {
@@ -2026,6 +2149,7 @@ void testRuntimeLightmapPbrContract() {
   assert(count_occurrences(shader, "float4 g_LightmapParams;") == 3u);
   assert(count_occurrences(shader, "float4 g_LightmapUVScaleOffset;") == 3u);
   assert(count_occurrences(shader, "uint4 g_LightmapMixedMask;") == 3u);
+  assert(count_occurrences(shader, "float4x4 g_InstanceBatchTransform;") == 3u);
   assert(count_occurrences(
              shader,
              "float4 g_MaterialParams7;\n"
@@ -2312,6 +2436,27 @@ void testParticleShaderFallbackContracts() {
   assert(particle_draw.find("global_pipeline_ready(") != std::string::npos);
 }
 
+void testBuiltinHlslAvoidsReservedPointParameter() {
+  const std::filesystem::path root = findRepoRoot();
+  assert(!root.empty());
+  const auto read_source = [&root](const std::filesystem::path& relative) {
+    std::ifstream stream(root / relative);
+    assert(stream);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string backend_init = read_source(
+      "src/rendering/renderer/backends/diligent/backend_init.cpp");
+  const std::string forward = read_source(
+      "src/rendering/renderer/backends/diligent/passes/forward.cpp");
+  const std::regex reserved_parameter{R"(\bfloat[234]?\s+point\b)"};
+  assert(!std::regex_search(backend_init, reserved_parameter));
+  assert(!std::regex_search(forward, reserved_parameter));
+  assert(backend_init.find("float3 local_point") != std::string::npos);
+  assert(forward.find("float3 local_point") != std::string::npos);
+}
+
 void testRenderingCacheInvalidationContracts() {
   const std::filesystem::path root = findRepoRoot();
   assert(!root.empty());
@@ -2340,10 +2485,11 @@ void testRenderingCacheInvalidationContracts() {
   const std::string render_system =
       read_source("src/rendering/renderer/render_system.cpp");
   assert(render_system.find("lod_binding_changed ||") != std::string::npos);
-  assert(render_system.find("owner_transform_changed ||") != std::string::npos);
-  assert(render_system.find("cached_owner_world_transform_valid") !=
+  assert(render_system.find("matrixChangedBeyondEpsilon(cache.owner_world_transform") !=
          std::string::npos);
-  assert(render_system.find("item.gpu_layout = it->second.cached_instance_layout") !=
+  assert(render_system.find("cache.owner_world_transform_valid") !=
+         std::string::npos);
+  assert(render_system.find("item.gpu_layout = source.extracted.gpu_layout") !=
          std::string::npos);
 
   const std::string meshes = read_source(
@@ -2879,21 +3025,22 @@ f 4 5 6
   const auto tree = karma::prefabs::instantiatePrefab(
       world, scene, tree_dir / "prefab.json", instantiate_desc);
   assert(tree.has_value());
-  assert(world.has<karma::components::InstancedMeshComponent>(tree->root));
+  assert(world.has<karma::components::MeshComponent>(tree->root));
+  assert(world.has<karma::components::LodComponent>(tree->root));
   assert(world.has<karma::components::ColliderComponent>(tree->root));
   assert(world.has<karma::components::StaticComponent>(tree->root));
   const auto& tree_static =
       world.get<karma::components::StaticComponent>(tree->root);
   assert(tree_static.enabled && tree_static.include_descendants);
   assert(tree_static.flags == karma::components::StaticComponentAll);
-  const auto& tree_instances =
-      world.get<karma::components::InstancedMeshComponent>(tree->root);
-  assert(tree_instances.instances.size() == 1u);
-  assert(tree_instances.lods.size() == 2u);
-  assert(nearly(tree_instances.lods[0].start_distance, 35.0f));
-  assert(nearly(tree_instances.lods[1].start_distance, 90.0f));
-  assert(tree_instances.lods[1].render_mode ==
-         karma::rendering::InstanceLodRenderMode::UprightBillboard);
+  const auto& tree_mesh = world.get<karma::components::MeshComponent>(tree->root);
+  const auto& tree_lod = world.get<karma::components::LodComponent>(tree->root);
+  assert(tree_mesh.mesh_asset_key == "scene_editor/pine_tree_lod/high_mesh");
+  assert(tree_lod.levels.size() == 2u);
+  assert(nearly(tree_lod.levels[0].start_distance, 35.0f));
+  assert(nearly(tree_lod.levels[1].start_distance, 90.0f));
+  assert(tree_lod.levels[1].render_mode ==
+         karma::rendering::LodRenderMode::UprightBillboard);
   assert(world.get<karma::components::ColliderComponent>(tree->root).type ==
          karma::components::ColliderShapeType::Cylinder);
 
@@ -2905,18 +3052,22 @@ f 4 5 6
   tree_transform.setScale({1.5f, 1.5f, 1.5f});
   const glm::mat4 tree_owner =
       karma::rendering::render_system::toTransform(tree_transform, 1.0f);
+  karma::components::InstanceSetComponent tree_instances{};
+  tree_instances.instances.push_back(karma::components::MeshInstance{});
   const auto transformed_tree =
-      karma::rendering::render_system::extractInstancedMesh(
-          tree_instances, tree_owner, glm::vec3(0.0f), 1.0f, true);
+      karma::rendering::render_system::extractInstanceSet(tree_instances, tree_owner);
   assert(transformed_tree.gpu_layout ==
          karma::rendering::InstanceGpuLayout::Matrix4x4Params);
   assert(transformed_tree.instances.size() == 1u);
   assert(matricesNearlyEqual(transformed_tree.instances[0].transform,
                              tree_owner));
-  assert(transformed_tree.bounds_valid);
-  assert(glm::length(transformed_tree.bounds_center - glm::vec3(12.0f, 1.5f, -8.0f)) <
+  const auto transformed_tree_bounds =
+      karma::rendering::render_system::calculateInstancedBounds(
+          transformed_tree, glm::mat4(1.0f), glm::vec3(0.0f), 1.0f, true);
+  assert(transformed_tree_bounds.valid);
+  assert(glm::length(transformed_tree_bounds.center - glm::vec3(12.0f, 1.5f, -8.0f)) <
          0.0001f);
-  assert(nearly(transformed_tree.bounds_radius, 1.5f));
+  assert(nearly(transformed_tree_bounds.radius, 1.5f));
 
   const auto grass = karma::prefabs::instantiatePrefab(
       world, scene, grass_dir / "prefab.json", instantiate_desc);
@@ -2926,13 +3077,13 @@ f 4 5 6
       world.get<karma::components::StaticComponent>(grass->root);
   assert(grass_static.enabled && grass_static.include_descendants);
   assert(grass_static.flags == karma::components::StaticComponentAll);
-  const auto& grass_instances =
-      world.get<karma::components::InstancedMeshComponent>(grass->root);
-  assert(grass_instances.instances.size() == 1u);
-  assert(grass_instances.lods.size() == 1u);
-  assert(nearly(grass_instances.lods[0].start_distance, 28.0f));
-  assert(grass_instances.lods[0].render_mode ==
-         karma::rendering::InstanceLodRenderMode::UprightBillboard);
+  assert(world.has<karma::components::MeshComponent>(grass->root));
+  assert(world.has<karma::components::LodComponent>(grass->root));
+  const auto& grass_lod = world.get<karma::components::LodComponent>(grass->root);
+  assert(grass_lod.levels.size() == 1u);
+  assert(nearly(grass_lod.levels[0].start_distance, 28.0f));
+  assert(grass_lod.levels[0].render_mode ==
+         karma::rendering::LodRenderMode::UprightBillboard);
 }
 
 void testFrameGraphValidationAndRegistryFallback() {
@@ -4297,6 +4448,7 @@ int main() {
   testPerRenderTargetTemporalHistoryContract();
   testRenderCopyUnbindContract();
   testParticleShaderFallbackContracts();
+  testBuiltinHlslAvoidsReservedPointParameter();
   testRenderingCacheInvalidationContracts();
   testPointShadowAllocationPolicy();
   testKtxCubemapOrientationNormalization();
@@ -4313,6 +4465,8 @@ int main() {
   testEditorViewModeBackendFallbackContract();
   testCameraAndLightExtractionSanitizesRuntimeData();
   testInstancedMeshExtractionComposesOwnerTransform();
+  testSharedInstanceSetAndGpuLodContracts();
+  testMissingLodSelectionKeepsLastRenderableLevel();
   testFrameGraphCopyAndSceneMaskContractsForAaCameras();
   testPrimitiveMeshAndDiffuseMaterialHelpers();
   testAssetRegistryMaterialInheritance();

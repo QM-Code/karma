@@ -1,6 +1,7 @@
 #include "karma/prefabs.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -11,12 +12,19 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <spdlog/spdlog.h>
+
+#if defined(_WIN32)
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 #include "karma/assets.h"
 #include "karma/components.h"
@@ -1246,6 +1254,8 @@ void makeFileBackedComponentPathsRelative(
     if (foliage_it != node.components.end() && foliage_it->is_object()) {
       makeAbsoluteJsonPathRelative(
           *foliage_it, "sidecar_path", prefab_directory);
+      makeAbsoluteJsonPathRelative(
+          *foliage_it, "prefab_path", prefab_directory);
     }
 
     auto camera_it = node.components.find("CameraComponent");
@@ -1389,6 +1399,48 @@ std::optional<uint32_t> prefabNodeReference(const Json& reference) {
   return static_cast<uint32_t>(value);
 }
 
+bool validateRenderComponentDependencies(
+    const world::World& world,
+    const std::vector<world::Entity>& entities,
+    const std::filesystem::path& path) {
+  for (const world::Entity entity : entities) {
+    if (world.has<components::InstancedMeshComponent>(entity)) {
+      const auto& batch =
+          world.get<components::InstancedMeshComponent>(entity);
+      const world::Entity source =
+          batch.instance_source.isValid() ? batch.instance_source : entity;
+      if (!world.isAlive(source) ||
+          !world.has<components::InstanceSetComponent>(source)) {
+        spdlog::error(
+            "Prefab '{}' InstancedMeshComponent has no resolvable "
+            "InstanceSetComponent source",
+            path.string());
+        return false;
+      }
+    }
+    if (world.has<components::LodComponent>(entity)) {
+      const bool has_mesh = world.has<components::MeshComponent>(entity);
+      const bool has_instanced_mesh =
+          world.has<components::InstancedMeshComponent>(entity);
+      bool has_direct_foliage = false;
+      if (world.has<components::FoliageComponent>(entity)) {
+        const auto& foliage =
+            world.get<components::FoliageComponent>(entity);
+        has_direct_foliage = foliage.prefab_path.empty() &&
+                             !foliage.mesh_asset_key.empty();
+      }
+      if (!has_mesh && !has_instanced_mesh && !has_direct_foliage) {
+        spdlog::error(
+            "Prefab '{}' LODComponent has no sibling mesh, instanced mesh, "
+            "or direct-mesh foliage render source",
+            path.string());
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool validateDocumentComponents(const PrefabDocument& document,
                                 const std::filesystem::path& path) {
   world::World validation_world;
@@ -1421,7 +1473,7 @@ bool validateDocumentComponents(const PrefabDocument& document,
       return false;
     }
   }
-  return true;
+  return validateRenderComponentDependencies(validation_world, entities, path);
 }
 
 void resolveFileBackedComponentPaths(world::World& world,
@@ -1448,7 +1500,9 @@ void resolveFileBackedComponentPaths(world::World& world,
     for (auto& map : terrain.data_maps) resolve(map.image);
   }
   if (world.has<components::FoliageComponent>(entity)) {
-    resolve(world.get<components::FoliageComponent>(entity).sidecar_path);
+    auto& foliage = world.get<components::FoliageComponent>(entity);
+    resolve(foliage.sidecar_path);
+    resolve(foliage.prefab_path);
   }
   if (world.has<components::CameraComponent>(entity)) {
     auto& camera = world.get<components::CameraComponent>(entity);
@@ -1521,6 +1575,113 @@ bool validateVolumetricMaterials(const world::World& world,
 }
 
 }  // namespace
+
+PrefabDocumentSaveResult savePrefabDocument(
+    const PrefabDocument& input_document,
+    const std::filesystem::path& input_path) {
+  PrefabDocumentSaveResult result{};
+  result.path = resolvePrefabPath(input_path);
+
+  PrefabDocument document = input_document;
+  makeFileBackedComponentPathsRelative(document, result.path);
+  const Json document_json = toJson(document);
+  std::optional<PrefabDocument> parsed =
+      parseDocument(document_json, result.path, &result.diagnostics);
+  if (!parsed.has_value()) {
+    return result;
+  }
+  const PrefabInstantiateDesc defaults{};
+  std::optional<PrefabDocument> resolved = resolvePrefabVariables(
+      *parsed, defaults, result.path, &result.diagnostics);
+  if (!resolved.has_value()) {
+    return result;
+  }
+  try {
+    ensureBuiltinComponentSerializers();
+    if (!validateDocumentComponents(*resolved, result.path)) {
+      prefabError(&result.diagnostics,
+                  "Cannot save prefab '" + result.path.string() +
+                      "': it has non-portable, invalid, or unresolved "
+                      "components");
+      return result;
+    }
+  } catch (const std::exception& error) {
+    prefabError(&result.diagnostics,
+                "Cannot validate prefab '" + result.path.string() +
+                    "': " + error.what());
+    return result;
+  }
+
+  std::error_code ec;
+  if (!result.path.parent_path().empty()) {
+    std::filesystem::create_directories(result.path.parent_path(), ec);
+    if (ec) {
+      prefabError(&result.diagnostics,
+                  "Failed to create prefab directory '" +
+                      result.path.parent_path().string() + "': " +
+                      ec.message());
+      return result;
+    }
+  }
+
+  static std::atomic<uint64_t> next_temporary_id{0u};
+  std::filesystem::path temporary_path;
+  do {
+    temporary_path = result.path;
+    temporary_path += ".tmp-" +
+                      std::to_string(next_temporary_id.fetch_add(
+                          1u, std::memory_order_relaxed));
+  } while (std::filesystem::exists(temporary_path, ec) && !ec);
+  ec.clear();
+
+  {
+    std::ofstream stream(
+        temporary_path, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+      prefabError(&result.diagnostics,
+                  "Failed to open prefab temporary file '" +
+                      temporary_path.string() + "' for writing");
+      return result;
+    }
+    stream << document_json.dump(2) << '\n';
+    stream.flush();
+    if (!stream) {
+      stream.close();
+      std::filesystem::remove(temporary_path, ec);
+      prefabError(&result.diagnostics,
+                  "Failed to write prefab temporary file '" +
+                      temporary_path.string() + "'");
+      return result;
+    }
+    stream.close();
+    if (!stream) {
+      std::filesystem::remove(temporary_path, ec);
+      prefabError(&result.diagnostics,
+                  "Failed to close prefab temporary file '" +
+                      temporary_path.string() + "'");
+      return result;
+    }
+  }
+
+#if defined(_WIN32)
+  if (!MoveFileExW(temporary_path.c_str(),
+                   result.path.c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    ec = std::error_code(static_cast<int>(GetLastError()),
+                         std::system_category());
+  }
+#else
+  std::filesystem::rename(temporary_path, result.path, ec);
+#endif
+  if (ec) {
+    std::error_code cleanup_ec;
+    std::filesystem::remove(temporary_path, cleanup_ec);
+    prefabError(&result.diagnostics,
+                "Failed to atomically replace prefab '" +
+                    result.path.string() + "': " + ec.message());
+  }
+  return result;
+}
 
 PrefabLoadResult loadPrefabDocument(const std::filesystem::path& input_path) {
   PrefabLoadResult result{};
@@ -1600,39 +1761,7 @@ bool savePrefab(const world::World& world,
     return false;
   }
 
-  const std::filesystem::path path = resolvePrefabPath(input_path);
-  makeFileBackedComponentPathsRelative(document, path);
-  try {
-    ensureBuiltinComponentSerializers();
-    if (!validateDocumentComponents(document, path)) {
-      spdlog::error(
-          "Cannot save prefab '{}': it has non-portable, invalid, or unresolved components",
-          path.string());
-      return false;
-    }
-  } catch (const std::exception& error) {
-    spdlog::error("Cannot validate prefab '{}': {}", path.string(), error.what());
-    return false;
-  }
-
-  std::error_code ec;
-  if (!path.parent_path().empty()) {
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec) {
-      spdlog::error("Failed to create prefab directory '{}': {}",
-                    path.parent_path().string(),
-                    ec.message());
-      return false;
-    }
-  }
-
-  std::ofstream stream(path);
-  if (!stream) {
-    spdlog::error("Failed to open prefab '{}' for writing", path.string());
-    return false;
-  }
-  stream << toJson(document).dump(2) << '\n';
-  return static_cast<bool>(stream);
+  return savePrefabDocument(document, input_path).success();
 }
 
 std::optional<PrefabInstance> instantiatePrefab(
@@ -1718,6 +1847,10 @@ std::optional<PrefabInstance> instantiatePrefab(
       ensureTransformsForHierarchy(world, created_entities[index]);
     }
 
+    if (!validateRenderComponentDependencies(
+            world, created_entities, path)) {
+      return std::nullopt;
+    }
     if (!validateVolumetricMaterials(world, created_entities, active_assets, path)) {
       return std::nullopt;
     }

@@ -97,6 +97,8 @@ struct alignas(16) DrawConstants {
   float lightmap_params[4];
   float lightmap_uv_scale_offset[4];
   uint32_t lightmap_mixed_mask[4];
+  /// Per-instanced-batch local transform; identity for ordinary draws.
+  float instance_batch_transform[16];
 };
 
 static_assert(alignof(DrawConstants) >= 16u);
@@ -111,6 +113,9 @@ static_assert(offsetof(DrawConstants, lightmap_uv_scale_offset) ==
 static_assert(offsetof(DrawConstants, lightmap_mixed_mask) ==
               offsetof(DrawConstants, lightmap_uv_scale_offset) +
                   sizeof(float) * 4u);
+static_assert(offsetof(DrawConstants, instance_batch_transform) ==
+              offsetof(DrawConstants, lightmap_mixed_mask) +
+                  sizeof(uint32_t) * 4u);
 
 struct DeformationConstants {
   float params[4];
@@ -124,7 +129,9 @@ struct ForwardPlusComputeConstants {
 
 struct InstancedGpuCullingConstants {
   float view_proj[16];
+  float batch_transform[16];
   float mesh_bounds[4];
+  float lod_reference_bounds[4];
   float camera_position[4];
   float distance_params[4];
   uint32_t params[4];

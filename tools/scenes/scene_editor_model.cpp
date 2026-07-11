@@ -1,5 +1,6 @@
 #include "scene_editor_model.h"
 
+#include "karma/assets.h"
 #include "karma/components.h"
 #include "karma/prefabs.h"
 #include "karma/world.h"
@@ -224,6 +225,9 @@ Json defaultBoxColliderPayload() {
 }
 
 std::vector<std::string> componentDependencies(std::string_view type_name) {
+  if (type_name == "InstancedMeshComponent") {
+    return {"InstanceSetComponent"};
+  }
   if (type_name == "RigidbodyComponent" ||
       type_name == "CharacterControllerComponent") {
     return {"ColliderComponent"};
@@ -243,6 +247,14 @@ std::vector<std::string> componentDependencies(std::string_view type_name) {
   if (type_name == "NetworkAuthorityComponent" ||
       type_name == "NetworkReplicatedComponent") {
     return {"NetworkIdentityComponent"};
+  }
+  return {};
+}
+
+std::vector<std::string> componentOneOfDependencies(
+    std::string_view type_name) {
+  if (type_name == "LODComponent") {
+    return {"MeshComponent", "InstancedMeshComponent", "FoliageComponent"};
   }
   return {};
 }
@@ -290,6 +302,17 @@ bool stageComponentDependencies(world::World& world,
       }
       continue;
     }
+    const prefabs::ComponentSerializer* serializer =
+        prefabs::componentSerializerRegistry().find(dependency);
+    if (serializer != nullptr) {
+      const Json candidate = dependency == "InstanceSetComponent"
+                                 ? defaultInstanceSetComponentPayload()
+                                 : Json::object();
+      if (serializer->deserialize(world, entity, candidate) &&
+          serializer->has(world, entity)) {
+        continue;
+      }
+    }
     return fail(diagnostic,
                 "component staging does not know how to create dependency: " +
                     dependency);
@@ -329,7 +352,11 @@ std::optional<Json> canonicalDefaultPayload(
     const std::vector<std::string>& dependencies) {
   Json candidate = serializer.type_name == "ColliderComponent"
                        ? defaultBoxColliderPayload()
-                       : Json::object();
+                       : (serializer.type_name == "LODComponent"
+                              ? defaultLodComponentPayload()
+                              : (serializer.type_name == "InstanceSetComponent"
+                                     ? defaultInstanceSetComponentPayload()
+                                     : Json::object()));
   try {
     world::World staging_world;
     const world::Entity entity = staging_world.createEntity();
@@ -383,6 +410,18 @@ void configureComponentDescriptor(ComponentEditorDescriptor& descriptor) {
     descriptor.display_name = "Instanced Mesh";
     descriptor.category = ComponentEditorCategory::Rendering;
     descriptor.editor = ComponentEditorKind::InstancedMesh;
+  } else if (type == "InstanceSetComponent") {
+    descriptor.display_name = "Instance Set";
+    descriptor.category = ComponentEditorCategory::Rendering;
+    descriptor.editor = ComponentEditorKind::InstanceSet;
+    descriptor.creation_policy = ComponentCreationPolicy::DirectDefault;
+    descriptor.runtime_update = ComponentRuntimeUpdatePolicy::RebuildPreview;
+  } else if (type == "LODComponent") {
+    descriptor.display_name = "Level of Detail";
+    descriptor.category = ComponentEditorCategory::Rendering;
+    descriptor.editor = ComponentEditorKind::Lod;
+    descriptor.creation_policy = ComponentCreationPolicy::DirectDefault;
+    descriptor.runtime_update = ComponentRuntimeUpdatePolicy::RebuildPreview;
   } else if (type == "FoliageComponent") {
     descriptor.category = ComponentEditorCategory::Terrain;
     descriptor.editor = ComponentEditorKind::Foliage;
@@ -484,6 +523,23 @@ bool colliderPayloadIsBox(const Json& payload) {
          type->get_ref<const std::string&>() == "box";
 }
 
+bool hasCompatibleLodRenderSource(const Json& components) {
+  if (!components.is_object()) return false;
+  if (components.contains("MeshComponent") ||
+      components.contains("InstancedMeshComponent")) {
+    return true;
+  }
+  const auto foliage = components.find("FoliageComponent");
+  if (foliage == components.end() || !foliage->is_object()) return false;
+  const auto prefab_path = foliage->find("prefab_path");
+  const auto mesh_asset_key = foliage->find("mesh_asset_key");
+  return (prefab_path == foliage->end() ||
+          (prefab_path->is_string() &&
+           prefab_path->get_ref<const std::string&>().empty())) &&
+         mesh_asset_key != foliage->end() && mesh_asset_key->is_string() &&
+         !mesh_asset_key->get_ref<const std::string&>().empty();
+}
+
 }  // namespace
 
 bool ComponentEditorRegistry::registerDescriptor(
@@ -509,6 +565,167 @@ const ComponentEditorDescriptor* ComponentEditorRegistry::find(
                                       : &descriptors_[descriptor->second];
 }
 
+Json defaultLodComponentPayload() {
+  return Json{{"levels", Json::array()}};
+}
+
+Json defaultInstanceSetComponentPayload() {
+  return Json{
+      {"gpu_layout", "matrix4x4_params"},
+      {"instances", Json::array()},
+      {"planar_instances", Json::array()},
+      {"instance_revision", 0u},
+      {"dynamic", false},
+  };
+}
+
+bool validateLodComponentPayload(const Json& payload,
+                                 std::string* diagnostic) {
+  if (diagnostic != nullptr) diagnostic->clear();
+  if (!payload.is_object()) {
+    return fail(diagnostic, "LODComponent payload must be an object");
+  }
+  const auto levels = payload.find("levels");
+  if (levels == payload.end() || !levels->is_array()) {
+    return fail(diagnostic, "LODComponent requires an array field 'levels'");
+  }
+  if (levels->size() > kMaxEditorLodLevels) {
+    return fail(diagnostic, "LODComponent supports at most three levels");
+  }
+  float previous_distance = 0.0f;
+  for (size_t index = 0u; index < levels->size(); ++index) {
+    const Json& level = (*levels)[index];
+    if (!level.is_object()) {
+      return fail(diagnostic, "LOD level " + std::to_string(index) +
+                                  " must be an object");
+    }
+    const auto distance = level.find("start_distance");
+    const auto mesh = level.find("mesh_asset_key");
+    const auto materials = level.find("materials");
+    const auto mode = level.find("render_mode");
+    const auto shadows = level.find("shadow_visible");
+    if (distance == level.end() || !distance->is_number() ||
+        mesh == level.end() || !mesh->is_string() ||
+        materials == level.end() || !materials->is_array() ||
+        mode == level.end() || !mode->is_string() ||
+        shadows == level.end() || !shadows->is_boolean()) {
+      return fail(diagnostic, "LOD level " + std::to_string(index) +
+                                  " does not match the level schema");
+    }
+    const float start_distance = distance->get<float>();
+    if (!std::isfinite(start_distance) || start_distance <= 0.0f ||
+        (index != 0u && start_distance <= previous_distance)) {
+      return fail(diagnostic,
+                  "LOD distances must be finite, positive, and strictly increasing");
+    }
+    previous_distance = start_distance;
+    if (mesh->get_ref<const std::string&>().empty()) {
+      return fail(diagnostic, "LOD level mesh_asset_key cannot be empty");
+    }
+    const std::string& render_mode = mode->get_ref<const std::string&>();
+    if (render_mode != "mesh" && render_mode != "upright_billboard") {
+      return fail(diagnostic,
+                  "LOD render_mode must be 'mesh' or 'upright_billboard'");
+    }
+    std::unordered_set<uint32_t> slots;
+    for (const Json& material : *materials) {
+      if (!material.is_object()) {
+        return fail(diagnostic, "LOD material entries must be objects");
+      }
+      const auto slot = material.find("slot");
+      const auto key = material.find("material_key");
+      if (slot == material.end() ||
+          (!slot->is_number_unsigned() && !slot->is_number_integer()) ||
+          key == material.end() || !key->is_string() ||
+          key->get_ref<const std::string&>().empty()) {
+        return fail(diagnostic,
+                    "LOD materials require an unsigned slot and material_key");
+      }
+      const int64_t signed_slot = slot->is_number_unsigned()
+                                      ? static_cast<int64_t>(slot->get<uint64_t>())
+                                      : slot->get<int64_t>();
+      if (signed_slot < 0 ||
+          static_cast<uint64_t>(signed_slot) > UINT32_MAX ||
+          !slots.insert(static_cast<uint32_t>(signed_slot)).second) {
+        return fail(diagnostic,
+                    "LOD material slots must be unique unsigned 32-bit values");
+      }
+    }
+  }
+  return true;
+}
+
+bool validateInstanceSetComponentPayload(const Json& payload,
+                                         std::string* diagnostic) {
+  if (diagnostic != nullptr) diagnostic->clear();
+  if (!payload.is_object()) {
+    return fail(diagnostic, "InstanceSetComponent payload must be an object");
+  }
+  const auto layout = payload.find("gpu_layout");
+  const auto matrix_instances = payload.find("instances");
+  const auto planar_instances = payload.find("planar_instances");
+  const auto revision = payload.find("instance_revision");
+  const auto dynamic = payload.find("dynamic");
+  if (layout == payload.end() || !layout->is_string() ||
+      matrix_instances == payload.end() || !matrix_instances->is_array() ||
+      planar_instances == payload.end() || !planar_instances->is_array() ||
+      revision == payload.end() ||
+      (!revision->is_number_unsigned() && !revision->is_number_integer()) ||
+      dynamic == payload.end() || !dynamic->is_boolean()) {
+    return fail(diagnostic,
+                "InstanceSetComponent does not match the expected schema");
+  }
+  const std::string& layout_name = layout->get_ref<const std::string&>();
+  if (layout_name != "matrix4x4_params" &&
+      layout_name != "position_yaw_scale_params") {
+    return fail(diagnostic, "InstanceSetComponent gpu_layout is unsupported");
+  }
+  if (revision->is_number_integer() && revision->get<int64_t>() < 0) {
+    return fail(diagnostic,
+                "InstanceSetComponent instance_revision cannot be negative");
+  }
+  const auto finite_array = [](const Json& value, size_t size) {
+    if (!value.is_array() || value.size() != size) return false;
+    return std::all_of(value.begin(), value.end(), [](const Json& scalar) {
+      return scalar.is_number() && std::isfinite(scalar.get<double>());
+    });
+  };
+  for (const Json& instance : *matrix_instances) {
+    if (!instance.is_object() ||
+        !finite_array(instance.value("position", Json{}), 3u) ||
+        !finite_array(instance.value("rotation", Json{}), 4u) ||
+        !finite_array(instance.value("scale", Json{}), 3u) ||
+        !finite_array(instance.value("params", Json{}), 4u)) {
+      return fail(diagnostic,
+                  "InstanceSetComponent matrix instances are malformed");
+    }
+  }
+  for (const Json& instance : *planar_instances) {
+    const auto yaw = instance.is_object()
+                         ? instance.find("yaw_radians")
+                         : instance.end();
+    if (!instance.is_object() ||
+        !finite_array(instance.value("position", Json{}), 3u) ||
+        yaw == instance.end() || !yaw->is_number() ||
+        !std::isfinite(yaw->get<double>()) ||
+        !finite_array(instance.value("scale", Json{}), 3u) ||
+        !finite_array(instance.value("params", Json{}), 4u)) {
+      return fail(diagnostic,
+                  "InstanceSetComponent planar instances are malformed");
+    }
+  }
+  if (layout_name == "matrix4x4_params" && !planar_instances->empty()) {
+    return fail(diagnostic,
+                "matrix4x4_params cannot contain planar_instances");
+  }
+  if (layout_name == "position_yaw_scale_params" &&
+      !matrix_instances->empty()) {
+    return fail(diagnostic,
+                "position_yaw_scale_params cannot contain matrix instances");
+  }
+  return true;
+}
+
 ComponentEditorRegistry buildComponentEditorRegistry() {
   prefabs::ensureBuiltinComponentSerializers();
   ComponentEditorRegistry registry;
@@ -517,6 +734,8 @@ ComponentEditorRegistry buildComponentEditorRegistry() {
     ComponentEditorDescriptor descriptor{};
     descriptor.type_name = serializer.type_name;
     descriptor.dependencies = componentDependencies(serializer.type_name);
+    descriptor.one_of_dependencies =
+        componentOneOfDependencies(serializer.type_name);
     configureComponentDescriptor(descriptor);
 
     const Json default_payload =
@@ -530,6 +749,33 @@ ComponentEditorRegistry buildComponentEditorRegistry() {
           return validateWithSerializer(
               serializer, dependencies, payload, diagnostic);
         };
+    registry.registerDescriptor(std::move(descriptor));
+  }
+
+  // Keep tooling source-compatible while the split render-component
+  // serializers are being rolled out across build profiles. When the engine
+  // serializers are present, the descriptors above remain authoritative and
+  // validate through a staging World.
+  if (registry.find("LODComponent") == nullptr) {
+    ComponentEditorDescriptor descriptor{};
+    descriptor.type_name = "LODComponent";
+    descriptor.dependencies = componentDependencies(descriptor.type_name);
+    descriptor.one_of_dependencies =
+        componentOneOfDependencies(descriptor.type_name);
+    configureComponentDescriptor(descriptor);
+    descriptor.default_payload = [] { return defaultLodComponentPayload(); };
+    descriptor.validate_payload = validateLodComponentPayload;
+    registry.registerDescriptor(std::move(descriptor));
+  }
+  if (registry.find("InstanceSetComponent") == nullptr) {
+    ComponentEditorDescriptor descriptor{};
+    descriptor.type_name = "InstanceSetComponent";
+    descriptor.dependencies = componentDependencies(descriptor.type_name);
+    configureComponentDescriptor(descriptor);
+    descriptor.default_payload = [] {
+      return defaultInstanceSetComponentPayload();
+    };
+    descriptor.validate_payload = validateInstanceSetComponentPayload;
     registry.registerDescriptor(std::move(descriptor));
   }
   return registry;
@@ -578,6 +824,28 @@ bool addComponentWithDependencies(
   }
 
   Json staged_components = entity.components;
+  if (!target->one_of_dependencies.empty() &&
+      std::none_of(target->one_of_dependencies.begin(),
+                   target->one_of_dependencies.end(),
+                   [&](const std::string& dependency) {
+                     return staged_components.contains(dependency);
+                   })) {
+    std::string choices;
+    for (const std::string& dependency : target->one_of_dependencies) {
+      if (!choices.empty()) choices += ", ";
+      choices += dependency;
+    }
+    return fail(diagnostic,
+                target->display_name + " requires one compatible source: " +
+                    choices);
+  }
+  if (type_name == "LODComponent" &&
+      !hasCompatibleLodRenderSource(staged_components)) {
+    return fail(diagnostic,
+                "Level of Detail requires a Mesh, Instanced Mesh, or "
+                "direct-mesh Foliage source");
+  }
+
   std::vector<std::string> staged_added;
   for (const std::string& dependency : target->dependencies) {
     if (dependency == "TransformComponent" ||
@@ -668,6 +936,12 @@ bool replaceComponentPayload(scenes::SceneEntity& entity,
   }
   Json staged_components = entity.components;
   staged_components[std::string(type_name)] = payload;
+  if (staged_components.contains("LODComponent") &&
+      !hasCompatibleLodRenderSource(staged_components)) {
+    return fail(diagnostic,
+                "Level of Detail requires a Mesh, Instanced Mesh, or "
+                "direct-mesh Foliage source");
+  }
   entity.components = std::move(staged_components);
   return true;
 }
@@ -688,6 +962,28 @@ std::vector<std::string> componentRemovalBlockers(
                   descriptor->dependencies.end(),
                   type_name) != descriptor->dependencies.end()) {
       blockers.push_back(component.key());
+      continue;
+    }
+    if (descriptor != nullptr &&
+        std::find(descriptor->one_of_dependencies.begin(),
+                  descriptor->one_of_dependencies.end(),
+                  type_name) != descriptor->one_of_dependencies.end()) {
+      if (component.key() == "LODComponent") {
+        Json remaining = entity.components;
+        remaining.erase(std::string(type_name));
+        if (!hasCompatibleLodRenderSource(remaining)) {
+          blockers.push_back(component.key());
+        }
+        continue;
+      }
+      const bool has_alternative = std::any_of(
+          descriptor->one_of_dependencies.begin(),
+          descriptor->one_of_dependencies.end(),
+          [&](const std::string& dependency) {
+            return dependency != type_name &&
+                   entity.components.contains(dependency);
+          });
+      if (!has_alternative) blockers.push_back(component.key());
     }
   }
   std::sort(blockers.begin(), blockers.end());
@@ -738,12 +1034,337 @@ bool removeComponentsTogether(scenes::SceneEntity& entity,
     }
   }
 
+  for (auto component = entity.components.begin();
+       component != entity.components.end(); ++component) {
+    if (removal_set.contains(component.key())) continue;
+    const ComponentEditorDescriptor* descriptor = registry.find(component.key());
+    if (descriptor == nullptr || descriptor->one_of_dependencies.empty()) {
+      continue;
+    }
+    const bool had_compatible_source = std::any_of(
+        descriptor->one_of_dependencies.begin(),
+        descriptor->one_of_dependencies.end(),
+        [&](const std::string& dependency) {
+          return entity.components.contains(dependency);
+        });
+    const bool keeps_compatible_source = std::any_of(
+        descriptor->one_of_dependencies.begin(),
+        descriptor->one_of_dependencies.end(),
+        [&](const std::string& dependency) {
+          return entity.components.contains(dependency) &&
+                 !removal_set.contains(dependency);
+        });
+    if (had_compatible_source && !keeps_compatible_source) {
+      return fail(diagnostic,
+                  "cannot remove all compatible render sources while " +
+                      component.key() + " depends on one");
+    }
+  }
+
   Json staged_components = entity.components;
   for (const std::string& type_name : removal_set) {
     staged_components.erase(type_name);
   }
+  if (staged_components.contains("LODComponent") &&
+      !hasCompatibleLodRenderSource(staged_components)) {
+    return fail(diagnostic,
+                "cannot remove all compatible render sources while "
+                "LODComponent depends on one");
+  }
   entity.components = std::move(staged_components);
   return true;
+}
+
+namespace {
+
+Json prefabDocumentJson(const prefabs::PrefabDocument& document) {
+  Json nodes = Json::array();
+  for (const prefabs::PrefabNode& node : document.nodes) {
+    nodes.push_back(Json{
+        {"id", node.id},
+        {"name", node.name},
+        {"parent", node.parent.has_value() ? Json(*node.parent) : Json(nullptr)},
+        {"components", node.components},
+    });
+  }
+  Json out{{"version", document.version},
+           {"root", document.root},
+           {"nodes", std::move(nodes)}};
+  if (document.variables.is_object() && !document.variables.empty()) {
+    out["variables"] = document.variables;
+  }
+  return out;
+}
+
+std::string prefabSourceHash(const std::filesystem::path& path) {
+  return assets::hashFile(path).value_or(std::string{});
+}
+
+bool editablePrefabComponent(std::string_view type_name) {
+  return type_name == "MeshComponent" || type_name == "LODComponent";
+}
+
+bool mergePrefabDraftIntoSource(const Json& source,
+                                const prefabs::PrefabDocument& document,
+                                Json& out,
+                                std::string* diagnostic) {
+  if (!source.is_object()) {
+    return fail(diagnostic, "prefab source JSON is not an object");
+  }
+  const auto source_nodes = source.find("nodes");
+  if (source_nodes == source.end() || !source_nodes->is_array() ||
+      source_nodes->size() != document.nodes.size()) {
+    return fail(diagnostic,
+                "prefab source node structure changed outside the draft");
+  }
+  out = source;
+  for (size_t index = 0u; index < document.nodes.size(); ++index) {
+    Json& raw_node = out["nodes"][index];
+    if (!raw_node.is_object() ||
+        raw_node.value("id", UINT32_MAX) != document.nodes[index].id) {
+      return fail(diagnostic,
+                  "prefab source node identities changed outside the draft");
+    }
+    raw_node["components"] = document.nodes[index].components;
+  }
+  return true;
+}
+
+std::string joinPrefabDiagnostics(const prefabs::PrefabLoadResult& loaded) {
+  std::string message;
+  for (const std::string& entry : loaded.diagnostics) {
+    if (!message.empty()) message += '\n';
+    message += entry;
+  }
+  return message.empty() ? std::string("prefab validation failed") : message;
+}
+
+}  // namespace
+
+bool PrefabAssetDraft::dirty() const {
+  return prefabDocumentJson(document_) != prefabDocumentJson(saved_document_);
+}
+
+std::string_view PrefabAssetDraft::undoLabel() const {
+  return canUndo() ? std::string_view(history_[cursor_ - 1u].label)
+                   : std::string_view{};
+}
+
+std::string_view PrefabAssetDraft::redoLabel() const {
+  return canRedo() ? std::string_view(history_[cursor_].label)
+                   : std::string_view{};
+}
+
+void PrefabAssetDraft::push(std::string label,
+                            prefabs::PrefabDocument before,
+                            prefabs::PrefabDocument after) {
+  if (prefabDocumentJson(before) == prefabDocumentJson(after)) return;
+  if (cursor_ < history_.size()) {
+    history_.erase(history_.begin() + static_cast<std::ptrdiff_t>(cursor_),
+                   history_.end());
+  }
+  history_.push_back(Entry{
+      .label = std::move(label),
+      .before = std::move(before),
+      .after = std::move(after),
+  });
+  cursor_ = history_.size();
+}
+
+bool PrefabAssetDraft::setNodeComponent(
+    size_t node_index,
+    std::string_view type_name,
+    const Json& payload,
+    const ComponentEditorRegistry& registry,
+    std::string label,
+    std::string* diagnostic,
+    bool coalesce) {
+  if (diagnostic != nullptr) diagnostic->clear();
+  if (!editablePrefabComponent(type_name)) {
+    return fail(diagnostic,
+                "the focused prefab editor only supports MeshComponent and "
+                "LODComponent");
+  }
+  if (node_index >= document_.nodes.size()) {
+    return fail(diagnostic, "prefab draft node index is out of range");
+  }
+  if (!coalesce ||
+      (coalesced_before_.has_value() &&
+       (coalesced_node_index_ != node_index ||
+        coalesced_type_name_ != type_name || coalesced_label_ != label))) {
+    finishCoalescedEdit();
+  }
+  prefabs::PrefabDocument before = document_;
+  scenes::SceneEntity staging{};
+  staging.components = document_.nodes[node_index].components;
+  const std::string type(type_name);
+  const bool present = staging.components.contains(type);
+  const bool changed = present
+                           ? replaceComponentPayload(staging,
+                                                     registry,
+                                                     type_name,
+                                                     payload,
+                                                     diagnostic)
+                           : addComponentWithDependencies(staging,
+                                                          registry,
+                                                          type_name,
+                                                          payload,
+                                                          nullptr,
+                                                          diagnostic);
+  if (!changed) return false;
+  document_.nodes[node_index].components = std::move(staging.components);
+  if (coalesce) {
+    if (!coalesced_before_.has_value()) {
+      coalesced_before_ = std::move(before);
+      coalesced_label_ = std::move(label);
+      coalesced_node_index_ = node_index;
+      coalesced_type_name_ = type;
+    }
+  } else {
+    push(std::move(label), std::move(before), document_);
+  }
+  return true;
+}
+
+bool PrefabAssetDraft::removeNodeComponent(
+    size_t node_index,
+    std::string_view type_name,
+    const ComponentEditorRegistry& registry,
+    std::string label,
+    std::string* diagnostic) {
+  if (diagnostic != nullptr) diagnostic->clear();
+  if (!editablePrefabComponent(type_name)) {
+    return fail(diagnostic,
+                "the focused prefab editor only supports MeshComponent and "
+                "LODComponent");
+  }
+  if (node_index >= document_.nodes.size()) {
+    return fail(diagnostic, "prefab draft node index is out of range");
+  }
+  finishCoalescedEdit();
+  prefabs::PrefabDocument before = document_;
+  scenes::SceneEntity staging{};
+  staging.components = document_.nodes[node_index].components;
+  if (!removeComponentsTogether(
+          staging, registry, {std::string(type_name)}, diagnostic)) {
+    return false;
+  }
+  document_.nodes[node_index].components = std::move(staging.components);
+  push(std::move(label), std::move(before), document_);
+  return true;
+}
+
+bool PrefabAssetDraft::undo() {
+  finishCoalescedEdit();
+  if (!canUndo()) return false;
+  document_ = history_[cursor_ - 1u].before;
+  --cursor_;
+  return true;
+}
+
+bool PrefabAssetDraft::redo() {
+  finishCoalescedEdit();
+  if (!canRedo()) return false;
+  document_ = history_[cursor_].after;
+  ++cursor_;
+  return true;
+}
+
+void PrefabAssetDraft::finishCoalescedEdit() {
+  if (!coalesced_before_.has_value()) return;
+  push(std::move(coalesced_label_),
+       std::move(*coalesced_before_),
+       document_);
+  coalesced_before_.reset();
+  coalesced_label_.clear();
+  coalesced_type_name_.clear();
+  coalesced_node_index_ = 0u;
+}
+
+bool PrefabAssetDraft::sourceChangedExternally() const {
+  if (!valid()) return false;
+  const std::string current = prefabSourceHash(source_path_);
+  return current.empty() || current != source_hash_;
+}
+
+bool PrefabAssetDraft::save(const ComponentEditorRegistry& registry,
+                            std::string* diagnostic) {
+  (void)registry;
+  finishCoalescedEdit();
+  if (diagnostic != nullptr) diagnostic->clear();
+  if (!valid()) return fail(diagnostic, "prefab draft is not open");
+  if (sourceChangedExternally()) {
+    return fail(diagnostic,
+                "prefab source changed externally; Revert before saving");
+  }
+  Json serialized;
+  if (!mergePrefabDraftIntoSource(
+          source_json_, document_, serialized, diagnostic)) {
+    return false;
+  }
+  const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+  const std::filesystem::path validation_path =
+      source_path_.string() + ".scene-editor-validate-" +
+      std::to_string(stamp) + ".json";
+  if (!atomicWriteJson(validation_path, serialized, diagnostic)) return false;
+  const prefabs::PrefabLoadResult validated =
+      prefabs::loadPrefabDocument(validation_path);
+  std::error_code ignored;
+  std::filesystem::remove(validation_path, ignored);
+  if (!validated.success()) {
+    return fail(diagnostic, joinPrefabDiagnostics(validated));
+  }
+  if (sourceChangedExternally()) {
+    return fail(diagnostic,
+                "prefab source changed externally while validating; Save was cancelled");
+  }
+  if (!atomicWriteJson(source_path_, serialized, diagnostic)) return false;
+  source_json_ = std::move(serialized);
+  source_hash_ = prefabSourceHash(source_path_);
+  if (source_hash_.empty()) {
+    return fail(diagnostic,
+                "prefab saved but its source fingerprint could not be refreshed");
+  }
+  saved_document_ = document_;
+  return true;
+}
+
+bool PrefabAssetDraft::revert(std::string* diagnostic) {
+  std::optional<PrefabAssetDraft> replacement =
+      openPrefabAssetDraft(source_path_, diagnostic);
+  if (!replacement.has_value()) return false;
+  *this = std::move(*replacement);
+  return true;
+}
+
+std::optional<PrefabAssetDraft> openPrefabAssetDraft(
+    const std::filesystem::path& path,
+    std::string* diagnostic) {
+  if (diagnostic != nullptr) diagnostic->clear();
+  const prefabs::PrefabLoadResult loaded = prefabs::loadPrefabDocument(path);
+  if (!loaded.success() || !loaded.document.has_value()) {
+    fail(diagnostic, joinPrefabDiagnostics(loaded));
+    return std::nullopt;
+  }
+  Json source;
+  std::string read_error;
+  if (!readJson(loaded.source_path, source, read_error)) {
+    fail(diagnostic, std::move(read_error));
+    return std::nullopt;
+  }
+  const std::string hash = prefabSourceHash(loaded.source_path);
+  if (hash.empty()) {
+    fail(diagnostic, "failed to fingerprint prefab source " +
+                         loaded.source_path.string());
+    return std::nullopt;
+  }
+  PrefabAssetDraft draft{};
+  draft.source_path_ = loaded.source_path;
+  draft.source_json_ = std::move(source);
+  draft.saved_document_ = *loaded.document;
+  draft.document_ = *loaded.document;
+  draft.source_hash_ = hash;
+  return draft;
 }
 
 void applyEditorCameraLookDelta(EditorOrbitCamera& camera,
@@ -940,6 +1561,74 @@ HierarchyBuildResult buildHierarchy(const scenes::SceneDocument& document) {
         HierarchyNode{.item = {SelectionKind::Prefab, prefab->id}});
   }
   return result;
+}
+
+HierarchyBuildResult projectFoliageUnderTerrain(
+    HierarchyBuildResult hierarchy,
+    std::string_view terrain_entity_id,
+    const std::vector<std::string>& foliage_entity_ids) {
+  if (terrain_entity_id.empty() || foliage_entity_ids.empty()) {
+    return hierarchy;
+  }
+  const std::unordered_set<std::string> foliage_ids(
+      foliage_entity_ids.begin(), foliage_entity_ids.end());
+  if (foliage_ids.contains(std::string(terrain_entity_id))) {
+    return hierarchy;
+  }
+
+  const auto contains = [&](const auto& self,
+                            const std::vector<HierarchyNode>& nodes,
+                            std::string_view id) -> bool {
+    for (const HierarchyNode& node : nodes) {
+      if (node.item.kind == SelectionKind::Entity && node.item.id == id) {
+        return true;
+      }
+      if (self(self, node.children, id)) return true;
+    }
+    return false;
+  };
+  if (!contains(contains, hierarchy.roots, terrain_entity_id)) {
+    return hierarchy;
+  }
+
+  std::vector<HierarchyNode> extracted;
+  const auto extract = [&](const auto& self,
+                           std::vector<HierarchyNode>& nodes) -> void {
+    for (size_t index = 0u; index < nodes.size();) {
+      HierarchyNode& node = nodes[index];
+      if (node.item.kind == SelectionKind::Entity &&
+          foliage_ids.contains(node.item.id)) {
+        extracted.push_back(std::move(node));
+        nodes.erase(nodes.begin() + static_cast<std::ptrdiff_t>(index));
+        continue;
+      }
+      self(self, node.children);
+      ++index;
+    }
+  };
+  extract(extract, hierarchy.roots);
+  if (extracted.empty()) return hierarchy;
+
+  const auto append = [&](const auto& self,
+                          std::vector<HierarchyNode>& nodes) -> bool {
+    for (HierarchyNode& node : nodes) {
+      if (node.item.kind == SelectionKind::Entity &&
+          node.item.id == terrain_entity_id) {
+        for (HierarchyNode& foliage : extracted) {
+          node.children.push_back(std::move(foliage));
+        }
+        return true;
+      }
+      if (self(self, node.children)) return true;
+    }
+    return false;
+  };
+  if (!append(append, hierarchy.roots)) {
+    for (HierarchyNode& foliage : extracted) {
+      hierarchy.roots.push_back(std::move(foliage));
+    }
+  }
+  return hierarchy;
 }
 
 std::optional<scenes::SceneTransform> sceneWorldTransform(
@@ -1968,8 +2657,9 @@ EditorWorkspaceLayout resolveEditorWorkspaceLayout(
 }
 
 bool blocksViewportPointerInput(const EditorPointerCaptureState& state) {
-  return state.popup_open || state.drag_drop_active ||
-         state.panel_item_active ||
+  if (state.popup_open || state.drag_drop_active) return true;
+  if (state.viewport_navigation_owned) return false;
+  return state.panel_item_active ||
          (state.want_capture_mouse && !state.viewport_item_hovered);
 }
 
@@ -2096,8 +2786,31 @@ bool loadEditorSettings(const std::filesystem::path& content_root,
   };
   if (!read_short_string("hierarchy_filter", loaded.hierarchy_filter, 127u) ||
       !read_short_string("inspector_filter", loaded.inspector_filter, 127u) ||
-      !read_short_string("selected_bake_id", loaded.selected_bake_id, 191u)) {
+      !read_short_string("selected_bake_id", loaded.selected_bake_id, 191u) ||
+      !read_short_string("active_foliage_layer_id",
+                         loaded.active_foliage_layer_id, 191u)) {
     return false;
+  }
+  const auto component_foldouts = json.find("component_foldouts");
+  if (component_foldouts != json.end()) {
+    if (!component_foldouts->is_object()) {
+      return fail(diagnostic, "editor component_foldouts must be an object");
+    }
+    if (component_foldouts->size() > 256u) {
+      return fail(diagnostic,
+                  "editor component_foldouts contains too many entries");
+    }
+    for (auto entry = component_foldouts->begin();
+         entry != component_foldouts->end(); ++entry) {
+      if (entry.key().empty() || entry.key().size() > 191u ||
+          !entry.value().is_boolean()) {
+        return fail(diagnostic,
+                    "editor component_foldouts entries must map short names "
+                    "to booleans");
+      }
+      loaded.component_foldouts.emplace(entry.key(),
+                                        entry.value().get<bool>());
+    }
   }
   const auto read_bounded_integer = [&](std::string_view name,
                                         int minimum,
@@ -2121,7 +2834,7 @@ bool loadEditorSettings(const std::filesystem::path& content_root,
                             loaded.asset_type_filter) ||
       !read_bounded_integer("console_min_level", 0, 5,
                             loaded.console_min_level) ||
-      !read_bounded_integer("terrain_inspector_tab", 0, 1,
+      !read_bounded_integer("terrain_inspector_tab", 0, 2,
                             loaded.terrain_inspector_tab) ||
       !read_bounded_integer("terrain_material_layer", 0, 3,
                             loaded.terrain_material_layer)) {
@@ -2198,6 +2911,10 @@ bool saveEditorSettings(const std::filesystem::path& content_root,
                               {"console_min_level", settings.console_min_level},
                               {"terrain_inspector_tab", settings.terrain_inspector_tab},
                               {"terrain_material_layer", settings.terrain_material_layer},
+                              {"active_foliage_layer_id",
+                               settings.active_foliage_layer_id},
+                              {"component_foldouts",
+                               settings.component_foldouts},
                               {"bottom_panel_tab", bottom_panel_tab},
                               {"viewport_render_mode",
                                viewportRenderModeName(settings.viewport_render_mode)}},

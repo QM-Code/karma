@@ -109,8 +109,52 @@ void resolveAuthoredComponentPaths(world::World& world,
   }
 
   if (world.has<components::FoliageComponent>(entity)) {
-    resolve(world.get<components::FoliageComponent>(entity).sidecar_path);
+    auto& foliage = world.get<components::FoliageComponent>(entity);
+    resolve(foliage.sidecar_path);
+    resolve(foliage.prefab_path);
   }
+}
+
+std::optional<std::string> authoredRenderDependencyError(
+    const world::World& world,
+    const SceneDocument& document,
+    const std::unordered_map<std::string, world::Entity>& entities_by_id) {
+  for (const SceneEntity& authored : document.entities) {
+    const std::string& id = authored.id;
+    const auto entity_it = entities_by_id.find(id);
+    if (entity_it == entities_by_id.end()) continue;
+    const world::Entity entity = entity_it->second;
+    if (!world.isAlive(entity)) continue;
+    if (world.has<components::InstancedMeshComponent>(entity)) {
+      const auto& batch =
+          world.get<components::InstancedMeshComponent>(entity);
+      const world::Entity source =
+          batch.instance_source.isValid() ? batch.instance_source : entity;
+      if (!world.isAlive(source) ||
+          !world.has<components::InstanceSetComponent>(source)) {
+        return "scene entity '" + id +
+               "' InstancedMeshComponent has no resolvable "
+               "InstanceSetComponent source";
+      }
+    }
+    if (!world.has<components::LodComponent>(entity)) continue;
+
+    const bool has_mesh = world.has<components::MeshComponent>(entity);
+    const bool has_instanced_mesh =
+        world.has<components::InstancedMeshComponent>(entity);
+    bool has_direct_foliage = false;
+    if (world.has<components::FoliageComponent>(entity)) {
+      const auto& foliage = world.get<components::FoliageComponent>(entity);
+      has_direct_foliage = foliage.prefab_path.empty() &&
+                           !foliage.mesh_asset_key.empty();
+    }
+    if (!has_mesh && !has_instanced_mesh && !has_direct_foliage) {
+      return "scene entity '" + id +
+             "' LODComponent has no sibling mesh, instanced mesh, or "
+             "direct-mesh foliage render source";
+    }
+  }
+  return std::nullopt;
 }
 
 math::Vec3 minVec(const math::Vec3& a, const math::Vec3& b) {
@@ -2044,6 +2088,10 @@ SceneInstantiateResult instantiateScene(world::World& world,
                                         entity_it->second,
                                         document,
                                         desc.reference_root);
+        }
+        if (const auto dependency_error = authoredRenderDependencyError(
+                world, document, result.entities_by_id)) {
+          return fail_and_rollback(*dependency_error);
         }
       }
     }

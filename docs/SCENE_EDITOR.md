@@ -5,12 +5,14 @@ linked prefabs, lights, an environment, one editable terrain, and visual
 foliage without turning the engine into a general-purpose game editor. It also
 authors every persistent component, edits PBR materials, marks static bake
 membership, and runs lighting/navigation bakes while deliberately keeping
-simulation, gameplay, and prefab-source editing out of the viewport.
+simulation, gameplay, and full prefab mode out of the viewport.
 
 ## Build and launch
 
-The editor is built when both `KARMA_BUILD_TOOLS` and the graphical profile are
-enabled. The portable preset enables both:
+The editor is built when `KARMA_BUILD_SCENE_EDITOR`, `KARMA_BUILD_TOOLS`, and
+the graphical profile are enabled. Top-level graphical tool builds enable the
+Scene Editor and its optional ImGui adapter automatically; runtime-only builds
+remain free of the ImGui dependency. The portable preset enables the editor:
 
 ```bash
 cmake --preset portable
@@ -42,9 +44,20 @@ See the content root's
 [README](../examples/assets/scene_editor_content/README.md) for details.
 
 Scene and asset roots must remain inside the content root. Additional roots can
-also be added from **File > Add Asset Root**. That local list and camera, grid,
-and marker-visibility preferences are stored in
+also be added from **File > Add Asset Root**. That local list, panel layout,
+camera/grid preferences, Terrain tab, active foliage layer, and component
+foldouts are stored in
 `.karma/scene-editor.local.json` and are not part of the authored scene.
+
+Renderable distance LODs use ordinary components rather than an embedded
+instancing format. `MeshComponent` or `InstancedMeshComponent` owns the base
+mesh/material batch, while a sibling `LODComponent` owns up to three strictly
+increasing distance levels. `InstanceSetComponent` separately owns matrix or
+planar transforms and their GPU upload revision. An `InstancedMeshComponent`
+references an instance set (the same entity by default) and adds only its own
+mesh/material binding and batch-local transform. This lets several mesh
+batches share one GPU transform buffer instead of uploading the same foliage
+placements once per trunk, leaves, accessory mesh, or LOD-capable batch.
 
 ## Authoring workflow
 
@@ -63,6 +76,13 @@ changes and the preview reloads automatically.
   press Escape to cancel. The selected editable group becomes its parent;
   otherwise it is placed at scene root. Prefab variables remain overrides on
   that instance, and the resolved source hierarchy is visible read-only.
+- Selecting a prefab asset opens the focused prefab source editor. It can edit
+  only `MeshComponent` and `LODComponent` payloads, with node selection,
+  drag-and-drop mesh/material assignment, typed LOD controls, independent
+  undo/redo, Revert, atomic Save, and external-change conflict detection. Node
+  structure, transforms, variables, and all other components remain linked and
+  read-only. Foliage layers backed by that prefab expose **Edit Source...** and
+  update their preview through the live source link after a successful save.
 - Add groups, point lights, and environment settings from the hierarchy and
   inspector. Existing scene cameras are editable but are not used for the
   editor preview.
@@ -80,7 +100,10 @@ changes and the preview reloads automatically.
   it in the Lighting status and Console instead of repeating one instance's
   lighting across the batch.
 - The hierarchy mirrors authored parent/child relationships, including linked
-  prefabs beneath their parent groups. Change **Parent** in the inspector to
+  prefabs beneath their parent groups. Foliage layers appear as virtual
+  children of the editable Terrain without changing their serialized parents
+  or transforms. Clicking one selects Terrain and opens that layer in the
+  Foliage tab. Change **Parent** in the inspector to
   reorganize a scene without changing the object's world placement. Preserved
   camera and static/baked subtrees cannot be reparented. Use **Ctrl+D** to
   duplicate a linked prefab or an editable group subtree; child
@@ -89,23 +112,36 @@ changes and the preview reloads automatically.
   and static/baked subtrees are not duplicated. Deleting a group promotes its
   direct children without changing their world placement.
 - Create or import one power-of-two-plus-one height field with **+ Terrain**.
-  Select it to open contextual Sculpt and Materials controls. Four normalized
-  splat layers expose names, enable state, material assignment, UV scale, and
-  active paint selection. Double-click a material in Assets or drag it onto a
-  layer card.
-- Double-click a mesh asset to create a grass/tree foliage layer. Select that
-  layer to edit its base mesh/material slots and as many as three strictly
-  increasing mesh or upright-billboard LODs. Paint and Erase operate on the
-  complete base/LOD configuration. Paint settings include density, spacing,
-  scale, height/slope projection, chunk size, and view distance.
-- Every serialized entity component is shown as an Inspector card. Transform,
+  Its Terrain Component contains true **Sculpt**, **Materials**, and
+  **Foliage** tabs, with serialized Component Data separated from editor-only
+  Authoring Tools. Four normalized splat layers expose names, enable state,
+  material assignment, UV scale, and active paint selection. Double-click a
+  material in Assets or drag it onto a layer card.
+- Create a grass/tree foliage layer from Terrain's Foliage tab, then choose one
+  of two exclusive render sources. Dropping a mesh creates a direct source with
+  material slots and a sibling `LODComponent`; its LODs can use mesh or upright
+  billboard rendering. Dropping a prefab creates a prefab-backed source. The
+  runtime resolves that prefab's render nodes and their `LODComponent` data,
+  preserves each batch's local transform, and points every batch at the
+  layer's shared `InstanceSetComponent` GPU transform buffer. The layer
+  Inspector exposes overrides for variables declared by the source prefab and
+  a resolved renderer/LOD summary. Source file changes invalidate the compiled
+  prototype and rebuild the layer automatically, so source edits stay live.
+  Paint and Erase always modify spatial instances, never separate LOD copies.
+  Layer actions include create, rename, duplicate, and delete; paint settings
+  include density, spacing, scale, height/slope projection, chunk size, and
+  view distance.
+- The Inspector resets to the newly selected object and shows a compact object
+  header followed only by that object's component cards. Transform, parent,
   mesh/render state, lights, colliders, rigid bodies, physics materials,
-  collision filters, character controllers, terrain, and foliage use typed
-  controls. Other registered serializers use an explicit JSON draft that must
-  parse and deserialize successfully before it can alter the scene. Adding a
-  rigid body or character controller also adds a Box Collider when needed.
-  Collider wire geometry is shown for the selected entity, but physics remains
-  disabled in the editor preview.
+  collision filters, character controllers, terrain, foliage, LOD, and
+  instance sets use typed controls. Other registered serializers use an
+  explicit JSON draft that must parse and deserialize successfully before it
+  can alter the scene. Adding an instanced mesh also adds its default same-
+  entity instance set; a contextual source can instead reference another
+  authored `InstanceSetComponent`. Adding a rigid body or character controller
+  also adds a Box Collider when needed. Collider wire geometry is shown for
+  the selected entity, but physics remains disabled in the editor preview.
 - Selecting a material asset opens a typed PBR editor for base/emissive color,
   metal/roughness, normal convention and scale, AO, specular, clearcoat, sheen,
   anisotropy, transmission, IOR, thickness, alpha/render state, and texture
@@ -152,6 +188,21 @@ scenes/world.scene-assets/
   foliage_<id>-<hash>.kfoliage
 ```
 
+The editor and migration-capable authoring tools automatically detect and
+upgrade legacy render JSON before editing it: instance layout, transforms,
+revision, and dynamic state move from `InstancedMeshComponent` to a sibling
+`InstanceSetComponent`, while embedded instanced-mesh or foliage `lods` move to
+a sibling `LODComponent`.
+Migration is transactional and refuses ambiguous content that already has a
+conflicting sibling component, is read-only, or changes while the staged
+replacement is being validated. Before the first source rewrite, the authoring
+tool keeps one sibling backup whose filename ends in
+`.pre-lod-component.bak`; subsequent checks reuse that single safety copy
+instead of producing a chain of backups. Runtime loading never performs this
+migration or writes source content. An unmigrated payload is rejected with a
+component diagnostic, so batch conversion belongs in the editor/tooling step
+and remains reviewable.
+
 The scene stores content-root-relative paths. The runtime resolves packages,
 prefabs, terrain images/material maps, foliage sidecars, and camera shader
 overrides with this precedence:
@@ -181,7 +232,8 @@ authoring utilities:
   fingerprints, progress/cancellation, lightmap bindings, and navigation
   bindings.
 - `<karma/prefabs.h>` provides `loadPrefabDocument` for tooling that needs
-  prefab metadata without instantiating it.
+  prefab metadata without instantiating it, validated atomic
+  `savePrefabDocument`, and explicit raw-JSON legacy render migration helpers.
 
 Graphical applications that use authored terrain and foliage must register the
 corresponding runtime modules with `EngineApp` before starting the game, as the
@@ -190,18 +242,22 @@ window or renderer.
 
 ## Acceptance content
 
-The mini content root includes `prefabs/grass_lod/`, whose crossed-card grass
-switches to an upright billboard at 28 units, and `prefabs/pine_tree_lod/`,
-whose approximately 10.5-unit tree switches to low detail at 35 units and an
-upright billboard at 90 units. The scene places one of each for immediate
-graphical validation. Both prefab roots are Static in all five authoring
-domains; the tree package keeps bark/leaf material-slot boundaries and includes
-a static trunk collider.
+The mini content root includes `prefabs/grass_lod/`, whose base
+`MeshComponent` crossed-card grass uses a sibling `LODComponent` to switch to
+an upright billboard at 28 units, and `prefabs/pine_tree_lod/`, whose base
+high-detail `MeshComponent` switches to low detail at 35 units and an upright
+billboard at 90 units. These are ordinary linked-prefab fixtures, not synthetic
+one-instance `InstancedMeshComponent` batches. The scene places one of each for
+immediate graphical validation, and either prefab can also be selected as a
+prefab-backed foliage source. Both prefab roots are Static in all five
+authoring domains; the approximately 10.5-unit tree package keeps bark/leaf
+material-slot boundaries and includes a static trunk collider.
 
 ## V1 boundaries
 
 The editor intentionally does not provide play mode, gameplay or physics
 simulation, camera creation, freeform mesh modeling, multiple editable
 terrains, terrain-distance materials, or more than four terrain layers. Prefab
-internals stay linked and are changed in their source documents; the scene
-stores placement, declared variables, and static bake membership only.
+internals stay linked; only mesh and LOD payloads are editable through the
+focused source editor. The scene stores placement, declared variable
+overrides, and static bake membership rather than arbitrary prefab overrides.

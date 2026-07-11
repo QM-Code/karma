@@ -1,8 +1,11 @@
 #include "scene_editor_model.h"
 #include "scene_editor_colliders.h"
+#include "scene_editor_foliage_prefab.h"
 #include "scene_editor_gizmo.h"
 #include "scene_editor_markers.h"
+#include "scene_editor_migration.h"
 #include "scene_editor_placement.h"
+#include "scene_editor_pointer_input.h"
 #include "scene_editor_viewport.h"
 
 #include "karma/foliage.h"
@@ -202,6 +205,7 @@ struct EditCommand {
 struct LaunchOptions {
   std::filesystem::path scene_path;
   std::filesystem::path content_root;
+  std::filesystem::path executable_directory;
   std::vector<std::filesystem::path> extra_asset_roots;
   bool valid = true;
   bool show_help = false;
@@ -387,6 +391,12 @@ scenes::SceneDocument makeNewDocument(const std::filesystem::path& path,
 
 LaunchOptions parseLaunchOptions(int argc, char** argv) {
   LaunchOptions options{};
+  if (argc > 0 && argv[0] != nullptr && argv[0][0] != '\0') {
+    options.executable_directory =
+        std::filesystem::absolute(argv[0]).lexically_normal().parent_path();
+  } else {
+    options.executable_directory = std::filesystem::current_path();
+  }
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--help" || argument == "-h") {
@@ -441,20 +451,110 @@ bool pathExistsNoThrow(const std::filesystem::path& path) {
   return std::filesystem::exists(path, error) && !error;
 }
 
+void applySceneEditorTheme() {
+  ImGui::StyleColorsDark();
+  ImGuiStyle& style = ImGui::GetStyle();
+  style.WindowPadding = {8.0f, 8.0f};
+  style.FramePadding = {7.0f, 5.0f};
+  style.CellPadding = {7.0f, 5.0f};
+  style.ItemSpacing = {7.0f, 6.0f};
+  style.ItemInnerSpacing = {6.0f, 4.0f};
+  style.IndentSpacing = 16.0f;
+  style.ScrollbarSize = 13.0f;
+  style.GrabMinSize = 10.0f;
+  style.WindowBorderSize = 1.0f;
+  style.ChildBorderSize = 1.0f;
+  style.PopupBorderSize = 1.0f;
+  style.FrameBorderSize = 1.0f;
+  style.TabBorderSize = 0.0f;
+  style.WindowRounding = 3.0f;
+  style.ChildRounding = 3.0f;
+  style.FrameRounding = 3.0f;
+  style.PopupRounding = 3.0f;
+  style.ScrollbarRounding = 3.0f;
+  style.GrabRounding = 2.0f;
+  style.TabRounding = 3.0f;
+
+  auto& colors = style.Colors;
+  colors[ImGuiCol_Text] = {0.90f, 0.91f, 0.92f, 1.0f};
+  colors[ImGuiCol_TextDisabled] = {0.58f, 0.61f, 0.65f, 1.0f};
+  colors[ImGuiCol_WindowBg] = {0.118f, 0.122f, 0.133f, 1.0f};
+  colors[ImGuiCol_ChildBg] = {0.153f, 0.161f, 0.176f, 1.0f};
+  colors[ImGuiCol_PopupBg] = {0.135f, 0.141f, 0.153f, 0.99f};
+  colors[ImGuiCol_Border] = {0.282f, 0.294f, 0.318f, 1.0f};
+  colors[ImGuiCol_BorderShadow] = {0.0f, 0.0f, 0.0f, 0.0f};
+  colors[ImGuiCol_FrameBg] = {0.176f, 0.184f, 0.200f, 1.0f};
+  colors[ImGuiCol_FrameBgHovered] = {0.220f, 0.239f, 0.263f, 1.0f};
+  colors[ImGuiCol_FrameBgActive] = {0.243f, 0.267f, 0.298f, 1.0f};
+  colors[ImGuiCol_TitleBg] = {0.102f, 0.106f, 0.114f, 1.0f};
+  colors[ImGuiCol_TitleBgActive] = {0.133f, 0.141f, 0.153f, 1.0f};
+  colors[ImGuiCol_MenuBarBg] = {0.102f, 0.106f, 0.114f, 1.0f};
+  colors[ImGuiCol_ScrollbarBg] = {0.102f, 0.106f, 0.114f, 0.85f};
+  colors[ImGuiCol_ScrollbarGrab] = {0.282f, 0.294f, 0.318f, 1.0f};
+  colors[ImGuiCol_ScrollbarGrabHovered] = {0.353f, 0.373f, 0.404f, 1.0f};
+  colors[ImGuiCol_ScrollbarGrabActive] = {0.247f, 0.510f, 0.769f, 1.0f};
+  colors[ImGuiCol_CheckMark] = {0.247f, 0.510f, 0.769f, 1.0f};
+  colors[ImGuiCol_SliderGrab] = {0.247f, 0.510f, 0.769f, 1.0f};
+  colors[ImGuiCol_SliderGrabActive] = {0.329f, 0.624f, 0.886f, 1.0f};
+  colors[ImGuiCol_Button] = {0.192f, 0.204f, 0.224f, 1.0f};
+  colors[ImGuiCol_ButtonHovered] = {0.247f, 0.510f, 0.769f, 0.78f};
+  colors[ImGuiCol_ButtonActive] = {0.208f, 0.431f, 0.655f, 1.0f};
+  colors[ImGuiCol_Header] = {0.192f, 0.204f, 0.224f, 1.0f};
+  colors[ImGuiCol_HeaderHovered] = {0.247f, 0.510f, 0.769f, 0.55f};
+  colors[ImGuiCol_HeaderActive] = {0.247f, 0.510f, 0.769f, 0.78f};
+  colors[ImGuiCol_Separator] = {0.282f, 0.294f, 0.318f, 1.0f};
+  colors[ImGuiCol_SeparatorHovered] = {0.247f, 0.510f, 0.769f, 0.75f};
+  colors[ImGuiCol_SeparatorActive] = {0.247f, 0.510f, 0.769f, 1.0f};
+  colors[ImGuiCol_ResizeGrip] = {0.247f, 0.510f, 0.769f, 0.22f};
+  colors[ImGuiCol_ResizeGripHovered] = {0.247f, 0.510f, 0.769f, 0.67f};
+  colors[ImGuiCol_ResizeGripActive] = {0.247f, 0.510f, 0.769f, 0.95f};
+  colors[ImGuiCol_Tab] = {0.153f, 0.161f, 0.176f, 1.0f};
+  colors[ImGuiCol_TabHovered] = {0.247f, 0.510f, 0.769f, 0.70f};
+  colors[ImGuiCol_TabSelected] = {0.208f, 0.431f, 0.655f, 1.0f};
+  colors[ImGuiCol_TabSelectedOverline] = {0.329f, 0.624f, 0.886f, 1.0f};
+  colors[ImGuiCol_TabDimmed] = {0.133f, 0.141f, 0.153f, 1.0f};
+  colors[ImGuiCol_TabDimmedSelected] = {0.176f, 0.302f, 0.427f, 1.0f};
+  colors[ImGuiCol_TableHeaderBg] = {0.176f, 0.184f, 0.200f, 1.0f};
+  colors[ImGuiCol_TableBorderStrong] = {0.282f, 0.294f, 0.318f, 1.0f};
+  colors[ImGuiCol_TableBorderLight] = {0.220f, 0.227f, 0.247f, 1.0f};
+  colors[ImGuiCol_TableRowBgAlt] = {1.0f, 1.0f, 1.0f, 0.018f};
+  colors[ImGuiCol_TextSelectedBg] = {0.247f, 0.510f, 0.769f, 0.40f};
+  colors[ImGuiCol_DragDropTarget] = {0.329f, 0.624f, 0.886f, 1.0f};
+  colors[ImGuiCol_NavCursor] = {0.329f, 0.624f, 0.886f, 1.0f};
+  colors[ImGuiCol_NavWindowingDimBg] = {0.0f, 0.0f, 0.0f, 0.38f};
+  colors[ImGuiCol_ModalWindowDimBg] = {0.0f, 0.0f, 0.0f, 0.58f};
+  // Karma's graphical UI target is composited through a linear scene target.
+  // Define the palette in familiar sRGB values, then linearize it once here.
+  const auto to_linear = [](float value) {
+    return value <= 0.04045f
+               ? value / 12.92f
+               : std::pow((value + 0.055f) / 1.055f, 2.4f);
+  };
+  for (int index = 0; index < ImGuiCol_COUNT; ++index) {
+    colors[index].x = to_linear(colors[index].x);
+    colors[index].y = to_linear(colors[index].y);
+    colors[index].z = to_linear(colors[index].z);
+  }
+}
+
 }  // namespace
 
 class SceneEditorGame final : public app::GameInterface {
  public:
-  SceneEditorGame(std::filesystem::path content_root,
+  SceneEditorGame(std::filesystem::path executable_directory,
+                  std::filesystem::path content_root,
                   std::filesystem::path scene_path,
                   scenes::SceneDocument document,
                   EditorSettings settings,
+                  std::string migration_status,
                   visual::terrain::TerrainRuntimeModule* terrain_runtime,
                   foliage::FoliageRuntimeModule* foliage_runtime)
-      : content_root_(std::move(content_root)),
+      : executable_directory_(std::move(executable_directory)),
+        content_root_(std::move(content_root)),
         scene_path_(std::move(scene_path)),
         document_(std::move(document)),
         settings_(std::move(settings)),
+        scene_migration_status_(std::move(migration_status)),
         terrain_runtime_(terrain_runtime),
         foliage_runtime_(foliage_runtime) {
     document_.source_path = scene_path_;
@@ -475,7 +575,8 @@ class SceneEditorGame final : public app::GameInterface {
   }
 
   void onStart() override {
-    ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w = 1.0f;
+    applySceneEditorTheme();
+    loadEditorFonts();
     bindInput();
     // Registry mutation and use require external serialization. Populate every
     // built-in before the catalog worker and main-thread preview can read it.
@@ -520,7 +621,11 @@ class SceneEditorGame final : public app::GameInterface {
       preview_pending_tool_.reset();
       rebuildPreview();
       if (!selected_id.empty()) {
-        selection_ = {SelectionKind::Entity, selected_id};
+        if (findFoliageLayer(selected_id) != nullptr) {
+          focusFoliageLayer(selected_id, true);
+        } else {
+          selection_ = {SelectionKind::Entity, selected_id};
+        }
         revalidateSelection();
       }
       if (pending_tool.has_value()) {
@@ -592,16 +697,109 @@ class SceneEditorGame final : public app::GameInterface {
     drawInspector();
     capturePanelInteraction();
     drawViewport(context);
+    if (ImGui::GetCurrentContext() != nullptr) {
+      const ImGuiIO& io = ImGui::GetIO();
+      const bool popup_open = ImGui::IsPopupOpen(
+          "", ImGuiPopupFlags_AnyPopupId |
+                  ImGuiPopupFlags_AnyPopupLevel);
+      const bool drag_drop_active = ImGui::GetDragDropPayload() != nullptr;
+      const bool navigation_can_acquire =
+          viewport_item_hovered_ && !popup_open && !drag_drop_active;
+      viewport_primary_owned_ = io.AppFocusLost
+                                    ? false
+                                    : updateViewportButtonOwnership(
+                                          viewport_primary_owned_,
+                                          io.MouseDown[ImGuiMouseButton_Left],
+                                          io.MouseClicked[ImGuiMouseButton_Left],
+                                          viewport_item_hovered_);
+      viewport_middle_owned_ = io.AppFocusLost
+                                   ? false
+                                   : updateViewportButtonOwnership(
+                                         viewport_middle_owned_,
+                                         io.MouseDown[ImGuiMouseButton_Middle],
+                                         io.MouseClicked[ImGuiMouseButton_Middle],
+                                         navigation_can_acquire);
+      viewport_right_owned_ = io.AppFocusLost
+                                  ? false
+                                  : updateViewportButtonOwnership(
+                                        viewport_right_owned_,
+                                        io.MouseDown[ImGuiMouseButton_Right],
+                                        io.MouseClicked[ImGuiMouseButton_Right],
+                                        navigation_can_acquire);
+      const bool navigation_focus_requested =
+          navigation_can_acquire &&
+          (io.MouseClicked[ImGuiMouseButton_Middle] ||
+           io.MouseClicked[ImGuiMouseButton_Right]);
+      if (navigation_focus_requested) {
+        // RMB/MMB over the viewport is an explicit focus transfer. Clear a
+        // lingering text/slider ActiveId so it cannot keep keyboard capture
+        // latched and make fly controls appear to stop working.
+        ImGui::SetWindowFocus("Viewport");
+        panel_item_active_ = false;
+        finishDocumentPropertyEditNow();
+      }
+    }
     drawWorkspaceSplitters();
     capturePanelInteraction();
     drawStatusBar();
     drawModals();
     capturePanelInteraction();
+    // Sample inside the Scene Editor's active ImGui frame. Engine update runs
+    // before ImGui::NewFrame(), so sampling from onUpdate() would observe the
+    // previous context/frame and lose the input events queued this tick.
+    viewport_input_ = captureViewportInputSnapshot();
   }
 
  private:
+  void loadEditorFonts() {
+    std::vector<std::filesystem::path> roots{
+        executable_directory_ / "assets" / "fonts",
+    };
+#if defined(KARMA_SCENE_EDITOR_FONT_SOURCE_DIR)
+    roots.emplace_back(KARMA_SCENE_EDITOR_FONT_SOURCE_DIR);
+#endif
+    std::filesystem::path regular_path;
+    std::filesystem::path semibold_path;
+    for (const std::filesystem::path& root : roots) {
+      const std::filesystem::path regular = root / "Inter-Regular.ttf";
+      const std::filesystem::path semibold = root / "Inter-SemiBold.ttf";
+      if (pathExistsNoThrow(regular) && pathExistsNoThrow(semibold)) {
+        regular_path = regular;
+        semibold_path = semibold;
+        break;
+      }
+    }
+    if (regular_path.empty()) {
+      last_error_ =
+          "Scene Editor font load failed; using the built-in fallback font";
+      return;
+    }
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImFontConfig regular_config{};
+    regular_config.OversampleH = 2;
+    regular_config.OversampleV = 1;
+    ImFont* regular = io.Fonts->AddFontFromFileTTF(
+        regular_path.string().c_str(), 15.0f, &regular_config);
+    if (regular != nullptr) io.FontDefault = regular;
+    ImFontConfig semibold_config{};
+    semibold_config.OversampleH = 2;
+    semibold_config.OversampleV = 1;
+    editor_semibold_font_ = io.Fonts->AddFontFromFileTTF(
+        semibold_path.string().c_str(), 15.0f, &semibold_config);
+    if (regular == nullptr || editor_semibold_font_ == nullptr) {
+      editor_semibold_font_ = regular;
+      last_error_ =
+          "Scene Editor font load failed; using the available fallback font";
+      return;
+    }
+  }
+
   void capturePanelInteraction() {
-    panel_item_active_ |= ImGui::IsAnyItemActive();
+    if (!viewport_primary_owned_ && !viewport_middle_owned_ &&
+        !viewport_right_owned_) {
+      panel_item_active_ |= ImGui::IsAnyItemActive();
+    }
   }
 
   void updateWorkspaceLayout() {
@@ -877,7 +1075,59 @@ class SceneEditorGame final : public app::GameInterface {
         .panel_item_active = panel_item_active_,
         .want_capture_mouse = io.WantCaptureMouse,
         .viewport_item_hovered = viewport_item_hovered_,
+        .viewport_navigation_owned =
+            viewport_middle_owned_ || viewport_right_owned_,
     };
+  }
+
+  ViewportInputSnapshot captureViewportInputSnapshot() const {
+    ViewportInputSnapshot input_fallback{};
+    if (input != nullptr) {
+      input_fallback.primary_down = input->actionDown("editor_primary");
+      input_fallback.primary_pressed = input->actionPressed("editor_primary");
+      input_fallback.middle_down = input->actionDown("editor_pan");
+      input_fallback.right_down = input->actionDown("editor_look");
+      input_fallback.orbit_modifier_down =
+          input->actionDown("editor_orbit_modifier");
+      input_fallback.fast_down = input->actionDown("editor_fast");
+      input_fallback.move_forward = input->actionDown("editor_forward");
+      input_fallback.move_backward = input->actionDown("editor_backward");
+      input_fallback.move_left = input->actionDown("editor_left");
+      input_fallback.move_right = input->actionDown("editor_right");
+      input_fallback.move_down = input->actionDown("editor_down");
+      input_fallback.move_up = input->actionDown("editor_up");
+      input_fallback.delta_x = input->mouseDeltaX();
+      input_fallback.delta_y = input->mouseDeltaY();
+    }
+
+    std::optional<ViewportInputSnapshot> imgui_snapshot;
+    bool app_focus_lost = false;
+    if (ImGui::GetCurrentContext() != nullptr) {
+      const ImGuiIO& io = ImGui::GetIO();
+      app_focus_lost = io.AppFocusLost;
+      imgui_snapshot = ViewportInputSnapshot{
+          .primary_down = io.MouseDown[ImGuiMouseButton_Left],
+          .primary_pressed = io.MouseClicked[ImGuiMouseButton_Left],
+          .middle_down = io.MouseDown[ImGuiMouseButton_Middle],
+          .right_down = io.MouseDown[ImGuiMouseButton_Right],
+          .orbit_modifier_down = ImGui::IsKeyDown(ImGuiKey_LeftAlt) ||
+                                 ImGui::IsKeyDown(ImGuiKey_RightAlt),
+          .fast_down = ImGui::IsKeyDown(ImGuiKey_LeftShift) ||
+                       ImGui::IsKeyDown(ImGuiKey_RightShift),
+          .move_forward = ImGui::IsKeyDown(ImGuiKey_W),
+          .move_backward = ImGui::IsKeyDown(ImGuiKey_S),
+          .move_left = ImGui::IsKeyDown(ImGuiKey_A),
+          .move_right = ImGui::IsKeyDown(ImGuiKey_D),
+          .move_down = ImGui::IsKeyDown(ImGuiKey_Q),
+          .move_up = ImGui::IsKeyDown(ImGuiKey_E),
+          .delta_x = io.MouseDelta.x,
+          .delta_y = io.MouseDelta.y,
+          .wheel = io.MouseWheel,
+      };
+    }
+    return resolveViewportInputSnapshot(std::move(imgui_snapshot),
+                                        input_fallback,
+                                        app_focus_lost);
   }
 
   void updateEditorCamera(float dt) {
@@ -887,14 +1137,17 @@ class SceneEditorGame final : public app::GameInterface {
     const bool modal_open = pointer_capture.popup_open;
     const bool input_blocked = blocksViewportPointerInput(pointer_capture);
 
-    const bool can_start_navigation = viewport_hovered_ && !input_blocked;
+    const bool navigation_owned =
+        viewport_middle_owned_ || viewport_right_owned_;
+    const bool can_start_navigation =
+        (viewport_hovered_ || navigation_owned) && !input_blocked;
     ViewportNavigationButtons navigation_buttons{};
     if (can_start_navigation ||
         camera_navigation_.mode != ViewportNavigationMode::None) {
-      navigation_buttons.alt = input->actionDown("editor_orbit_modifier");
-      navigation_buttons.left = input->actionDown("editor_primary");
-      navigation_buttons.middle = input->actionDown("editor_pan");
-      navigation_buttons.right = input->actionDown("editor_look");
+      navigation_buttons.alt = viewport_input_.orbit_modifier_down;
+      navigation_buttons.left = viewport_input_.primary_down;
+      navigation_buttons.middle = viewport_input_.middle_down;
+      navigation_buttons.right = viewport_input_.right_down;
     }
     ViewportNavigationMode requested_mode =
         unityViewportNavigationMode(navigation_buttons);
@@ -941,9 +1194,8 @@ class SceneEditorGame final : public app::GameInterface {
       if (input->actionPressed("editor_delete")) deleteSelection();
       const bool command_modifier = io != nullptr &&
                                     (io->KeyCtrl || io->KeySuper);
-      const bool rmb_fly_chord = input->actionDown("editor_look") &&
-                                  !input->actionDown(
-                                      "editor_orbit_modifier");
+      const bool rmb_fly_chord = viewport_input_.right_down &&
+                                 !viewport_input_.orbit_modifier_down;
       if (!command_modifier &&
           !rmb_fly_chord &&
           camera_navigation_.mode != ViewportNavigationMode::Fly &&
@@ -964,8 +1216,8 @@ class SceneEditorGame final : public app::GameInterface {
       }
     }
 
-    const float mouse_dx = input->mouseDeltaX();
-    const float mouse_dy = input->mouseDeltaY();
+    const float mouse_dx = viewport_input_.delta_x;
+    const float mouse_dy = viewport_input_.delta_y;
     if (camera_navigation_.mode == ViewportNavigationMode::Orbit ||
         camera_navigation_.mode == ViewportNavigationMode::Fly) {
       applyViewportLookDrag(camera_navigation_, mouse_dx, mouse_dy,
@@ -977,26 +1229,26 @@ class SceneEditorGame final : public app::GameInterface {
       applyViewportPanDrag(camera_navigation_, mouse_dx, mouse_dy,
                            viewport_height, camera.fov_y_degrees);
     } else if (camera_navigation_.mode == ViewportNavigationMode::Dolly) {
-      const float speed = input->actionDown("editor_fast") ? 4.0f : 1.0f;
+      const float speed = viewport_input_.fast_down ? 4.0f : 1.0f;
       applyViewportDollyDrag(camera_navigation_, mouse_dy,
                              0.01f * speed);
     }
 
     if (camera_navigation_.mode == ViewportNavigationMode::Fly) {
       ViewportFlyMotion motion{};
-      if (input->actionDown("editor_forward")) motion.forward += 1.0f;
-      if (input->actionDown("editor_backward")) motion.forward -= 1.0f;
-      if (input->actionDown("editor_right")) motion.right += 1.0f;
-      if (input->actionDown("editor_left")) motion.right -= 1.0f;
-      if (input->actionDown("editor_up")) motion.up += 1.0f;
-      if (input->actionDown("editor_down")) motion.up -= 1.0f;
+      if (viewport_input_.move_forward) motion.forward += 1.0f;
+      if (viewport_input_.move_backward) motion.forward -= 1.0f;
+      if (viewport_input_.move_right) motion.right += 1.0f;
+      if (viewport_input_.move_left) motion.right -= 1.0f;
+      if (viewport_input_.move_up) motion.up += 1.0f;
+      if (viewport_input_.move_down) motion.up -= 1.0f;
       applyViewportFlyMotion(camera_navigation_, motion, dt,
-                             input->actionDown("editor_fast"));
+                             viewport_input_.fast_down);
     }
-    if (io != nullptr && viewport_hovered_ && !input_blocked &&
-        std::abs(io->MouseWheel) > 0.0f) {
-      const float wheel = io->MouseWheel *
-                          (input->actionDown("editor_fast") ? 4.0f : 1.0f);
+    if (viewport_hovered_ && !input_blocked &&
+        std::abs(viewport_input_.wheel) > 0.0f) {
+      const float wheel = viewport_input_.wheel *
+                          (viewport_input_.fast_down ? 4.0f : 1.0f);
       applyViewportWheel(camera_navigation_, wheel);
       if (camera_navigation_.mode == ViewportNavigationMode::Fly) {
         settings_.camera_move_speed = camera_navigation_.fly_speed;
@@ -1133,6 +1385,20 @@ class SceneEditorGame final : public app::GameInterface {
     if (!relative) {
       last_error_ = "Prefab must be inside the content root";
       return;
+    }
+    const LegacyRenderMigrationReport migration =
+        migratePrefabSourceClosure({prefab_path}, content_root_);
+    if (!migration.success()) {
+      last_error_ = migration.diagnostics.empty()
+                        ? "Prefab migration failed before placement"
+                        : joinDiagnostics(migration.diagnostics);
+      return;
+    }
+    if (migration.changed) {
+      prefab_asset_draft_status_ =
+          "Automatically migrated prefab before placement; backup preserved";
+      prefab_asset_draft_.reset();
+      scanCatalog(false);
     }
     const prefabs::PrefabLoadResult loaded =
         prefabs::loadPrefabDocument(prefab_path);
@@ -1309,7 +1575,7 @@ class SceneEditorGame final : public app::GameInterface {
         rebuild_geometry();
         return;
       }
-      if (!input->actionDown("editor_primary")) {
+      if (!viewport_input_.primary_down) {
         finishGizmoDrag(false);
         rebuild_geometry();
         return;
@@ -1336,7 +1602,7 @@ class SceneEditorGame final : public app::GameInterface {
     if (!hit) return;
     gizmo_hovered_ = true;
     gizmo_hot_handle_ = hit->handle;
-    if (!input->actionPressed("editor_primary")) return;
+    if (!viewport_input_.primary_pressed) return;
 
     const GizmoDragBegin begin{
         .handle = hit->handle,
@@ -1373,17 +1639,17 @@ class SceneEditorGame final : public app::GameInterface {
       return;
     }
     if (camera_navigation_.mode != ViewportNavigationMode::None ||
-        input->actionDown("editor_orbit_modifier") ||
-        input->actionDown("editor_pan") ||
-        input->actionDown("editor_look")) {
+        viewport_input_.orbit_modifier_down ||
+        viewport_input_.middle_down ||
+        viewport_input_.right_down) {
       finishTerrainStroke();
       finishFoliageStroke();
       return;
     }
 
-    if (gizmo_hovered_ && input->actionPressed("editor_primary")) return;
+    if (gizmo_hovered_ && viewport_input_.primary_pressed) return;
     if (tool_ == ToolMode::PlacePrefab &&
-        input->actionPressed("editor_primary")) {
+        viewport_input_.primary_pressed) {
       if (placement_world_point_.has_value()) {
         placePendingPrefab(*placement_world_point_);
       } else if (auto point = cursorSurfacePoint()) {
@@ -1392,7 +1658,7 @@ class SceneEditorGame final : public app::GameInterface {
       }
       return;
     }
-    if (tool_ == ToolMode::Select && input->actionPressed("editor_primary")) {
+    if (tool_ == ToolMode::Select && viewport_input_.primary_pressed) {
       if (selectMarkerAtCursor()) {
         return;
       }
@@ -1420,7 +1686,13 @@ class SceneEditorGame final : public app::GameInterface {
                                         *cursor,
                                         settings_.markers_visible);
     if (!marker) return false;
-    selection_ = marker->selection;
+    if (marker->selection.kind == SelectionKind::Entity &&
+        findFoliageLayer(marker->selection.id) != nullptr &&
+        !terrain_entity_id_.empty()) {
+      focusFoliageLayer(marker->selection.id, true);
+    } else {
+      selection_ = marker->selection;
+    }
     gizmo_geometry_ = {};
     return true;
   }
@@ -1462,7 +1734,13 @@ class SceneEditorGame final : public app::GameInterface {
       consider(SelectionKind::Prefab, id, entity);
     }
     if (best.valid()) {
-      selection_ = std::move(best);
+      if (best.kind == SelectionKind::Entity &&
+          findFoliageLayer(best.id) != nullptr &&
+          !terrain_entity_id_.empty()) {
+        focusFoliageLayer(best.id, true);
+      } else {
+        selection_ = std::move(best);
+      }
       gizmo_geometry_ = {};
       return true;
     }
@@ -1479,7 +1757,7 @@ class SceneEditorGame final : public app::GameInterface {
       last_error_ = "Terrain editing is disabled because its source maps did not load";
       return;
     }
-    const bool down = input->actionDown("editor_primary");
+    const bool down = viewport_input_.primary_down;
     if (!down) {
       finishTerrainStroke();
       return;
@@ -1568,7 +1846,7 @@ class SceneEditorGame final : public app::GameInterface {
       last_error_ = "Foliage editing is disabled because its sidecar did not load";
       return;
     }
-    const bool down = input->actionDown("editor_primary");
+    const bool down = viewport_input_.primary_down;
     if (!down) {
       finishFoliageStroke();
       return;
@@ -1996,6 +2274,16 @@ class SceneEditorGame final : public app::GameInterface {
         component.sidecar_path = working_path;
         components::FoliageComponent authored_component = component;
         authored_component.sidecar_path = *relative_working;
+        if (!authored_component.prefab_path.empty()) {
+          const std::filesystem::path absolute_prefab =
+              authored_component.prefab_path.is_absolute()
+                  ? authored_component.prefab_path
+                  : content_root_ / authored_component.prefab_path;
+          if (const auto relative_prefab = contentRelativePath(
+                  content_root_, absolute_prefab)) {
+            authored_component.prefab_path = *relative_prefab;
+          }
+        }
         if (auto authored_entity = findEntity(authored.id);
             authored_entity != document_.entities.end()) {
           authored_entity->components["FoliageComponent"] =
@@ -2007,6 +2295,11 @@ class SceneEditorGame final : public app::GameInterface {
         }
       }
       foliage_layers_.push_back(std::move(state));
+    }
+    if (findFoliageLayer(settings_.active_foliage_layer_id) == nullptr) {
+      settings_.active_foliage_layer_id =
+          foliage_layers_.empty() ? std::string{}
+                                  : foliage_layers_.front().entity_id;
     }
   }
 
@@ -2060,8 +2353,9 @@ class SceneEditorGame final : public app::GameInterface {
     auto tool_button = [&](ToolMode mode, const char* label) {
       const bool selected = tool_ == mode;
       if (selected) {
-        ImGui::PushStyleColor(ImGuiCol_Button,
-                              {0.20f, 0.46f, 0.78f, 1.0f});
+        ImGui::PushStyleColor(
+            ImGuiCol_Button,
+            ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
       }
       if (ImGui::Button(label) && !selected) {
         changeTool(mode);
@@ -2074,7 +2368,9 @@ class SceneEditorGame final : public app::GameInterface {
       const bool selected = tool_ == ToolMode::Select &&
                             gizmo_tool_ == operation;
       if (selected) {
-        ImGui::PushStyleColor(ImGuiCol_Button, {0.20f, 0.46f, 0.78f, 1.0f});
+        ImGui::PushStyleColor(
+            ImGuiCol_Button,
+            ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
       }
       if (ImGui::Button(label) && !selected) {
         changeTransformTool(operation);
@@ -2565,7 +2861,13 @@ class SceneEditorGame final : public app::GameInterface {
                                  sizeof(hierarchy_filter_))) {
       settings_.hierarchy_filter = hierarchy_filter_;
     }
-    const HierarchyBuildResult hierarchy = buildHierarchy(document_);
+    std::vector<std::string> foliage_entity_ids;
+    foliage_entity_ids.reserve(foliage_layers_.size());
+    for (const FoliageLayerState& layer : foliage_layers_) {
+      foliage_entity_ids.push_back(layer.entity_id);
+    }
+    const HierarchyBuildResult hierarchy = projectFoliageUnderTerrain(
+        buildHierarchy(document_), terrain_entity_id_, foliage_entity_ids);
     const auto lowercase = [](std::string value) {
       std::transform(value.begin(), value.end(), value.begin(),
                      [](unsigned char character) {
@@ -2654,7 +2956,13 @@ class SceneEditorGame final : public app::GameInterface {
       if (node.children.empty()) {
         flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
       }
-      if (selection_.kind == node.item.kind && selection_.id == node.item.id) {
+      const bool active_virtual_foliage =
+          node.item.kind == SelectionKind::Entity &&
+          node.item.id == settings_.active_foliage_layer_id &&
+          selection_.kind == SelectionKind::Entity &&
+          selection_.id == terrain_entity_id_;
+      if ((selection_.kind == node.item.kind &&
+           selection_.id == node.item.id) || active_virtual_foliage) {
         flags |= ImGuiTreeNodeFlags_Selected;
       }
       ImGui::PushID(node.item.id.c_str());
@@ -2663,7 +2971,13 @@ class SceneEditorGame final : public app::GameInterface {
         changeTool(ToolMode::Select);
         selected_asset_path_.clear();
         selected_asset_key_.clear();
-        selection_ = node.item;
+        if (!terrain_entity_id_.empty() &&
+            node.item.kind == SelectionKind::Entity &&
+            findFoliageLayer(node.item.id) != nullptr) {
+          focusFoliageLayer(node.item.id, true);
+        } else {
+          selection_ = node.item;
+        }
         gizmo_geometry_ = {};
       }
       if (open && !node.children.empty()) {
@@ -2757,6 +3071,15 @@ class SceneEditorGame final : public app::GameInterface {
         ImGui::EndTooltip();
       }
       if (activated) {
+        if (prefab_asset_draft_.has_value() &&
+            prefab_asset_draft_->dirty() &&
+            prefab_asset_draft_->sourcePath().lexically_normal() !=
+                entry.path.lexically_normal()) {
+          last_error_ =
+              "Save or Revert the open prefab draft before selecting another asset";
+          ImGui::PopID();
+          continue;
+        }
         selected_asset_path_ = entry.path;
         selected_asset_key_ = entry.key;
         selection_.clear();
@@ -2766,6 +3089,7 @@ class SceneEditorGame final : public app::GameInterface {
           beginPrefabPlacement(entry.path);
         } else if (entry.kind == AssetKind::Mesh) {
           pending_foliage_mesh_ = entry.key;
+          pending_foliage_prefab_.clear();
           pending_foliage_package_ = entry.package_path;
           open_create_foliage_ = true;
         } else if (entry.kind == AssetKind::Material) {
@@ -2813,6 +3137,68 @@ class SceneEditorGame final : public app::GameInterface {
     ImGui::EndTable();
   }
 
+  static std::string lowercaseUi(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char character) {
+                     return static_cast<char>(std::tolower(character));
+                   });
+    return value;
+  }
+
+  bool inspectorFilterMatches(std::string_view display,
+                              std::string_view type = {}) const {
+    if (component_filter_[0] == '\0') return true;
+    return lowercaseUi(std::string(display) + " " + std::string(type))
+               .find(lowercaseUi(component_filter_)) != std::string::npos;
+  }
+
+  template <typename DrawBody>
+  void drawComponentCard(std::string_view key,
+                         std::string_view display_name,
+                         bool default_open,
+                         DrawBody&& draw_body) {
+    const std::string stable_key(key);
+    ImGui::PushID(stable_key.c_str());
+    const auto stored = settings_.component_foldouts.find(stable_key);
+    const bool requested_open = stored == settings_.component_foldouts.end()
+                                    ? default_open
+                                    : stored->second;
+    ImGui::SetNextItemOpen(requested_open, ImGuiCond_Always);
+    if (editor_semibold_font_ != nullptr) ImGui::PushFont(editor_semibold_font_);
+    const std::string header = std::string(display_name) + "##component_header";
+    const bool open = ImGui::CollapsingHeader(
+        header.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth |
+                            ImGuiTreeNodeFlags_FramePadding);
+    if (editor_semibold_font_ != nullptr) ImGui::PopFont();
+    settings_.component_foldouts[stable_key] = open;
+    if (open) {
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{9.0f, 8.0f});
+      ImGui::BeginChild("##component_body", {0.0f, 0.0f},
+                        ImGuiChildFlags_Borders |
+                            ImGuiChildFlags_AutoResizeY,
+                        ImGuiWindowFlags_NoScrollbar |
+                            ImGuiWindowFlags_NoScrollWithMouse);
+      ImGui::PopStyleVar();
+      draw_body();
+      ImGui::EndChild();
+    }
+    ImGui::PopID();
+    ImGui::Dummy({0.0f, 2.0f});
+  }
+
+  std::string inspectorContextKey() const {
+    if (selection_.valid()) {
+      return (selection_.kind == SelectionKind::Prefab ? "prefab:" :
+                                                        "entity:") +
+             selection_.id;
+    }
+    if (!selected_asset_key_.empty()) return "asset:" + selected_asset_key_;
+    if (!selected_asset_path_.empty()) {
+      return "asset:" + selected_asset_path_.generic_string();
+    }
+    return "scene";
+  }
+
   void drawInspector() {
     const float x = workspace_layout_.hierarchy_width +
                     workspace_layout_.splitter_size +
@@ -2826,6 +3212,12 @@ class SceneEditorGame final : public app::GameInterface {
     ImGui::Begin("Inspector", nullptr,
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoSavedSettings);
+    const std::string context_key = inspectorContextKey();
+    if (context_key != inspector_context_key_ || inspector_scroll_to_top_) {
+      inspector_context_key_ = context_key;
+      inspector_scroll_to_top_ = false;
+      ImGui::SetScrollY(0.0f);
+    }
     if (!selection_.valid() && !selected_asset_path_.empty()) {
       drawAssetInspector();
     } else if (!selection_.valid()) {
@@ -2868,6 +3260,391 @@ class SceneEditorGame final : public app::GameInterface {
     }
     if (selected->kind == AssetKind::Material) {
       drawMaterialAssetInspector(*selected);
+    } else if (selected->kind == AssetKind::Prefab) {
+      drawPrefabAssetInspector(*selected);
+    }
+  }
+
+  bool ensurePrefabAssetDraft(const AssetEntry& entry) {
+    if (prefab_asset_draft_.has_value() &&
+        prefab_asset_draft_->sourcePath().lexically_normal() ==
+            entry.path.lexically_normal()) {
+      return true;
+    }
+    if (prefab_asset_draft_.has_value() && prefab_asset_draft_->dirty()) {
+      prefab_asset_draft_error_ =
+          "Save or Revert the current prefab draft before opening another";
+      return false;
+    }
+    prefab_asset_draft_.reset();
+    prefab_asset_draft_error_.clear();
+    const LegacyRenderMigrationReport migration =
+        migratePrefabSourceClosure({entry.path}, content_root_);
+    if (!migration.success()) {
+      prefab_asset_draft_error_ = migration.diagnostics.empty()
+                                      ? "Prefab migration failed"
+                                      : joinDiagnostics(migration.diagnostics);
+      return false;
+    }
+    if (migration.changed) {
+      prefab_asset_draft_status_ =
+          "Automatically migrated prefab source; backup preserved";
+      scanCatalog(true);
+    }
+    std::optional<PrefabAssetDraft> opened =
+        openPrefabAssetDraft(entry.path, &prefab_asset_draft_error_);
+    if (!opened.has_value()) return false;
+    prefab_asset_draft_ = std::move(*opened);
+    prefab_draft_node_index_ = std::min(
+        prefab_asset_draft_->document().root,
+        prefab_asset_draft_->document().nodes.empty()
+            ? 0u
+            : prefab_asset_draft_->document().nodes.size() - 1u);
+    return true;
+  }
+
+  bool prefabDraftAcceptsAsset(const AssetEntry& asset) {
+    if (!prefab_asset_draft_.has_value() || asset.package_path.empty()) {
+      prefab_asset_draft_error_ =
+          "Prefab mesh/material references must come from its local asset package";
+      return false;
+    }
+    std::error_code error;
+    const std::filesystem::path prefab_directory =
+        std::filesystem::weakly_canonical(
+            prefab_asset_draft_->sourcePath().parent_path(), error);
+    error.clear();
+    const std::filesystem::path package_directory =
+        std::filesystem::weakly_canonical(asset.package_path.parent_path(),
+                                          error);
+    if (error || prefab_directory != package_directory) {
+      prefab_asset_draft_error_ =
+          "The focused prefab editor cannot attach assets from another package";
+      return false;
+    }
+    return true;
+  }
+
+  bool commitPrefabDraftComponent(std::string_view type_name,
+                                  const nlohmann::json& payload,
+                                  std::string label,
+                                  bool coalesce = false) {
+    if (!prefab_asset_draft_.has_value()) return false;
+    std::string error;
+    if (!prefab_asset_draft_->setNodeComponent(prefab_draft_node_index_,
+                                                type_name,
+                                                payload,
+                                                component_editors_,
+                                                std::move(label),
+                                                &error,
+                                                coalesce)) {
+      prefab_asset_draft_error_ = error.empty()
+                                      ? "Prefab component edit was rejected"
+                                      : std::move(error);
+      return false;
+    }
+    prefab_asset_draft_error_.clear();
+    return true;
+  }
+
+  bool drawPrefabMeshDraftEditor(nlohmann::json& payload) {
+    bool changed = false;
+    const std::string mesh_key =
+        payload.value("mesh_asset_key", std::string{});
+    ImGui::Selectable(("Mesh: " +
+                       (mesh_key.empty() ? std::string("<drop mesh>")
+                                         : mesh_key))
+                          .c_str(),
+                      false);
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* drop =
+              ImGui::AcceptDragDropPayload("KARMA_MESH_ASSET")) {
+        const AssetEntry* asset = catalog_.findByKey(
+            static_cast<const char*>(drop->Data));
+        if (asset != nullptr && asset->valid &&
+            asset->kind == AssetKind::Mesh &&
+            prefabDraftAcceptsAsset(*asset)) {
+          payload["mesh_asset_key"] = asset->key;
+          commitPrefabDraftComponent(
+              "MeshComponent", payload, "Assign Prefab Mesh");
+          ImGui::EndDragDropTarget();
+          return false;
+        }
+      }
+      ImGui::EndDragDropTarget();
+    }
+    changed |= drawJsonBool(payload, "visible", "Visible", true);
+    changed |= drawJsonBool(payload, "shadow_visible", "Cast shadows", true);
+    auto& materials = payload["materials"];
+    if (!materials.is_array()) materials = nlohmann::json::array();
+    for (uint32_t slot = 0u; slot < 4u; ++slot) {
+      auto assignment = std::find_if(
+          materials.begin(), materials.end(),
+          [&](const nlohmann::json& candidate) {
+            return candidate.is_object() &&
+                   candidate.value("slot", UINT32_MAX) == slot;
+          });
+      const std::string key = assignment == materials.end()
+                                  ? "<drop material>"
+                                  : assignment->value(
+                                        "material_key", std::string{});
+      ImGui::PushID(static_cast<int>(slot));
+      ImGui::Selectable(
+          ("Material " + std::to_string(slot) + ": " + key).c_str(), false);
+      if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* drop = ImGui::AcceptDragDropPayload(
+                "KARMA_TERRAIN_MATERIAL")) {
+          const AssetEntry* asset = catalog_.findByKey(
+              static_cast<const char*>(drop->Data));
+          if (asset != nullptr && asset->valid &&
+              asset->kind == AssetKind::Material &&
+              prefabDraftAcceptsAsset(*asset)) {
+            if (assignment == materials.end()) {
+              materials.push_back(
+                  {{"slot", slot}, {"material_key", asset->key}});
+            } else {
+              (*assignment)["material_key"] = asset->key;
+            }
+            commitPrefabDraftComponent(
+                "MeshComponent", payload, "Assign Prefab Material");
+            ImGui::EndDragDropTarget();
+            ImGui::PopID();
+            return false;
+          }
+        }
+        ImGui::EndDragDropTarget();
+      }
+      ImGui::PopID();
+    }
+    return changed;
+  }
+
+  void drawPrefabAssetInspector(const AssetEntry& entry) {
+    ImGui::SeparatorText("Focused Prefab Source Editor");
+    ImGui::TextDisabled(
+        "Mesh and LOD components only. Node structure and other components stay linked.");
+    if (ImGui::Button("Check / Migrate Legacy Rendering")) {
+      const LegacyRenderMigrationReport migrated =
+          migratePrefabSourceClosure({entry.path}, content_root_);
+      if (!migrated.success()) {
+        prefab_asset_draft_status_.clear();
+        prefab_asset_draft_error_ = migrated.diagnostics.empty()
+                                        ? "Prefab migration failed"
+                                        : migrated.diagnostics.front();
+      } else if (migrated.changed) {
+        prefab_asset_draft_.reset();
+        prefab_asset_draft_status_ =
+            "Migrated " + std::to_string(migrated.migrated_owners) +
+            " prefab node(s)";
+        prefab_asset_draft_error_.clear();
+        scanCatalog(true);
+      } else {
+        prefab_asset_draft_status_ = "No legacy render fields were found";
+        prefab_asset_draft_error_.clear();
+      }
+    }
+    if (!prefab_asset_draft_status_.empty()) {
+      ImGui::TextColored({0.35f, 0.85f, 0.55f, 1.0f}, "%s",
+                         prefab_asset_draft_status_.c_str());
+    }
+    if (!ensurePrefabAssetDraft(entry)) {
+      if (!prefab_asset_draft_error_.empty()) {
+        ImGui::TextColored({1.0f, 0.35f, 0.25f, 1.0f}, "%s",
+                           prefab_asset_draft_error_.c_str());
+      }
+      return;
+    }
+    PrefabAssetDraft& draft = *prefab_asset_draft_;
+    if (!ImGui::IsAnyItemActive()) draft.finishCoalescedEdit();
+    const bool conflict = draft.sourceChangedExternally();
+    if (conflict) {
+      ImGui::TextColored(
+          {1.0f, 0.35f, 0.25f, 1.0f},
+          "Source changed externally. Save is blocked until Revert.");
+    }
+
+    ImGui::BeginDisabled(!draft.canUndo());
+    if (ImGui::Button("Undo")) draft.undo();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!draft.canRedo());
+    if (ImGui::Button("Redo")) draft.redo();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!draft.dirty() || conflict);
+    if (ImGui::Button("Save")) {
+      std::string error;
+      if (draft.save(component_editors_, &error)) {
+        prefab_asset_draft_status_ = "Prefab source saved atomically";
+        prefab_asset_draft_error_.clear();
+        scanCatalog(true);
+      } else {
+        prefab_asset_draft_error_ = std::move(error);
+      }
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!draft.dirty() && !conflict);
+    if (ImGui::Button("Revert") ||
+        (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+         ImGui::IsKeyPressed(ImGuiKey_Escape))) {
+      std::string error;
+      if (!draft.revert(&error)) {
+        prefab_asset_draft_error_ = std::move(error);
+      } else {
+        prefab_asset_draft_error_.clear();
+        prefab_asset_draft_status_ = "Prefab draft reverted";
+        prefab_draft_node_index_ = std::min(
+            draft.document().root,
+            draft.document().nodes.empty()
+                ? 0u
+                : draft.document().nodes.size() - 1u);
+      }
+    }
+    ImGui::EndDisabled();
+    if (!prefab_asset_draft_error_.empty()) {
+      ImGui::TextColored({1.0f, 0.35f, 0.25f, 1.0f}, "%s",
+                         prefab_asset_draft_error_.c_str());
+    }
+    if (draft.document().nodes.empty()) {
+      ImGui::TextDisabled("Prefab contains no nodes.");
+      return;
+    }
+
+    prefab_draft_node_index_ =
+        std::min(prefab_draft_node_index_, draft.document().nodes.size() - 1u);
+    const auto& selected_node =
+        draft.document().nodes[prefab_draft_node_index_];
+    const std::string node_preview = selected_node.name.empty()
+                                         ? "Node " +
+                                               std::to_string(selected_node.id)
+                                         : selected_node.name;
+    if (ImGui::BeginCombo("Node", node_preview.c_str())) {
+      for (size_t index = 0u; index < draft.document().nodes.size(); ++index) {
+        const prefabs::PrefabNode& node = draft.document().nodes[index];
+        const std::string label =
+            (node.name.empty() ? "Node " + std::to_string(node.id)
+                               : node.name) +
+            (index == draft.document().root ? " [Root]" : "") + "##" +
+            std::to_string(node.id);
+        const bool selected = index == prefab_draft_node_index_;
+        if (ImGui::Selectable(label.c_str(), selected)) {
+          draft.finishCoalescedEdit();
+          prefab_draft_node_index_ = index;
+        }
+        if (selected) ImGui::SetItemDefaultFocus();
+      }
+      ImGui::EndCombo();
+    }
+
+    if (!draft.document()
+             .nodes[prefab_draft_node_index_]
+             .components.is_object()) {
+      ImGui::TextDisabled("Node components are unavailable.");
+      return;
+    }
+    if (draft.document()
+            .nodes[prefab_draft_node_index_]
+            .components.contains("MeshComponent")) {
+      drawComponentCard("PrefabDraftMesh", "Mesh Renderer", true, [&] {
+        nlohmann::json payload =
+            draft.document()
+                .nodes[prefab_draft_node_index_]
+                .components["MeshComponent"];
+        if (drawPrefabMeshDraftEditor(payload)) {
+          commitPrefabDraftComponent("MeshComponent",
+                                     payload,
+                                     "Edit Prefab Mesh",
+                                     ImGui::IsAnyItemActive());
+        }
+        if (ImGui::Button("Remove Mesh Component")) {
+          std::string error;
+          if (!draft.removeNodeComponent(prefab_draft_node_index_,
+                                         "MeshComponent",
+                                         component_editors_,
+                                         "Remove Prefab Mesh",
+                                         &error)) {
+            prefab_asset_draft_error_ = std::move(error);
+          }
+        }
+      });
+    } else if (ImGui::Button("Add Mesh Component")) {
+      const auto* descriptor = component_editors_.find("MeshComponent");
+      if (descriptor != nullptr) {
+        commitPrefabDraftComponent("MeshComponent",
+                                   descriptor->default_payload(),
+                                   "Add Prefab Mesh");
+      }
+      return;
+    }
+
+    if (draft.document()
+            .nodes[prefab_draft_node_index_]
+            .components.contains("LODComponent")) {
+      drawComponentCard("PrefabDraftLOD", "Level of Detail", true, [&] {
+        const auto& current_components =
+            draft.document().nodes[prefab_draft_node_index_].components;
+        nlohmann::json payload = current_components["LODComponent"];
+        const nlohmann::json mesh =
+            current_components.value("MeshComponent", nlohmann::json::object());
+        bool committed = false;
+        const bool changed = drawLodLevelsEditor(
+            payload,
+            mesh.value("mesh_asset_key", std::string{}),
+            mesh.value("materials", nlohmann::json::array()),
+            [&](const nlohmann::json& edited,
+                const AssetEntry& asset,
+                std::string label) {
+              if (!prefabDraftAcceptsAsset(asset)) return false;
+              return commitPrefabDraftComponent(
+                  "LODComponent", edited, "Prefab " + label);
+            },
+            committed);
+        if (!committed && changed) {
+          commitPrefabDraftComponent("LODComponent",
+                                     payload,
+                                     "Edit Prefab LOD",
+                                     ImGui::IsAnyItemActive());
+        }
+        if (ImGui::Button("Remove LOD Component")) {
+          std::string error;
+          if (!draft.removeNodeComponent(prefab_draft_node_index_,
+                                         "LODComponent",
+                                         component_editors_,
+                                         "Remove Prefab LOD",
+                                         &error)) {
+            prefab_asset_draft_error_ = std::move(error);
+          }
+        }
+      });
+    } else {
+      const auto& current_components =
+          draft.document().nodes[prefab_draft_node_index_].components;
+      const bool compatible =
+          current_components.contains("MeshComponent") ||
+          current_components.contains("InstancedMeshComponent") ||
+          current_components.contains("FoliageComponent");
+      ImGui::BeginDisabled(!compatible);
+      if (ImGui::Button("Add LOD Component")) {
+        commitPrefabDraftComponent("LODComponent",
+                                   defaultLodComponentPayload(),
+                                   "Add Prefab LOD");
+        ImGui::EndDisabled();
+        return;
+      }
+      ImGui::EndDisabled();
+    }
+
+    ImGui::SeparatorText("Other Components (read-only)");
+    const auto& current_components =
+        draft.document().nodes[prefab_draft_node_index_].components;
+    for (auto component = current_components.begin();
+         component != current_components.end(); ++component) {
+      if (component.key() == "MeshComponent" ||
+          component.key() == "LODComponent") {
+        continue;
+      }
+      ImGui::BulletText("%s", component.key().c_str());
     }
   }
 
@@ -3137,6 +3914,33 @@ class SceneEditorGame final : public app::GameInterface {
     }
     ImGui::TextWrapped("Content root: %s", content_root_.string().c_str());
     ImGui::TextWrapped("Scene: %s", scene_path_.string().c_str());
+    if (ImGui::Button("Migrate Legacy Render Components")) {
+      scenes::SceneDocument next = document_;
+      const LegacyRenderMigrationReport migrated =
+          migrateSceneLegacyRenderComponents(next);
+      if (!migrated.success()) {
+        scene_migration_status_.clear();
+        last_error_ = migrated.diagnostics.empty()
+                          ? "Scene render migration failed"
+                          : migrated.diagnostics.front();
+      } else if (migrated.changed) {
+        if (commitDocumentCommand("Migrate Legacy Render Components",
+                                  std::move(next))) {
+          scene_migration_status_ =
+              "Migrated " + std::to_string(migrated.migrated_owners) +
+              " scene owner(s); save the scene to commit";
+          rebuildPreview();
+          last_error_.clear();
+        }
+      } else {
+        scene_migration_status_ = "No legacy render fields were found";
+        last_error_.clear();
+      }
+    }
+    if (!scene_migration_status_.empty()) {
+      ImGui::TextColored({0.35f, 0.85f, 0.55f, 1.0f}, "%s",
+                         scene_migration_status_.c_str());
+    }
     ImGui::SeparatorText("Environment");
     if (!document_.environment) {
       if (ImGui::Button("Add Environment")) addEnvironment();
@@ -3155,12 +3959,77 @@ class SceneEditorGame final : public app::GameInterface {
     }
   }
 
+  bool drawSelectedObjectHeader(world::Entity runtime) {
+    bool selection_changed = false;
+    ImGui::BeginChild("##object_header", {0.0f, 0.0f},
+                      ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY,
+                      ImGuiWindowFlags_NoScrollbar |
+                          ImGuiWindowFlags_NoScrollWithMouse);
+    if (selection_.kind == SelectionKind::Entity) {
+      auto entity = findEntity(selection_.id);
+      if (entity != document_.entities.end()) {
+        std::array<char, 256> name{};
+        std::copy_n(entity->name.data(),
+                    std::min(entity->name.size(), name.size() - 1u),
+                    name.data());
+        ImGui::SetNextItemWidth(-36.0f);
+        if (editor_semibold_font_ != nullptr) ImGui::PushFont(editor_semibold_font_);
+        const bool renamed = ImGui::InputText(
+            "##object_name", name.data(), name.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        if (editor_semibold_font_ != nullptr) ImGui::PopFont();
+        if (renamed) {
+          scenes::SceneDocument before = document_;
+          entity->name = name.data();
+          world->setName(runtime, entity->name);
+          pushDocumentCommand("Rename Entity", std::move(before));
+        }
+      }
+    } else {
+      const auto prefab = findPrefab(selection_.id);
+      const std::string title =
+          prefab == document_.prefab_instances.end()
+              ? "Linked Prefab"
+              : prefab->prefab_path.parent_path().filename().string();
+      if (editor_semibold_font_ != nullptr) ImGui::PushFont(editor_semibold_font_);
+      ImGui::TextUnformatted(title.empty() ? "Linked Prefab" : title.c_str());
+      if (editor_semibold_font_ != nullptr) ImGui::PopFont();
+    }
+    ImGui::SameLine(ImGui::GetContentRegionMax().x - 28.0f);
+    if (ImGui::Button("...", {28.0f, 0.0f})) {
+      ImGui::OpenPopup("##object_actions");
+    }
+    if (ImGui::BeginPopup("##object_actions")) {
+      if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+        duplicateSelected();
+        selection_changed = true;
+      }
+      if (ImGui::MenuItem("Delete", "Delete")) {
+        deleteSelection();
+        selection_changed = true;
+      }
+      ImGui::EndPopup();
+    }
+    ImGui::TextDisabled("%s", selection_.id.c_str());
+    if (selection_.kind == SelectionKind::Prefab) {
+      const auto prefab = findPrefab(selection_.id);
+      if (prefab != document_.prefab_instances.end()) {
+        ImGui::TextWrapped("Source: %s",
+                           prefab->prefab_path.generic_string().c_str());
+      }
+    }
+    ImGui::EndChild();
+    ImGui::Dummy({0.0f, 3.0f});
+    return selection_changed;
+  }
+
   void drawSelectionInspector() {
-    world::Entity runtime = selectedRuntimeEntity();
+    const world::Entity runtime = selectedRuntimeEntity();
     if (!world->isAlive(runtime)) {
       ImGui::TextDisabled("Selection is unavailable in the preview");
       return;
     }
+    if (drawSelectedObjectHeader(runtime)) return;
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::InputTextWithHint("##inspector_filter", "Search inspector",
                                  component_filter_,
@@ -3183,82 +4052,66 @@ class SceneEditorGame final : public app::GameInterface {
                                            return value.entity_id == selection_.id;
                                          })
                                    : document_.static_components.end();
-    if (selection_.kind == SelectionKind::Entity) {
-      auto entity = findEntity(selection_.id);
-      if (entity != document_.entities.end()) {
-        std::array<char, 256> name{};
-        std::copy_n(entity->name.data(), std::min(entity->name.size(), name.size() - 1u), name.data());
-        if (ImGui::InputText("Name", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue)) {
-          scenes::SceneDocument before = document_;
-          entity->name = name.data();
-          world->setName(runtime, entity->name);
-          pushDocumentCommand("Rename Entity", std::move(before));
-        }
-      }
-    } else {
-      const auto prefab = findPrefab(selection_.id);
-      if (prefab != document_.prefab_instances.end()) {
-        ImGui::TextWrapped("Prefab: %s", prefab->prefab_path.generic_string().c_str());
-      }
+    bool reparented = false;
+    if (inspectorFilterMatches("Transform", "TransformComponent")) {
+      drawComponentCard("TransformComponent", "Transform", true, [&] {
+        reparented = drawParentInspector();
+        if (!reparented) drawTransformInspector(runtime);
+      });
+      if (reparented) return;
     }
-    if (drawParentInspector()) return;
-    drawTransformInspector(runtime);
-    if (camera_record != document_.cameras.end()) {
-      drawCameraRecordInspector(*camera_record);
+    if (camera_record != document_.cameras.end() &&
+        inspectorFilterMatches("Camera", "SceneCamera")) {
+      drawComponentCard("SceneCamera", "Camera", false, [&] {
+        drawCameraRecordInspector(*camera_record);
+      });
     }
-    if (static_record != document_.static_components.end()) {
-      drawStaticRecordInspector(*static_record);
+    if (static_record != document_.static_components.end() &&
+        inspectorFilterMatches("Static Bake Membership", "SceneStatic")) {
+      drawComponentCard("SceneStatic", "Static Bake Membership", false, [&] {
+        drawStaticRecordInspector(*static_record);
+      });
     }
     if (selection_.kind == SelectionKind::Prefab) {
-      drawPrefabStaticInspector();
-      drawPrefabVariables();
-      drawResolvedPrefabHierarchy();
+      if (inspectorFilterMatches("Static Membership", "StaticComponent")) {
+        drawComponentCard("PrefabStatic", "Static Membership", false, [&] {
+          drawPrefabStaticInspector();
+        });
+      }
+      if (inspectorFilterMatches("Prefab Variables", "PrefabVariables")) {
+        drawComponentCard("PrefabVariables", "Prefab Variables", false, [&] {
+          drawPrefabVariables();
+        });
+      }
+      if (inspectorFilterMatches("Linked Prefab Contents", "PrefabSource")) {
+        drawComponentCard("PrefabSource", "Linked Prefab Contents", false, [&] {
+          drawResolvedPrefabHierarchy();
+        });
+      }
     }
     if (selection_.kind == SelectionKind::Entity) {
-      const auto entity = findEntity(selection_.id);
-      const bool has_static_component =
-          entity != document_.entities.end() &&
-          entity->components.contains("StaticComponent");
-      if (static_record == document_.static_components.end() &&
-          !has_static_component &&
-          component_editors_.find("StaticComponent") != nullptr) {
-        if (ImGui::Button("Mark Static")) {
-          scenes::SceneDocument next = document_;
-          const auto next_entity = std::find_if(
-              next.entities.begin(), next.entities.end(),
-              [&](const scenes::SceneEntity& value) {
-                return value.id == selection_.id;
-              });
-          std::string error;
-          if (next_entity != next.entities.end() &&
-              addDefaultComponentWithDependencies(
-                  *next_entity, component_editors_, "StaticComponent",
-                  nullptr, &error)) {
-            const std::string selected_id = selection_.id;
-            if (commitDocumentCommand("Mark Static", std::move(next))) {
-              rebuildPreview();
-              selection_ = {SelectionKind::Entity, selected_id};
-            }
-          } else {
-            last_error_ = error.empty() ? "Object could not be marked static"
-                                        : std::move(error);
-          }
-        }
+      const bool has_scene_light = std::any_of(
+          document_.lights.begin(), document_.lights.end(),
+          [&](const scenes::SceneLight& light) {
+            return light.entity_id == selection_.id;
+          });
+      if (has_scene_light && inspectorFilterMatches("Light", "SceneLight")) {
+        drawComponentCard("SceneLight", "Light", false, [&] {
+          drawLightInspector(runtime);
+        });
       }
-      drawLightInspector(runtime);
-      if (selection_.id == terrain_entity_id_) drawTerrainInspector();
-      if (findFoliageLayer(selection_.id) != nullptr) drawFoliageInspector(runtime);
+      if (selection_.id == terrain_entity_id_ &&
+          inspectorFilterMatches("Terrain", "TerrainComponent")) {
+        drawComponentCard("TerrainComponent", "Terrain", true, [&] {
+          drawTerrainInspector();
+        });
+      }
       drawAuthoredComponentCards();
       drawAddComponentMenu();
     }
-    ImGui::Separator();
-    if (ImGui::Button("Duplicate selected")) duplicateSelected();
-    ImGui::SameLine();
-    if (ImGui::Button("Delete selected")) deleteSelection();
   }
 
   void drawCameraRecordInspector(scenes::SceneCamera& camera) {
-    ImGui::SeparatorText("Camera");
     scenes::SceneDocument before = document_;
     bool changed = false;
     changed |= ImGui::Checkbox("Perspective", &camera.component.perspective);
@@ -3303,7 +4156,6 @@ class SceneEditorGame final : public app::GameInterface {
   }
 
   void drawStaticRecordInspector(scenes::SceneStaticComponent& record) {
-    ImGui::SeparatorText("Static");
     scenes::SceneDocument before = document_;
     bool changed = false;
     changed |= ImGui::Checkbox("Static transform", &record.transform);
@@ -3426,7 +4278,6 @@ class SceneEditorGame final : public app::GameInterface {
     const std::filesystem::path absolute = content_root_ / prefab->prefab_path;
     const auto loaded = prefabs::loadPrefabDocument(absolute);
     if (!loaded.success() || !loaded.document || loaded.document->variables.empty()) return;
-    ImGui::SeparatorText("Variables");
     for (auto it = loaded.document->variables.begin(); it != loaded.document->variables.end(); ++it) {
       if (!it.value().is_object()) continue;
       const std::string type = it.value().value("type", "");
@@ -3475,7 +4326,6 @@ class SceneEditorGame final : public app::GameInterface {
   void drawPrefabStaticInspector() {
     auto prefab = findPrefab(selection_.id);
     if (prefab == document_.prefab_instances.end()) return;
-    ImGui::SeparatorText("Static");
     scenes::SceneDocument before = document_;
     int mode = !prefab->static_component.has_value()
                    ? 0
@@ -3535,7 +4385,6 @@ class SceneEditorGame final : public app::GameInterface {
     if (prefab == document_.prefab_instances.end()) return;
     const auto loaded = prefabs::loadPrefabDocument(
         content_root_ / prefab->prefab_path);
-    ImGui::SeparatorText("Linked Prefab Contents");
     if (!loaded.success() || !loaded.document) {
       ImGui::TextColored({1.0f, 0.35f, 0.25f, 1.0f},
                          "The linked prefab source could not be resolved.");
@@ -3585,7 +4434,6 @@ class SceneEditorGame final : public app::GameInterface {
                                       return value.entity_id == selection_.id;
                                     });
     if (light == document_.lights.end()) return;
-    ImGui::SeparatorText("Light");
     scenes::SceneDocument before = document_;
     int type = static_cast<int>(light->component.type);
     bool changed = ImGui::Combo("Type", &type, "Directional\0Point\0Spot\0");
@@ -3624,161 +4472,240 @@ class SceneEditorGame final : public app::GameInterface {
     }
   }
 
+  void drawInspectorSectionHeading(const char* label) {
+    if (editor_semibold_font_ != nullptr) ImGui::PushFont(editor_semibold_font_);
+    ImGui::TextColored({0.72f, 0.77f, 0.83f, 1.0f}, "%s", label);
+    if (editor_semibold_font_ != nullptr) ImGui::PopFont();
+    ImGui::Separator();
+  }
+
   void drawTerrainInspector() {
-    if (!terrain_canvas_) return;
-    ImGui::SeparatorText("Terrain");
+    if (!terrain_canvas_ || !world->isAlive(terrain_entity_) ||
+        !world->has<components::TerrainComponent>(terrain_entity_)) {
+      ImGui::TextDisabled("Terrain preview data is unavailable.");
+      return;
+    }
     if (!terrain_authoring_valid_) {
-      ImGui::TextColored({1.0f, 0.35f, 0.25f, 1.0f},
-                         "Source map failed to load; editing is disabled.");
-    }
-    if (ImGui::RadioButton("Sculpt", settings_.terrain_inspector_tab == 0)) {
-      settings_.terrain_inspector_tab = 0;
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Materials", settings_.terrain_inspector_tab == 1)) {
-      settings_.terrain_inspector_tab = 1;
+      ImGui::TextColored({1.0f, 0.42f, 0.28f, 1.0f},
+                         "Source map failed to load; authoring is disabled.");
     }
     const auto mode_button = [&](ToolMode mode, const char* label) {
       const bool selected = tool_ == mode;
       if (selected) {
-        ImGui::PushStyleColor(ImGuiCol_Button,
-                              {0.20f, 0.46f, 0.78f, 1.0f});
+        ImGui::PushStyleColor(
+            ImGuiCol_Button,
+            ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
       }
       if (ImGui::Button(label) && !selected) changeTool(mode);
       if (selected) ImGui::PopStyleColor();
     };
-    if (settings_.terrain_inspector_tab == 0) {
-      mode_button(ToolMode::SculptRaise, "Raise");
-      ImGui::SameLine();
-      mode_button(ToolMode::SculptLower, "Lower");
-      ImGui::SameLine();
-      mode_button(ToolMode::SculptSmooth, "Smooth");
-      mode_button(ToolMode::SculptFlatten, "Flatten");
-      ImGui::SameLine();
-      mode_button(ToolMode::SculptSetHeight, "Set Height");
-    } else {
-      mode_button(ToolMode::PaintSplat, "Paint selected material");
-    }
-    if (tool_ != ToolMode::Select &&
-        (isTerrainTool(tool_) || tool_ == ToolMode::PaintSplat)) {
-      ImGui::SameLine();
-      if (ImGui::Button("Stop")) changeTool(ToolMode::Select);
-    }
-    ImGui::SeparatorText("Brush");
-    ImGui::DragFloat("Radius", &terrain_brush_.radius, 0.25f, 0.1f, 500.0f);
-    ImGui::SliderFloat("Strength", &terrain_brush_.strength, 0.001f, 1.0f);
-    int falloff = static_cast<int>(terrain_brush_.falloff);
-    if (ImGui::Combo("Falloff", &falloff, "Constant\0Linear\0Smooth\0")) {
-      terrain_brush_.falloff = static_cast<scene_authoring::TerrainBrushFalloff>(falloff);
-    }
-    if (tool_ == ToolMode::SculptSetHeight) {
-      ImGui::SliderFloat("Target height", &set_height_target_, 0.0f, 1.0f);
-    } else if (tool_ == ToolMode::SculptFlatten) {
-      ImGui::TextDisabled("Flatten target is sampled when the stroke begins");
-    }
-    const auto& component =
-        world->get<components::TerrainComponent>(terrain_entity_);
-    if (settings_.terrain_inspector_tab == 1) {
-      ImGui::SeparatorText("Material Layers");
-      for (int layer = 0; layer < 4; ++layer) {
-        ImGui::PushID(layer);
-        components::TerrainMaterialLayer layer_value{};
-        layer_value.name = "Layer " + std::to_string(layer + 1);
-        layer_value.enabled = false;
-        if (static_cast<size_t>(layer) < component.material_layers.size()) {
-          layer_value = component.material_layers[static_cast<size_t>(layer)];
+    const auto draw_brush = [&] {
+      ImGui::DragFloat("Radius", &terrain_brush_.radius, 0.25f, 0.1f,
+                       500.0f);
+      ImGui::SliderFloat("Strength", &terrain_brush_.strength, 0.001f,
+                         1.0f);
+      int falloff = static_cast<int>(terrain_brush_.falloff);
+      if (ImGui::Combo("Falloff", &falloff,
+                       "Constant\0Linear\0Smooth\0")) {
+        terrain_brush_.falloff =
+            static_cast<scene_authoring::TerrainBrushFalloff>(falloff);
+      }
+    };
+    const auto tab_flags = [&](int tab) {
+      return terrain_tab_selection_pending_ &&
+                     settings_.terrain_inspector_tab == tab
+                 ? ImGuiTabItemFlags_SetSelected
+                 : ImGuiTabItemFlags_None;
+    };
+
+    bool component_changed = false;
+    if (ImGui::BeginTabBar("##terrain_authoring_tabs")) {
+      if (ImGui::BeginTabItem("Sculpt", nullptr, tab_flags(0))) {
+        settings_.terrain_inspector_tab = 0;
+        ImGui::BeginChild("##sculpt_window", {0.0f, 0.0f},
+                          ImGuiChildFlags_Borders |
+                              ImGuiChildFlags_AutoResizeY,
+                          ImGuiWindowFlags_NoScrollbar |
+                              ImGuiWindowFlags_NoScrollWithMouse);
+        const auto& component =
+            world->get<components::TerrainComponent>(terrain_entity_);
+        const auto& desc = terrain_canvas_->desc();
+        drawInspectorSectionHeading("Component Data");
+        ImGui::Text("Source: %s",
+                    terrain_authoring_valid_ ? "Valid" : "Invalid");
+        ImGui::Text("Resolution: %u x %u (control %u x %u)",
+                    desc.resolution, desc.resolution,
+                    terrain_canvas_->controlResolution(),
+                    terrain_canvas_->controlResolution());
+        ImGui::Text("Dimensions: %.1f x %.1f", desc.terrain_size,
+                    desc.terrain_size);
+        ImGui::Text("Height: %.1f scale, %.1f offset", desc.height_scale,
+                    desc.height_offset);
+        ImGui::TextWrapped("Height source: %s",
+                           component.height_image.generic_string().c_str());
+        ImGui::Dummy({0.0f, 3.0f});
+        drawInspectorSectionHeading("Authoring Tools");
+        ImGui::BeginDisabled(!terrain_authoring_valid_);
+        mode_button(ToolMode::SculptRaise, "Raise");
+        ImGui::SameLine();
+        mode_button(ToolMode::SculptLower, "Lower");
+        ImGui::SameLine();
+        mode_button(ToolMode::SculptSmooth, "Smooth");
+        mode_button(ToolMode::SculptFlatten, "Flatten");
+        ImGui::SameLine();
+        mode_button(ToolMode::SculptSetHeight, "Set Height");
+        if (tool_ >= ToolMode::SculptRaise &&
+            tool_ <= ToolMode::SculptSetHeight) {
+          ImGui::SameLine();
+          if (ImGui::Button("Stop")) changeTool(ToolMode::Select);
         }
-        ImGui::SeparatorText(("Layer " + std::to_string(layer + 1)).c_str());
-        if (ImGui::RadioButton("Active paint layer", splat_layer_ == layer)) {
-          splat_layer_ = layer;
-          settings_.terrain_material_layer = layer;
+        ImGui::SeparatorText("Brush");
+        draw_brush();
+        if (tool_ == ToolMode::SculptSetHeight) {
+          ImGui::SliderFloat("Target height", &set_height_target_, 0.0f,
+                             1.0f);
+        } else if (tool_ == ToolMode::SculptFlatten) {
+          ImGui::TextDisabled(
+              "Flatten target is sampled when the stroke begins");
         }
-        std::array<char, 128> name{};
-        std::copy_n(layer_value.name.data(),
-                    std::min(layer_value.name.size(), name.size() - 1u),
-                    name.data());
-        if (ImGui::InputText("Name", name.data(), name.size())) {
-          scenes::SceneDocument before = document_;
-          auto edited = component;
-          edited.material_layers.resize(4u);
-          edited.material_layers[static_cast<size_t>(layer)] = layer_value;
-          edited.material_layers[static_cast<size_t>(layer)].name = name.data();
-          applyTerrainComponentEdit(std::move(edited), std::move(before),
-                                    "Edit Terrain Material Layer");
-          ImGui::PopID();
-          return;
-        }
-        bool enabled = layer_value.enabled;
-        if (ImGui::Checkbox("Enabled", &enabled)) {
-          if (enabled && layer_value.material_key.empty() &&
-              layer_value.albedo_image.empty()) {
-            last_error_ = "Assign a material before enabling this terrain layer";
-          } else {
+        ImGui::EndDisabled();
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem("Materials", nullptr, tab_flags(1))) {
+        settings_.terrain_inspector_tab = 1;
+        ImGui::BeginChild("##materials_window", {0.0f, 0.0f},
+                          ImGuiChildFlags_Borders |
+                              ImGuiChildFlags_AutoResizeY,
+                          ImGuiWindowFlags_NoScrollbar |
+                              ImGuiWindowFlags_NoScrollWithMouse);
+        const auto& component =
+            world->get<components::TerrainComponent>(terrain_entity_);
+        drawInspectorSectionHeading("Component Data");
+        for (int layer = 0; layer < 4 && !component_changed; ++layer) {
+          ImGui::PushID(layer);
+          components::TerrainMaterialLayer layer_value{};
+          layer_value.name = "Layer " + std::to_string(layer + 1);
+          if (static_cast<size_t>(layer) < component.material_layers.size()) {
+            layer_value = component.material_layers[static_cast<size_t>(layer)];
+          }
+          ImGui::SeparatorText(
+              ("Layer " + std::to_string(layer + 1)).c_str());
+          std::array<char, 128> name{};
+          std::copy_n(layer_value.name.data(),
+                      std::min(layer_value.name.size(), name.size() - 1u),
+                      name.data());
+          if (ImGui::InputText("Name", name.data(), name.size())) {
             scenes::SceneDocument before = document_;
             auto edited = component;
             edited.material_layers.resize(4u);
             edited.material_layers[static_cast<size_t>(layer)] = layer_value;
-            edited.material_layers[static_cast<size_t>(layer)].enabled = enabled;
-            applyTerrainComponentEdit(std::move(edited), std::move(before),
-                                      "Edit Terrain Material Layer");
-            ImGui::PopID();
-            return;
+            edited.material_layers[static_cast<size_t>(layer)].name =
+                name.data();
+            component_changed = applyTerrainComponentEdit(
+                std::move(edited), std::move(before),
+                "Edit Terrain Material Layer");
           }
-        }
-        float uv_scale = layer_value.uv_scale;
-        if (ImGui::DragFloat("UV scale", &uv_scale, 0.1f, 0.01f,
-                             10000.0f, "%.2f")) {
-          scenes::SceneDocument before = document_;
-          auto edited = component;
-          edited.material_layers.resize(4u);
-          edited.material_layers[static_cast<size_t>(layer)] = layer_value;
-          edited.material_layers[static_cast<size_t>(layer)].uv_scale =
-              std::max(uv_scale, 0.01f);
-          applyTerrainComponentEdit(std::move(edited), std::move(before),
-                                    "Edit Terrain Material Layer");
-          ImGui::PopID();
-          return;
-        }
-        const std::string material = layer_value.material_key.empty()
-                                         ? "<drop material>"
-                                         : layer_value.material_key;
-        ImGui::Selectable(("Material: " + material).c_str(), false);
-        if (ImGui::BeginDragDropTarget()) {
-          if (const ImGuiPayload* payload =
-                  ImGui::AcceptDragDropPayload("KARMA_TERRAIN_MATERIAL")) {
-            const std::string key(static_cast<const char*>(payload->Data));
-            const auto entry = std::find_if(
-                catalog_.entries().begin(), catalog_.entries().end(),
-                [&](const AssetEntry& candidate) {
-                  return candidate.valid && candidate.kind == AssetKind::Material &&
-                         candidate.key == key;
-                });
-            if (entry != catalog_.entries().end()) {
-              splat_layer_ = layer;
-              assignTerrainMaterial(*entry);
-              ImGui::EndDragDropTarget();
-              ImGui::PopID();
-              return;
+          bool enabled = layer_value.enabled;
+          if (!component_changed && ImGui::Checkbox("Enabled", &enabled)) {
+            if (enabled && layer_value.material_key.empty() &&
+                layer_value.albedo_image.empty()) {
+              last_error_ =
+                  "Assign a material before enabling this terrain layer";
+            } else {
+              scenes::SceneDocument before = document_;
+              auto edited = component;
+              edited.material_layers.resize(4u);
+              edited.material_layers[static_cast<size_t>(layer)] =
+                  layer_value;
+              edited.material_layers[static_cast<size_t>(layer)].enabled =
+                  enabled;
+              component_changed = applyTerrainComponentEdit(
+                  std::move(edited), std::move(before),
+                  "Edit Terrain Material Layer");
             }
           }
-          ImGui::EndDragDropTarget();
+          float uv_scale = layer_value.uv_scale;
+          if (!component_changed &&
+              ImGui::DragFloat("UV scale", &uv_scale, 0.1f, 0.01f,
+                               10000.0f, "%.2f")) {
+            scenes::SceneDocument before = document_;
+            auto edited = component;
+            edited.material_layers.resize(4u);
+            edited.material_layers[static_cast<size_t>(layer)] = layer_value;
+            edited.material_layers[static_cast<size_t>(layer)].uv_scale =
+                std::max(uv_scale, 0.01f);
+            component_changed = applyTerrainComponentEdit(
+                std::move(edited), std::move(before),
+                "Edit Terrain Material Layer");
+          }
+          const std::string material = layer_value.material_key.empty()
+                                           ? "<drop material>"
+                                           : layer_value.material_key;
+          if (!component_changed) {
+            ImGui::Selectable(("Material: " + material).c_str(), false);
+            if (ImGui::BeginDragDropTarget()) {
+              if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(
+                      "KARMA_TERRAIN_MATERIAL")) {
+                const std::string key(
+                    static_cast<const char*>(payload->Data));
+                const AssetEntry* entry = catalog_.findByKey(key);
+                if (entry != nullptr && entry->valid &&
+                    entry->kind == AssetKind::Material) {
+                  splat_layer_ = layer;
+                  settings_.terrain_material_layer = layer;
+                  assignTerrainMaterial(*entry);
+                  component_changed = true;
+                }
+              }
+              ImGui::EndDragDropTarget();
+            }
+          }
+          ImGui::PopID();
         }
-        ImGui::PopID();
+        if (!component_changed) {
+          ImGui::Dummy({0.0f, 3.0f});
+          drawInspectorSectionHeading("Authoring Tools");
+          ImGui::BeginDisabled(!terrain_authoring_valid_);
+          ImGui::TextDisabled("Active paint layer");
+          for (int layer = 0; layer < 4; ++layer) {
+            ImGui::PushID(100 + layer);
+            if (layer > 0) ImGui::SameLine();
+            const std::string label = std::to_string(layer + 1);
+            if (ImGui::RadioButton(label.c_str(), splat_layer_ == layer)) {
+              splat_layer_ = layer;
+              settings_.terrain_material_layer = layer;
+            }
+            ImGui::PopID();
+          }
+          mode_button(ToolMode::PaintSplat, "Paint Material");
+          if (tool_ == ToolMode::PaintSplat) {
+            ImGui::SameLine();
+            if (ImGui::Button("Stop")) changeTool(ToolMode::Select);
+          }
+          ImGui::SeparatorText("Brush");
+          draw_brush();
+          ImGui::EndDisabled();
+        }
+        ImGui::EndChild();
+        ImGui::EndTabItem();
       }
+
+      if (ImGui::BeginTabItem("Foliage", nullptr, tab_flags(2))) {
+        settings_.terrain_inspector_tab = 2;
+        ImGui::BeginChild("##foliage_window", {0.0f, 0.0f},
+                          ImGuiChildFlags_Borders |
+                              ImGuiChildFlags_AutoResizeY,
+                          ImGuiWindowFlags_NoScrollbar |
+                              ImGuiWindowFlags_NoScrollWithMouse);
+        drawFoliageInspector();
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      ImGui::EndTabBar();
     }
-    const auto& desc = terrain_canvas_->desc();
-    ImGui::SeparatorText("Source");
-    ImGui::Text("Status: %s", terrain_authoring_valid_ ? "Valid" : "Invalid");
-    ImGui::Text("Resolution: %u x %u (control %u x %u)",
-                desc.resolution, desc.resolution,
-                terrain_canvas_->controlResolution(),
-                terrain_canvas_->controlResolution());
-    ImGui::Text("Dimensions: %.1f x %.1f", desc.terrain_size,
-                desc.terrain_size);
-    ImGui::Text("Height: %.1f scale, %.1f offset", desc.height_scale,
-                desc.height_offset);
-    ImGui::TextWrapped("Height source: %s",
-                       component.height_image.generic_string().c_str());
+    terrain_tab_selection_pending_ = false;
   }
 
   bool applyTerrainComponentEdit(components::TerrainComponent edited,
@@ -3820,35 +4747,125 @@ class SceneEditorGame final : public app::GameInterface {
     return true;
   }
 
-  void drawFoliageInspector(world::Entity runtime) {
+  void drawFoliageInspector() {
+    drawInspectorSectionHeading("Foliage Layers");
+    if (foliage_layers_.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text,
+                            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      ImGui::TextWrapped(
+          "No foliage layers. Create one and assign a base mesh to begin.");
+      ImGui::PopStyleColor();
+    } else {
+      for (const FoliageLayerState& layer : foliage_layers_) {
+        ImGui::PushID(layer.entity_id.c_str());
+        const bool active =
+            settings_.active_foliage_layer_id == layer.entity_id;
+        const std::string label = layer.name + "  (" +
+                                  std::to_string(layer.layer.instanceCount()) +
+                                  ")";
+        if (ImGui::Selectable(label.c_str(), active)) {
+          finishFoliageStroke();
+          settings_.active_foliage_layer_id = layer.entity_id;
+          changeTool(ToolMode::Select);
+          ImGui::PopID();
+          return;
+        }
+        ImGui::PopID();
+      }
+    }
+    if (ImGui::Button("+ New Layer")) {
+      pending_foliage_mesh_.clear();
+      pending_foliage_prefab_.clear();
+      pending_foliage_package_.clear();
+      open_create_foliage_ = true;
+    }
+    ImGui::SameLine();
+    FoliageLayerState* selected_layer = selectedFoliageLayer();
+    ImGui::BeginDisabled(selected_layer == nullptr ||
+                         !selected_layer->source_valid);
+    if (ImGui::Button("Duplicate")) {
+      duplicateActiveFoliageLayer();
+      ImGui::EndDisabled();
+      return;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(selected_layer == nullptr);
+    if (ImGui::Button("Delete")) {
+      deleteActiveFoliageLayer();
+      ImGui::EndDisabled();
+      return;
+    }
+    ImGui::EndDisabled();
+    ImGui::Selectable(
+        "Drop a mesh or prefab here to create a foliage layer", false);
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* payload =
+              ImGui::AcceptDragDropPayload("KARMA_MESH_ASSET")) {
+        const std::string key(static_cast<const char*>(payload->Data));
+        const AssetEntry* entry = catalog_.findByKey(key);
+        if (entry != nullptr && entry->valid &&
+            entry->kind == AssetKind::Mesh) {
+          pending_foliage_mesh_ = entry->key;
+          pending_foliage_prefab_.clear();
+          pending_foliage_package_ = entry->package_path;
+          open_create_foliage_ = true;
+        }
+      }
+      if (const ImGuiPayload* payload =
+              ImGui::AcceptDragDropPayload("KARMA_PREFAB")) {
+        const std::filesystem::path path(
+            static_cast<const char*>(payload->Data));
+        const AssetEntry* entry = catalog_.findPrefab(path);
+        if (entry != nullptr && entry->valid) {
+          pending_foliage_prefab_ = entry->path;
+          pending_foliage_mesh_.clear();
+          pending_foliage_package_.clear();
+          open_create_foliage_ = true;
+        }
+      }
+      ImGui::EndDragDropTarget();
+    }
+
     FoliageLayerState* state = selectedFoliageLayer();
-    if (state == nullptr || !world->has<components::FoliageComponent>(runtime)) return;
+    if (state == nullptr) return;
+    const world::Entity runtime = preview_.find(state->entity_id);
+    if (!world->isAlive(runtime) ||
+        !world->has<components::FoliageComponent>(runtime)) {
+      ImGui::TextDisabled("The selected foliage preview is unavailable.");
+      return;
+    }
     const auto& component = world->get<components::FoliageComponent>(runtime);
-    ImGui::SeparatorText("Foliage Layer");
     if (!state->source_valid) {
       ImGui::TextColored({1.0f, 0.35f, 0.25f, 1.0f},
                          "Sidecar failed to load; editing is disabled.");
     }
-    const auto mode_button = [&](ToolMode mode, const char* label) {
-      const bool selected = tool_ == mode;
-      if (selected) {
-        ImGui::PushStyleColor(ImGuiCol_Button,
-                              {0.20f, 0.46f, 0.78f, 1.0f});
+    std::array<char, 128> layer_name{};
+    std::copy_n(state->name.data(),
+                std::min(state->name.size(), layer_name.size() - 1u),
+                layer_name.data());
+    if (ImGui::InputText("Layer name", layer_name.data(), layer_name.size(),
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+      scenes::SceneDocument before = document_;
+      if (auto entity = findEntity(state->entity_id);
+          entity != document_.entities.end()) {
+        entity->name = layer_name.data();
+        state->name = entity->name;
+        world->setName(runtime, entity->name);
+        pushDocumentCommand("Rename Foliage Layer", std::move(before));
       }
-      if (ImGui::Button(label) && !selected) changeTool(mode);
-      if (selected) ImGui::PopStyleColor();
-    };
-    mode_button(ToolMode::PaintFoliage, "Paint");
-    ImGui::SameLine();
-    mode_button(ToolMode::EraseFoliage, "Erase");
-    if (tool_ == ToolMode::PaintFoliage ||
-        tool_ == ToolMode::EraseFoliage) {
-      ImGui::SameLine();
-      if (ImGui::Button("Stop")) changeTool(ToolMode::Select);
+      return;
     }
+    ImGui::Dummy({0.0f, 3.0f});
+    drawInspectorSectionHeading("Component Data");
     ImGui::Text("Instances: %zu", state->layer.instanceCount());
-    ImGui::SeparatorText("Base Render Configuration");
-    ImGui::Selectable(("Mesh: " + component.mesh_asset_key).c_str(), false);
+    ImGui::SeparatorText("Render Source");
+    const bool prefab_backed = !component.prefab_path.empty();
+    const std::string source_label = prefab_backed
+                                         ? "Prefab: " +
+                                               component.prefab_path.generic_string()
+                                         : "Mesh: " + component.mesh_asset_key;
+    ImGui::Selectable(source_label.c_str(), false);
     if (ImGui::BeginDragDropTarget()) {
       if (const ImGuiPayload* payload =
               ImGui::AcceptDragDropPayload("KARMA_MESH_ASSET")) {
@@ -3860,14 +4877,59 @@ class SceneEditorGame final : public app::GameInterface {
                      candidate.key == key;
             });
         if (entry != catalog_.entries().end()) {
-          assignFoliageMesh(*entry, std::nullopt);
+          assignFoliageMesh(*entry);
+          ImGui::EndDragDropTarget();
+          return;
+        }
+      }
+      if (const ImGuiPayload* payload =
+              ImGui::AcceptDragDropPayload("KARMA_PREFAB")) {
+        const AssetEntry* entry = catalog_.findPrefab(
+            std::filesystem::path(static_cast<const char*>(payload->Data)));
+        if (entry != nullptr && entry->valid) {
+          assignFoliagePrefab(*entry);
           ImGui::EndDragDropTarget();
           return;
         }
       }
       ImGui::EndDragDropTarget();
     }
-    if (drawFoliageMaterialSlots(component, std::nullopt)) return;
+    if (prefab_backed) {
+      if (drawFoliagePrefabSource(component)) return;
+    } else {
+      if (drawFoliageMaterialSlots(component)) return;
+      auto authored = findEntity(state->entity_id);
+      if (authored != document_.entities.end()) {
+        if (authored->components.contains("LODComponent")) {
+          nlohmann::json lod_payload = authored->components["LODComponent"];
+          bool committed = false;
+          const bool lod_changed = drawLodLevelsEditor(
+              lod_payload,
+              component.mesh_asset_key,
+              authored->components["FoliageComponent"].value(
+                  "materials", nlohmann::json::array()),
+              [&](const nlohmann::json& edited,
+                  const AssetEntry& asset,
+                  std::string label) {
+                return commitFoliageLodAssetPayload(
+                    state->entity_id, edited, asset, std::move(label));
+              },
+              committed);
+          if (committed) return;
+          if (lod_changed) {
+            applyFoliageLodPayload(state->entity_id,
+                                   std::move(lod_payload),
+                                   "Edit Foliage LOD");
+            return;
+          }
+        } else if (ImGui::Button("Add LOD Component")) {
+          applyFoliageLodPayload(state->entity_id,
+                                 defaultLodComponentPayload(),
+                                 "Add Foliage LOD");
+          return;
+        }
+      }
+    }
     bool visible = component.visible;
     bool base_shadows = component.shadow_visible;
     bool base_changed = ImGui::Checkbox("Visible", &visible);
@@ -3882,107 +4944,6 @@ class SceneEditorGame final : public app::GameInterface {
       return;
     }
 
-    ImGui::SeparatorText("Distance LODs");
-    for (size_t lod_index = 0u; lod_index < component.lods.size(); ++lod_index) {
-      ImGui::PushID(static_cast<int>(lod_index));
-      const auto& lod = component.lods[lod_index];
-      ImGui::SeparatorText(("LOD " + std::to_string(lod_index + 1u)).c_str());
-      const float minimum = lod_index == 0u
-                                ? 0.001f
-                                : component.lods[lod_index - 1u].start_distance + 0.001f;
-      const float maximum = lod_index + 1u < component.lods.size()
-                                ? component.lods[lod_index + 1u].start_distance - 0.001f
-                                : 100000.0f;
-      float distance = lod.start_distance;
-      if (ImGui::DragFloat("Start distance", &distance, 0.25f, minimum,
-                           std::max(minimum, maximum), "%.2f")) {
-        scenes::SceneDocument before = document_;
-        auto edited = component;
-        edited.lods[lod_index].start_distance =
-            std::clamp(distance, minimum, std::max(minimum, maximum));
-        applyFoliageComponentEdit(std::move(edited), std::move(before),
-                                  "Edit Foliage LOD Distance");
-        ImGui::PopID();
-        return;
-      }
-      ImGui::Selectable(("Mesh: " + lod.mesh_asset_key).c_str(), false);
-      if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload =
-                ImGui::AcceptDragDropPayload("KARMA_MESH_ASSET")) {
-          const std::string key(static_cast<const char*>(payload->Data));
-          const AssetEntry* entry = catalog_.findByKey(key);
-          if (entry != nullptr && entry->valid && entry->kind == AssetKind::Mesh) {
-            assignFoliageMesh(*entry, lod_index);
-            ImGui::EndDragDropTarget();
-            ImGui::PopID();
-            return;
-          }
-        }
-        ImGui::EndDragDropTarget();
-      }
-      if (drawFoliageMaterialSlots(component, lod_index)) {
-        ImGui::PopID();
-        return;
-      }
-      int render_mode = static_cast<int>(lod.render_mode);
-      bool shadow_visible = lod.shadow_visible;
-      bool lod_changed = ImGui::Combo(
-          "Render mode", &render_mode, "Mesh\0Upright billboard\0");
-      lod_changed |= ImGui::Checkbox("LOD casts shadows", &shadow_visible);
-      if (lod_changed) {
-        scenes::SceneDocument before = document_;
-        auto edited = component;
-        edited.lods[lod_index].render_mode =
-            static_cast<rendering::InstanceLodRenderMode>(
-                std::clamp(render_mode, 0, 1));
-        edited.lods[lod_index].shadow_visible = shadow_visible;
-        applyFoliageComponentEdit(std::move(edited), std::move(before),
-                                  "Edit Foliage LOD");
-        ImGui::PopID();
-        return;
-      }
-      if (ImGui::Button("Remove LOD")) {
-        scenes::SceneDocument before = document_;
-        auto edited = component;
-        edited.lods.erase(edited.lods.begin() +
-                          static_cast<std::ptrdiff_t>(lod_index));
-        applyFoliageComponentEdit(std::move(edited), std::move(before),
-                                  "Remove Foliage LOD");
-        ImGui::PopID();
-        return;
-      }
-      ImGui::PopID();
-    }
-    if (component.lods.size() < components::kMaxInstancedMeshLodLevels &&
-        ImGui::Button("+ Add LOD")) {
-      scenes::SceneDocument before = document_;
-      auto edited = component;
-      const float distance = edited.lods.empty()
-                                 ? 35.0f
-                                 : edited.lods.back().start_distance + 35.0f;
-      edited.lods.push_back(components::InstancedMeshLodLevel{
-          .start_distance = distance,
-          .mesh_asset_key = edited.mesh_asset_key,
-          .materials = edited.materials,
-          .render_mode = rendering::InstanceLodRenderMode::Mesh,
-          .shadow_visible = false,
-      });
-      applyFoliageComponentEdit(std::move(edited), std::move(before),
-                                "Add Foliage LOD");
-      return;
-    }
-
-    ImGui::SeparatorText("Paint Brush");
-    ImGui::DragFloat("Paint radius", &foliage_brush_.radius, 0.25f, 0.1f, 500.0f);
-    ImGui::DragFloat("Density", &foliage_brush_.density, 0.01f, 0.0f, 100.0f);
-    ImGui::DragFloat("Min spacing", &foliage_brush_.min_spacing, 0.02f, 0.0f, 100.0f);
-    ImGui::DragFloat3("Min scale", &foliage_brush_.min_scale.x, 0.02f, 0.01f, 100.0f);
-    ImGui::DragFloat3("Max scale", &foliage_brush_.max_scale.x, 0.02f, 0.01f, 100.0f);
-    ImGui::DragFloatRange2("Height range", &foliage_min_height_, &foliage_max_height_,
-                           0.25f, -100000.0f, 100000.0f);
-    ImGui::SliderFloat("Max slope", &foliage_brush_.max_slope_degrees, 0.0f, 90.0f);
-    ImGui::DragFloat("Erase radius", &foliage_erase_.radius, 0.25f, 0.1f, 500.0f);
-    ImGui::SliderFloat("Erase strength", &foliage_erase_.strength, 0.0f, 1.0f);
     ImGui::SeparatorText("Streaming");
     float view_distance = component.view_distance;
     float chunk_size = component.chunk_size;
@@ -4004,15 +4965,56 @@ class SceneEditorGame final : public app::GameInterface {
           static_cast<uint32_t>(std::max(max_resident, 1));
       applyFoliageComponentEdit(std::move(edited), std::move(before),
                                 "Edit Foliage Streaming");
+      return;
     }
+
+    ImGui::Dummy({0.0f, 3.0f});
+    drawInspectorSectionHeading("Authoring Tools");
+    const auto mode_button = [&](ToolMode mode, const char* label) {
+      const bool selected = tool_ == mode;
+      if (selected) {
+        ImGui::PushStyleColor(
+            ImGuiCol_Button,
+            ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+      }
+      if (ImGui::Button(label) && !selected) changeTool(mode);
+      if (selected) ImGui::PopStyleColor();
+    };
+    ImGui::BeginDisabled(!state->source_valid || !terrain_authoring_valid_);
+    mode_button(ToolMode::PaintFoliage, "Paint");
+    ImGui::SameLine();
+    mode_button(ToolMode::EraseFoliage, "Erase");
+    if (tool_ == ToolMode::PaintFoliage ||
+        tool_ == ToolMode::EraseFoliage) {
+      ImGui::SameLine();
+      if (ImGui::Button("Stop")) changeTool(ToolMode::Select);
+    }
+    ImGui::SeparatorText("Brush");
+    ImGui::DragFloat("Paint radius", &foliage_brush_.radius, 0.25f, 0.1f,
+                     500.0f);
+    ImGui::DragFloat("Density", &foliage_brush_.density, 0.01f, 0.0f,
+                     100.0f);
+    ImGui::DragFloat("Min spacing", &foliage_brush_.min_spacing, 0.02f,
+                     0.0f, 100.0f);
+    ImGui::DragFloat3("Min scale", &foliage_brush_.min_scale.x, 0.02f,
+                      0.01f, 100.0f);
+    ImGui::DragFloat3("Max scale", &foliage_brush_.max_scale.x, 0.02f,
+                      0.01f, 100.0f);
+    ImGui::DragFloatRange2("Height range", &foliage_min_height_,
+                           &foliage_max_height_, 0.25f, -100000.0f,
+                           100000.0f);
+    ImGui::SliderFloat("Max slope", &foliage_brush_.max_slope_degrees,
+                       0.0f, 90.0f);
+    ImGui::DragFloat("Erase radius", &foliage_erase_.radius, 0.25f, 0.1f,
+                     500.0f);
+    ImGui::SliderFloat("Erase strength", &foliage_erase_.strength, 0.0f,
+                       1.0f);
+    ImGui::EndDisabled();
   }
 
   bool drawFoliageMaterialSlots(
-      const components::FoliageComponent& component,
-      std::optional<size_t> lod_index) {
-    const auto& materials = lod_index.has_value()
-                                ? component.lods[*lod_index].materials
-                                : component.materials;
+      const components::FoliageComponent& component) {
+    const auto& materials = component.materials;
     uint32_t maximum_slot = 1u;
     for (const auto& material : materials) {
       maximum_slot = std::max(maximum_slot, material.slot);
@@ -4037,7 +5039,7 @@ class SceneEditorGame final : public app::GameInterface {
           const AssetEntry* entry = catalog_.findByKey(asset_key);
           if (entry != nullptr && entry->valid &&
               entry->kind == AssetKind::Material) {
-            assignFoliageMaterial(*entry, lod_index, slot);
+            assignFoliageMaterial(*entry, slot);
             ImGui::EndDragDropTarget();
             ImGui::PopID();
             return true;
@@ -4050,9 +5052,243 @@ class SceneEditorGame final : public app::GameInterface {
     return false;
   }
 
+  bool drawFoliagePrefabSource(
+      const components::FoliageComponent& component) {
+    const std::filesystem::path prefab_path = component.prefab_path.is_absolute()
+                                                  ? component.prefab_path
+                                                  : content_root_ /
+                                                        component.prefab_path;
+    const prefabs::PrefabLoadResult loaded =
+        prefabs::loadPrefabDocument(prefab_path);
+    if (!loaded.success() || !loaded.document.has_value()) {
+      ImGui::TextColored({1.0f, 0.35f, 0.25f, 1.0f},
+                         "Prefab source could not be resolved.");
+      return false;
+    }
+    if (ImGui::Button("Edit Source...")) {
+      const AssetEntry* source = catalog_.findPrefab(prefab_path);
+      if (source == nullptr) {
+        last_error_ = "Prefab source is outside the indexed asset roots";
+      } else if (prefab_asset_draft_.has_value() &&
+                 prefab_asset_draft_->dirty() &&
+                 prefab_asset_draft_->sourcePath().lexically_normal() !=
+                     source->path.lexically_normal()) {
+        last_error_ =
+            "Save or Revert the current prefab draft before opening another";
+      } else {
+        selected_asset_path_ = source->path;
+        selected_asset_key_ = source->key;
+        selection_.clear();
+        inspector_scroll_to_top_ = true;
+        last_error_.clear();
+      }
+      return true;
+    }
+
+    ImGui::SeparatorText("Prefab Variables");
+    if (loaded.document->variables.empty()) {
+      ImGui::TextDisabled("This prefab declares no variables.");
+    }
+    for (auto declaration = loaded.document->variables.begin();
+         declaration != loaded.document->variables.end(); ++declaration) {
+      if (!declaration.value().is_object()) continue;
+      const std::string type =
+          declaration.value().value("type", std::string{});
+      const nlohmann::json default_value = declaration.value().value(
+          "default", nlohmann::json{});
+      nlohmann::json value = component.prefab_variables.contains(
+                                 declaration.key())
+                                 ? component.prefab_variables[declaration.key()]
+                                 : default_value;
+      bool changed = false;
+      ImGui::PushID(declaration.key().c_str());
+      if (type == "bool" && value.is_boolean()) {
+        bool scalar = value.get<bool>();
+        changed = ImGui::Checkbox(declaration.key().c_str(), &scalar);
+        value = scalar;
+      } else if (type == "float" && value.is_number()) {
+        float scalar = value.get<float>();
+        changed = ImGui::DragFloat(declaration.key().c_str(), &scalar, 0.05f);
+        value = scalar;
+      } else if (type == "int" && value.is_number_integer()) {
+        int scalar = value.get<int>();
+        changed = ImGui::DragInt(declaration.key().c_str(), &scalar);
+        value = scalar;
+      } else if (type == "vec3" && value.is_array() && value.size() == 3u) {
+        math::Vec3 vector{value[0].get<float>(), value[1].get<float>(),
+                          value[2].get<float>()};
+        changed =
+            ImGui::DragFloat3(declaration.key().c_str(), &vector.x, 0.05f);
+        value = nlohmann::json::array({vector.x, vector.y, vector.z});
+      } else if (type == "color" && value.is_array() &&
+                 value.size() >= 3u) {
+        float color[4]{value[0].get<float>(), value[1].get<float>(),
+                       value[2].get<float>(),
+                       value.size() > 3u ? value[3].get<float>() : 1.0f};
+        changed = ImGui::ColorEdit4(declaration.key().c_str(), color);
+        value = nlohmann::json::array(
+            {color[0], color[1], color[2], color[3]});
+      } else if (type == "string" && value.is_string()) {
+        std::array<char, 256> text{};
+        const std::string current = value.get<std::string>();
+        std::copy_n(current.data(),
+                    std::min(current.size(), text.size() - 1u),
+                    text.data());
+        changed = ImGui::InputText(declaration.key().c_str(),
+                                   text.data(),
+                                   text.size(),
+                                   ImGuiInputTextFlags_EnterReturnsTrue);
+        value = text.data();
+      } else {
+        ImGui::TextDisabled("%s (%s)", declaration.key().c_str(),
+                            type.c_str());
+      }
+      ImGui::PopID();
+      if (changed) {
+        scenes::SceneDocument before = document_;
+        components::FoliageComponent edited = component;
+        edited.prefab_variables[declaration.key()] = std::move(value);
+        std::string prefab_error;
+        if (!foliage_prefab_inspector_.validate(
+                prefab_path, edited.prefab_variables, &prefab_error)) {
+          last_error_ = std::move(prefab_error);
+          return true;
+        }
+        return applyFoliageComponentEdit(std::move(edited),
+                                         std::move(before),
+                                         "Edit Foliage Prefab Variable");
+      }
+    }
+
+    ImGui::SeparatorText("Resolved Renderer / LOD Summary");
+    const FoliagePrefabInspection inspection =
+        foliage_prefab_inspector_.inspect(
+            prefab_path, component.prefab_variables);
+    if (!inspection.inspected()) {
+      ImGui::TextColored({1.0f, 0.35f, 0.25f, 1.0f}, "%s",
+                         inspection.diagnostic.c_str());
+    }
+    for (const FoliagePrefabRendererSummary& renderer :
+         inspection.renderers) {
+      const std::string mesh_key = renderer.mesh_asset_key.empty()
+                                       ? "<none>"
+                                       : renderer.mesh_asset_key;
+      switch (renderer.disposition) {
+        case FoliagePrefabRendererDisposition::PaintedRigidMesh:
+          ImGui::BulletText("Painted rigid mesh - %s: %s",
+                            renderer.node_name.c_str(), mesh_key.c_str());
+          if (renderer.lod_level_count > 0u) {
+            ImGui::Indent();
+            ImGui::TextDisabled("%zu LOD level(s)",
+                                renderer.lod_level_count);
+            ImGui::Unindent();
+          }
+          break;
+        case FoliagePrefabRendererDisposition::IgnoredInvisibleMesh:
+          ImGui::BulletText("Ignored invisible mesh - %s: %s",
+                            renderer.node_name.c_str(), mesh_key.c_str());
+          break;
+        case FoliagePrefabRendererDisposition::IgnoredDeformableMesh:
+          ImGui::BulletText("Ignored deformable renderer - %s: %s",
+                            renderer.node_name.c_str(), mesh_key.c_str());
+          break;
+        case FoliagePrefabRendererDisposition::IgnoredInstancedMesh:
+          ImGui::BulletText("Ignored authored instanced renderer - %s: %s",
+                            renderer.node_name.c_str(), mesh_key.c_str());
+          break;
+        case FoliagePrefabRendererDisposition::IgnoredMeshWithoutTransform:
+          ImGui::BulletText("Ignored mesh without transform - %s: %s",
+                            renderer.node_name.c_str(), mesh_key.c_str());
+          break;
+      }
+    }
+    if (inspection.inspected() && inspection.eligible_rigid_meshes == 0u) {
+      ImGui::TextColored(
+          {1.0f, 0.55f, 0.25f, 1.0f},
+          "This prefab cannot be painted: no visible rigid MeshComponent was resolved.");
+    } else if (inspection.inspected()) {
+      ImGui::TextDisabled("%zu rigid mesh renderer(s) will be painted.",
+                          inspection.eligible_rigid_meshes);
+    }
+    ImGui::TextDisabled(
+        "Prefab renderer and LOD components are read-only from the foliage layer. "
+        "Authored instancing and deformable renderers are not recursively painted.");
+    return false;
+  }
+
+  bool applyFoliageLodPayload(std::string_view entity_id,
+                              nlohmann::json payload,
+                              std::string label) {
+    auto entity = findEntity(std::string(entity_id));
+    if (entity == document_.entities.end()) return false;
+    scenes::SceneDocument before = document_;
+    std::string error;
+    const bool present = entity->components.contains("LODComponent");
+    const bool valid = present
+                           ? replaceComponentPayload(*entity,
+                                                     component_editors_,
+                                                     "LODComponent",
+                                                     payload,
+                                                     &error)
+                           : addComponentWithDependencies(*entity,
+                                                          component_editors_,
+                                                          "LODComponent",
+                                                          payload,
+                                                          nullptr,
+                                                          &error);
+    if (!valid) {
+      last_error_ = error.empty() ? "Foliage LOD edit failed"
+                                  : std::move(error);
+      return false;
+    }
+    beginDocumentPropertyEdit(std::move(label), std::move(before), true);
+    last_error_.clear();
+    return true;
+  }
+
+  bool commitFoliageLodAssetPayload(std::string_view entity_id,
+                                    const nlohmann::json& payload,
+                                    const AssetEntry& asset,
+                                    std::string label) {
+    scenes::SceneDocument next = document_;
+    std::string error;
+    if (!asset.package_path.empty() &&
+        !ensurePackageReferenced(next, asset.package_path, &error)) {
+      last_error_ = std::move(error);
+      return false;
+    }
+    const auto entity = std::find_if(
+        next.entities.begin(), next.entities.end(),
+        [&](const scenes::SceneEntity& value) { return value.id == entity_id; });
+    if (entity == next.entities.end() ||
+        !replaceComponentPayload(*entity,
+                                 component_editors_,
+                                 "LODComponent",
+                                 payload,
+                                 &error)) {
+      last_error_ = error.empty() ? "Foliage LOD asset assignment failed"
+                                  : std::move(error);
+      return false;
+    }
+    const std::string selected_id(entity_id);
+    if (!commitDocumentCommand("Foliage " + label, std::move(next))) {
+      return false;
+    }
+    rebuildPreview();
+    focusFoliageLayer(selected_id);
+    last_error_.clear();
+    return true;
+  }
+
   bool applyFoliageComponentEdit(components::FoliageComponent edited,
                                  scenes::SceneDocument before,
                                  std::string label) {
+    FoliageLayerState* state = selectedFoliageLayer();
+    if (state == nullptr) {
+      last_error_ = "No foliage layer is selected";
+      return false;
+    }
+    const std::string layer_id = state->entity_id;
     std::string validation_error;
     if (!foliage::validateFoliageComponent(edited, &validation_error)) {
       last_error_ = validation_error.empty()
@@ -4060,7 +5296,7 @@ class SceneEditorGame final : public app::GameInterface {
                         : std::move(validation_error);
       return false;
     }
-    auto authored_entity = findEntity(selection_.id);
+    auto authored_entity = findEntity(layer_id);
     if (authored_entity == document_.entities.end()) {
       last_error_ = "The foliage layer is missing from the scene document";
       return false;
@@ -4072,6 +5308,19 @@ class SceneEditorGame final : public app::GameInterface {
       last_error_ = "Foliage sidecar must remain inside the content root";
       return false;
     }
+    if (!authored.prefab_path.empty()) {
+      const std::filesystem::path absolute_prefab =
+          authored.prefab_path.is_absolute()
+              ? authored.prefab_path
+              : content_root_ / authored.prefab_path;
+      if (const auto relative =
+              contentRelativePath(content_root_, absolute_prefab)) {
+        authored.prefab_path = *relative;
+      } else {
+        last_error_ = "Foliage prefab must remain inside the content root";
+        return false;
+      }
+    }
     const nlohmann::json serialized =
         serializeTemporaryComponent(authored, "FoliageComponent");
     if (serialized.empty()) {
@@ -4079,7 +5328,7 @@ class SceneEditorGame final : public app::GameInterface {
       return false;
     }
     authored_entity->components["FoliageComponent"] = serialized;
-    const world::Entity runtime = preview_.find(selection_.id);
+    const world::Entity runtime = preview_.find(layer_id);
     if (world->isAlive(runtime)) world->add(runtime, std::move(edited));
     beginDocumentPropertyEdit(std::move(label), std::move(before), true);
     last_error_.clear();
@@ -4257,6 +5506,183 @@ class SceneEditorGame final : public app::GameInterface {
       }
       ImGui::PopID();
     }
+    return changed;
+  }
+
+  using LodAssetCommit = std::function<bool(
+      const nlohmann::json&, const AssetEntry&, std::string)>;
+
+  bool drawLodLevelsEditor(nlohmann::json& payload,
+                           std::string_view base_mesh_asset_key,
+                           const nlohmann::json& base_materials,
+                           const LodAssetCommit& commit_asset,
+                           bool& document_committed) {
+    auto& levels = payload["levels"];
+    if (!levels.is_array()) levels = nlohmann::json::array();
+    bool changed = false;
+    for (size_t index = 0u; index < levels.size(); ++index) {
+      nlohmann::json& level = levels[index];
+      if (!level.is_object()) level = nlohmann::json::object();
+      ImGui::PushID(static_cast<int>(index));
+      ImGui::SeparatorText(("LOD " + std::to_string(index + 1u)).c_str());
+
+      const float previous = index == 0u
+                                 ? 0.0f
+                                 : levels[index - 1u].value(
+                                       "start_distance", 0.0f);
+      const float next = index + 1u < levels.size()
+                             ? levels[index + 1u].value(
+                                   "start_distance", 1000000.0f)
+                             : 1000000.0f;
+      const float minimum = previous + 0.001f;
+      const float maximum = std::max(minimum, next - 0.001f);
+      float distance = level.value("start_distance", minimum);
+      if (ImGui::DragFloat("Start distance", &distance, 0.25f, minimum,
+                           maximum, "%.2f")) {
+        level["start_distance"] = std::clamp(distance, minimum, maximum);
+        changed = true;
+      }
+
+      const std::string mesh_key =
+          level.value("mesh_asset_key", std::string{});
+      ImGui::Selectable(("Mesh: " +
+                         (mesh_key.empty() ? std::string("<drop mesh>")
+                                           : mesh_key))
+                            .c_str(),
+                        false);
+      if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* drop =
+                ImGui::AcceptDragDropPayload("KARMA_MESH_ASSET")) {
+          const AssetEntry* entry = catalog_.findByKey(
+              static_cast<const char*>(drop->Data));
+          if (entry != nullptr && entry->valid &&
+              entry->kind == AssetKind::Mesh) {
+            level["mesh_asset_key"] = entry->key;
+            document_committed = commit_asset(
+                payload, *entry, "Assign LOD Mesh");
+            ImGui::EndDragDropTarget();
+            ImGui::PopID();
+            return false;
+          }
+        }
+        ImGui::EndDragDropTarget();
+      }
+
+      auto& materials = level["materials"];
+      if (!materials.is_array()) materials = nlohmann::json::array();
+      for (uint32_t slot = 0u; slot < 4u; ++slot) {
+        auto assignment = std::find_if(
+            materials.begin(), materials.end(),
+            [&](const nlohmann::json& candidate) {
+              return candidate.is_object() &&
+                     candidate.value("slot", UINT32_MAX) == slot;
+            });
+        const std::string material_key =
+            assignment == materials.end()
+                ? std::string("<drop material>")
+                : assignment->value("material_key", std::string{});
+        ImGui::PushID(static_cast<int>(slot));
+        ImGui::Selectable(
+            ("Material " + std::to_string(slot) + ": " + material_key)
+                .c_str(),
+            false);
+        if (ImGui::BeginDragDropTarget()) {
+          if (const ImGuiPayload* drop = ImGui::AcceptDragDropPayload(
+                  "KARMA_TERRAIN_MATERIAL")) {
+            const AssetEntry* entry = catalog_.findByKey(
+                static_cast<const char*>(drop->Data));
+            if (entry != nullptr && entry->valid &&
+                entry->kind == AssetKind::Material) {
+              if (assignment == materials.end()) {
+                materials.push_back(
+                    {{"slot", slot}, {"material_key", entry->key}});
+              } else {
+                (*assignment)["material_key"] = entry->key;
+              }
+              document_committed = commit_asset(
+                  payload, *entry, "Assign LOD Material");
+              ImGui::EndDragDropTarget();
+              ImGui::PopID();
+              ImGui::PopID();
+              return false;
+            }
+          }
+          ImGui::EndDragDropTarget();
+        }
+        ImGui::PopID();
+      }
+
+      const std::string render_mode =
+          level.value("render_mode", std::string("mesh"));
+      int render_mode_index =
+          render_mode == "upright_billboard" ? 1 : 0;
+      if (ImGui::Combo("Render mode", &render_mode_index,
+                       "Mesh\0Upright billboard\0")) {
+        level["render_mode"] = render_mode_index == 1
+                                   ? "upright_billboard"
+                                   : "mesh";
+        changed = true;
+      }
+      changed |= drawJsonBool(level, "shadow_visible", "Cast shadows", false);
+      if (ImGui::Button("Remove LOD")) {
+        levels.erase(levels.begin() + static_cast<std::ptrdiff_t>(index));
+        changed = true;
+        ImGui::PopID();
+        return changed;
+      }
+      ImGui::PopID();
+    }
+
+    const bool can_add = levels.size() < kMaxEditorLodLevels &&
+                         !base_mesh_asset_key.empty();
+    ImGui::BeginDisabled(!can_add);
+    if (ImGui::Button("+ Add LOD")) {
+      const float distance = levels.empty()
+                                 ? 35.0f
+                                 : levels.back().value("start_distance", 0.0f) +
+                                       35.0f;
+      levels.push_back({
+          {"start_distance", distance},
+          {"mesh_asset_key", std::string(base_mesh_asset_key)},
+          {"materials",
+           base_materials.is_array() ? base_materials
+                                     : nlohmann::json::array()},
+          {"render_mode", "mesh"},
+          {"shadow_visible", false},
+      });
+      changed = true;
+    }
+    ImGui::EndDisabled();
+    if (base_mesh_asset_key.empty()) {
+      ImGui::TextDisabled("Assign a compatible base mesh before adding LODs.");
+    }
+    return changed;
+  }
+
+  bool drawInstanceSetComponentEditor(nlohmann::json& payload) {
+    auto& instances = payload["instances"];
+    auto& planar_instances = payload["planar_instances"];
+    if (!instances.is_array()) instances = nlohmann::json::array();
+    if (!planar_instances.is_array()) {
+      planar_instances = nlohmann::json::array();
+    }
+    std::string layout =
+        payload.value("gpu_layout", std::string("matrix4x4_params"));
+    int layout_index = layout == "position_yaw_scale_params" ? 1 : 0;
+    bool changed = false;
+    ImGui::BeginDisabled(!instances.empty() || !planar_instances.empty());
+    if (ImGui::Combo("GPU layout", &layout_index,
+                     "Matrix + params\0Position/yaw/scale + params\0")) {
+      payload["gpu_layout"] = layout_index == 1
+                                  ? "position_yaw_scale_params"
+                                  : "matrix4x4_params";
+      changed = true;
+    }
+    ImGui::EndDisabled();
+    changed |= drawJsonBool(payload, "dynamic", "Dynamic upload", false);
+    ImGui::Text("Matrix instances: %zu", instances.size());
+    ImGui::Text("Planar instances: %zu", planar_instances.size());
+    ImGui::TextDisabled("Instance arrays remain available in Edit JSON.");
     return changed;
   }
 
@@ -4483,6 +5909,38 @@ class SceneEditorGame final : public app::GameInterface {
     switch (descriptor.editor) {
       case ComponentEditorKind::Mesh:
         return drawMeshComponentEditor(payload, document_committed);
+      case ComponentEditorKind::Lod: {
+        std::string base_mesh;
+        nlohmann::json base_materials = nlohmann::json::array();
+        const auto entity = findEntity(selection_.id);
+        if (entity != document_.entities.end()) {
+          for (const char* source_type : {"MeshComponent",
+                                          "InstancedMeshComponent",
+                                          "FoliageComponent"}) {
+            const auto source = entity->components.find(source_type);
+            if (source == entity->components.end() || !source->is_object()) {
+              continue;
+            }
+            base_mesh = source->value("mesh_asset_key", std::string{});
+            base_materials =
+                source->value("materials", nlohmann::json::array());
+            if (!base_mesh.empty()) break;
+          }
+        }
+        return drawLodLevelsEditor(
+            payload,
+            base_mesh,
+            base_materials,
+            [&](const nlohmann::json& edited,
+                const AssetEntry& asset,
+                std::string label) {
+              return commitComponentAssetPayload(
+                  "LODComponent", edited, asset, std::move(label));
+            },
+            document_committed);
+      }
+      case ComponentEditorKind::InstanceSet:
+        return drawInstanceSetComponentEditor(payload);
       case ComponentEditorKind::Collider:
         return drawColliderComponentEditor(payload, document_committed);
       case ComponentEditorKind::Rigidbody:
@@ -4597,13 +6055,13 @@ class SceneEditorGame final : public app::GameInterface {
         return changed;
       }
       case ComponentEditorKind::Terrain:
-        ImGui::TextDisabled("Use the Terrain controls above.");
+        drawTerrainInspector();
         return false;
       case ComponentEditorKind::Foliage:
-        ImGui::TextDisabled("Use the Foliage controls above.");
+        drawFoliageInspector();
         return false;
       case ComponentEditorKind::Transform:
-        ImGui::TextDisabled("The authored Scene Transform is edited above.");
+        ImGui::TextDisabled("Transform is owned by the Scene Transform card.");
         return false;
       case ComponentEditorKind::InstancedMesh:
       case ComponentEditorKind::AdvancedJson:
@@ -4671,35 +6129,41 @@ class SceneEditorGame final : public app::GameInterface {
       type_names.push_back(component.key());
     }
     std::sort(type_names.begin(), type_names.end());
-    const auto lowercase = [](std::string value) {
-      std::transform(value.begin(), value.end(), value.begin(),
-                     [](unsigned char character) {
-                       return static_cast<char>(std::tolower(character));
-                     });
-      return value;
-    };
-    const std::string filter = lowercase(component_filter_);
-    if (!type_names.empty()) ImGui::SeparatorText("Components");
     for (const std::string& type_name : type_names) {
       entity = findEntity(selection_.id);
       if (entity == document_.entities.end() ||
           !entity->components.contains(type_name)) return;
+      if (type_name == "TransformComponent" ||
+          (type_name == "TerrainComponent" &&
+           selection_.id == terrain_entity_id_) ||
+          (type_name == "FoliageComponent" && !terrain_entity_id_.empty())) {
+        continue;
+      }
       const ComponentEditorDescriptor* descriptor =
           component_editors_.find(type_name);
       const std::string display = descriptor == nullptr
                                       ? type_name
                                       : descriptor->display_name;
-      if (!filter.empty() &&
-          lowercase(display + " " + type_name).find(filter) ==
-              std::string::npos) {
-        continue;
-      }
-      ImGui::PushID(type_name.c_str());
-      const bool open = ImGui::CollapsingHeader(
-          display.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
-      if (open) {
+      if (!inspectorFilterMatches(display, type_name)) continue;
+      bool stop = false;
+      drawComponentCard(type_name, display, false, [&] {
         ImGui::TextDisabled("%s", type_name.c_str());
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - 28.0f);
+        if (ImGui::Button("...", {28.0f, 0.0f})) {
+          ImGui::OpenPopup("##component_actions");
+        }
         nlohmann::json payload = entity->components[type_name];
+        if (ImGui::BeginPopup("##component_actions")) {
+          if (ImGui::MenuItem("Edit JSON...")) {
+            openComponentJsonEditor(type_name, payload, false);
+          }
+          if (descriptor != nullptr && descriptor->removable &&
+              ImGui::MenuItem("Remove Component")) {
+            stop = removeAuthoredComponent(type_name);
+          }
+          ImGui::EndPopup();
+        }
+        if (stop) return;
         bool committed = false;
         bool changed = false;
         if (descriptor != nullptr) {
@@ -4708,34 +6172,26 @@ class SceneEditorGame final : public app::GameInterface {
           ImGui::TextDisabled("No editor descriptor is registered.");
         }
         if (committed) {
-          ImGui::PopID();
+          stop = true;
           return;
         }
         if (changed) {
           applyTypedComponentPayload(type_name, std::move(payload),
                                      "Edit " + display);
-          ImGui::PopID();
+          stop = true;
           return;
         }
-        if (ImGui::Button("Edit JSON...")) {
-          openComponentJsonEditor(type_name, payload, false);
-        }
-        if (descriptor != nullptr && descriptor->removable) {
-          ImGui::SameLine();
-          if (ImGui::Button("Remove")) {
-            removeAuthoredComponent(type_name);
-            ImGui::PopID();
-            return;
-          }
-        }
-      }
-      ImGui::PopID();
+      });
+      if (stop) return;
     }
   }
 
   void drawAddComponentMenu() {
-    ImGui::Separator();
-    if (ImGui::Button("Add Component")) ImGui::OpenPopup("##add_component");
+    ImGui::Dummy({0.0f, 2.0f});
+    if (ImGui::Button("Add Component",
+                      {ImGui::GetContentRegionAvail().x, 0.0f})) {
+      ImGui::OpenPopup("##add_component");
+    }
     if (!ImGui::BeginPopup("##add_component")) return;
     if (ImGui::InputTextWithHint("##component_search", "Search components",
                                  component_filter_,
@@ -4830,7 +6286,9 @@ class SceneEditorGame final : public app::GameInterface {
         if (descriptor.type_name == "TerrainComponent") {
           open_create_terrain_ = true;
         } else if (descriptor.type_name == "FoliageComponent") {
-          last_error_ = "Create foliage by activating or dragging a mesh asset";
+          settings_.terrain_inspector_tab = 2;
+          terrain_tab_selection_pending_ = true;
+          open_create_foliage_ = true;
         }
         ImGui::CloseCurrentPopup();
         break;
@@ -4906,8 +6364,12 @@ class SceneEditorGame final : public app::GameInterface {
     // covering the renderer-backed world-space handles.
     ImGui::SetCursorScreenPos(viewport_min_);
     ImGui::Dummy(available);
-    viewport_item_hovered_ = ImGui::IsItemHovered();
-    viewport_hovered_ = viewport_item_hovered_ || ImGui::IsWindowHovered();
+    const ImGuiIO& io = ImGui::GetIO();
+    viewport_item_hovered_ = viewportContainsPointer(
+        ViewportRect{viewport_min_.x, viewport_min_.y, available.x, available.y},
+        io.MousePos.x,
+        io.MousePos.y);
+    viewport_hovered_ = viewport_item_hovered_;
     if (ImGui::BeginDragDropTarget()) {
       if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KARMA_PREFAB")) {
         beginPrefabPlacement(
@@ -5133,7 +6595,53 @@ class SceneEditorGame final : public app::GameInterface {
     if (ImGui::BeginPopupModal("Create Foliage Layer", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
       ImGui::InputText("Name", new_foliage_name_, sizeof(new_foliage_name_));
-      ImGui::TextWrapped("Mesh: %s", pending_foliage_mesh_.c_str());
+      int source_kind = pending_foliage_prefab_.empty() ? 0 : 1;
+      if (ImGui::Combo("Source type", &source_kind, "Direct mesh\0Prefab\0")) {
+        if (source_kind == 0) {
+          pending_foliage_prefab_.clear();
+        } else {
+          pending_foliage_mesh_.clear();
+          pending_foliage_package_.clear();
+        }
+      }
+      ImGui::SetNextItemWidth(420.0f);
+      if (source_kind == 0) {
+        const std::string mesh_preview = pending_foliage_mesh_.empty()
+                                             ? "<choose base mesh>"
+                                             : pending_foliage_mesh_;
+        if (ImGui::BeginCombo("Base mesh", mesh_preview.c_str())) {
+          for (const AssetEntry& entry : catalog_.entries()) {
+            if (!entry.valid || entry.kind != AssetKind::Mesh) continue;
+            const bool selected = entry.key == pending_foliage_mesh_;
+            if (ImGui::Selectable(entry.name.c_str(), selected)) {
+              pending_foliage_mesh_ = entry.key;
+              pending_foliage_package_ = entry.package_path;
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+          }
+          ImGui::EndCombo();
+        }
+      } else {
+        const std::string prefab_preview = pending_foliage_prefab_.empty()
+                                               ? "<choose prefab>"
+                                               : pending_foliage_prefab_
+                                                     .parent_path()
+                                                     .filename()
+                                                     .string();
+        if (ImGui::BeginCombo("Prefab", prefab_preview.c_str())) {
+          for (const AssetEntry& entry : catalog_.entries()) {
+            if (!entry.valid || entry.kind != AssetKind::Prefab) continue;
+            const bool selected =
+                entry.path.lexically_normal() ==
+                pending_foliage_prefab_.lexically_normal();
+            if (ImGui::Selectable(entry.name.c_str(), selected)) {
+              pending_foliage_prefab_ = entry.path;
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+          }
+          ImGui::EndCombo();
+        }
+      }
       ImGui::DragFloat("Chunk size", &new_foliage_chunk_size_, 1.0f, 1.0f, 1000.0f);
       ImGui::DragFloat("View distance", &new_foliage_view_distance_, 1.0f, 1.0f, 100000.0f);
       new_foliage_chunk_size_ =
@@ -5144,7 +6652,9 @@ class SceneEditorGame final : public app::GameInterface {
           std::isfinite(new_foliage_view_distance_)
               ? std::clamp(new_foliage_view_distance_, 1.0f, 100000.0f)
               : 256.0f;
-      if (ImGui::Button("Create") && !pending_foliage_mesh_.empty()) {
+      const bool has_source = !pending_foliage_mesh_.empty() ||
+                              !pending_foliage_prefab_.empty();
+      if (ImGui::Button("Create") && has_source) {
         if (createFoliageLayer()) ImGui::CloseCurrentPopup();
       }
       ImGui::SameLine();
@@ -5348,9 +6858,36 @@ class SceneEditorGame final : public app::GameInterface {
   }
 
   bool createFoliageLayer() {
-    if (pending_foliage_mesh_.empty()) {
-      last_error_ = "Choose a foliage mesh before creating the layer";
+    const bool uses_mesh = !pending_foliage_mesh_.empty();
+    const bool uses_prefab = !pending_foliage_prefab_.empty();
+    if (uses_mesh == uses_prefab) {
+      last_error_ =
+          "Choose exactly one foliage source: a direct mesh or a prefab";
       return false;
+    }
+    if (uses_prefab) {
+      const LegacyRenderMigrationReport migration =
+          migratePrefabSourceClosure(
+              {pending_foliage_prefab_}, content_root_);
+      if (!migration.success()) {
+        last_error_ = migration.diagnostics.empty()
+                          ? "Foliage prefab migration failed"
+                          : joinDiagnostics(migration.diagnostics);
+        return false;
+      }
+      if (migration.changed) {
+        prefab_asset_draft_status_ =
+            "Automatically migrated foliage prefab; backup preserved";
+        scanCatalog(false);
+      }
+      std::string prefab_error;
+      if (!foliage_prefab_inspector_.validate(
+              pending_foliage_prefab_,
+              nlohmann::json::object(),
+              &prefab_error)) {
+        last_error_ = std::move(prefab_error);
+        return false;
+      }
     }
     if (!terrain_canvas_ || !terrain_authoring_valid_) {
       last_error_ = "Create or load an editable terrain before adding foliage";
@@ -5389,7 +6926,7 @@ class SceneEditorGame final : public app::GameInterface {
     try {
       next = document_;
       std::string package_error;
-      if (!pending_foliage_package_.empty() &&
+      if (uses_mesh && !pending_foliage_package_.empty() &&
           !ensurePackageReferenced(next,
                                    pending_foliage_package_,
                                    &package_error)) {
@@ -5398,7 +6935,17 @@ class SceneEditorGame final : public app::GameInterface {
       }
       components::FoliageComponent component{};
       component.sidecar_path = *relative_sidecar;
-      component.mesh_asset_key = pending_foliage_mesh_;
+      if (uses_mesh) {
+        component.mesh_asset_key = pending_foliage_mesh_;
+      } else {
+        const auto relative_prefab =
+            contentRelativePath(content_root_, pending_foliage_prefab_);
+        if (!relative_prefab.has_value()) {
+          last_error_ = "Foliage prefab must remain inside the content root";
+          return false;
+        }
+        component.prefab_path = *relative_prefab;
+      }
       component.chunk_size = new_foliage_chunk_size_;
       component.view_distance = new_foliage_view_distance_;
       const nlohmann::json component_json =
@@ -5421,7 +6968,7 @@ class SceneEditorGame final : public app::GameInterface {
           .name = new_foliage_name_[0] == '\0' ? "Foliage" : new_foliage_name_,
           .parent_id = rootEntityId(),
           .transform = foliage_transform,
-          .components = nlohmann::json{{"FoliageComponent", component_json}},
+          .components = {{"FoliageComponent", component_json}},
       });
     } catch (const std::exception& error) {
       last_error_ = std::string("Failed to stage foliage layer: ") + error.what();
@@ -5448,6 +6995,117 @@ class SceneEditorGame final : public app::GameInterface {
     preview_rebuild_pending_ = true;
     preview_pending_selection_ = entity_id;
     preview_pending_tool_ = ToolMode::PaintFoliage;
+    last_error_.clear();
+    return true;
+  }
+
+  bool duplicateActiveFoliageLayer() {
+    FoliageLayerState* state = selectedFoliageLayer();
+    if (state == nullptr) return false;
+    size_t authored_instance_total = 0u;
+    for (const FoliageLayerState& layer : foliage_layers_) {
+      if (layer.source_valid) authored_instance_total += layer.layer.instanceCount();
+    }
+    if (state->layer.instanceCount() >
+        kMaxAuthoredFoliageInstances - authored_instance_total) {
+      last_error_ =
+          "Duplicating this layer would exceed the 1,000,000 instance limit";
+      return false;
+    }
+    const world::Entity runtime = preview_.find(state->entity_id);
+    if (!world->isAlive(runtime) ||
+        !world->has<components::FoliageComponent>(runtime)) {
+      last_error_ = "The selected foliage preview is unavailable";
+      return false;
+    }
+    const auto source = findEntity(state->entity_id);
+    if (source == document_.entities.end()) {
+      last_error_ = "The selected foliage layer is missing from the scene";
+      return false;
+    }
+
+    const std::string entity_id = makeStableId("foliage");
+    const std::filesystem::path sidecar =
+        editorPreviewDirectory() / (entity_id + ".kfoliage");
+    const auto relative_sidecar = contentRelativePath(content_root_, sidecar);
+    if (!relative_sidecar) {
+      last_error_ = "Foliage working path must remain inside the content root";
+      return false;
+    }
+    std::error_code filesystem_error;
+    std::filesystem::create_directories(sidecar.parent_path(), filesystem_error);
+    if (filesystem_error) {
+      last_error_ = "Failed to create foliage preview directory: " +
+                    filesystem_error.message();
+      return false;
+    }
+    std::string write_error;
+    if (!foliage::writeFoliageFile(sidecar, state->layer.toDocument(),
+                                   &write_error)) {
+      last_error_ = write_error.empty() ? "Failed to duplicate foliage sidecar"
+                                        : std::move(write_error);
+      return false;
+    }
+
+    scenes::SceneDocument next = document_;
+    const auto next_source = std::find_if(
+        next.entities.begin(), next.entities.end(),
+        [&](const scenes::SceneEntity& entity) {
+          return entity.id == state->entity_id;
+        });
+    if (next_source == next.entities.end()) {
+      std::filesystem::remove(sidecar, filesystem_error);
+      return false;
+    }
+    scenes::SceneEntity copy = *next_source;
+    copy.id = entity_id;
+    copy.name = copy.name.empty() ? "Foliage Copy" : copy.name + " Copy";
+    auto component = world->get<components::FoliageComponent>(runtime);
+    component.sidecar_path = *relative_sidecar;
+    if (!component.prefab_path.empty()) {
+      makeContentRelative(component.prefab_path);
+    }
+    const nlohmann::json serialized =
+        serializeTemporaryComponent(component, "FoliageComponent");
+    if (serialized.empty()) {
+      std::filesystem::remove(sidecar, filesystem_error);
+      last_error_ = "Foliage component validation failed";
+      return false;
+    }
+    copy.components["FoliageComponent"] = serialized;
+    next.entities.push_back(std::move(copy));
+    if (!commitDocumentCommand("Duplicate Foliage Layer", std::move(next))) {
+      std::filesystem::remove(sidecar, filesystem_error);
+      return false;
+    }
+    preview_rebuild_pending_ = true;
+    preview_pending_selection_ = entity_id;
+    last_error_.clear();
+    return true;
+  }
+
+  bool deleteActiveFoliageLayer() {
+    FoliageLayerState* state = selectedFoliageLayer();
+    if (state == nullptr) return false;
+    finishFoliageStroke();
+    scenes::SceneDocument next = document_;
+    std::string error;
+    if (!deleteSelectionPreservingWorld(
+            next, {SelectionKind::Entity, state->entity_id}, &error)) {
+      last_error_ = std::move(error);
+      return false;
+    }
+    if (!commitDocumentCommand("Delete Foliage Layer", std::move(next))) {
+      return false;
+    }
+    settings_.active_foliage_layer_id.clear();
+    changeTool(ToolMode::Select);
+    rebuildPreview();
+    if (terrain_entity_id_.empty()) {
+      selection_.clear();
+    } else {
+      selection_ = {SelectionKind::Entity, terrain_entity_id_};
+    }
     last_error_.clear();
     return true;
   }
@@ -5553,11 +7211,10 @@ class SceneEditorGame final : public app::GameInterface {
   }
 
   void assignFoliageMaterial(const AssetEntry& entry) {
-    assignFoliageMaterial(entry, std::nullopt, 0u);
+    assignFoliageMaterial(entry, 0u);
   }
 
   void assignFoliageMaterial(const AssetEntry& entry,
-                             std::optional<size_t> lod_index,
                              uint32_t material_slot) {
     FoliageLayerState* state = selectedFoliageLayer();
     if (entry.kind != AssetKind::Material || entry.key.empty() ||
@@ -5580,13 +7237,12 @@ class SceneEditorGame final : public app::GameInterface {
         return;
       }
       auto component = world->get<components::FoliageComponent>(runtime);
-      if (lod_index.has_value() && *lod_index >= component.lods.size()) {
-        last_error_ = "The selected foliage LOD no longer exists";
+      if (!component.prefab_path.empty()) {
+        last_error_ =
+            "Prefab-backed foliage materials are authored in the prefab source";
         return;
       }
-      auto& materials = lod_index.has_value()
-                            ? component.lods[*lod_index].materials
-                            : component.materials;
+      auto& materials = component.materials;
       const auto slot = std::find_if(
           materials.begin(), materials.end(),
           [&](const components::MeshMaterialAssignment& material) {
@@ -5629,19 +7285,15 @@ class SceneEditorGame final : public app::GameInterface {
                     error.what();
       return;
     }
-    if (!commitDocumentCommand(
-            lod_index.has_value() ? "Assign Foliage LOD Material"
-                                  : "Assign Foliage Material",
-            std::move(next))) {
+    if (!commitDocumentCommand("Assign Foliage Material", std::move(next))) {
       return;
     }
     rebuildPreview();
-    selection_ = {SelectionKind::Entity, selected_id};
+    focusFoliageLayer(selected_id);
     last_error_.clear();
   }
 
-  void assignFoliageMesh(const AssetEntry& entry,
-                         std::optional<size_t> lod_index) {
+  void assignFoliageMesh(const AssetEntry& entry) {
     FoliageLayerState* state = selectedFoliageLayer();
     if (entry.kind != AssetKind::Mesh || entry.key.empty() || state == nullptr) {
       return;
@@ -5660,15 +7312,9 @@ class SceneEditorGame final : public app::GameInterface {
       return;
     }
     auto component = world->get<components::FoliageComponent>(runtime);
-    if (lod_index.has_value()) {
-      if (*lod_index >= component.lods.size()) {
-        last_error_ = "The selected foliage LOD no longer exists";
-        return;
-      }
-      component.lods[*lod_index].mesh_asset_key = entry.key;
-    } else {
-      component.mesh_asset_key = entry.key;
-    }
+    component.prefab_path.clear();
+    component.prefab_variables = nlohmann::json::object();
+    component.mesh_asset_key = entry.key;
     std::string validation_error;
     if (!foliage::validateFoliageComponent(component, &validation_error)) {
       last_error_ = std::move(validation_error);
@@ -5691,14 +7337,86 @@ class SceneEditorGame final : public app::GameInterface {
       return;
     }
     entity->components["FoliageComponent"] = serialized;
-    if (!commitDocumentCommand(
-            lod_index.has_value() ? "Assign Foliage LOD Mesh"
-                                  : "Assign Foliage Mesh",
-            std::move(next))) {
+    if (!commitDocumentCommand("Assign Foliage Mesh", std::move(next))) {
       return;
     }
     rebuildPreview();
-    selection_ = {SelectionKind::Entity, selected_id};
+    focusFoliageLayer(selected_id);
+    last_error_.clear();
+  }
+
+  void assignFoliagePrefab(const AssetEntry& entry) {
+    FoliageLayerState* state = selectedFoliageLayer();
+    if (entry.kind != AssetKind::Prefab || !entry.valid || state == nullptr) {
+      return;
+    }
+    const LegacyRenderMigrationReport migration =
+        migratePrefabSourceClosure({entry.path}, content_root_);
+    if (!migration.success()) {
+      last_error_ = migration.diagnostics.empty()
+                        ? "Foliage prefab migration failed"
+                        : joinDiagnostics(migration.diagnostics);
+      return;
+    }
+    if (migration.changed) {
+      prefab_asset_draft_.reset();
+      prefab_asset_draft_status_ =
+          "Automatically migrated foliage prefab; backup preserved";
+      scanCatalog(false);
+    }
+    std::string prefab_error;
+    if (!foliage_prefab_inspector_.validate(entry.path,
+                                            nlohmann::json::object(),
+                                            &prefab_error)) {
+      last_error_ = std::move(prefab_error);
+      return;
+    }
+    const auto relative = contentRelativePath(content_root_, entry.path);
+    if (!relative.has_value()) {
+      last_error_ = "Foliage prefab must remain inside the content root";
+      return;
+    }
+    const world::Entity runtime = preview_.find(state->entity_id);
+    if (!world->isAlive(runtime) ||
+        !world->has<components::FoliageComponent>(runtime)) {
+      last_error_ = "The selected foliage preview is unavailable";
+      return;
+    }
+    components::FoliageComponent component =
+        world->get<components::FoliageComponent>(runtime);
+    component.prefab_path = entry.path;
+    component.prefab_variables = nlohmann::json::object();
+    component.mesh_asset_key.clear();
+    component.materials.clear();
+    std::string validation_error;
+    if (!foliage::validateFoliageComponent(component, &validation_error)) {
+      last_error_ = std::move(validation_error);
+      return;
+    }
+    components::FoliageComponent authored = component;
+    authored.prefab_path = *relative;
+    makeContentRelative(authored.sidecar_path);
+    const nlohmann::json serialized =
+        serializeTemporaryComponent(authored, "FoliageComponent");
+    if (serialized.empty()) {
+      last_error_ = "Foliage prefab source validation failed";
+      return;
+    }
+    scenes::SceneDocument next = document_;
+    const auto entity = std::find_if(
+        next.entities.begin(), next.entities.end(),
+        [&](const scenes::SceneEntity& value) {
+          return value.id == state->entity_id;
+        });
+    if (entity == next.entities.end()) return;
+    entity->components["FoliageComponent"] = serialized;
+    entity->components.erase("LODComponent");
+    const std::string selected_id = state->entity_id;
+    if (!commitDocumentCommand("Assign Foliage Prefab", std::move(next))) {
+      return;
+    }
+    rebuildPreview();
+    focusFoliageLayer(selected_id);
     last_error_.clear();
   }
 
@@ -6110,6 +7828,9 @@ class SceneEditorGame final : public app::GameInterface {
         auto component = world->get<components::FoliageComponent>(runtime);
         component.sidecar_path = final;
         makeContentRelative(component.sidecar_path);
+        if (!component.prefab_path.empty()) {
+          makeContentRelative(component.prefab_path);
+        }
         component.source_revision += 1u;
         entity->components["FoliageComponent"] = serializeTemporaryComponent(component, "FoliageComponent");
       }
@@ -6251,23 +7972,29 @@ class SceneEditorGame final : public app::GameInterface {
       last_error_ = "Scene must be inside the content root";
       return;
     }
-    scenes::SceneLoadDesc desc{.path = path, .reference_root = content_root_};
-    const scenes::SceneLoadResult result = scenes::loadSceneDocument(desc);
-    if (!result.success() || !result.document) {
-      last_error_ = joinDiagnostics(result.diagnostics);
+    scenes::SceneDocument loaded_document{};
+    std::string migration_status;
+    std::string load_error;
+    if (!loadSceneWithEditorMigration(path,
+                                      content_root_,
+                                      loaded_document,
+                                      migration_status,
+                                      load_error)) {
+      last_error_ = std::move(load_error);
       return;
     }
     if (discard_unsaved) {
       discardRecovery(content_root_, scene_path_);
     }
     scene_path_ = path;
-    document_ = *result.document;
+    document_ = std::move(loaded_document);
     document_.reference_root = content_root_;
     commands_.clear();
     command_cursor_ = saved_cursor_ = command_bytes_ = 0u;
     saved_state_reachable_ = true;
     has_disk_version_ = true;
     selection_.clear();
+    scene_migration_status_ = std::move(migration_status);
     last_error_.clear();
     rebuildPreview();
     std::error_code ec;
@@ -6435,9 +8162,25 @@ class SceneEditorGame final : public app::GameInterface {
     return it == foliage_layers_.end() ? nullptr : &*it;
   }
   FoliageLayerState* selectedFoliageLayer() {
-    return selection_.kind == SelectionKind::Entity ? findFoliageLayer(selection_.id) : nullptr;
+    if (selection_.kind != SelectionKind::Entity) return nullptr;
+    if (selection_.id == terrain_entity_id_) {
+      return findFoliageLayer(settings_.active_foliage_layer_id);
+    }
+    return findFoliageLayer(selection_.id);
   }
 
+  void focusFoliageLayer(const std::string& entity_id,
+                         bool reset_inspector = false) {
+    settings_.active_foliage_layer_id = entity_id;
+    settings_.terrain_inspector_tab = 2;
+    terrain_tab_selection_pending_ = true;
+    inspector_scroll_to_top_ |= reset_inspector;
+    selection_ = {SelectionKind::Entity,
+                  terrain_entity_id_.empty() ? entity_id
+                                             : terrain_entity_id_};
+  }
+
+  std::filesystem::path executable_directory_;
   std::filesystem::path content_root_;
   std::filesystem::path scene_path_;
   scenes::SceneDocument document_;
@@ -6470,12 +8213,20 @@ class SceneEditorGame final : public app::GameInterface {
   ImVec2 viewport_display_size_{};
   bool viewport_hovered_ = false;
   bool viewport_item_hovered_ = false;
+  bool viewport_primary_owned_ = false;
+  bool viewport_middle_owned_ = false;
+  bool viewport_right_owned_ = false;
 
   Selection selection_{};
   ToolMode tool_ = ToolMode::Select;
   std::filesystem::path pending_prefab_;
   std::filesystem::path selected_asset_path_;
   std::string selected_asset_key_;
+  std::optional<PrefabAssetDraft> prefab_asset_draft_;
+  size_t prefab_draft_node_index_ = 0u;
+  std::string prefab_asset_draft_error_;
+  std::string prefab_asset_draft_status_;
+  std::string scene_migration_status_;
   std::optional<rendering::MaterialAssetDesc> material_original_;
   std::optional<rendering::MaterialAssetDesc> material_draft_;
   std::filesystem::path material_draft_path_;
@@ -6486,11 +8237,15 @@ class SceneEditorGame final : public app::GameInterface {
   scenes::SceneTransform placement_source_transform_{};
   std::optional<math::Vec3> placement_world_point_;
   std::string pending_foliage_mesh_;
+  std::filesystem::path pending_foliage_prefab_;
   std::filesystem::path pending_foliage_package_;
+  FoliagePrefabInspector foliage_prefab_inspector_;
   char asset_filter_[192]{};
   char hierarchy_filter_[128]{};
   char component_filter_[128]{};
   char console_filter_[128]{};
+  std::string inspector_context_key_;
+  bool inspector_scroll_to_top_ = false;
   std::shared_ptr<EditorConsoleSink> console_sink_;
   std::shared_ptr<spdlog::logger> console_logger_;
   bool bottom_tab_initialized_ = false;
@@ -6515,7 +8270,10 @@ class SceneEditorGame final : public app::GameInterface {
   float workspace_top_ = 0.0f;
   float workspace_height_ = 0.0f;
   bool panel_item_active_ = false;
+  ImFont* editor_semibold_font_ = nullptr;
+  bool terrain_tab_selection_pending_ = true;
 
+  ViewportInputSnapshot viewport_input_{};
   GizmoTool gizmo_tool_ = GizmoTool::Move;
   GizmoSpace gizmo_space_ = GizmoSpace::World;
   GizmoHandle gizmo_hot_handle_ = GizmoHandle::None;
@@ -6619,15 +8377,20 @@ int main(int argc, char** argv) {
   }
 
   scenes::SceneDocument document{};
+  std::string startup_migration_status;
   if (pathExistsNoThrow(options.scene_path)) {
-    const scenes::SceneLoadResult loaded = scenes::loadSceneDocument(
-        scenes::SceneLoadDesc{.path = options.scene_path,
-                              .reference_root = options.content_root});
-    if (!loaded.success() || !loaded.document) {
-      std::cerr << joinDiagnostics(loaded.diagnostics) << '\n';
+    std::string load_error;
+    if (!loadSceneWithEditorMigration(options.scene_path,
+                                      options.content_root,
+                                      document,
+                                      startup_migration_status,
+                                      load_error)) {
+      std::cerr << load_error << '\n';
       return 1;
     }
-    document = *loaded.document;
+    if (!startup_migration_status.empty()) {
+      std::cout << startup_migration_status << '\n';
+    }
   } else {
     document = makeNewDocument(options.scene_path, options.content_root);
   }
@@ -6644,10 +8407,12 @@ int main(int argc, char** argv) {
   auto* foliage_runtime_ptr = foliage_runtime.get();
   engine.addRuntimeModule(std::move(foliage_runtime));
 
-  SceneEditorGame editor(options.content_root,
+  SceneEditorGame editor(options.executable_directory,
+                         options.content_root,
                          options.scene_path,
                          std::move(document),
                          std::move(settings),
+                         std::move(startup_migration_status),
                          terrain_runtime_ptr,
                          foliage_runtime_ptr);
   engine.setUi(ui::imgui::createUiLayer(

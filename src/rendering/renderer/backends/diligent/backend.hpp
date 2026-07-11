@@ -182,6 +182,7 @@ class DiligentBackend final : public Backend {
   void submitParticleBeam(const rendering::ParticleBeamGpuDesc& beam) override;
   void setParticleSystemStats(const rendering::ParticlePassStats& stats) override;
   void retireInstance(rendering::InstanceId instance) override;
+  void retireInstanceSet(rendering::InstanceId instance_set) override;
   void renderLayer(rendering::LayerId layer,
                    rendering::RenderTargetId target,
                    const rendering::FrameGraphDesc& frame_graph) override;
@@ -388,10 +389,23 @@ class DiligentBackend final : public Backend {
   };
 
   struct InstanceRecord {
+    struct LodRecord {
+      float start_distance = 0.0f;
+      rendering::MeshId mesh = rendering::kInvalidMesh;
+      rendering::MaterialId material = rendering::kInvalidMaterial;
+      std::vector<rendering::DrawMaterialBinding> materials;
+      rendering::LodRenderMode render_mode = rendering::LodRenderMode::Mesh;
+      glm::vec3 bounds_center{0.0f};
+      float bounds_radius = 0.0f;
+      bool bounds_valid = false;
+      bool shadow_visible = false;
+    };
+
     rendering::LayerId layer = 0;
     rendering::MeshId mesh = rendering::kInvalidMesh;
     rendering::MaterialId material = rendering::kInvalidMaterial;
     std::vector<rendering::DrawMaterialBinding> materials;
+    std::vector<LodRecord> lods;
     std::vector<std::string> render_tags;
     rendering::DeformationId deformation = rendering::kInvalidDeformation;
     glm::mat4 transform{1.0f};
@@ -405,49 +419,21 @@ class DiligentBackend final : public Backend {
     bool transform_changed = true;
   };
 
-  struct InstancedRecord {
-    struct LodRecord {
-      float start_distance = 0.0f;
-      rendering::MeshId mesh = rendering::kInvalidMesh;
-      rendering::MaterialId material = rendering::kInvalidMaterial;
-      std::vector<rendering::DrawMaterialBinding> materials;
-      rendering::InstanceLodRenderMode render_mode = rendering::InstanceLodRenderMode::Mesh;
-      glm::vec3 bounds_center{0.0f};
-      float bounds_radius = 0.0f;
-      bool bounds_valid = false;
-      bool shadow_visible = false;
-      Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culled_instance_buffer;
-      Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culled_instance_uav;
-      size_t gpu_culled_instance_buffer_capacity_bytes = 0;
-      Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culling_indirect_args_buffer;
-      Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culling_indirect_args_uav;
-    };
-
-    rendering::LayerId layer = 0;
-    rendering::MeshId mesh = rendering::kInvalidMesh;
-    rendering::MaterialId material = rendering::kInvalidMaterial;
-    std::vector<rendering::DrawMaterialBinding> materials;
-    std::vector<std::string> render_tags;
-    std::vector<LodRecord> lods;
-    rendering::InstanceGpuLayout gpu_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
+  struct InstanceSetRecord {
+    rendering::InstanceGpuLayout gpu_layout =
+        rendering::InstanceGpuLayout::Matrix4x4Params;
     std::vector<rendering::InstanceData> instances;
     std::vector<rendering::PlanarInstanceData> planar_instances;
     uint64_t revision = 0;
-    glm::vec3 bounds_center{0.0f};
-    float bounds_radius = 0.0f;
-    bool bounds_valid = false;
     Diligent::RefCntAutoPtr<Diligent::IBuffer> instance_buffer;
     Diligent::RefCntAutoPtr<Diligent::IBufferView> instance_srv;
     size_t instance_buffer_capacity_bytes = 0;
+    rendering::InstanceGpuLayout instance_buffer_layout =
+        rendering::InstanceGpuLayout::Matrix4x4Params;
     bool instance_buffer_dirty = true;
-    Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culled_instance_buffer;
-    Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culled_instance_uav;
-    size_t gpu_culled_instance_buffer_capacity_bytes = 0;
-    Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culling_indirect_args_buffer;
-    Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culling_indirect_args_uav;
     bool dynamic = false;
-    bool visible = true;
-    bool shadow_visible = true;
+    uint64_t last_submission_frame = 0;
+    uint32_t submitted_batch_count = 0;
 
     size_t instanceCount() const {
       switch (gpu_layout) {
@@ -458,6 +444,48 @@ class DiligentBackend final : public Backend {
       }
       return 0u;
     }
+  };
+
+  struct InstancedRecord {
+    struct LodRecord {
+      float start_distance = 0.0f;
+      rendering::MeshId mesh = rendering::kInvalidMesh;
+      rendering::MaterialId material = rendering::kInvalidMaterial;
+      std::vector<rendering::DrawMaterialBinding> materials;
+      rendering::LodRenderMode render_mode = rendering::LodRenderMode::Mesh;
+      glm::vec3 bounds_center{0.0f};
+      float bounds_radius = 0.0f;
+      bool bounds_valid = false;
+      bool shadow_visible = false;
+      Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culled_instance_buffer;
+      Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culled_instance_uav;
+      size_t gpu_culled_instance_buffer_capacity_bytes = 0;
+      rendering::InstanceGpuLayout gpu_culled_layout =
+          rendering::InstanceGpuLayout::Matrix4x4Params;
+      Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culling_indirect_args_buffer;
+      Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culling_indirect_args_uav;
+    };
+
+    rendering::LayerId layer = 0;
+    rendering::InstanceId instance_set = rendering::kInvalidInstance;
+    rendering::MeshId mesh = rendering::kInvalidMesh;
+    rendering::MaterialId material = rendering::kInvalidMaterial;
+    std::vector<rendering::DrawMaterialBinding> materials;
+    std::vector<std::string> render_tags;
+    std::vector<LodRecord> lods;
+    glm::mat4 batch_transform{1.0f};
+    glm::vec3 bounds_center{0.0f};
+    float bounds_radius = 0.0f;
+    bool bounds_valid = false;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culled_instance_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culled_instance_uav;
+    size_t gpu_culled_instance_buffer_capacity_bytes = 0;
+    rendering::InstanceGpuLayout gpu_culled_layout =
+        rendering::InstanceGpuLayout::Matrix4x4Params;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> gpu_culling_indirect_args_buffer;
+    Diligent::RefCntAutoPtr<Diligent::IBufferView> gpu_culling_indirect_args_uav;
+    bool visible = true;
+    bool shadow_visible = true;
   };
 
   struct DeformationRecord {
@@ -547,7 +575,7 @@ class DiligentBackend final : public Backend {
     bool indexed = false;
     bool deformed = false;
     rendering::InstanceGpuLayout gpu_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
-    rendering::InstanceLodRenderMode render_mode = rendering::InstanceLodRenderMode::Mesh;
+    rendering::LodRenderMode render_mode = rendering::LodRenderMode::Mesh;
 
     bool operator==(const ForwardBatchKey& other) const {
       return mesh == other.mesh &&
@@ -832,18 +860,21 @@ class DiligentBackend final : public Backend {
                                                                  rendering::InstanceGpuLayout::
                                                                      Matrix4x4Params);
   Diligent::IShaderResourceBinding* ensureMaterialShadowAlphaSrb(MaterialRecord& material);
-  bool ensureInstancedRecordBuffer(InstancedRecord& record);
+  bool ensureInstanceSetBuffer(InstanceSetRecord& record);
   bool instancedGpuCullingEnabled() const;
-  bool ensureInstancedGpuCullingResources();
-  bool ensureInstancedGpuLodCullingResources();
+  bool ensureInstancedGpuCullingResources(rendering::InstanceGpuLayout layout);
+  bool ensureInstancedGpuLodCullingResources(rendering::InstanceGpuLayout layout);
   bool ensureInstancedGpuCullingOutputBuffers(
+      rendering::InstanceGpuLayout layout,
       size_t instance_count,
       Diligent::RefCntAutoPtr<Diligent::IBuffer>& visible_buffer,
       Diligent::RefCntAutoPtr<Diligent::IBufferView>& visible_uav,
       size_t& visible_buffer_capacity_bytes,
+      rendering::InstanceGpuLayout& visible_buffer_layout,
       Diligent::RefCntAutoPtr<Diligent::IBuffer>& indirect_args_buffer,
       Diligent::RefCntAutoPtr<Diligent::IBufferView>& indirect_args_uav);
-  bool ensureInstancedGpuCullingRecordBuffers(InstancedRecord& record);
+  bool ensureInstancedGpuCullingRecordBuffers(InstancedRecord& record,
+                                              const InstanceSetRecord& instance_set);
   void initializeMaterialBindingForPipeline(
       MaterialRecord& record,
       Diligent::IPipelineState* pso,
@@ -1018,7 +1049,7 @@ class DiligentBackend final : public Backend {
   bool shader_cache_enabled_ = true;
   bool pipeline_cache_enabled_ = true;
   bool shader_cache_log_ = false;
-  std::uint32_t shader_cache_version_ = 34;
+  std::uint32_t shader_cache_version_ = 36;
   bool shader_cache_flush_ = false;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_vs_;
   Diligent::RefCntAutoPtr<Diligent::IShader> forward_ps_;
@@ -1182,17 +1213,31 @@ class DiligentBackend final : public Backend {
   Diligent::IShaderResourceVariable* forward_plus_compute_tile_counts_var_ = nullptr;
   Diligent::IShaderResourceVariable* forward_plus_compute_tile_indices_var_ = nullptr;
   Diligent::RefCntAutoPtr<Diligent::IBuffer> forward_plus_compute_cb_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> instanced_gpu_culling_pso_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> instanced_gpu_culling_srb_;
-  Diligent::IShaderResourceVariable* instanced_gpu_culling_source_var_ = nullptr;
-  Diligent::IShaderResourceVariable* instanced_gpu_culling_visible_var_ = nullptr;
-  Diligent::IShaderResourceVariable* instanced_gpu_culling_args_var_ = nullptr;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IPipelineState>, kInstanceGpuLayoutCount>
+      instanced_gpu_culling_psos_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>,
+             kInstanceGpuLayoutCount>
+      instanced_gpu_culling_srbs_;
+  std::array<Diligent::IShaderResourceVariable*, kInstanceGpuLayoutCount>
+      instanced_gpu_culling_source_vars_{};
+  std::array<Diligent::IShaderResourceVariable*, kInstanceGpuLayoutCount>
+      instanced_gpu_culling_visible_vars_{};
+  std::array<Diligent::IShaderResourceVariable*, kInstanceGpuLayoutCount>
+      instanced_gpu_culling_args_vars_{};
   Diligent::RefCntAutoPtr<Diligent::IBuffer> instanced_gpu_culling_cb_;
-  Diligent::RefCntAutoPtr<Diligent::IPipelineState> instanced_gpu_lod_culling_pso_;
-  Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> instanced_gpu_lod_culling_srb_;
-  Diligent::IShaderResourceVariable* instanced_gpu_lod_culling_source_var_ = nullptr;
-  std::array<Diligent::IShaderResourceVariable*, 4> instanced_gpu_lod_culling_visible_vars_{};
-  std::array<Diligent::IShaderResourceVariable*, 4> instanced_gpu_lod_culling_args_vars_{};
+  std::array<Diligent::RefCntAutoPtr<Diligent::IPipelineState>, kInstanceGpuLayoutCount>
+      instanced_gpu_lod_culling_psos_;
+  std::array<Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding>,
+             kInstanceGpuLayoutCount>
+      instanced_gpu_lod_culling_srbs_;
+  std::array<Diligent::IShaderResourceVariable*, kInstanceGpuLayoutCount>
+      instanced_gpu_lod_culling_source_vars_{};
+  std::array<std::array<Diligent::IShaderResourceVariable*, 4>,
+             kInstanceGpuLayoutCount>
+      instanced_gpu_lod_culling_visible_vars_{};
+  std::array<std::array<Diligent::IShaderResourceVariable*, 4>,
+             kInstanceGpuLayoutCount>
+      instanced_gpu_lod_culling_args_vars_{};
   Diligent::RefCntAutoPtr<Diligent::ISampler> ui_sampler_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_depth_;
   Diligent::RefCntAutoPtr<Diligent::IPipelineState> line_pipeline_state_no_depth_;
@@ -1473,6 +1518,7 @@ class DiligentBackend final : public Backend {
   std::unordered_map<rendering::TerrainId, TerrainRecord> terrains_;
   std::unordered_map<rendering::DeformationId, DeformationRecord> deformations_;
   std::unordered_map<rendering::InstanceId, InstanceRecord> instances_;
+  std::unordered_map<rendering::InstanceId, InstanceSetRecord> instance_sets_;
   std::unordered_map<rendering::InstanceId, InstancedRecord> instanced_records_;
   std::vector<TerrainSubmission> terrain_submissions_;
   std::vector<ParticleBatchRecord> particle_batches_;
@@ -1569,6 +1615,7 @@ class DiligentBackend final : public Backend {
   int forward_plus_max_lights_per_tile_ = 128;
   rendering::ForwardPlusStats forward_plus_stats_{};
   rendering::InstancingStats instancing_stats_{};
+  uint64_t instancing_frame_serial_ = 0;
   rendering::ParticlePassStats particle_pass_stats_{};
   rendering::TerrainStats terrain_stats_{};
   rendering::RendererFrameTimingStats current_frame_timing_stats_{};

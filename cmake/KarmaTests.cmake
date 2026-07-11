@@ -528,6 +528,8 @@ if (BUILD_TESTING AND KARMA_BUILD_TESTS)
     karma_scene_editor_viewport_tests
     karma_scene_editor_collider_tests
     karma_scene_editor_placement_tests
+    karma_ui_hot_reload_coordinator_tests
+    karma_ui_tests
     karma_audio_sdl_tests
     karma_window_sdl_tests
     karma_network_tests

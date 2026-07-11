@@ -1,5 +1,6 @@
 #pragma once
 
+#include "karma/prefabs.h"
 #include "karma/scene_authoring.h"
 #include "karma/scenes.h"
 
@@ -63,6 +64,8 @@ enum class ComponentEditorKind : uint8_t {
   Transform,
   Mesh,
   InstancedMesh,
+  InstanceSet,
+  Lod,
   Light,
   Visibility,
   RenderTags,
@@ -111,6 +114,9 @@ struct ComponentEditorDescriptor {
   ComponentPayloadFactory default_payload;
   ComponentPayloadValidator validate_payload;
   std::vector<std::string> dependencies;
+  /// At least one of these sibling components must be present. Unlike hard
+  /// dependencies, alternatives are never created implicitly.
+  std::vector<std::string> one_of_dependencies;
   bool removable = true;
 };
 
@@ -177,6 +183,95 @@ bool removeComponentsTogether(scenes::SceneEntity& entity,
                               const std::vector<std::string>& type_names,
                               std::string* diagnostic = nullptr);
 
+inline constexpr size_t kMaxEditorLodLevels = 3u;
+
+/// Canonical editor defaults for the split rendering authoring components.
+nlohmann::json defaultLodComponentPayload();
+nlohmann::json defaultInstanceSetComponentPayload();
+
+/// Schema validation used by the editor before the engine serializer is
+/// invoked. This keeps malformed drafts out of both scenes and prefabs.
+bool validateLodComponentPayload(const nlohmann::json& payload,
+                                 std::string* diagnostic = nullptr);
+bool validateInstanceSetComponentPayload(const nlohmann::json& payload,
+                                         std::string* diagnostic = nullptr);
+
+/// Focused source-prefab editing session. Only MeshComponent and LODComponent
+/// payloads can be changed; node structure, transforms, variables, and all
+/// other components remain immutable. Draft history is independent from the
+/// scene document history.
+class PrefabAssetDraft {
+ public:
+  struct Entry {
+    std::string label;
+    prefabs::PrefabDocument before;
+    prefabs::PrefabDocument after;
+  };
+
+  const std::filesystem::path& sourcePath() const { return source_path_; }
+  const prefabs::PrefabDocument& document() const { return document_; }
+  prefabs::PrefabDocument& document() { return document_; }
+  bool valid() const { return !source_path_.empty(); }
+  bool dirty() const;
+  bool canUndo() const { return cursor_ > 0u; }
+  bool canRedo() const { return cursor_ < history_.size(); }
+  std::string_view undoLabel() const;
+  std::string_view redoLabel() const;
+
+  bool setNodeComponent(size_t node_index,
+                        std::string_view type_name,
+                        const nlohmann::json& payload,
+                        const ComponentEditorRegistry& registry,
+                        std::string label,
+                        std::string* diagnostic = nullptr,
+                        bool coalesce = false);
+  bool removeNodeComponent(size_t node_index,
+                           std::string_view type_name,
+                           const ComponentEditorRegistry& registry,
+                           std::string label,
+                           std::string* diagnostic = nullptr);
+  bool undo();
+  bool redo();
+  void finishCoalescedEdit();
+
+  /// Returns true when the source no longer matches the version from which the
+  /// draft (or most recent successful save) was derived.
+  bool sourceChangedExternally() const;
+
+  /// Validates through the prefab loader using a sibling staging file, checks
+  /// the source fingerprint again, then atomically replaces the source.
+  bool save(const ComponentEditorRegistry& registry,
+            std::string* diagnostic = nullptr);
+  /// Discards local history and reloads the current source from disk.
+  bool revert(std::string* diagnostic = nullptr);
+
+ private:
+  friend std::optional<PrefabAssetDraft> openPrefabAssetDraft(
+      const std::filesystem::path&, std::string*);
+
+  void push(std::string label,
+            prefabs::PrefabDocument before,
+            prefabs::PrefabDocument after);
+
+  std::filesystem::path source_path_;
+  nlohmann::json source_json_ = nlohmann::json::object();
+  prefabs::PrefabDocument saved_document_{};
+  prefabs::PrefabDocument document_{};
+  std::string source_hash_;
+  std::vector<Entry> history_;
+  size_t cursor_ = 0u;
+  std::optional<prefabs::PrefabDocument> coalesced_before_;
+  std::string coalesced_label_;
+  size_t coalesced_node_index_ = 0u;
+  std::string coalesced_type_name_;
+};
+
+/// Opens a validated prefab source and preserves its raw top-level JSON so
+/// fields outside PrefabDocument (for example asset_package) survive saving.
+std::optional<PrefabAssetDraft> openPrefabAssetDraft(
+    const std::filesystem::path& path,
+    std::string* diagnostic = nullptr);
+
 /// Orbit state used by the standalone editor camera. Negative pitch looks
 /// down in Karma's +Y-up, -Z-forward convention.
 struct EditorOrbitCamera {
@@ -222,6 +317,14 @@ bool shouldResolveViewportSelection(bool selection_pending,
 /// Builds the entity/prefab hierarchy without trusting the document to be
 /// acyclic. Every addressable item is returned at most once.
 HierarchyBuildResult buildHierarchy(const scenes::SceneDocument& document);
+
+/// Reparents foliage rows beneath the editable terrain for editor presentation
+/// only. The authored document, entity parents, and transforms are untouched.
+/// If the terrain cannot be found, the original hierarchy is returned.
+HierarchyBuildResult projectFoliageUnderTerrain(
+    HierarchyBuildResult hierarchy,
+    std::string_view terrain_entity_id,
+    const std::vector<std::string>& foliage_entity_ids);
 
 /// Computes an authored entity or prefab placement transform in scene space.
 std::optional<scenes::SceneTransform> sceneWorldTransform(
@@ -342,6 +445,8 @@ struct EditorSettings {
   int console_min_level = 0;
   int terrain_inspector_tab = 0;
   int terrain_material_layer = 0;
+  std::string active_foliage_layer_id;
+  std::unordered_map<std::string, bool> component_foldouts;
   BottomPanelTab bottom_panel_tab = BottomPanelTab::Assets;
   ViewportRenderMode viewport_render_mode = ViewportRenderMode::Rendered;
 };
@@ -374,11 +479,14 @@ struct EditorPointerCaptureState {
   bool panel_item_active = false;
   bool want_capture_mouse = false;
   bool viewport_item_hovered = false;
+  bool viewport_navigation_owned = false;
 };
 
 /// Centralizes the input gate shared by viewport navigation, gizmos, painting,
 /// and placement. Active editor controls continue to capture input even if the
-/// cursor crosses into the viewport while dragging.
+/// cursor crosses into the viewport while dragging. An RMB/MMB gesture that
+/// explicitly began in the viewport owns navigation until that button is
+/// released, while popups and drag/drop remain hard barriers.
 bool blocksViewportPointerInput(const EditorPointerCaptureState& state);
 
 std::filesystem::path settingsPath(const std::filesystem::path& content_root);

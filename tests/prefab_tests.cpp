@@ -64,6 +64,12 @@ void writeText(const std::filesystem::path& path, const std::string& text) {
   stream << text;
 }
 
+std::string readText(const std::filesystem::path& path) {
+  std::ifstream stream(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(stream),
+                     std::istreambuf_iterator<char>());
+}
+
 Json readJson(const std::filesystem::path& path) {
   std::ifstream stream(path);
   Json json;
@@ -415,28 +421,46 @@ void testSaveLoadSingleEntity(const std::filesystem::path& dir) {
   KARMA_REQUIRE(render_tags.tags[1] == "outline");
 }
 
-void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
+void testSplitInstancedMeshLodPrefabRoundTrip(
+    const std::filesystem::path& dir) {
   karma::world::World world;
   karma::world::Scene scene;
   const karma::world::Entity root = world.createEntity();
-  scene.createNode(root);
+  const karma::world::Entity source = world.createEntity();
+  const karma::world::NodeId root_node = scene.createNode(root);
+  const karma::world::NodeId source_node = scene.createNode(source);
+  KARMA_REQUIRE(scene.reparent(source_node, root_node));
   world.setName(root, "Grass Chunk");
+  world.setName(source, "Grass Instances");
   world.add(root, karma::components::InstancedMeshComponent{
                       .mesh_asset_key = "assets/grass_cluster",
                       .materials = {karma::components::MeshMaterialAssignment{
                           .slot = 0,
                           .material_key = "grass_near",
                       }},
-                      .lods = {karma::components::InstancedMeshLodLevel{
+                      .instance_source = source,
+                      .local_position = {1.0f, 2.0f, 3.0f},
+                      .local_rotation = {0.0f, 0.0f, 0.0f, 1.0f},
+                      .local_scale = {2.0f, 2.0f, 2.0f},
+                      .visible = true,
+                      .shadow_visible = false,
+                  });
+  world.add(root,
+            karma::components::LodComponent{
+                .levels = {karma::components::LodLevel{
                           .start_distance = 28.0f,
                           .mesh_asset_key = "assets/grass_billboard",
                           .materials = {karma::components::MeshMaterialAssignment{
                               .slot = 0,
                               .material_key = "grass_far",
                           }},
-                          .render_mode = karma::rendering::InstanceLodRenderMode::UprightBillboard,
+                          .render_mode =
+                              karma::rendering::LodRenderMode::UprightBillboard,
                           .shadow_visible = false,
                       }},
+            });
+  world.add(source,
+            karma::components::InstanceSetComponent{
                       .gpu_layout = karma::rendering::InstanceGpuLayout::PositionYawScaleParams,
                       .planar_instances = {karma::components::PlanarMeshInstance{
                           .position = {1.0f, 0.0f, 2.0f},
@@ -445,20 +469,33 @@ void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
                       }},
                       .instance_revision = 3u,
                       .dynamic = false,
-                      .visible = true,
-                      .shadow_visible = false,
                   });
 
   const std::filesystem::path path = dir / "instanced_lod.json";
   KARMA_REQUIRE(karma::prefabs::savePrefab(world, scene, root, path));
   const Json saved = readJson(path);
-  const Json& serialized = saved["nodes"][0]["components"]["InstancedMeshComponent"];
-  KARMA_REQUIRE(serialized["lods"].is_array());
-  KARMA_REQUIRE(serialized["lods"].size() == 1);
-  KARMA_REQUIRE(serialized["lods"][0]["start_distance"] == 28.0f);
-  KARMA_REQUIRE(serialized["lods"][0]["mesh_asset_key"] == "assets/grass_billboard");
-  KARMA_REQUIRE(serialized["lods"][0]["render_mode"] == "upright_billboard");
-  KARMA_REQUIRE(serialized["lods"][0]["materials"][0]["material_key"] == "grass_far");
+  const Json& serialized =
+      saved["nodes"][0]["components"]["InstancedMeshComponent"];
+  KARMA_REQUIRE(!serialized.contains("lods"));
+  KARMA_REQUIRE(!serialized.contains("instances"));
+  KARMA_REQUIRE(serialized["instance_source"]["scope"] == "prefab");
+  KARMA_REQUIRE(serialized["instance_source"]["node"] == 1u);
+  KARMA_REQUIRE(serialized["local_position"] ==
+                Json::array({1.0f, 2.0f, 3.0f}));
+  const Json& levels = saved["nodes"][0]["components"]["LODComponent"]
+                            ["levels"];
+  KARMA_REQUIRE(levels.is_array());
+  KARMA_REQUIRE(levels.size() == 1);
+  KARMA_REQUIRE(levels[0]["start_distance"] == 28.0f);
+  KARMA_REQUIRE(levels[0]["mesh_asset_key"] ==
+                "assets/grass_billboard");
+  KARMA_REQUIRE(levels[0]["render_mode"] == "upright_billboard");
+  KARMA_REQUIRE(levels[0]["materials"][0]["material_key"] == "grass_far");
+  const Json& serialized_instances =
+      saved["nodes"][1]["components"]["InstanceSetComponent"];
+  KARMA_REQUIRE(serialized_instances["gpu_layout"] ==
+                "position_yaw_scale_params");
+  KARMA_REQUIRE(serialized_instances["planar_instances"].size() == 1u);
 
   karma::world::World loaded_world;
   karma::world::Scene loaded_scene;
@@ -466,27 +503,294 @@ void testInstancedMeshLodPrefabRoundTrip(const std::filesystem::path& dir) {
   KARMA_REQUIRE(instance.has_value());
   const auto& loaded =
       loaded_world.get<karma::components::InstancedMeshComponent>(instance->root);
-  KARMA_REQUIRE(loaded.lods.size() == 1);
-  KARMA_REQUIRE(nearly(loaded.lods[0].start_distance, 28.0f));
-  KARMA_REQUIRE(loaded.lods[0].mesh_asset_key == "assets/grass_billboard");
-  KARMA_REQUIRE(loaded.lods[0].materials.size() == 1);
-  KARMA_REQUIRE(loaded.lods[0].materials[0].material_key == "grass_far");
-  KARMA_REQUIRE(loaded.lods[0].render_mode ==
-                karma::rendering::InstanceLodRenderMode::UprightBillboard);
-  KARMA_REQUIRE(!loaded.lods[0].shadow_visible);
+  const karma::world::Entity loaded_source = instance->find("Grass Instances");
+  KARMA_REQUIRE(loaded.instance_source == loaded_source);
+  KARMA_REQUIRE(nearly(loaded.local_position.x, 1.0f));
+  KARMA_REQUIRE(nearly(loaded.local_scale.x, 2.0f));
+  const auto& loaded_instances =
+      loaded_world.get<karma::components::InstanceSetComponent>(loaded_source);
+  KARMA_REQUIRE(loaded_instances.planar_instances.size() == 1u);
+  KARMA_REQUIRE(loaded_instances.instance_revision == 3u);
+  const auto& loaded_lod =
+      loaded_world.get<karma::components::LodComponent>(instance->root);
+  KARMA_REQUIRE(loaded_lod.levels.size() == 1u);
+  KARMA_REQUIRE(loaded_lod.levels[0].render_mode ==
+                karma::rendering::LodRenderMode::UprightBillboard);
+}
 
-  Json legacy = saved;
-  legacy["nodes"][0]["components"]["InstancedMeshComponent"].erase("lods");
-  const std::filesystem::path legacy_path = dir / "instanced_lod_legacy.json";
-  writeText(legacy_path, legacy.dump(2));
-  karma::world::World legacy_world;
-  karma::world::Scene legacy_scene;
-  const auto legacy_instance =
-      karma::prefabs::instantiatePrefab(legacy_world, legacy_scene, legacy_path);
-  KARMA_REQUIRE(legacy_instance.has_value());
-  const auto& legacy_component =
-      legacy_world.get<karma::components::InstancedMeshComponent>(legacy_instance->root);
-  KARMA_REQUIRE(legacy_component.lods.empty());
+void testLodValidationAndLegacyRenderMigration(
+    const std::filesystem::path& dir) {
+  karma::components::LodComponent lod{
+      .levels = {
+          karma::components::LodLevel{
+              .start_distance = 10.0f,
+              .mesh_asset_key = "mesh/mid",
+          },
+          karma::components::LodLevel{
+              .start_distance = 20.0f,
+              .mesh_asset_key = "mesh/far",
+              .render_mode =
+                  karma::rendering::LodRenderMode::UprightBillboard,
+          },
+      },
+  };
+  std::string validation_error;
+  KARMA_REQUIRE(
+      karma::components::validateLodComponent(lod, &validation_error));
+  lod.levels[1].start_distance = 10.0f;
+  KARMA_REQUIRE(
+      !karma::components::validateLodComponent(lod, &validation_error));
+  KARMA_REQUIRE(!validation_error.empty());
+
+  Json legacy_components{
+      {"InstancedMeshComponent",
+       Json{
+           {"mesh_asset_key", "mesh/base"},
+           {"materials", Json::array()},
+           {"gpu_layout", "position_yaw_scale_params"},
+           {"instances", Json::array()},
+           {"planar_instances",
+            Json::array({Json{
+                {"position", Json::array({1.0f, 0.0f, 2.0f})},
+                {"yaw_radians", 0.25f},
+                {"scale", Json::array({1.0f, 1.0f, 1.0f})},
+                {"params", Json::array({0.0f, 0.0f, 0.0f, 0.0f})},
+            }})},
+           {"instance_revision", 9u},
+           {"dynamic", true},
+           {"visible", true},
+           {"shadow_visible", true},
+           {"lods",
+            Json::array({Json{
+                {"start_distance", 40.0f},
+                {"mesh_asset_key", "mesh/far"},
+                {"materials", Json::array()},
+                {"render_mode", "upright_billboard"},
+                {"shadow_visible", false},
+            }})},
+       }},
+  };
+  const auto migrated =
+      karma::prefabs::migrateLegacyRenderComponentsJson(legacy_components);
+  KARMA_REQUIRE(migrated.success());
+  KARMA_REQUIRE(migrated.changed);
+  KARMA_REQUIRE(legacy_components.contains("InstanceSetComponent"));
+  KARMA_REQUIRE(legacy_components.contains("LODComponent"));
+  KARMA_REQUIRE(!legacy_components["InstancedMeshComponent"].contains(
+      "gpu_layout"));
+  KARMA_REQUIRE(!legacy_components["InstancedMeshComponent"].contains(
+      "lods"));
+  KARMA_REQUIRE(
+      legacy_components["InstanceSetComponent"]["instance_revision"] == 9u);
+  KARMA_REQUIRE(
+      legacy_components["LODComponent"]["levels"][0]["mesh_asset_key"] ==
+      "mesh/far");
+  const auto idempotent =
+      karma::prefabs::migrateLegacyRenderComponentsJson(legacy_components);
+  KARMA_REQUIRE(idempotent.success());
+  KARMA_REQUIRE(!idempotent.changed);
+
+  Json conflict{
+      {"InstancedMeshComponent", Json{{"instances", Json::array()}}},
+      {"InstanceSetComponent", Json::object()},
+  };
+  const Json conflict_before = conflict;
+  const auto conflict_result =
+      karma::prefabs::migrateLegacyRenderComponentsJson(conflict);
+  KARMA_REQUIRE(!conflict_result.success());
+  KARMA_REQUIRE(conflict == conflict_before);
+
+  Json lod_conflict{
+      {"FoliageComponent", Json{{"lods", Json::array()}}},
+      {"LODComponent", Json{{"levels", Json::array()}}},
+  };
+  const Json lod_conflict_before = lod_conflict;
+  const auto lod_conflict_result =
+      karma::prefabs::migrateLegacyRenderComponentsJson(lod_conflict);
+  KARMA_REQUIRE(!lod_conflict_result.success());
+  KARMA_REQUIRE(lod_conflict == lod_conflict_before);
+
+  Json legacy_prefab{
+      {"version", 2u},
+      {"root", 0u},
+      {"nodes",
+       Json::array({Json{
+           {"id", 0u},
+           {"name", "Legacy Batch"},
+           {"parent", nullptr},
+           {"components",
+            Json{{"InstancedMeshComponent",
+                  Json{
+                      {"mesh_asset_key", "mesh/base"},
+                      {"gpu_layout", "matrix4x4_params"},
+                      {"instances",
+                       Json::array({Json{
+                           {"position", Json::array({0.0f, 0.0f, 0.0f})},
+                           {"rotation",
+                            Json::array({0.0f, 0.0f, 0.0f, 1.0f})},
+                           {"scale", Json::array({1.0f, 1.0f, 1.0f})},
+                       }})},
+                  }}}},
+       }})},
+  };
+  const std::filesystem::path rejected_path = dir / "legacy_rejected.json";
+  writeText(rejected_path, legacy_prefab.dump(2));
+  KARMA_REQUIRE(!karma::prefabs::loadPrefabDocument(rejected_path).success());
+
+  const auto prefab_migration =
+      karma::prefabs::migrateLegacyPrefabJson(legacy_prefab);
+  KARMA_REQUIRE(prefab_migration.success());
+  KARMA_REQUIRE(prefab_migration.changed);
+  const std::filesystem::path migrated_path = dir / "legacy_migrated.json";
+  writeText(migrated_path, legacy_prefab.dump(2));
+  KARMA_REQUIRE(karma::prefabs::loadPrefabDocument(migrated_path).success());
+
+  Json foliage_components{
+      {"FoliageComponent",
+       Json{
+           {"sidecar_path", "foliage/trees.kfoliage"},
+           {"mesh_asset_key", "trees/base"},
+           {"lods",
+            Json::array({Json{
+                {"start_distance", 60.0f},
+                {"mesh_asset_key", "trees/far"},
+                {"render_mode", "mesh"},
+            }})},
+       }},
+  };
+  const auto foliage_migration =
+      karma::prefabs::migrateLegacyRenderComponentsJson(foliage_components);
+  KARMA_REQUIRE(foliage_migration.success());
+  KARMA_REQUIRE(foliage_components.contains("LODComponent"));
+  KARMA_REQUIRE(
+      !foliage_components["FoliageComponent"].contains("lods"));
+}
+
+void testFoliageLodRenderDependencyValidation(
+    const std::filesystem::path& dir) {
+  karma::prefabs::ensureBuiltinComponentSerializers();
+  const auto serialize = [](std::string_view type_name, auto component) {
+    const auto* serializer =
+        karma::prefabs::componentSerializerRegistry().find(type_name);
+    KARMA_REQUIRE(serializer != nullptr);
+    karma::world::World world;
+    const karma::world::Entity entity = world.createEntity();
+    world.add(entity, std::move(component));
+    return serializer->serialize(world, entity);
+  };
+
+  const Json lod_payload = serialize(
+      "LODComponent",
+      karma::components::LodComponent{
+          .levels = {karma::components::LodLevel{
+              .start_distance = 45.0f,
+              .mesh_asset_key = "trees/far",
+          }},
+      });
+
+  karma::components::FoliageComponent direct_foliage{};
+  direct_foliage.sidecar_path = "foliage/direct.kfoliage";
+  direct_foliage.mesh_asset_key = "trees/direct";
+  karma::prefabs::PrefabDocument direct_document{};
+  direct_document.nodes.push_back(karma::prefabs::PrefabNode{
+      .id = 0u,
+      .name = "Direct foliage",
+      .components = Json{
+          {"FoliageComponent",
+           serialize("FoliageComponent", std::move(direct_foliage))},
+          {"LODComponent", lod_payload},
+      },
+  });
+  const std::filesystem::path direct_path =
+      dir / "direct_foliage_lod.json";
+  KARMA_REQUIRE(
+      karma::prefabs::savePrefabDocument(direct_document, direct_path)
+          .success());
+  KARMA_REQUIRE(
+      karma::prefabs::loadPrefabDocument(direct_path).success());
+
+  karma::components::FoliageComponent prefab_foliage{};
+  prefab_foliage.sidecar_path = "foliage/prefab.kfoliage";
+  prefab_foliage.prefab_path = "trees/tree.prefab.json";
+  karma::prefabs::PrefabDocument prefab_document = direct_document;
+  prefab_document.nodes[0].name = "Prefab foliage";
+  prefab_document.nodes[0].components["FoliageComponent"] =
+      serialize("FoliageComponent", std::move(prefab_foliage));
+  const auto rejected = karma::prefabs::savePrefabDocument(
+      prefab_document, dir / "prefab_foliage_orphan_lod.json");
+  KARMA_REQUIRE(!rejected.success());
+  KARMA_REQUIRE(!rejected.diagnostics.empty());
+
+  prefab_document.nodes[0].components["MeshComponent"] = serialize(
+      "MeshComponent",
+      karma::components::MeshComponent{
+          .mesh_asset_key = "trees/sibling_renderer",
+      });
+  KARMA_REQUIRE(karma::prefabs::savePrefabDocument(
+                    prefab_document,
+                    dir / "prefab_foliage_mesh_lod.json")
+                    .success());
+}
+
+void testPrefabDocumentAtomicSaveAndFoliagePrefabSource(
+    const std::filesystem::path& dir) {
+  const std::filesystem::path path = dir / "atomic_document.json";
+  karma::prefabs::PrefabDocument document{};
+  document.nodes.push_back(karma::prefabs::PrefabNode{
+      .id = 0u,
+      .name = "Original",
+      .components = Json{
+          {"TagComponent", Json{{"name", "Original"}}},
+      },
+  });
+  const auto first_save = karma::prefabs::savePrefabDocument(document, path);
+  KARMA_REQUIRE(first_save.success());
+  KARMA_REQUIRE(first_save.path == path);
+  const std::string original_text = readText(path);
+
+  karma::prefabs::PrefabDocument invalid = document;
+  invalid.nodes[0].components["UnknownComponent"] = Json::object();
+  const auto failed_save = karma::prefabs::savePrefabDocument(invalid, path);
+  KARMA_REQUIRE(!failed_save.success());
+  KARMA_REQUIRE(!failed_save.diagnostics.empty());
+  KARMA_REQUIRE(readText(path) == original_text);
+
+  karma::world::World world;
+  karma::world::Scene scene;
+  const karma::world::Entity root = world.createEntity();
+  scene.createNode(root);
+  karma::components::FoliageComponent foliage{};
+  foliage.sidecar_path = "foliage/trees.kfoliage";
+  foliage.prefab_path = "trees/pine.prefab.json";
+  foliage.prefab_variables = Json{{"height", 10.5f}, {"snow", true}};
+  world.add(root, foliage);
+
+  const std::filesystem::path foliage_path = dir / "foliage_prefab.json";
+  KARMA_REQUIRE(
+      karma::prefabs::savePrefab(world, scene, root, foliage_path));
+  const Json saved = readJson(foliage_path);
+  const Json& payload =
+      saved["nodes"][0]["components"]["FoliageComponent"];
+  KARMA_REQUIRE(payload["prefab_path"] == "trees/pine.prefab.json");
+  KARMA_REQUIRE(payload["prefab_variables"]["height"] == 10.5f);
+  KARMA_REQUIRE(!payload.contains("mesh_asset_key"));
+
+  karma::world::World loaded_world;
+  karma::world::Scene loaded_scene;
+  const auto instance = karma::prefabs::instantiatePrefab(
+      loaded_world, loaded_scene, foliage_path);
+  KARMA_REQUIRE(instance.has_value());
+  const auto& loaded =
+      loaded_world.get<karma::components::FoliageComponent>(instance->root);
+  KARMA_REQUIRE(loaded.prefab_path ==
+                (dir / "trees/pine.prefab.json").lexically_normal());
+  KARMA_REQUIRE(loaded.prefab_variables["snow"] == true);
+
+  karma::components::FoliageComponent conflicting = foliage;
+  conflicting.mesh_asset_key = "trees/direct";
+  world.add(root, conflicting);
+  KARMA_REQUIRE(!karma::prefabs::savePrefab(
+      world, scene, root, dir / "foliage_conflict.json"));
 }
 
 void testColliderComponentPrefabRoundTrips(const std::filesystem::path& dir) {
@@ -856,7 +1160,9 @@ void testPersistentComponentRegistryCoverage() {
       "CameraComponent",
       "EnvironmentComponent",
       "MeshComponent",
+      "InstanceSetComponent",
       "InstancedMeshComponent",
+      "LODComponent",
       "FoliageComponent",
       "AnimatorComponent",
       "RootMotionComponent",
@@ -899,9 +1205,9 @@ void testPersistentComponentRegistryCoverage() {
       "VolumetricComponent",
   };
 #if defined(KARMA_ENABLE_NAVIGATION)
-  KARMA_REQUIRE(required.size() == 47u);
+  KARMA_REQUIRE(required.size() == 49u);
 #else
-  KARMA_REQUIRE(required.size() == 38u);
+  KARMA_REQUIRE(required.size() == 40u);
 #endif
   KARMA_REQUIRE(registry.serializers().size() == required.size());
   for (std::string_view name : required) {
@@ -3410,7 +3716,10 @@ int main() {
   testPersistentComponentRegistryCoverage();
   testPersistentAuthoringSubsetRoundTrips();
   testSaveLoadSingleEntity(dir);
-  testInstancedMeshLodPrefabRoundTrip(dir);
+  testSplitInstancedMeshLodPrefabRoundTrip(dir);
+  testLodValidationAndLegacyRenderMigration(dir);
+  testFoliageLodRenderDependencyValidation(dir);
+  testPrefabDocumentAtomicSaveAndFoliagePrefabSource(dir);
   testColliderComponentPrefabRoundTrips(dir);
   testPhysicsAuthoringComponentsPrefabRoundTrip(dir);
   testLegacyRigidbodyPayloadKeepsAdvancedDefaults(dir);

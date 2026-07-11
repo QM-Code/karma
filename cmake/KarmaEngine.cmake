@@ -311,6 +311,8 @@ karma_add_static(karma_content
   src/content/image/stb_image.cpp
   src/content/materials/material_loader.cpp
   src/content/prefabs/component_serializer_registry.cpp
+  src/content/prefabs/component_serializer_rendering.cpp
+  src/content/prefabs/prefab_render_migration.cpp
   src/content/prefabs/prefab_runtime.cpp
   src/content/scenes/scene_bake.cpp
   src/content/scenes/scene_bake_artifacts.cpp
@@ -321,6 +323,7 @@ karma_add_static(karma_content
   src/content/scenes/scene_runtime_assets.cpp
   src/content/scenes/scene_runtime_prefabs.cpp
   src/content/scenes/terrain_canvas.cpp
+  src/features/visual/foliage/foliage_file.cpp
   src/features/visual/particles/effect_library.cpp
 )
 target_link_libraries(karma_content
@@ -404,8 +407,8 @@ list(APPEND KARMA_INSTALL_TARGETS karma_features_network)
 
 if (KARMA_BUILD_HEADLESS_PROFILE OR KARMA_BUILD_GRAPHICAL_PROFILE)
   karma_add_static(karma_features_visual
-    src/features/visual/foliage/foliage_file.cpp
     src/features/visual/foliage/foliage_layer.cpp
+    src/features/visual/foliage/foliage_render_prototype.cpp
     src/features/visual/foliage/foliage_runtime_module.cpp
     src/features/visual/lights/light_pulse_system.cpp
     src/features/visual/particles/particle_system.cpp

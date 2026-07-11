@@ -1,5 +1,6 @@
 #include "karma/scenes.h"
 #include "karma/assets.h"
+#include "karma/foliage.h"
 
 #include <algorithm>
 #include <chrono>
@@ -261,12 +262,128 @@ void addInstancedBlocker(LightingFixture& fixture, bool planar) {
           {"InstancedMeshComponent",
            {{"mesh_asset_key", "tests/bake/blocker"},
             {"materials", nlohmann::json::array()},
-            {"gpu_layout",
+            {"local_position", {0.0f, 0.0f, 0.0f}},
+            {"local_rotation", {0.0f, 0.0f, 0.0f, 1.0f}},
+            {"local_scale", {1.0f, 1.0f, 1.0f}},
+            {"visible", true},
+            {"shadow_visible", true}}},
+          {"InstanceSetComponent",
+           {{"gpu_layout",
              planar ? "position_yaw_scale_params" : "matrix4x4_params"},
             {"instances", std::move(instances)},
             {"planar_instances", std::move(planar_instances)},
             {"instance_revision", 1u},
-            {"dynamic", false},
+            {"dynamic", false}}},
+      },
+  });
+}
+
+void writeFoliageSidecar(
+    const std::filesystem::path& path,
+    std::vector<karma::foliage::FoliageInstance> instances) {
+  std::filesystem::create_directories(path.parent_path());
+  karma::foliage::FoliageDocument document{};
+  document.chunk_size = 32.0f;
+  document.chunks.push_back(karma::foliage::FoliageChunk{
+      .coord = {0, 0},
+      .instances = std::move(instances),
+  });
+  std::string error;
+  KARMA_REQUIRE(
+      karma::foliage::writeFoliageFile(path, document, &error));
+  KARMA_REQUIRE(error.empty());
+}
+
+void addDirectFoliageBlocker(LightingFixture& fixture,
+                             uint32_t static_flags) {
+  writeFoliageSidecar(
+      fixture.directory / "foliage/blocker.kfoliage",
+      {karma::foliage::FoliageInstance{
+          .position = {0.0f, 0.25f, 0.0f},
+          .yaw_radians = 0.0f,
+          .scale = {1.0f, 1.0f, 1.0f},
+      }});
+  fixture.document.entities.push_back(karma::scenes::SceneEntity{
+      .id = "direct_foliage_blocker",
+      .name = "Direct Foliage Blocker",
+      .components = {
+          {"StaticComponent",
+           {{"enabled", true},
+            {"include_descendants", false},
+            {"flags", static_flags}}},
+          {"FoliageComponent",
+           {{"sidecar_path", "foliage/blocker.kfoliage"},
+            {"mesh_asset_key", "tests/bake/blocker"},
+            {"materials", nlohmann::json::array()},
+            {"chunk_size", 32.0f},
+            {"view_distance", 256.0f},
+            {"max_resident_instances", 100000u},
+            {"source_revision", 1u},
+            {"visible", true},
+            {"shadow_visible", true}}},
+          {"LODComponent",
+           {{"levels",
+             {{{"start_distance", 1.0f},
+               {"mesh_asset_key", "tests/bake/unresolved_far_lod"},
+               {"materials", nlohmann::json::array()},
+               {"render_mode", "mesh"},
+               {"shadow_visible", false}}}}}},
+      },
+  });
+}
+
+void addPrefabFoliageBlocker(LightingFixture& fixture,
+                             uint32_t static_flags) {
+  writeFoliageSidecar(
+      fixture.directory / "foliage/prefab_blocker.kfoliage",
+      {karma::foliage::FoliageInstance{
+          .position = {0.0f, 0.25f, 0.0f},
+          .yaw_radians = 0.0f,
+          .scale = {1.0f, 1.0f, 1.0f},
+      }});
+  const std::filesystem::path prefab_directory =
+      fixture.directory / "prefabs/foliage_blocker";
+  writeText(prefab_directory / "blocker.obj", gridObj(1u));
+  writeText(prefab_directory / "assets.package.json", R"({
+  "version": 1,
+  "assets": [
+    {"type": "mesh", "key": "tests/foliage_prefab/blocker", "path": "blocker.obj"}
+  ]
+})");
+  writeText(prefab_directory / "prefab.json", R"({
+  "version": 2,
+  "asset_package": "assets.package.json",
+  "root": 0,
+  "nodes": [{
+    "id": 0,
+    "name": "Prefab Foliage Blocker",
+    "parent": null,
+    "components": {
+      "MeshComponent": {
+        "mesh_asset_key": "tests/foliage_prefab/blocker",
+        "materials": [],
+        "visible": true,
+        "shadow_visible": true
+      }
+    }
+  }]
+})");
+  fixture.document.entities.push_back(karma::scenes::SceneEntity{
+      .id = "prefab_foliage_blocker",
+      .name = "Prefab Foliage Blocker",
+      .components = {
+          {"StaticComponent",
+           {{"enabled", true},
+            {"include_descendants", false},
+            {"flags", static_flags}}},
+          {"FoliageComponent",
+           {{"sidecar_path", "foliage/prefab_blocker.kfoliage"},
+            {"prefab_path", "prefabs/foliage_blocker/prefab.json"},
+            {"prefab_variables", nlohmann::json::object()},
+            {"chunk_size", 32.0f},
+            {"view_distance", 256.0f},
+            {"max_resident_instances", 100000u},
+            {"source_revision", 1u},
             {"visible", true},
             {"shadow_visible", true}}},
       },
@@ -649,6 +766,77 @@ void testInstancedStaticShadowOccludersAndReceiverWarning() {
   }
 }
 
+void testDirectFoliageStaticShadowOccluderUsesBaseDetail() {
+  using karma::components::StaticComponentLighting;
+  using karma::components::StaticComponentShadows;
+
+  LightingFixture fixture = lightingFixture(true, false);
+  fixture.document.static_components[1].casts_shadows = false;
+  fixture.document.bakes.front().lighting.directional = false;
+  addDirectFoliageBlocker(
+      fixture, static_cast<uint32_t>(StaticComponentLighting));
+
+  const karma::scenes::SceneBakeResult open = karma::scenes::bakeScene(
+      fixture.document, fixture.document.bakes.front());
+  KARMA_REQUIRE(open.success);
+  std::string diagnostic;
+  const auto open_image = karma::assets::loadBakedRgba8Artifact(
+      fixture.directory /
+          producedAsset(open, "baked_irradiance_rgba8").path,
+      &diagnostic);
+  KARMA_REQUIRE(open_image.has_value());
+
+  auto& membership = fixture.document.entities.back()
+                         .components["StaticComponent"]["flags"];
+  membership = static_cast<uint32_t>(StaticComponentLighting |
+                                     StaticComponentShadows);
+  const karma::scenes::SceneBakeResult shadowed = karma::scenes::bakeScene(
+      fixture.document, fixture.document.bakes.front());
+  KARMA_REQUIRE(shadowed.success);
+  KARMA_REQUIRE(shadowed.diagnostic.empty());
+  const auto shadowed_image = karma::assets::loadBakedRgba8Artifact(
+      fixture.directory /
+          producedAsset(shadowed, "baked_irradiance_rgba8").path,
+      &diagnostic);
+  KARMA_REQUIRE(shadowed_image.has_value());
+  KARMA_REQUIRE(rgbSum(*shadowed_image) < rgbSum(*open_image));
+}
+
+void testPrefabFoliageStaticShadowOccluderKeepsPackageResident() {
+  using karma::components::StaticComponentLighting;
+  using karma::components::StaticComponentShadows;
+
+  LightingFixture fixture = lightingFixture(true, false);
+  fixture.document.static_components[1].casts_shadows = false;
+  fixture.document.bakes.front().lighting.directional = false;
+  addPrefabFoliageBlocker(
+      fixture, static_cast<uint32_t>(StaticComponentLighting));
+
+  const karma::scenes::SceneBakeResult open = karma::scenes::bakeScene(
+      fixture.document, fixture.document.bakes.front());
+  KARMA_REQUIRE(open.success);
+  std::string diagnostic;
+  const auto open_image = karma::assets::loadBakedRgba8Artifact(
+      fixture.directory /
+          producedAsset(open, "baked_irradiance_rgba8").path,
+      &diagnostic);
+  KARMA_REQUIRE(open_image.has_value());
+
+  fixture.document.entities.back().components["StaticComponent"]["flags"] =
+      static_cast<uint32_t>(StaticComponentLighting |
+                            StaticComponentShadows);
+  const karma::scenes::SceneBakeResult shadowed = karma::scenes::bakeScene(
+      fixture.document, fixture.document.bakes.front());
+  KARMA_REQUIRE(shadowed.success);
+  KARMA_REQUIRE(shadowed.diagnostic.empty());
+  const auto shadowed_image = karma::assets::loadBakedRgba8Artifact(
+      fixture.directory /
+          producedAsset(shadowed, "baked_irradiance_rgba8").path,
+      &diagnostic);
+  KARMA_REQUIRE(shadowed_image.has_value());
+  KARMA_REQUIRE(rgbSum(*shadowed_image) < rgbSum(*open_image));
+}
+
 void testArtifactTransactionPreservesPreviousBakeOnFailure() {
   LightingFixture fixture = lightingFixture(false, true);
   fixture.document.bakes.front().lighting.directional = false;
@@ -755,6 +943,114 @@ f 3 2 4
   KARMA_REQUIRE(prefab_changed != prefab_baseline);
 }
 
+void testSceneBakeFingerprintTracksFoliageDependencies() {
+  LightingFixture fixture = lightingFixture();
+  const std::filesystem::path sidecar_path =
+      fixture.directory / "foliage/fingerprint.kfoliage";
+  writeFoliageSidecar(
+      sidecar_path,
+      {karma::foliage::FoliageInstance{
+          .position = {0.0f, 0.0f, 0.0f},
+      }});
+  fixture.document.entities.push_back(karma::scenes::SceneEntity{
+      .id = "fingerprinted_foliage",
+      .name = "Fingerprinted Foliage",
+      .components = {
+          {"FoliageComponent",
+           {{"sidecar_path", "foliage/fingerprint.kfoliage"},
+            {"mesh_asset_key", "tests/bake/blocker"},
+            {"materials", nlohmann::json::array()},
+            {"chunk_size", 32.0f},
+            {"view_distance", 256.0f},
+            {"max_resident_instances", 100000u},
+            {"source_revision", 1u},
+            {"visible", true},
+            {"shadow_visible", true}}},
+      },
+  });
+
+  const std::string sidecar_baseline = karma::scenes::sceneBakeFingerprint(
+      fixture.document, fixture.document.bakes.front());
+  writeFoliageSidecar(
+      sidecar_path,
+      {karma::foliage::FoliageInstance{
+           .position = {0.0f, 0.0f, 0.0f},
+       },
+       karma::foliage::FoliageInstance{
+           .position = {2.0f, 0.0f, 0.0f},
+       }});
+  const std::string sidecar_changed = karma::scenes::sceneBakeFingerprint(
+      fixture.document, fixture.document.bakes.front());
+  KARMA_REQUIRE(sidecar_changed != sidecar_baseline);
+
+  const std::filesystem::path prefab_path =
+      fixture.directory / "foliage_tree.prefab.json";
+  writeText(prefab_path, R"({
+  "version": 2,
+  "root": 0,
+  "nodes": [{
+    "id": 0,
+    "name": "Foliage Tree",
+    "parent": null,
+    "components": {
+      "MeshComponent": {
+        "mesh_asset_key": "tests/bake/blocker",
+        "materials": [],
+        "visible": true,
+        "shadow_visible": true
+      },
+      "LODComponent": {
+        "levels": [{
+          "start_distance": 25.0,
+          "mesh_asset_key": "tests/bake/plane",
+          "materials": [],
+          "render_mode": "mesh",
+          "shadow_visible": false
+        }]
+      }
+    }
+  }]
+})");
+  auto& foliage = fixture.document.entities.back()
+                      .components["FoliageComponent"];
+  foliage.erase("mesh_asset_key");
+  foliage.erase("materials");
+  foliage["prefab_path"] = "foliage_tree.prefab.json";
+  foliage["prefab_variables"] = nlohmann::json::object();
+  const std::string prefab_baseline = karma::scenes::sceneBakeFingerprint(
+      fixture.document, fixture.document.bakes.front());
+
+  writeText(prefab_path, R"({
+  "version": 2,
+  "root": 0,
+  "nodes": [{
+    "id": 0,
+    "name": "Foliage Tree",
+    "parent": null,
+    "components": {
+      "MeshComponent": {
+        "mesh_asset_key": "tests/bake/blocker",
+        "materials": [],
+        "visible": true,
+        "shadow_visible": true
+      },
+      "LODComponent": {
+        "levels": [{
+          "start_distance": 35.0,
+          "mesh_asset_key": "tests/bake/plane",
+          "materials": [],
+          "render_mode": "mesh",
+          "shadow_visible": false
+        }]
+      }
+    }
+  }]
+})");
+  const std::string prefab_changed = karma::scenes::sceneBakeFingerprint(
+      fixture.document, fixture.document.bakes.front());
+  KARMA_REQUIRE(prefab_changed != prefab_baseline);
+}
+
 void testSceneBakeFingerprintIsPortableAcrossContentRoots() {
   LightingFixture first = lightingFixture();
   LightingFixture second = lightingFixture();
@@ -808,9 +1104,12 @@ int main() {
   testCpuLightingModesFilteringAndStageSelection();
   testShadowFilteringAndBvhWorkBound();
   testInstancedStaticShadowOccludersAndReceiverWarning();
+  testDirectFoliageStaticShadowOccluderUsesBaseDetail();
+  testPrefabFoliageStaticShadowOccluderKeepsPackageResident();
   testArtifactTransactionPreservesPreviousBakeOnFailure();
   testArtifactTransactionPreservesPreviousBakeOnCancellation();
   testSceneBakeFingerprintTracksPackageAndPrefabContent();
+  testSceneBakeFingerprintTracksFoliageDependencies();
   testSceneBakeFingerprintIsPortableAcrossContentRoots();
   return 0;
 }

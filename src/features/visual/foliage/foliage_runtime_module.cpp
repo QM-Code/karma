@@ -1,10 +1,14 @@
 #include "karma/foliage.h"
 
+#include "foliage_render_prototype.h"
+
 #include <algorithm>
 #include <cmath>
 #include <condition_variable>
 #include <deque>
+#include <filesystem>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 #include <unordered_map>
@@ -34,6 +38,33 @@ bool same(const math::Vec3& a, const math::Vec3& b) {
 
 bool same(const math::Quat& a, const math::Quat& b) {
   return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+}
+
+bool sameJson(const nlohmann::json& a, const nlohmann::json& b) {
+  return a == b;
+}
+
+bool sameLod(const std::optional<components::LodComponent>& a,
+             const std::optional<components::LodComponent>& b) {
+  if (a.has_value() != b.has_value()) return false;
+  if (!a.has_value()) return true;
+  if (a->levels.size() != b->levels.size()) return false;
+  for (std::size_t index = 0; index < a->levels.size(); ++index) {
+    const auto& left = a->levels[index];
+    const auto& right = b->levels[index];
+    const bool same_start_distance =
+        left.start_distance == right.start_distance ||
+        (std::isnan(left.start_distance) &&
+         std::isnan(right.start_distance));
+    if (!same_start_distance ||
+        left.mesh_asset_key != right.mesh_asset_key ||
+        left.materials != right.materials ||
+        left.render_mode != right.render_mode ||
+        left.shadow_visible != right.shadow_visible) {
+      return false;
+    }
+  }
+  return true;
 }
 
 float yawFromQuaternion(const math::Quat& quaternion) {
@@ -184,8 +215,9 @@ class FoliageRuntimeModule::Impl {
     return stats_;
   }
 
-  void attach() {
+  void attach(assets::AssetRegistry* assets) {
     stopWorker();
+    assets_ = assets;
     {
       std::lock_guard lock(queue_mutex_);
       stop_worker_ = false;
@@ -197,6 +229,7 @@ class FoliageRuntimeModule::Impl {
   void detach() {
     stopWorker();
     cleanupWorld();
+    assets_ = nullptr;
   }
 
   void update(world::World& world, float interpolation_alpha) {
@@ -271,14 +304,24 @@ class FoliageRuntimeModule::Impl {
 
   struct SourceState {
     world::Entity source{};
-    world::Entity proxy{};
+    world::Entity instance_set_proxy{};
+    std::vector<world::Entity> render_proxies;
     bool initialized = false;
     uint64_t generation = 0u;
     uint64_t source_revision = 0u;
     uint64_t reference_root_revision = 0u;
     uint64_t override_revision = 0u;
     std::filesystem::path authored_sidecar_path;
+    std::filesystem::path authored_prefab_path;
+    nlohmann::json authored_prefab_variables = nlohmann::json::object();
+    std::optional<components::LodComponent> authored_direct_lod;
     std::filesystem::path resolved_path;
+    std::filesystem::path resolved_prefab_path;
+    std::filesystem::file_time_type prefab_modified =
+        std::filesystem::file_time_type::min();
+    std::optional<assets::AssetPackageHandle> prefab_package;
+    std::vector<detail::FoliageRenderPrototypePart> prototype_parts;
+    bool prototype_valid = false;
     std::shared_ptr<const FoliageFileIndex> file_index;
     std::shared_ptr<const FoliageDocument> override_document;
     bool override_valid = false;
@@ -289,6 +332,7 @@ class FoliageRuntimeModule::Impl {
     std::set<FoliageChunkCoord> failed;
     std::string component_validation_error;
     bool proxy_dirty = true;
+    bool prototype_dirty = true;
     math::Vec3 last_position{};
     math::Quat last_rotation{};
     math::Vec3 last_scale{1.0f, 1.0f, 1.0f};
@@ -393,15 +437,51 @@ class FoliageRuntimeModule::Impl {
     SourceState& state = it->second;
     if (inserted) {
       state.source = source;
-      state.proxy = world.createEntity();
-      world.setName(state.proxy,
-                    "__karma_foliage_proxy_" + std::to_string(source.index));
-      components::InstancedMeshComponent proxy{};
-      proxy.gpu_layout = rendering::InstanceGpuLayout::PositionYawScaleParams;
-      proxy.dynamic = false;
-      world.add(state.proxy, std::move(proxy));
+      state.instance_set_proxy = world.createEntity();
+      world.setName(state.instance_set_proxy,
+                    "__karma_foliage_instances_" +
+                        std::to_string(source.index));
+      components::InstanceSetComponent instances{};
+      instances.gpu_layout =
+          rendering::InstanceGpuLayout::PositionYawScaleParams;
+      instances.dynamic = false;
+      world.add(state.instance_set_proxy, std::move(instances));
     }
     return state;
+  }
+
+  void releasePrototypePackage(SourceState& state) {
+    detail::releaseFoliageRenderPrototypePackage(
+        assets_, state.prefab_package);
+  }
+
+  bool rebuildPrototype(world::World& world,
+                        world::Entity source,
+                        const components::FoliageComponent& component,
+                        SourceState& state,
+                        const PublicSnapshot& snapshot) {
+    releasePrototypePackage(state);
+    state.prototype_parts.clear();
+    state.resolved_prefab_path.clear();
+    state.prefab_modified = std::filesystem::file_time_type::min();
+    detail::FoliageRenderPrototypeBuild built =
+        detail::buildFoliageRenderPrototype(world,
+                                            source,
+                                            component,
+                                            snapshot.reference_root,
+                                            assets_);
+    state.resolved_prefab_path = std::move(built.resolved_prefab_path);
+    state.prefab_modified = built.prefab_modified;
+    state.prefab_package = std::move(built.prefab_package);
+    state.prototype_parts = std::move(built.parts);
+    for (auto& diagnostic : built.diagnostics) {
+      addDiagnostic(source,
+                    std::move(diagnostic.path),
+                    std::move(diagnostic.message));
+    }
+    state.prototype_valid = built.success;
+    state.prototype_dirty = true;
+    return built.success;
   }
 
   void resetSource(world::World& world,
@@ -415,6 +495,13 @@ class FoliageRuntimeModule::Impl {
     state.reference_root_revision = snapshot.reference_root_revision;
     state.override_revision = snapshot.override_revision;
     state.authored_sidecar_path = component.sidecar_path;
+    state.authored_prefab_path = component.prefab_path;
+    state.authored_prefab_variables = component.prefab_variables;
+    state.authored_direct_lod =
+        world.has<components::LodComponent>(source)
+            ? std::optional<components::LodComponent>(
+                  world.get<components::LodComponent>(source))
+            : std::nullopt;
     state.override_document = snapshot.override_document;
     state.override_valid = false;
     state.file_index.reset();
@@ -424,7 +511,12 @@ class FoliageRuntimeModule::Impl {
     state.queued.clear();
     state.failed.clear();
     state.proxy_dirty = true;
+    state.prototype_dirty = true;
     state.resolved_path.clear();
+
+    if (!rebuildPrototype(world, source, component, state, snapshot)) {
+      return;
+    }
 
     if (snapshot.override_document != nullptr) {
       std::string error;
@@ -501,12 +593,41 @@ class FoliageRuntimeModule::Impl {
     }
 
     const PublicSnapshot snapshot = snapshotFor(source);
+    const std::optional<components::LodComponent> current_direct_lod =
+        world.has<components::LodComponent>(source)
+            ? std::optional<components::LodComponent>(
+                  world.get<components::LodComponent>(source))
+            : std::nullopt;
+    std::filesystem::path resolved_prefab = component.prefab_path;
+    if (!resolved_prefab.empty() && resolved_prefab.is_relative() &&
+        !snapshot.reference_root.empty()) {
+      resolved_prefab = snapshot.reference_root / resolved_prefab;
+    }
+    if (!resolved_prefab.empty()) {
+      resolved_prefab =
+          detail::resolveFoliagePrefabPath(std::move(resolved_prefab));
+    }
+    const bool prefab_changed_on_disk =
+        !resolved_prefab.empty() &&
+        (resolved_prefab != state.resolved_prefab_path ||
+         detail::foliagePrefabModifiedTime(resolved_prefab) !=
+             state.prefab_modified);
     if (!state.initialized || state.source_revision != component.source_revision ||
         state.authored_sidecar_path != component.sidecar_path ||
+        state.authored_prefab_path != component.prefab_path ||
+        !sameJson(state.authored_prefab_variables,
+                  component.prefab_variables) ||
+        !sameLod(state.authored_direct_lod, current_direct_lod) ||
+        prefab_changed_on_disk ||
         state.reference_root_revision != snapshot.reference_root_revision ||
         state.override_revision != snapshot.override_revision ||
         state.override_document != snapshot.override_document) {
       resetSource(world, source, component, state, snapshot);
+    }
+
+    if (!state.prototype_valid) {
+      suppressProxy(world, state);
+      return;
     }
 
     components::TransformComponent interpolated{};
@@ -675,24 +796,52 @@ class FoliageRuntimeModule::Impl {
   }
 
   void suppressProxy(world::World& world, SourceState& state) {
-    if (!world.isAlive(state.proxy) ||
-        !world.has<components::InstancedMeshComponent>(state.proxy)) {
-      return;
+    if (world.isAlive(state.instance_set_proxy) &&
+        world.has<components::InstanceSetComponent>(
+            state.instance_set_proxy)) {
+      auto& instances = world.get<components::InstanceSetComponent>(
+          state.instance_set_proxy);
+      const bool had_instances =
+          !instances.instances.empty() || !instances.planar_instances.empty();
+      instances.instances.clear();
+      instances.planar_instances.clear();
+      if (had_instances) {
+        ++instances.instance_revision;
+      }
     }
-    auto& proxy = world.get<components::InstancedMeshComponent>(state.proxy);
-    const bool had_instances =
-        !proxy.instances.empty() || !proxy.planar_instances.empty();
-    proxy.mesh_asset_key.clear();
-    proxy.materials.clear();
-    proxy.lods.clear();
-    proxy.instances.clear();
-    proxy.planar_instances.clear();
-    proxy.visible = false;
-    proxy.shadow_visible = false;
-    if (had_instances) {
-      ++proxy.instance_revision;
+    for (world::Entity proxy_entity : state.render_proxies) {
+      if (!world.isAlive(proxy_entity) ||
+          !world.has<components::InstancedMeshComponent>(proxy_entity)) {
+        continue;
+      }
+      auto& proxy =
+          world.get<components::InstancedMeshComponent>(proxy_entity);
+      proxy.visible = false;
+      proxy.shadow_visible = false;
     }
     state.proxy_dirty = false;
+  }
+
+  void syncRenderProxyCount(world::World& world, SourceState& state) {
+    while (state.render_proxies.size() > state.prototype_parts.size()) {
+      const world::Entity entity = state.render_proxies.back();
+      if (world.isAlive(entity)) {
+        world.destroyEntity(entity);
+      }
+      state.render_proxies.pop_back();
+    }
+    while (state.render_proxies.size() < state.prototype_parts.size()) {
+      const std::size_t index = state.render_proxies.size();
+      const world::Entity entity = world.createEntity();
+      world.setName(entity,
+                    "__karma_foliage_batch_" +
+                        std::to_string(state.source.index) + "_" +
+                        std::to_string(index));
+      components::InstancedMeshComponent batch{};
+      batch.instance_source = state.instance_set_proxy;
+      world.add(entity, std::move(batch));
+      state.render_proxies.push_back(entity);
+    }
   }
 
   void syncProxy(world::World& world,
@@ -700,41 +849,72 @@ class FoliageRuntimeModule::Impl {
                  SourceState& state,
                  const components::TransformComponent* transform,
                  bool visible) {
-    if (!world.isAlive(state.proxy) ||
-        !world.has<components::InstancedMeshComponent>(state.proxy)) {
-      state.proxy = world.createEntity();
-      components::InstancedMeshComponent proxy{};
-      proxy.gpu_layout = rendering::InstanceGpuLayout::PositionYawScaleParams;
-      proxy.dynamic = false;
-      world.add(state.proxy, std::move(proxy));
+    if (!world.isAlive(state.instance_set_proxy) ||
+        !world.has<components::InstanceSetComponent>(
+            state.instance_set_proxy)) {
+      state.instance_set_proxy = world.createEntity();
+      components::InstanceSetComponent instances{};
+      instances.gpu_layout =
+          rendering::InstanceGpuLayout::PositionYawScaleParams;
+      instances.dynamic = false;
+      world.add(state.instance_set_proxy, std::move(instances));
       state.proxy_dirty = true;
     }
-    auto& proxy = world.get<components::InstancedMeshComponent>(state.proxy);
-    proxy.mesh_asset_key = source.mesh_asset_key;
-    proxy.materials = source.materials;
-    proxy.lods = source.lods;
-    proxy.gpu_layout = rendering::InstanceGpuLayout::PositionYawScaleParams;
-    proxy.dynamic = false;
-    proxy.visible = visible;
-    proxy.shadow_visible = source.shadow_visible;
-    if (!state.proxy_dirty) {
-      return;
-    }
-    proxy.instances.clear();
-    proxy.planar_instances.clear();
-    std::size_t count = 0u;
-    for (const auto& [coord, instances] : state.resident) {
-      (void)coord;
-      count += instances.size();
-    }
-    proxy.planar_instances.reserve(count);
-    for (const auto& [coord, instances] : state.resident) {
-      (void)coord;
-      for (const FoliageInstance& instance : instances) {
-        proxy.planar_instances.push_back(makeProxyInstance(instance, transform));
+    syncRenderProxyCount(world, state);
+    for (std::size_t index = 0; index < state.prototype_parts.size(); ++index) {
+      const detail::FoliageRenderPrototypePart& part =
+          state.prototype_parts[index];
+      const world::Entity proxy_entity = state.render_proxies[index];
+      auto& proxy =
+          world.get<components::InstancedMeshComponent>(proxy_entity);
+      proxy.mesh_asset_key = part.mesh.mesh_asset_key;
+      proxy.materials = part.mesh.materials;
+      proxy.instance_source = state.instance_set_proxy;
+      proxy.local_position = part.local_position;
+      proxy.local_rotation = part.local_rotation;
+      proxy.local_scale = part.local_scale;
+      proxy.visible = visible && part.mesh.visible;
+      proxy.shadow_visible = proxy.visible && source.shadow_visible &&
+                             part.mesh.shadow_visible;
+
+      if (part.lod.has_value()) {
+        world.add(proxy_entity, *part.lod);
+      } else if (world.has<components::LodComponent>(proxy_entity)) {
+        world.remove<components::LodComponent>(proxy_entity);
+      }
+      if (!part.render_tags.empty()) {
+        components::RenderTagsComponent tags{};
+        tags.tags = part.render_tags;
+        world.add(proxy_entity, std::move(tags));
+      } else if (world.has<components::RenderTagsComponent>(proxy_entity)) {
+        world.remove<components::RenderTagsComponent>(proxy_entity);
       }
     }
-    ++proxy.instance_revision;
+    state.prototype_dirty = false;
+
+    if (state.proxy_dirty) {
+      auto& instances = world.get<components::InstanceSetComponent>(
+          state.instance_set_proxy);
+      instances.gpu_layout =
+          rendering::InstanceGpuLayout::PositionYawScaleParams;
+      instances.dynamic = false;
+      instances.instances.clear();
+      instances.planar_instances.clear();
+      std::size_t count = 0u;
+      for (const auto& [coord, resident] : state.resident) {
+        (void)coord;
+        count += resident.size();
+      }
+      instances.planar_instances.reserve(count);
+      for (const auto& [coord, resident] : state.resident) {
+        (void)coord;
+        for (const FoliageInstance& instance : resident) {
+          instances.planar_instances.push_back(
+              makeProxyInstance(instance, transform));
+        }
+      }
+      ++instances.instance_revision;
+    }
     state.proxy_dirty = false;
   }
 
@@ -863,9 +1043,16 @@ class FoliageRuntimeModule::Impl {
   }
 
   void destroyState(world::World& world, SourceState& state) {
-    if (world.isAlive(state.proxy)) {
-      world.destroyEntity(state.proxy);
+    for (world::Entity proxy : state.render_proxies) {
+      if (world.isAlive(proxy)) {
+        world.destroyEntity(proxy);
+      }
     }
+    state.render_proxies.clear();
+    if (world.isAlive(state.instance_set_proxy)) {
+      world.destroyEntity(state.instance_set_proxy);
+    }
+    releasePrototypePackage(state);
   }
 
   void cleanupWorld() {
@@ -875,6 +1062,11 @@ class FoliageRuntimeModule::Impl {
       for (auto& [key, state] : sources_) {
         (void)key;
         destroyState(*world, state);
+      }
+    } else {
+      for (auto& [key, state] : sources_) {
+        (void)key;
+        releasePrototypePackage(state);
       }
     }
     sources_.clear();
@@ -909,6 +1101,7 @@ class FoliageRuntimeModule::Impl {
   FoliageRuntimeStats stats_{};
 
   std::unordered_map<uint64_t, SourceState> sources_;
+  assets::AssetRegistry* assets_ = nullptr;
   world::World::LifetimeHandle last_world_;
   uint64_t last_world_id_ = 0u;
 
@@ -960,8 +1153,8 @@ FoliageRuntimeStats FoliageRuntimeModule::stats() const {
   return impl_->stats();
 }
 
-void FoliageRuntimeModule::onAttach(const app::RuntimeModuleContext&) {
-  impl_->attach();
+void FoliageRuntimeModule::onAttach(const app::RuntimeModuleContext& context) {
+  impl_->attach(context.assets);
 }
 
 void FoliageRuntimeModule::onDetach() {

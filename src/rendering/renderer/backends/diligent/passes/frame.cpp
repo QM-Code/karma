@@ -27,6 +27,8 @@
 namespace karma::rendering::backend {
 
 namespace {
+
+constexpr size_t kMaxRendererLodLevels = 3u;
 constexpr double kWrappedShaderTimeSeconds = 4096.0;
 
 bool envFlagEnabled(std::string_view value) {
@@ -143,6 +145,38 @@ bool materialBindingsEqual(const std::vector<rendering::DrawMaterialBinding>& a,
          });
 }
 
+template <typename LodRecord>
+bool lodDrawsEqual(const std::vector<LodRecord>& records,
+                   const std::vector<rendering::LodDrawDesc>& draws) {
+  const size_t draw_count = std::min(draws.size(), kMaxRendererLodLevels);
+  if (records.size() != draw_count) {
+    return false;
+  }
+  for (size_t index = 0u; index < records.size(); ++index) {
+    const LodRecord& record = records[index];
+    const rendering::LodDrawDesc& draw = draws[index];
+    if (record.start_distance != draw.start_distance ||
+        record.mesh != draw.mesh ||
+        record.material != draw.material ||
+        !materialBindingsEqual(record.materials, draw.materials) ||
+        record.render_mode != draw.render_mode ||
+        record.shadow_visible != draw.shadow_visible) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <typename LodRecord>
+bool anyLodCastsShadow(const std::vector<LodRecord>& lods) {
+  const size_t lod_count = std::min(lods.size(), kMaxRendererLodLevels);
+  return std::any_of(lods.begin(),
+                     lods.begin() + static_cast<std::ptrdiff_t>(lod_count),
+                     [](const LodRecord& lod) {
+    return lod.shadow_visible;
+  });
+}
+
 Diligent::TEXTURE_FORMAT resolveDepthSrvFormat(Diligent::TEXTURE_FORMAT depth_format) {
   switch (depth_format) {
     case Diligent::TEX_FORMAT_D32_FLOAT:
@@ -191,6 +225,8 @@ void DiligentBackend::beginFrame(const rendering::FrameInfo& frame) {
   }
   particle_pass_stats_ = {};
   instancing_stats_ = {};
+  ++instancing_frame_serial_;
+  if (instancing_frame_serial_ == 0u) ++instancing_frame_serial_;
   last_frame_delta_seconds_ = std::max(frame.delta_time, 0.0f);
   accumulated_time_seconds_ += static_cast<double>(std::max(frame.delta_time, 0.0f));
   if (accumulated_time_seconds_ >= kWrappedShaderTimeSeconds) {
@@ -288,8 +324,12 @@ void DiligentBackend::prewarmRendererResources(bool include_ui) {
                         rendering::InstanceGpuLayout::Matrix4x4Params);
   ensureForwardPipeline(ForwardPipelineVariant::DepthPrepass,
                         rendering::InstanceGpuLayout::PositionYawScaleParams);
-  ensureInstancedGpuCullingResources();
-  ensureInstancedGpuLodCullingResources();
+  for (const rendering::InstanceGpuLayout layout : {
+           rendering::InstanceGpuLayout::Matrix4x4Params,
+           rendering::InstanceGpuLayout::PositionYawScaleParams}) {
+    ensureInstancedGpuCullingResources(layout);
+    ensureInstancedGpuLodCullingResources(layout);
+  }
   if (!shadow_pipeline_state_) {
     recreateShadowPipeline();
   }
@@ -1511,7 +1551,8 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
   if (meshes_.find(item.mesh) == meshes_.end()) {
     auto stale_it = instances_.find(item.instance);
     if (stale_it != instances_.end()) {
-      if (stale_it->second.shadow_visible) {
+      if (stale_it->second.shadow_visible ||
+          anyLodCastsShadow(stale_it->second.lods)) {
         directional_shadow_scene_dirty_ = true;
         point_shadow_scene_dirty_ = true;
       }
@@ -1530,14 +1571,20 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
   const bool shadow_material_changed =
       record.material != item.material ||
       !materialBindingsEqual(record.materials, item.materials);
+  const bool shadow_lods_changed = !lodDrawsEqual(record.lods, item.lods);
+  const bool previous_casts_shadow =
+      record.shadow_visible || anyLodCastsShadow(record.lods);
+  const bool submitted_casts_shadow =
+      item.shadow_visible || anyLodCastsShadow(item.lods);
   const bool shadow_scene_changed =
-      new_record ? item.shadow_visible
+      new_record ? submitted_casts_shadow
                  : ((record.layer != item.layer ||
                      mesh_changed ||
                      shadow_material_changed ||
+                     shadow_lods_changed ||
                      record.deformation != item.deformation ||
                      record.shadow_visible != item.shadow_visible) &&
-                    (record.shadow_visible || item.shadow_visible));
+                    (previous_casts_shadow || submitted_casts_shadow));
   if (shadow_scene_changed) {
     directional_shadow_scene_dirty_ = true;
     point_shadow_scene_dirty_ = true;
@@ -1549,6 +1596,23 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
   record.mesh = item.mesh;
   record.material = item.material;
   record.materials = item.materials;
+  const size_t lod_count = std::min(item.lods.size(), kMaxRendererLodLevels);
+  if (record.lods.size() > lod_count) record.lods.resize(lod_count);
+  record.lods.reserve(lod_count);
+  for (size_t lod_index = 0; lod_index < lod_count; ++lod_index) {
+    if (lod_index >= record.lods.size()) record.lods.emplace_back();
+    const rendering::LodDrawDesc& item_lod = item.lods[lod_index];
+    InstanceRecord::LodRecord& lod = record.lods[lod_index];
+    lod.start_distance = item_lod.start_distance;
+    lod.mesh = item_lod.mesh;
+    lod.material = item_lod.material;
+    lod.materials = item_lod.materials;
+    lod.render_mode = item_lod.render_mode;
+    lod.bounds_center = item_lod.bounds_center;
+    lod.bounds_radius = item_lod.bounds_radius;
+    lod.bounds_valid = item_lod.bounds_valid;
+    lod.shadow_visible = item_lod.shadow_visible;
+  }
   record.render_tags = item.render_tags;
   record.deformation = item.deformation;
   record.transform = item.transform;
@@ -1563,20 +1627,63 @@ void DiligentBackend::submit(const rendering::DrawItem& item) {
 
 void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) {
   const size_t item_instance_count = item.instanceCount();
-  if (item.instance == rendering::kInvalidInstance) {
+  if (item.instance == rendering::kInvalidInstance ||
+      item.instance_set == rendering::kInvalidInstance) {
     return;
   }
 
   if (item_instance_count == 0u || meshes_.find(item.mesh) == meshes_.end()) {
     auto stale_it = instanced_records_.find(item.instance);
     if (stale_it != instanced_records_.end()) {
-      if (stale_it->second.shadow_visible) {
+      if (stale_it->second.shadow_visible ||
+          anyLodCastsShadow(stale_it->second.lods)) {
         directional_shadow_scene_dirty_ = true;
         point_shadow_scene_dirty_ = true;
       }
       instanced_records_.erase(stale_it);
     }
     return;
+  }
+
+  auto source_it = instance_sets_.find(item.instance_set);
+  const bool new_source = source_it == instance_sets_.end();
+  if (new_source) {
+    source_it = instance_sets_.emplace(item.instance_set, InstanceSetRecord{}).first;
+  }
+  InstanceSetRecord& source = source_it->second;
+  const bool first_source_submission =
+      source.last_submission_frame != instancing_frame_serial_;
+  if (first_source_submission) {
+    source.last_submission_frame = instancing_frame_serial_;
+    source.submitted_batch_count = 0u;
+    instancing_stats_.submitted_instance_sets += 1u;
+  }
+  ++source.submitted_batch_count;
+  if (source.submitted_batch_count > 1u) {
+    instancing_stats_.shared_instance_batches += 1u;
+  }
+  const bool source_payload_changed =
+      new_source ||
+      source.gpu_layout != item.gpu_layout ||
+      source.revision != item.revision ||
+      source.instanceCount() != item_instance_count ||
+      ((item.payload_changed || item.dynamic) && first_source_submission);
+  if (source_payload_changed) {
+    source.gpu_layout = item.gpu_layout;
+    source.revision = item.revision;
+    source.dynamic = item.dynamic;
+    source.instances.clear();
+    source.planar_instances.clear();
+    if (item.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
+      source.planar_instances.assign(item.planar_instances.begin(),
+                                     item.planar_instances.end());
+    } else {
+      source.instances.assign(item.instances.begin(), item.instances.end());
+    }
+    source.instance_buffer_dirty = true;
+    if (!source.dynamic) ensureInstanceSetBuffer(source);
+  } else {
+    source.dynamic = item.dynamic;
   }
 
   auto it = instanced_records_.find(item.instance);
@@ -1588,42 +1695,47 @@ void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) 
   const bool shadow_material_changed =
       record.material != item.material ||
       !materialBindingsEqual(record.materials, item.materials);
+  const bool shadow_lods_changed = !lodDrawsEqual(record.lods, item.lods);
+  const bool previous_casts_shadow =
+      record.shadow_visible || anyLodCastsShadow(record.lods);
+  const bool submitted_casts_shadow =
+      item.shadow_visible || anyLodCastsShadow(item.lods);
   const bool shadow_scene_changed =
-      new_record ? item.shadow_visible
+      new_record ? submitted_casts_shadow
                  : ((record.layer != item.layer ||
+                     record.instance_set != item.instance_set ||
                      record.mesh != item.mesh ||
+                     matrixChangedBeyondEpsilon(record.batch_transform,
+                                                item.batch_transform) ||
                      shadow_material_changed ||
+                     shadow_lods_changed ||
                      record.shadow_visible != item.shadow_visible) &&
-                    (record.shadow_visible || item.shadow_visible));
+                    (previous_casts_shadow || submitted_casts_shadow));
   if (shadow_scene_changed) {
     directional_shadow_scene_dirty_ = true;
     point_shadow_scene_dirty_ = true;
   }
-  const bool payload_changed = item.payload_changed ||
-                               item.dynamic ||
-                               record.mesh != item.mesh ||
-                               record.revision != item.revision ||
-                               record.gpu_layout != item.gpu_layout ||
-                               record.instanceCount() != item_instance_count;
-  if (payload_changed &&
-      (item.shadow_visible || (!new_record && record.shadow_visible))) {
+  if (source_payload_changed &&
+      (submitted_casts_shadow || (!new_record && previous_casts_shadow))) {
     directional_shadow_scene_dirty_ = true;
     point_shadow_scene_dirty_ = true;
   }
   record.layer = item.layer;
+  record.instance_set = item.instance_set;
   record.mesh = item.mesh;
   record.material = item.material;
   record.materials = item.materials;
   record.render_tags = item.render_tags;
-  if (record.lods.size() > item.lods.size()) {
-    record.lods.resize(item.lods.size());
+  const size_t lod_count = std::min(item.lods.size(), kMaxRendererLodLevels);
+  if (record.lods.size() > lod_count) {
+    record.lods.resize(lod_count);
   }
-  record.lods.reserve(item.lods.size());
-  for (size_t lod_index = 0; lod_index < item.lods.size(); ++lod_index) {
+  record.lods.reserve(lod_count);
+  for (size_t lod_index = 0; lod_index < lod_count; ++lod_index) {
     if (lod_index >= record.lods.size()) {
       record.lods.emplace_back();
     }
-    const rendering::InstancedLodDrawDesc& item_lod = item.lods[lod_index];
+    const rendering::LodDrawDesc& item_lod = item.lods[lod_index];
     InstancedRecord::LodRecord& lod = record.lods[lod_index];
     lod.start_distance = item_lod.start_distance;
     lod.mesh = item_lod.mesh;
@@ -1635,34 +1747,19 @@ void DiligentBackend::submitInstanced(const rendering::InstancedDrawItem& item) 
     lod.bounds_valid = item_lod.bounds_valid;
     lod.shadow_visible = item_lod.shadow_visible;
   }
-  record.gpu_layout = item.gpu_layout;
-  record.revision = item.revision;
+  record.batch_transform = item.batch_transform;
   record.bounds_center = item.bounds_center;
   record.bounds_radius = item.bounds_radius;
   record.bounds_valid = item.bounds_valid;
-  record.dynamic = item.dynamic;
   record.visible = item.visible;
   record.shadow_visible = item.shadow_visible;
-  if (payload_changed) {
-    record.instances.clear();
-    record.planar_instances.clear();
-    if (item.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
-      record.planar_instances.assign(item.planar_instances.begin(), item.planar_instances.end());
-    } else {
-      record.instances.assign(item.instances.begin(), item.instances.end());
-    }
-    record.instance_buffer_dirty = true;
-    if (!record.dynamic) {
-      ensureInstancedRecordBuffer(record);
-    }
-  }
   instancing_stats_.submitted_batches += 1u;
   instancing_stats_.submitted_instances +=
       static_cast<uint32_t>(std::min<size_t>(item_instance_count,
                                              std::numeric_limits<uint32_t>::max()));
 }
 
-bool DiligentBackend::ensureInstancedRecordBuffer(InstancedRecord& record) {
+bool DiligentBackend::ensureInstanceSetBuffer(InstanceSetRecord& record) {
   if (!device_ || !context_ || record.instanceCount() == 0u) {
     return false;
   }
@@ -1682,6 +1779,12 @@ bool DiligentBackend::ensureInstancedRecordBuffer(InstancedRecord& record) {
     return false;
   }
 
+  if (record.instance_buffer_layout != record.gpu_layout) {
+    record.instance_buffer.Release();
+    record.instance_srv.Release();
+    record.instance_buffer_capacity_bytes = 0u;
+    record.instance_buffer_layout = record.gpu_layout;
+  }
   if (!record.instance_buffer || record.instance_buffer_capacity_bytes < payload_bytes) {
     const size_t next_capacity =
         std::max(payload_bytes,
@@ -1730,11 +1833,6 @@ bool DiligentBackend::ensureInstancedRecordBuffer(InstancedRecord& record) {
     instancing_stats_.instance_upload_ms +=
         static_cast<float>(core::elapsedMilliseconds(upload_start, upload_end));
     record.instance_buffer_dirty = false;
-  }
-  if (!record.dynamic &&
-      record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams &&
-      instancedGpuCullingEnabled()) {
-    ensureInstancedGpuCullingRecordBuffers(record);
   }
   return record.instance_buffer != nullptr && record.instance_srv != nullptr;
 }
@@ -1862,7 +1960,8 @@ void DiligentBackend::retireInstance(rendering::InstanceId instance) {
   }
   auto instance_it = instances_.find(instance);
   if (instance_it != instances_.end()) {
-    if (instance_it->second.shadow_visible) {
+    if (instance_it->second.shadow_visible ||
+        anyLodCastsShadow(instance_it->second.lods)) {
       directional_shadow_scene_dirty_ = true;
       point_shadow_scene_dirty_ = true;
     }
@@ -1870,7 +1969,8 @@ void DiligentBackend::retireInstance(rendering::InstanceId instance) {
   }
   auto instanced_it = instanced_records_.find(instance);
   if (instanced_it != instanced_records_.end()) {
-    if (instanced_it->second.shadow_visible) {
+    if (instanced_it->second.shadow_visible ||
+        anyLodCastsShadow(instanced_it->second.lods)) {
       directional_shadow_scene_dirty_ = true;
       point_shadow_scene_dirty_ = true;
     }
@@ -1891,6 +1991,22 @@ void DiligentBackend::retireInstance(rendering::InstanceId instance) {
     particle_emitter_runtime_states_.erase(particle_it);
   }
   particle_beam_runtime_states_.erase(static_cast<uint64_t>(instance));
+}
+
+void DiligentBackend::retireInstanceSet(rendering::InstanceId instance_set) {
+  if (instance_set == rendering::kInvalidInstance) return;
+  instance_sets_.erase(instance_set);
+  for (auto it = instanced_records_.begin(); it != instanced_records_.end();) {
+    if (it->second.instance_set != instance_set) {
+      ++it;
+      continue;
+    }
+    if (it->second.shadow_visible || anyLodCastsShadow(it->second.lods)) {
+      directional_shadow_scene_dirty_ = true;
+      point_shadow_scene_dirty_ = true;
+    }
+    it = instanced_records_.erase(it);
+  }
 }
 
 void DiligentBackend::drawLine(const math::Vec3& start, const math::Vec3& end,

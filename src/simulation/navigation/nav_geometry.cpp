@@ -78,34 +78,59 @@ void appendMesh(NavMeshInputGeometry& out,
 template <class Mesh>
 void appendInstancedMesh(NavMeshInputGeometry& geometry,
                          const Mesh& mesh,
-                         const components::InstancedMeshComponent& instanced,
+                         const components::InstanceSetComponent& instances,
                          const glm::mat4& owner_transform,
+                         const glm::mat4& batch_transform,
                          unsigned char area) {
-  switch (instanced.gpu_layout) {
+  switch (instances.gpu_layout) {
     case rendering::InstanceGpuLayout::Matrix4x4Params:
-      for (const components::MeshInstance& instance : instanced.instances) {
+      for (const components::MeshInstance& instance : instances.instances) {
         appendMesh(geometry,
                    mesh,
                    owner_transform *
                        makeTransform(instance.position,
                                      instance.rotation,
-                                     instance.scale),
+                                     instance.scale) *
+                       batch_transform,
                    area);
       }
       break;
     case rendering::InstanceGpuLayout::PositionYawScaleParams:
       for (const components::PlanarMeshInstance& instance :
-           instanced.planar_instances) {
+           instances.planar_instances) {
         glm::mat4 transform = glm::translate(
             glm::mat4(1.0f), math::toGlm(instance.position));
         transform = glm::rotate(transform,
                                 instance.yaw_radians,
                                 glm::vec3(0.0f, 1.0f, 0.0f));
         transform = glm::scale(transform, math::toGlm(instance.scale));
-        appendMesh(geometry, mesh, owner_transform * transform, area);
+        appendMesh(geometry,
+                   mesh,
+                   owner_transform * transform * batch_transform,
+                   area);
       }
       break;
   }
+}
+
+glm::mat4 instancedBatchTransform(
+    const components::InstancedMeshComponent& component) {
+  return makeTransform(component.local_position,
+                       component.local_rotation,
+                       component.local_scale);
+}
+
+const components::InstanceSetComponent* resolveInstanceSet(
+    const world::World& world,
+    world::Entity renderer,
+    const components::InstancedMeshComponent& component,
+    world::Entity& source) {
+  source = component.instance_source.isValid() ? component.instance_source
+                                               : renderer;
+  return world.isAlive(source) &&
+                 world.has<components::InstanceSetComponent>(source)
+             ? &world.get<components::InstanceSetComponent>(source)
+             : nullptr;
 }
 
 void appendOffMeshLinks(NavMeshInputGeometry& geometry,
@@ -215,11 +240,34 @@ NavMeshInputGeometry collectNavMeshGeometry(const world::World& world,
         const unsigned char area = surface.walkable ? surface.area : kNavAreaNull;
         const auto append_surface_mesh = [&](const auto& mesh) {
           if (world.has<components::InstancedMeshComponent>(entity)) {
+            const auto& instanced =
+                world.get<components::InstancedMeshComponent>(entity);
+            world::Entity instance_source{};
+            const components::InstanceSetComponent* instance_set =
+                resolveInstanceSet(
+                    world, entity, instanced, instance_source);
+            if (instance_set == nullptr) {
+              return;
+            }
+            const glm::mat4 instance_owner_transform =
+                world.has<components::TransformComponent>(instance_source)
+                    ? makeTransform(
+                          world.get<components::TransformComponent>(
+                                   instance_source)
+                              .getPosition(),
+                          world.get<components::TransformComponent>(
+                                   instance_source)
+                              .getRotation(),
+                          world.get<components::TransformComponent>(
+                                   instance_source)
+                              .getScale())
+                    : glm::mat4(1.0f);
             appendInstancedMesh(
                 geometry,
                 mesh,
-                world.get<components::InstancedMeshComponent>(entity),
-                world_transform,
+                *instance_set,
+                instance_owner_transform,
+                instancedBatchTransform(instanced),
                 area);
           } else {
             appendMesh(geometry, mesh, world_transform, area);

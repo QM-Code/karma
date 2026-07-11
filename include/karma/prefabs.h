@@ -139,11 +139,47 @@ struct PrefabLoadResult {
   explicit operator bool() const { return success(); }
 };
 
+/// Result of validated, atomic `PrefabDocument` persistence.
+struct PrefabDocumentSaveResult {
+  std::filesystem::path path;
+  std::vector<std::string> diagnostics;
+
+  bool success() const { return diagnostics.empty(); }
+  explicit operator bool() const { return success(); }
+};
+
+/// Result of an explicit in-memory legacy render-component migration.
+struct LegacyRenderComponentMigrationResult {
+  bool changed = false;
+  std::vector<std::string> diagnostics;
+
+  bool success() const { return diagnostics.empty(); }
+  explicit operator bool() const { return success(); }
+};
+
 /// \ingroup karma_prefabs
 /// Loads and validates a prefab document without creating runtime state.
 ///
 /// A directory or extensionless path resolves to its `prefab.json` child.
 PrefabLoadResult loadPrefabDocument(const std::filesystem::path& path);
+
+/// Validates and atomically writes a prefab document.
+///
+/// The destination is replaced only after a sibling temporary file has been
+/// fully written. Invalid documents leave the destination unchanged.
+PrefabDocumentSaveResult savePrefabDocument(
+    const PrefabDocument& document,
+    const std::filesystem::path& path);
+
+/// Explicitly migrates legacy instancing/LOD fields in one raw `components`
+/// object. The input is unchanged when validation or a sibling conflict fails.
+LegacyRenderComponentMigrationResult migrateLegacyRenderComponentsJson(
+    nlohmann::json& components);
+
+/// Applies `migrateLegacyRenderComponentsJson` to every node in a raw prefab
+/// document. This authoring helper is never invoked implicitly by loaders.
+LegacyRenderComponentMigrationResult migrateLegacyPrefabJson(
+    nlohmann::json& prefab_json);
 
 /// \ingroup karma_prefabs
 /// Options controlling prefab save traversal.

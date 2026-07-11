@@ -2,6 +2,9 @@
 
 #include "scene_runtime_assets.h"
 
+#include "karma/foliage.h"
+#include "karma/prefabs.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -103,8 +106,33 @@ glm::mat4 instanceMatrix(const components::PlanarMeshInstance& instance) {
   return glm::scale(matrix, math::toGlm(instance.scale));
 }
 
-size_t authoredInstanceCount(
+glm::mat4 instanceMatrix(const foliage::FoliageInstance& instance) {
+  glm::mat4 matrix =
+      glm::translate(glm::mat4(1.0f), math::toGlm(instance.position));
+  matrix = glm::rotate(
+      matrix, instance.yaw_radians, glm::vec3(0.0f, 1.0f, 0.0f));
+  return glm::scale(matrix, math::toGlm(instance.scale));
+}
+
+world::Entity instanceSourceEntity(
+    world::Entity renderer,
     const components::InstancedMeshComponent& component) {
+  return component.instance_source.isValid() ? component.instance_source
+                                             : renderer;
+}
+
+const components::InstanceSetComponent* instanceSetFor(
+    const world::World& world,
+    world::Entity renderer,
+    const components::InstancedMeshComponent& component) {
+  const world::Entity source = instanceSourceEntity(renderer, component);
+  return world.isAlive(source) &&
+                 world.has<components::InstanceSetComponent>(source)
+             ? &world.get<components::InstanceSetComponent>(source)
+             : nullptr;
+}
+
+size_t authoredInstanceCount(const components::InstanceSetComponent& component) {
   switch (component.gpu_layout) {
     case rendering::InstanceGpuLayout::Matrix4x4Params:
       return component.instances.size();
@@ -112,6 +140,13 @@ size_t authoredInstanceCount(
       return component.planar_instances.size();
   }
   return 0u;
+}
+
+glm::mat4 batchMatrix(const components::InstancedMeshComponent& component) {
+  glm::mat4 matrix = glm::translate(
+      glm::mat4(1.0f), math::toGlm(component.local_position));
+  matrix *= glm::mat4_cast(math::toGlm(component.local_rotation));
+  return glm::scale(matrix, math::toGlm(component.local_scale));
 }
 
 glm::vec3 transformPoint(const glm::mat4& matrix, const glm::vec3& point) {
@@ -953,7 +988,10 @@ std::vector<BakeTarget> collectTargets(const SceneInstantiateResult& instance,
     if (world.has<components::InstancedMeshComponent>(entity)) {
       const auto& instanced =
           world.get<components::InstancedMeshComponent>(entity);
-      if (instanced.visible && authoredInstanceCount(instanced) != 0u) {
+      const components::InstanceSetComponent* instance_set =
+          instanceSetFor(world, entity, instanced);
+      if (instanced.visible && instance_set != nullptr &&
+          authoredInstanceCount(*instance_set) != 0u) {
         result.lighting_warnings.push_back(
             "Static Lighting receiver '" + owner_id +
             "' uses InstancedMeshComponent and was excluded; the current "
@@ -1037,10 +1075,200 @@ bool appendOccluderMesh(const world::MeshData& mesh,
   return true;
 }
 
+struct FoliageBakePart {
+  const world::MeshData* mesh = nullptr;
+  glm::mat4 local_transform{1.0f};
+};
+
+struct FoliageBakePrototype {
+  assets::AssetRegistry* assets = nullptr;
+  std::optional<assets::AssetPackageHandle> package;
+  std::vector<FoliageBakePart> parts;
+
+  FoliageBakePrototype() = default;
+  FoliageBakePrototype(const FoliageBakePrototype&) = delete;
+  FoliageBakePrototype& operator=(const FoliageBakePrototype&) = delete;
+  FoliageBakePrototype(FoliageBakePrototype&& other) noexcept
+      : assets(other.assets),
+        package(std::move(other.package)),
+        parts(std::move(other.parts)) {
+    other.assets = nullptr;
+    other.package.reset();
+  }
+  FoliageBakePrototype& operator=(FoliageBakePrototype&&) = delete;
+  ~FoliageBakePrototype() {
+    if (assets != nullptr && package.has_value()) {
+      assets->sharedPackageStore().releasePackage(*package);
+    }
+  }
+};
+
+std::optional<FoliageBakePrototype> foliageBakeParts(
+    const components::FoliageComponent& component,
+    assets::AssetRegistry& assets,
+    SceneBakeResult& result) {
+  FoliageBakePrototype prototype{};
+  if (component.prefab_path.empty()) {
+    const world::MeshData* mesh =
+        assets.findMeshAsset(component.mesh_asset_key);
+    if (mesh == nullptr) {
+      result.diagnostic =
+          "static foliage references missing base mesh asset '" +
+          component.mesh_asset_key + "'";
+      return std::nullopt;
+    }
+    prototype.parts.push_back(FoliageBakePart{.mesh = mesh});
+    return std::optional<FoliageBakePrototype>(std::move(prototype));
+  }
+
+  std::filesystem::path prefab_path = component.prefab_path;
+  std::error_code filesystem_error;
+  if (std::filesystem::is_directory(prefab_path, filesystem_error) ||
+      prefab_path.extension().empty()) {
+    prefab_path /= "prefab.json";
+  }
+  if (filesystem_error) {
+    result.diagnostic = "failed to inspect static foliage prefab '" +
+                        component.prefab_path.string() + "': " +
+                        filesystem_error.message();
+    return std::nullopt;
+  }
+  prefab_path = prefab_path.lexically_normal();
+  const std::filesystem::path package_manifest =
+      assets::resolveAssetPackagePath(prefab_path.parent_path());
+  if (std::filesystem::exists(package_manifest, filesystem_error)) {
+    std::string package_error;
+    prototype.package = assets.sharedPackageStore().acquirePackage(
+        package_manifest, &package_error);
+    if (!prototype.package.has_value()) {
+      result.diagnostic =
+          "failed to acquire static foliage prefab package '" +
+          package_manifest.string() + "': " + package_error;
+      return std::nullopt;
+    }
+    prototype.assets = &assets;
+  } else if (filesystem_error) {
+    result.diagnostic = "failed to inspect static foliage prefab package '" +
+                        package_manifest.string() + "': " +
+                        filesystem_error.message();
+    return std::nullopt;
+  }
+
+  prefabs::PrefabInstantiateDesc desc{};
+  desc.assets = &assets;
+  if (component.prefab_variables.is_object()) {
+    for (auto it = component.prefab_variables.begin();
+         it != component.prefab_variables.end(); ++it) {
+      desc.variables[it.key()] = it.value();
+    }
+  }
+  world::World staging_world;
+  world::Scene staging_scene;
+  std::optional<prefabs::PrefabInstance> instance =
+      prefabs::instantiatePrefab(staging_world,
+                                 staging_scene,
+                                 prefab_path,
+                                 desc);
+  if (!instance.has_value()) {
+    result.diagnostic = "failed to resolve static foliage prefab '" +
+                        prefab_path.string() + "'";
+    return std::nullopt;
+  }
+  world::updateWorldTransforms(staging_world, staging_scene);
+  bool has_eligible_renderer = false;
+  for (world::Entity entity : instance->entities) {
+    if (!staging_world.has<components::MeshComponent>(entity) ||
+        !staging_world.has<components::TransformComponent>(entity)) {
+      continue;
+    }
+    const auto& renderer =
+        staging_world.get<components::MeshComponent>(entity);
+    const bool visible =
+        renderer.visible &&
+        (!staging_world.has<components::VisibilityComponent>(entity) ||
+         staging_world.get<components::VisibilityComponent>(entity).visible);
+    if (!visible ||
+        (staging_world.has<components::DeformableMeshComponent>(entity) &&
+         staging_world.get<components::DeformableMeshComponent>(entity)
+             .enabled)) {
+      continue;
+    }
+    has_eligible_renderer = true;
+    const world::MeshData* mesh =
+        assets.findMeshAsset(renderer.mesh_asset_key);
+    if (mesh == nullptr) {
+      prefabs::destroyPrefab(staging_world, staging_scene, instance->root);
+      result.diagnostic =
+          "static foliage prefab references missing base mesh asset '" +
+          renderer.mesh_asset_key + "'";
+      return std::nullopt;
+    }
+    if (renderer.shadow_visible) {
+      prototype.parts.push_back(FoliageBakePart{
+          .mesh = mesh,
+          .local_transform = worldMatrix(
+              staging_world.get<components::TransformComponent>(entity)),
+      });
+    }
+  }
+  prefabs::destroyPrefab(staging_world, staging_scene, instance->root);
+  if (!has_eligible_renderer) {
+    result.diagnostic = "static foliage prefab contains no eligible rigid "
+                        "MeshComponent renderers: " +
+                        prefab_path.string();
+    return std::nullopt;
+  }
+  return std::optional<FoliageBakePrototype>(std::move(prototype));
+}
+
+bool appendFoliageOccluders(
+    const world::World& world,
+    world::Entity entity,
+    std::string_view owner_id,
+    const components::FoliageComponent& component,
+    assets::AssetRegistry& assets,
+    const SceneBakeExecutionOptions& execution,
+    SceneBakeResult& result,
+    std::vector<WorldTriangle>& triangles) {
+  if (!component.visible || !component.shadow_visible) return true;
+  std::string error;
+  const std::optional<foliage::FoliageDocument> document =
+      foliage::readFoliageFile(component.sidecar_path, &error);
+  if (!document.has_value()) {
+    result.diagnostic = "failed to read static foliage sidecar '" +
+                        component.sidecar_path.string() + "': " + error;
+    return false;
+  }
+  const auto prototype = foliageBakeParts(component, assets, result);
+  if (!prototype.has_value()) return false;
+  const glm::mat4 owner_transform =
+      world.has<components::TransformComponent>(entity)
+          ? worldMatrix(world.get<components::TransformComponent>(entity))
+          : glm::mat4(1.0f);
+  for (const foliage::FoliageChunk& chunk : document->chunks) {
+    for (const foliage::FoliageInstance& instance : chunk.instances) {
+      const glm::mat4 instance_transform =
+          owner_transform * instanceMatrix(instance);
+      for (const FoliageBakePart& part : prototype->parts) {
+        if (!appendOccluderMesh(*part.mesh,
+                                instance_transform * part.local_transform,
+                                entity,
+                                owner_id,
+                                execution,
+                                result,
+                                triangles)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 std::vector<WorldTriangle> collectOccluders(
     const SceneInstantiateResult& instance,
     const world::World& world,
-    const assets::AssetRegistry& assets,
+    assets::AssetRegistry& assets,
     const SceneBakeExecutionOptions& execution,
     SceneBakeResult& result) {
   std::vector<std::pair<std::string, world::Entity>> owners(
@@ -1078,10 +1306,26 @@ std::vector<WorldTriangle> collectOccluders(
       }
     }
 
+    if (world.has<components::FoliageComponent>(entity) &&
+        !appendFoliageOccluders(
+            world,
+            entity,
+            owner_id,
+            world.get<components::FoliageComponent>(entity),
+            assets,
+            execution,
+            result,
+            triangles)) {
+      return {};
+    }
+
     if (!world.has<components::InstancedMeshComponent>(entity)) continue;
     const auto& instanced =
         world.get<components::InstancedMeshComponent>(entity);
     if (!instanced.visible || !instanced.shadow_visible) continue;
+    const components::InstanceSetComponent* instance_set =
+        instanceSetFor(world, entity, instanced);
+    if (instance_set == nullptr) continue;
     const world::MeshData* mesh =
         assets.findMeshAsset(instanced.mesh_asset_key);
     if (mesh == nullptr) continue;
@@ -1090,15 +1334,21 @@ std::vector<WorldTriangle> collectOccluders(
     // meshes are camera-distance display representations and do not describe
     // distinct authored objects in the offline bake. Instance transforms are
     // owner-local, matching the renderer and navigation surface collector.
+    const world::Entity instance_source =
+        instanceSourceEntity(entity, instanced);
     const glm::mat4 owner_transform =
-        world.has<components::TransformComponent>(entity)
-            ? worldMatrix(world.get<components::TransformComponent>(entity))
+        world.has<components::TransformComponent>(instance_source)
+            ? worldMatrix(world.get<components::TransformComponent>(
+                  instance_source))
             : glm::mat4(1.0f);
-    switch (instanced.gpu_layout) {
+    const glm::mat4 local_transform = batchMatrix(instanced);
+    switch (instance_set->gpu_layout) {
       case rendering::InstanceGpuLayout::Matrix4x4Params:
-        for (const components::MeshInstance& authored : instanced.instances) {
+        for (const components::MeshInstance& authored :
+             instance_set->instances) {
           if (!appendOccluderMesh(*mesh,
-                                  owner_transform * instanceMatrix(authored),
+                                  owner_transform * instanceMatrix(authored) *
+                                      local_transform,
                                   entity,
                                   owner_id,
                                   execution,
@@ -1110,9 +1360,10 @@ std::vector<WorldTriangle> collectOccluders(
         break;
       case rendering::InstanceGpuLayout::PositionYawScaleParams:
         for (const components::PlanarMeshInstance& authored :
-             instanced.planar_instances) {
+             instance_set->planar_instances) {
           if (!appendOccluderMesh(*mesh,
-                                  owner_transform * instanceMatrix(authored),
+                                  owner_transform * instanceMatrix(authored) *
+                                      local_transform,
                                   entity,
                                   owner_id,
                                   execution,

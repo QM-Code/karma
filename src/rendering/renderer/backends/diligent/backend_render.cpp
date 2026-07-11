@@ -570,7 +570,8 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
         "Diligent render layer diag: reason={} layer={} target={} total={:.3f}ms "
         "size={}x{} output={}x{} aa_mode={} msaa={} ssaa={:.2f} "
         "camera_active={} post_enabled={} taa={} draws={} "
-        "inst=[submitted={} drawn={} culled_batches={} draw_calls={} uploads={} bytes={} "
+        "inst=[submitted={} batches={} sets={} shared_batches={} drawn={} culled_batches={} "
+        "draw_calls={} uploads={} bytes={} "
         "gpu_cull=[batches={} dispatch={} candidates={} indirect={}] "
         "lod=[buckets={} dispatch={} candidates={} indirect={} fallback={}] "
         "collect={:.3f} upload={:.3f}] cmd_totals=[draws={} update_buffer={} copy_texture={} dispatch={}] "
@@ -594,6 +595,9 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
         post_process.temporal_antialiasing_enabled,
         draw_count,
         instancing_stats_.submitted_instances,
+        instancing_stats_.submitted_batches,
+        instancing_stats_.submitted_instance_sets,
+        instancing_stats_.shared_instance_batches,
         instancing_stats_.drawn_instances,
         instancing_stats_.culled_batches,
         instancing_stats_.draw_calls,
@@ -794,6 +798,12 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
   if (!constants_ || !base_forward_pipeline || !shader_resources_) {
     if (!warned_no_draws_) {
       warned_no_draws_ = true;
+      spdlog::error(
+          "Diligent renderer cannot draw: constants={}, forward_pipeline={}, "
+          "shader_resources={}",
+          constants_ ? "ready" : "missing",
+          base_forward_pipeline ? "ready" : "missing",
+          shader_resources_ ? "ready" : "missing");
     }
     finalize_camera_output();
     present_active_target();
@@ -1431,6 +1441,7 @@ void DiligentBackend::renderLayer(rendering::LayerId layer,
 
   const glm::mat4 view_proj = depth_fix * projection * view;
   DrawConstants base_constants{};
+  copyMat4(base_constants.instance_batch_transform, glm::mat4(1.0f));
   for (size_t slot = 0; slot < MaterialRecord::kTextureCoordSlotCount; ++slot) {
     base_constants.texcoord_row0[slot][0] = 1.0f;
     base_constants.texcoord_row0[slot][1] = 0.0f;

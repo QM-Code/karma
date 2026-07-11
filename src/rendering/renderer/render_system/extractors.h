@@ -23,13 +23,10 @@ glm::mat4 toTransform(const components::TransformComponent& transform,
 /// Renderer-ready instance payload after applying an owning entity's world
 /// transform. Planar source instances remain compact only when every composed
 /// transform can be represented by the compact position/yaw/scale layout.
-struct ExtractedInstancedMesh {
+struct ExtractedInstanceSet {
   InstanceGpuLayout gpu_layout = InstanceGpuLayout::Matrix4x4Params;
   std::vector<InstanceData> instances;
   std::vector<PlanarInstanceData> planar_instances;
-  glm::vec3 bounds_center{0.0f};
-  float bounds_radius = 0.0f;
-  bool bounds_valid = false;
 
   std::size_t instanceCount() const {
     return gpu_layout == InstanceGpuLayout::PositionYawScaleParams
@@ -38,9 +35,19 @@ struct ExtractedInstancedMesh {
   }
 };
 
-ExtractedInstancedMesh extractInstancedMesh(
-    const components::InstancedMeshComponent& component,
-    const glm::mat4& owner_world_transform,
+ExtractedInstanceSet extractInstanceSet(
+    const components::InstanceSetComponent& component,
+    const glm::mat4& owner_world_transform);
+
+struct InstancedBounds {
+  glm::vec3 center{0.0f};
+  float radius = 0.0f;
+  bool valid = false;
+};
+
+InstancedBounds calculateInstancedBounds(
+    const ExtractedInstanceSet& instance_set,
+    const glm::mat4& batch_local_transform,
     const glm::vec3& mesh_bounds_center,
     float mesh_bounds_radius,
     bool mesh_bounds_valid);

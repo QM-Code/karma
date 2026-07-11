@@ -150,6 +150,7 @@ class Backend {
   virtual void submitParticleBeam(const rendering::ParticleBeamGpuDesc& beam) = 0;
   virtual void setParticleSystemStats(const rendering::ParticlePassStats& stats) = 0;
   virtual void retireInstance(rendering::InstanceId instance) = 0;
+  virtual void retireInstanceSet(rendering::InstanceId instance_set) = 0;
   /// Renders one extracted layer into a target using the resolved frame graph.
   virtual void renderLayer(rendering::LayerId layer,
                            rendering::RenderTargetId target,

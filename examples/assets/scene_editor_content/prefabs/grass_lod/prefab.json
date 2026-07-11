@@ -20,7 +20,7 @@
           "include_descendants": true,
           "flags": 31
         },
-        "InstancedMeshComponent": {
+        "MeshComponent": {
           "mesh_asset_key": "scene_editor/grass_lod/cluster_mesh",
           "materials": [
             {
@@ -28,7 +28,11 @@
               "material_key": "scene_editor/grass_lod/grass_material"
             }
           ],
-          "lods": [
+          "visible": true,
+          "shadow_visible": false
+        },
+        "LODComponent": {
+          "levels": [
             {
               "start_distance": 28.0,
               "mesh_asset_key": "scene_editor/grass_lod/billboard_mesh",
@@ -41,21 +45,7 @@
               "render_mode": "upright_billboard",
               "shadow_visible": false
             }
-          ],
-          "gpu_layout": "matrix4x4_params",
-          "instances": [
-            {
-              "position": [0.0, 0.0, 0.0],
-              "rotation": [0.0, 0.0, 0.0, 1.0],
-              "scale": [1.0, 1.0, 1.0],
-              "params": [0.0, 0.0, 0.0, 0.0]
-            }
-          ],
-          "planar_instances": [],
-          "instance_revision": 1,
-          "dynamic": false,
-          "visible": true,
-          "shadow_visible": false
+          ]
         }
       }
     }

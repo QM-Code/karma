@@ -286,6 +286,7 @@ cbuffer Constants
     float4 g_LightmapParams;
     float4 g_LightmapUVScaleOffset;
     uint4 g_LightmapMixedMask;
+    float4x4 g_InstanceBatchTransform;
 };
 
 cbuffer DeformationConstants
@@ -330,6 +331,33 @@ struct VSOutput
     float2 UV : TEXCOORD0;
     float2 UV1 : TEXCOORD1;
 };
+
+float3 TransformSourceInstancePoint(VSInput input, float3 local_point)
+{
+    if (g_InstanceParams.x > 0.5)
+    {
+        float3 scale = input.ModelCol1.xyz;
+        float3 scaled = local_point * scale;
+        float yaw = input.ModelCol0.w;
+        float s = sin(yaw);
+        float c = cos(yaw);
+        return input.ModelCol0.xyz +
+               float3(scaled.x * c + scaled.z * s,
+                      scaled.y,
+                      -scaled.x * s + scaled.z * c);
+    }
+    return (input.ModelCol0 * local_point.x +
+            input.ModelCol1 * local_point.y +
+            input.ModelCol2 * local_point.z +
+            input.ModelCol3).xyz;
+}
+
+float3 TransformFinalInstancePoint(VSInput input, float3 local_point)
+{
+    float4 batch_point = mul(g_InstanceBatchTransform, float4(local_point, 1.0));
+    return TransformSourceInstancePoint(input,
+                                        batch_point.xyz / max(abs(batch_point.w), 1.0e-5));
+}
 
 VSOutput main(VSInput input)
 {
@@ -380,26 +408,32 @@ VSOutput main(VSInput input)
         local_pos.x += sin(phase + local_pos.y * 2.4) * 0.055 * sway_weight;
         local_pos.z += cos(phase * 0.73 + local_pos.y * 1.9) * 0.035 * sway_weight;
     }
-    float4 world_pos;
-    if (g_InstanceParams.x > 0.5)
+    float3 center = TransformFinalInstancePoint(input, float3(0.0, 0.0, 0.0));
+    float3 axis_x = TransformFinalInstancePoint(input, float3(1.0, 0.0, 0.0)) - center;
+    float3 axis_y = TransformFinalInstancePoint(input, float3(0.0, 1.0, 0.0)) - center;
+    float3 axis_z = TransformFinalInstancePoint(input, float3(0.0, 0.0, 1.0)) - center;
+    if (g_InstanceParams.y > 0.5)
     {
-        float3 scale = input.ModelCol1.xyz;
-        float yaw = input.ModelCol0.w;
-        float s = sin(yaw);
-        float c = cos(yaw);
-        float3 scaled = local_pos * scale;
-        float3 rotated = float3(scaled.x * c + scaled.z * s,
-                                scaled.y,
-                                -scaled.x * s + scaled.z * c);
-        world_pos = float4(rotated + input.ModelCol0.xyz, 1.0);
+        float sx = length(axis_x);
+        float sy = length(axis_y);
+        float sz = length(axis_z);
+        float orientation = dot(axis_x, cross(axis_y, axis_z)) < 0.0 ? -1.0 : 1.0;
+        float3 up_axis = float3(0.0, 1.0, 0.0);
+        float3 forward_axis = g_CameraPos.xyz - center;
+        forward_axis.y = 0.0;
+        forward_axis = dot(forward_axis, forward_axis) > 1.0e-6
+            ? normalize(forward_axis)
+            : float3(0.0, 0.0, 1.0);
+        float3 right_axis = normalize(cross(up_axis, forward_axis));
+        forward_axis = normalize(cross(right_axis, up_axis));
+        axis_x = right_axis * sx * orientation;
+        axis_y = up_axis * sy;
+        axis_z = forward_axis * sz;
     }
-    else
-    {
-        world_pos = input.ModelCol0 * local_pos.x +
-                    input.ModelCol1 * local_pos.y +
-                    input.ModelCol2 * local_pos.z +
-                    input.ModelCol3;
-    }
+    float4 world_pos = float4(center + axis_x * local_pos.x +
+                                       axis_y * local_pos.y +
+                                       axis_z * local_pos.z,
+                              1.0);
     output.Pos = mul(g_MVP, world_pos);
     output.UV = input.UV;
     output.UV1 = input.UV1;
@@ -1792,6 +1826,7 @@ cbuffer Constants
     float4 g_LightmapParams;
     float4 g_LightmapUVScaleOffset;
     uint4 g_LightmapMixedMask;
+    float4x4 g_InstanceBatchTransform;
 };
 
 cbuffer DeformationConstants
@@ -1837,6 +1872,33 @@ struct VSOutput
     float3 WorldPos : TEXCOORD3;
     float4 InstanceParams : TEXCOORD4;
 };
+
+float3 TransformSourceInstancePoint(VSInput input, float3 local_point)
+{
+    if (g_InstanceParams.x > 0.5)
+    {
+        float3 scale = input.ModelCol1.xyz;
+        float3 scaled = local_point * scale;
+        float yaw = input.ModelCol0.w;
+        float s = sin(yaw);
+        float c = cos(yaw);
+        return input.ModelCol0.xyz +
+               float3(scaled.x * c + scaled.z * s,
+                      scaled.y,
+                      -scaled.x * s + scaled.z * c);
+    }
+    return (input.ModelCol0 * local_point.x +
+            input.ModelCol1 * local_point.y +
+            input.ModelCol2 * local_point.z +
+            input.ModelCol3).xyz;
+}
+
+float3 TransformFinalInstancePoint(VSInput input, float3 local_point)
+{
+    float4 batch_point = mul(g_InstanceBatchTransform, float4(local_point, 1.0));
+    return TransformSourceInstancePoint(input,
+                                        batch_point.xyz / max(abs(batch_point.w), 1.0e-5));
+}
 
 VSOutput main(VSInput input)
 {
@@ -1903,93 +1965,41 @@ VSOutput main(VSInput input)
         local_pos.x += sin(phase + local_pos.y * 2.4) * 0.055 * sway_weight;
         local_pos.z += cos(phase * 0.73 + local_pos.y * 1.9) * 0.035 * sway_weight;
     }
-    float4 world_pos;
-    float3 world_normal;
-    float3 world_tangent;
-    float transform_orientation = 1.0;
-    if (g_InstanceParams.x > 0.5)
+    float3 center = TransformFinalInstancePoint(input, float3(0.0, 0.0, 0.0));
+    float3 axis_x = TransformFinalInstancePoint(input, float3(1.0, 0.0, 0.0)) - center;
+    float3 axis_y = TransformFinalInstancePoint(input, float3(0.0, 1.0, 0.0)) - center;
+    float3 axis_z = TransformFinalInstancePoint(input, float3(0.0, 0.0, 1.0)) - center;
+    float transform_orientation = dot(axis_x, cross(axis_y, axis_z)) < 0.0 ? -1.0 : 1.0;
+    if (g_InstanceParams.y > 0.5)
     {
-        float3 scale = input.ModelCol1.xyz;
-        transform_orientation = scale.x * scale.y * scale.z < 0.0 ? -1.0 : 1.0;
-        float3 safe_scale = float3(
-            abs(scale.x) > 1.0e-5 ? scale.x : (scale.x < 0.0 ? -1.0e-5 : 1.0e-5),
-            abs(scale.y) > 1.0e-5 ? scale.y : (scale.y < 0.0 ? -1.0e-5 : 1.0e-5),
-            abs(scale.z) > 1.0e-5 ? scale.z : (scale.z < 0.0 ? -1.0e-5 : 1.0e-5));
-        float3 scaled = local_pos * scale;
-        float3 normal_scaled = local_normal / safe_scale;
-        float3 tangent_scaled = local_tangent * scale;
-        if (g_InstanceParams.y > 0.5)
-        {
-            float3 center = input.ModelCol0.xyz;
-            float3 up_axis = float3(0.0, 1.0, 0.0);
-            float3 forward_axis = g_CameraPos.xyz - center;
-            forward_axis.y = 0.0;
-            if (dot(forward_axis, forward_axis) <= 1.0e-6)
-            {
-                forward_axis = float3(0.0, 0.0, 1.0);
-            }
-            else
-            {
-                forward_axis = normalize(forward_axis);
-            }
-            float3 right_axis = cross(up_axis, forward_axis);
-            if (dot(right_axis, right_axis) <= 1.0e-6)
-            {
-                right_axis = float3(1.0, 0.0, 0.0);
-            }
-            else
-            {
-                right_axis = normalize(right_axis);
-            }
-            forward_axis = normalize(cross(right_axis, up_axis));
-            float3 billboard_pos =
-                right_axis * scaled.x + up_axis * scaled.y + forward_axis * scaled.z;
-            world_pos = float4(billboard_pos + center, 1.0);
-            world_normal = right_axis * normal_scaled.x +
-                           up_axis * normal_scaled.y +
-                           forward_axis * normal_scaled.z;
-            world_tangent = right_axis * tangent_scaled.x +
-                            up_axis * tangent_scaled.y +
-                            forward_axis * tangent_scaled.z;
-        }
-        else
-        {
-            float yaw = input.ModelCol0.w;
-            float s = sin(yaw);
-            float c = cos(yaw);
-            float3 rotated = float3(scaled.x * c + scaled.z * s,
-                                    scaled.y,
-                                    -scaled.x * s + scaled.z * c);
-            world_pos = float4(rotated + input.ModelCol0.xyz, 1.0);
-            world_normal = float3(normal_scaled.x * c + normal_scaled.z * s,
-                                  normal_scaled.y,
-                                  -normal_scaled.x * s + normal_scaled.z * c);
-            world_tangent = float3(tangent_scaled.x * c + tangent_scaled.z * s,
-                                   tangent_scaled.y,
-                                   -tangent_scaled.x * s + tangent_scaled.z * c);
-        }
+        float sx = length(axis_x);
+        float sy = length(axis_y);
+        float sz = length(axis_z);
+        float3 up_axis = float3(0.0, 1.0, 0.0);
+        float3 forward_axis = g_CameraPos.xyz - center;
+        forward_axis.y = 0.0;
+        forward_axis = dot(forward_axis, forward_axis) > 1.0e-6
+            ? normalize(forward_axis)
+            : float3(0.0, 0.0, 1.0);
+        float3 right_axis = normalize(cross(up_axis, forward_axis));
+        forward_axis = normalize(cross(right_axis, up_axis));
+        axis_x = right_axis * sx * transform_orientation;
+        axis_y = up_axis * sy;
+        axis_z = forward_axis * sz;
     }
-    else
-    {
-        world_pos = input.ModelCol0 * local_pos.x +
-                    input.ModelCol1 * local_pos.y +
-                    input.ModelCol2 * local_pos.z +
-                    input.ModelCol3;
-        float3 model_col0 = input.ModelCol0.xyz;
-        float3 model_col1 = input.ModelCol1.xyz;
-        float3 model_col2 = input.ModelCol2.xyz;
-        float3 normal_col0 = cross(model_col1, model_col2);
-        float3 normal_col1 = cross(model_col2, model_col0);
-        float3 normal_col2 = cross(model_col0, model_col1);
-        float determinant_sign = dot(model_col0, normal_col0) < 0.0 ? -1.0 : 1.0;
-        transform_orientation = determinant_sign;
-        world_normal = (normal_col0 * local_normal.x +
-                        normal_col1 * local_normal.y +
-                        normal_col2 * local_normal.z) * determinant_sign;
-        world_tangent = model_col0 * local_tangent.x +
-                        model_col1 * local_tangent.y +
-                        model_col2 * local_tangent.z;
-    }
+    float4 world_pos = float4(center + axis_x * local_pos.x +
+                                       axis_y * local_pos.y +
+                                       axis_z * local_pos.z,
+                              1.0);
+    float3 normal_col0 = cross(axis_y, axis_z);
+    float3 normal_col1 = cross(axis_z, axis_x);
+    float3 normal_col2 = cross(axis_x, axis_y);
+    float3 world_normal = (normal_col0 * local_normal.x +
+                           normal_col1 * local_normal.y +
+                           normal_col2 * local_normal.z) * transform_orientation;
+    float3 world_tangent = axis_x * local_tangent.x +
+                           axis_y * local_tangent.y +
+                           axis_z * local_tangent.z;
     output.Pos = mul(g_MVP, world_pos);
     output.WorldPos = world_pos.xyz;
     float world_normal_len_sq = dot(world_normal, world_normal);
@@ -2060,6 +2070,7 @@ cbuffer Constants
     float4 g_LightmapParams;
     float4 g_LightmapUVScaleOffset;
     uint4 g_LightmapMixedMask;
+    float4x4 g_InstanceBatchTransform;
 };
 
 Texture2D g_BaseColorTex;

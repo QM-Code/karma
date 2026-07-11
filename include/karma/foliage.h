@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 namespace karma::components {
 
 /// \ingroup karma_components
@@ -31,9 +33,10 @@ namespace karma::components {
 /// behavior.
 struct FoliageComponent : world::ComponentTag {
   std::filesystem::path sidecar_path;
+  std::filesystem::path prefab_path;
+  nlohmann::json prefab_variables = nlohmann::json::object();
   std::string mesh_asset_key;
   std::vector<MeshMaterialAssignment> materials;
-  std::vector<InstancedMeshLodLevel> lods;
   float chunk_size = 32.0f;
   float view_distance = 256.0f;
   uint32_t max_resident_instances = 100000u;
@@ -76,8 +79,19 @@ inline bool validateFoliageComponent(
     return false;
   };
 
-  if (component.mesh_asset_key.empty()) {
-    return fail("foliage mesh asset key must not be empty");
+  const bool uses_prefab = !component.prefab_path.empty();
+  const bool uses_direct_mesh = !component.mesh_asset_key.empty();
+  if (uses_prefab == uses_direct_mesh) {
+    return fail("foliage must use exactly one prefab or direct mesh source");
+  }
+  if (!component.prefab_variables.is_object()) {
+    return fail("foliage prefab variables must be a JSON object");
+  }
+  if (uses_prefab && !component.materials.empty()) {
+    return fail("prefab foliage must not define direct mesh materials");
+  }
+  if (uses_direct_mesh && !component.prefab_variables.empty()) {
+    return fail("direct mesh foliage must not define prefab variables");
   }
   if (!std::isfinite(component.chunk_size) || component.chunk_size <= 0.0f) {
     return fail("foliage chunk size must be finite and positive");
@@ -94,33 +108,6 @@ inline bool validateFoliageComponent(
     if (material.material_key.empty()) {
       return fail("foliage material key must not be empty");
     }
-  }
-  if (component.lods.size() > components::kMaxInstancedMeshLodLevels) {
-    return fail("foliage component has too many LOD levels");
-  }
-
-  float previous_start_distance = 0.0f;
-  for (const components::InstancedMeshLodLevel& lod : component.lods) {
-    if (!std::isfinite(lod.start_distance) ||
-        lod.start_distance <= previous_start_distance) {
-      return fail(
-          "foliage LOD distances must be finite, positive, and strictly "
-          "increasing");
-    }
-    if (lod.mesh_asset_key.empty()) {
-      return fail("foliage LOD mesh asset key must not be empty");
-    }
-    if (lod.render_mode != rendering::InstanceLodRenderMode::Mesh &&
-        lod.render_mode !=
-            rendering::InstanceLodRenderMode::UprightBillboard) {
-      return fail("foliage LOD render mode is invalid");
-    }
-    for (const components::MeshMaterialAssignment& material : lod.materials) {
-      if (material.material_key.empty()) {
-        return fail("foliage LOD material key must not be empty");
-      }
-    }
-    previous_start_distance = lod.start_distance;
   }
   return true;
 }

@@ -34,6 +34,9 @@ if (KARMA_BUILD_TOOLS)
 
   add_library(karma_scene_editor_model STATIC
     tools/scenes/scene_editor_model.cpp
+    tools/scenes/scene_editor_foliage_prefab.cpp
+    tools/scenes/scene_editor_migration.cpp
+    tools/scenes/scene_editor_pointer_input.cpp
     tools/scenes/scene_editor_viewport.cpp
     tools/scenes/scene_editor_gizmo.cpp
     tools/scenes/scene_editor_markers.cpp
@@ -47,7 +50,7 @@ if (KARMA_BUILD_TOOLS)
   target_link_libraries(karma_scene_editor_model PUBLIC karma_content)
   target_compile_features(karma_scene_editor_model PUBLIC cxx_std_20)
 
-  if (KARMA_BUILD_GRAPHICAL_PROFILE)
+  if (KARMA_BUILD_GRAPHICAL_PROFILE AND KARMA_BUILD_SCENE_EDITOR)
     set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(NFD_BUILD_SDL2_TESTS OFF CACHE BOOL "" FORCE)
     set(NFD_INSTALL OFF CACHE BOOL "" FORCE)
@@ -73,13 +76,23 @@ if (KARMA_BUILD_TOOLS)
     target_link_libraries(karma_scene_editor
       PRIVATE
         karma::graphical
+        karma_features_ui_imgui
         karma_scene_editor_model
         nfd::nfd
+    )
+    target_compile_definitions(karma_scene_editor PRIVATE
+      KARMA_SCENE_EDITOR_FONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}/tools/scenes/assets/fonts"
     )
     target_compile_features(karma_scene_editor PRIVATE cxx_std_20)
     set_target_properties(karma_scene_editor PROPERTIES
       OUTPUT_NAME scene_editor
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/scenes"
+    )
+    add_custom_command(TARGET karma_scene_editor POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${PROJECT_SOURCE_DIR}/tools/scenes/assets/fonts"
+        "$<TARGET_FILE_DIR:karma_scene_editor>/assets/fonts"
+      COMMENT "Copying Scene Editor fonts"
     )
     if (TARGET karma_fix_xxhash)
       add_dependencies(karma_scene_editor karma_fix_xxhash)

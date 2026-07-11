@@ -230,7 +230,7 @@ void testInstancedWorldSurfaceCollectionUsesActiveLayoutAndStaticFlags() {
   matrix_transform.setPosition({1.0f, 0.0f, 2.0f});
   world.add(matrix_surface, matrix_transform);
   world.add(matrix_surface, nav_static());
-  karma::components::InstancedMeshComponent matrix_instances{};
+  karma::components::InstanceSetComponent matrix_instances{};
   matrix_instances.gpu_layout =
       karma::rendering::InstanceGpuLayout::Matrix4x4Params;
   matrix_instances.instances = {
@@ -248,6 +248,7 @@ void testInstancedWorldSurfaceCollectionUsesActiveLayoutAndStaticFlags() {
       },
   };
   world.add(matrix_surface, std::move(matrix_instances));
+  world.add(matrix_surface, karma::components::InstancedMeshComponent{});
   world.add(matrix_surface,
             karma::components::NavMeshSurfaceComponent{
                 .area = 2,
@@ -260,7 +261,7 @@ void testInstancedWorldSurfaceCollectionUsesActiveLayoutAndStaticFlags() {
   planar_transform.setPosition({2.0f, 1.0f, -1.0f});
   world.add(planar_surface, planar_transform);
   world.add(planar_surface, nav_static());
-  karma::components::InstancedMeshComponent planar_instances{};
+  karma::components::InstanceSetComponent planar_instances{};
   planar_instances.gpu_layout =
       karma::rendering::InstanceGpuLayout::PositionYawScaleParams;
   planar_instances.instances = {
@@ -276,6 +277,7 @@ void testInstancedWorldSurfaceCollectionUsesActiveLayoutAndStaticFlags() {
       },
   };
   world.add(planar_surface, std::move(planar_instances));
+  world.add(planar_surface, karma::components::InstancedMeshComponent{});
   world.add(planar_surface,
             karma::components::NavMeshSurfaceComponent{
                 .area = 3,
@@ -288,9 +290,10 @@ void testInstancedWorldSurfaceCollectionUsesActiveLayoutAndStaticFlags() {
   karma::components::StaticComponent disabled_membership = nav_static();
   disabled_membership.flags = karma::components::StaticComponentLighting;
   world.add(disabled_surface, disabled_membership);
-  karma::components::InstancedMeshComponent disabled_instances{};
+  karma::components::InstanceSetComponent disabled_instances{};
   disabled_instances.instances.push_back(karma::components::MeshInstance{});
   world.add(disabled_surface, std::move(disabled_instances));
+  world.add(disabled_surface, karma::components::InstancedMeshComponent{});
   world.add(disabled_surface,
             karma::components::NavMeshSurfaceComponent{
                 .area = 4,

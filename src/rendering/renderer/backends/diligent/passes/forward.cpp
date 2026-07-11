@@ -1,6 +1,7 @@
 #include "../backend.hpp"
 
 #include "../backend_internal.h"
+#include "private/rendering/lod_selection.hpp"
 
 #include <Graphics/GraphicsEngine/interface/Buffer.h>
 #include <Graphics/GraphicsEngine/interface/BufferView.h>
@@ -94,6 +95,39 @@ glm::vec4 transformBoundingSphere(const glm::mat4& world,
   return glm::vec4(center, radius);
 }
 
+void mergeBoundingSphere(glm::vec3& center,
+                         float& radius,
+                         bool& valid,
+                         const glm::vec3& next_center,
+                         float next_radius) {
+  if (next_radius <= 0.0f || !std::isfinite(next_radius)) {
+    return;
+  }
+  if (!valid) {
+    center = next_center;
+    radius = next_radius;
+    valid = true;
+    return;
+  }
+  const glm::vec3 delta = next_center - center;
+  const float distance = glm::length(delta);
+  if (!std::isfinite(distance) || distance + next_radius <= radius) {
+    return;
+  }
+  if (distance + radius <= next_radius) {
+    center = next_center;
+    radius = next_radius;
+    return;
+  }
+  if (distance <= 1.0e-5f) {
+    radius = std::max(radius, next_radius);
+    return;
+  }
+  const float merged_radius = (radius + distance + next_radius) * 0.5f;
+  center += delta * ((merged_radius - radius) / distance);
+  radius = merged_radius;
+}
+
 glm::mat4 planarInstanceTransform(const rendering::PlanarInstanceData& instance) {
   const glm::vec3 position(instance.position_yaw);
   const float yaw = instance.position_yaw.w;
@@ -160,18 +194,55 @@ static constexpr const char* kInstancedGpuCullingShader = R"(
 cbuffer InstancedGpuCullingConstants
 {
     float4x4 g_ViewProj;
+    float4x4 g_BatchTransform;
     float4 g_MeshBounds;
+    float4 g_LodReferenceBounds;
     float4 g_CameraPosition;
     float4 g_DistanceParams;
     uint4 g_Params;
 };
 
-struct PlanarInstanceData
+#if KARMA_MATRIX_INSTANCE_LAYOUT
+struct InstancePayload
+{
+    float4 col0;
+    float4 col1;
+    float4 col2;
+    float4 col3;
+    float4 params;
+};
+
+float3 TransformSourcePoint(InstancePayload instance, float3 local_point)
+{
+    return (instance.col0 * local_point.x + instance.col1 * local_point.y +
+            instance.col2 * local_point.z + instance.col3).xyz;
+}
+#else
+struct InstancePayload
 {
     float4 position_yaw;
     float4 scale_pad;
     float4 params;
 };
+
+float3 TransformSourcePoint(InstancePayload instance, float3 local_point)
+{
+    float3 scaled = local_point * instance.scale_pad.xyz;
+    float s = sin(instance.position_yaw.w);
+    float c = cos(instance.position_yaw.w);
+    return instance.position_yaw.xyz +
+           float3(scaled.x * c + scaled.z * s,
+                  scaled.y,
+                  -scaled.x * s + scaled.z * c);
+}
+#endif
+
+float3 TransformFinalPoint(InstancePayload instance, float3 local_point)
+{
+    float4 batch_point = mul(g_BatchTransform, float4(local_point, 1.0));
+    return TransformSourcePoint(instance,
+                                batch_point.xyz / max(abs(batch_point.w), 1.0e-5));
+}
 
 struct DrawIndexedIndirectArgs
 {
@@ -182,8 +253,8 @@ struct DrawIndexedIndirectArgs
     uint FirstInstanceLocation;
 };
 
-StructuredBuffer<PlanarInstanceData> g_SourceInstances;
-RWStructuredBuffer<PlanarInstanceData> g_VisibleInstances;
+StructuredBuffer<InstancePayload> g_SourceInstances;
+RWStructuredBuffer<InstancePayload> g_VisibleInstances;
 RWStructuredBuffer<DrawIndexedIndirectArgs> g_DrawArgs;
 
 bool SphereIntersectsClipVolume(float3 center, float radius)
@@ -233,22 +304,20 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         return;
     }
 
-    PlanarInstanceData instance = g_SourceInstances[instance_index];
-    float3 scale = instance.scale_pad.xyz;
-    float3 scaled_center = g_MeshBounds.xyz * scale;
-    float yaw = instance.position_yaw.w;
-    float s = sin(yaw);
-    float c = cos(yaw);
-    float3 rotated_center = float3(scaled_center.x * c + scaled_center.z * s,
-                                   scaled_center.y,
-                                   -scaled_center.x * s + scaled_center.z * c);
-    float3 center = instance.position_yaw.xyz + rotated_center;
-    float radius = g_MeshBounds.w * max(abs(scale.x), max(abs(scale.y), abs(scale.z)));
+    InstancePayload instance = g_SourceInstances[instance_index];
+    float3 origin = TransformFinalPoint(instance, float3(0.0, 0.0, 0.0));
+    float3 axis_x = TransformFinalPoint(instance, float3(1.0, 0.0, 0.0)) - origin;
+    float3 axis_y = TransformFinalPoint(instance, float3(0.0, 1.0, 0.0)) - origin;
+    float3 axis_z = TransformFinalPoint(instance, float3(0.0, 0.0, 1.0)) - origin;
+    float3 center = TransformFinalPoint(instance, g_MeshBounds.xyz);
+    float radius = g_MeshBounds.w * max(length(axis_x), max(length(axis_y), length(axis_z)));
     if (!SphereIntersectsClipVolume(center, radius))
     {
         return;
     }
-    float distance_to_camera = length(center - g_CameraPosition.xyz);
+    float3 lod_reference_center =
+        TransformFinalPoint(instance, g_LodReferenceBounds.xyz);
+    float distance_to_camera = length(lod_reference_center - g_CameraPosition.xyz);
     if (distance_to_camera < g_DistanceParams.x ||
         distance_to_camera >= g_DistanceParams.y)
     {
@@ -265,18 +334,55 @@ static constexpr const char* kInstancedGpuLodCullingShader = R"(
 cbuffer InstancedGpuCullingConstants
 {
     float4x4 g_ViewProj;
+    float4x4 g_BatchTransform;
     float4 g_MeshBounds;
+    float4 g_LodReferenceBounds;
     float4 g_CameraPosition;
     float4 g_DistanceParams;
     uint4 g_Params;
 };
 
-struct PlanarInstanceData
+#if KARMA_MATRIX_INSTANCE_LAYOUT
+struct InstancePayload
+{
+    float4 col0;
+    float4 col1;
+    float4 col2;
+    float4 col3;
+    float4 params;
+};
+
+float3 TransformSourcePoint(InstancePayload instance, float3 local_point)
+{
+    return (instance.col0 * local_point.x + instance.col1 * local_point.y +
+            instance.col2 * local_point.z + instance.col3).xyz;
+}
+#else
+struct InstancePayload
 {
     float4 position_yaw;
     float4 scale_pad;
     float4 params;
 };
+
+float3 TransformSourcePoint(InstancePayload instance, float3 local_point)
+{
+    float3 scaled = local_point * instance.scale_pad.xyz;
+    float s = sin(instance.position_yaw.w);
+    float c = cos(instance.position_yaw.w);
+    return instance.position_yaw.xyz +
+           float3(scaled.x * c + scaled.z * s,
+                  scaled.y,
+                  -scaled.x * s + scaled.z * c);
+}
+#endif
+
+float3 TransformFinalPoint(InstancePayload instance, float3 local_point)
+{
+    float4 batch_point = mul(g_BatchTransform, float4(local_point, 1.0));
+    return TransformSourcePoint(instance,
+                                batch_point.xyz / max(abs(batch_point.w), 1.0e-5));
+}
 
 struct DrawIndexedIndirectArgs
 {
@@ -287,11 +393,11 @@ struct DrawIndexedIndirectArgs
     uint FirstInstanceLocation;
 };
 
-StructuredBuffer<PlanarInstanceData> g_SourceInstances;
-RWStructuredBuffer<PlanarInstanceData> g_VisibleInstances0;
-RWStructuredBuffer<PlanarInstanceData> g_VisibleInstances1;
-RWStructuredBuffer<PlanarInstanceData> g_VisibleInstances2;
-RWStructuredBuffer<PlanarInstanceData> g_VisibleInstances3;
+StructuredBuffer<InstancePayload> g_SourceInstances;
+RWStructuredBuffer<InstancePayload> g_VisibleInstances0;
+RWStructuredBuffer<InstancePayload> g_VisibleInstances1;
+RWStructuredBuffer<InstancePayload> g_VisibleInstances2;
+RWStructuredBuffer<InstancePayload> g_VisibleInstances3;
 RWStructuredBuffer<DrawIndexedIndirectArgs> g_DrawArgs0;
 RWStructuredBuffer<DrawIndexedIndirectArgs> g_DrawArgs1;
 RWStructuredBuffer<DrawIndexedIndirectArgs> g_DrawArgs2;
@@ -334,7 +440,7 @@ bool SphereIntersectsClipVolume(float3 center, float radius)
     return true;
 }
 
-void AppendVisible(uint bucket, PlanarInstanceData instance)
+void AppendVisible(uint bucket, InstancePayload instance)
 {
     uint visible_index = 0u;
     if (bucket == 0u)
@@ -369,23 +475,21 @@ void main(uint3 dispatch_id : SV_DispatchThreadID)
         return;
     }
 
-    PlanarInstanceData instance = g_SourceInstances[instance_index];
-    float3 scale = instance.scale_pad.xyz;
-    float3 scaled_center = g_MeshBounds.xyz * scale;
-    float yaw = instance.position_yaw.w;
-    float s = sin(yaw);
-    float c = cos(yaw);
-    float3 rotated_center = float3(scaled_center.x * c + scaled_center.z * s,
-                                   scaled_center.y,
-                                   -scaled_center.x * s + scaled_center.z * c);
-    float3 center = instance.position_yaw.xyz + rotated_center;
-    float radius = g_MeshBounds.w * max(abs(scale.x), max(abs(scale.y), abs(scale.z)));
+    InstancePayload instance = g_SourceInstances[instance_index];
+    float3 origin = TransformFinalPoint(instance, float3(0.0, 0.0, 0.0));
+    float3 axis_x = TransformFinalPoint(instance, float3(1.0, 0.0, 0.0)) - origin;
+    float3 axis_y = TransformFinalPoint(instance, float3(0.0, 1.0, 0.0)) - origin;
+    float3 axis_z = TransformFinalPoint(instance, float3(0.0, 0.0, 1.0)) - origin;
+    float3 center = TransformFinalPoint(instance, g_MeshBounds.xyz);
+    float radius = g_MeshBounds.w * max(length(axis_x), max(length(axis_y), length(axis_z)));
     if (!SphereIntersectsClipVolume(center, radius))
     {
         return;
     }
 
-    float distance_to_camera = length(center - g_CameraPosition.xyz);
+    float3 lod_reference_center =
+        TransformFinalPoint(instance, g_LodReferenceBounds.xyz);
+    float distance_to_camera = length(lod_reference_center - g_CameraPosition.xyz);
     uint bucket_count = min(max(g_Params.y, 1u), 4u);
     uint bucket = 0u;
     if (bucket_count > 1u && distance_to_camera >= g_DistanceParams.x)
@@ -421,7 +525,8 @@ bool DiligentBackend::instancedGpuCullingEnabled() const {
   return !envFlagDisabled(std::getenv("KARMA_RENDER_GPU_CULLING"));
 }
 
-bool DiligentBackend::ensureInstancedGpuCullingResources() {
+bool DiligentBackend::ensureInstancedGpuCullingResources(
+    rendering::InstanceGpuLayout layout) {
   if (!instancedGpuCullingEnabled()) {
     return false;
   }
@@ -436,14 +541,24 @@ bool DiligentBackend::ensureInstancedGpuCullingResources() {
     }
     return false;
   }
-  if (instanced_gpu_culling_pso_ &&
-      instanced_gpu_culling_srb_ &&
+  const size_t layout_index = instanceGpuLayoutIndex(layout);
+  auto& culling_pso = instanced_gpu_culling_psos_[layout_index];
+  auto& culling_srb = instanced_gpu_culling_srbs_[layout_index];
+  auto*& source_var = instanced_gpu_culling_source_vars_[layout_index];
+  auto*& visible_var = instanced_gpu_culling_visible_vars_[layout_index];
+  auto*& args_var = instanced_gpu_culling_args_vars_[layout_index];
+  if (culling_pso &&
+      culling_srb &&
       instanced_gpu_culling_cb_) {
     return true;
   }
 
+  const Diligent::ShaderMacro layout_macro{
+      "KARMA_MATRIX_INSTANCE_LAYOUT",
+      layout == rendering::InstanceGpuLayout::Matrix4x4Params ? "1" : "0"};
   Diligent::ShaderCreateInfo shader_ci{};
   shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
+  shader_ci.Macros = Diligent::ShaderMacroArray{&layout_macro, 1u};
   shader_ci.CompileFlags = Diligent::SHADER_COMPILE_FLAGS{};
   shader_ci.Desc.Name = "Karma Instanced GPU Culling CS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_COMPUTE;
@@ -484,13 +599,12 @@ bool DiligentBackend::ensureInstancedGpuCullingResources() {
       static_cast<Diligent::Uint32>(std::size(variables));
 
   const auto pso_start = core::SteadyClock::now();
-  instanced_gpu_culling_pso_ =
-      createComputePipelineState(pso_ci);
+  culling_pso = createComputePipelineState(pso_ci);
   recordPipelineCreation("instancing",
                          "Karma Instanced GPU Culling Pipeline",
                          pso_start,
                          core::SteadyClock::now());
-  if (!instanced_gpu_culling_pso_) {
+  if (!culling_pso) {
     return false;
   }
 
@@ -511,56 +625,60 @@ bool DiligentBackend::ensureInstancedGpuCullingResources() {
   if (!instanced_gpu_culling_cb_) {
     return false;
   }
-  if (auto* var = instanced_gpu_culling_pso_->GetStaticVariableByName(
+  if (auto* var = culling_pso->GetStaticVariableByName(
           Diligent::SHADER_TYPE_COMPUTE, "InstancedGpuCullingConstants")) {
     var->Set(instanced_gpu_culling_cb_);
   }
 
   const auto srb_start = core::SteadyClock::now();
-  instanced_gpu_culling_pso_->CreateShaderResourceBinding(
-      &instanced_gpu_culling_srb_, true);
+  culling_pso->CreateShaderResourceBinding(&culling_srb, true);
   recordResourceCreation("instancing",
                          "instanced gpu culling SRB",
                          srb_start,
                          core::SteadyClock::now());
-  if (!instanced_gpu_culling_srb_) {
+  if (!culling_srb) {
     return false;
   }
-  instanced_gpu_culling_source_var_ =
-      instanced_gpu_culling_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
-                                                    "g_SourceInstances");
-  instanced_gpu_culling_visible_var_ =
-      instanced_gpu_culling_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
-                                                    "g_VisibleInstances");
-  instanced_gpu_culling_args_var_ =
-      instanced_gpu_culling_srb_->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
-                                                    "g_DrawArgs");
-  return instanced_gpu_culling_source_var_ &&
-         instanced_gpu_culling_visible_var_ &&
-         instanced_gpu_culling_args_var_;
+  source_var = culling_srb->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
+                                              "g_SourceInstances");
+  visible_var = culling_srb->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
+                                               "g_VisibleInstances");
+  args_var = culling_srb->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
+                                            "g_DrawArgs");
+  return source_var && visible_var && args_var;
 }
 
-bool DiligentBackend::ensureInstancedGpuLodCullingResources() {
-  if (!ensureInstancedGpuCullingResources()) {
+bool DiligentBackend::ensureInstancedGpuLodCullingResources(
+    rendering::InstanceGpuLayout layout) {
+  if (!ensureInstancedGpuCullingResources(layout)) {
     return false;
   }
-  if (instanced_gpu_lod_culling_pso_ &&
-      instanced_gpu_lod_culling_srb_ &&
+  const size_t layout_index = instanceGpuLayoutIndex(layout);
+  auto& culling_pso = instanced_gpu_lod_culling_psos_[layout_index];
+  auto& culling_srb = instanced_gpu_lod_culling_srbs_[layout_index];
+  auto*& source_var = instanced_gpu_lod_culling_source_vars_[layout_index];
+  auto& visible_vars = instanced_gpu_lod_culling_visible_vars_[layout_index];
+  auto& args_vars = instanced_gpu_lod_culling_args_vars_[layout_index];
+  if (culling_pso &&
+      culling_srb &&
       instanced_gpu_culling_cb_ &&
-      instanced_gpu_lod_culling_source_var_) {
+      source_var) {
     bool variables_ready = true;
     for (size_t i = 0; i < kInstancedGpuLodBucketCapacity; ++i) {
       variables_ready = variables_ready &&
-                        instanced_gpu_lod_culling_visible_vars_[i] &&
-                        instanced_gpu_lod_culling_args_vars_[i];
+                        visible_vars[i] && args_vars[i];
     }
     if (variables_ready) {
       return true;
     }
   }
 
+  const Diligent::ShaderMacro layout_macro{
+      "KARMA_MATRIX_INSTANCE_LAYOUT",
+      layout == rendering::InstanceGpuLayout::Matrix4x4Params ? "1" : "0"};
   Diligent::ShaderCreateInfo shader_ci{};
   shader_ci.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
+  shader_ci.Macros = Diligent::ShaderMacroArray{&layout_macro, 1u};
   shader_ci.CompileFlags = Diligent::SHADER_COMPILE_FLAGS{};
   shader_ci.Desc.Name = "Karma Instanced GPU LOD Culling CS";
   shader_ci.Desc.ShaderType = Diligent::SHADER_TYPE_COMPUTE;
@@ -625,36 +743,32 @@ bool DiligentBackend::ensureInstancedGpuLodCullingResources() {
       static_cast<Diligent::Uint32>(std::size(variables));
 
   const auto pso_start = core::SteadyClock::now();
-  instanced_gpu_lod_culling_pso_ =
-      createComputePipelineState(pso_ci);
+  culling_pso = createComputePipelineState(pso_ci);
   recordPipelineCreation("instancing",
                          "Karma Instanced GPU LOD Culling Pipeline",
                          pso_start,
                          core::SteadyClock::now());
-  if (!instanced_gpu_lod_culling_pso_) {
+  if (!culling_pso) {
     return false;
   }
 
-  if (auto* var = instanced_gpu_lod_culling_pso_->GetStaticVariableByName(
+  if (auto* var = culling_pso->GetStaticVariableByName(
           Diligent::SHADER_TYPE_COMPUTE, "InstancedGpuCullingConstants")) {
     var->Set(instanced_gpu_culling_cb_);
   }
 
   const auto srb_start = core::SteadyClock::now();
-  instanced_gpu_lod_culling_pso_->CreateShaderResourceBinding(
-      &instanced_gpu_lod_culling_srb_, true);
+  culling_pso->CreateShaderResourceBinding(&culling_srb, true);
   recordResourceCreation("instancing",
                          "instanced gpu LOD culling SRB",
                          srb_start,
                          core::SteadyClock::now());
-  if (!instanced_gpu_lod_culling_srb_) {
+  if (!culling_srb) {
     return false;
   }
 
-  instanced_gpu_lod_culling_source_var_ =
-      instanced_gpu_lod_culling_srb_->GetVariableByName(
-          Diligent::SHADER_TYPE_COMPUTE,
-          "g_SourceInstances");
+  source_var = culling_srb->GetVariableByName(Diligent::SHADER_TYPE_COMPUTE,
+                                              "g_SourceInstances");
   const char* visible_names[] = {
       "g_VisibleInstances0",
       "g_VisibleInstances1",
@@ -668,27 +782,28 @@ bool DiligentBackend::ensureInstancedGpuLodCullingResources() {
       "g_DrawArgs3",
   };
   for (size_t i = 0; i < kInstancedGpuLodBucketCapacity; ++i) {
-    instanced_gpu_lod_culling_visible_vars_[i] =
-        instanced_gpu_lod_culling_srb_->GetVariableByName(
+    visible_vars[i] =
+        culling_srb->GetVariableByName(
             Diligent::SHADER_TYPE_COMPUTE,
             visible_names[i]);
-    instanced_gpu_lod_culling_args_vars_[i] =
-        instanced_gpu_lod_culling_srb_->GetVariableByName(
+    args_vars[i] =
+        culling_srb->GetVariableByName(
             Diligent::SHADER_TYPE_COMPUTE,
             args_names[i]);
-    if (!instanced_gpu_lod_culling_visible_vars_[i] ||
-        !instanced_gpu_lod_culling_args_vars_[i]) {
+    if (!visible_vars[i] || !args_vars[i]) {
       return false;
     }
   }
-  return instanced_gpu_lod_culling_source_var_ != nullptr;
+  return source_var != nullptr;
 }
 
 bool DiligentBackend::ensureInstancedGpuCullingOutputBuffers(
+    rendering::InstanceGpuLayout layout,
     size_t instance_count,
     Diligent::RefCntAutoPtr<Diligent::IBuffer>& visible_buffer,
     Diligent::RefCntAutoPtr<Diligent::IBufferView>& visible_uav,
     size_t& visible_buffer_capacity_bytes,
+    rendering::InstanceGpuLayout& visible_buffer_layout,
     Diligent::RefCntAutoPtr<Diligent::IBuffer>& indirect_args_buffer,
     Diligent::RefCntAutoPtr<Diligent::IBufferView>& indirect_args_uav) {
   if (instance_count == 0u || !device_) {
@@ -699,11 +814,17 @@ bool DiligentBackend::ensureInstancedGpuCullingOutputBuffers(
     return false;
   }
 
-  const size_t stride = sizeof(rendering::PlanarInstanceData);
+  const size_t stride = rendering::instanceGpuLayoutStride(layout);
   const size_t required_bytes = instance_count * stride;
   if (required_bytes == 0u ||
       required_bytes > static_cast<size_t>(std::numeric_limits<Diligent::Uint32>::max())) {
     return false;
+  }
+  if (visible_buffer_layout != layout) {
+    visible_buffer.Release();
+    visible_uav.Release();
+    visible_buffer_capacity_bytes = 0u;
+    visible_buffer_layout = layout;
   }
   if (!visible_buffer ||
       !visible_uav ||
@@ -774,19 +895,22 @@ bool DiligentBackend::ensureInstancedGpuCullingOutputBuffers(
   return true;
 }
 
-bool DiligentBackend::ensureInstancedGpuCullingRecordBuffers(InstancedRecord& record) {
+bool DiligentBackend::ensureInstancedGpuCullingRecordBuffers(
+    InstancedRecord& record,
+    const InstanceSetRecord& instance_set) {
   if (!instancedGpuCullingEnabled() ||
-      record.dynamic ||
-      record.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
-      record.instanceCount() == 0u ||
+      instance_set.dynamic ||
+      instance_set.instanceCount() == 0u ||
       !device_) {
     return false;
   }
   return ensureInstancedGpuCullingOutputBuffers(
-      record.instanceCount(),
+      instance_set.gpu_layout,
+      instance_set.instanceCount(),
       record.gpu_culled_instance_buffer,
       record.gpu_culled_instance_uav,
       record.gpu_culled_instance_buffer_capacity_bytes,
+      record.gpu_culled_layout,
       record.gpu_culling_indirect_args_buffer,
       record.gpu_culling_indirect_args_uav);
 }
@@ -1010,7 +1134,39 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
       out_stats.skipped_hidden += 1;
       continue;
     }
-    auto mesh_it = meshes_.find(instance.mesh);
+    auto base_mesh_it = meshes_.find(instance.mesh);
+    if (base_mesh_it == meshes_.end()) {
+      out_stats.skipped_missing_mesh += 1;
+      continue;
+    }
+    const MeshRecord& base_mesh = base_mesh_it->second;
+    rendering::MeshId selected_mesh = instance.mesh;
+    rendering::MaterialId selected_material = instance.material;
+    const std::vector<rendering::DrawMaterialBinding>* selected_materials =
+        &instance.materials;
+    rendering::LodRenderMode selected_render_mode = rendering::LodRenderMode::Mesh;
+    const glm::vec3 base_world_center =
+        base_mesh.bounds_radius > 0.0f
+            ? glm::vec3(instance.transform *
+                        glm::vec4(base_mesh.bounds_center, 1.0f))
+            : glm::vec3(instance.transform[3]);
+    const float distance_to_camera = glm::length(base_world_center - camera_position);
+    const auto lod_is_renderable = [&](const auto& lod) {
+      const auto candidate = meshes_.find(lod.mesh);
+      return lod.mesh != rendering::kInvalidMesh &&
+             candidate != meshes_.end() && candidate->second.vertex_buffer;
+    };
+    const size_t selected_lod_bucket =
+        rendering::detail::selectRenderableLodBucket(
+            distance_to_camera, instance.lods, lod_is_renderable);
+    if (selected_lod_bucket != 0u) {
+      const auto& lod = instance.lods[selected_lod_bucket - 1u];
+      selected_mesh = lod.mesh;
+      selected_material = lod.material;
+      selected_materials = &lod.materials;
+      selected_render_mode = lod.render_mode;
+    }
+    auto mesh_it = meshes_.find(selected_mesh);
     if (mesh_it == meshes_.end()) {
       out_stats.skipped_missing_mesh += 1;
       continue;
@@ -1038,17 +1194,18 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
       for (size_t submesh_index = 0; submesh_index < mesh.submeshes.size(); ++submesh_index) {
         const auto& submesh = mesh.submeshes[submesh_index];
         const rendering::MaterialId mat_id =
-            resolve_bound_material(instance.materials,
-                                   instance.material,
+            resolve_bound_material(*selected_materials,
+                                   selected_material,
                                    submesh.material_slot,
                                    submesh.material);
         const ForwardBatchKey key{
-            .mesh = instance.mesh,
+            .mesh = selected_mesh,
             .material = mat_id,
             .index_offset = submesh.index_offset,
             .index_count = submesh.index_count,
             .indexed = indexed_mesh && submesh.index_count > 0,
             .deformed = instance.deformation != rendering::kInvalidDeformation,
+            .render_mode = selected_render_mode,
         };
         const MaterialRecord* mat = lookup_material(mat_id);
         const bool transparent = uses_transparent_forward_path(mat, mesh);
@@ -1085,17 +1242,18 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
       }
     } else {
       const rendering::MaterialId mat_id =
-          resolve_bound_material(instance.materials,
-                                 instance.material,
+          resolve_bound_material(*selected_materials,
+                                 selected_material,
                                  0,
                                  rendering::kInvalidMaterial);
       const ForwardBatchKey key{
-          .mesh = instance.mesh,
+          .mesh = selected_mesh,
           .material = mat_id,
           .index_offset = 0,
           .index_count = mesh.index_count,
           .indexed = indexed_mesh,
           .deformed = instance.deformation != rendering::kInvalidDeformation,
+          .render_mode = selected_render_mode,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
       const bool transparent = uses_transparent_forward_path(mat, mesh);
@@ -1135,11 +1293,17 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
   for (const auto& entry : instanced_records_) {
     const rendering::InstanceId record_id = entry.first;
     const auto& record = entry.second;
+    const auto source_it = instance_sets_.find(record.instance_set);
+    if (source_it == instance_sets_.end()) {
+      out_stats.skipped_missing_mesh += 1;
+      continue;
+    }
+    const auto& instance_set = source_it->second;
     if (record.layer != layer) {
       out_stats.skipped_layer += 1;
       continue;
     }
-    const size_t record_instance_count = record.instanceCount();
+    const size_t record_instance_count = instance_set.instanceCount();
     if (!record.visible || record_instance_count == 0u) {
       out_stats.skipped_hidden += 1;
       if (record_instance_count > 0u) {
@@ -1166,6 +1330,179 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
       }
     }
 
+    auto level_uses_transparency =
+        [&](const MeshRecord& level_mesh,
+            const std::vector<rendering::DrawMaterialBinding>& level_materials,
+            rendering::MaterialId level_material) {
+      if (level_mesh.submeshes.empty()) {
+        const rendering::MaterialId material_id = resolve_bound_material(
+            level_materials, level_material, 0u, rendering::kInvalidMaterial);
+        return uses_transparent_forward_path(lookup_material(material_id), level_mesh);
+      }
+      return std::any_of(
+          level_mesh.submeshes.begin(),
+          level_mesh.submeshes.end(),
+          [&](const auto& submesh) {
+            const rendering::MaterialId material_id = resolve_bound_material(
+                level_materials,
+                level_material,
+                submesh.material_slot,
+                submesh.material);
+            return uses_transparent_forward_path(lookup_material(material_id), level_mesh);
+          });
+    };
+    const bool indirect_draw_supported =
+        (device_->GetAdapterInfo().DrawCommand.CapFlags &
+         Diligent::DRAW_COMMAND_CAP_FLAG_DRAW_INDIRECT) != 0;
+    const bool camera_shader_override =
+        !camera_.shader_override_vertex_path.empty() &&
+        !camera_.shader_override_fragment_path.empty();
+    const auto lod_is_renderable = [&](const auto& lod) {
+      const auto lod_mesh_it = meshes_.find(lod.mesh);
+      return lod.mesh != rendering::kInvalidMesh &&
+             lod_mesh_it != meshes_.end() &&
+             lod_mesh_it->second.vertex_buffer;
+    };
+    bool use_cpu_lod_classification =
+        !record.lods.empty() &&
+        (instance_set.dynamic || !instancedGpuCullingEnabled() ||
+         !indirect_draw_supported || camera_shader_override ||
+         !mesh.index_buffer || mesh.index_count == 0u ||
+         rendering::detail::hasUnrenderableLod(record.lods,
+                                               lod_is_renderable));
+    if (!record.lods.empty() &&
+        level_uses_transparency(mesh, record.materials, record.material)) {
+      use_cpu_lod_classification = true;
+    }
+    if (!record.lods.empty() && !use_cpu_lod_classification) {
+      for (const auto& lod : record.lods) {
+        const auto lod_mesh_it = meshes_.find(lod.mesh);
+        if (lod_mesh_it != meshes_.end() &&
+            ((!lod_mesh_it->second.index_buffer ||
+              lod_mesh_it->second.index_count == 0u) ||
+             level_uses_transparency(lod_mesh_it->second,
+                                     lod.materials,
+                                     lod.material))) {
+          use_cpu_lod_classification = true;
+          break;
+        }
+      }
+    }
+    if (use_cpu_lod_classification) {
+      auto emit_classified_instance = [&](const glm::mat4& source_transform,
+                                          const glm::vec4& params) {
+        const glm::mat4 transform = source_transform * record.batch_transform;
+        const glm::vec3 base_center =
+            glm::vec3(transform * glm::vec4(mesh.bounds_center, 1.0f));
+        const float distance_to_camera = glm::length(base_center - camera_position);
+        rendering::MeshId selected_mesh_id = record.mesh;
+        rendering::MaterialId selected_material = record.material;
+        const std::vector<rendering::DrawMaterialBinding>* selected_materials =
+            &record.materials;
+        rendering::LodRenderMode selected_render_mode = rendering::LodRenderMode::Mesh;
+        const size_t selected_lod_bucket =
+            rendering::detail::selectRenderableLodBucket(
+                distance_to_camera, record.lods, lod_is_renderable);
+        if (selected_lod_bucket != 0u) {
+          const auto& lod = record.lods[selected_lod_bucket - 1u];
+          selected_mesh_id = lod.mesh;
+          selected_material = lod.material;
+          selected_materials = &lod.materials;
+          selected_render_mode = lod.render_mode;
+        }
+        const auto selected_mesh_it = meshes_.find(selected_mesh_id);
+        if (selected_mesh_it == meshes_.end() ||
+            !selected_mesh_it->second.vertex_buffer) {
+          return;
+        }
+        const MeshRecord& selected_mesh = selected_mesh_it->second;
+        const bool selected_indexed =
+            selected_mesh.index_buffer && selected_mesh.index_count > 0u;
+        auto emit_range = [&](uint32_t material_slot,
+                              Diligent::Uint32 index_offset,
+                              Diligent::Uint32 index_count,
+                              bool indexed,
+                              rendering::MaterialId fallback_material) {
+          const rendering::MaterialId material_id = resolve_bound_material(
+              *selected_materials,
+              selected_material,
+              material_slot,
+              fallback_material);
+          const MaterialRecord* material = lookup_material(material_id);
+          const ForwardBatchKey key{
+              .mesh = selected_mesh_id,
+              .material = material_id,
+              .index_offset = index_offset,
+              .index_count = index_count,
+              .indexed = indexed,
+              .deformed = false,
+              .gpu_layout = rendering::InstanceGpuLayout::Matrix4x4Params,
+              .render_mode = selected_render_mode,
+          };
+          if (uses_transparent_forward_path(material, selected_mesh)) {
+            auto& target_draws = uses_pre_particle_scene_sample_pass(material)
+                                     ? out_state.pre_particle_scene_sample_draws
+                                     : (uses_post_particle_transparent_pass(material)
+                                            ? out_state.post_particle_draws
+                                            : out_state.transparent_draws);
+            target_draws.push_back(TransparentForwardDraw{
+                .key = key,
+                .transform = transform,
+                .params = params,
+                .deformation = rendering::kInvalidDeformation,
+                .depth = resolve_transparent_sort_depth(material,
+                                                        selected_mesh,
+                                                        transform),
+            });
+            return;
+          }
+          append_opaque_forward_batch(
+              key,
+              rendering::InstanceData{.transform = transform, .params = params},
+              rendering::kInvalidDeformation);
+          if (uses_scene_reflection_overlay(material)) {
+            out_state.scene_reflection_draws.push_back(TransparentForwardDraw{
+                .key = key,
+                .transform = transform,
+                .params = params,
+                .deformation = rendering::kInvalidDeformation,
+                .depth = resolve_transparent_sort_depth(material,
+                                                        selected_mesh,
+                                                        transform),
+                .scene_sample_mode =
+                    TransparentForwardDraw::SceneSampleMode::ReflectionOverlay,
+            });
+          }
+        };
+        if (!selected_mesh.submeshes.empty()) {
+          for (const auto& submesh : selected_mesh.submeshes) {
+            emit_range(submesh.material_slot,
+                       submesh.index_offset,
+                       submesh.index_count,
+                       selected_indexed && submesh.index_count > 0u,
+                       submesh.material);
+          }
+        } else {
+          emit_range(0u,
+                     0u,
+                     selected_mesh.index_count,
+                     selected_indexed,
+                     rendering::kInvalidMaterial);
+        }
+      };
+      if (instance_set.gpu_layout ==
+          rendering::InstanceGpuLayout::PositionYawScaleParams) {
+        for (const auto& instance : instance_set.planar_instances) {
+          emit_classified_instance(planarInstanceTransform(instance), instance.params);
+        }
+      } else {
+        for (const auto& instance : instance_set.instances) {
+          emit_classified_instance(instance.transform, instance.params);
+        }
+      }
+      continue;
+    }
+
     const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
     auto emit_instanced_submesh = [&](uint32_t material_slot,
                                       Diligent::Uint32 index_offset,
@@ -1181,7 +1518,7 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
           .index_count = index_count,
           .indexed = indexed,
           .deformed = false,
-          .gpu_layout = record.gpu_layout,
+          .gpu_layout = instance_set.gpu_layout,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
       const bool transparent = uses_transparent_forward_path(mat, mesh);
@@ -1217,13 +1554,18 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
             .depth = resolve_transparent_sort_depth(mat, mesh, transform),
         });
       };
-      if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
-        for (const rendering::PlanarInstanceData& instance : record.planar_instances) {
-          append_transparent_instance(planarInstanceTransform(instance), instance.params);
+      if (instance_set.gpu_layout ==
+          rendering::InstanceGpuLayout::PositionYawScaleParams) {
+        for (const rendering::PlanarInstanceData& instance :
+             instance_set.planar_instances) {
+          append_transparent_instance(
+              planarInstanceTransform(instance) * record.batch_transform,
+              instance.params);
         }
       } else {
-        for (const rendering::InstanceData& instance : record.instances) {
-          append_transparent_instance(instance.transform, instance.params);
+        for (const rendering::InstanceData& instance : instance_set.instances) {
+          append_transparent_instance(instance.transform * record.batch_transform,
+                                      instance.params);
         }
       }
     };
@@ -1242,7 +1584,7 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
             .index_count = submesh.index_count,
             .indexed = indexed_mesh && submesh.index_count > 0,
             .deformed = false,
-            .gpu_layout = record.gpu_layout,
+            .gpu_layout = instance_set.gpu_layout,
         };
         const MaterialRecord* mat = lookup_material(mat_id);
         if (uses_transparent_forward_path(mat, mesh)) {
@@ -1273,13 +1615,16 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
           .index_count = mesh.index_count,
           .indexed = indexed_mesh,
           .deformed = false,
-          .gpu_layout = record.gpu_layout,
+          .gpu_layout = instance_set.gpu_layout,
       };
       const MaterialRecord* mat = lookup_material(mat_id);
       if (uses_transparent_forward_path(mat, mesh)) {
-        if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
-          for (const rendering::PlanarInstanceData& instance : record.planar_instances) {
-            const glm::mat4 transform = planarInstanceTransform(instance);
+        if (instance_set.gpu_layout ==
+            rendering::InstanceGpuLayout::PositionYawScaleParams) {
+          for (const rendering::PlanarInstanceData& instance :
+               instance_set.planar_instances) {
+            const glm::mat4 transform =
+                planarInstanceTransform(instance) * record.batch_transform;
             auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                      ? out_state.pre_particle_scene_sample_draws
                                      : (uses_post_particle_transparent_pass(mat)
@@ -1301,7 +1646,8 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
             });
           }
         } else {
-          for (const rendering::InstanceData& submitted_instance : record.instances) {
+          for (const rendering::InstanceData& submitted_instance :
+               instance_set.instances) {
             auto& target_draws = uses_pre_particle_scene_sample_pass(mat)
                                      ? out_state.pre_particle_scene_sample_draws
                                      : (uses_post_particle_transparent_pass(mat)
@@ -1316,10 +1662,13 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
                     .indexed = key.indexed,
                     .deformed = false,
                 },
-                .transform = submitted_instance.transform,
+                .transform = submitted_instance.transform * record.batch_transform,
                 .params = submitted_instance.params,
                 .deformation = rendering::kInvalidDeformation,
-                .depth = resolve_transparent_sort_depth(mat, mesh, submitted_instance.transform),
+                .depth = resolve_transparent_sort_depth(
+                    mat,
+                    mesh,
+                    submitted_instance.transform * record.batch_transform),
             });
           }
         }
@@ -1367,7 +1716,7 @@ void DiligentBackend::collectForwardLayerState(rendering::LayerId layer,
             .index_count = index_count,
             .indexed = indexed,
             .deformed = false,
-            .gpu_layout = record.gpu_layout,
+            .gpu_layout = instance_set.gpu_layout,
             .render_mode = lod.render_mode,
         };
         append_persistent_instanced_batch(
@@ -1570,23 +1919,29 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                                const MeshRecord& mesh,
                                                const MaterialRecord* mat,
                                                rendering::InstanceGpuLayout layout,
-                                               rendering::InstanceLodRenderMode render_mode,
+                                               rendering::LodRenderMode render_mode,
+                                               const glm::mat4& batch_transform,
                                                rendering::MaterialId& last_constants_material,
                                                rendering::MeshId& last_constants_mesh,
                                                rendering::InstanceGpuLayout& last_constants_layout,
-                                               rendering::InstanceLodRenderMode&
-                                                   last_constants_render_mode) -> bool {
+                                               rendering::LodRenderMode&
+                                                   last_constants_render_mode,
+                                               glm::mat4& last_constants_batch_transform) -> bool {
     if (material_id == last_constants_material &&
         (material_id != rendering::kInvalidMaterial || mesh_id == last_constants_mesh) &&
         layout == last_constants_layout &&
-        render_mode == last_constants_render_mode) {
+        render_mode == last_constants_render_mode &&
+        std::memcmp(glm::value_ptr(batch_transform),
+                    glm::value_ptr(last_constants_batch_transform),
+                    sizeof(glm::mat4)) == 0) {
       return true;
     }
     DrawConstants constants = base_constants;
+    copyMat4(constants.instance_batch_transform, batch_transform);
     constants.instance_params[0] =
         layout == rendering::InstanceGpuLayout::PositionYawScaleParams ? 1.0f : 0.0f;
     constants.instance_params[1] =
-        render_mode == rendering::InstanceLodRenderMode::UprightBillboard ? 1.0f : 0.0f;
+        render_mode == rendering::LodRenderMode::UprightBillboard ? 1.0f : 0.0f;
     constants.instance_params[2] = 0.0f;
     constants.instance_params[3] = 0.0f;
     glm::vec4 base_color = mat ? mat->base_color_factor : mesh.base_color;
@@ -1793,6 +2148,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     last_constants_mesh = mesh_id;
     last_constants_layout = layout;
     last_constants_render_mode = render_mode;
+    last_constants_batch_transform = batch_transform;
     return true;
   };
 
@@ -1959,6 +2315,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
 
   auto draw_gpu_culled_forward_batch =
       [&](InstancedRecord& record,
+          InstanceSetRecord& instance_set,
           const MeshRecord& mesh,
           const ForwardBatchKey& key,
           Diligent::Uint32 instance_count,
@@ -1975,10 +2332,9 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
           Diligent::IBuffer*& bound_index_buffer) -> bool {
     if (use_custom_shader_override ||
         !key.indexed ||
-        key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
-        record.dynamic ||
-        !record.instance_srv ||
-        !record.instance_buffer ||
+        instance_set.dynamic ||
+        !instance_set.instance_srv ||
+        !instance_set.instance_buffer ||
         !visible_instance_buffer ||
         !visible_instance_uav ||
         !indirect_args_buffer ||
@@ -1986,10 +2342,13 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         !graphics_pipeline ||
         !graphics_srb ||
         instance_count == 0u ||
-        !ensureInstancedGpuCullingResources() ||
+        !ensureInstancedGpuCullingResources(instance_set.gpu_layout) ||
         !is_valid_indexed_draw(mesh, key.index_offset, key.index_count)) {
       return false;
     }
+    const size_t layout_index = instanceGpuLayoutIndex(instance_set.gpu_layout);
+    auto& culling_pso = instanced_gpu_culling_psos_[layout_index];
+    auto& culling_srb = instanced_gpu_culling_srbs_[layout_index];
 
     InstancedIndexedIndirectArgs args{};
     args.num_indices = key.index_count;
@@ -2007,10 +2366,18 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     std::memcpy(culling_constants.view_proj,
                 base_constants.mvp,
                 sizeof(culling_constants.view_proj));
+    copyMat4(culling_constants.batch_transform, record.batch_transform);
     culling_constants.mesh_bounds[0] = mesh.bounds_center.x;
     culling_constants.mesh_bounds[1] = mesh.bounds_center.y;
     culling_constants.mesh_bounds[2] = mesh.bounds_center.z;
     culling_constants.mesh_bounds[3] = mesh.bounds_radius;
+    const auto base_mesh_it = meshes_.find(record.mesh);
+    const MeshRecord& lod_reference_mesh =
+        base_mesh_it != meshes_.end() ? base_mesh_it->second : mesh;
+    culling_constants.lod_reference_bounds[0] = lod_reference_mesh.bounds_center.x;
+    culling_constants.lod_reference_bounds[1] = lod_reference_mesh.bounds_center.y;
+    culling_constants.lod_reference_bounds[2] = lod_reference_mesh.bounds_center.z;
+    culling_constants.lod_reference_bounds[3] = lod_reference_mesh.bounds_radius;
     culling_constants.camera_position[0] = base_constants.camera_pos[0];
     culling_constants.camera_position[1] = base_constants.camera_pos[1];
     culling_constants.camera_position[2] = base_constants.camera_pos[2];
@@ -2036,17 +2403,17 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       *mapped_constants = culling_constants;
     }
 
-    instanced_gpu_culling_source_var_->Set(
-        record.instance_srv,
+    instanced_gpu_culling_source_vars_[layout_index]->Set(
+        instance_set.instance_srv,
         Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-    instanced_gpu_culling_visible_var_->Set(
+    instanced_gpu_culling_visible_vars_[layout_index]->Set(
         visible_instance_uav,
         Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-    instanced_gpu_culling_args_var_->Set(
+    instanced_gpu_culling_args_vars_[layout_index]->Set(
         indirect_args_uav,
         Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-    context_->SetPipelineState(instanced_gpu_culling_pso_);
-    context_->CommitShaderResources(instanced_gpu_culling_srb_,
+    context_->SetPipelineState(culling_pso);
+    context_->CommitShaderResources(culling_srb,
                                     Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     Diligent::DispatchComputeAttribs dispatch{};
     dispatch.ThreadGroupCountX = (instance_count + 63u) / 64u;
@@ -2089,12 +2456,12 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         static_cast<Diligent::Uint32>(sizeof(InstancedIndexedIndirectArgs));
     indirect.DrawCount = 1u;
     indirect.Flags = kHotPathDrawFlags;
-	    indirect.AttribsBufferStateTransitionMode =
-	        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION;
-	    context_->DrawIndexedIndirect(indirect);
-	    instancing_stats_.gpu_indirect_draws += 1u;
-	    return true;
-	  };
+    indirect.AttribsBufferStateTransitionMode =
+        Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION;
+    context_->DrawIndexedIndirect(indirect);
+    instancing_stats_.gpu_indirect_draws += 1u;
+    return true;
+  };
 
   struct GpuLodBucketDraw {
     const ForwardBatch* batch = nullptr;
@@ -2168,7 +2535,6 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
           Diligent::IBuffer*& bound_index_buffer) -> bool {
     if (use_custom_shader_override ||
         !key.indexed ||
-        key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
         !visible_instance_buffer ||
         !indirect_args_buffer ||
         !graphics_pipeline ||
@@ -2212,6 +2578,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   auto classify_gpu_lod_record =
       [&](rendering::InstanceId record_id,
           InstancedRecord& record,
+          InstanceSetRecord& instance_set,
           Diligent::Uint32 instance_count) -> GpuLodClassification* {
     auto [classification_it, inserted] =
         gpu_lod_classifications.emplace(record_id, GpuLodClassification{});
@@ -2223,16 +2590,18 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     classification.bucket_count =
         static_cast<uint32_t>(record.lods.size()) + 1u;
     if (use_custom_shader_override ||
-        record.dynamic ||
-        record.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
+        instance_set.dynamic ||
         record.lods.empty() ||
         classification.bucket_count > kInstancedGpuLodBucketCapacity ||
         instance_count == 0u ||
-        !record.instance_buffer ||
-        !record.instance_srv ||
-        !ensureInstancedGpuLodCullingResources()) {
+        !instance_set.instance_buffer ||
+        !instance_set.instance_srv ||
+        !ensureInstancedGpuLodCullingResources(instance_set.gpu_layout)) {
       return &classification;
     }
+    const size_t layout_index = instanceGpuLayoutIndex(instance_set.gpu_layout);
+    auto& culling_pso = instanced_gpu_lod_culling_psos_[layout_index];
+    auto& culling_srb = instanced_gpu_lod_culling_srbs_[layout_index];
 
     const auto batch_set_it = gpu_lod_batch_sets.find(record_id);
     if (batch_set_it == gpu_lod_batch_sets.end() || batch_set_it->second.invalid) {
@@ -2246,7 +2615,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       const ForwardBatch* bucket_batch = batch_by_bucket[bucket_index];
       if (!bucket_batch ||
           !bucket_batch->key.indexed ||
-          bucket_batch->key.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams ||
+          bucket_batch->key.gpu_layout != instance_set.gpu_layout ||
           bucket_batch->persistent_instance_count != instance_count) {
         return &classification;
       }
@@ -2262,7 +2631,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       GpuLodBucketDraw& bucket = classification.buckets[bucket_index];
       bucket.batch = bucket_batch;
       if (bucket_index == 0u) {
-        if (!ensureInstancedGpuCullingRecordBuffers(record)) {
+        if (!ensureInstancedGpuCullingRecordBuffers(record, instance_set)) {
           return &classification;
         }
         bucket.visible_instance_buffer = record.gpu_culled_instance_buffer.RawPtr();
@@ -2272,10 +2641,12 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       } else {
         auto& lod = record.lods[bucket_index - 1u];
         if (!ensureInstancedGpuCullingOutputBuffers(
+                instance_set.gpu_layout,
                 instance_count,
                 lod.gpu_culled_instance_buffer,
                 lod.gpu_culled_instance_uav,
                 lod.gpu_culled_instance_buffer_capacity_bytes,
+                lod.gpu_culled_layout,
                 lod.gpu_culling_indirect_args_buffer,
                 lod.gpu_culling_indirect_args_uav)) {
           return &classification;
@@ -2314,15 +2685,43 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       return &classification;
     }
     const MeshRecord& base_mesh = base_mesh_it->second;
+    glm::vec3 combined_bounds_center = base_mesh.bounds_center;
+    float combined_bounds_radius = base_mesh.bounds_radius;
+    bool combined_bounds_valid = base_mesh.bounds_radius > 0.0f;
+    for (const auto& lod : record.lods) {
+      glm::vec3 lod_center = lod.bounds_center;
+      float lod_radius = lod.bounds_radius;
+      bool lod_valid = lod.bounds_valid;
+      if (!lod_valid) {
+        const auto lod_mesh_it = meshes_.find(lod.mesh);
+        if (lod_mesh_it != meshes_.end()) {
+          lod_center = lod_mesh_it->second.bounds_center;
+          lod_radius = lod_mesh_it->second.bounds_radius;
+          lod_valid = lod_radius > 0.0f;
+        }
+      }
+      if (lod_valid) {
+        mergeBoundingSphere(combined_bounds_center,
+                            combined_bounds_radius,
+                            combined_bounds_valid,
+                            lod_center,
+                            lod_radius);
+      }
+    }
 
     InstancedGpuCullingConstants culling_constants{};
     std::memcpy(culling_constants.view_proj,
                 base_constants.mvp,
                 sizeof(culling_constants.view_proj));
-    culling_constants.mesh_bounds[0] = base_mesh.bounds_center.x;
-    culling_constants.mesh_bounds[1] = base_mesh.bounds_center.y;
-    culling_constants.mesh_bounds[2] = base_mesh.bounds_center.z;
-    culling_constants.mesh_bounds[3] = base_mesh.bounds_radius;
+    copyMat4(culling_constants.batch_transform, record.batch_transform);
+    culling_constants.mesh_bounds[0] = combined_bounds_center.x;
+    culling_constants.mesh_bounds[1] = combined_bounds_center.y;
+    culling_constants.mesh_bounds[2] = combined_bounds_center.z;
+    culling_constants.mesh_bounds[3] = combined_bounds_radius;
+    culling_constants.lod_reference_bounds[0] = base_mesh.bounds_center.x;
+    culling_constants.lod_reference_bounds[1] = base_mesh.bounds_center.y;
+    culling_constants.lod_reference_bounds[2] = base_mesh.bounds_center.z;
+    culling_constants.lod_reference_bounds[3] = base_mesh.bounds_radius;
     culling_constants.camera_position[0] = base_constants.camera_pos[0];
     culling_constants.camera_position[1] = base_constants.camera_pos[1];
     culling_constants.camera_position[2] = base_constants.camera_pos[2];
@@ -2354,23 +2753,23 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       *mapped_constants = culling_constants;
     }
 
-    instanced_gpu_lod_culling_source_var_->Set(
-        record.instance_srv,
+    instanced_gpu_lod_culling_source_vars_[layout_index]->Set(
+        instance_set.instance_srv,
         Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     for (uint32_t i = 0u; i < kInstancedGpuLodBucketCapacity; ++i) {
       const uint32_t source_bucket =
           std::min(i, classification.bucket_count - 1u);
       const GpuLodBucketDraw& bucket = classification.buckets[source_bucket];
-      instanced_gpu_lod_culling_visible_vars_[i]->Set(
+      instanced_gpu_lod_culling_visible_vars_[layout_index][i]->Set(
           bucket.visible_instance_uav,
           Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
-      instanced_gpu_lod_culling_args_vars_[i]->Set(
+      instanced_gpu_lod_culling_args_vars_[layout_index][i]->Set(
           bucket.indirect_args_uav,
           Diligent::SET_SHADER_RESOURCE_FLAG_ALLOW_OVERWRITE);
     }
 
-    context_->SetPipelineState(instanced_gpu_lod_culling_pso_);
-    context_->CommitShaderResources(instanced_gpu_lod_culling_srb_,
+    context_->SetPipelineState(culling_pso);
+    context_->CommitShaderResources(culling_srb,
                                     Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     Diligent::DispatchComputeAttribs dispatch{};
     dispatch.ThreadGroupCountX = (instance_count + 63u) / 64u;
@@ -2547,6 +2946,21 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         if (!mesh.vertex_buffer) {
           continue;
         }
+        {
+          DrawConstants depth_constants = base_constants;
+          depth_constants.instance_params[0] = 0.0f;
+          depth_constants.instance_params[1] =
+              batch.key.render_mode == rendering::LodRenderMode::UprightBillboard
+                  ? 1.0f
+                  : 0.0f;
+          Diligent::MapHelper<DrawConstants> mapped(
+              context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+          auto* mapped_constants = getMappedData(mapped);
+          if (mapped_constants == nullptr) {
+            continue;
+          }
+          *mapped_constants = depth_constants;
+        }
         if (depth_prepass_srb_ && !default_deformation_bound) {
           if (!bindDeformationResources(depth_prepass_srb_,
                                         mesh,
@@ -2595,6 +3009,15 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         const auto& mesh = mesh_it->second;
         if (!mesh.vertex_buffer) {
           continue;
+        }
+        {
+          Diligent::MapHelper<DrawConstants> mapped(
+              context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
+          auto* mapped_constants = getMappedData(mapped);
+          if (mapped_constants == nullptr) {
+            continue;
+          }
+          *mapped_constants = base_constants;
         }
         if (depth_prepass_srb_) {
           if (!bindDeformationResources(depth_prepass_srb_, mesh, draw.deformation)) {
@@ -2653,8 +3076,9 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
   rendering::MaterialId last_constants_material = rendering::kInvalidMaterial;
   rendering::MeshId last_constants_mesh = rendering::kInvalidMesh;
   rendering::InstanceGpuLayout last_constants_layout = rendering::InstanceGpuLayout::Matrix4x4Params;
-  rendering::InstanceLodRenderMode last_constants_render_mode =
-      rendering::InstanceLodRenderMode::Mesh;
+  rendering::LodRenderMode last_constants_render_mode =
+      rendering::LodRenderMode::Mesh;
+  glm::mat4 last_constants_batch_transform{1.0f};
   {
     Diligent::MapHelper<DrawConstants> mapped(
         context_, constants_, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD);
@@ -2705,16 +3129,26 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         bound_forward_srb = camera_override_srb_;
       }
     }
+    glm::mat4 batch_transform{1.0f};
+    if (batch.instanced_record != rendering::kInvalidInstance) {
+      const auto record_it = instanced_records_.find(batch.instanced_record);
+      if (record_it == instanced_records_.end()) {
+        continue;
+      }
+      batch_transform = record_it->second.batch_transform;
+    }
     if (!update_forward_material_constants(batch.key.material,
                                            batch.key.mesh,
                                            mesh,
                                            mat,
                                            batch.key.gpu_layout,
                                            batch.key.render_mode,
+                                           batch_transform,
                                            last_constants_material,
                                            last_constants_mesh,
                                            last_constants_layout,
-                                           last_constants_render_mode)) {
+                                           last_constants_render_mode,
+                                           last_constants_batch_transform)) {
       continue;
     }
 
@@ -2739,77 +3173,87 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
     Diligent::Uint32 first_instance = 0u;
     if (batch.instanced_record != rendering::kInvalidInstance) {
       auto record_it = instanced_records_.find(batch.instanced_record);
-      if (record_it == instanced_records_.end() ||
-          !ensureInstancedRecordBuffer(record_it->second)) {
+      if (record_it == instanced_records_.end()) {
         continue;
-	      }
-	      auto& record = record_it->second;
-	      instance_count = batch.persistent_instance_count;
-	      const bool lod_batch = batch.instanced_lod_index != UINT32_MAX;
-	      if (lod_batch && batch.instanced_lod_index >= record.lods.size()) {
-	        continue;
-	      }
-	      uint32_t lod_bucket_index = 0u;
-	      if (!lod_bucket_index_for_batch(batch, record, lod_bucket_index)) {
-	        continue;
-	      }
-	      if (!record.lods.empty()) {
-	        GpuLodClassification* classification =
-	            classify_gpu_lod_record(batch.instanced_record, record, instance_count);
-	        if (classification &&
-	            classification->ready &&
-	            lod_bucket_index < classification->bucket_count) {
-	          const GpuLodBucketDraw& bucket =
-	              classification->buckets[lod_bucket_index];
-	          if (bucket.batch == &batch &&
-	              draw_preclassified_gpu_lod_batch(mesh,
-	                                               batch.key,
-	                                               pipeline,
-	                                               active_forward_srb,
-	                                               bucket.visible_instance_buffer,
-	                                               bucket.indirect_args_buffer,
-	                                               bound_mesh_vb,
-	                                               bound_instance_vb,
-	                                               bound_index_buffer)) {
-	            draw_count += 1;
-	            instancing_stats_.drawn_batches += 1u;
-	            if (!lod_batch) {
-	              instancing_stats_.drawn_instances += instance_count;
-	            }
-	            instancing_stats_.draw_calls += 1u;
-	            instancing_stats_.lod_indirect_draws += 1u;
-	            continue;
-	          }
-	        }
-	      }
-	      float distance_min = 0.0f;
-	      float distance_max = std::numeric_limits<float>::max();
+      }
+      auto& record = record_it->second;
+      auto source_it = instance_sets_.find(record.instance_set);
+      if (source_it == instance_sets_.end() ||
+          !ensureInstanceSetBuffer(source_it->second)) {
+        continue;
+      }
+      auto& instance_set = source_it->second;
+      instance_count = batch.persistent_instance_count;
+      const bool lod_batch = batch.instanced_lod_index != UINT32_MAX;
+      if (lod_batch && batch.instanced_lod_index >= record.lods.size()) {
+        continue;
+      }
+      uint32_t lod_bucket_index = 0u;
+      if (!lod_bucket_index_for_batch(batch, record, lod_bucket_index)) {
+        continue;
+      }
+      if (!record.lods.empty()) {
+        GpuLodClassification* classification =
+            classify_gpu_lod_record(batch.instanced_record,
+                                      record,
+                                      instance_set,
+                                      instance_count);
+        if (classification && classification->ready &&
+            lod_bucket_index < classification->bucket_count) {
+          const GpuLodBucketDraw& bucket =
+              classification->buckets[lod_bucket_index];
+          if (bucket.batch == &batch &&
+              draw_preclassified_gpu_lod_batch(
+                  mesh,
+                  batch.key,
+                  pipeline,
+                  active_forward_srb,
+                  bucket.visible_instance_buffer,
+                  bucket.indirect_args_buffer,
+                  bound_mesh_vb,
+                  bound_instance_vb,
+                  bound_index_buffer)) {
+            draw_count += 1;
+            instancing_stats_.drawn_batches += 1u;
+            if (!lod_batch) {
+              instancing_stats_.drawn_instances += instance_count;
+            }
+            instancing_stats_.draw_calls += 1u;
+            instancing_stats_.lod_indirect_draws += 1u;
+            continue;
+          }
+        }
+      }
+      float distance_min = 0.0f;
+      float distance_max = std::numeric_limits<float>::max();
       Diligent::IBuffer* visible_instance_buffer = nullptr;
       Diligent::IBufferView* visible_instance_uav = nullptr;
       Diligent::IBuffer* indirect_args_buffer = nullptr;
       Diligent::IBufferView* indirect_args_uav = nullptr;
       bool gpu_lod_bucket_ready = false;
-      if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams &&
-          !record.dynamic) {
+      if (!instance_set.dynamic) {
         if (lod_batch) {
           auto& lod = record.lods[batch.instanced_lod_index];
           distance_min = lod.start_distance;
-          const size_t next_lod_index = static_cast<size_t>(batch.instanced_lod_index) + 1u;
+          const size_t next_lod_index =
+              static_cast<size_t>(batch.instanced_lod_index) + 1u;
           distance_max = next_lod_index < record.lods.size()
                              ? record.lods[next_lod_index].start_distance
                              : std::numeric_limits<float>::max();
           gpu_lod_bucket_ready = ensureInstancedGpuCullingOutputBuffers(
-              record.instanceCount(),
+              instance_set.gpu_layout,
+              instance_set.instanceCount(),
               lod.gpu_culled_instance_buffer,
               lod.gpu_culled_instance_uav,
               lod.gpu_culled_instance_buffer_capacity_bytes,
+              lod.gpu_culled_layout,
               lod.gpu_culling_indirect_args_buffer,
               lod.gpu_culling_indirect_args_uav);
           visible_instance_buffer = lod.gpu_culled_instance_buffer.RawPtr();
           visible_instance_uav = lod.gpu_culled_instance_uav.RawPtr();
           indirect_args_buffer = lod.gpu_culling_indirect_args_buffer.RawPtr();
           indirect_args_uav = lod.gpu_culling_indirect_args_uav.RawPtr();
-        } else if (ensureInstancedGpuCullingRecordBuffers(record)) {
+        } else if (ensureInstancedGpuCullingRecordBuffers(record, instance_set)) {
           if (!record.lods.empty()) {
             distance_max = record.lods.front().start_distance;
           }
@@ -2825,6 +3269,7 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
       }
       if (gpu_lod_bucket_ready &&
           draw_gpu_culled_forward_batch(record,
+                                        instance_set,
                                         mesh,
                                         batch.key,
                                         instance_count,
@@ -2856,12 +3301,8 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
         instancing_stats_.lod_fallbacks += 1u;
         continue;
       }
-      if (!record.lods.empty() &&
-          record.gpu_layout != rendering::InstanceGpuLayout::PositionYawScaleParams) {
-        instancing_stats_.lod_fallbacks += 1u;
-      }
       if (!bind_forward_instance_buffer(mesh,
-                                        record.instance_buffer.RawPtr(),
+                                        instance_set.instance_buffer.RawPtr(),
                                         bound_mesh_vb,
                                         bound_instance_vb)) {
         continue;
@@ -2942,11 +3383,13 @@ Diligent::Uint32 DiligentBackend::renderOpaqueForwardLayer(
                                            mesh,
                                  mat,
                                  rendering::InstanceGpuLayout::Matrix4x4Params,
-                                 rendering::InstanceLodRenderMode::Mesh,
+                                 rendering::LodRenderMode::Mesh,
+                                 glm::mat4{1.0f},
                                  last_constants_material,
                                  last_constants_mesh,
                                  last_constants_layout,
-                                 last_constants_render_mode)) {
+                                 last_constants_render_mode,
+                                 last_constants_batch_transform)) {
       continue;
     }
 
@@ -3081,15 +3524,18 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
                                                rendering::MeshId mesh_id,
                                                const MeshRecord& mesh,
                                                const MaterialRecord* mat,
+                                               rendering::LodRenderMode render_mode,
                                                TransparentForwardDraw::SceneSampleMode scene_sample_mode,
                                                const rendering::VolumeDrawParams& volume_params,
                                                bool has_volume_params,
                                                rendering::MaterialId& last_constants_material,
                                                rendering::MeshId& last_constants_mesh,
+                                               rendering::LodRenderMode& last_constants_render_mode,
                                                TransparentForwardDraw::SceneSampleMode&
                                                    last_constants_scene_sample_mode) -> bool {
     if (!has_volume_params &&
         material_id == last_constants_material &&
+        render_mode == last_constants_render_mode &&
         scene_sample_mode == last_constants_scene_sample_mode &&
         (material_id != rendering::kInvalidMaterial || mesh_id == last_constants_mesh)) {
       return true;
@@ -3118,7 +3564,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
       constants.volume_params4[3] = volume_params.surface_double_sided ? 1.0f : 0.0f;
     }
     constants.instance_params[0] = 0.0f;
-    constants.instance_params[1] = 0.0f;
+    constants.instance_params[1] =
+        render_mode == rendering::LodRenderMode::UprightBillboard ? 1.0f : 0.0f;
     constants.instance_params[2] = 0.0f;
     constants.instance_params[3] = 0.0f;
     glm::vec4 base_color = mat ? mat->base_color_factor : mesh.base_color;
@@ -3324,6 +3771,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
     }
     last_constants_material = has_volume_params ? rendering::kInvalidMaterial : material_id;
     last_constants_mesh = has_volume_params ? rendering::kInvalidMesh : mesh_id;
+    last_constants_render_mode =
+        has_volume_params ? rendering::LodRenderMode::Mesh : render_mode;
     last_constants_scene_sample_mode =
         has_volume_params ? TransparentForwardDraw::SceneSampleMode::None : scene_sample_mode;
     return true;
@@ -3563,6 +4012,8 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
   Diligent::ITextureView* bound_scene_depth = nullptr;
   rendering::MaterialId last_constants_material = rendering::kInvalidMaterial;
   rendering::MeshId last_constants_mesh = rendering::kInvalidMesh;
+  rendering::LodRenderMode last_constants_render_mode =
+      rendering::LodRenderMode::Mesh;
   auto last_constants_scene_sample_mode = TransparentForwardDraw::SceneSampleMode::None;
   Diligent::Uint32 draw_count = 0;
   for (size_t draw_index = 0u; draw_index < draws.size(); ++draw_index) {
@@ -3597,11 +4048,13 @@ Diligent::Uint32 DiligentBackend::renderTransparentForwardDraws(
                                            draw.key.mesh,
                                            mesh,
                                            mat,
+                                           draw.key.render_mode,
                                            draw.scene_sample_mode,
                                            draw.volume_params,
                                            draw.has_volume_params,
                                            last_constants_material,
                                            last_constants_mesh,
+                                           last_constants_render_mode,
                                            last_constants_scene_sample_mode)) {
       continue;
     }

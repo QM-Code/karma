@@ -34,7 +34,8 @@ namespace {
 using render_system::drawBoxWire;
 using render_system::drawCapsuleWire;
 using render_system::drawSphereWire;
-using render_system::extractInstancedMesh;
+using render_system::calculateInstancedBounds;
+using render_system::extractInstanceSet;
 using render_system::toCameraData;
 using render_system::toDirectionalLight;
 using render_system::toLightData;
@@ -142,59 +143,12 @@ bool matrixChangedBeyondEpsilon(const glm::mat4& a,
   return false;
 }
 
-template <typename RenderRecordT>
-void rebuildCachedInstances(const components::InstancedMeshComponent& instanced,
-                            const glm::mat4& owner_world_transform,
-                            RenderRecordT& record) {
-  record.cached_authored_instance_layout = instanced.gpu_layout;
-  record.cached_instance_revision = instanced.instance_revision;
-  record.cached_instance_dynamic = instanced.dynamic;
-  record.cached_owner_world_transform = owner_world_transform;
-  record.cached_owner_world_transform_valid = true;
-
-  glm::vec3 combined_bounds_center{0.0f};
-  float combined_bounds_radius = 0.0f;
-  bool combined_bounds_valid = false;
-  if (record.bounds_valid) {
-    mergeSphere(combined_bounds_center,
-                combined_bounds_radius,
-                combined_bounds_valid,
-                record.bounds_center,
-                record.bounds_radius);
-  }
-  for (const auto& lod : record.instanced_lods) {
-    if (lod.bounds_valid) {
-      mergeSphere(combined_bounds_center,
-                  combined_bounds_radius,
-                  combined_bounds_valid,
-                  lod.bounds_center,
-                  lod.bounds_radius);
-    }
-  }
-
-  render_system::ExtractedInstancedMesh extracted = extractInstancedMesh(
-      instanced,
-      owner_world_transform,
-      combined_bounds_center,
-      combined_bounds_radius,
-      combined_bounds_valid);
-  record.cached_instance_count = extracted.instanceCount();
-  record.cached_instance_layout = extracted.gpu_layout;
-  record.cached_instances = std::move(extracted.instances);
-  record.cached_planar_instances = std::move(extracted.planar_instances);
-  record.cached_instance_bounds_center = extracted.bounds_center;
-  record.cached_instance_bounds_radius = extracted.bounds_radius;
-  record.cached_instance_bounds_valid = extracted.bounds_valid;
-}
-
-size_t authoredInstanceCount(const components::InstancedMeshComponent& instanced) {
-  switch (instanced.gpu_layout) {
-    case rendering::InstanceGpuLayout::Matrix4x4Params:
-      return instanced.instances.size();
-    case rendering::InstanceGpuLayout::PositionYawScaleParams:
-      return instanced.planar_instances.size();
-  }
-  return 0u;
+glm::mat4 instancedBatchTransform(
+    const components::InstancedMeshComponent& component) {
+  glm::mat4 transform = glm::translate(
+      glm::mat4(1.0f), math::toGlm(component.local_position));
+  transform *= glm::mat4_cast(math::toGlm(component.local_rotation));
+  return glm::scale(transform, math::toGlm(component.local_scale));
 }
 
 template <typename T>
@@ -310,7 +264,7 @@ struct RenderSystem::Impl {
   Impl(GraphicsDevice& device, const assets::AssetRegistry& assets)
       : device_(device), assets_(&assets) {}
 
-  struct InstancedLodRecord {
+  struct RenderLodRecord {
     float start_distance = 0.0f;
     std::string mesh_asset_key;
     std::vector<world::MeshMaterialSlot> material_slots;
@@ -321,7 +275,7 @@ struct RenderSystem::Impl {
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
-    rendering::InstanceLodRenderMode render_mode = rendering::InstanceLodRenderMode::Mesh;
+    rendering::LodRenderMode render_mode = rendering::LodRenderMode::Mesh;
     bool shadow_visible = false;
   };
 
@@ -335,21 +289,27 @@ struct RenderSystem::Impl {
     glm::vec3 bounds_center{0.0f};
     float bounds_radius = 0.0f;
     bool bounds_valid = false;
-    rendering::InstanceGpuLayout cached_authored_instance_layout =
-        rendering::InstanceGpuLayout::Matrix4x4Params;
-    rendering::InstanceGpuLayout cached_instance_layout =
-        rendering::InstanceGpuLayout::Matrix4x4Params;
-    uint64_t cached_instance_revision = UINT64_MAX;
-    size_t cached_instance_count = 0;
-    bool cached_instance_dynamic = false;
-    glm::mat4 cached_owner_world_transform{1.0f};
-    bool cached_owner_world_transform_valid = false;
+    uint64_t instance_set_key = 0u;
+    uint64_t cached_instance_set_generation = UINT64_MAX;
+    glm::mat4 cached_batch_transform{1.0f};
+    bool cached_batch_transform_valid = false;
     bool cached_instance_bounds_valid = false;
     glm::vec3 cached_instance_bounds_center{0.0f};
     float cached_instance_bounds_radius = 0.0f;
-    std::vector<rendering::InstanceData> cached_instances;
-    std::vector<rendering::PlanarInstanceData> cached_planar_instances;
-    std::vector<InstancedLodRecord> instanced_lods;
+    std::vector<RenderLodRecord> lods;
+  };
+
+  struct InstanceSetCache {
+    rendering::InstanceGpuLayout authored_layout =
+        rendering::InstanceGpuLayout::Matrix4x4Params;
+    uint64_t revision = UINT64_MAX;
+    size_t authored_instance_count = 0u;
+    glm::mat4 owner_world_transform{1.0f};
+    bool owner_world_transform_valid = false;
+    uint64_t generation = 0u;
+    bool dynamic = false;
+    bool payload_changed = true;
+    render_system::ExtractedInstanceSet extracted;
   };
 
   struct SharedMeshResource {
@@ -390,6 +350,9 @@ struct RenderSystem::Impl {
   static uint64_t instancedEntityKey(world::Entity entity) {
     return entityKey(entity) | (uint64_t{1} << 63);
   }
+  static uint64_t instanceSetEntityKey(world::Entity entity) {
+    return entityKey(entity) | (uint64_t{1} << 62);
+  }
   static world::Entity entityFromKey(uint64_t key) {
     world::Entity entity{};
     entity.index = static_cast<uint32_t>(key >> 32);
@@ -398,6 +361,9 @@ struct RenderSystem::Impl {
   }
   static world::Entity entityFromInstancedKey(uint64_t key) {
     return entityFromKey(key & ~(uint64_t{1} << 63));
+  }
+  static world::Entity entityFromInstanceSetKey(uint64_t key) {
+    return entityFromKey(key & ~(uint64_t{1} << 62));
   }
 
   void update(world::World& world, world::Scene& scene, float dt, float interpolation_alpha);
@@ -410,11 +376,12 @@ struct RenderSystem::Impl {
   void releaseRecord(uint64_t key, RenderRecord& record);
   void cleanupStaleRecords(world::World& world);
   void cleanupStaleInstancedRecords(world::World& world);
+  void cleanupStaleInstanceSets(world::World& world);
   void releaseMeshBinding(RenderRecord& record);
   void releaseMaterialBinding(RenderRecord& record);
-  void releaseInstancedLodBindings(RenderRecord& record);
-  bool syncInstancedLodBindings(const components::InstancedMeshComponent& instanced,
-                                RenderRecord& record);
+  void releaseLodBindings(RenderRecord& record);
+  bool syncLodBindings(const components::LodComponent* component,
+                       RenderRecord& record);
   void bindMesh(const components::MeshComponent& mesh, RenderRecord& record);
   void bindMesh(const std::string& mesh_asset_key, RenderRecord& record);
   void bindMaterial(const components::MeshComponent& mesh, RenderRecord& record);
@@ -438,6 +405,7 @@ struct RenderSystem::Impl {
   const assets::AssetRegistry* assets_ = nullptr;
   std::unordered_map<uint64_t, RenderRecord> records_;
   std::unordered_map<uint64_t, RenderRecord> instanced_records_;
+  std::unordered_map<uint64_t, InstanceSetCache> instance_set_records_;
   std::unordered_map<std::string, SharedMeshResource> shared_meshes_;
   std::unordered_map<std::string, SharedMaterialResource> shared_materials_;
   std::unordered_map<std::string, SharedMaterialAlias> shared_material_aliases_;
@@ -490,7 +458,7 @@ bool RenderSystem::releasePrewarm(RenderPrewarmHandle handle) {
 
 void RenderSystem::Impl::releaseRecord(uint64_t key, RenderRecord& record) {
   device_.retireInstance(static_cast<InstanceId>(key));
-  releaseInstancedLodBindings(record);
+  releaseLodBindings(record);
   releaseMaterialBinding(record);
   releaseMeshBinding(record);
 }
@@ -524,6 +492,20 @@ void RenderSystem::Impl::cleanupStaleInstancedRecords(world::World& world) {
   }
 }
 
+void RenderSystem::Impl::cleanupStaleInstanceSets(world::World& world) {
+  for (auto it = instance_set_records_.begin(); it != instance_set_records_.end();) {
+    const world::Entity entity = entityFromInstanceSetKey(it->first);
+    const bool stale = !world.isAlive(entity) ||
+                       !world.has<components::InstanceSetComponent>(entity);
+    if (!stale) {
+      ++it;
+      continue;
+    }
+    device_.retireInstanceSet(static_cast<InstanceId>(it->first));
+    it = instance_set_records_.erase(it);
+  }
+}
+
 void RenderSystem::Impl::releaseMeshBinding(RenderRecord& record) {
   releaseSharedMesh(record.mesh_asset_key);
   record.mesh_asset_key.clear();
@@ -543,8 +525,8 @@ void RenderSystem::Impl::releaseMaterialBinding(RenderRecord& record) {
   record.material_bindings.clear();
 }
 
-void RenderSystem::Impl::releaseInstancedLodBindings(RenderRecord& record) {
-  for (auto& lod : record.instanced_lods) {
+void RenderSystem::Impl::releaseLodBindings(RenderRecord& record) {
+  for (auto& lod : record.lods) {
     for (const std::string& material_key : lod.acquired_material_keys) {
       releaseSharedMaterial(material_key);
     }
@@ -557,32 +539,29 @@ void RenderSystem::Impl::releaseInstancedLodBindings(RenderRecord& record) {
     lod.bounds_radius = 0.0f;
     lod.bounds_valid = false;
   }
-  record.instanced_lods.clear();
+  record.lods.clear();
 }
 
-bool RenderSystem::Impl::syncInstancedLodBindings(
-    const components::InstancedMeshComponent& instanced,
+bool RenderSystem::Impl::syncLodBindings(
+    const components::LodComponent* component,
     RenderRecord& record) {
-  std::vector<components::InstancedMeshLodLevel> desired;
-  desired.reserve(std::min(instanced.lods.size(), components::kMaxInstancedMeshLodLevels));
-  for (const auto& lod : instanced.lods) {
-    if (desired.size() >= components::kMaxInstancedMeshLodLevels) {
-      break;
+  std::vector<components::LodLevel> desired;
+  if (component != nullptr) {
+    desired.reserve(std::min(component->levels.size(), components::kMaxLodLevels));
+    for (const auto& lod : component->levels) {
+      if (desired.size() >= components::kMaxLodLevels) break;
+      if (!lod.mesh_asset_key.empty()) desired.push_back(lod);
     }
-    if (lod.mesh_asset_key.empty()) {
-      continue;
-    }
-    desired.push_back(lod);
   }
   std::sort(desired.begin(), desired.end(), [](const auto& a, const auto& b) {
     return a.start_distance < b.start_distance;
   });
 
-  bool needs_rebind = desired.size() != record.instanced_lods.size();
+  bool needs_rebind = desired.size() != record.lods.size();
   if (!needs_rebind) {
     for (size_t i = 0; i < desired.size(); ++i) {
       const auto& wanted = desired[i];
-      const auto& current = record.instanced_lods[i];
+      const auto& current = record.lods[i];
       if (wanted.start_distance != current.start_distance ||
           wanted.mesh_asset_key != current.mesh_asset_key ||
           wanted.materials != current.component_materials ||
@@ -597,20 +576,18 @@ bool RenderSystem::Impl::syncInstancedLodBindings(
     return false;
   }
 
-  releaseInstancedLodBindings(record);
-  record.instanced_lods.reserve(desired.size());
+  releaseLodBindings(record);
+  record.lods.reserve(desired.size());
   for (const auto& wanted : desired) {
-    InstancedLodRecord lod_record{};
+    RenderLodRecord lod_record{};
     lod_record.start_distance = std::max(wanted.start_distance, 0.0f);
+    lod_record.mesh_asset_key = wanted.mesh_asset_key;
+    lod_record.component_materials = wanted.materials;
     lod_record.render_mode = wanted.render_mode;
     lod_record.shadow_visible = wanted.shadow_visible;
 
     RenderRecord mesh_record{};
     acquireSharedMesh(wanted.mesh_asset_key, mesh_record);
-    if (mesh_record.mesh == rendering::kInvalidMesh) {
-      continue;
-    }
-    lod_record.mesh_asset_key = wanted.mesh_asset_key;
     lod_record.mesh = mesh_record.mesh;
     lod_record.bounds_center = mesh_record.bounds_center;
     lod_record.bounds_radius = mesh_record.bounds_radius;
@@ -624,10 +601,9 @@ bool RenderSystem::Impl::syncInstancedLodBindings(
     RenderRecord material_record{};
     material_record.material_slots = lod_record.material_slots;
     bindMaterial(wanted.materials, material_record);
-    lod_record.component_materials = wanted.materials;
     lod_record.acquired_material_keys = std::move(material_record.acquired_material_keys);
     lod_record.material_bindings = std::move(material_record.material_bindings);
-    record.instanced_lods.push_back(std::move(lod_record));
+    record.lods.push_back(std::move(lod_record));
   }
   return true;
 }
@@ -1571,6 +1547,7 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       components::MeshComponent mesh_binding{};
       mesh_binding.mesh_asset_key = record.mesh_asset_key;
       mesh_binding.materials = record.component_materials;
+      releaseLodBindings(record);
       releaseMaterialBinding(record);
       releaseMeshBinding(record);
       bindMesh(mesh_binding, record);
@@ -1580,12 +1557,16 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       (void)key;
       const std::string mesh_asset_key = record.mesh_asset_key;
       const std::vector<components::MeshMaterialAssignment> materials = record.component_materials;
-      releaseInstancedLodBindings(record);
+      releaseLodBindings(record);
       releaseMaterialBinding(record);
       releaseMeshBinding(record);
       bindMesh(mesh_asset_key, record);
       bindMaterial(materials, record);
-      record.cached_owner_world_transform_valid = false;
+      record.cached_batch_transform_valid = false;
+    }
+    for (auto& [key, record] : instance_set_records_) {
+      (void)key;
+      record.owner_world_transform_valid = false;
     }
     last_asset_registry_version_ = assets_->version();
   }
@@ -1841,6 +1822,12 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
       }
     }
 
+    const components::LodComponent* lod_component =
+        world.has<components::LodComponent>(entity)
+            ? &world.get<components::LodComponent>(entity)
+            : nullptr;
+    syncLodBindings(lod_component, it->second);
+
     glm::mat4 world_matrix = toTransform(transform, interpolation_alpha);
     const components::DeformableMeshComponent* deformable_mesh = nullptr;
     if (world.has<components::DeformableMeshComponent>(entity)) {
@@ -1861,6 +1848,19 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
     item.instance = static_cast<InstanceId>(key);
     item.mesh = it->second.mesh;
     item.materials = it->second.material_bindings;
+    item.lods.reserve(it->second.lods.size());
+    for (const auto& lod : it->second.lods) {
+      item.lods.push_back(rendering::LodDrawDesc{
+          .start_distance = lod.start_distance,
+          .mesh = lod.mesh,
+          .materials = lod.material_bindings,
+          .render_mode = lod.render_mode,
+          .bounds_center = lod.bounds_center,
+          .bounds_radius = lod.bounds_radius,
+          .bounds_valid = lod.bounds_valid,
+          .shadow_visible = visible && lod.shadow_visible,
+      });
+    }
     if (world.has<components::RenderTagsComponent>(entity)) {
       item.render_tags = world.get<components::RenderTagsComponent>(entity).tags;
     }
@@ -1885,13 +1885,66 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
   }
   section_start = section_end;
 
+  size_t rebuilt_instanced_payload_count = 0;
+  world.forEach<components::InstanceSetComponent>([&](const world::Entity entity) {
+    const auto& component = world.get<components::InstanceSetComponent>(entity);
+    const uint64_t key = instanceSetEntityKey(entity);
+    auto [it, inserted] = instance_set_records_.try_emplace(key);
+    InstanceSetCache& cache = it->second;
+    glm::mat4 owner_world_transform{1.0f};
+    if (world.has<components::TransformComponent>(entity)) {
+      owner_world_transform = toTransform(
+          world.get<components::TransformComponent>(entity), interpolation_alpha);
+    }
+    const size_t authored_count =
+        component.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams
+            ? component.planar_instances.size()
+            : component.instances.size();
+    const bool changed =
+        inserted || component.dynamic ||
+        cache.authored_layout != component.gpu_layout ||
+        cache.revision != component.instance_revision ||
+        cache.authored_instance_count != authored_count ||
+        !cache.owner_world_transform_valid ||
+        matrixChangedBeyondEpsilon(cache.owner_world_transform,
+                                   owner_world_transform);
+    cache.payload_changed = changed;
+    cache.dynamic = component.dynamic;
+    if (!changed) return;
+    cache.authored_layout = component.gpu_layout;
+    cache.revision = component.instance_revision;
+    cache.authored_instance_count = authored_count;
+    cache.owner_world_transform = owner_world_transform;
+    cache.owner_world_transform_valid = true;
+    cache.extracted = extractInstanceSet(component, owner_world_transform);
+    ++cache.generation;
+    if (cache.generation == 0u) ++cache.generation;
+    ++rebuilt_instanced_payload_count;
+  });
+
   size_t instanced_entity_count = 0;
   size_t instanced_instance_count = 0;
   size_t new_instanced_record_count = 0;
-  size_t rebuilt_instanced_payload_count = 0;
   world.forEach<components::InstancedMeshComponent>([&](const world::Entity entity) {
     ++instanced_entity_count;
     const auto& instanced = world.get<components::InstancedMeshComponent>(entity);
+
+    const world::Entity source_entity =
+        instanced.instance_source.isValid() ? instanced.instance_source : entity;
+    if (!world.isAlive(source_entity) ||
+        !world.has<components::InstanceSetComponent>(source_entity)) {
+      const uint64_t stale_key = instancedEntityKey(entity);
+      auto stale = instanced_records_.find(stale_key);
+      if (stale != instanced_records_.end()) {
+        releaseRecord(stale->first, stale->second);
+        instanced_records_.erase(stale);
+      }
+      return;
+    }
+    const uint64_t source_key = instanceSetEntityKey(source_entity);
+    const auto source_it = instance_set_records_.find(source_key);
+    if (source_it == instance_set_records_.end()) return;
+    const InstanceSetCache& source = source_it->second;
 
     bool visible = instanced.visible;
     if (world.has<components::VisibilityComponent>(entity)) {
@@ -1947,42 +2000,67 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
         }
       }
     }
-    const bool lod_binding_changed = syncInstancedLodBindings(instanced, it->second);
-
-    glm::mat4 owner_world_transform{1.0f};
-    if (world.has<components::TransformComponent>(entity)) {
-      owner_world_transform = toTransform(
-          world.get<components::TransformComponent>(entity), interpolation_alpha);
-    }
-    const bool owner_transform_changed =
-        !it->second.cached_owner_world_transform_valid ||
-        matrixChangedBeyondEpsilon(it->second.cached_owner_world_transform,
-                                   owner_world_transform);
-
-    const size_t instance_count = authoredInstanceCount(instanced);
-    const bool payload_changed =
-        instanced.dynamic ||
-        binding_changed ||
-        lod_binding_changed ||
-        owner_transform_changed ||
-        it->second.cached_authored_instance_layout != instanced.gpu_layout ||
-        it->second.cached_instance_revision != instanced.instance_revision ||
-        it->second.cached_instance_count != instance_count;
-    if (payload_changed) {
-      rebuildCachedInstances(instanced, owner_world_transform, it->second);
-      ++rebuilt_instanced_payload_count;
+    const components::LodComponent* lod_component =
+        world.has<components::LodComponent>(entity)
+            ? &world.get<components::LodComponent>(entity)
+            : nullptr;
+    const bool lod_binding_changed = syncLodBindings(lod_component, it->second);
+    const glm::mat4 batch_transform = instancedBatchTransform(instanced);
+    const bool batch_transform_changed =
+        !it->second.cached_batch_transform_valid ||
+        matrixChangedBeyondEpsilon(it->second.cached_batch_transform,
+                                   batch_transform);
+    const bool source_changed =
+        it->second.instance_set_key != source_key ||
+        it->second.cached_instance_set_generation != source.generation ||
+        source.payload_changed;
+    if (binding_changed || lod_binding_changed || batch_transform_changed ||
+        source_changed) {
+      glm::vec3 combined_bounds_center{0.0f};
+      float combined_bounds_radius = 0.0f;
+      bool combined_bounds_valid = false;
+      if (it->second.bounds_valid) {
+        mergeSphere(combined_bounds_center,
+                    combined_bounds_radius,
+                    combined_bounds_valid,
+                    it->second.bounds_center,
+                    it->second.bounds_radius);
+      }
+      for (const auto& lod : it->second.lods) {
+        if (lod.bounds_valid) {
+          mergeSphere(combined_bounds_center,
+                      combined_bounds_radius,
+                      combined_bounds_valid,
+                      lod.bounds_center,
+                      lod.bounds_radius);
+        }
+      }
+      const render_system::InstancedBounds bounds = calculateInstancedBounds(
+          source.extracted,
+          batch_transform,
+          combined_bounds_center,
+          combined_bounds_radius,
+          combined_bounds_valid);
+      it->second.cached_instance_bounds_center = bounds.center;
+      it->second.cached_instance_bounds_radius = bounds.radius;
+      it->second.cached_instance_bounds_valid = bounds.valid;
+      it->second.instance_set_key = source_key;
+      it->second.cached_instance_set_generation = source.generation;
+      it->second.cached_batch_transform = batch_transform;
+      it->second.cached_batch_transform_valid = true;
     }
 
     InstancedDrawItem item{};
     item.instance = static_cast<InstanceId>(key);
+    item.instance_set = static_cast<InstanceId>(source_key);
     item.mesh = it->second.mesh;
     item.materials = it->second.material_bindings;
     if (world.has<components::RenderTagsComponent>(entity)) {
       item.render_tags = world.get<components::RenderTagsComponent>(entity).tags;
     }
-    item.lods.reserve(it->second.instanced_lods.size());
-    for (const auto& lod : it->second.instanced_lods) {
-      item.lods.push_back(rendering::InstancedLodDrawDesc{
+    item.lods.reserve(it->second.lods.size());
+    for (const auto& lod : it->second.lods) {
+      item.lods.push_back(rendering::LodDrawDesc{
           .start_distance = lod.start_distance,
           .mesh = lod.mesh,
           .materials = lod.material_bindings,
@@ -1990,19 +2068,20 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
           .bounds_center = lod.bounds_center,
           .bounds_radius = lod.bounds_radius,
           .bounds_valid = lod.bounds_valid,
-          .shadow_visible = lod.shadow_visible,
+          .shadow_visible = visible && lod.shadow_visible,
       });
     }
-    item.gpu_layout = it->second.cached_instance_layout;
-    item.instances = it->second.cached_instances;
-    item.planar_instances = it->second.cached_planar_instances;
-    item.payload_changed = payload_changed;
-    item.revision = instanced.instance_revision;
+    item.gpu_layout = source.extracted.gpu_layout;
+    item.instances = source.extracted.instances;
+    item.planar_instances = source.extracted.planar_instances;
+    item.batch_transform = batch_transform;
+    item.payload_changed = source.payload_changed;
+    item.revision = source.revision;
     item.bounds_center = it->second.cached_instance_bounds_center;
     item.bounds_radius = it->second.cached_instance_bounds_radius;
     item.bounds_valid = it->second.cached_instance_bounds_valid;
     item.layer = 0;
-    item.dynamic = instanced.dynamic;
+    item.dynamic = source.dynamic;
     item.visible = visible;
     item.shadow_visible = visible && instanced.shadow_visible;
     instanced_instance_count += item.instanceCount();
@@ -2024,6 +2103,7 @@ void RenderSystem::Impl::update(world::World& world, world::Scene& /*scene*/, fl
 
   cleanupStaleRecords(world);
   cleanupStaleInstancedRecords(world);
+  cleanupStaleInstanceSets(world);
   section_end = core::SteadyClock::now();
   logRenderSystemStage(diag_enabled, "stale record cleanup", section_start, section_end);
   section_start = section_end;

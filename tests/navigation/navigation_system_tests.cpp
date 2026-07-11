@@ -258,12 +258,14 @@ void testStaticMembershipInheritanceControlsNavigation() {
                           });
               }
               if (json.value("instanced", false)) {
-                karma::components::InstancedMeshComponent instanced{};
-                instanced.instances.push_back(
+                karma::components::InstanceSetComponent instances{};
+                instances.instances.push_back(
                     karma::components::MeshInstance{
                         .position = {7.0f, 0.0f, 0.0f},
                     });
-                world.add(entity, std::move(instanced));
+                world.add(entity, std::move(instances));
+                world.add(entity,
+                          karma::components::InstancedMeshComponent{});
               }
               return true;
             },

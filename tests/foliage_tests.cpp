@@ -41,6 +41,13 @@ void writeBytes(const std::filesystem::path& path,
   assert(stream.good());
 }
 
+void writeText(const std::filesystem::path& path, std::string_view text) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+  stream << text;
+  assert(stream.good());
+}
+
 karma::foliage::FoliageInstance instance(float x,
                                          float y,
                                          float z,
@@ -319,6 +326,18 @@ karma::world::Entity addPrimaryCamera(karma::world::World& world,
   return camera;
 }
 
+const karma::components::InstanceSetComponent& instanceSetForBatch(
+    const karma::world::World& world,
+    karma::world::Entity batch) {
+  const auto& renderer =
+      world.get<karma::components::InstancedMeshComponent>(batch);
+  const karma::world::Entity source =
+      renderer.instance_source.isValid() ? renderer.instance_source : batch;
+  assert(world.isAlive(source));
+  assert(world.has<karma::components::InstanceSetComponent>(source));
+  return world.get<karma::components::InstanceSetComponent>(source);
+}
+
 void testWorldLifetimeHandleMoveAndDestruction() {
   using namespace karma;
 
@@ -398,20 +417,23 @@ void testRuntimeOverrideResidencyAndCleanup() {
   assert(proxies.size() == 1u);
   const auto proxy_entity = proxies.front();
   const auto& proxy = world.get<components::InstancedMeshComponent>(proxy_entity);
-  assert(proxy.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams);
-  assert(proxy.planar_instances.size() == 2u);
-  assert(proxy.planar_instances[0].position.x == 11.0f);
+  const auto instance_source = proxy.instance_source;
+  const auto& proxy_instances = instanceSetForBatch(world, proxy_entity);
+  assert(proxy_instances.gpu_layout ==
+         rendering::InstanceGpuLayout::PositionYawScaleParams);
+  assert(proxy_instances.planar_instances.size() == 2u);
+  assert(proxy_instances.planar_instances[0].position.x == 11.0f);
 
   world.get<components::TransformComponent>(camera).setPosition({1000.0f, 0.0f, 0.0f});
   module.onUpdate(world, 0.0f, 1.0f);
   assert(module.stats().resident_instances == 0u);
-  assert(world.get<components::InstancedMeshComponent>(proxy_entity)
-             .planar_instances.empty());
+  assert(instanceSetForBatch(world, proxy_entity).planar_instances.empty());
 
   world.destroyEntity(source);
   module.onUpdate(world, 0.0f, 1.0f);
   assert(module.stats().source_count == 0u);
   assert(!world.isAlive(proxy_entity));
+  assert(!world.isAlive(instance_source));
   module.onDetach();
 }
 
@@ -502,10 +524,11 @@ void testRuntimeGlobalResidentBudget() {
          kDefaultMaxResidentFoliageInstances);
 
   std::size_t proxy_instances = 0u;
-  for (const world::Entity proxy :
-       world.storage<components::InstancedMeshComponent>().denseEntities()) {
+  for (const world::Entity source :
+       world.storage<components::InstanceSetComponent>().denseEntities()) {
     proxy_instances +=
-        world.get<components::InstancedMeshComponent>(proxy).planar_instances.size();
+        world.get<components::InstanceSetComponent>(source)
+            .planar_instances.size();
   }
   assert(proxy_instances == kDefaultMaxResidentFoliageInstances);
   module.onDetach();
@@ -727,8 +750,9 @@ void testRuntimeFailedChunkDoesNotConsumeBudget() {
   assert(proxies.size() == 1u);
   const auto& proxy =
       world.get<components::InstancedMeshComponent>(proxies.front());
-  assert(proxy.planar_instances.size() == 1u);
-  assert(proxy.planar_instances.front().position.x == 17.0f);
+  const auto& proxy_instances = instanceSetForBatch(world, proxies.front());
+  assert(proxy_instances.planar_instances.size() == 1u);
+  assert(proxy_instances.planar_instances.front().position.x == 17.0f);
   module.onDetach();
   std::filesystem::remove_all(dir);
 }
@@ -743,10 +767,12 @@ void testRuntimeRejectsInvalidRendererStateOnce() {
   components::FoliageComponent component{};
   component.mesh_asset_key = "grass";
   component.view_distance = 100.0f;
-  component.lods = {{.start_distance =
-                          std::numeric_limits<float>::quiet_NaN(),
-                     .mesh_asset_key = "grass_lod"}};
   world.add(source, component);
+  components::LodComponent lod{};
+  lod.levels = {{.start_distance =
+                     std::numeric_limits<float>::quiet_NaN(),
+                 .mesh_asset_key = "grass_lod"}};
+  world.add(source, lod);
   auto document = std::make_shared<FoliageDocument>();
   document->chunk_size = 16.0f;
   document->chunks = {
@@ -763,25 +789,269 @@ void testRuntimeRejectsInvalidRendererStateOnce() {
          std::string::npos);
   const auto& proxies =
       world.storage<components::InstancedMeshComponent>().denseEntities();
-  assert(proxies.size() == 1u);
-  const world::Entity proxy_entity = proxies.front();
-  const auto& suppressed =
-      world.get<components::InstancedMeshComponent>(proxy_entity);
-  assert(!suppressed.visible);
-  assert(suppressed.mesh_asset_key.empty());
-  assert(suppressed.lods.empty());
-  assert(suppressed.planar_instances.empty());
+  assert(proxies.empty());
+  const auto& instance_sets =
+      world.storage<components::InstanceSetComponent>().denseEntities();
+  assert(instance_sets.size() == 1u);
+  assert(world.get<components::InstanceSetComponent>(instance_sets.front())
+             .planar_instances.empty());
 
-  world.get<components::FoliageComponent>(source).lods.front().start_distance =
-      10.0f;
+  world.get<components::LodComponent>(source)
+      .levels.front()
+      .start_distance = 10.0f;
+  ++world.get<components::FoliageComponent>(source).source_revision;
   module.onUpdate(world, 0.0f, 1.0f);
   assert(module.stats().resident_instances == 1u);
+  const auto& restored_proxies =
+      world.storage<components::InstancedMeshComponent>().denseEntities();
+  assert(restored_proxies.size() == 1u);
   const auto& restored =
-      world.get<components::InstancedMeshComponent>(proxy_entity);
+      world.get<components::InstancedMeshComponent>(restored_proxies.front());
   assert(restored.visible);
   assert(restored.mesh_asset_key == "grass");
-  assert(restored.lods.size() == 1u);
+  assert(world.has<components::LodComponent>(restored_proxies.front()));
+  assert(world.get<components::LodComponent>(restored_proxies.front())
+             .levels.size() == 1u);
   module.onDetach();
+}
+
+void testPrefabPrototypeSharesOneInstanceSetAcrossRenderers() {
+  using namespace karma;
+  using namespace karma::foliage;
+
+  const auto dir = makeTempDir();
+  const auto prefab_path = dir / "plant/prefab.json";
+  writeText(prefab_path, R"({
+    "version": 2,
+    "root": 0,
+    "variables": {
+      "base_mesh": {"type": "string", "default": "plant/high"}
+    },
+    "nodes": [
+      {
+        "id": 0,
+        "name": "Plant Root",
+        "parent": null,
+        "components": {
+          "TransformComponent": {
+            "position": [0.0, 0.0, 0.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": [1.0, 1.0, 1.0]
+          },
+          "MeshComponent": {
+            "mesh_asset_key": {"$var": "base_mesh"},
+            "materials": [],
+            "visible": true,
+            "shadow_visible": true
+          },
+          "LODComponent": {
+            "levels": [{
+              "start_distance": 30.0,
+              "mesh_asset_key": "plant/billboard",
+              "materials": [],
+              "render_mode": "upright_billboard",
+              "shadow_visible": true
+            }]
+          }
+        }
+      },
+      {
+        "id": 1,
+        "name": "Fruit",
+        "parent": 0,
+        "components": {
+          "TransformComponent": {
+            "position": [2.0, 1.0, 0.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": [0.5, 0.5, 0.5]
+          },
+          "MeshComponent": {
+            "mesh_asset_key": "plant/fruit",
+            "materials": [],
+            "visible": true,
+            "shadow_visible": true
+          }
+        }
+      }
+    ]
+  })");
+
+  assets::AssetRegistry assets;
+  assert(assets.registerMeshAsset("plant/high", world::MeshData{}));
+  assert(assets.registerMeshAsset("plant/override", world::MeshData{}));
+  assert(assets.registerMeshAsset("plant/billboard", world::MeshData{}));
+  assert(assets.registerMeshAsset("plant/fruit", world::MeshData{}));
+
+  world::World world;
+  addPrimaryCamera(world, {10.0f, 0.0f, 0.0f});
+  const world::Entity source = world.createEntity();
+  world.add(source,
+            components::TransformComponent{{10.0f, 0.0f, 0.0f}});
+  components::FoliageComponent component{};
+  component.prefab_path = "plant/prefab.json";
+  component.prefab_variables = {{"base_mesh", "plant/override"}};
+  component.view_distance = 100.0f;
+  world.add(source, component);
+  auto document = std::make_shared<FoliageDocument>();
+  document->chunk_size = 16.0f;
+  document->chunks = {
+      {.coord = {0, 0}, .instances = {instance(1.0f, 0.0f, 1.0f)}},
+  };
+
+  FoliageRuntimeModule module;
+  module.setReferenceRoot(dir);
+  module.setLayerOverride(source, document);
+  module.onAttach({.assets = &assets});
+  module.onUpdate(world, 0.0f, 1.0f);
+
+  const auto& instance_sets =
+      world.storage<components::InstanceSetComponent>().denseEntities();
+  assert(instance_sets.size() == 1u);
+  const world::Entity shared_set = instance_sets.front();
+  assert(world.get<components::InstanceSetComponent>(shared_set)
+             .planar_instances.size() == 1u);
+
+  const auto& batches =
+      world.storage<components::InstancedMeshComponent>().denseEntities();
+  assert(batches.size() == 2u);
+  bool found_root = false;
+  bool found_fruit = false;
+  for (const world::Entity batch_entity : batches) {
+    const auto& batch =
+        world.get<components::InstancedMeshComponent>(batch_entity);
+    assert(batch.instance_source == shared_set);
+    if (batch.mesh_asset_key == "plant/override") {
+      found_root = true;
+      assert(world.has<components::LodComponent>(batch_entity));
+      const auto& lod = world.get<components::LodComponent>(batch_entity);
+      assert(lod.levels.size() == 1u);
+      assert(lod.levels.front().render_mode ==
+             rendering::LodRenderMode::UprightBillboard);
+      assert(lod.levels.front().shadow_visible);
+    } else if (batch.mesh_asset_key == "plant/fruit") {
+      found_fruit = true;
+      assert(batch.local_position.x == 2.0f);
+      assert(batch.local_position.y == 1.0f);
+      assert(batch.local_scale.x == 0.5f);
+    }
+  }
+  assert(found_root && found_fruit);
+  assert(module.diagnostics().empty());
+
+  world.get<components::FoliageComponent>(source).shadow_visible = false;
+  ++world.get<components::FoliageComponent>(source).source_revision;
+  module.onUpdate(world, 0.0f, 1.0f);
+  for (const world::Entity batch_entity :
+       world.storage<components::InstancedMeshComponent>().denseEntities()) {
+    const auto& batch =
+        world.get<components::InstancedMeshComponent>(batch_entity);
+    assert(!batch.shadow_visible);
+    if (batch.mesh_asset_key == "plant/override") {
+      assert(world.has<components::LodComponent>(batch_entity));
+      assert(world.get<components::LodComponent>(batch_entity)
+                 .levels.front()
+                 .shadow_visible);
+    }
+  }
+  module.onDetach();
+  std::filesystem::remove_all(dir);
+}
+
+void testPrefabPrototypeHoldsAdjacentAssetPackage() {
+  using namespace karma;
+  using namespace karma::foliage;
+
+  const auto dir = makeTempDir();
+  const auto prefab_dir = dir / "package_plant";
+  writeText(prefab_dir / "plant.obj", R"(v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+)");
+  writeText(prefab_dir / "assets.package.json", R"({
+    "version": 1,
+    "assets": [
+      {
+        "type": "mesh",
+        "key": "foliage/package_plant",
+        "path": "plant.obj"
+      }
+    ]
+  })");
+  writeText(prefab_dir / "prefab.json", R"({
+    "version": 2,
+    "root": 0,
+    "variables": {},
+    "nodes": [{
+      "id": 0,
+      "name": "Package Plant",
+      "parent": null,
+      "components": {
+        "TransformComponent": {
+          "position": [0.0, 0.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "MeshComponent": {
+          "mesh_asset_key": "foliage/package_plant",
+          "materials": [],
+          "visible": true,
+          "shadow_visible": true
+        }
+      }
+    }]
+  })");
+
+  assets::AssetRegistry assets;
+  assert(assets.findMeshAsset("foliage/package_plant") == nullptr);
+
+  world::World world;
+  addPrimaryCamera(world, {0.0f, 0.0f, 0.0f});
+  const auto make_source = [&]() {
+    const world::Entity source = world.createEntity();
+    world.add(source, components::TransformComponent{});
+    components::FoliageComponent component{};
+    component.prefab_path = "package_plant/prefab.json";
+    component.view_distance = 100.0f;
+    world.add(source, std::move(component));
+    return source;
+  };
+  auto document = std::make_shared<FoliageDocument>();
+  document->chunk_size = 16.0f;
+  document->chunks = {
+      {.coord = {0, 0}, .instances = {instance(1.0f, 0.0f, 1.0f)}},
+  };
+
+  FoliageRuntimeModule module;
+  module.setReferenceRoot(dir);
+  module.onAttach({.assets = &assets});
+
+  const world::Entity removed_source = make_source();
+  module.setLayerOverride(removed_source, document);
+  module.onUpdate(world, 0.0f, 1.0f);
+  assert(module.diagnostics().empty());
+  assert(assets.findMeshAsset("foliage/package_plant") != nullptr);
+  const auto& initial_batches =
+      world.storage<components::InstancedMeshComponent>().denseEntities();
+  assert(initial_batches.size() == 1u);
+  assert(world.get<components::InstancedMeshComponent>(initial_batches.front())
+             .mesh_asset_key == "foliage/package_plant");
+
+  world.destroyEntity(removed_source);
+  module.onUpdate(world, 0.0f, 1.0f);
+  assert(assets.findMeshAsset("foliage/package_plant") == nullptr);
+  assert(world.storage<components::InstancedMeshComponent>()
+             .denseEntities()
+             .empty());
+
+  const world::Entity attached_source = make_source();
+  module.setLayerOverride(attached_source, document);
+  module.onUpdate(world, 0.0f, 1.0f);
+  assert(assets.findMeshAsset("foliage/package_plant") != nullptr);
+  module.onDetach();
+  assert(assets.findMeshAsset("foliage/package_plant") == nullptr);
+
+  std::filesystem::remove_all(dir);
 }
 
 void testRuntimeFileStreamingAndDiagnostics() {
@@ -842,6 +1112,9 @@ void testComponentSerializerRoundTripAndValidation() {
   const prefabs::ComponentSerializer* serializer =
       registry.find("FoliageComponent");
   assert(serializer != nullptr);
+  const prefabs::ComponentSerializer* lod_serializer =
+      registry.find("LODComponent");
+  assert(lod_serializer != nullptr);
 
   world::World source_world;
   const world::Entity source = source_world.createEntity();
@@ -849,16 +1122,17 @@ void testComponentSerializerRoundTripAndValidation() {
   authored.sidecar_path = "forest/layers/oaks.kfoliage";
   authored.mesh_asset_key = "forest/oak_near";
   authored.materials = {{.slot = 0u, .material_key = "forest/oak_bark"}};
-  authored.lods = {
+  components::LodComponent authored_lod{};
+  authored_lod.levels = {
       {.start_distance = 48.0f,
        .mesh_asset_key = "forest/oak_mid",
        .materials = {{.slot = 0u, .material_key = "forest/oak_atlas"}},
-       .render_mode = rendering::InstanceLodRenderMode::Mesh,
+       .render_mode = rendering::LodRenderMode::Mesh,
        .shadow_visible = true},
       {.start_distance = 128.0f,
        .mesh_asset_key = "forest/oak_billboard",
        .materials = {{.slot = 0u, .material_key = "forest/oak_atlas"}},
-       .render_mode = rendering::InstanceLodRenderMode::UprightBillboard,
+       .render_mode = rendering::LodRenderMode::UprightBillboard,
        .shadow_visible = false},
   };
   authored.chunk_size = 24.0f;
@@ -871,33 +1145,43 @@ void testComponentSerializerRoundTripAndValidation() {
   assert(foliage::validateFoliageComponent(authored, &validation_error));
   assert(validation_error.empty());
   source_world.add(source, authored);
+  source_world.add(source, authored_lod);
 
   assert(serializer->has(source_world, source));
   const nlohmann::json serialized = serializer->serialize(source_world, source);
   assert(serialized["sidecar_path"] == "forest/layers/oaks.kfoliage");
   assert(serialized["mesh_asset_key"] == "forest/oak_near");
   assert(serialized["materials"][0]["material_key"] == "forest/oak_bark");
-  assert(serialized["lods"].size() == 2u);
-  assert(serialized["lods"][1]["render_mode"] == "upright_billboard");
+  assert(!serialized.contains("lods"));
   assert(serialized["max_resident_instances"] == 54321u);
   assert(serialized["source_revision"] == 17u);
+  const nlohmann::json serialized_lod =
+      lod_serializer->serialize(source_world, source);
+  assert(serialized_lod["levels"].size() == 2u);
+  assert(serialized_lod["levels"][1]["render_mode"] ==
+         "upright_billboard");
 
   world::World loaded_world;
   const world::Entity loaded_entity = loaded_world.createEntity();
   assert(serializer->deserialize(loaded_world, loaded_entity, serialized));
+  assert(lod_serializer->deserialize(
+      loaded_world, loaded_entity, serialized_lod));
   const auto& loaded =
       loaded_world.get<components::FoliageComponent>(loaded_entity);
   assert(loaded.sidecar_path.generic_string() ==
          "forest/layers/oaks.kfoliage");
   assert(loaded.mesh_asset_key == authored.mesh_asset_key);
   assert(loaded.materials == authored.materials);
-  assert(loaded.lods.size() == 2u);
-  assert(loaded.lods[0].start_distance == 48.0f);
-  assert(loaded.lods[0].mesh_asset_key == "forest/oak_mid");
-  assert(loaded.lods[0].materials == authored.lods[0].materials);
-  assert(loaded.lods[0].shadow_visible);
-  assert(loaded.lods[1].render_mode ==
-         rendering::InstanceLodRenderMode::UprightBillboard);
+  const auto& loaded_lod =
+      loaded_world.get<components::LodComponent>(loaded_entity);
+  assert(loaded_lod.levels.size() == 2u);
+  assert(loaded_lod.levels[0].start_distance == 48.0f);
+  assert(loaded_lod.levels[0].mesh_asset_key == "forest/oak_mid");
+  assert(loaded_lod.levels[0].materials ==
+         authored_lod.levels[0].materials);
+  assert(loaded_lod.levels[0].shadow_visible);
+  assert(loaded_lod.levels[1].render_mode ==
+         rendering::LodRenderMode::UprightBillboard);
   assert(loaded.chunk_size == authored.chunk_size);
   assert(loaded.view_distance == authored.view_distance);
   assert(loaded.max_resident_instances == authored.max_resident_instances);
@@ -940,28 +1224,22 @@ void testComponentSerializerRoundTripAndValidation() {
   invalid["max_resident_instances"] = 0u;
   rejects(invalid);
   invalid = serialized;
-  invalid["lods"][1]["start_distance"] = 48.0f;
-  rejects(invalid);
-  invalid = serialized;
-  invalid["lods"][0]["mesh_asset_key"] = "";
-  rejects(invalid);
-  invalid = serialized;
-  invalid["lods"].push_back(serialized["lods"][1]);
-  invalid["lods"].push_back(serialized["lods"][1]);
+  invalid["lods"] = serialized_lod["levels"];
   rejects(invalid);
 
   components::FoliageComponent direct = authored;
   direct.sidecar_path.clear();
   assert(foliage::validateFoliageComponent(direct, &validation_error));
-  direct.lods[0].start_distance =
+  components::LodComponent invalid_lod = authored_lod;
+  invalid_lod.levels[0].start_distance =
       std::numeric_limits<float>::quiet_NaN();
-  assert(!foliage::validateFoliageComponent(direct, &validation_error));
+  assert(!components::validateLodComponent(invalid_lod, &validation_error));
   assert(validation_error.find("LOD distances") != std::string::npos);
 
-  direct = authored;
-  direct.lods[0].render_mode =
-      static_cast<rendering::InstanceLodRenderMode>(255u);
-  assert(!foliage::validateFoliageComponent(direct, &validation_error));
+  invalid_lod = authored_lod;
+  invalid_lod.levels[0].render_mode =
+      static_cast<rendering::LodRenderMode>(255u);
+  assert(!components::validateLodComponent(invalid_lod, &validation_error));
   assert(validation_error.find("render mode") != std::string::npos);
 
   direct = authored;
@@ -987,6 +1265,8 @@ int main() {
   testRuntimeQueuedLimitGrowthRequeues();
   testRuntimeFailedChunkDoesNotConsumeBudget();
   testRuntimeRejectsInvalidRendererStateOnce();
+  testPrefabPrototypeSharesOneInstanceSetAcrossRenderers();
+  testPrefabPrototypeHoldsAdjacentAssetPackage();
   testRuntimeFileStreamingAndDiagnostics();
   testComponentSerializerRoundTripAndValidation();
   return 0;

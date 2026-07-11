@@ -198,6 +198,47 @@ glm::mat4 planarInstanceTransform(const rendering::PlanarInstanceData& instance)
   return transform;
 }
 
+glm::mat4 uprightBillboardTransform(const glm::mat4& transform,
+                                    const glm::vec3& camera_position) {
+  const glm::vec3 center(transform[3]);
+  const float sx = glm::length(glm::vec3(transform[0]));
+  const float sy = glm::length(glm::vec3(transform[1]));
+  const float sz = glm::length(glm::vec3(transform[2]));
+  const float orientation =
+      glm::dot(glm::vec3(transform[0]),
+               glm::cross(glm::vec3(transform[1]), glm::vec3(transform[2]))) < 0.0f
+          ? -1.0f
+          : 1.0f;
+  glm::vec3 forward = camera_position - center;
+  forward.y = 0.0f;
+  if (glm::dot(forward, forward) <= 1.0e-6f) {
+    forward = glm::vec3(0.0f, 0.0f, 1.0f);
+  } else {
+    forward = glm::normalize(forward);
+  }
+  const glm::vec3 up(0.0f, 1.0f, 0.0f);
+  glm::vec3 right = glm::cross(up, forward);
+  if (glm::dot(right, right) <= 1.0e-6f) {
+    right = glm::vec3(1.0f, 0.0f, 0.0f);
+  } else {
+    right = glm::normalize(right);
+  }
+  forward = glm::normalize(glm::cross(right, up));
+  glm::mat4 billboard(1.0f);
+  billboard[0] = glm::vec4(right * sx * orientation, 0.0f);
+  billboard[1] = glm::vec4(up * sy, 0.0f);
+  billboard[2] = glm::vec4(forward * sz, 0.0f);
+  billboard[3] = glm::vec4(center, 1.0f);
+  return billboard;
+}
+
+template <typename LodRecord>
+bool anyLodCastsShadow(const std::vector<LodRecord>& lods) {
+  return std::any_of(lods.begin(), lods.end(), [](const LodRecord& lod) {
+    return lod.shadow_visible;
+  });
+}
+
 bool sphereIntersectsClipVolume(const glm::mat4& clip_from_world,
                                 const glm::vec4& sphere,
                                 bool is_gl_ndc) {
@@ -855,10 +896,40 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
 
     for (const auto& entry : instances_) {
       const auto& instance = entry.second;
-      if (instance.layer != layer || !instance.shadow_visible) {
+      if (instance.layer != layer ||
+          (!instance.shadow_visible && !anyLodCastsShadow(instance.lods))) {
         continue;
       }
-      auto mesh_it = meshes_.find(instance.mesh);
+      auto base_mesh_it = meshes_.find(instance.mesh);
+      if (base_mesh_it == meshes_.end()) {
+        continue;
+      }
+      rendering::MeshId selected_mesh = instance.mesh;
+      rendering::MaterialId selected_material = instance.material;
+      const std::vector<rendering::DrawMaterialBinding>* selected_materials =
+          &instance.materials;
+      rendering::LodRenderMode selected_render_mode = rendering::LodRenderMode::Mesh;
+      bool selected_shadow_visible = instance.shadow_visible;
+      const glm::vec3 base_center = glm::vec3(
+          instance.transform * glm::vec4(base_mesh_it->second.bounds_center, 1.0f));
+      const float distance_to_camera = glm::length(base_center - camera_position);
+      for (const auto& lod : instance.lods) {
+        if (distance_to_camera < lod.start_distance) {
+          break;
+        }
+        if (lod.mesh == rendering::kInvalidMesh) {
+          continue;
+        }
+        selected_mesh = lod.mesh;
+        selected_material = lod.material;
+        selected_materials = &lod.materials;
+        selected_render_mode = lod.render_mode;
+        selected_shadow_visible = lod.shadow_visible;
+      }
+      if (!selected_shadow_visible) {
+        continue;
+      }
+      auto mesh_it = meshes_.find(selected_mesh);
       if (mesh_it == meshes_.end()) {
         continue;
       }
@@ -866,45 +937,49 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       if (!mesh.vertex_buffer) {
         continue;
       }
+      const glm::mat4 selected_transform =
+          selected_render_mode == rendering::LodRenderMode::UprightBillboard
+              ? uprightBillboardTransform(instance.transform, camera_position)
+              : instance.transform;
       const glm::vec4 world_bounds_sphere =
-          transformBoundingSphere(instance.transform, mesh.bounds_center, mesh.bounds_radius);
+          transformBoundingSphere(selected_transform, mesh.bounds_center, mesh.bounds_radius);
 
       const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
       if (!mesh.submeshes.empty()) {
         for (const auto& submesh : mesh.submeshes) {
           const rendering::MaterialId material_id =
-              resolve_bound_material(instance.materials,
-                                     instance.material,
+              resolve_bound_material(*selected_materials,
+                                     selected_material,
                                      submesh.material_slot,
                                      submesh.material);
           const ShadowBatchKey key =
-              make_shadow_key(instance.mesh,
+              make_shadow_key(selected_mesh,
                               material_id,
                               submesh.index_offset,
                               submesh.index_count,
                               indexed_mesh && submesh.index_count > 0,
                               instance.deformation != rendering::kInvalidDeformation);
           append_shadow_batch(key,
-                              instance.transform,
+                              selected_transform,
                               instance.params,
                               world_bounds_sphere,
                               instance.deformation);
         }
       } else {
         const rendering::MaterialId material_id =
-            resolve_bound_material(instance.materials,
-                                   instance.material,
+            resolve_bound_material(*selected_materials,
+                                   selected_material,
                                    0,
                                    rendering::kInvalidMaterial);
         const ShadowBatchKey key =
-            make_shadow_key(instance.mesh,
+            make_shadow_key(selected_mesh,
                             material_id,
                             0,
                             mesh.index_count,
                             indexed_mesh,
                             instance.deformation != rendering::kInvalidDeformation);
         append_shadow_batch(key,
-                            instance.transform,
+                            selected_transform,
                             instance.params,
                             world_bounds_sphere,
                             instance.deformation);
@@ -912,7 +987,12 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
     }
     for (const auto& entry : instanced_records_) {
       const auto& record = entry.second;
-      if (record.layer != layer || !record.shadow_visible || record.instanceCount() == 0u) {
+      const auto source_it = instance_sets_.find(record.instance_set);
+      if (source_it == instance_sets_.end()) continue;
+      const auto& instance_set = source_it->second;
+      if (record.layer != layer ||
+          (!record.shadow_visible && !anyLodCastsShadow(record.lods)) ||
+          instance_set.instanceCount() == 0u) {
         continue;
       }
       auto mesh_it = meshes_.find(record.mesh);
@@ -923,57 +1003,100 @@ void DiligentBackend::renderShadowLayer(rendering::LayerId layer,
       if (!mesh.vertex_buffer) {
         continue;
       }
-      const bool indexed_mesh = mesh.index_buffer && mesh.index_count > 0;
       auto append_instanced_shadow = [&](const glm::mat4& transform, const glm::vec4& params) {
+        rendering::MeshId selected_mesh = record.mesh;
+        rendering::MaterialId selected_material = record.material;
+        const std::vector<rendering::DrawMaterialBinding>* selected_materials =
+            &record.materials;
+        rendering::LodRenderMode selected_render_mode = rendering::LodRenderMode::Mesh;
+        bool selected_shadow_visible = record.shadow_visible;
+        const glm::vec3 base_center =
+            glm::vec3(transform * glm::vec4(mesh.bounds_center, 1.0f));
+        const float distance_to_camera = glm::length(base_center - camera_position);
+        for (const auto& lod : record.lods) {
+          if (distance_to_camera < lod.start_distance) {
+            break;
+          }
+          if (lod.mesh == rendering::kInvalidMesh) {
+            continue;
+          }
+          selected_mesh = lod.mesh;
+          selected_material = lod.material;
+          selected_materials = &lod.materials;
+          selected_render_mode = lod.render_mode;
+          selected_shadow_visible = lod.shadow_visible;
+        }
+        if (!selected_shadow_visible) {
+          return;
+        }
+        const auto selected_mesh_it = meshes_.find(selected_mesh);
+        if (selected_mesh_it == meshes_.end() ||
+            !selected_mesh_it->second.vertex_buffer) {
+          return;
+        }
+        const MeshRecord& selected_mesh_record = selected_mesh_it->second;
+        const glm::mat4 selected_transform =
+            selected_render_mode == rendering::LodRenderMode::UprightBillboard
+                ? uprightBillboardTransform(transform, camera_position)
+                : transform;
         const glm::vec4 world_bounds_sphere =
-            transformBoundingSphere(transform, mesh.bounds_center, mesh.bounds_radius);
-        if (!mesh.submeshes.empty()) {
-          for (const auto& submesh : mesh.submeshes) {
+            transformBoundingSphere(selected_transform,
+                                    selected_mesh_record.bounds_center,
+                                    selected_mesh_record.bounds_radius);
+        const bool indexed_mesh = selected_mesh_record.index_buffer &&
+                                  selected_mesh_record.index_count > 0;
+        if (!selected_mesh_record.submeshes.empty()) {
+          for (const auto& submesh : selected_mesh_record.submeshes) {
             const rendering::MaterialId material_id =
-                resolve_bound_material(record.materials,
-                                       record.material,
+                resolve_bound_material(*selected_materials,
+                                       selected_material,
                                        submesh.material_slot,
                                        submesh.material);
             const ShadowBatchKey key =
-                make_shadow_key(record.mesh,
+                make_shadow_key(selected_mesh,
                                 material_id,
                                 submesh.index_offset,
                                 submesh.index_count,
                                 indexed_mesh && submesh.index_count > 0,
                                 false);
             append_shadow_batch(key,
-                                transform,
+                                selected_transform,
                                 params,
                                 world_bounds_sphere,
                                 rendering::kInvalidDeformation);
           }
         } else {
           const rendering::MaterialId material_id =
-              resolve_bound_material(record.materials,
-                                     record.material,
+              resolve_bound_material(*selected_materials,
+                                     selected_material,
                                      0,
                                      rendering::kInvalidMaterial);
           const ShadowBatchKey key =
-              make_shadow_key(record.mesh,
+              make_shadow_key(selected_mesh,
                               material_id,
                               0,
-                              mesh.index_count,
+                              selected_mesh_record.index_count,
                               indexed_mesh,
                               false);
           append_shadow_batch(key,
-                              transform,
+                              selected_transform,
                               params,
                               world_bounds_sphere,
                               rendering::kInvalidDeformation);
         }
       };
-      if (record.gpu_layout == rendering::InstanceGpuLayout::PositionYawScaleParams) {
-        for (const rendering::PlanarInstanceData& instance : record.planar_instances) {
-          append_instanced_shadow(planarInstanceTransform(instance), instance.params);
+      if (instance_set.gpu_layout ==
+          rendering::InstanceGpuLayout::PositionYawScaleParams) {
+        for (const rendering::PlanarInstanceData& instance :
+             instance_set.planar_instances) {
+          append_instanced_shadow(
+              planarInstanceTransform(instance) * record.batch_transform,
+              instance.params);
         }
       } else {
-        for (const rendering::InstanceData& instance : record.instances) {
-          append_instanced_shadow(instance.transform, instance.params);
+        for (const rendering::InstanceData& instance : instance_set.instances) {
+          append_instanced_shadow(instance.transform * record.batch_transform,
+                                  instance.params);
         }
       }
     }

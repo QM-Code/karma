@@ -45,14 +45,16 @@ RendererExecutionMode resolveExecutionMode(GraphicsDeviceCreateInfo create_info)
 
 struct OwnedInstancedDrawItem {
   InstanceId instance = kInvalidInstance;
+  InstanceId instance_set = kInvalidInstance;
   MeshId mesh = kInvalidMesh;
   MaterialId material = kInvalidMaterial;
   std::vector<DrawMaterialBinding> materials;
   std::vector<std::string> render_tags;
-  std::vector<InstancedLodDrawDesc> lods;
+  std::vector<LodDrawDesc> lods;
   InstanceGpuLayout gpu_layout = InstanceGpuLayout::Matrix4x4Params;
   std::vector<InstanceData> instances;
   std::vector<PlanarInstanceData> planar_instances;
+  glm::mat4 batch_transform{1.0f};
   bool payload_changed = true;
   uint64_t revision = 0;
   glm::vec3 bounds_center{0.0f};
@@ -65,6 +67,7 @@ struct OwnedInstancedDrawItem {
 
   explicit OwnedInstancedDrawItem(InstancedDrawItem&& item)
       : instance(item.instance),
+        instance_set(item.instance_set),
         mesh(item.mesh),
         material(item.material),
         materials(std::move(item.materials)),
@@ -73,6 +76,7 @@ struct OwnedInstancedDrawItem {
         gpu_layout(item.gpu_layout),
         instances(item.instances.begin(), item.instances.end()),
         planar_instances(item.planar_instances.begin(), item.planar_instances.end()),
+        batch_transform(item.batch_transform),
         payload_changed(item.payload_changed),
         revision(item.revision),
         bounds_center(item.bounds_center),
@@ -86,6 +90,7 @@ struct OwnedInstancedDrawItem {
   void submit(rendering::backend::Backend& backend) {
     InstancedDrawItem item{};
     item.instance = instance;
+    item.instance_set = instance_set;
     item.mesh = mesh;
     item.material = material;
     item.materials = std::move(materials);
@@ -95,6 +100,7 @@ struct OwnedInstancedDrawItem {
     item.instances = std::span<const InstanceData>(instances.data(), instances.size());
     item.planar_instances =
         std::span<const PlanarInstanceData>(planar_instances.data(), planar_instances.size());
+    item.batch_transform = batch_transform;
     item.payload_changed = payload_changed;
     item.revision = revision;
     item.bounds_center = bounds_center;
@@ -1102,6 +1108,15 @@ void GraphicsDevice::retireInstance(InstanceId instance) {
   if (scheduler_) {
     scheduler_->recordDurableFrameCommand([instance](RenderScheduler::Backend& backend) {
       backend.retireInstance(instance);
+    });
+  }
+}
+
+void GraphicsDevice::retireInstanceSet(InstanceId instance_set) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (scheduler_) {
+    scheduler_->recordFrameCommand([instance_set](RenderScheduler::Backend& backend) {
+      backend.retireInstanceSet(instance_set);
     });
   }
 }

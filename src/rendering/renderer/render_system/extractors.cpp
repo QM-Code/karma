@@ -157,7 +157,7 @@ void mergeSphere(glm::vec3& center,
   radius = new_radius;
 }
 
-void mergeTransformedBounds(ExtractedInstancedMesh& out,
+void mergeTransformedBounds(InstancedBounds& out,
                             const glm::mat4& transform,
                             const glm::vec3& mesh_bounds_center,
                             float mesh_bounds_radius,
@@ -165,9 +165,9 @@ void mergeTransformedBounds(ExtractedInstancedMesh& out,
   if (!mesh_bounds_valid) return;
   const glm::vec3 center =
       glm::vec3(transform * glm::vec4(mesh_bounds_center, 1.0f));
-  mergeSphere(out.bounds_center,
-              out.bounds_radius,
-              out.bounds_valid,
+  mergeSphere(out.center,
+              out.radius,
+              out.valid,
               center,
               mesh_bounds_radius * conservativeTransformScale(transform));
 }
@@ -204,13 +204,10 @@ glm::mat4 toTransform(const components::TransformComponent& transform,
   return matrix;
 }
 
-ExtractedInstancedMesh extractInstancedMesh(
-    const components::InstancedMeshComponent& component,
-    const glm::mat4& owner_world_transform,
-    const glm::vec3& mesh_bounds_center,
-    float mesh_bounds_radius,
-    bool mesh_bounds_valid) {
-  ExtractedInstancedMesh out{};
+ExtractedInstanceSet extractInstanceSet(
+    const components::InstanceSetComponent& component,
+    const glm::mat4& owner_world_transform) {
+  ExtractedInstanceSet out{};
   if (component.gpu_layout == InstanceGpuLayout::PositionYawScaleParams) {
     std::vector<glm::mat4> composed_transforms;
     composed_transforms.reserve(component.planar_instances.size());
@@ -234,13 +231,6 @@ ExtractedInstancedMesh extractInstancedMesh(
 
     if (compact) {
       out.gpu_layout = InstanceGpuLayout::PositionYawScaleParams;
-      for (const glm::mat4& transform : composed_transforms) {
-        mergeTransformedBounds(out,
-                               transform,
-                               mesh_bounds_center,
-                               mesh_bounds_radius,
-                               mesh_bounds_valid);
-      }
       return out;
     }
 
@@ -251,11 +241,6 @@ ExtractedInstancedMesh extractInstancedMesh(
           .transform = composed_transforms[index],
           .params = instanceParams(component.planar_instances[index].params),
       });
-      mergeTransformedBounds(out,
-                             composed_transforms[index],
-                             mesh_bounds_center,
-                             mesh_bounds_radius,
-                             mesh_bounds_valid);
     }
     return out;
   }
@@ -267,12 +252,42 @@ ExtractedInstancedMesh extractInstancedMesh(
         .transform = owner_world_transform * meshInstanceTransform(instance),
         .params = instanceParams(instance.params),
     };
+    out.instances.push_back(extracted);
+  }
+  return out;
+}
+
+InstancedBounds calculateInstancedBounds(
+    const ExtractedInstanceSet& instance_set,
+    const glm::mat4& batch_local_transform,
+    const glm::vec3& mesh_bounds_center,
+    float mesh_bounds_radius,
+    bool mesh_bounds_valid) {
+  InstancedBounds out{};
+  if (instance_set.gpu_layout == InstanceGpuLayout::PositionYawScaleParams) {
+    for (const PlanarInstanceData& instance : instance_set.planar_instances) {
+      mergeTransformedBounds(out,
+                             planarInstanceTransform(components::PlanarMeshInstance{
+                                 .position = {instance.position_yaw.x,
+                                              instance.position_yaw.y,
+                                              instance.position_yaw.z},
+                                 .yaw_radians = instance.position_yaw.w,
+                                 .scale = {instance.scale_pad.x,
+                                           instance.scale_pad.y,
+                                           instance.scale_pad.z},
+                             }) * batch_local_transform,
+                             mesh_bounds_center,
+                             mesh_bounds_radius,
+                             mesh_bounds_valid);
+    }
+    return out;
+  }
+  for (const InstanceData& instance : instance_set.instances) {
     mergeTransformedBounds(out,
-                           extracted.transform,
+                           instance.transform * batch_local_transform,
                            mesh_bounds_center,
                            mesh_bounds_radius,
                            mesh_bounds_valid);
-    out.instances.push_back(extracted);
   }
   return out;
 }

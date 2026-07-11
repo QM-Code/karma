@@ -809,8 +809,8 @@ enum class InstanceGpuLayout : uint32_t {
   PositionYawScaleParams = 1,
 };
 
-/// Draw-time orientation behavior for an instanced LOD mesh.
-enum class InstanceLodRenderMode : uint32_t {
+/// Draw-time orientation behavior for a distance-selected LOD mesh.
+enum class LodRenderMode : uint32_t {
   Mesh = 0,
   UprightBillboard = 1,
 };
@@ -868,6 +868,18 @@ struct VolumeDrawParams {
   bool surface_double_sided = false;
 };
 
+struct LodDrawDesc {
+  float start_distance = 0.0f;
+  MeshId mesh = kInvalidMesh;
+  MaterialId material = kInvalidMaterial;
+  std::vector<DrawMaterialBinding> materials;
+  LodRenderMode render_mode = LodRenderMode::Mesh;
+  glm::vec3 bounds_center{0.0f};
+  float bounds_radius = 0.0f;
+  bool bounds_valid = false;
+  bool shadow_visible = false;
+};
+
 /// \ingroup karma_rendering
 /// One renderable mesh submission.
 ///
@@ -878,6 +890,7 @@ struct DrawItem {
   MeshId mesh = kInvalidMesh;
   MaterialId material = kInvalidMaterial;
   std::vector<DrawMaterialBinding> materials;
+  std::vector<LodDrawDesc> lods;
   std::vector<std::string> render_tags;
   DeformationId deformation = kInvalidDeformation;
   glm::mat4 transform{1.0f};
@@ -891,30 +904,23 @@ struct DrawItem {
   bool shadow_visible = true;
 };
 
-struct InstancedLodDrawDesc {
-  float start_distance = 0.0f;
-  MeshId mesh = kInvalidMesh;
-  MaterialId material = kInvalidMaterial;
-  std::vector<DrawMaterialBinding> materials;
-  InstanceLodRenderMode render_mode = InstanceLodRenderMode::Mesh;
-  glm::vec3 bounds_center{0.0f};
-  float bounds_radius = 0.0f;
-  bool bounds_valid = false;
-  bool shadow_visible = false;
-};
-
 /// \ingroup karma_rendering
 /// One batch of repeated mesh instances with shared mesh/material bindings.
 struct InstancedDrawItem {
+  /// Stable identity of this mesh/material/LOD draw batch.
   InstanceId instance = kInvalidInstance;
+  /// Stable identity of the shared transform payload used by this batch.
+  InstanceId instance_set = kInvalidInstance;
   MeshId mesh = kInvalidMesh;
   MaterialId material = kInvalidMaterial;
   std::vector<DrawMaterialBinding> materials;
   std::vector<std::string> render_tags;
-  std::vector<InstancedLodDrawDesc> lods;
+  std::vector<LodDrawDesc> lods;
   InstanceGpuLayout gpu_layout = InstanceGpuLayout::Matrix4x4Params;
   std::span<const InstanceData> instances;
   std::span<const PlanarInstanceData> planar_instances;
+  /// Per-batch local mesh transform applied after each source instance.
+  glm::mat4 batch_transform{1.0f};
   bool payload_changed = true;
   uint64_t revision = 0;
   glm::vec3 bounds_center{0.0f};
@@ -2647,6 +2653,8 @@ struct ForwardPlusStats {
 /// Instanced-rendering diagnostics for the most recent backend frame.
 struct InstancingStats {
   uint32_t submitted_batches = 0;
+  uint32_t submitted_instance_sets = 0;
+  uint32_t shared_instance_batches = 0;
   uint32_t submitted_instances = 0;
   uint32_t drawn_batches = 0;
   uint32_t drawn_instances = 0;
@@ -3282,6 +3290,8 @@ class GraphicsDevice {
   void setParticleSystemStats(const ParticlePassStats& stats);
   /// Retires a renderer instance id.
   void retireInstance(InstanceId instance);
+  /// Retires one shared instancing payload after its last batch releases it.
+  void retireInstanceSet(InstanceId instance_set);
   /// Renders one layer into a target with a resolved renderer frame graph.
   ///
   /// Normal applications let `RenderSystem` call this after resolving the

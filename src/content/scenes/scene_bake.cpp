@@ -327,6 +327,47 @@ Json dependencyHashes(const SceneDocument& document, const SceneBakeDesc& desc) 
                                       package_paths.logical,
                                       package_paths.resolved);
   }
+  for (const SceneEntity& entity : document.entities) {
+    if (!entity.components.is_object()) continue;
+    const auto foliage = entity.components.find("FoliageComponent");
+    if (foliage == entity.components.end() || !foliage->is_object()) {
+      continue;
+    }
+    const auto sidecar = foliage->find("sidecar_path");
+    if (sidecar != foliage->end() && sidecar->is_string() &&
+        !sidecar->get_ref<const std::string&>().empty()) {
+      const std::filesystem::path logical =
+          sidecar->get_ref<const std::string&>();
+      dependencies.push_back(dependencyRecord(
+          "foliage_sidecar",
+          entity.id,
+          logical,
+          resolveDocumentPath(document, logical)));
+    }
+    const auto prefab = foliage->find("prefab_path");
+    if (prefab == foliage->end() || !prefab->is_string() ||
+        prefab->get_ref<const std::string&>().empty()) {
+      continue;
+    }
+    std::filesystem::path logical_prefab =
+        prefab->get_ref<const std::string&>();
+    std::filesystem::path resolved_prefab =
+        resolveDocumentPath(document, logical_prefab);
+    std::error_code error;
+    if (std::filesystem::is_directory(resolved_prefab, error) ||
+        resolved_prefab.extension().empty()) {
+      resolved_prefab /= "prefab.json";
+      logical_prefab /= "prefab.json";
+    }
+    dependencies.push_back(dependencyRecord(
+        "foliage_prefab", entity.id, logical_prefab, resolved_prefab));
+    const PrefabPackagePaths package_paths =
+        prefabPackagePaths(logical_prefab, resolved_prefab);
+    appendPackageManifestDependencies(dependencies,
+                                      "foliage_prefab:" + entity.id,
+                                      package_paths.logical,
+                                      package_paths.resolved);
+  }
   sortDependencies(dependencies);
   return dependencies;
 }

@@ -36,6 +36,13 @@ option(KARMA_BUILD_DEBUG_UI "Build engine debug UI overlay" ${KARMA_ENABLE_IMGUI
 option(KARMA_BUILD_EXAMPLES "Build Karma example executables" ${KARMA_IS_TOP_LEVEL})
 option(KARMA_BUILD_TESTS "Build Karma test executables" ${KARMA_IS_TOP_LEVEL})
 option(KARMA_BUILD_TOOLS "Build Karma command-line content tools" ${KARMA_IS_TOP_LEVEL})
+set(KARMA_BUILD_SCENE_EDITOR_DEFAULT OFF)
+if (KARMA_IS_TOP_LEVEL AND KARMA_BUILD_TOOLS AND KARMA_BUILD_GRAPHICAL_PROFILE)
+  set(KARMA_BUILD_SCENE_EDITOR_DEFAULT ON)
+endif()
+option(KARMA_BUILD_SCENE_EDITOR
+  "Build the graphical ImGui scene editor"
+  ${KARMA_BUILD_SCENE_EDITOR_DEFAULT})
 option(KARMA_INSTALL_VCPKG_DEPS
   "Install the active vcpkg triplet contents into the Karma install prefix for SDK packages" OFF)
 option(KARMA_BUILD_IMGUI_DEMO "Build ImGui UI demo" ${KARMA_ENABLE_IMGUI})
@@ -52,10 +59,20 @@ set(KARMA_KTX_SOFTWARE_TAG "v4.4.2" CACHE STRING "KTX-Software git tag/branch to
 if (KARMA_HEADLESS)
   set(KARMA_BUILD_HEADLESS_PROFILE ON CACHE BOOL "Build the karma::headless profile target" FORCE)
   set(KARMA_BUILD_GRAPHICAL_PROFILE OFF CACHE BOOL "Build the karma::graphical profile target" FORCE)
+  set(KARMA_BUILD_SCENE_EDITOR OFF CACHE BOOL "Build the graphical ImGui scene editor" FORCE)
 endif()
 
 if (KARMA_BUILD_RMLUI_DEMO)
   set(KARMA_ENABLE_RMLUI ON CACHE BOOL "Build RmlUi UI adapter" FORCE)
+endif()
+
+if (KARMA_BUILD_SCENE_EDITOR)
+  if (NOT KARMA_BUILD_TOOLS OR NOT KARMA_BUILD_GRAPHICAL_PROFILE)
+    message(FATAL_ERROR
+      "KARMA_BUILD_SCENE_EDITOR requires KARMA_BUILD_TOOLS and KARMA_BUILD_GRAPHICAL_PROFILE")
+  endif()
+  set(KARMA_ENABLE_IMGUI ON CACHE BOOL
+    "Build the optional ImGui adapter and tooling" FORCE)
 endif()
 
 if (NOT KARMA_ENABLE_IMGUI)
@@ -70,6 +87,7 @@ if (NOT KARMA_BUILD_GRAPHICAL_PROFILE)
   set(KARMA_ENABLE_AUDIO OFF CACHE BOOL "Enable runtime audio through the selected backend" FORCE)
   set(KARMA_ENABLE_NATIVE_UI OFF CACHE BOOL "Build Karma's first-party retained-mode UI" FORCE)
   set(KARMA_ENABLE_IMGUI OFF CACHE BOOL "Build the optional ImGui adapter and tooling" FORCE)
+  set(KARMA_BUILD_SCENE_EDITOR OFF CACHE BOOL "Build the graphical ImGui scene editor" FORCE)
   set(KARMA_BUILD_DEBUG_UI OFF CACHE BOOL "Build engine debug UI overlay" FORCE)
   set(KARMA_BUILD_IMGUI_DEMO OFF CACHE BOOL "Build ImGui UI demo" FORCE)
   set(KARMA_BUILD_RMLUI_DEMO OFF CACHE BOOL "Build RmlUi UI demo" FORCE)
